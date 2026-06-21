@@ -19,6 +19,7 @@
 (ns ai.miniforge.phase-deployment.shell.exec
   "Shared deployment shell execution helpers."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
+            [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
             [ai.miniforge.schema.interface :as schema]
             [cheshire.core :as json]
             [clojure.java.shell :as shell]
@@ -81,7 +82,7 @@
 (defn sh-with-timeout
   "Execute a shell command with timeout and structured results."
   [cmd args & {:keys [dir timeout-ms env]
-               :or {timeout-ms 300000}}]
+               :or {timeout-ms (get timeouts/timeouts :exec-default-ms 300000)}}]
   (let [start-time (System/currentTimeMillis)
         full-cmd   (into [cmd] args)
         cmd-str    (str/join " " full-cmd)

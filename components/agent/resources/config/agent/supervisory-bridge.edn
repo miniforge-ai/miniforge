@@ -1,0 +1,9 @@
+;; Tuning for the supervisory bridge (supervisory_bridge.clj).
+;;
+;; Loaded at namespace load. Each value has a named in-code fallback
+;; constant; this file overrides it when present.
+;;
+;; - :heartbeat-interval-ms — interval between heartbeat events emitted for
+;;   direct in-process agents bridged into the control-plane event family.
+
+{:heartbeat-interval-ms 30000}

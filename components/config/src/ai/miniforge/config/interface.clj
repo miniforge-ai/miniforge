@@ -22,9 +22,26 @@
    [ai.miniforge.config.user :as user]
    [ai.miniforge.config.governance :as governance]
    [ai.miniforge.config.digest :as digest]
-   [ai.miniforge.config.profile :as profile]))
+   [ai.miniforge.config.profile :as profile]
+   [ai.miniforge.config.resource :as resource]))
 
 ;; Re-export public functions
+
+;; Generic classpath EDN config-resource loaders — the one home for the
+;; load-a-component's-config-resource pattern. `load-config-resource`
+;; fails fast (ex-info) on a missing/malformed/non-map resource or a
+;; missing required key; `read-config-resource-or` is fail-open and
+;; returns the supplied fallback on any error.
+(def load-config-resource
+  "Read an EDN config resource from the classpath, failing fast with a
+   clear ex-info on a missing/malformed/non-map resource or a missing
+   required key. Arities: [path] and [path required-keys]."
+  resource/load-config-resource)
+(def read-config-resource-or
+  "Read an EDN config resource, returning `fallback` if the resource is
+   absent, unreadable, malformed, or not a map (fail-open). Args:
+   [path fallback]."
+  resource/read-config-resource-or)
 (def default-user-config-path
   "Default filesystem path string for the user config file
    (`<miniforge-home>/config.edn`). Computed once at load time."

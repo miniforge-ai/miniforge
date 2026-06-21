@@ -26,6 +26,41 @@
 ;;------------------------------------------------------------------------------ Layer 0
 ;; Tuning constants + file paths
 
+;; Backend failover policy is operational config — the allow-list /
+;; failover order and the health thresholds are operator policy, tuned
+;; without a code release. Active values live in
+;; resources/config/self-healing/backend-health.edn; the named constants
+;; below are the fallback when config is absent. `config` is public so the
+;; sibling stream-recovery / integration namespaces resolve the same
+;; defaults instead of re-hardcoding them.
+(defn- load-config
+  "Read an EDN config resource, failing fast with a clear ex-info when the
+   resource is absent from the classpath, malformed, not a map, or missing
+   a required key — rather than a low-signal NPE/reader error at load."
+  [path required-keys]
+  (let [url (io/resource path)]
+    (when (nil? url)
+      (throw (ex-info (str "Missing config resource on classpath: " path)
+                      {:config/resource path})))
+    (let [parsed (try
+                   (edn/read-string (slurp url))
+                   (catch Exception e
+                     (throw (ex-info (str "Malformed EDN config resource: " path)
+                                     {:config/resource path} e))))]
+      (when-not (map? parsed)
+        (throw (ex-info (str "Config resource is not a map: " path)
+                        {:config/resource path})))
+      (let [missing (remove #(contains? parsed %) required-keys)]
+        (when (seq missing)
+          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
+                          {:config/resource path :config/missing-keys (vec missing)})))
+        parsed))))
+
+(def config
+  (load-config "config/self-healing/backend-health.edn"
+               [:success-rate-threshold :switch-cooldown-ms :failure-recency-window-ms
+                :health-decay-ms :default-backend :fallback-order]))
+
 (def ^:private default-success-rate-threshold
   "Minimum cumulative success rate (`:successful-calls / :total-calls`)
    before a backend is considered degraded and a failover is triggered.
@@ -34,14 +69,14 @@
    absorb transient single failures without flapping. (Note: the rate
    is cumulative since last decay, not a sliding window — `maybe-decay-health`
    resets the counters wholesale after 24h of stale data.)"
-  0.90)
+  (:success-rate-threshold config))
 
 (def ^:private default-switch-cooldown-ms
   "Minimum interval between automatic backend switches (30 min). After
    a switch fires, the FROM backend is parked for this long even if its
    success rate recovers — prevents two flaky backends from oscillating
    between healthy and degraded."
-  (* 30 60 1000))
+  (:switch-cooldown-ms config))
 
 (def ^:private default-failure-recency-window-ms
   "Window during which a recent failure is considered fresh enough to
@@ -49,7 +84,7 @@
    timestamp is compared against this window; older failures stay in
    the cumulative counter for accounting but do not by themselves
    cause a switch — stale failure data shouldn't trigger live failover."
-  (* 5 60 1000))
+  (:failure-recency-window-ms config))
 
 ;; File paths and utilities
 
@@ -113,15 +148,15 @@
   []
   {:backends {}
    :switch-cooldowns {}
-   :default-backend :anthropic
-   :fallback-order [:anthropic :openai :codex :ollama :google]})
+   :default-backend (:default-backend config)
+   :fallback-order (:fallback-order config)})
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Backend health operations
 
 (def ^:private decay-threshold-ms
   "Maximum age of health data before counters are reset (24 hours)."
-  86400000)
+  (:health-decay-ms config))
 
 (defn- maybe-decay-health
   "Reset backend counters if all recorded last-failure timestamps are older than

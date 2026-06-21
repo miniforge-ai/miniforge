@@ -101,14 +101,28 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File selection and batch analysis
 
+(defn- load-limits
+  "Read the limits EDN, returning {} if the resource is absent,
+   unreadable, malformed, or not a map — so the call-site literal
+   defaults remain authoritative (fail-open, matching the prior
+   inline-literal behavior)."
+  [path]
+  (try
+    (let [url    (io/resource path)
+          parsed (when url (edn/read-string (slurp url)))]
+      (if (map? parsed) parsed {}))
+    (catch Exception _ {})))
+
+(def ^:private limits (load-limits "config/semantic-analyzer/limits.edn"))
+
 (def ^:private max-file-size-bytes
   "Maximum file size to send to LLM. Files larger than this are skipped."
-  50000)
+  (get limits :max-file-size-bytes 50000))
 
 (def ^:private max-files-per-rule
   "Maximum number of files to analyze per rule.
    Kept low to stay within per-rule timeout when using CLI backends."
-  5)
+  (get limits :max-files-per-rule 5))
 
 ;; NOTE: This mirrors compliance-scanner.scan/globs->file-pred.
 ;; Glob matching should be extracted to repo-index component.
@@ -154,7 +168,7 @@
 (def ^:private default-rule-timeout-ms
   "Maximum time to spend analyzing one rule before giving up.
    5 files × ~30s per CLI backend call = ~150s, so 300s gives headroom."
-  300000)
+  (get limits :default-rule-timeout-ms 300000))
 
 (defn analyze-rule
   [llm-client complete-fn repo-path rule]
@@ -166,6 +180,40 @@
     {:rule/id        (get rule :rule/id)
      :violations     viols
      :files-analyzed (count files)
+     :duration-ms    (- end-ms start-ms)
+     :status         :completed}))
+
+(defn- file-under-size-limit?
+  "True when an in-memory file's content is under the byte size limit. Uses `<`
+   to match the repo-scan path's `under-size-limit?` (a file exactly at the
+   limit is excluded by both)."
+  [content]
+  (< (count (.getBytes ^String content "UTF-8")) max-file-size-bytes))
+
+(defn analyze-rule-on-files
+  "Analyze an explicit set of changed files against one rule, instead of
+   scanning the whole repo. `files` is a vector of {:path :content}. Filters to
+   files matching the rule's globs and under the size limit, runs the judge per
+   file, and returns the same result shape as `analyze-rule`.
+
+   This is the changed-files scope: a run gates only the files it touched, and
+   an in-scope file is judged in full (every violation in it must be fixed)."
+  [llm-client complete-fn rule files]
+  (let [start-ms (System/currentTimeMillis)
+        globs    (get-in rule [:rule/applies-to :file-globs] ["**/*"])
+        eligible (vec (->> files
+                           (filter (fn [{:keys [path content]}]
+                                     (and (string? path) (string? content)
+                                          (file-under-size-limit? content)
+                                          (file-matches-globs? path globs))))
+                           (take max-files-per-rule)))
+        viols    (vec (mapcat (fn [{:keys [path content]}]
+                                (analyze-file llm-client complete-fn rule path content))
+                              eligible))
+        end-ms   (System/currentTimeMillis)]
+    {:rule/id        (get rule :rule/id)
+     :violations     viols
+     :files-analyzed (count eligible)
      :duration-ms    (- end-ms start-ms)
      :status         :completed}))
 

@@ -29,11 +29,34 @@
    - Budget: ~500 input tokens, ~100 output tokens per call"
   (:require
    [cheshire.core :as json]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.llm.interface :as llm]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Prompt construction
+;; Tuning config and prompt construction
+
+(def ^:private fallback-eval-tuning
+  "In-code fallback used when config/agent/meta-eval-tuning.edn is absent."
+  {:max-tokens 150})
+
+(defn- load-config-or
+  "Read an EDN config resource, returning `fallback` if the resource is
+   absent, unreadable, malformed, or not a map — preserving fail-open
+   behavior."
+  [path fallback]
+  (try
+    (let [url    (io/resource path)
+          parsed (when url (edn/read-string (slurp url)))]
+      (if (map? parsed) parsed fallback))
+    (catch Exception _ fallback)))
+
+(def ^:private eval-tuning
+  "Per-call tuning (currently :max-tokens) for the meta-evaluator LLM call.
+   Loaded from config/agent/meta-eval-tuning.edn at ns load, falling back
+   to fallback-eval-tuning."
+  (load-config-or "config/agent/meta-eval-tuning.edn" fallback-eval-tuning))
 
 (def system-prompt
   "You are a tool-use quality evaluator for a software engineering agent.
@@ -118,9 +141,9 @@ Respond with ONLY a JSON object, no other text:
   (try
     (let [llm-client (:llm-client opts)
           prompt (build-eval-prompt context)
-          request {:prompt prompt
-                   :system system-prompt
-                   :max-tokens 150}
+          request (merge eval-tuning
+                         {:prompt prompt
+                          :system system-prompt})
           response (llm/complete llm-client request)]
       (if (:success response)
         (parse-eval-response (:content response))

@@ -17,6 +17,7 @@
   (:require
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.views.auth :as auth-views]))
@@ -24,8 +25,10 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(def default-cookie-name "miniforge-dashboard-session")
-(def default-session-ttl-ms (* 12 60 60 1000))
+(def ^:private defaults dashboard-config/defaults)
+
+(def default-cookie-name (:session-cookie-name defaults))
+(def default-session-ttl-ms (:session-ttl-ms defaults))
 
 (defn- utf8-bytes
   [value]

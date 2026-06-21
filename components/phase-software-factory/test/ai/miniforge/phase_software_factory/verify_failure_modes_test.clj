@@ -43,6 +43,9 @@
 
 ;------------------------------------------------------------------------------ Test Fixtures
 
+(def ^:private run-tests-var
+  #'verify/run-tests!)
+
 (defn create-base-context
   "Base context with executor environment."
   []
@@ -54,20 +57,18 @@
    :execution/phase-results {}})
 
 (defn with-passing-tests [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-    (with-redefs-fn
-      {run-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
-                                :fail-count 0 :error-count 0
-                                :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
-      body-fn)))
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                    :fail-count 0 :error-count 0
+                                    :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+    body-fn))
 
 (defn with-failing-tests [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-    (with-redefs-fn
-      {run-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
-                                :fail-count 2 :error-count 1
-                                :output "Ran 3 tests.\n2 failures, 1 error."})}
-      body-fn)))
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                    :fail-count 2 :error-count 1
+                                    :output "Ran 3 tests.\n2 failures, 1 error."})}
+    body-fn))
 
 ;------------------------------------------------------------------------------ Enter Tests
 
@@ -119,39 +120,37 @@
 
 (deftest verify-handles-test-runner-error-gracefully-test
   (testing "verify phase handles test runner exception as test failure"
-    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-      (with-redefs-fn
-        {run-var (fn [_ & _opts] {:passed? false :test-count 0 :fail-count 0 :error-count 1
-                                  :output "bb: command not found"})}
-        (fn []
-          (let [ctx (-> (create-base-context)
-                        (assoc :phase-config {:phase :verify}))
-                interceptor (phase/get-phase-interceptor {:phase :verify})
-                result ((:enter interceptor) ctx)]
-            (is (= :error (get-in result [:phase :result :status]))
-                "Runner error should produce :error result")
-            (is (some? (get-in result [:phase :result :metrics :test-output]))
-                "Test output captured in metrics even on runner error")))))))
+    (with-redefs-fn
+      {run-tests-var (fn [_ & _opts] {:passed? false :test-count 0 :fail-count 0 :error-count 1
+                                      :output "bb: command not found"})}
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
+          (is (= :error (get-in result [:phase :result :status]))
+              "Runner error should produce :error result")
+          (is (some? (get-in result [:phase :result :metrics :test-output]))
+              "Test output captured in metrics even on runner error"))))))
 
 (deftest verify-preserves-unparseable-test-output-test
   (testing "unparseable test output is surfaced as actionable verify feedback"
-    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-      (with-redefs-fn
-        {run-var (fn [_ & _opts] {:passed? false
-                                  :test-count 0
-                                  :assertion-count 0
-                                  :fail-count 0
-                                  :error-count 1
-                                  :parse-error? true
-                                  :output "Syntax error compiling at src/example.clj:12:3"})}
-        (fn []
-          (let [ctx (-> (create-base-context)
-                        (assoc :phase-config {:phase :verify}))
-                interceptor (phase/get-phase-interceptor {:phase :verify})
-                result ((:enter interceptor) ctx)
-                message (get-in result [:phase :result :error :message])]
-            (is (str/includes? message (messages/t :verify/output-unparseable)))
-            (is (str/includes? message "Syntax error compiling"))))))))
+    (with-redefs-fn
+      {run-tests-var (fn [_ & _opts] {:passed? false
+                                      :test-count 0
+                                      :assertion-count 0
+                                      :fail-count 0
+                                      :error-count 1
+                                      :parse-error? true
+                                      :output "Syntax error compiling at src/example.clj:12:3"})}
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)
+              message (get-in result [:phase :result :error :message])]
+          (is (str/includes? message (messages/t :verify/output-unparseable)))
+          (is (str/includes? message "Syntax error compiling")))))))
 
 (deftest parse-test-output-marks-unparseable-output-test
   (testing "the real parser treats unparseable output as one actionable error"
@@ -185,18 +184,17 @@
 
 (deftest verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
-    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)
-          preview-limit @#'verify/verify-error-preview-limit
+    (let [preview-limit @#'verify/verify-error-preview-limit
           suffix @#'verify/truncated-output-suffix
           output (apply str (repeat (+ preview-limit 50) "x"))]
       (with-redefs-fn
-        {run-var (fn [_ & _opts] {:passed? false
-                                  :test-count 0
-                                  :assertion-count 0
-                                  :fail-count 0
-                                  :error-count 1
-                                  :parse-error? true
-                                  :output output})}
+        {run-tests-var (fn [_ & _opts] {:passed? false
+                                        :test-count 0
+                                        :assertion-count 0
+                                        :fail-count 0
+                                        :error-count 1
+                                        :parse-error? true
+                                        :output output})}
         (fn []
           (let [ctx (-> (create-base-context)
                         (assoc :phase-config {:phase :verify}))

@@ -29,6 +29,14 @@
    :duration-ms int :status keyword}. Selects files via select-files-for-rule."
   core/analyze-rule)
 
+(def analyze-rule-on-files
+  "Analyze one rule against an explicit set of changed files (changed-files
+   scope) instead of scanning the repo.
+   Args: llm-client, complete-fn, rule, files (vector of {:path :content}).
+   Filters by the rule's globs + size limit, judges per file. Returns the same
+   map shape as analyze-rule."
+  core/analyze-rule-on-files)
+
 (def analyze-rules-parallel
   "Analyze many behavioral rules in parallel batches with per-rule timeouts.
    Args: llm-client, complete-fn, repo-path (string), rules (vector of rule

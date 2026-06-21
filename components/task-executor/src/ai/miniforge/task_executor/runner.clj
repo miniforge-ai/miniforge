@@ -31,7 +31,35 @@
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.agent-runtime.interface :as error-classifier]
-            [ai.miniforge.spec-parser.interface :as spec-parser]))
+            [ai.miniforge.spec-parser.interface :as spec-parser]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+(defn- load-config
+  "Read an EDN config resource, failing fast with a clear ex-info when the
+   resource is absent from the classpath, malformed, not a map, or missing
+   a required key — rather than a low-signal NPE at load."
+  [path required-keys]
+  (let [url (io/resource path)]
+    (when (nil? url)
+      (throw (ex-info (str "Missing config resource on classpath: " path)
+                      {:config/resource path})))
+    (let [parsed (try
+                   (edn/read-string (slurp url))
+                   (catch Exception e
+                     (throw (ex-info (str "Malformed EDN config resource: " path)
+                                     {:config/resource path} e))))]
+      (when-not (map? parsed)
+        (throw (ex-info (str "Config resource is not a map: " path) {:config/resource path})))
+      (let [missing (remove #(contains? parsed %) required-keys)]
+        (when (seq missing)
+          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
+                          {:config/resource path :config/missing-keys (vec missing)})))
+        parsed))))
+
+(def ^:private defaults
+  (load-config "config/task-executor/defaults.edn"
+               [:worktree-acquire-timeout-ms :token-pricing]))
 
 (defn create-task-context
   [task-id task run-context]
@@ -64,8 +92,10 @@
   [task-id lock-pool executor logger config]
   (log-event logger :acquiring-resources task-id {})
 
-  ;; Acquire worktree semaphore (60 second timeout)
-  (let [worktree-result (dag/acquire-worktree! lock-pool task-id 60000 logger)]
+  ;; Acquire worktree semaphore (timeout from config defaults)
+  (let [worktree-result (dag/acquire-worktree! lock-pool task-id
+                                               (:worktree-acquire-timeout-ms defaults)
+                                               logger)]
     (when (dag/err? worktree-result)
       (throw (ex-info "Failed to acquire worktree"
                       {:task-id task-id
@@ -215,13 +245,16 @@
 
 (defn calculate-cost-usd
   "Calculate estimated cost in USD based on tokens used.
-   Using Claude Sonnet pricing as baseline: ~$3/million input, ~$15/million output.
-   Assume 70% input / 30% output ratio for simplicity."
+   Pricing model is configurable, sourced from :token-pricing in the
+   defaults EDN (config/task-executor/defaults.edn): the per-million input
+   and output costs and the input/output token-share split are all read from
+   there rather than hard-coded here. Edit the EDN to change the model."
   [total-tokens]
-  (let [input-tokens (* total-tokens 0.7)
-        output-tokens (* total-tokens 0.3)
-        input-cost-per-million 3.0
-        output-cost-per-million 15.0
+  (let [{:keys [input-cost-per-million output-cost-per-million
+                input-token-share output-token-share]}
+        (:token-pricing defaults)
+        input-tokens (* total-tokens input-token-share)
+        output-tokens (* total-tokens output-token-share)
         cost (+ (/ (* input-tokens input-cost-per-million) 1000000.0)
                 (/ (* output-tokens output-cost-per-million) 1000000.0))]
     (double cost)))

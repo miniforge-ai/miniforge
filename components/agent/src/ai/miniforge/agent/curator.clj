@@ -61,6 +61,7 @@
   (:require
    [ai.miniforge.agent.file-artifacts :as file-artifacts]
    [ai.miniforge.agent.prompts :as prompts]
+   [ai.miniforge.agent.role-config :as role-config]
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.repo-index.interface :as messages]
    [ai.miniforge.response.interface :as response]
@@ -358,9 +359,8 @@
   [llm-client system-prompt user-prompt]
   (try
     (let [result (llm/chat llm-client user-prompt
-                           {:system system-prompt
-                            :temperature 0.1
-                            :max-tokens 800})]
+                           (merge (role-config/agent-llm-default :curator)
+                                  {:system system-prompt}))]
       (when (llm/success? result)
         (parse-llm-response (llm/get-content result))))
     (catch Exception _ nil)))

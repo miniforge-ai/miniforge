@@ -162,13 +162,13 @@
 
 (defn validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
-  [task-id raw-deps valid-task-ids]
+  [task-id raw-deps valid-task-ids logger]
   (let [valid (set (filter valid-task-ids raw-deps))
         invalid (remove valid-task-ids raw-deps)]
     (when (seq invalid)
-      (println "WARN: Task" task-id
-               "has dependencies on non-existent tasks:"
-               (vec invalid) "— dropping them"))
+      (log/warn logger :dag-orchestrator :dag/phantom-deps-dropped
+                {:data {:task-id task-id
+                        :dropped-deps (vec invalid)}}))
     valid))
 
 (defn plan-task->dag-task
@@ -178,7 +178,8 @@
     (cond-> {:task/id task-id
              :task/deps (validate-deps task-id
                                        (map normalize-task-id (:task/dependencies t []))
-                                       valid-task-ids)
+                                       valid-task-ids
+                                       (:logger context))
              :task/description (:task/description t)
              :task/type (:task/type t :implement)
              :task/acceptance-criteria (:task/acceptance-criteria t [])
@@ -209,7 +210,9 @@
 (defn plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
         valid-task-ids (set (map (comp normalize-task-id :task/id) tasks))
-        dag-tasks (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) context)
+        logger (or (:logger context) (log/create-logger {:min-level :info}))
+        ctx (assoc context :logger logger)
+        dag-tasks (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) ctx)
                         tasks)]
     (wire-stratum-deps dag-tasks)))
 
@@ -556,7 +559,7 @@
   (try
     (apply shell/sh "git" "-C" cwd args)
     (catch Exception e
-      {:exit -1 :out "" :err (.getMessage e)})))
+      {:exit -1 :out "" :err (or (ex-message e) (.getName (class e)))})))
 
 (defn- host-repo-path
   "Resolve the host repository path for orchestrator-level git operations.
@@ -1348,11 +1351,11 @@
         ;; and the DAG batch cleanup can proceed.
         (.interrupt (Thread/currentThread))
         (dag/err :task-cancelled
-                 (str "Task cancelled: " (.getMessage ie))
+                 (str "Task cancelled: " (or (ex-message ie) (.getName (class ie))))
                  {:task-id task-id}))
       (catch Exception e
         (dag/err :task-execution-failed
-                 (str "Task failed: " (.getMessage e))
+                 (str "Task failed: " (or (ex-message e) (.getName (class e))))
                  {:task-id task-id})))))
 
 (defn create-task-executor-fn [context opts]
@@ -1761,7 +1764,7 @@
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         _ (warn-potential-monolith plan logger)
-        task-defs (plan->dag-tasks plan context)
+        task-defs (plan->dag-tasks plan (assoc context :logger logger))
         _ (log-multi-parent-detected! logger plan task-defs)
         tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
         pre-completed (get context :pre-completed-ids #{})

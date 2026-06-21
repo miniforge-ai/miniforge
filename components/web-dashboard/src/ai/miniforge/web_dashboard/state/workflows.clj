@@ -19,10 +19,13 @@
    [ai.miniforge.event-stream.interface :as es]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
+
+(def ^:private defaults dashboard-config/defaults)
 
 (def events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
@@ -30,11 +33,11 @@
 
 (def stale-threshold-ms
   "Workflows with no events for this long are considered stale (10 minutes)."
-  (* 10 60 1000))
+  (:stale-threshold-ms defaults))
 
 (def max-recent-workflows
   "Maximum number of recent workflows returned from the live stream."
-  50)
+  (:max-recent-workflows defaults))
 
 (def phase-lifecycle-types
   "Event types that carry phase classification data."

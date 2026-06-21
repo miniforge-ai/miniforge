@@ -215,6 +215,30 @@
       (is (pos? (:files-analyzed result)))
       (is (pos? @call-count)))))
 
+(deftest analyze-rule-on-files-test
+  (testing "judges only the supplied changed files, filters by glob + size"
+    (let [rule    {:rule/id :std/test
+                   :rule/title "Test Rule"
+                   :rule/category "001"
+                   :rule/severity :minor
+                   :rule/knowledge-content "Check it."
+                   :rule/applies-to {:file-globs ["src/*.clj"]}}
+          judged  (atom [])
+          big     (apply str (repeat 60000 "x"))
+          mock    (fn [_client request]
+                    (swap! judged conj (-> request :messages first :content))
+                    {:success true
+                     :content "[{:line 1 :message \"semantic issue\"}]"})
+          files   [{:path "src/core.clj" :content "(def x 1)"}
+                   {:path "docs/readme.md" :content "skip — not a glob match"}
+                   {:path "src/huge.clj" :content big}]
+          result  (sut/analyze-rule-on-files :mock mock rule files)]
+      (is (= 1 (:files-analyzed result)) "only src/core.clj matches glob + size")
+      (is (= 1 (count (:violations result))))
+      (is (= 1 (count @judged)))
+      (is (re-find #"\(def x 1\)" (first @judged))
+          "the judged file's content reached the prompt"))))
+
 (def ^:private base-rule
   {:rule/id :std/test
    :rule/title "Test"

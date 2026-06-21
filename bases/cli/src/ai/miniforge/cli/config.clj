@@ -27,7 +27,8 @@
    [babashka.process :as process]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.backends :as backends]
-   [ai.miniforge.cli.messages :as messages]))
+   [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.resource-config :as resource-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration paths and utilities
@@ -35,21 +36,17 @@
 (def default-user-config-path
   (app-config/config-path))
 
+(def default-config-resource
+  "Classpath resource path for the fallback user config."
+  "config/cli/user-defaults.edn")
+
 (def default-config
-  {:llm {:backend :opencode
-         :model "anthropic/claude-sonnet-4-5"
-         :timeout-ms 300000
-         :line-timeout-ms 60000
-         :max-tokens 4000}
-   :workflow {:max-iterations 50
-              :max-tokens 150000
-              :failure-strategy :retry}
-   :artifacts {:dir (app-config/artifacts-dir)}
-   :meta-loop {:enabled true
-               :max-convergence-iterations 10
-               :convergence-threshold 0.95}
-   :dashboard {:port 7878
-               :auto-open false}})
+  ;; Static defaults load from EDN; :artifacts :dir is resolved from the
+  ;; runtime home dir so MINIFORGE_HOME overrides keep working. Merge (not
+  ;; assoc) so any :artifacts keys from the loaded EDN survive while the
+  ;; computed :dir still wins.
+  (update (resource-config/merged-resource-config default-config-resource)
+          :artifacts merge {:dir (app-config/artifacts-dir)}))
 
 (defn style
   "Apply terminal styling using ANSI escape codes."
