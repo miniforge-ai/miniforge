@@ -89,18 +89,19 @@
   "Resolve a completed phase's typed act — the one derivation of the
    :phase/outcome value from a phase result and a success verdict.
 
-   `succeeded?` is the caller's verdict. It folds in inner-agent failure and
-   the registry status normalization, both of which live above this layer, so
-   this function stays a pure reduction over the result's own markers.
+   `succeeded-verdict?` is the caller's success verdict — distinct from the
+   `succeeded?` predicate above, since it folds in inner-agent failure and the
+   registry status normalization, both of which live above this layer. Passing
+   it in keeps this function a pure reduction over the result's own markers.
 
    Precedence is deliberate: a refusal dominates any other act; an outright
    failure dominates a pending redirect; a phase that did its work but hands
    control elsewhere is :redirected. This is the only place the precedence is
    decided — the event stream and the views read the result, never re-derive it."
-  [result succeeded?]
+  [result succeeded-verdict?]
   (cond
     (blocked? result)            :blocked
-    (not succeeded?)             :failure
+    (not succeeded-verdict?)     :failure
     (redirect-requested? result) :redirected
     :else                        :success))
 
