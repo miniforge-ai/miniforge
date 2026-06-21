@@ -28,6 +28,8 @@
    [ai.miniforge.tool-registry.lsp.process :as process]
    [ai.miniforge.tool-registry.schema :as schema]
    [clojure.core.async :as async :refer [go-loop]]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
@@ -45,7 +47,23 @@
    initialized?
    notification-handler])
 
-(def default-timeout-ms 30000)
+(def ^:private timeouts
+  "LSP client timeouts, loaded from EDN so operators can tune per environment."
+  (-> (io/resource "config/tool-registry/lsp.edn")
+      slurp
+      edn/read-string))
+
+(def default-timeout-ms
+  "Default deadline (ms) for synchronous LSP requests."
+  (:request-timeout-ms timeouts))
+
+(def init-timeout-ms
+  "Deadline (ms) for the initialize handshake."
+  (:init-timeout-ms timeouts))
+
+(def shutdown-timeout-ms
+  "Deadline (ms) for the graceful shutdown request."
+  (:shutdown-timeout-ms timeouts))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message I/O
@@ -212,7 +230,7 @@
    - {:success? false :error string}"
   [client root-uri capabilities]
   (let [request (proto/initialize-request root-uri capabilities)
-        {:keys [success? result error]} (send-request-sync client request 60000)]
+        {:keys [success? result error]} (send-request-sync client request init-timeout-ms)]
     (if success?
       (do
         ;; Store server capabilities
@@ -231,7 +249,7 @@
    - {:success? true}
    - {:success? false :error string}"
   [client]
-  (let [{:keys [success? error]} (send-request-sync client (proto/shutdown-request) 10000)]
+  (let [{:keys [success? error]} (send-request-sync client (proto/shutdown-request) shutdown-timeout-ms)]
     (if success?
       (do
         (send-notification client (proto/exit-notification))
