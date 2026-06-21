@@ -859,9 +859,8 @@
             (assoc-in [:phase :skipped-reason] :already-implemented))]
       ;; Emit phase-completed telemetry with termination reason
       (phase/emit-phase-completed! final-ctx :implement
-        (merge {:outcome     (if (contains? #{:completed :already-implemented} phase-status)
-                               :success
-                               :failure)
+        (merge {:outcome     (phase/outcome result
+                                            (contains? #{:completed :already-implemented} phase-status))
                 :duration-ms duration-ms
                 :tokens      (get metrics :tokens 0)}
                (phase-terminal/derive-termination-reason

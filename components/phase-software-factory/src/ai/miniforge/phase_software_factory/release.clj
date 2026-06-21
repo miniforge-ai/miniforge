@@ -547,7 +547,7 @@
                 (assoc-in [:phase :last-error]
                           (get-in result [:error :message] (messages/t :release/phase-failed)))))
       (phase/emit-phase-completed! :release
-        (merge {:outcome     (if (= :completed phase-status) :success :failure)
+        (merge {:outcome     (phase/outcome result (= :completed phase-status))
                 :duration-ms duration-ms
                 :tokens      (:tokens metrics 0)}
                (phase-terminal/derive-termination-reason result nil))))))

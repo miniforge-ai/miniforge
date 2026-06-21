@@ -471,7 +471,7 @@
                    :else
                    updated-ctx)]
     (phase/emit-phase-completed! next-ctx :verify
-      (merge {:outcome     (if (= :completed phase-status) :success :failure)
+      (merge {:outcome     (phase/outcome result (= :completed phase-status))
               :duration-ms duration-ms
               :tokens      (get metrics :tokens 0)}
              (phase-terminal/derive-termination-reason result
