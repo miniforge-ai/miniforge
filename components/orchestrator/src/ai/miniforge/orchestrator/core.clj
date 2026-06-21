@@ -32,7 +32,9 @@
    [ai.miniforge.orchestrator.protocol :as proto]
    [ai.miniforge.workflow.interface :as wf]
    [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
@@ -54,13 +56,7 @@
 
 (def default-config
   "Default control plane configuration."
-  {:default-budget {:max-tokens 100000
-                    :max-cost-usd 10.0
-                    :timeout-ms (* 30 60 1000)} ; 30 minutes
-   :knowledge-injection? true
-   :learning-capture? true
-   :escalation-threshold 3
-   :log-level :info})
+  (-> (io/resource "config/orchestrator/defaults.edn") slurp edn/read-string))
 
 (def task-type->agent-role
   "Mapping of task types to agent roles."

@@ -25,18 +25,16 @@
    [ai.miniforge.operator.llm-pattern-detector :as llm-pattern-detector]
    [ai.miniforge.workflow.interface :as wf]
    [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
 (def default-config
   "Default operator configuration."
-  {:signal-retention-ms (* 24 60 60 1000) ; 24 hours
-   :pattern-window-ms (* 60 60 1000)       ; 1 hour
-   :min-pattern-occurrences 3
-   :auto-apply-threshold 0.95
-   :shadow-period-ms (* 60 60 1000)})      ; 1 hour shadow mode
+  (-> (io/resource "config/operator/defaults.edn") slurp edn/read-string))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Signal management
