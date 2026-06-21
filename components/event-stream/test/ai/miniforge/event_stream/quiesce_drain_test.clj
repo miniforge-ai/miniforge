@@ -220,30 +220,37 @@
       (is (true? (:ok? result))
           "in-flight counter must release even when the sink throws"))))
 
+(def ^:private with-in-flight-var  #'core/with-in-flight)
+(def ^:private quiesced-sentinel-var #'core/quiesced-sentinel)
+
 (deftest publish-rejected-when-quiesced-during-atomic-acquire
-  ;; Pin the TOCTOU fix: a publish that passes the fast-path rejection check
-  ;; but races with quiesce! on the in-flight increment must still be
-  ;; rejected rather than silently reaching the sink.
+  ;; Pin the TOCTOU fix: a publish that clears the fast-path
+  ;; rejection-if-quiesced check (stream not yet quiesced) but then
+  ;; encounters a quiesce during the atomic acquire inside with-in-flight
+  ;; must still be rejected.
   ;;
-  ;; The fix fuses the quiesce-check and the increment into a single swap!
-  ;; inside with-in-flight. This test simulates the scenario by quiescing
-  ;; the workflow directly on the atom (bypassing the fast-path check)
-  ;; immediately before publish! would increment, and asserts that the
-  ;; canonical {:rejected? true :reason :workflow-quiesced} shape is
-  ;; returned and the sink is not reached.
+  ;; We exercise the slow path directly: bypass rejection-if-quiesced by
+  ;; calling with-in-flight on a stream that is already quiesced. This
+  ;; replicates the race window — rejection-if-quiesced would have returned
+  ;; nil (workflow not quiesced at the fast-path instant) but the atomic
+  ;; swap! inside try-acquire-in-flight! observes the fence.
   (let [[sink record] (recording-sink)
-        stream (core/create-event-stream {:sinks [sink]})
-        wid (random-uuid)
-        ;; Quiesce the workflow before any publish so the slow path inside
-        ;; try-acquire-in-flight! fires (fast-path check also guards it,
-        ;; but both paths must yield the same rejection shape).
-        _ (core/quiesce! stream {:workflow-id wid})
-        result (core/publish! stream (workflow-event wid :test/event))]
-    (is (true? (:rejected? result))
-        "quiesced-during-acquire publish must return {:rejected? true}")
-    (is (= :workflow-quiesced (:reason result))
-        "rejection reason must be :workflow-quiesced regardless of which path caught it")
-    (is (= wid (:workflow-id result))
-        "workflow-id must be echoed in the rejection map")
-    (is (= 0 (count @record))
-        "the sink must not be reached when the acquire was rejected")))
+        wid     (random-uuid)
+        event   (workflow-event wid :test/event)
+        ;; Build a stream that is quiesced, simulating the state after a
+        ;; concurrent quiesce! landed between the fast-path check and the swap!.
+        stream  (atom {:in-flight 0
+                       :quiesced-workflows #{wid}
+                       :sinks [sink]
+                       :subscribers {}
+                       :events []
+                       :filters {}
+                       :logger nil})
+        sentinel @quiesced-sentinel-var
+        result  (@with-in-flight-var stream event (fn [] :should-not-reach))]
+    (is (= result sentinel)
+        "with-in-flight returns quiesced-sentinel when the atomic acquire is denied")
+    (is (= 0 (:in-flight @stream))
+        ":in-flight must not be incremented when fenced")
+    (is (empty? @record)
+        "sink must not receive an event when quiesced during atomic acquire")))

@@ -230,9 +230,9 @@
   "Atomically check the quiesce fence for `event`'s workflow and, if not
    fenced, increment the in-flight counter.
 
-   Uses a decision atom captured inside the `swap!` fn to signal the outcome
-   to the caller without polluting the stream map with temporary keys. The
-   `swap!` fn may be retried by the atom under contention — the decision atom
+   Uses a decision volatile captured inside the `swap!` fn to signal the
+   outcome to the caller without polluting the stream map with temporary keys.
+   The `swap!` fn may be retried by the atom under contention — the volatile
    is reset on each retry so the final value always reflects the last
    successful swap.
 
