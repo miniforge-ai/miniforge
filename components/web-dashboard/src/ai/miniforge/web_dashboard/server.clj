@@ -21,6 +21,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [org.httpkit.server :as http]
+   [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.java.io :as io]
    [cheshire.core :as json]
@@ -37,6 +38,12 @@
    [ai.miniforge.web-dashboard.archive :as archive]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.control-plane.interface :as cp]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Configuration defaults
+
+(def ^:private defaults
+  (-> (io/resource "config/web-dashboard/defaults.edn") slurp edn/read-string))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
@@ -368,7 +375,7 @@
    - :repo-dag-manager - Repo DAG manager instance
    - :auth - Optional dashboard auth config"
   [{:keys [port event-stream pr-train-manager repo-dag-manager auth]
-    :or {port 7878}}]
+    :or {port (:port defaults)}}]
   (let [;; Create dashboard-local event stream with NO file sinks to prevent write-back loop.
         ;; The watcher reads from ~/.miniforge/events/ and publishes to this in-memory-only stream.
         dashboard-event-stream (or event-stream (es/create-event-stream {:sinks []}))

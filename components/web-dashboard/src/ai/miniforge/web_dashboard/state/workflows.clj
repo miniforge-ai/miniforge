@@ -17,6 +17,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
@@ -24,17 +25,20 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
+(def ^:private defaults
+  (-> (io/resource "config/web-dashboard/defaults.edn") slurp edn/read-string))
+
 (def events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
   (str (config/miniforge-home) "/events"))
 
 (def stale-threshold-ms
   "Workflows with no events for this long are considered stale (10 minutes)."
-  (* 10 60 1000))
+  (:stale-threshold-ms defaults))
 
 (def max-recent-workflows
   "Maximum number of recent workflows returned from the live stream."
-  50)
+  (:max-recent-workflows defaults))
 
 (def phase-lifecycle-types
   "Event types that carry phase classification data."
