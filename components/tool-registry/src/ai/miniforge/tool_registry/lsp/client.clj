@@ -24,10 +24,11 @@
    Layer 2: Request/response handling
    Layer 3: High-level operations"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.tool-registry.lsp.protocol :as proto]
    [ai.miniforge.tool-registry.lsp.process :as process]
    [ai.miniforge.tool-registry.schema :as schema]
-   [clojure.core.async :as async :refer [go-loop]]
+   [clojure.core.async :refer [go-loop]]
    [clojure.string :as str])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
@@ -45,7 +46,25 @@
    initialized?
    notification-handler])
 
-(def default-timeout-ms 30000)
+(def ^:private timeouts
+  "LSP client timeouts, loaded from EDN so operators can tune per environment.
+   Uses the shared config-resource loader (fails fast with a clear ex-info on
+   a missing/malformed/non-map resource or a missing required key)."
+  (config/load-config-resource
+   "config/tool-registry/lsp.edn"
+   [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
+
+(def default-timeout-ms
+  "Default deadline (ms) for synchronous LSP requests."
+  (:request-timeout-ms timeouts))
+
+(def init-timeout-ms
+  "Deadline (ms) for the initialize handshake."
+  (:init-timeout-ms timeouts))
+
+(def shutdown-timeout-ms
+  "Deadline (ms) for the graceful shutdown request."
+  (:shutdown-timeout-ms timeouts))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message I/O
@@ -212,7 +231,7 @@
    - {:success? false :error string}"
   [client root-uri capabilities]
   (let [request (proto/initialize-request root-uri capabilities)
-        {:keys [success? result error]} (send-request-sync client request 60000)]
+        {:keys [success? result error]} (send-request-sync client request init-timeout-ms)]
     (if success?
       (do
         ;; Store server capabilities
@@ -231,7 +250,7 @@
    - {:success? true}
    - {:success? false :error string}"
   [client]
-  (let [{:keys [success? error]} (send-request-sync client (proto/shutdown-request) 10000)]
+  (let [{:keys [success? error]} (send-request-sync client (proto/shutdown-request) shutdown-timeout-ms)]
     (if success?
       (do
         (send-notification client (proto/exit-notification))
