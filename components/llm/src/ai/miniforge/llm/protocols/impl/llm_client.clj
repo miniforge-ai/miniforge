@@ -647,7 +647,7 @@
 (def ^:private backend-data
   (load-backend-data))
 
-;; Function-valued backend fields. The :echo entry is intentionally
+;; Function-valued backend fields. The :ollama entry is intentionally
 ;; absent (it has none); OpenCode loads credentials from its auth
 ;; store, environment, or project .env/config, so Miniforge should not
 ;; read provider-specific keys on that path.

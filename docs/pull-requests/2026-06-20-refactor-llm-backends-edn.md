@@ -3,8 +3,10 @@
 ## Overview
 
 Moves the pure-data fields of the `backends` map in the `llm` component
-out of `llm_client.clj` and into a new EDN resource,
-`resources/llm/backends.edn`. The function-valued fields stay in code.
+out of `llm_client.clj` and into a new EDN resource, loaded from the
+classpath as `llm/backends.edn` (on disk at
+`components/llm/resources/llm/backends.edn`). The function-valued fields
+stay in code.
 The runtime value of the `backends` var is unchanged.
 
 ## Motivation
