@@ -1,0 +1,84 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+;; Pure-data fields of each LLM backend, keyed by backend keyword.
+;; The function-valued fields (:stream-parser, :args-fn) stay in
+;; llm_client.clj and are merged onto these maps at load time. See the
+;; `backends` var there for the merge and for the rationale of each
+;; field (prompt delivery, probe endpoints, credential handling).
+{:claude {:cmd "claude"
+          :streaming? true
+          :description "Claude via Anthropic CLI"
+          :provider "Anthropic"
+          :requires-cli? true
+          ;; Prompt delivery: stdin. The planner path's system-prompt +
+          ;; spec text + existing-files context regularly pushes argv
+          ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
+          ;; to read the user prompt from stdin; we use that instead.
+          :prompt-via :stdin
+          :probe-endpoint "https://api.anthropic.com/"}
+
+ :codex {:cmd "codex"
+         :streaming? true
+         :description "Codex via Codex CLI"
+         :provider "Codex"
+         :requires-cli? true
+         ;; Prompt delivery: stdin. Codex supports `-` as the prompt
+         ;; placeholder; this keeps large synthesis prompts off argv.
+         :prompt-via :stdin
+         :probe-endpoint "https://api.openai.com/"}
+
+ :ollama {:cmd "http"
+          :streaming? true
+          :description "Local models via Ollama"
+          :provider "Ollama"
+          :requires-cli? false
+          :api-endpoint "http://localhost:11434/api/chat"
+          :default-model "codellama"
+          :models ["codellama" "llama2" "mistral"]
+          :probe-endpoint "http://localhost:11434/api/version"}
+
+ :cursor {:cmd "agent"
+          :streaming? false
+          :description "Cursor AI via CLI"
+          :provider "Cursor"
+          :requires-cli? true
+          :prompt-via :argv
+          :probe-endpoint "https://api2.cursor.sh/"}
+
+ :opencode {:cmd "opencode"
+            :streaming? false
+            :description "OpenCode CLI provider wrapper"
+            :provider "OpenCode"
+            :requires-cli? true
+            :prompt-via :argv
+            ;; OpenCode's typical default provider; tunable per-deployment.
+            :probe-endpoint "https://api.anthropic.com/"}
+
+ ;; :echo's :probe-endpoint mirrors the in-code
+ ;; `generic-connectivity-probe-url` ("https://1.1.1.1/"): backends
+ ;; without a provider-controlled endpoint get the generic Cloudflare
+ ;; DNS connectivity URL so the network-monitor still has something to
+ ;; probe.
+ :echo {:cmd "echo"
+        :streaming? false
+        :description "Echo backend for testing"
+        :provider "Test"
+        :requires-cli? false
+        :prompt-via :argv
+        :probe-endpoint "https://1.1.1.1/"}}

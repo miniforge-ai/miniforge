@@ -632,73 +632,36 @@
 (def ^:private generic-connectivity-probe-url
   "https://1.1.1.1/")
 
+;; Pure-data backend fields (`:cmd`, endpoints, `:default-model`,
+;; `:models`, etc.) live in `llm/backends.edn`; the function-valued
+;; fields (`:stream-parser`, `:args-fn`) stay here because they
+;; reference parser/arg-builder fns defined in this namespace. The two
+;; are merged per backend below to form `backends`.
+(defn- load-backend-data
+  []
+  (if-let [resource (io/resource "llm/backends.edn")]
+    (edn/read-string (slurp resource))
+    (response/throw-anomaly! :anomalies/not-found
+                             "Missing llm/backends.edn resource")))
+
+(def ^:private backend-data
+  (load-backend-data))
+
+;; Function-valued backend fields. The :echo entry is intentionally
+;; absent (it has none); OpenCode loads credentials from its auth
+;; store, environment, or project .env/config, so Miniforge should not
+;; read provider-specific keys on that path.
+(def ^:private backend-fns
+  {:claude {:stream-parser parse-claude-stream-line
+            :args-fn claude-args}
+   :codex {:stream-parser parse-codex-stream-line
+           :args-fn codex-args}
+   :cursor {:args-fn cursor-args}
+   :opencode {:args-fn opencode-args}
+   :echo {:args-fn echo-args}})
+
 (def backends
-  {:claude {:cmd "claude"
-            :streaming? true
-            :description "Claude via Anthropic CLI"
-            :provider "Anthropic"
-            :requires-cli? true
-            :stream-parser parse-claude-stream-line
-            :args-fn claude-args
-            ;; Prompt delivery: stdin. The planner path's system-prompt +
-            ;; spec text + existing-files context regularly pushes argv
-            ;; past POSIX ARG_MAX. Claude CLI supports --input-format text
-            ;; to read the user prompt from stdin; we use that instead.
-            :prompt-via :stdin
-            :probe-endpoint "https://api.anthropic.com/"}
-
-   :codex {:cmd "codex"
-           :streaming? true
-           :description "Codex via Codex CLI"
-           :provider "Codex"
-           :requires-cli? true
-           :stream-parser parse-codex-stream-line
-           :args-fn codex-args
-           ;; Prompt delivery: stdin. Codex supports `-` as the prompt
-           ;; placeholder; this keeps large synthesis prompts off argv.
-           :prompt-via :stdin
-           :probe-endpoint "https://api.openai.com/"}
-
-   :ollama {:cmd "http"
-            :streaming? true
-            :description "Local models via Ollama"
-            :provider "Ollama"
-            :requires-cli? false
-            :api-endpoint "http://localhost:11434/api/chat"
-            :default-model "codellama"
-            :models ["codellama" "llama2" "mistral"]
-            :probe-endpoint "http://localhost:11434/api/version"}
-
-   :cursor {:cmd "agent"
-            :streaming? false
-            :description "Cursor AI via CLI"
-            :provider "Cursor"
-            :requires-cli? true
-            :args-fn cursor-args
-            :prompt-via :argv
-            :probe-endpoint "https://api2.cursor.sh/"}
-
-   :opencode {:cmd "opencode"
-              :streaming? false
-              :description "OpenCode CLI provider wrapper"
-              :provider "OpenCode"
-              :requires-cli? true
-              ;; OpenCode loads credentials from its auth store,
-              ;; environment, or project .env/config. Miniforge should not
-              ;; read provider-specific keys on this path.
-              :args-fn opencode-args
-              :prompt-via :argv
-              ;; OpenCode's typical default provider; tunable per-deployment.
-              :probe-endpoint "https://api.anthropic.com/"}
-
-   :echo {:cmd "echo"
-          :streaming? false
-          :description "Echo backend for testing"
-          :provider "Test"
-          :requires-cli? false
-          :args-fn echo-args
-          :prompt-via :argv
-          :probe-endpoint generic-connectivity-probe-url}})
+  (merge-with merge backend-data backend-fns))
 
 (defn probe-endpoint-for
   "Resolve the network-health probe URL for `backend-key`. Returns the
