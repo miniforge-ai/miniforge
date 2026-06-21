@@ -31,6 +31,9 @@
 
 ;------------------------------------------------------------------------------ Test fixtures
 
+(def ^:private run-tests-var
+  #'verify/run-tests!)
+
 (def phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
@@ -57,21 +60,19 @@
 (defn with-mocked-test-runner
   "Run body-fn with run-tests! mocked to return a passing result."
   [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-    (with-redefs-fn
-      {run-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
-                                :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
-      body-fn)))
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                    :fail-count 0 :error-count 0 :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+    body-fn))
 
 (defn with-failing-test-runner
   "Run body-fn with run-tests! mocked to return a failing result."
   [body-fn]
-  (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-    (with-redefs-fn
-      {run-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
-                                :fail-count 2 :error-count 0
-                                :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
-      body-fn)))
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                    :fail-count 2 :error-count 0
+                                    :output "Ran 3 tests containing 6 assertions.\n2 failures, 0 errors."})}
+    body-fn))
 
 ;------------------------------------------------------------------------------ Layer 0: Defaults tests
 
@@ -147,12 +148,11 @@
 
 (deftest enter-verify-uses-execution-worktree-path-test
   (testing "enter-verify passes :execution/worktree-path to test runner"
-    (let [captured-path (atom nil)
-          run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+    (let [captured-path (atom nil)]
       (with-redefs-fn
-        {run-var (fn [path & _opts]
-                   (reset! captured-path path)
-                   {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+        {run-tests-var (fn [path & _opts]
+                         (reset! captured-path path)
+                         {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
         (fn []
           (let [ctx (-> (create-base-context)
                         (assoc :execution/worktree-path "/tmp/my-worktree")
@@ -203,12 +203,11 @@
 
 (deftest enter-verify-propagates-spec-test-timeout-test
   (testing "enter-verify threads :spec/test-timeout-ms from :execution/input into run-tests!"
-    (let [captured-opts (atom nil)
-          run-var       (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+    (let [captured-opts (atom nil)]
       (with-redefs-fn
-        {run-var (fn [_path & opts]
-                   (reset! captured-opts (apply hash-map opts))
-                   {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+        {run-tests-var (fn [_path & opts]
+                         (reset! captured-opts (apply hash-map opts))
+                         {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
         (fn []
           (let [ctx (-> (create-base-context)
                         (assoc-in [:execution/input :spec/test-timeout-ms] 12345)
@@ -220,12 +219,11 @@
 
 (deftest enter-verify-uses-default-timeout-when-no-override-test
   (testing "enter-verify falls back to default-test-timeout-ms when neither spec nor config sets one"
-    (let [captured-opts (atom nil)
-          run-var       (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
+    (let [captured-opts (atom nil)]
       (with-redefs-fn
-        {run-var (fn [_path & opts]
-                   (reset! captured-opts (apply hash-map opts))
-                   {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
+        {run-tests-var (fn [_path & opts]
+                         (reset! captured-opts (apply hash-map opts))
+                         {:passed? true :test-count 1 :fail-count 0 :error-count 0})}
         (fn []
           (let [ctx (-> (create-base-context)
                         (assoc :phase-config {:phase :verify}))]
@@ -294,23 +292,22 @@
     ;; If the fragment doesn't survive into the phase result, the dead-code
     ;; detection in leave-verify stays dead and timeouts get treated as
     ;; ordinary test failures (and route back to implement — wasting tokens).
-    (let [run-var (resolve 'ai.miniforge.phase-software-factory.verify/run-tests!)]
-      (with-redefs-fn
-        {run-var (fn [_path & _opts]
-                   {:passed? false :test-count 0 :assertion-count 0
-                    :fail-count 0 :error-count 1
-                    :timed-out? true
-                    :output "Verify test runner timed out after 1000ms (cmd: bb test)"})}
-        (fn []
-          (let [ctx (-> (create-base-context)
-                        (assoc :phase-config {:phase :verify}))
-                ctx-after (verify/enter-verify ctx)
-                result (get-in ctx-after [:phase :result])]
-            (is (= :error (:status result)))
-            (is (str/includes? (str (:summary result)) "timed out")
-                ":summary must carry the `timed out` fragment")
-            (is (str/includes? (str (get-in result [:error :message])) "timed out")
-                ":error :message must carry the fragment — leave-verify branches on this")))))))
+    (with-redefs-fn
+      {run-tests-var (fn [_path & _opts]
+                       {:passed? false :test-count 0 :assertion-count 0
+                        :fail-count 0 :error-count 1
+                        :timed-out? true
+                        :output "Verify test runner timed out after 1000ms (cmd: bb test)"})}
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              ctx-after (verify/enter-verify ctx)
+              result (get-in ctx-after [:phase :result])]
+          (is (= :error (:status result)))
+          (is (str/includes? (str (:summary result)) "timed out")
+              ":summary must carry the `timed out` fragment")
+          (is (str/includes? (str (get-in result [:error :message])) "timed out")
+              ":error :message must carry the fragment — leave-verify branches on this"))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
