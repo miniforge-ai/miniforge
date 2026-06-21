@@ -102,12 +102,9 @@
 
 ;; -- EDGAR EFTS API --
 
-(def ^:private efts-base "https://efts.sec.gov/LATEST/search-index")
-(def ^:private archives-base "https://www.sec.gov/Archives/edgar/data")
-
 (defn- search-filings
   "Search EDGAR EFTS for filings of a given form type in a date range."
-  [form-type start-date end-date sample-size user-agent]
+  [efts-base form-type start-date end-date sample-size user-agent]
   (let [url (str efts-base
                  "?q=%22" form-type "%22"
                  "&forms=" form-type
@@ -121,7 +118,7 @@
 
 (defn- fetch-filing-xml
   "Fetch a filing's XML document. Tries common filenames."
-  [adsh cik user-agent filenames]
+  [archives-base adsh cik user-agent filenames]
   (let [adsh-path (clojure.string/replace adsh "-" "")
         cik-num   (str (parse-long cik))]
     (some (fn [fname]
@@ -165,12 +162,12 @@
 
 (defn- fetch-filing-transactions
   "Fetch and extract transactions from a single EFTS hit."
-  [hit user-agent filenames transaction-codes]
+  [archives-base hit user-agent filenames transaction-codes]
   (let [src  (:_source hit)
         adsh (:adsh src)
         cik  (first (:ciks src))]
     (when (and adsh cik)
-      (when-let [xml (fetch-filing-xml adsh cik user-agent filenames)]
+      (when-let [xml (fetch-filing-xml archives-base adsh cik user-agent filenames)]
         (extract-form4-transactions xml transaction-codes)))))
 
 (defn- count-by-code
@@ -183,17 +180,19 @@
   [config user-agent]
   (let [{:edgar/keys [start-date sample-size transaction-codes
                       series-id filing-filenames]} config
+        efts-base     (get config :edgar/efts-base-url "https://efts.sec.gov/LATEST/search-index")
+        archives-base (get config :edgar/archives-base-url "https://www.sec.gov/Archives/edgar/data")
         codes   (or transaction-codes #{"P" "S"})
         fnames  (or filing-filenames ["form4.xml" "ownership.xml" "primary_doc.xml"])
         windows (monthly-windows (or start-date "2025-01-01"))]
     (vec
      (for [[start end] windows
-           :let [hits    (or (search-filings "4" start end
+           :let [hits    (or (search-filings efts-base "4" start end
                                              (or sample-size 200)
                                              user-agent)
                              [])
                  sample  (take (or sample-size 200) hits)
-                 txns    (mapcat #(fetch-filing-transactions % user-agent fnames codes) sample)
+                 txns    (mapcat #(fetch-filing-transactions archives-base % user-agent fnames codes) sample)
                  buys    (count-by-code txns "P")
                  sells   (count-by-code txns "S")
                  ratio   (if (pos? sells)
