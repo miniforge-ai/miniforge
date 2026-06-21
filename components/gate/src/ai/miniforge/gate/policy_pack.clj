@@ -37,12 +37,22 @@
    Pack source: `ctx :policy-packs` when provided (tests / repo packs), else
    the classpath-shipped `packs/miniforge-standards.pack.edn`.
 
-   Semantic seam: when the run carries an `:llm-client` and `:complete-fn` in
-   ctx, this gate INJECTS `semantic-analyzer/analyze-rule` under
-   `:semantic-analyze-fn` so heuristic (`:custom` rules with no resolvable
-   `:custom-fn`) reach the LLM judge. With compiled checks, missing semantic
-   wiring is reported as a policy violation; the pack's enforcement action
-   controls whether that violation blocks, requires approval, warns, or audits.
+   Semantic seam: this gate is the layer that depends on both the policy pack
+   and the LLM, so it INJECTS the LLM-judge wiring the policy-pack detector
+   needs — `:llm-client` (from the run's `:llm-backend`), `:complete-fn`
+   (`llm/complete`), and a `:semantic-analyze-fn` that scopes the judge to the
+   run's CHANGED files (not the whole repo) — so heuristic (`:custom` rules with
+   no resolvable `:custom-fn`) reach the LLM judge over exactly the artifact
+   under review. With compiled checks, missing semantic wiring is reported as a
+   policy violation; the pack's enforcement action controls whether that
+   violation blocks, requires approval, warns, or audits.
+
+   Cost discipline: the judge runs only for semantic rules the run intends to
+   ACT on — `:hard-halt` / `:require-approval`. A semantic rule that only warns
+   or audits is guidance (surfaced via behavior injection elsewhere), so the
+   gate does not pay for an LLM call that could only yield a non-blocking
+   finding. Until a semantic rule is classified to an acting action, the seam
+   is wired but dormant.
 
    Fail-safe: a check that throws is converted to a failed gate by
    `gate.interface/check-gate` (mirrors the reviewer fix in #977) — never a
@@ -53,6 +63,7 @@
    [ai.miniforge.gate.capabilities]
    [ai.miniforge.gate.messages :as msg]
    [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [ai.miniforge.semantic-analyzer.interface :as semantic]
    [clojure.edn :as edn]
@@ -99,20 +110,53 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Context wiring
 
+(defn- artifact-changed-files
+  "The changed files [{:path :content}] this gate evaluates, taken from the
+   resolved policy artifact (its code files, or a single content artifact).
+   This is the changed-files scope handed to the judge."
+  [artifact]
+  (cond
+    (seq (:code/files artifact))
+    (mapv (fn [f] {:path    (or (:path f) (:artifact/path f))
+                   :content (or (:content f) (:artifact/content f))})
+          (:code/files artifact))
+
+    (or (:artifact/path artifact) (:path artifact))
+    [{:path    (or (:artifact/path artifact) (:path artifact))
+      :content (or (:artifact/content artifact) (:content artifact))}]
+
+    :else []))
+
+(defn- changed-files-analyzer
+  "An `analyze-rule`-shaped fn (repo-path ignored) that scopes the judge to the
+   run's changed files instead of scanning the whole repo."
+  [files]
+  (fn [llm-client complete-fn _repo-path rule]
+    (semantic/analyze-rule-on-files llm-client complete-fn rule files)))
+
 (defn- with-semantic-wiring
-  "Inject the LLM-judge seam when the run carries an `:llm-client` and
-   `:complete-fn` but no explicit `:semantic-analyze-fn`. Also normalizes the
-   repo path the judge scans (`:repo-path`, falling back to the execution
-   worktree). When the LLM seam is absent, leaves ctx untouched so compiled
-   semantic checks can fail loud according to pack enforcement."
-  [ctx]
+  "Inject the LLM-judge seam the policy-pack semantic detector needs. Derives
+   `:llm-client` from the run's `:llm-backend` when absent, sets `:complete-fn`
+   to `llm/complete`, and injects a `:semantic-analyze-fn` that scopes the judge
+   to `artifact`'s changed files (not the whole repo). Also normalizes
+   `:repo-path` (falling back to the execution worktree). When the run carries
+   no LLM backend, the seam stays unwired so compiled semantic checks fail loud
+   according to pack enforcement (fail-closed)."
+  [ctx artifact]
   (let [ctx (assoc ctx :repo-path (or (:repo-path ctx)
                                       (:execution/worktree-path ctx)
-                                      "."))]
+                                      "."))
+        ctx (cond-> ctx
+              (and (not (:llm-client ctx)) (:llm-backend ctx))
+              (assoc :llm-client (:llm-backend ctx))
+
+              (not (:complete-fn ctx))
+              (assoc :complete-fn llm/complete))]
     (if (and (:llm-client ctx)
              (:complete-fn ctx)
              (not (:semantic-analyze-fn ctx)))
-      (assoc ctx :semantic-analyze-fn semantic/analyze-rule)
+      (assoc ctx :semantic-analyze-fn (changed-files-analyzer
+                                       (artifact-changed-files artifact)))
       ctx)))
 
 (defn- no-policy-packs-warning
@@ -259,13 +303,31 @@
    :violation violation
    :timestamp (java.time.Instant/now)})
 
+(def ^:private judge-acting-actions
+  "Enforcement actions for which the LLM judge actually runs. A semantic rule
+   that only warns/audits is guidance — surfaced via behavior injection, not
+   evaluated by the judge — so the run never pays for an LLM call that could
+   only produce a non-blocking finding."
+  #{:hard-halt :require-approval})
+
+(defn- semantic-judge-applies?
+  "True unless this is a semantic-detector rule whose enforcement action is
+   non-acting. Non-semantic detectors (content-scan, diff, etc.) always run —
+   they are cheap and deterministic."
+  [compiled]
+  (or (not= :semantic (:detector compiled))
+      (contains? judge-acting-actions
+                 (get-in compiled [:rule :rule/enforcement :action]))))
+
 (defn- run-compiled-rule
   [artifact context compiled]
-  (let [rule   (:rule compiled)
-        phase  (:phase context)
-        inputs (applicable-artifacts rule phase artifact context)
-        result ((:check-fn compiled) inputs context)]
-    (mapv #(violation-entry compiled %) (:violations result))))
+  (if-not (semantic-judge-applies? compiled)
+    []
+    (let [rule   (:rule compiled)
+          phase  (:phase context)
+          inputs (applicable-artifacts rule phase artifact context)
+          result ((:check-fn compiled) inputs context)]
+      (mapv #(violation-entry compiled %) (:violations result)))))
 
 (defn- run-compiled-rules
   [compiled-rules artifact context]
@@ -308,6 +370,16 @@
      :artifact-path (:artifact-path violation)
      :match-count   (count (:matches violation))}))
 
+(defn- guidance-only-semantic?
+  "A semantic-detector rule with a non-acting enforcement action — surfaced as
+   guidance (behavior injection), never evaluated by the judge (see
+   `semantic-judge-applies?`). Evidence marks these `:guidance`, not `:passed`,
+   so the event log never claims the judge cleared a rule it skipped."
+  [rule]
+  (and (= :semantic (policy-pack/resolve-detector rule))
+       (not (contains? judge-acting-actions
+                       (get-in rule [:rule/enforcement :action])))))
+
 (defn- classify-rules
   "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
    `violations` are the {:rule :violation} maps from compiled check results.
@@ -315,6 +387,9 @@
      :skipped-by-phase — the rule's :applies-to {:phases} excludes `phase`
      :not-applicable   — phase matches but file-glob/task-type excludes it
      :failed           — considered and violated (carries a violation summary)
+     :guidance         — applicable semantic rule the judge skips (non-acting
+                         action): surfaced as guidance, not gated. NOT `:passed`
+                         — the judge never ran, so evidence must not imply it did
      :passed           — considered and clean
 
    Rules are resolved first, so override-by-id is honored: evidence is 1:1
@@ -339,6 +414,8 @@
                :status      (cond
                               (not (policy-pack/rule-applies-to-phase? rule phase)) :skipped-by-phase
                               (contains? violated id)                               :failed
+                              (and (contains? considered-ids id)
+                                   (guidance-only-semantic? rule))                 :guidance
                               (contains? considered-ids id)                         :passed
                               :else                                                 :not-applicable)
                :severity    (:rule/severity rule)
@@ -384,7 +461,7 @@
     (if (empty? packs)
       {:passed? true :warnings [(no-policy-packs-warning)]}
       (let [artifact (policy-artifact artifact ctx)
-            context  (-> ctx with-semantic-wiring (assoc :phase phase))
+            context  (-> (with-semantic-wiring ctx artifact) (assoc :phase phase))
             result   (compiled-check-result packs phase artifact context)]
         (when (:compiled? result)
           (emit-rule-evidence! ctx phase

@@ -169,6 +169,40 @@
      :duration-ms    (- end-ms start-ms)
      :status         :completed}))
 
+(defn- file-under-size-limit?
+  "True when an in-memory file's content is under the byte size limit. Uses `<`
+   to match the repo-scan path's `under-size-limit?` (a file exactly at the
+   limit is excluded by both)."
+  [content]
+  (< (count (.getBytes ^String content "UTF-8")) max-file-size-bytes))
+
+(defn analyze-rule-on-files
+  "Analyze an explicit set of changed files against one rule, instead of
+   scanning the whole repo. `files` is a vector of {:path :content}. Filters to
+   files matching the rule's globs and under the size limit, runs the judge per
+   file, and returns the same result shape as `analyze-rule`.
+
+   This is the changed-files scope: a run gates only the files it touched, and
+   an in-scope file is judged in full (every violation in it must be fixed)."
+  [llm-client complete-fn rule files]
+  (let [start-ms (System/currentTimeMillis)
+        globs    (get-in rule [:rule/applies-to :file-globs] ["**/*"])
+        eligible (vec (->> files
+                           (filter (fn [{:keys [path content]}]
+                                     (and (string? path) (string? content)
+                                          (file-under-size-limit? content)
+                                          (file-matches-globs? path globs))))
+                           (take max-files-per-rule)))
+        viols    (vec (mapcat (fn [{:keys [path content]}]
+                                (analyze-file llm-client complete-fn rule path content))
+                              eligible))
+        end-ms   (System/currentTimeMillis)]
+    {:rule/id        (get rule :rule/id)
+     :violations     viols
+     :files-analyzed (count eligible)
+     :duration-ms    (- end-ms start-ms)
+     :status         :completed}))
+
 (defn- analyze-rule-with-timeout
   "Run analyze-rule with a timeout. Returns result or timeout marker."
   [llm-client complete-fn repo-path rule timeout-ms]

@@ -134,6 +134,88 @@
       (is (:passed? result))
       (is (empty? (:errors result))))))
 
+;------------------------------------------------------------------------------ Semantic seam
+
+(defn- semantic-rule
+  "A heuristic `:custom` rule with no `:custom-fn` — resolves to the `:semantic`
+   (LLM-judge) detector. Defaults to an acting (:hard-halt) enforcement action."
+  [& {:keys [id phases action severity]
+      :or   {id :test/semantic phases #{:verify :review}
+             action :hard-halt severity :major}}]
+  {:rule/id          id
+   :rule/enabled?    true
+   :rule/severity    severity
+   :rule/applies-to  {:phases phases}
+   :rule/detection   {:type :custom}
+   :rule/enforcement {:action action :message (str "rule " id " fired")}})
+
+(defn- recording-analyze-fn
+  "Stands in for `semantic-analyzer/analyze-rule`. Records the args the gate
+   passes (proving the injected wiring) and reports one violation."
+  [recorder]
+  (fn [llm-client complete-fn repo-path rule]
+    (reset! recorder {:llm-client  llm-client
+                      :complete-fn complete-fn
+                      :repo-path   repo-path
+                      :rule-id     (:rule/id rule)})
+    {:rule/id    (:rule/id rule)
+     :status     :failed
+     :violations [{:path "src/core.clj" :message "semantic issue"}]}))
+
+(deftest semantic-acting-rule-runs-judge-and-blocks-test
+  (testing "a :hard-halt semantic rule runs the judge and blocks; the gate
+            derives :llm-client from :llm-backend and sets :complete-fn"
+    (let [rec    (atom nil)
+          ctx    (assoc (ctx-with [(pack (semantic-rule :phases #{:verify}
+                                                        :action :hard-halt))])
+                        :llm-backend ::client
+                        :semantic-analyze-fn (recording-analyze-fn rec))
+          result (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (seq (:errors result)))
+      (is (= ::client (:llm-client @rec)) ":llm-client derived from :llm-backend")
+      (is (fn? (:complete-fn @rec)) ":complete-fn injected"))))
+
+(deftest semantic-non-acting-rule-skips-judge-test
+  (testing "a :warn semantic rule is guidance — the judge is not invoked and the
+            gate passes (no LLM cost for a finding that could only warn)"
+    (let [rec    (atom nil)
+          ctx    (assoc (ctx-with [(pack (semantic-rule :phases #{:verify}
+                                                        :action :warn))])
+                        :llm-backend ::client
+                        :semantic-analyze-fn (recording-analyze-fn rec))
+          result (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (:passed? result))
+      (is (nil? @rec) "judge must not run for a non-acting semantic rule"))))
+
+(deftest semantic-acting-rule-without-wiring-fails-closed-test
+  (testing "a :hard-halt semantic rule with no LLM backend fails closed — a
+            missing-wiring violation blocks rather than silently passing"
+    (let [ctx    (ctx-with [(pack (semantic-rule :phases #{:verify}
+                                                 :action :hard-halt))])
+          result (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (seq (:errors result))))))
+
+(deftest semantic-judge-scoped-to-changed-files-test
+  (testing "with no explicit analyze-fn, the gate injects a changed-files-scoped
+            judge: the LLM prompt carries the artifact's changed file content,
+            not a whole-repo scan"
+    (let [seen          (atom nil)
+          fake-complete (fn [_client request]
+                          (reset! seen request)
+                          {:content "[{:line 1 :message \"semantic issue\"}]"})
+          ctx           (assoc (ctx-with [(pack (semantic-rule :phases #{:verify}
+                                                              :action :hard-halt))])
+                               :llm-backend ::client
+                               :complete-fn fake-complete)
+          result        (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (not (:passed? result)))
+      (is (seq (:errors result)))
+      (is (re-find #"FORBIDDEN"
+                   (-> @seen :messages first :content))
+          "judge prompt must contain the changed file's content"))))
+
 ;------------------------------------------------------------------------------ Phase scoping
 
 (deftest phase-scoping-test
@@ -266,6 +348,15 @@
           (is (not (contains? (:violation fail-rec) :matches))
               "raw matches must be redacted from evidence")
           (is (= :critical (:severity fail-rec))))))))
+
+(deftest classify-rules-guidance-status-test
+  (testing "an applicable non-acting semantic rule is classified :guidance, not
+            :passed — the judge was skipped, so evidence must not imply it ran"
+    (let [r-guid     (semantic-rule :id :r/guid :phases #{:verify} :action :warn)
+          classified (#'sut/classify-rules [(pack r-guid)] :verify
+                                           dirty-code-artifact {} [])
+          by-id      (into {} (map (juxt :rule-id :status)) classified)]
+      (is (= :guidance (by-id :r/guid))))))
 
 (deftest emits-rule-applied-events-test
   (testing "evaluation publishes one :gate/rule-applied event per enabled rule"
