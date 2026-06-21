@@ -1696,7 +1696,7 @@
 (defn execute-plan-as-dag [plan context]
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         _ (warn-potential-monolith plan logger)
-        task-defs (plan->dag-tasks plan context)
+        task-defs (plan->dag-tasks plan (assoc context :logger logger))
         _ (log-multi-parent-detected! logger plan task-defs)
         tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
         pre-completed (get context :pre-completed-ids #{})
