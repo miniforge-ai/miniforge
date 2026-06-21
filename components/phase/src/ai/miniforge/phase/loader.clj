@@ -67,7 +67,11 @@
 ;; Loading
 
 (defn load-phase-implementations!
-  "Require all configured phase implementation namespaces."
+  "Require all configured phase implementation namespaces.
+
+   This is an intentional runtime loader boundary: phase implementations are
+   selected by classpath EDN resources so products can compose different phase
+   sets without hard-coding every implementation namespace here."
   []
   (let [phase-namespaces (configured-phase-namespaces)]
     (doseq [phase-ns phase-namespaces]
