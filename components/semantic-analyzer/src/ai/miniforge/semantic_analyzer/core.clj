@@ -101,14 +101,28 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File selection and batch analysis
 
+(defn- load-limits
+  "Read the limits EDN, returning {} if the resource is absent,
+   unreadable, malformed, or not a map — so the call-site literal
+   defaults remain authoritative (fail-open, matching the prior
+   inline-literal behavior)."
+  [path]
+  (try
+    (let [url    (io/resource path)
+          parsed (when url (edn/read-string (slurp url)))]
+      (if (map? parsed) parsed {}))
+    (catch Exception _ {})))
+
+(def ^:private limits (load-limits "config/semantic-analyzer/limits.edn"))
+
 (def ^:private max-file-size-bytes
   "Maximum file size to send to LLM. Files larger than this are skipped."
-  50000)
+  (get limits :max-file-size-bytes 50000))
 
 (def ^:private max-files-per-rule
   "Maximum number of files to analyze per rule.
    Kept low to stay within per-rule timeout when using CLI backends."
-  5)
+  (get limits :max-files-per-rule 5))
 
 ;; NOTE: This mirrors compliance-scanner.scan/globs->file-pred.
 ;; Glob matching should be extracted to repo-index component.
@@ -154,7 +168,7 @@
 (def ^:private default-rule-timeout-ms
   "Maximum time to spend analyzing one rule before giving up.
    5 files × ~30s per CLI backend call = ~150s, so 300s gives headroom."
-  300000)
+  (get limits :default-rule-timeout-ms 300000))
 
 (defn analyze-rule
   [llm-client complete-fn repo-path rule]
