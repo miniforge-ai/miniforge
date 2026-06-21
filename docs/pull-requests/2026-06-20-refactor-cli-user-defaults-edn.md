@@ -28,7 +28,7 @@ already loads via `resource-config/merged-resource-config`.
 - The `:artifacts {:dir ...}` entry stays computed in code. Its value comes
   from `app-config/artifacts-dir`, which resolves against the runtime home dir
   (honoring `MINIFORGE_HOME`), so it cannot be frozen into a static literal.
-  `default-config` assoc-es it onto the loaded EDN, preserving the prior value.
+  `default-config` assocs it onto the loaded EDN, preserving the prior value.
 
 No numbers, keywords, or strings were changed. Map equality is order
 independent, so the relocation of `:artifacts` to the end of the map does not

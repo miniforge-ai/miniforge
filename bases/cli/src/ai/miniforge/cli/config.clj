@@ -42,9 +42,11 @@
 
 (def default-config
   ;; Static defaults load from EDN; :artifacts :dir is resolved from the
-  ;; runtime home dir so MINIFORGE_HOME overrides keep working.
-  (assoc (resource-config/merged-resource-config default-config-resource)
-         :artifacts {:dir (app-config/artifacts-dir)}))
+  ;; runtime home dir so MINIFORGE_HOME overrides keep working. Merge (not
+  ;; assoc) so any :artifacts keys from the loaded EDN survive while the
+  ;; computed :dir still wins.
+  (update (resource-config/merged-resource-config default-config-resource)
+          :artifacts merge {:dir (app-config/artifacts-dir)}))
 
 (defn style
   "Apply terminal styling using ANSI escape codes."
