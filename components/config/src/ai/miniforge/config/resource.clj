@@ -48,7 +48,12 @@
        (throw (ex-info (str "Missing config resource on classpath: " path)
                        {:config/resource path})))
      (let [parsed (try
-                    (edn/read-string (slurp url))
+                    (edn/read-string (slurp url :encoding "UTF-8"))
+                    (catch InterruptedException e
+                      ;; Never swallow cancellation — restore the flag and
+                      ;; propagate rather than wrap it as a parse error.
+                      (.interrupt (Thread/currentThread))
+                      (throw e))
                     (catch Exception e
                       (throw (ex-info (str "Malformed EDN config resource: " path)
                                       {:config/resource path}
@@ -56,18 +61,22 @@
        (when-not (map? parsed)
          (throw (ex-info (str "Config resource is not a map: " path)
                          {:config/resource path})))
-       (let [missing (remove #(contains? parsed %) required-keys)]
+       (let [missing (vec (remove #(contains? parsed %) required-keys))]
          (when (seq missing)
-           (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
-                           {:config/resource path :config/missing-keys (vec missing)})))
+           (throw (ex-info (str "Config resource " path " missing keys: " missing)
+                           {:config/resource path :config/missing-keys missing})))
          parsed)))))
 
 (defn read-config-resource-or
   "Read an EDN config resource, returning `fallback` if the resource is
-   absent, unreadable, malformed, or not a map (fail-open)."
+   absent, unreadable, malformed, or not a map (fail-open). Cancellation
+   (`InterruptedException`) is propagated, not swallowed."
   [path fallback]
   (try
     (let [url    (io/resource path)
-          parsed (when url (edn/read-string (slurp url)))]
+          parsed (when url (edn/read-string (slurp url :encoding "UTF-8")))]
       (if (map? parsed) parsed fallback))
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (throw e))
     (catch Exception _ fallback)))

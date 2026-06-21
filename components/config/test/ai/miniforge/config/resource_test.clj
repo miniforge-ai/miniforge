@@ -24,6 +24,12 @@
 ;; A real map resource shipped by this component, used for the happy path.
 (def ^:private a-real-resource "config/default-user-config-fallback.edn")
 (def ^:private a-missing-resource "config/does-not-exist-xyz.edn")
+;; Test fixtures (under test/resource_test_fixtures/, on the test classpath).
+;; The malformed fixture uses a .txt extension so the EDN linter does not
+;; reject its deliberately invalid content; the loader reads by path, not
+;; extension.
+(def ^:private a-malformed-resource "resource_test_fixtures/malformed-edn.txt")
+(def ^:private a-non-map-resource "resource_test_fixtures/non-map.edn")
 
 (deftest load-config-resource-happy-path
   (testing "returns the parsed map for a resource on the classpath"
@@ -45,9 +51,29 @@
       (is (instance? clojure.lang.ExceptionInfo ex))
       (is (= [:definitely-not-a-key] (:config/missing-keys (ex-data ex)))))))
 
+(deftest load-config-resource-malformed
+  (testing "throws a clear ex-info for malformed EDN"
+    (let [ex (try (resource/load-config-resource a-malformed-resource)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= a-malformed-resource (:config/resource (ex-data ex)))))))
+
+(deftest load-config-resource-non-map
+  (testing "throws when the EDN parses to a non-map value"
+    (let [ex (try (resource/load-config-resource a-non-map-resource)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= a-non-map-resource (:config/resource (ex-data ex)))))))
+
 (deftest read-config-resource-or-fail-open
   (testing "returns the fallback for a missing resource"
     (is (= {:fallback true}
            (resource/read-config-resource-or a-missing-resource {:fallback true}))))
+  (testing "returns the fallback for malformed EDN"
+    (is (= {:fallback true}
+           (resource/read-config-resource-or a-malformed-resource {:fallback true}))))
+  (testing "returns the fallback for a non-map value"
+    (is (= {:fallback true}
+           (resource/read-config-resource-or a-non-map-resource {:fallback true}))))
   (testing "returns the parsed map for a present resource"
     (is (map? (resource/read-config-resource-or a-real-resource {:fallback true})))))
