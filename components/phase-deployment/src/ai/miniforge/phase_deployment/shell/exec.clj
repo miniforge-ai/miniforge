@@ -21,8 +21,19 @@
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Timeout configuration
+
+(def ^:private timeouts
+  "Deployment shell command timeouts (ms), loaded from EDN."
+  (if-let [resource (io/resource "config/phase-deployment/timeouts.edn")]
+    (edn/read-string (slurp resource))
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Command result schemas + parsing
@@ -81,7 +92,7 @@
 (defn sh-with-timeout
   "Execute a shell command with timeout and structured results."
   [cmd args & {:keys [dir timeout-ms env]
-               :or {timeout-ms 300000}}]
+               :or {timeout-ms (get timeouts :exec-default-ms 300000)}}]
   (let [start-time (System/currentTimeMillis)
         full-cmd   (into [cmd] args)
         cmd-str    (str/join " " full-cmd)

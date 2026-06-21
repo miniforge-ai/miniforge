@@ -20,8 +20,19 @@
   "Kustomize CLI wrappers for deployment phases."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
-            [ai.miniforge.schema.interface :as schema])
+            [ai.miniforge.schema.interface :as schema]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io])
   (:import [java.io File]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Timeout configuration
+
+(def ^:private timeouts
+  "Kustomize command timeouts (ms), loaded from EDN."
+  (if-let [resource (io/resource "config/phase-deployment/timeouts.edn")]
+    (edn/read-string (slurp resource))
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Kustomize wrappers
@@ -40,7 +51,7 @@
   (schema/validate KustomizeApplyResult result))
 
 (defn kustomize-build!
-  [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms 60000}}]
+  [kustomize-dir & {:keys [timeout-ms] :or {timeout-ms (get timeouts :kustomize-build-ms 60000)}}]
   (exec/sh-with-timeout "kustomize" ["build" kustomize-dir] :timeout-ms timeout-ms))
 
 (defn kustomize-apply!
@@ -64,7 +75,7 @@
                                                 (-> (subvec apply-args 0 1)
                                                     (into ["-f" (.getAbsolutePath tmp-file)])
                                                     (into (subvec apply-args 3)))
-                                                :timeout-ms 120000)]
+                                                :timeout-ms (get timeouts :kustomize-apply-ms 120000))]
         (try
           (.delete tmp-file)
           (catch Exception _ nil))

@@ -18,7 +18,18 @@
 
 (ns ai.miniforge.phase-deployment.shell.kubectl
   "kubectl CLI wrappers for deployment phases."
-  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]))
+  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Timeout configuration
+
+(def ^:private timeouts
+  "kubectl command timeouts (ms), loaded from EDN."
+  (if-let [resource (io/resource "config/phase-deployment/timeouts.edn")]
+    (edn/read-string (slurp resource))
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; kubectl wrappers
@@ -26,7 +37,7 @@
 (defn kubectl!
   "Execute a kubectl command."
   [subcommand & {:keys [namespace context output extra-args timeout-ms]
-                 :or {timeout-ms 120000}}]
+                 :or {timeout-ms (get timeouts :kubectl-default-ms 120000)}}]
   (let [args (cond-> [subcommand]
                namespace  (into ["--namespace" namespace])
                context    (into ["--context" context])

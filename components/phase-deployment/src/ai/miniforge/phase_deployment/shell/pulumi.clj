@@ -18,7 +18,18 @@
 
 (ns ai.miniforge.phase-deployment.shell.pulumi
   "Pulumi CLI wrappers for deployment phases."
-  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]))
+  (:require [ai.miniforge.phase-deployment.shell.exec :as exec]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Timeout configuration
+
+(def ^:private timeouts
+  "Pulumi command timeouts (ms), loaded from EDN."
+  (if-let [resource (io/resource "config/phase-deployment/timeouts.edn")]
+    (edn/read-string (slurp resource))
+    {}))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pulumi wrappers
@@ -36,7 +47,7 @@
         result (exec/sh-with-timeout "pulumi"
                                      args
                                      :dir stack-dir
-                                     :timeout-ms (or timeout-ms 900000)
+                                     :timeout-ms (or timeout-ms (get timeouts :pulumi-default-ms 900000))
                                      :env env)]
     (if json?
       (exec/with-parsed-json result)
@@ -68,7 +79,8 @@
   (let [args (cond-> ["stack" "output" "--json"]
                stack (into ["--stack" stack]))]
     (exec/with-parsed-json
-     (exec/sh-with-timeout "pulumi" args :dir stack-dir :timeout-ms 30000))))
+     (exec/sh-with-timeout "pulumi" args :dir stack-dir
+                           :timeout-ms (get timeouts :pulumi-outputs-ms 30000)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
