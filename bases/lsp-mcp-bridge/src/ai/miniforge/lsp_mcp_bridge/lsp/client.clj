@@ -30,7 +30,9 @@
   (:require
    [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]
    [ai.miniforge.lsp-mcp-bridge.lsp.process :as process]
-   [ai.miniforge.response.interface :as response])
+   [ai.miniforge.response.interface :as response]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io])
   (:import
    [java.io BufferedReader InputStreamReader BufferedWriter OutputStreamWriter]))
 
@@ -49,7 +51,45 @@
    diagnostics-buffer   ; atom: {uri -> [diagnostic ...]}
    reader-thread])      ; Thread
 
-(def default-timeout-ms 30000)
+(defn- load-config
+  "Read an EDN config resource, failing fast with a clear ex-info when the
+   resource is absent from the classpath, malformed, not a map, or missing
+   a required key — rather than a low-signal NPE/reader error at load."
+  [path required-keys]
+  (let [url (io/resource path)]
+    (when (nil? url)
+      (throw (ex-info (str "Missing config resource on classpath: " path)
+                      {:config/resource path})))
+    (let [parsed (try
+                   (edn/read-string (slurp url))
+                   (catch Exception e
+                     (throw (ex-info (str "Malformed EDN config resource: " path)
+                                     {:config/resource path} e))))]
+      (when-not (map? parsed)
+        (throw (ex-info (str "Config resource is not a map: " path)
+                        {:config/resource path})))
+      (let [missing (remove #(contains? parsed %) required-keys)]
+        (when (seq missing)
+          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
+                          {:config/resource path :config/missing-keys (vec missing)})))
+        parsed))))
+
+(def ^:private timeouts
+  "LSP client timeouts, loaded from EDN so operators can tune per environment."
+  (load-config "config/lsp-mcp-bridge/lsp.edn"
+               [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
+
+(def default-timeout-ms
+  "Default deadline (ms) for synchronous LSP requests."
+  (:request-timeout-ms timeouts))
+
+(def init-timeout-ms
+  "Deadline (ms) for the initialize handshake."
+  (:init-timeout-ms timeouts))
+
+(def shutdown-timeout-ms
+  "Deadline (ms) for the graceful shutdown request."
+  (:shutdown-timeout-ms timeouts))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message dispatch — extracted from reader loop
@@ -203,7 +243,7 @@
    - Anomaly map on failure"
   [client root-uri capabilities]
   (let [request (proto/initialize-request root-uri capabilities)
-        result (send-request-sync client request 60000)]
+        result (send-request-sync client request init-timeout-ms)]
     (if (response/anomaly-map? result)
       result
       (do
@@ -215,7 +255,7 @@
 (defn shutdown
   "Shutdown the LSP server gracefully."
   [client]
-  (let [result (send-request-sync client (proto/shutdown-request) 10000)]
+  (let [result (send-request-sync client (proto/shutdown-request) shutdown-timeout-ms)]
     (if (response/anomaly-map? result)
       result
       (do

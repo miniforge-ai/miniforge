@@ -140,6 +140,7 @@
                        "components/semantic-analyzer/src"
                        "components/semantic-analyzer/resources"
                        "bases/lsp-mcp-bridge/src"
+                       "bases/lsp-mcp-bridge/resources"
                        ;; Data Foundry components
                        "components/connector/src"
                        "components/connector/resources"
@@ -404,6 +405,7 @@
                        "bases/cli/test"
                        "bases/etl/test"
                        "bases/lsp-mcp-bridge/test"
+                       "bases/lsp-mcp-bridge/resources"
                        ;; Data Foundry tests
                        "components/connector/test"
                        "components/connector-auth/test"
