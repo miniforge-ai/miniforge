@@ -589,8 +589,13 @@
                   :discovery-interval-ms 50
                   :poll-interval-ms 50}))]
       (sut/start! orch)
-      ;; Wait for at least one discovery cycle to register an agent.
-      (wait-until #(pos? (registry/count-agents reg)))
+      ;; Wait for the on-agent-discovered callback to fire — not just for
+      ;; registry registration. run-discovery-pass calls register-agent!
+      ;; immediately before on-agent-discovered, so waiting on the registry
+      ;; count can observe the agent in the window before the callback runs
+      ;; and then race stop!, leaving `discovered` empty. Waiting on the
+      ;; callback's own effect makes both assertions deterministic.
+      (wait-until-count discovered 1)
       (sut/stop! orch)
       (is (pos? (registry/count-agents reg))
           "discovery loop should have registered agents")
