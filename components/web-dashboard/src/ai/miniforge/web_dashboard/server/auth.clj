@@ -15,10 +15,9 @@
 (ns ai.miniforge.web-dashboard.server.auth
   "Dashboard-local authentication and session management."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
    [clojure.string :as str]
    [cheshire.core :as json]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.server.filters :as filters]
    [ai.miniforge.web-dashboard.server.responses :as responses]
    [ai.miniforge.web-dashboard.views.auth :as auth-views]))
@@ -26,8 +25,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(def ^:private defaults
-  (-> (io/resource "config/web-dashboard/defaults.edn") slurp edn/read-string))
+(def ^:private defaults dashboard-config/defaults)
 
 (def default-cookie-name (:session-cookie-name defaults))
 (def default-session-ttl-ms (:session-ttl-ms defaults))

@@ -17,16 +17,15 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
-   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure helpers
 
-(def ^:private defaults
-  (-> (io/resource "config/web-dashboard/defaults.edn") slurp edn/read-string))
+(def ^:private defaults dashboard-config/defaults)
 
 (def events-dir-path
   "Default event archive directory shared by the CLI and dashboard."

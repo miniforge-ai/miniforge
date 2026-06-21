@@ -21,10 +21,10 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [org.httpkit.server :as http]
-   [clojure.edn :as edn]
    [clojure.string :as str]
    [clojure.java.io :as io]
    [cheshire.core :as json]
+   [ai.miniforge.web-dashboard.config :as dashboard-config]
    [ai.miniforge.web-dashboard.state :as state]
    [ai.miniforge.web-dashboard.views :as views]
    [ai.miniforge.web-dashboard.server.auth :as auth]
@@ -42,8 +42,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration defaults
 
-(def ^:private defaults
-  (-> (io/resource "config/web-dashboard/defaults.edn") slurp edn/read-string))
+(def ^:private defaults dashboard-config/defaults)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
