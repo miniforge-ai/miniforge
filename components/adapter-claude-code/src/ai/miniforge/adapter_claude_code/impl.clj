@@ -66,11 +66,15 @@
         session-file (get-in agent-record [:agent/metadata :session-file])]
     (cond
       (and pid (pid-alive? pid))
-      {:status (if (session-file-active-within-ms? session-file (* 60 1000))
+      {:status (if (session-file-active-within-ms?
+                    session-file
+                    (:running-window-ms discovery/staleness-windows))
                  :running
                  :idle)}
 
-      (session-file-active-within-ms? session-file (* 5 60 1000))
+      (session-file-active-within-ms?
+       session-file
+       (:idle-window-ms discovery/staleness-windows))
       {:status :running}
 
       :else
