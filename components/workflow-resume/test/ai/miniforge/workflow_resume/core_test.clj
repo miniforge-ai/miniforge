@@ -43,15 +43,18 @@
       (is (false? (core/paused? running))))))
 
 (deftest extract-completed-phases-test
-  (testing "only :phase-completed events with :success outcome are collected"
+  (testing ":success and :skipped count as completed; :failure does not"
     (let [events [{:event/type :workflow/started}
                   {:event/type :workflow/phase-completed
                    :workflow/phase :explore :phase/outcome :success}
                   {:event/type :workflow/phase-completed
                    :workflow/phase :plan :phase/outcome :success}
                   {:event/type :workflow/phase-completed
+                   :workflow/phase :release :phase/outcome :skipped}
+                  {:event/type :workflow/phase-completed
                    :workflow/phase :implement :phase/outcome :failure}]]
-      (is (= [:explore :plan] (core/extract-completed-phases events))))))
+      (is (= [:explore :plan :release] (core/extract-completed-phases events))
+          "a :skipped phase is completed (not re-run); a :failure is omitted"))))
 
 (deftest extract-phase-results-test
   (testing "builds {phase → {:outcome :duration-ms :timestamp}}"
