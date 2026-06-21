@@ -43,6 +43,9 @@ sites and meant `:skipped` could never surface: release short-circuits with a
 - `extract-completed-phases` filtered on `:success`; it now filters against a
   named `completed-outcomes` set (`#{:success :skipped}`), so a skipped phase is
   trimmed from the pipeline on resume instead of re-executed.
+- The resume config's completed status set also includes `:skipped`, so the
+  reconstructed context path trims skipped phases consistently with the
+  extractor path.
 
 ## Behavior Change
 
@@ -68,7 +71,9 @@ sites and meant `:skipped` could never surface: release short-circuits with a
 - New: `phase-result` `outcome-skipped-test` and `skipped?-predicate-test`;
   a `skipped-result-reports-skipped` case in
   `phase-outcome-from-inner-result-test` (Path A emits `:skipped`); a `:skipped`
-  case in `workflow-resume` `extract-completed-phases-test`.
+  case in `workflow-resume` `extract-completed-phases-test`; and a
+  `reconstruct-context` integration case proving skipped phase-completion events
+  are trimmed by the config-backed resume path.
 - Regression: the five leave-handler namespaces compile; the smoke set (316
   tests) is green on every commit; `clj-kondo` clean (two pre-existing
   `verdicts` unused-private warnings in verify/release are non-fatal and out of
@@ -101,4 +106,4 @@ Three commits, each independently valid and under the budget:
 - [x] Five leave-handlers routed through `phase/outcome`
 - [x] Resume treats `:skipped` as completed + test
 - [x] `clj-kondo` clean, `poly check` OK, commit budget respected
-- [ ] Push and open PR (awaiting approval)
+- [x] Push and open PR

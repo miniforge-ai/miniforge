@@ -1,6 +1,7 @@
 {:workflow-resume/resume
  {:completed-phase-statuses #{:completed
                               :success
+                              :skipped
                               :succeeded
                               :already-implemented
                               :already-satisfied}
