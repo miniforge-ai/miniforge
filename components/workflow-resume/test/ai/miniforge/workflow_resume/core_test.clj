@@ -43,15 +43,18 @@
       (is (false? (core/paused? running))))))
 
 (deftest extract-completed-phases-test
-  (testing "only :phase-completed events with :success outcome are collected"
+  (testing ":success and :skipped count as completed; :failure does not"
     (let [events [{:event/type :workflow/started}
                   {:event/type :workflow/phase-completed
                    :workflow/phase :explore :phase/outcome :success}
                   {:event/type :workflow/phase-completed
                    :workflow/phase :plan :phase/outcome :success}
                   {:event/type :workflow/phase-completed
+                   :workflow/phase :release :phase/outcome :skipped}
+                  {:event/type :workflow/phase-completed
                    :workflow/phase :implement :phase/outcome :failure}]]
-      (is (= [:explore :plan] (core/extract-completed-phases events))))))
+      (is (= [:explore :plan :release] (core/extract-completed-phases events))
+          "a :skipped phase is completed (not re-run); a :failure is omitted"))))
 
 (deftest extract-phase-results-test
   (testing "builds {phase → {:outcome :duration-ms :timestamp}}"
@@ -366,12 +369,17 @@
                        "~:workflow/phase" "~:plan"
                        "~:phase/outcome" "~:success"
                        "~:phase/duration-ms" 456})
+        ;; release skipped; should appear in completed-phases
+        (write-event! wf-dir "20260421T000003Z-r.json"
+                      {"~:event/type" "~:workflow/phase-completed"
+                       "~:workflow/phase" "~:release"
+                       "~:phase/outcome" "~:skipped"})
         ;; implement failed — should NOT appear in completed-phases
-        (write-event! wf-dir "20260421T000003Z-i.json"
+        (write-event! wf-dir "20260421T000004Z-i.json"
                       {"~:event/type" "~:workflow/phase-completed"
                        "~:workflow/phase" "~:implement"
                        "~:phase/outcome" "~:failure"})
-        (write-event! wf-dir "20260421T000004Z-w.json"
+        (write-event! wf-dir "20260421T000005Z-w.json"
                       {"~:event/type" "~:workspace/persisted"
                        "~:workspace/branch" "task-resume"
                        "~:workspace/bundle-path" "/tmp/task-resume.bundle"
@@ -380,8 +388,8 @@
                        "~:workflow/phase" "~:review"})
         (testing "reconstructs context from per-event JSON files"
           (let [ctx (core/reconstruct-context base-dir wf-id)]
-            (is (= [:explore :plan] (:completed-phases ctx)))
-            (is (= 5 (:event-count ctx)))
+            (is (= [:explore :plan :release] (:completed-phases ctx)))
+            (is (= 6 (:event-count ctx)))
             (is (false? (:completed? ctx)))
             (is (false? (:failed? ctx)))
             (is (= wf-id (:workflow-id ctx)))
@@ -389,6 +397,7 @@
                    (:workflow-spec ctx)))
             (is (= 123 (get-in ctx [:phase-results :explore :duration-ms])))
             (is (= :success (get-in ctx [:phase-results :plan :outcome])))
+            (is (= :skipped (get-in ctx [:phase-results :release :outcome])))
             (is (= {:branch "task-resume"
                     :bundle-path "/tmp/task-resume.bundle"
                     :commit-sha "abc123"

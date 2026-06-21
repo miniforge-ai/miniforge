@@ -83,9 +83,9 @@
   core/extract-dag-pause-info)
 
 (def extract-completed-phases
-  "Phase names (keywords) that completed with `:success` outcome.
-   Arg: a sequence of events. Returns a vector of phase keywords in
-   event order."
+  "Phase names (keywords) that completed — `:success` or `:skipped` outcome
+   (see `core/completed-outcomes`). Arg: a sequence of events. Returns a vector
+   of phase keywords in event order."
   core/extract-completed-phases)
 
 (def extract-phase-results

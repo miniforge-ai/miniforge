@@ -235,7 +235,7 @@
     ;; Emit phase-completed with the REAL outcome — never a false :success on a
     ;; failure result (that produced the ✓-then-✗ double-emit).
     (phase/emit-phase-completed! updated-ctx :plan
-      (merge {:outcome     (if succeeded-or-done? :success :failure)
+      (merge {:outcome     (phase/outcome result succeeded-or-done?)
               :duration-ms duration-ms
               :tokens      (get metrics :tokens 0)}
              (phase-terminal/derive-termination-reason result nil)))

@@ -434,7 +434,7 @@
     (phase/emit-phase-completed! next-ctx :review
       ;; :outcome from the FINAL (verdict-corrected) status, not phase-status:
       ;; apply-verdict promotes :accept-with-warnings to :completed.
-      (merge {:outcome     (if (= :completed (get-in next-ctx [:phase :status])) :success :failure)
+      (merge {:outcome     (phase/outcome result (= :completed (get-in next-ctx [:phase :status])))
               :duration-ms duration-ms
               :tokens      (:tokens metrics 0)}
              (phase-terminal/derive-termination-reason result nil)

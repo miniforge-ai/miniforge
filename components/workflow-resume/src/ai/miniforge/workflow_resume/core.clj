@@ -105,11 +105,19 @@
     {:completed-task-ids (set (:dag/completed-task-ids pause-event))
      :pause-reason (:dag/pause-reason pause-event)}))
 
+(def completed-outcomes
+  "Phase outcomes that count as completed for resume — the phase finished its
+   work, so resume trims it from the pipeline rather than re-running it.
+   :success did the work; :skipped short-circuited because the work was already
+   done. :failure re-runs (it is excluded); :blocked and :redirected have no
+   producer yet, so they too fall outside this set and would re-run."
+  #{:success :skipped})
+
 (defn extract-completed-phases
   [events]
   (->> events
        (filter #(= :workflow/phase-completed (:event/type %)))
-       (filter #(= :success (:phase/outcome %)))
+       (filter #(contains? completed-outcomes (:phase/outcome %)))
        (mapv :workflow/phase)))
 
 (defn extract-phase-results

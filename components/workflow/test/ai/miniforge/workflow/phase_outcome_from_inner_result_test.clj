@@ -80,6 +80,14 @@
         (is (= :failure (:phase/outcome evt)))
         (is (= {:message "boom"} (:phase/error evt)))))))
 
+(deftest skipped-result-reports-skipped
+  (testing "a phase that short-circuited (skip marker on inner :result) → :skipped"
+    (is (= :skipped
+           (:outcome (build {:name :release :status :completed
+                             :result {:status :success
+                                      :output {:skipped true
+                                               :reason :already-implemented}}}))))))
+
 (deftest error-attached-at-phase-error-surfaces-test
   (testing "[:phase :error] is read when nothing higher carries the payload"
     ;; Regression: error-* interceptors that fall through to
