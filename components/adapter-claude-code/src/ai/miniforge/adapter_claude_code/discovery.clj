@@ -28,9 +28,23 @@
    Layer 1: Process liveness detection
    Layer 2: Session extraction"
   (:require
+   [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.control-plane.interface :as messages]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Staleness windows (loaded from EDN)
+
+(def ^:private staleness-resource-path
+  "Classpath path to the EDN holding session staleness windows."
+  "config/adapter_claude_code/staleness.edn")
+
+(def staleness-windows
+  "Session staleness windows (milliseconds) loaded from the classpath.
+   Data lives in resources/config/adapter_claude_code/staleness.edn — a
+   missing resource is a packaging error, not a runtime condition."
+  (-> staleness-resource-path io/resource slurp edn/read-string))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filesystem scanning
@@ -98,9 +112,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Session extraction
 
-(def ^:const activity-threshold-ms
+(def activity-threshold-ms
   "Consider a session active if its log was modified within this window."
-  (* 5 60 1000)) ;; 5 minutes
+  (:session-activity-window-ms staleness-windows))
 
 (defn- project-dir->session-info
   "Extract session info from a project directory.
