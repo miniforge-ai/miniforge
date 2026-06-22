@@ -1,0 +1,18 @@
+{:config/system
+ {;; Diagnostics raised by config.resource/load-config-resource when a
+  ;; required classpath EDN config resource is absent, malformed, not a map,
+  ;; or missing a required key. Operator-facing (system-locale, not user UI),
+  ;; but routed through the catalog — the system-locale counterpart of a
+  ;; component's user-locale en-US.edn — so the one place to audit or override
+  ;; them is data, not source.
+  :resource/missing
+  "Missing config resource on classpath: {path}"
+
+  :resource/malformed
+  "Malformed EDN config resource: {path}"
+
+  :resource/not-a-map
+  "Config resource is not a map: {path}"
+
+  :resource/missing-keys
+  "Config resource {path} missing keys: {keys}"}}
