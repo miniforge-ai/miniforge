@@ -36,11 +36,11 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   with the Apache-2.0 header and a comment describing each key. Values and
   structure match the `tool-registry` resource introduced by PR #1253.
 - New message catalog
-  `bases/lsp-mcp-bridge/resources/config/lsp-mcp-bridge/messages/en-US.edn`
+  `bases/lsp-mcp-bridge/resources/config/lsp-mcp-bridge/messages/system.edn`
   holding the config-load diagnostic strings, so the fail-fast `ex-info`
   messages are catalog-data (operator/system-locale, auditable and overridable)
-  rather than raw English string literals in source. Follows the event-stream
-  `:fleet-sink.system/*` precedent.
+  rather than raw English string literals in source. Follows the established
+  system-locale catalog layout with section key `:lsp-mcp-bridge/system`.
 - `bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj`:
   - requires `clojure.edn`, `clojure.java.io`, and `messages.interface`
   - adds a private `load-config` helper that reads the EDN via

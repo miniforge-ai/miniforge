@@ -56,8 +56,8 @@
   "Translator for this base's message catalog. Config-load diagnostics are
    routed through it (system-locale, catalog-audited) rather than inlined as
    raw English string literals."
-  (messages/create-translator "config/lsp-mcp-bridge/messages/en-US.edn"
-                              :lsp-mcp-bridge/messages))
+  (messages/create-translator "config/lsp-mcp-bridge/messages/system.edn"
+                              :lsp-mcp-bridge/system))
 
 (defn- load-config
   "Read an EDN config resource, failing fast with a clear ex-info when the
