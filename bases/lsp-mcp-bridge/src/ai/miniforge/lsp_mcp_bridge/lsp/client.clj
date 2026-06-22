@@ -28,7 +28,7 @@
    Layer 3: Request/response handling
    Layer 4: High-level operations"
   (:require
-   [ai.miniforge.lsp-mcp-bridge.config :as config]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]
    [ai.miniforge.lsp-mcp-bridge.lsp.process :as process]
    [ai.miniforge.response.interface :as response])
@@ -51,9 +51,12 @@
    reader-thread])      ; Thread
 
 (def ^:private timeouts
-  "LSP client timeouts, loaded and validated by the base config reader so
-   operators can tune them per environment (config/lsp-mcp-bridge/lsp.edn)."
-  (config/load-lsp-timeouts))
+  "LSP client timeouts, loaded from EDN via the shared config-resource loader
+   so operators can tune them per environment. Fails fast with a clear ex-info
+   on a missing/malformed/non-map resource or a missing required key."
+  (config/load-config-resource
+   "config/lsp-mcp-bridge/lsp.edn"
+   [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
 
 (def default-timeout-ms
   "Default deadline (ms) for synchronous LSP requests."

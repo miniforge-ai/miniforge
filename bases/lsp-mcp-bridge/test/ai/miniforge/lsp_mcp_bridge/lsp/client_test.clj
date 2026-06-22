@@ -19,11 +19,18 @@
 (ns ai.miniforge.lsp-mcp-bridge.lsp.client-test
   "Tests for LSP client (promise-based, bb-compatible)."
   (:require
+   [ai.miniforge.lsp-mcp-bridge.lsp.client :as client]
    [clojure.test :refer [deftest is testing]]))
 
 ;; Note: Full client tests require a running LSP server.
 ;; These tests verify the protocol layer and message building
 ;; that the client depends on.
+
+(deftest shipped-timeouts-test
+  (testing "the shipped lsp.edn resource loads via the shared config loader"
+    (is (= 30000 client/default-timeout-ms))
+    (is (= 60000 client/init-timeout-ms))
+    (is (= 10000 client/shutdown-timeout-ms))))
 
 (deftest promise-based-pending-requests-test
   (testing "atom+promise pattern works for request tracking"
