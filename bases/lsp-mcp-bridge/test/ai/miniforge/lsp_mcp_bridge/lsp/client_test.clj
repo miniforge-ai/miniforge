@@ -19,51 +19,7 @@
 (ns ai.miniforge.lsp-mcp-bridge.lsp.client-test
   "Tests for LSP client (promise-based, bb-compatible)."
   (:require
-   [ai.miniforge.lsp-mcp-bridge.lsp.client :as client]
    [clojure.test :refer [deftest is testing]]))
-
-(def ^:private load-config #'client/load-config)
-(def ^:private required-keys
-  [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms])
-
-(deftest load-config-test
-  (testing "valid resource parses to the timeout map"
-    (is (= {:request-timeout-ms 30000
-            :init-timeout-ms 60000
-            :shutdown-timeout-ms 10000}
-           (load-config "fixtures/lsp_config/valid.edn" required-keys))))
-
-  (testing "missing resource fails fast with the resource path in ex-data"
-    (let [ex (is (thrown? clojure.lang.ExceptionInfo
-                          (load-config "fixtures/lsp_config/does-not-exist.edn"
-                                       required-keys)))]
-      (is (= "fixtures/lsp_config/does-not-exist.edn"
-             (:config/resource (ex-data ex))))))
-
-  (testing "non-map resource fails fast"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (load-config "fixtures/lsp_config/not-a-map.edn" required-keys))))
-
-  (testing "missing key fails fast and names the missing key"
-    (let [ex (is (thrown? clojure.lang.ExceptionInfo
-                          (load-config "fixtures/lsp_config/missing-key.edn"
-                                       required-keys)))]
-      (is (= [:shutdown-timeout-ms] (:config/missing-keys (ex-data ex))))))
-
-  (testing "string and negative timeout values fail fast at load (not later at deref)"
-    (doseq [fixture ["fixtures/lsp_config/bad-string.edn"
-                     "fixtures/lsp_config/negative.edn"]]
-      (let [ex (is (thrown? clojure.lang.ExceptionInfo
-                            (load-config fixture required-keys)))]
-        (is (= [:request-timeout-ms] (:config/invalid-keys (ex-data ex))))
-        ;; Message is catalog-sourced (param-substituted), not the bare key name.
-        (is (re-find #"\Qfixtures/lsp_config/\E" (ex-message ex))))))
-
-  (testing "the shipped resource loads with the documented values"
-    (is (= {:request-timeout-ms 30000
-            :init-timeout-ms 60000
-            :shutdown-timeout-ms 10000}
-           (load-config "config/lsp-mcp-bridge/lsp.edn" required-keys)))))
 
 ;; Note: Full client tests require a running LSP server.
 ;; These tests verify the protocol layer and message building

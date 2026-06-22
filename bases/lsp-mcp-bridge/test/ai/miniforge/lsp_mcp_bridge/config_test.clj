@@ -89,6 +89,52 @@
     (let [cfg (config/load-config)]
       (is (nil? (config/resolve-tool-for-file cfg "/foo/bar.xyz"))))))
 
+;------------------------------------------------------------------------------ Strict resource loading
+
+(def ^:private timeout-keys config/lsp-timeout-keys)
+
+(deftest read-config-resource-test
+  (testing "valid resource parses to the map"
+    (is (= {:request-timeout-ms 30000
+            :init-timeout-ms 60000
+            :shutdown-timeout-ms 10000}
+           (config/read-config-resource "fixtures/lsp_config/valid.edn"
+                                        timeout-keys))))
+
+  (testing "missing resource fails fast with the resource path in ex-data"
+    (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                          (config/read-config-resource
+                           "fixtures/lsp_config/does-not-exist.edn" timeout-keys)))]
+      (is (= "fixtures/lsp_config/does-not-exist.edn"
+             (:config/resource (ex-data ex))))))
+
+  (testing "non-map resource fails fast"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (config/read-config-resource "fixtures/lsp_config/not-a-map.edn"
+                                              timeout-keys))))
+
+  (testing "missing key fails fast and names the missing key"
+    (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                          (config/read-config-resource
+                           "fixtures/lsp_config/missing-key.edn" timeout-keys)))]
+      (is (= [:shutdown-timeout-ms] (:config/missing-keys (ex-data ex)))))))
+
+(deftest read-timeout-resource-test
+  (testing "string and negative values fail fast at load (not later at deref)"
+    (doseq [fixture ["fixtures/lsp_config/bad-string.edn"
+                     "fixtures/lsp_config/negative.edn"]]
+      (let [ex (is (thrown? clojure.lang.ExceptionInfo
+                            (config/read-timeout-resource fixture)))]
+        (is (= [:request-timeout-ms] (:config/invalid-keys (ex-data ex))))
+        ;; Message is catalog-sourced (param-substituted), not the bare key name.
+        (is (re-find #"\Qfixtures/lsp_config/\E" (ex-message ex))))))
+
+  (testing "the shipped resource loads with the documented values"
+    (is (= {:request-timeout-ms 30000
+            :init-timeout-ms 60000
+            :shutdown-timeout-ms 10000}
+           (config/load-lsp-timeouts)))))
+
 ;------------------------------------------------------------------------------ Registry
 
 (deftest read-lsp-registry-test

@@ -41,17 +41,24 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   messages are catalog-data (operator/system-locale, auditable and overridable)
   rather than raw English string literals in source. Follows the established
   system-locale catalog layout with section key `:lsp-mcp-bridge/system`.
+- `bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/config.clj` (the base's
+  existing config reader) gains the resource loading, so `lsp/client.clj` does
+  not introduce a second `load-config`:
+  - `read-config-resource` — strict counterpart of the existing lenient
+    `read-edn-file`: reads a required EDN map from the classpath and fails fast
+    with a catalog-routed `ex-info` when the resource is missing, malformed, not
+    a map, or missing a required key
+  - `read-timeout-resource` / `load-lsp-timeouts` — add the positive-integer
+    millisecond value check (so a string/nil/negative value fails at load, not
+    later at `deref`) and read the shipped resource
 - `bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj`:
-  - requires `clojure.edn`, `clojure.java.io`, and `messages.interface`
-  - adds a private `load-config` helper that reads the EDN via
-    `(io/resource ...) slurp edn/read-string`, failing fast with a clear
-    `ex-info` (message routed through the catalog) when the resource is missing,
-    malformed, not a map, missing a required key, or carries a
-    non-positive-integer timeout value
-  - `default-timeout-ms` now sources `:request-timeout-ms`; new `init-timeout-ms`
-    and `shutdown-timeout-ms` defs source their keys
-  - the `60000` in `initialize` and the `10000` in `shutdown` now reference the
-    new defs
+  - requires the base `config` namespace (and no longer `clojure.edn`,
+    `clojure.java.io`, or `messages.interface` directly)
+  - `timeouts` is now `(config/load-lsp-timeouts)`; `default-timeout-ms` sources
+    `:request-timeout-ms`, with `init-timeout-ms`/`shutdown-timeout-ms` defs for
+    the other two keys
+  - the `60000` in `initialize` and the `10000` in `shutdown` reference the
+    named defs
 - Path wiring so the new resources are on every classpath that already lists the
   base `src`:
   - `bases/lsp-mcp-bridge/deps.edn` `:paths` → `["src" "resources"]` (the three
@@ -71,11 +78,11 @@ the `bb.edn` LSP tasks. This PR does that path wiring.
   equal `30000`/`60000`/`10000`, matching the originals.
 - bb resource resolution: `io/resource` + `edn/read-string` of
   `config/lsp-mcp-bridge/lsp.edn` returns the expected map under Babashka.
-- `load-config` negative paths exercised: a missing key and a
-  non-positive-integer value each throw the catalog-routed `ex-info` (not a
-  later low-signal `deref` failure), and the resolved message comes from the
-  catalog.
-- Base isolated tests (client, config, protocol, installer): 32 tests, 124
+- `read-config-resource`/`read-timeout-resource` negative paths exercised
+  (in `config-test`): missing-resource, not-a-map, missing-key, and
+  string/negative value each throw the catalog-routed `ex-info` (not a later
+  low-signal `deref` failure), and the resolved message comes from the catalog.
+- Base isolated tests (client, config, protocol, installer): 33 tests, 124
   assertions, 0 failures, 0 errors.
 - `bb poly:check`: OK.
 

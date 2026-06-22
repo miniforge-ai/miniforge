@@ -1,6 +1,6 @@
 {:lsp-mcp-bridge/system
- {;; Config-load fail-fast diagnostics raised at namespace init by
-  ;; lsp.client/load-config. Operator-facing (system-locale, not
+ {;; Config-load fail-fast diagnostics raised by the base config reader
+  ;; (config/read-config-resource). Operator-facing (system-locale, not
   ;; user-localized), so they live in messages/system.edn per localization
   ;; standards and the one place to audit or override them is data, not source.
   :lsp-config.system/missing-resource

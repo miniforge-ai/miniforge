@@ -28,10 +28,18 @@
    Layer 1: Language routing
    Layer 2: Config assembly"
   (:require
+   [ai.miniforge.messages.interface :as messages]
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.string :as str]))
+
+(def ^:private t
+  "Translator for this base's message catalog. Config-load diagnostics are
+   routed through it (system-locale, catalog-audited) rather than inlined as
+   raw English string literals."
+  (messages/create-translator "config/lsp-mcp-bridge/messages/system.edn"
+                              :lsp-mcp-bridge/system))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; File discovery and reading
@@ -45,6 +53,58 @@
       (binding [*out* *err*]
         (println "Warning: Failed to read" (str path) "-" (.getMessage e)))
       nil)))
+
+(defn read-config-resource
+  "Read a required EDN config map from a classpath resource, failing fast with
+   a catalog-routed ex-info when the resource is absent, malformed, not a map,
+   or missing a required key — rather than a low-signal NPE/reader error at
+   load. The strict counterpart of `read-edn-file` (which is lenient by design
+   for the 3-tier tool-config discovery)."
+  [path required-keys]
+  (let [url (io/resource path)]
+    (when (nil? url)
+      (throw (ex-info (t :lsp-config.system/missing-resource {:path path})
+                      {:config/resource path})))
+    (let [parsed (try
+                   (edn/read-string (slurp url))
+                   (catch Exception e
+                     (throw (ex-info (t :lsp-config.system/malformed {:path path})
+                                     {:config/resource path} e))))]
+      (when-not (map? parsed)
+        (throw (ex-info (t :lsp-config.system/not-a-map {:path path})
+                        {:config/resource path})))
+      (let [missing (remove #(contains? parsed %) required-keys)]
+        (when (seq missing)
+          (throw (ex-info (t :lsp-config.system/missing-keys
+                             {:path path :keys (vec missing)})
+                          {:config/resource path :config/missing-keys (vec missing)}))))
+      parsed)))
+
+(def lsp-timeout-keys
+  "Required keys in the LSP client timeout resource."
+  [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms])
+
+(defn read-timeout-resource
+  "Read and validate an LSP client timeout EDN resource at `path`. Each value
+   must be a positive-integer count of milliseconds; otherwise fail fast at
+   load (catalog-routed ex-info) rather than later at `deref`."
+  [path]
+  (let [parsed (read-config-resource path lsp-timeout-keys)
+        invalid (remove #(pos-int? (get parsed %)) lsp-timeout-keys)]
+    (when (seq invalid)
+      (throw (ex-info (t :lsp-config.system/invalid-values
+                         {:path path :keys (vec invalid)})
+                      {:config/resource path :config/invalid-keys (vec invalid)})))
+    parsed))
+
+(def lsp-timeouts-resource
+  "Classpath path to the shipped LSP client timeout resource."
+  "config/lsp-mcp-bridge/lsp.edn")
+
+(defn load-lsp-timeouts
+  "Load and validate the shipped LSP client timeouts."
+  []
+  (read-timeout-resource lsp-timeouts-resource))
 
 (defn discover-resource-configs
   "Discover built-in LSP configs from classpath resources."
