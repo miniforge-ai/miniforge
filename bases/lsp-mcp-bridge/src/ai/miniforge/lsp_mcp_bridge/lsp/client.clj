@@ -28,6 +28,7 @@
    Layer 3: Request/response handling
    Layer 4: High-level operations"
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.lsp-mcp-bridge.lsp.protocol :as proto]
    [ai.miniforge.lsp-mcp-bridge.lsp.process :as process]
    [ai.miniforge.response.interface :as response])
@@ -49,7 +50,25 @@
    diagnostics-buffer   ; atom: {uri -> [diagnostic ...]}
    reader-thread])      ; Thread
 
-(def default-timeout-ms 30000)
+(def ^:private timeouts
+  "LSP client timeouts, loaded from EDN via the shared config-resource loader
+   so operators can tune them per environment. Fails fast with a clear ex-info
+   on a missing/malformed/non-map resource or a missing required key."
+  (config/load-config-resource
+   "config/lsp-mcp-bridge/lsp.edn"
+   [:request-timeout-ms :init-timeout-ms :shutdown-timeout-ms]))
+
+(def default-timeout-ms
+  "Default deadline (ms) for synchronous LSP requests."
+  (:request-timeout-ms timeouts))
+
+(def init-timeout-ms
+  "Deadline (ms) for the initialize handshake."
+  (:init-timeout-ms timeouts))
+
+(def shutdown-timeout-ms
+  "Deadline (ms) for the graceful shutdown request."
+  (:shutdown-timeout-ms timeouts))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Message dispatch — extracted from reader loop
@@ -203,7 +222,7 @@
    - Anomaly map on failure"
   [client root-uri capabilities]
   (let [request (proto/initialize-request root-uri capabilities)
-        result (send-request-sync client request 60000)]
+        result (send-request-sync client request init-timeout-ms)]
     (if (response/anomaly-map? result)
       result
       (do
@@ -215,7 +234,7 @@
 (defn shutdown
   "Shutdown the LSP server gracefully."
   [client]
-  (let [result (send-request-sync client (proto/shutdown-request) 10000)]
+  (let [result (send-request-sync client (proto/shutdown-request) shutdown-timeout-ms)]
     (if (response/anomaly-map? result)
       result
       (do

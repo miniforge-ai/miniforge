@@ -543,32 +543,52 @@
   lsp-mcp-bridge
   {:doc     "Run LSP-to-MCP bridge (for Claude Code integration)"
    :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"
+                 "components/config/src"
+                 "components/config/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.main :as bridge])
    :task    (bridge/-main)}
 
   lsp:status
   {:doc     "Show installed/available LSP servers"
    :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"
+                 "components/config/src"
+                 "components/config/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/status)}
 
   lsp:install
   {:doc     "Install LSP servers (all or specific: bb lsp:install clojure typescript)"
    :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"
+                 "components/config/src"
+                 "components/config/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/install *command-line-args*)}
 
   lsp:setup
   {:doc     "Generate MCP config for Claude Code/Desktop and Codex (--claude-code, --claude-desktop, --codex)"
    :extra-paths ["bases/lsp-mcp-bridge/src"
+                 "bases/lsp-mcp-bridge/resources"
                  "components/tool-registry/resources"
-                 "components/response/src"]
+                 "components/response/src"
+                 "components/messages/src"
+                 "components/messages/resources"
+                 "components/config/src"
+                 "components/config/resources"]
    :requires ([ai.miniforge.lsp-mcp-bridge.tasks :as tasks])
    :task    (tasks/setup *command-line-args*)}
 
@@ -581,6 +601,7 @@
    :extra-paths ["bases/cli/src"
                  "bases/cli/resources"
                  "bases/lsp-mcp-bridge/src"
+                 "bases/lsp-mcp-bridge/resources"
                  "components/config/src"
                  "components/config/resources"
                  "components/algorithms/src"
