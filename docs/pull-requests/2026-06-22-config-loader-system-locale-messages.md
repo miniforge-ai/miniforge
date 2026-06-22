@@ -10,7 +10,7 @@ emits operator-facing (system-locale) messages that are auditable and
 overridable as data — the system-locale counterpart of a component's
 user-locale `en-US.edn`.
 
-Behaviour-preserving: the thrown `ex-info` keeps the same `ex-data`
+Behavior-preserving: the thrown `ex-info` keeps the same `ex-data`
 (`:config/resource`, `:config/missing-keys`) and the same message text; only
 the message source moves from inline strings to the catalog.
 
