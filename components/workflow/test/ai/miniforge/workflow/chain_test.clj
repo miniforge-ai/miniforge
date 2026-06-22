@@ -166,3 +166,50 @@
           (is (= 1 @call-count) "step 2 should never execute")
           (is (= :failed (get-in result [:chain/step-results 0 :step/status])))
           (is (nat-int? (:chain/duration-ms result))))))))
+
+(def ^:private two-step-chain
+  {:chain/id :corr-chain
+   :chain/version "1.0.0"
+   :chain/description "Correlation chain"
+   :chain/steps
+   [{:step/id :step-1 :step/workflow-id :workflow-a
+     :step/input-bindings {:task :chain/input.task}}
+    {:step/id :step-2 :step/workflow-id :workflow-b
+     :step/input-bindings {:task :chain/input.task}}]})
+
+(defn- completed-step
+  "A run-pipeline stub result that lets the chain advance."
+  [_workflow _input _opts]
+  {:execution/status :completed
+   :execution/output {:artifacts []
+                      :phase-results {}
+                      :last-phase-result {:success? true}
+                      :status :completed}})
+
+(deftest run-chain-threads-one-correlation-id-to-all-steps-test
+  (testing "every step's run-pipeline opts carry the same minted correlation-id"
+    (let [opts-log (atom [])]
+      (with-redefs [runner/run-pipeline
+                    (fn [workflow input opts]
+                      (swap! opts-log conj opts)
+                      (completed-step workflow input opts))
+                    loader/load-workflow (constantly mock-workflow)]
+        (chain/run-chain two-step-chain {:task "x"} {})
+        (let [ids (map :workflow-run/correlation-id @opts-log)]
+          (is (= 2 (count ids)))
+          (is (every? uuid? ids) "minted as a uuid")
+          (is (apply = ids) "all steps share one correlation-id"))))))
+
+(deftest run-chain-honors-caller-supplied-correlation-id-test
+  (testing "a correlation-id supplied in opts is threaded unchanged, not overwritten"
+    (let [supplied (random-uuid)
+          opts-log (atom [])]
+      (with-redefs [runner/run-pipeline
+                    (fn [workflow input opts]
+                      (swap! opts-log conj opts)
+                      (completed-step workflow input opts))
+                    loader/load-workflow (constantly mock-workflow)]
+        (chain/run-chain two-step-chain {:task "x"}
+                         {:workflow-run/correlation-id supplied})
+        (is (= 2 (count @opts-log)))
+        (is (every? #(= supplied (:workflow-run/correlation-id %)) @opts-log))))))

@@ -208,7 +208,10 @@
      :workflow-run/started-at    now
      :workflow-run/updated-at    now
      :workflow-run/trigger-source (get-in context [:execution/opts :trigger-source] :cli)
-     :workflow-run/correlation-id (:execution/id context)}))
+     ;; An inherited id (threaded by run-chain across all steps of one ETL
+     ;; invocation) wins; a standalone run correlates to its own execution.
+     :workflow-run/correlation-id (or (:workflow-run/correlation-id context)
+                                      (:execution/id context))}))
 
 (defn- repo-from-pr-url
   "Extract `owner/repo` from a GitHub-style PR URL.
