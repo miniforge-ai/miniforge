@@ -29,19 +29,21 @@
 ;; Helper functions
 
 (defn safe-get
-  "Returns nil on error; logs at WARN when a logger is supplied."
-  ([f & args]
-   (try
-     (apply f args)
-     (catch Exception _e nil)))
-  ([logger f & args]
-   (try
-     (apply f args)
-     (catch Exception e
-       (when logger
-         (log/warn logger :reporting :reporting/safe-get-error
-                   {:error (.getMessage e) :fn (str f)}))
-       nil))))
+  "Returns nil on error; logs at WARN when a logger is supplied.
+  Call as (safe-get f arg…) or (safe-get logger f arg…)."
+  [maybe-logger-or-fn & rest]
+  (if (ifn? maybe-logger-or-fn)
+    (try
+      (apply maybe-logger-or-fn rest)
+      (catch Exception _e nil))
+    (let [[f & args] rest]
+      (try
+        (apply f args)
+        (catch Exception e
+          (log/warn maybe-logger-or-fn :reporting :reporting/safe-get-error
+                    {:message (str "safe-get caught: " (.getMessage e))
+                     :data {:fn (str f)}})
+          nil)))))
 
 (defn count-by-status
   "Count workflows by status."
