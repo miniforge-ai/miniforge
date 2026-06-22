@@ -219,18 +219,53 @@
     (log-rejection! (:logger @stream) event)
     (rejection-result event :workflow-quiesced)))
 
+(def ^:private quiesced-sentinel
+  "Sentinel value returned by `with-in-flight` when the event's workflow was
+   quiesced between the caller's fast-path check and the atomic increment,
+   closing the TOCTOU window. Distinct from nil so callers can distinguish
+   'quiesced-during-acquire' from 'no-workflow-id event'."
+  ::quiesced)
+
+(defn- try-acquire-in-flight!
+  "Atomically check the quiesce fence for `event`'s workflow and, if not
+   fenced, increment the in-flight counter.
+
+   Uses a decision volatile captured inside the `swap!` fn to signal the
+   outcome to the caller without polluting the stream map with temporary keys.
+   The `swap!` fn may be retried by the atom under contention — the volatile
+   is reset on each retry so the final value always reflects the last
+   successful swap.
+
+   Returns true when the slot was acquired (in-flight incremented), false
+   when the workflow was quiesced at the moment of the swap."
+  [stream event]
+  (let [wid      (:workflow/id event)
+        acquired (volatile! false)]
+    (swap! stream
+           (fn [s]
+             (if (and wid (contains? (:quiesced-workflows s) wid))
+               (do (vreset! acquired false) s)
+               (do (vreset! acquired true)
+                   (update s :in-flight inc)))))
+    @acquired))
+
 (defn- with-in-flight
   "Run `body-fn` while incrementing the stream's in-flight publish
    counter, decrementing in a finally so an exception still releases the
-   slot. Returns body-fn's result. Cross-cutting concern that lets
-   `quiesce!` / `drain!` observe an at-rest stream when no publishes
-   are mid-flight."
-  [stream body-fn]
-  (swap! stream update :in-flight inc)
-  (try
-    (body-fn)
-    (finally
-      (swap! stream update :in-flight dec))))
+   slot. Returns body-fn's result, or `quiesced-sentinel` when the
+   workflow was fenced at the moment of the atomic acquire.
+
+   The quiesce check and increment are fused into a single `swap!` via
+   `try-acquire-in-flight!`, eliminating the TOCTOU window that existed
+   when the two operations were separate (check in `rejection-if-quiesced`
+   then increment in `swap! update :in-flight inc`)."
+  [stream event body-fn]
+  (if-not (try-acquire-in-flight! stream event)
+    quiesced-sentinel
+    (try
+      (body-fn)
+      (finally
+        (swap! stream update :in-flight dec)))))
 
 (defn- record-event!
   "Append `event` to the in-memory event log."
@@ -301,17 +336,32 @@
    log, fan out to subscribers, log, and return `event`.
 
    In-flight publishes are tracked so `quiesce!` / `drain!` can wait
-   for the stream to settle before reporting at-rest."
+   for the stream to settle before reporting at-rest.
+
+   The quiesce fence is enforced atomically: `with-in-flight` fuses the
+   quiesce-check and the in-flight increment into a single `swap!`,
+   eliminating the TOCTOU window that allowed a publish to slip through
+   after `quiesce!` fenced the workflow."
   [stream event]
+  ;; Fast path: check quiesce before acquiring the in-flight slot so
+  ;; already-quiesced workflows skip the swap! entirely.
   (or (rejection-if-quiesced stream event)
-      (with-in-flight stream
-        (fn []
-          (let [{:keys [sinks subscribers filters logger]} @stream]
-            (deliver-to-sinks! sinks event logger)
-            (record-event! stream event)
-            (deliver-to-subscribers! subscribers filters event logger)
-            (log-published! logger event)
-            event)))))
+      (let [result (with-in-flight stream event
+                     (fn []
+                       (let [{:keys [sinks subscribers filters logger]} @stream]
+                         (deliver-to-sinks! sinks event logger)
+                         (record-event! stream event)
+                         (deliver-to-subscribers! subscribers filters event logger)
+                         (log-published! logger event)
+                         event)))]
+        ;; with-in-flight returns quiesced-sentinel when the workflow was
+        ;; fenced during the atomic acquire (the TOCTOU window). Convert
+        ;; to the canonical rejection shape so callers see a consistent
+        ;; {:rejected? true ...} map regardless of which path triggered it.
+        (if (= result quiesced-sentinel)
+          (do (log-rejection! (:logger @stream) event)
+              (rejection-result event :workflow-quiesced))
+          result))))
 
 (defn subscribe!
   ([stream subscriber-id callback]

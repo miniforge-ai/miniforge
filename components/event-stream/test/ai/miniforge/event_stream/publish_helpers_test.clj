@@ -26,11 +26,13 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.core :as core]))
 
-(def ^:private workflow-quiesced?     #'core/workflow-quiesced?)
-(def ^:private rejection-result       #'core/rejection-result)
-(def ^:private rejection-if-quiesced  #'core/rejection-if-quiesced)
-(def ^:private with-in-flight         #'core/with-in-flight)
-(def ^:private record-event!          #'core/record-event!)
+(def ^:private workflow-quiesced?       #'core/workflow-quiesced?)
+(def ^:private rejection-result         #'core/rejection-result)
+(def ^:private rejection-if-quiesced    #'core/rejection-if-quiesced)
+(def ^:private try-acquire-in-flight!   #'core/try-acquire-in-flight!)
+(def ^:private with-in-flight           #'core/with-in-flight)
+(def ^:private quiesced-sentinel        #'core/quiesced-sentinel)
+(def ^:private record-event!            #'core/record-event!)
 (def ^:private deliver-to-sink!       #'core/deliver-to-sink!)
 (def ^:private deliver-to-sinks!      #'core/deliver-to-sinks!)
 (def ^:private deliver-to-subscriber! #'core/deliver-to-subscriber!)
@@ -79,12 +81,32 @@
     (is (true? (:rejected? result)))
     (is (= :workflow-quiesced (:reason result)))))
 
+;------------------------------------------------------------------------------ try-acquire-in-flight!
+
+(deftest try-acquire-in-flight!-acquires-when-not-quiesced
+  (let [wid    (random-uuid)
+        stream (atom {:in-flight 0 :quiesced-workflows #{}})
+        event  (evt :test/event wid)]
+    (is (true? (try-acquire-in-flight! stream event))
+        "returns true when the workflow is not fenced")
+    (is (= 1 (:in-flight @stream))
+        ":in-flight is incremented on acquire")))
+
+(deftest try-acquire-in-flight!-rejects-when-quiesced
+  (let [wid    (random-uuid)
+        stream (atom {:in-flight 0 :quiesced-workflows #{wid}})
+        event  (evt :test/event wid)]
+    (is (false? (try-acquire-in-flight! stream event))
+        "returns false when the workflow is already fenced")
+    (is (= 0 (:in-flight @stream))
+        ":in-flight is NOT incremented when fenced — the TOCTOU window is closed")))
+
 ;------------------------------------------------------------------------------ with-in-flight
 
 (deftest with-in-flight-increments-and-decrements-around-body
-  (let [stream (atom {:in-flight 0})
+  (let [stream   (atom {:in-flight 0})
         observed (atom nil)]
-    (with-in-flight stream
+    (with-in-flight stream (evt)
       (fn []
         (reset! observed (:in-flight @stream))
         :body-result))
@@ -94,13 +116,26 @@
 (deftest with-in-flight-decrements-on-body-exception
   (let [stream (atom {:in-flight 0})]
     (is (thrown? Exception
-                 (with-in-flight stream (fn [] (throw (RuntimeException. "boom"))))))
+                 (with-in-flight stream (evt) (fn [] (throw (RuntimeException. "boom"))))))
     (is (= 0 (:in-flight @stream))
         "decrement runs in finally so a body exception doesn't leak the slot")))
 
 (deftest with-in-flight-returns-body-value
   (let [stream (atom {:in-flight 0})]
-    (is (= :result (with-in-flight stream (constantly :result))))))
+    (is (= :result (with-in-flight stream (evt) (constantly :result))))))
+
+(deftest with-in-flight-returns-quiesced-sentinel-when-fenced
+  ;; Pins the TOCTOU fix at the unit level: with-in-flight bypasses
+  ;; body-fn and returns the sentinel when try-acquire-in-flight! finds
+  ;; the workflow already fenced in its atomic swap!.
+  (let [wid    (random-uuid)
+        stream (atom {:in-flight 0 :quiesced-workflows #{wid}})
+        event  (evt :test/event wid)
+        result (with-in-flight stream event (fn [] :should-not-reach))]
+    (is (= result @quiesced-sentinel)
+        "returns quiesced-sentinel when the atomic acquire is denied")
+    (is (= 0 (:in-flight @stream))
+        ":in-flight must not be incremented when fenced")))
 
 ;------------------------------------------------------------------------------ record-event!
 

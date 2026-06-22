@@ -219,3 +219,38 @@
     (let [result (core/drain! stream {:timeout-ms 500})]
       (is (true? (:ok? result))
           "in-flight counter must release even when the sink throws"))))
+
+(def ^:private with-in-flight-var  #'core/with-in-flight)
+(def ^:private quiesced-sentinel-var #'core/quiesced-sentinel)
+
+(deftest publish-rejected-when-quiesced-during-atomic-acquire
+  ;; Pin the TOCTOU fix: a publish that clears the fast-path
+  ;; rejection-if-quiesced check (stream not yet quiesced) but then
+  ;; encounters a quiesce during the atomic acquire inside with-in-flight
+  ;; must still be rejected.
+  ;;
+  ;; We exercise the slow path directly: bypass rejection-if-quiesced by
+  ;; calling with-in-flight on a stream that is already quiesced. This
+  ;; replicates the race window — rejection-if-quiesced would have returned
+  ;; nil (workflow not quiesced at the fast-path instant) but the atomic
+  ;; swap! inside try-acquire-in-flight! observes the fence.
+  (let [[sink record] (recording-sink)
+        wid     (random-uuid)
+        event   (workflow-event wid :test/event)
+        ;; Build a stream that is quiesced, simulating the state after a
+        ;; concurrent quiesce! landed between the fast-path check and the swap!.
+        stream  (atom {:in-flight 0
+                       :quiesced-workflows #{wid}
+                       :sinks [sink]
+                       :subscribers {}
+                       :events []
+                       :filters {}
+                       :logger nil})
+        sentinel @quiesced-sentinel-var
+        result  (@with-in-flight-var stream event (fn [] :should-not-reach))]
+    (is (= result sentinel)
+        "with-in-flight returns quiesced-sentinel when the atomic acquire is denied")
+    (is (= 0 (:in-flight @stream))
+        ":in-flight must not be incremented when fenced")
+    (is (empty? @record)
+        "sink must not receive an event when quiesced during atomic acquire")))
