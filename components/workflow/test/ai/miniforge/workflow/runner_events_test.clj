@@ -69,6 +69,24 @@
         (is (inst? (:workflow-run/started-at ev)))
         (is (inst? (:workflow-run/updated-at ev)))))))
 
+(deftest correlation-id-defaults-to-execution-id-test
+  (testing "a standalone run (no inherited id) correlates to its own execution id"
+    (let [stream (create-stream)
+          ctx    (test-context)]
+      (events/publish-workflow-started! stream ctx)
+      (is (= (:execution/id ctx)
+             (:workflow-run/correlation-id (first-event stream)))))))
+
+(deftest correlation-id-honors-inherited-id-test
+  (testing "an inherited :workflow-run/correlation-id wins over the per-run execution id"
+    (let [stream (create-stream)
+          shared (random-uuid)
+          ctx    (assoc (test-context) :workflow-run/correlation-id shared)]
+      (events/publish-workflow-started! stream ctx)
+      (let [ev (first-event stream)]
+        (is (= shared (:workflow-run/correlation-id ev)))
+        (is (not= (:execution/id ctx) (:workflow-run/correlation-id ev)))))))
+
 (deftest publish-workflow-started-timestamps-same-instant-test
   (testing "started-at and updated-at are bound to the same instant"
     (let [stream (create-stream)

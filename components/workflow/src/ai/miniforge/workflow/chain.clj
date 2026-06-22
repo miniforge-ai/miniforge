@@ -124,7 +124,13 @@
   (let [start-time (System/currentTimeMillis)
         chain-id (:chain/id chain-def)
         steps (:chain/steps chain-def)
-        load-workflow loader/load-workflow]
+        load-workflow loader/load-workflow
+        ;; One correlation id per chain invocation, threaded onto every
+        ;; step's run-pipeline opts so all steps and their lifecycle
+        ;; events share it. Mint-if-absent: a caller may supply one to
+        ;; correlate the whole ETL invocation from outside.
+        correlation-id (or (:workflow-run/correlation-id opts) (random-uuid))
+        step-opts (assoc opts :workflow-run/correlation-id correlation-id)]
     (emit! opts events/chain-started
            chain-id (count steps))
     (loop [remaining steps
@@ -152,7 +158,7 @@
               resolved-input (resolve-bindings input-bindings prev-output chain-input)
               workflow-result (load-workflow workflow-id :latest {:skip-validation? true})
               workflow (:workflow workflow-result)
-              result (runner/run-pipeline workflow resolved-input opts)
+              result (runner/run-pipeline workflow resolved-input step-opts)
               output (:execution/output result)
               step-result {:step/id step-id
                            :step/workflow-id workflow-id

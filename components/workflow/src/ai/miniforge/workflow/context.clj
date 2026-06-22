@@ -125,7 +125,10 @@
    :on-phase-start :on-phase-complete
    :executor :environment-id :sandbox-workdir
    :on-chunk :event-stream :worktree-path
-   :source-root])
+   :source-root
+   ;; Threaded by run-chain so every step of one ETL invocation shares
+   ;; it; lifecycle events read it from the context (see runner-events).
+   :workflow-run/correlation-id])
 
 (defn- passthrough-option-values
   [opts]
