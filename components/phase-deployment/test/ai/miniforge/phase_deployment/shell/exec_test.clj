@@ -34,7 +34,12 @@
   (testing "returns a structured timeout result"
     (let [result (sut/sh-with-timeout "sleep" ["1"] :timeout-ms 10)]
       (is (false? (:success? result)))
-      (is (= :timeout (:error-type result))))))
+      (is (= :timeout (:error-type result)))))
+
+  (testing "pipes :in string to the subprocess stdin"
+    (let [result (sut/sh-with-timeout "cat" [] :in "hello from stdin")]
+      (is (:success? result))
+      (is (= "hello from stdin" (str/trim (:stdout result)))))))
 
 (deftest classify-error-test
   (testing "classifies retryable and permanent errors"
