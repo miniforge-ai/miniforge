@@ -21,8 +21,7 @@
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.phase-deployment.shell.exec :as exec]
             [ai.miniforge.phase-deployment.shell.timeouts :as timeouts]
-            [ai.miniforge.schema.interface :as schema])
-  (:import [java.io File]))
+            [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Kustomize wrappers
@@ -59,16 +58,9 @@
                             namespace (into ["--namespace" namespace])
                             context   (into ["--context" context])
                             dry-run?  (conj "--dry-run=client"))
-            tmp-file      (File/createTempFile "kustomize-" ".yaml")
-            _             (spit tmp-file rendered-yaml)
-            apply-result  (exec/sh-with-timeout "kubectl"
-                                                (-> (subvec apply-args 0 1)
-                                                    (into ["-f" (.getAbsolutePath tmp-file)])
-                                                    (into (subvec apply-args 3)))
+            apply-result  (exec/sh-with-timeout "kubectl" apply-args
+                                                :in rendered-yaml
                                                 :timeout-ms (get timeouts/timeouts :kustomize-apply-ms 120000))]
-        (try
-          (.delete tmp-file)
-          (catch Exception _ nil))
         (if (schema/succeeded? apply-result)
           (validate-result!
            (schema/success :rendered-yaml rendered-yaml

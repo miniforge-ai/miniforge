@@ -80,15 +80,17 @@
 ;; Shell execution + classification
 
 (defn sh-with-timeout
-  "Execute a shell command with timeout and structured results."
-  [cmd args & {:keys [dir timeout-ms env]
+  "Execute a shell command with timeout and structured results.
+   Pass :in STRING to supply the process's stdin (e.g. piping YAML to kubectl)."
+  [cmd args & {:keys [dir timeout-ms env in]
                :or {timeout-ms (get timeouts/timeouts :exec-default-ms 300000)}}]
   (let [start-time (System/currentTimeMillis)
         full-cmd   (into [cmd] args)
         cmd-str    (str/join " " full-cmd)
         sh-args    (cond-> full-cmd
                      dir (into [:dir dir])
-                     env (into [:env (merge (into {} (System/getenv)) env)]))]
+                     env (into [:env (merge (into {} (System/getenv)) env)])
+                     in  (into [:in in]))]
     (try
       (let [future-result (future (apply shell/sh sh-args))
             result        (deref future-result timeout-ms ::timeout)]
