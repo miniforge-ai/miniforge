@@ -29,12 +29,21 @@
 ;; Helper functions
 
 (defn safe-get
-  "Safely get value from component, returning nil on error."
-  [f & args]
-  (try
-    (apply f args)
-    (catch Exception _e
-      nil)))
+  "Returns nil on error; logs at WARN when a logger is supplied.
+  Call as (safe-get f arg…) or (safe-get logger f arg…)."
+  [maybe-logger-or-fn & rest]
+  (if (ifn? maybe-logger-or-fn)
+    (try
+      (apply maybe-logger-or-fn rest)
+      (catch Exception _e nil))
+    (let [[f & args] rest]
+      (try
+        (apply f args)
+        (catch Exception e
+          (log/warn maybe-logger-or-fn :reporting :reporting/safe-get-error
+                    {:message (str "safe-get caught: " (.getMessage e))
+                     :data {:fn (str f)}})
+          nil)))))
 
 (defn count-by-status
   "Count workflows by status."
@@ -73,8 +82,8 @@
 
 (defn aggregate-workflow-stats
   "Aggregate workflow statistics."
-  [workflow-component]
-  (if-let [all-workflows (safe-get wf/get-state workflow-component :all)]
+  [workflow-component logger]
+  (if-let [all-workflows (safe-get logger wf/get-state workflow-component :all)]
     {:active (count-by-status all-workflows :running)
      :pending (count-by-status all-workflows :pending)
      :completed (count-by-status all-workflows :completed)
@@ -83,8 +92,8 @@
 
 (defn aggregate-resource-metrics
   "Aggregate resource usage metrics."
-  [workflow-component]
-  (if-let [all-workflows (safe-get wf/get-state workflow-component :all)]
+  [workflow-component logger]
+  (if-let [all-workflows (safe-get logger wf/get-state workflow-component :all)]
     (reduce
      (fn [acc wf]
        (let [metrics (:workflow/metrics wf {})]
@@ -96,9 +105,9 @@
 
 (defn aggregate-meta-loop-status
   "Aggregate meta-loop status."
-  [operator-component]
+  [operator-component logger]
   (if operator-component
-    (let [proposals (safe-get op/get-proposals operator-component {:status :proposed})
+    (let [proposals (safe-get logger op/get-proposals operator-component {:status :proposed})
           pending-count (count proposals)]
       {:status (if (> pending-count 0) :active :idle)
        :pending-improvements pending-count})
@@ -107,16 +116,16 @@
 
 (defn collect-alerts
   "Collect system alerts."
-  [workflow-stats operator-component]
+  [workflow-stats operator-component logger]
   (let [alerts []]
     (cond-> alerts
       (> (:failed workflow-stats 0) 0)
       (conj {:type :failed-workflows
              :severity :error
              :message (str (:failed workflow-stats) " failed workflow(s)")})
-      
+
       (and operator-component
-           (> (count (safe-get op/get-proposals operator-component {:status :proposed})) 5))
+           (> (count (safe-get logger op/get-proposals operator-component {:status :proposed})) 5))
       (conj {:type :pending-improvements
              :severity :warning
              :message "Multiple pending improvements awaiting review"}))))
@@ -137,9 +146,9 @@
 
 (defn get-workflow-artifacts
   "Get artifacts for a workflow."
-  [artifact-store workflow-id]
+  [artifact-store workflow-id logger]
   (if artifact-store
-    (let [artifacts (safe-get art/query artifact-store {:workflow-id workflow-id})]
+    (let [artifacts (safe-get logger art/query artifact-store {:workflow-id workflow-id})]
       (mapv (fn [art]
               {:id (:artifact/id art)
                :type (:artifact/type art)
@@ -169,10 +178,10 @@
   proto/ReportingService
 
   (get-system-status [_this]
-    (let [workflow-stats (aggregate-workflow-stats workflow-component)
-          resource-metrics (aggregate-resource-metrics workflow-component)
-          meta-loop-status (aggregate-meta-loop-status operator-component)
-          alerts (collect-alerts workflow-stats operator-component)]
+    (let [workflow-stats (aggregate-workflow-stats workflow-component logger)
+          resource-metrics (aggregate-resource-metrics workflow-component logger)
+          meta-loop-status (aggregate-meta-loop-status operator-component logger)
+          alerts (collect-alerts workflow-stats operator-component logger)]
       {:workflows workflow-stats
        :resources resource-metrics
        :meta-loop meta-loop-status
@@ -183,7 +192,7 @@
           phase-filter (:phase criteria)
           limit (:limit criteria 100)
           all-workflows (if workflow-component
-                          (safe-get wf/get-state workflow-component :all)
+                          (safe-get logger wf/get-state workflow-component :all)
                           [])]
       (->> (or all-workflows [])
            (filter (fn [wf]
@@ -199,7 +208,7 @@
                     :workflow/created-at (:workflow/created-at wf)})))))
 
   (get-workflow-detail [_this workflow-id]
-    (if-let [workflow-state (safe-get wf/get-state workflow-component workflow-id)]
+    (if-let [workflow-state (safe-get logger wf/get-state workflow-component workflow-id)]
       {:header {:id (:workflow/id workflow-state)
                 :status (:workflow/status workflow-state)
                 :phase (:workflow/phase workflow-state)
@@ -209,15 +218,15 @@
        :current-task {:description (:workflow/current-task workflow-state)
                       :agent (:workflow/current-agent workflow-state)
                       :status (:workflow/status workflow-state)}
-       :artifacts (get-workflow-artifacts artifact-store workflow-id)
+       :artifacts (get-workflow-artifacts artifact-store workflow-id logger)
        :logs (get-workflow-logs logger workflow-id)}
       nil))
 
   (get-meta-loop-status [_this]
     (if operator-component
-      (let [signals (safe-get op/get-signals operator-component {:limit 10})
-            pending (safe-get op/get-proposals operator-component {:status :proposed})
-            recent (safe-get op/get-proposals operator-component {:status :applied})]
+      (let [signals (safe-get logger op/get-signals operator-component {:limit 10})
+            pending (safe-get logger op/get-proposals operator-component {:status :proposed})
+            recent (safe-get logger op/get-proposals operator-component {:status :applied})]
         {:signals (or signals [])
          :pending-improvements (or pending [])
          :recent-improvements (take 10 (or recent []))})
