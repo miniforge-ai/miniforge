@@ -43,13 +43,20 @@
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp.bridge)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.kafka.consumer)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.events.listener)))
+    (is (true? (exc/boundary-namespace? 'ai.miniforge.events.listeners)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.foo.boundary.in)))))
+
+(deftest dashed-mcp-base-is-boundary
+  (testing "the MCP context-server base is an external protocol boundary"
+    (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.tools)))
+    (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.server)))))
 
 (deftest core-namespaces-are-not-boundaries
   (testing "ordinary component core namespaces are not boundaries"
     (is (false? (exc/boundary-namespace? 'ai.miniforge.agent.planner)))
     (is (false? (exc/boundary-namespace? 'ai.miniforge.workflow.runner)))
-    (is (false? (exc/boundary-namespace? 'ai.miniforge.config.user)))))
+    (is (false? (exc/boundary-namespace? 'ai.miniforge.config.user)))
+    (is (false? (exc/boundary-namespace? 'ai.miniforge.some-mcp-ish.core)))))
 
 (deftest boundary-files-yield-zero-violations
   (testing "throws inside a CLI namespace produce no violations"
