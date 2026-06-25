@@ -26,9 +26,8 @@
   when a workflow event-stream is present."
   (:require
    [ai.miniforge.agent.core :as core]
-   [ai.miniforge.event-stream.interface :as events]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io])
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.event-stream.interface :as events])
   (:import
    (java.nio ByteBuffer)
    (java.security MessageDigest)
@@ -45,24 +44,14 @@
    or omits :heartbeat-interval-ms."
   30000)
 
-(defn- load-config-or
-  "Read an EDN config resource, returning `fallback` if the resource is
-   absent, unreadable, malformed, or not a map — preserving fail-open
-   behavior."
-  [path fallback]
-  (try
-    (let [url    (io/resource path)
-          parsed (when url (edn/read-string (slurp url)))]
-      (if (map? parsed) parsed fallback))
-    (catch Exception _ fallback)))
-
 (def ^:private default-heartbeat-interval-ms
   "Interval between heartbeat events for direct in-process agents. Loaded
    from config/agent/supervisory-bridge.edn at ns load, falling back to
    fallback-heartbeat-interval-ms."
   (or (:heartbeat-interval-ms
-       (load-config-or "config/agent/supervisory-bridge.edn"
-                       {:heartbeat-interval-ms fallback-heartbeat-interval-ms}))
+       (config/read-config-resource-or
+        "config/agent/supervisory-bridge.edn"
+        {:heartbeat-interval-ms fallback-heartbeat-interval-ms}))
       fallback-heartbeat-interval-ms))
 
 (def ^:private agent-session-namespace

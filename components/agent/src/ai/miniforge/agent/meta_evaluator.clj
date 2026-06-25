@@ -28,11 +28,10 @@
    - Fail-open on timeout/error (never block the inner agent on infra issues)
    - Budget: ~500 input tokens, ~100 output tokens per call"
   (:require
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.llm.interface :as llm]
    [cheshire.core :as json]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
-   [clojure.string :as str]
-   [ai.miniforge.llm.interface :as llm]))
+   [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Tuning config and prompt construction
@@ -41,22 +40,12 @@
   "In-code fallback used when config/agent/meta-eval-tuning.edn is absent."
   {:max-tokens 150})
 
-(defn- load-config-or
-  "Read an EDN config resource, returning `fallback` if the resource is
-   absent, unreadable, malformed, or not a map — preserving fail-open
-   behavior."
-  [path fallback]
-  (try
-    (let [url    (io/resource path)
-          parsed (when url (edn/read-string (slurp url)))]
-      (if (map? parsed) parsed fallback))
-    (catch Exception _ fallback)))
-
 (def ^:private eval-tuning
   "Per-call tuning (currently :max-tokens) for the meta-evaluator LLM call.
    Loaded from config/agent/meta-eval-tuning.edn at ns load, falling back
    to fallback-eval-tuning."
-  (load-config-or "config/agent/meta-eval-tuning.edn" fallback-eval-tuning))
+  (config/read-config-resource-or "config/agent/meta-eval-tuning.edn"
+                                  fallback-eval-tuning))
 
 (def system-prompt
   "You are a tool-use quality evaluator for a software engineering agent.

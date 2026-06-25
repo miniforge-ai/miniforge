@@ -19,8 +19,7 @@
 (ns ai.miniforge.event-stream.storage-layout
   "Configuration-as-data for the event-stream on-disk storage layout."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.config.interface :as config]))
 
 (def ^:private resource-path
   "config/event-stream/storage-layout.edn")
@@ -35,10 +34,7 @@
 
 (defn- load-layout
   []
-  (let [resource (or (io/resource resource-path)
-                     (throw (ex-info "Missing event-stream storage layout resource"
-                                     {:resource resource-path})))
-        layout (edn/read-string (slurp resource))
+  (let [layout (config/load-config-resource resource-path required-keys)
         missing (seq (remove #(string? (get layout %)) required-keys))]
     (when missing
       (throw (ex-info "Invalid event-stream storage layout resource"
