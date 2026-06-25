@@ -20,46 +20,23 @@
   "Core operator implementation.
    Manages meta-loop: observe signals, detect patterns, propose improvements."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.operator.protocol :as proto]
    [ai.miniforge.operator.llm-improvement-generator :as llm-improvement-generator]
    [ai.miniforge.operator.llm-pattern-detector :as llm-pattern-detector]
    [ai.miniforge.workflow.interface :as wf]
    [ai.miniforge.knowledge.interface :as knowledge]
-   [ai.miniforge.logging.interface :as log]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Configuration
 
-(defn- load-config
-  "Read an EDN config resource, failing fast with a clear ex-info when the
-   resource is absent from the classpath, malformed, not a map, or missing
-   a required key — rather than a low-signal NPE/reader error at load."
-  [path required-keys]
-  (let [url (io/resource path)]
-    (when (nil? url)
-      (throw (ex-info (str "Missing config resource on classpath: " path)
-                      {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url))
-                   (catch Exception e
-                     (throw (ex-info (str "Malformed EDN config resource: " path)
-                                     {:config/resource path} e))))]
-      (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path)
-                        {:config/resource path})))
-      (let [missing (remove #(contains? parsed %) required-keys)]
-        (when (seq missing)
-          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
-                          {:config/resource path :config/missing-keys (vec missing)})))
-        parsed))))
-
 (def default-config
   "Default operator configuration."
-  (load-config "config/operator/defaults.edn"
-               [:signal-retention-ms :pattern-window-ms :min-pattern-occurrences
-                :auto-apply-threshold :shadow-period-ms]))
+  (config/load-config-resource "config/operator/defaults.edn"
+                               [:signal-retention-ms :pattern-window-ms
+                                :min-pattern-occurrences
+                                :auto-apply-threshold :shadow-period-ms]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Signal management

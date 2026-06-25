@@ -25,41 +25,18 @@
   3. PR lifecycle (create → CI → review → merge)
   4. Event bridging (PR events → scheduler events)
   5. Resource cleanup (always in finally block)"
-  (:require [ai.miniforge.task-executor.bridge :as bridge]
+  (:require [ai.miniforge.config.interface :as config]
+            [ai.miniforge.task-executor.bridge :as bridge]
             [ai.miniforge.task-executor.generate :as generate]
             [ai.miniforge.pr-lifecycle.interface :as pr]
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.agent-runtime.interface :as error-classifier]
-            [ai.miniforge.spec-parser.interface :as spec-parser]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]))
-
-(defn- load-config
-  "Read an EDN config resource, failing fast with a clear ex-info when the
-   resource is absent from the classpath, malformed, not a map, or missing
-   a required key — rather than a low-signal NPE at load."
-  [path required-keys]
-  (let [url (io/resource path)]
-    (when (nil? url)
-      (throw (ex-info (str "Missing config resource on classpath: " path)
-                      {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url))
-                   (catch Exception e
-                     (throw (ex-info (str "Malformed EDN config resource: " path)
-                                     {:config/resource path} e))))]
-      (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path) {:config/resource path})))
-      (let [missing (remove #(contains? parsed %) required-keys)]
-        (when (seq missing)
-          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
-                          {:config/resource path :config/missing-keys (vec missing)})))
-        parsed))))
+            [ai.miniforge.spec-parser.interface :as spec-parser]))
 
 (def ^:private defaults
-  (load-config "config/task-executor/defaults.edn"
-               [:worktree-acquire-timeout-ms :token-pricing]))
+  (config/load-config-resource "config/task-executor/defaults.edn"
+                               [:worktree-acquire-timeout-ms :token-pricing]))
 
 (defn create-task-context
   [task-id task run-context]
