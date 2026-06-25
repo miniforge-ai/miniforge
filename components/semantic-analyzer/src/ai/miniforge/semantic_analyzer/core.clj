@@ -29,7 +29,10 @@
     (if-let [url (io/resource judge-prompt-resource)]
       (edn/read-string (slurp url))
       {:system "You are a code reviewer. Return EDN violations or []."
-       :user "Rule: {{rule-title}}\n\n{{knowledge-content}}\n\nFile: {{file-path}}\n```\n{{file-content}}\n```"})))
+       :user "Rule: {{rule-title}}\n\n{{knowledge-content}}\n\nFile: {{file-path}}\n```\n{{file-content}}\n```"
+       :batched-system "You are a code reviewer. Tag each violation with :rule-id. Return EDN violations or []."
+       :batched-rule-item "### {{rule-id}} — {{rule-title}}\n{{rule-description}}\n{{knowledge-content}}"
+       :batched-user "File: {{file-path}}\n```\n{{file-content}}\n```\n\nRules:\n{{rules-block}}\n\nReturn EDN violations tagged with :rule-id, or []."})))
 
 (defn- rule->prompt-bindings
   "Extract prompt interpolation bindings from a rule and file."
@@ -220,29 +223,30 @@
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Batched judge — one LLM call per file across many rules
 
-(def ^:private batched-system-prompt
-  (str "You are a code reviewer enforcing engineering standards. Analyze ONE "
-       "source file against a list of rules, each rendered as a `### <rule-id>` "
-       "heading. Return ONLY a valid EDN vector of violation maps, no prose or "
-       "markdown. Each map: {:rule-id <the rule-id keyword> :line <int> :current "
-       "<snippet> :message <why>}. Tag every violation with the :rule-id of the "
-       "rule it violates. Return [] if the file complies with all rules."))
-
 (defn- batched-rules-block
+  "Render each rule as a `### <id>` heading block from the `:batched-rule-item`
+   template, joined — no raw prompt strings in code."
   [rules]
-  (str/join "\n\n"
-            (map (fn [r] (str "### " (:rule/id r) " — " (get r :rule/title "") "\n"
-                              (get r :rule/description "") "\n"
-                              (get r :rule/knowledge-content "")))
-                 rules)))
+  (let [item (get @judge-templates :batched-rule-item "")]
+    (str/join "\n\n"
+              (map (fn [r] (pt/interpolate
+                            item
+                            {:rule-id           (str (:rule/id r))
+                             :rule-title        (get r :rule/title "")
+                             :rule-description  (get r :rule/description "")
+                             :knowledge-content (get r :rule/knowledge-content "")}))
+                   rules))))
 
 (defn- build-batched-prompt
+  "Batched system + user prompts from the `:batched-system` / `:batched-user`
+   templates (resource/locale), not inline strings."
   [rules file-path file-content]
-  {:system batched-system-prompt
-   :user   (str "## File: " file-path "\n\n```\n" file-content "\n```\n\n## Rules\n\n"
-                (batched-rules-block rules)
-                "\n\nReturn an EDN vector of violations across ALL rules (tag each "
-                ":rule-id), or [].")})
+  (let [templates @judge-templates]
+    {:system (get templates :batched-system "")
+     :user   (pt/interpolate (get templates :batched-user "")
+                             {:file-path    file-path
+                              :file-content file-content
+                              :rules-block  (batched-rules-block rules)})}))
 
 (defn- ->rule-kw
   "Coerce a model-emitted :rule-id (keyword, \":std/foo\" or \"std/foo\" string)
