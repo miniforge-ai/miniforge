@@ -287,16 +287,19 @@
   (let [start-ms (System/currentTimeMillis)]
     (loop [fs (seq files), by-rule {}, analyzed 0, calls 0]
       (if-let [{:keys [path content]} (first fs)]
-        (let [applicable (filterv #(file-matches-globs?
-                                    path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
-                                  rules)]
-          (if (and (seq applicable) (string? path) (string? content)
-                   (file-under-size-limit? content))
-            (let [viols   (analyze-file-batched llm-client complete-fn applicable path content)
-                  by-rule (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v))
-                                  by-rule viols)]
-              (recur (next fs) by-rule (inc analyzed) (inc calls)))
-            (recur (next fs) by-rule analyzed calls)))
+        ;; Validate the file shape BEFORE touching globs — file-matches-globs?
+        ;; would throw on a non-string path.
+        (if-not (and (string? path) (string? content) (file-under-size-limit? content))
+          (recur (next fs) by-rule analyzed calls)
+          (let [applicable (filterv #(file-matches-globs?
+                                      path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
+                                    rules)]
+            (if (seq applicable)
+              (let [viols   (analyze-file-batched llm-client complete-fn applicable path content)
+                    by-rule (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v))
+                                    by-rule viols)]
+                (recur (next fs) by-rule (inc analyzed) (inc calls)))
+              (recur (next fs) by-rule analyzed calls))))
         {:by-rule        by-rule
          :files-analyzed analyzed
          :calls          calls
