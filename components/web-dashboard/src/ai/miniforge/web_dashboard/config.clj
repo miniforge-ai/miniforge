@@ -15,8 +15,7 @@
 (ns ai.miniforge.web-dashboard.config
   "Validated load of the web-dashboard deployment/session defaults."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fail-fast resource loading
@@ -26,28 +25,6 @@
 (def ^:private required-keys
   [:port :session-cookie-name :session-ttl-ms :stale-threshold-ms :max-recent-workflows])
 
-(defn- load-config
-  "Read an EDN config resource, failing fast with a clear ex-info when the
-   resource is absent from the classpath, malformed, not a map, or missing
-   a required key — rather than a low-signal NPE at load."
-  [path required-keys]
-  (let [url (io/resource path)]
-    (when (nil? url)
-      (throw (ex-info (str "Missing config resource on classpath: " path)
-                      {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url))
-                   (catch Exception e
-                     (throw (ex-info (str "Malformed EDN config resource: " path)
-                                     {:config/resource path} e))))]
-      (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path) {:config/resource path})))
-      (let [missing (remove #(contains? parsed %) required-keys)]
-        (when (seq missing)
-          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
-                          {:config/resource path :config/missing-keys (vec missing)})))
-        parsed))))
-
 (def defaults
   "Web dashboard deployment and session defaults, validated at load."
-  (load-config defaults-resource required-keys))
+  (config/load-config-resource defaults-resource required-keys))

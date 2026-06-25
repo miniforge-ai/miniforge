@@ -19,10 +19,8 @@
 (ns ai.miniforge.pr-lifecycle.controller-config
   "Load PR lifecycle controller defaults from EDN configuration."
   (:require
-   [ai.miniforge.pr-lifecycle.messages :as messages]
-   [ai.miniforge.schema.interface :as schema]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas + config loading
@@ -49,11 +47,9 @@
 
 (defn- load-controller-config
   []
-  (if-let [resource (io/resource controller-defaults-resource)]
-    (->> resource slurp edn/read-string (validate! ControllerConfig))
-    (throw (ex-info (messages/t :config/missing-resource
-                                {:resource controller-defaults-resource})
-                    {:hint (messages/t :config/classpath-hint)}))))
+  (validate! ControllerConfig
+             (config/load-config-resource controller-defaults-resource
+                                          [:pr-lifecycle/controller-defaults])))
 
 (def ^:private controller-config
   (delay (load-controller-config)))
