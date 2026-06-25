@@ -35,11 +35,12 @@
    keyword `:event/type` are dropped at the boundary, so everything
   the extractors see is well-shaped."
   (:require
-   [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.schema :as schema]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -180,9 +181,11 @@
 
 (defn- read-resume-config
   []
-  (:workflow-resume/resume
-   (config/load-config-resource resume-config-resource
-                                [:workflow-resume/resume])))
+  (if-let [resource (io/resource resume-config-resource)]
+    (:workflow-resume/resume (edn/read-string (slurp resource)))
+    (response/throw-anomaly! :anomalies/not-found
+                             "Workflow resume config resource not found"
+                             {:resource resume-config-resource})))
 
 (def ^:private resume-config
   (delay (read-resume-config)))
