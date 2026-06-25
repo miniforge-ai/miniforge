@@ -95,6 +95,7 @@
                        "components/web-dashboard/src"
                        "components/web-dashboard/resources"
                        "components/self-healing/src"
+                       "components/self-healing/resources"
                        "components/failure-classifier/src"
                        "components/failure-classifier/resources"
                        "components/reliability/src"
