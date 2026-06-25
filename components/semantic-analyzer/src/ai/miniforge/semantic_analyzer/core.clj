@@ -13,6 +13,7 @@
    Layer 2: File selection and batch analysis"
   (:require
    [ai.miniforge.compliance-scanner.interface :as factory]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.policy-pack.interface :as pt]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -101,19 +102,8 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; File selection and batch analysis
 
-(defn- load-limits
-  "Read the limits EDN, returning {} if the resource is absent,
-   unreadable, malformed, or not a map — so the call-site literal
-   defaults remain authoritative (fail-open, matching the prior
-   inline-literal behavior)."
-  [path]
-  (try
-    (let [url    (io/resource path)
-          parsed (when url (edn/read-string (slurp url)))]
-      (if (map? parsed) parsed {}))
-    (catch Exception _ {})))
-
-(def ^:private limits (load-limits "config/semantic-analyzer/limits.edn"))
+(def ^:private limits
+  (config/read-config-resource-or "config/semantic-analyzer/limits.edn" {}))
 
 (def ^:private max-file-size-bytes
   "Maximum file size to send to LLM. Files larger than this are skipped."
