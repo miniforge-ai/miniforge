@@ -639,6 +639,7 @@
                  "components/workflow/resources"
                  "components/spec-parser/src"
                  "components/self-healing/src"
+                 "components/self-healing/resources"
                  "components/event-stream/src"
                  "components/event-stream/resources"
                  "components/supervisory-state/src"
