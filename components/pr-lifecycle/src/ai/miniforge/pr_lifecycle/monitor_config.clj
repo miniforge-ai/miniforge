@@ -15,9 +15,8 @@
 (ns ai.miniforge.pr-lifecycle.monitor-config
   "Load shared PR monitor defaults from EDN configuration."
   (:require
-   [ai.miniforge.schema.interface :as schema]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas + config loading
@@ -40,10 +39,11 @@
 
 (defn- load-monitor-config
   []
-  (if-let [res (io/resource "config/pr-monitor/defaults.edn")]
-    (->> res slurp edn/read-string (validate! MonitorConfig))
-    (throw (ex-info "Missing classpath resource: config/pr-monitor/defaults.edn"
-                    {:hint "Add components/pr-lifecycle/resources to your classpath"}))))
+  (->> (config/load-config-resource
+        "config/pr-monitor/defaults.edn"
+        [:pr-monitor/defaults]
+        {:hint "Add components/pr-lifecycle/resources to your classpath"})
+       (validate! MonitorConfig)))
 
 (def ^:private monitor-config
   (delay (load-monitor-config)))

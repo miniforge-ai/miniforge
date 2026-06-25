@@ -31,8 +31,6 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
             [babashka.process :as process]
-            [clojure.edn :as edn]
-            [clojure.java.io :as io]
             [clojure.string :as str]
             [slingshot.slingshot :refer [try+]]))
 
@@ -70,11 +68,11 @@
 
 (defn- load-observe-phase-config
   []
-  (if-let [res (io/resource "config/workflow/observe-phase.edn")]
-    (->> res slurp edn/read-string (validate! ObservePhaseConfig))
-    (response/throw-anomaly! :anomalies/not-found
-                            "Missing classpath resource: config/workflow/observe-phase.edn"
-                            {:hint "Add components/workflow/resources to your classpath"})))
+  (->> (config/load-config-resource
+        "config/workflow/observe-phase.edn"
+        [:observe/phase-defaults]
+        {:hint "Add components/workflow/resources to your classpath"})
+       (validate! ObservePhaseConfig)))
 
 (defn- load-monitor-defaults
   []

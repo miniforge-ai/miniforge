@@ -35,7 +35,8 @@
 (def load-config-resource
   "Read an EDN config resource from the classpath, failing fast with a
    clear ex-info on a missing/malformed/non-map resource or a missing
-   required key. Arities: [path] and [path required-keys]."
+   required key. Arities: [path], [path required-keys], and
+   [path required-keys extra-ex-data]."
   resource/load-config-resource)
 (def read-config-resource-or
   "Read an EDN config resource, returning `fallback` if the resource is

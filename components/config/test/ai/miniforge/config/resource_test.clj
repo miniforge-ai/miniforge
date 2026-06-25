@@ -42,7 +42,25 @@
     (let [ex (try (resource/load-config-resource a-missing-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (= a-missing-resource (:config/resource (ex-data ex)))))))
+      (is (= a-missing-resource (:config/resource (ex-data ex))))))
+  (testing "preserves caller-supplied diagnostic ex-data"
+    (let [ex (try (resource/load-config-resource
+                   a-missing-resource
+                   nil
+                   {:hint "add the component resources to the classpath"})
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= a-missing-resource (:config/resource (ex-data ex))))
+      (is (= "add the component resources to the classpath"
+             (:hint (ex-data ex)))))))
+
+(deftest load-config-resource-extra-ex-data-contract
+  (testing "throws a clear ex-info when caller-supplied diagnostic ex-data is not a map"
+    (let [ex (try (resource/load-config-resource a-real-resource nil [:hint "bad"])
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= a-real-resource (:config/resource (ex-data ex))))
+      (is (= [:hint "bad"] (:config/extra-ex-data (ex-data ex)))))))
 
 (deftest load-config-resource-missing-key
   (testing "throws when a required key is absent, naming the key"

@@ -42,19 +42,33 @@
   (messages/create-translator "config/config/messages/system.edn"
                               :config/system))
 
+(defn- extra-ex-data-map
+  [path extra-ex-data]
+  (cond
+    (nil? extra-ex-data) {}
+    (map? extra-ex-data) extra-ex-data
+    :else (throw (ex-info "Config resource extra ex-data must be a map"
+                          {:config/resource path
+                           :config/extra-ex-data extra-ex-data}))))
+
 (defn load-config-resource
   "Read an EDN config resource from the classpath, failing fast with a
    clear ex-info when the resource is absent, malformed, not a map, or
    missing a required key. Returns the parsed map.
 
    `required-keys` (optional) is a collection of keys that must be present
-   at the top level; an empty/absent collection skips the key check."
-  ([path] (load-config-resource path nil))
-  ([path required-keys]
-   (let [url (io/resource path)]
+   at the top level; an empty/absent collection skips the key check.
+   `extra-ex-data` (optional) is merged into thrown ex-data so callers can
+   preserve domain-specific packaging hints while this namespace owns the
+   resource-loading boundary."
+  ([path] (load-config-resource path nil nil))
+  ([path required-keys] (load-config-resource path required-keys nil))
+  ([path required-keys extra-ex-data]
+   (let [ex-data (assoc (extra-ex-data-map path extra-ex-data) :config/resource path)
+         url     (io/resource path)]
      (when (nil? url)
        (throw (ex-info (t :resource/missing {:path path})
-                       {:config/resource path})))
+                       ex-data)))
      (let [parsed (try
                     (edn/read-string (slurp url :encoding "UTF-8"))
                     (catch InterruptedException e
@@ -64,15 +78,15 @@
                       (throw e))
                     (catch Exception e
                       (throw (ex-info (t :resource/malformed {:path path})
-                                      {:config/resource path}
+                                      ex-data
                                       e))))]
        (when-not (map? parsed)
          (throw (ex-info (t :resource/not-a-map {:path path})
-                         {:config/resource path})))
+                         ex-data)))
        (let [missing (vec (remove #(contains? parsed %) required-keys))]
          (when (seq missing)
            (throw (ex-info (t :resource/missing-keys {:path path :keys missing})
-                           {:config/resource path :config/missing-keys missing})))
+                           (assoc ex-data :config/missing-keys missing))))
          parsed)))))
 
 (defn read-config-resource-or
