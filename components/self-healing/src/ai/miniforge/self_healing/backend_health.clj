@@ -20,6 +20,7 @@
   "Backend health tracking and automatic failover.
    Storage: ~/.miniforge/backend_health.edn"
   (:require
+   [ai.miniforge.config.interface :as cfg]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -33,33 +34,12 @@
 ;; below are the fallback when config is absent. `config` is public so the
 ;; sibling stream-recovery / integration namespaces resolve the same
 ;; defaults instead of re-hardcoding them.
-(defn- load-config
-  "Read an EDN config resource, failing fast with a clear ex-info when the
-   resource is absent from the classpath, malformed, not a map, or missing
-   a required key — rather than a low-signal NPE/reader error at load."
-  [path required-keys]
-  (let [url (io/resource path)]
-    (when (nil? url)
-      (throw (ex-info (str "Missing config resource on classpath: " path)
-                      {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url))
-                   (catch Exception e
-                     (throw (ex-info (str "Malformed EDN config resource: " path)
-                                     {:config/resource path} e))))]
-      (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path)
-                        {:config/resource path})))
-      (let [missing (remove #(contains? parsed %) required-keys)]
-        (when (seq missing)
-          (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
-                          {:config/resource path :config/missing-keys (vec missing)})))
-        parsed))))
-
 (def config
-  (load-config "config/self-healing/backend-health.edn"
-               [:success-rate-threshold :switch-cooldown-ms :failure-recency-window-ms
-                :health-decay-ms :default-backend :fallback-order]))
+  (cfg/load-config-resource "config/self-healing/backend-health.edn"
+                            [:success-rate-threshold :switch-cooldown-ms
+                             :failure-recency-window-ms
+                             :health-decay-ms :default-backend
+                             :fallback-order]))
 
 (def ^:private default-success-rate-threshold
   "Minimum cumulative success rate (`:successful-calls / :total-calls`)

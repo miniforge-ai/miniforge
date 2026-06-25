@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/dag-executor {:local/root "../dag-executor"}
+ :deps {ai.miniforge/config       {:local/root "../config"}
+        ai.miniforge/dag-executor {:local/root "../dag-executor"}
         ai.miniforge/pr-lifecycle {:local/root "../pr-lifecycle"}
         ai.miniforge/agent        {:local/root "../agent"}
         ai.miniforge/loop         {:local/root "../loop"}

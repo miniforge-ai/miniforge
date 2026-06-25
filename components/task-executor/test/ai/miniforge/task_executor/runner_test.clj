@@ -22,8 +22,9 @@
   Tests that a task flows correctly through: environment acquisition →
   code generation → PR lifecycle → metrics accumulation → cleanup."
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.task-executor.runner :as runner]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.task-executor.runner :as runner]
+   [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Mock Data
 
@@ -523,5 +524,5 @@
   (testing "missing config resource throws a clear ex-info, not an NPE"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo #"Missing config resource on classpath"
-         (#'runner/load-config "config/task-executor/does-not-exist.edn"
-                               [:worktree-acquire-timeout-ms])))))
+         (config/load-config-resource "config/task-executor/does-not-exist.edn"
+                                      [:worktree-acquire-timeout-ms])))))
