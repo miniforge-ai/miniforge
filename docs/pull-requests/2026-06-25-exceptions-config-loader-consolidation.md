@@ -15,11 +15,10 @@ Consolidates duplicated fail-fast EDN config resource loaders into the shared
 
 ## Verification
 
-- `clojure -M:dev:test -e "(require '[clojure.test :as t] 'ai.miniforge.operator.core-test
-  'ai.miniforge.task-executor.orchestrator-test 'ai.miniforge.task-executor.runner-test
-  'ai.miniforge.self-healing.stream-recovery-test) (let [result (t/run-tests 'ai.miniforge.operator.core-test
-  'ai.miniforge.task-executor.orchestrator-test 'ai.miniforge.task-executor.runner-test
-  'ai.miniforge.self-healing.stream-recovery-test)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))"`
-  - 93 tests, 198 assertions, 0 failures, 0 errors
+```bash
+clojure -M:dev:test -e "(require '[clojure.test :as t] 'ai.miniforge.operator.core-test 'ai.miniforge.task-executor.orchestrator-test 'ai.miniforge.task-executor.runner-test 'ai.miniforge.self-healing.stream-recovery-test) (let [result (t/run-tests 'ai.miniforge.operator.core-test 'ai.miniforge.task-executor.orchestrator-test 'ai.miniforge.task-executor.runner-test 'ai.miniforge.self-healing.stream-recovery-test)] (when (pos? (+ (:fail result) (:error result))) (System/exit 1)))"
+```
+
+- 93 tests, 198 assertions, 0 failures, 0 errors
 - `bb review`
   - 288 violations, down from the 308 baseline after PR #1270

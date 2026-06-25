@@ -20,7 +20,7 @@
   "Backend health tracking and automatic failover.
    Storage: ~/.miniforge/backend_health.edn"
   (:require
-   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.config.interface :as cfg]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -35,11 +35,11 @@
 ;; sibling stream-recovery / integration namespaces resolve the same
 ;; defaults instead of re-hardcoding them.
 (def config
-  (config/load-config-resource "config/self-healing/backend-health.edn"
-                               [:success-rate-threshold :switch-cooldown-ms
-                                :failure-recency-window-ms
-                                :health-decay-ms :default-backend
-                                :fallback-order]))
+  (cfg/load-config-resource "config/self-healing/backend-health.edn"
+                            [:success-rate-threshold :switch-cooldown-ms
+                             :failure-recency-window-ms
+                             :health-decay-ms :default-backend
+                             :fallback-order]))
 
 (def ^:private default-success-rate-threshold
   "Minimum cumulative success rate (`:successful-calls / :total-calls`)
