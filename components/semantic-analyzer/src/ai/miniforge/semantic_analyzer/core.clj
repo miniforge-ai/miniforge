@@ -217,6 +217,92 @@
      :duration-ms    (- end-ms start-ms)
      :status         :completed}))
 
+;------------------------------------------------------------------------------ Layer 2b
+;; Batched judge — one LLM call per file across many rules
+
+(def ^:private batched-system-prompt
+  (str "You are a code reviewer enforcing engineering standards. Analyze ONE "
+       "source file against a list of rules, each rendered as a `### <rule-id>` "
+       "heading. Return ONLY a valid EDN vector of violation maps, no prose or "
+       "markdown. Each map: {:rule-id <the rule-id keyword> :line <int> :current "
+       "<snippet> :message <why>}. Tag every violation with the :rule-id of the "
+       "rule it violates. Return [] if the file complies with all rules."))
+
+(defn- batched-rules-block
+  [rules]
+  (str/join "\n\n"
+            (map (fn [r] (str "### " (:rule/id r) " — " (get r :rule/title "") "\n"
+                              (get r :rule/description "") "\n"
+                              (get r :rule/knowledge-content "")))
+                 rules)))
+
+(defn- build-batched-prompt
+  [rules file-path file-content]
+  {:system batched-system-prompt
+   :user   (str "## File: " file-path "\n\n```\n" file-content "\n```\n\n## Rules\n\n"
+                (batched-rules-block rules)
+                "\n\nReturn an EDN vector of violations across ALL rules (tag each "
+                ":rule-id), or [].")})
+
+(defn- ->rule-kw
+  "Coerce a model-emitted :rule-id (keyword, \":std/foo\" or \"std/foo\" string)
+   to a keyword; nil for anything else."
+  [x]
+  (cond (keyword? x) x
+        (string? x)  (keyword (str/replace x #"^:" ""))
+        :else        nil))
+
+(defn- analyze-file-batched
+  "One judge call: a single file against MANY rules. Returns canonical violation
+   maps, each attributed to the rule the model tagged it with. Violations tagged
+   with a rule-id not in `rules` are dropped (no hallucinated rules)."
+  [llm-client complete-fn rules file-path file-content]
+  (let [by-id    (into {} (map (juxt :rule/id identity)) rules)
+        {:keys [system user]} (build-batched-prompt rules file-path file-content)
+        response (complete-fn llm-client {:system system
+                                          :messages [{:role "user" :content user}]})
+        raws     (parse-judge-response (get response :content ""))]
+    (->> raws
+         (keep (fn [v]
+                 ;; Attribute by the model's tag; if a violation is untagged and
+                 ;; there is exactly one rule in the batch, attribute it to that
+                 ;; rule (an unambiguous single-rule batch). Otherwise drop it —
+                 ;; an untagged violation across many rules can't be placed.
+                 (let [rule (or (get by-id (->rule-kw (:rule-id v)))
+                                (when (= 1 (count rules)) (first rules)))]
+                   (when rule (raw->violation rule file-path v)))))
+         vec)))
+
+(defn analyze-rules-on-files
+  "Batched changed-files judge: ONE LLM call per file, covering all `rules` whose
+   globs match that file (and that are under the size limit). `files` is a vector
+   of {:path :content}, `rules` a vector of rule maps. Returns
+   {:by-rule {rule-id [violation...]} :files-analyzed int :calls int
+    :duration-ms int :status :completed}.
+
+   This collapses the per-rule-per-file judge (analyze-rule-on-files run once per
+   rule) into one call per file: the rule pack is sent once per file, not once
+   per (rule, file)."
+  [llm-client complete-fn rules files]
+  (let [start-ms (System/currentTimeMillis)]
+    (loop [fs (seq files), by-rule {}, analyzed 0, calls 0]
+      (if-let [{:keys [path content]} (first fs)]
+        (let [applicable (filterv #(file-matches-globs?
+                                    path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
+                                  rules)]
+          (if (and (seq applicable) (string? path) (string? content)
+                   (file-under-size-limit? content))
+            (let [viols   (analyze-file-batched llm-client complete-fn applicable path content)
+                  by-rule (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v))
+                                  by-rule viols)]
+              (recur (next fs) by-rule (inc analyzed) (inc calls)))
+            (recur (next fs) by-rule analyzed calls)))
+        {:by-rule        by-rule
+         :files-analyzed analyzed
+         :calls          calls
+         :duration-ms    (- (System/currentTimeMillis) start-ms)
+         :status         :completed}))))
+
 (defn- analyze-rule-with-timeout
   "Run analyze-rule with a timeout. Returns result or timeout marker."
   [llm-client complete-fn repo-path rule timeout-ms]

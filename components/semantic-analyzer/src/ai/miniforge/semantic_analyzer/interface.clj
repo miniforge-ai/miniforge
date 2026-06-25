@@ -37,6 +37,14 @@
    map shape as analyze-rule."
   core/analyze-rule-on-files)
 
+(def analyze-rules-on-files
+  "Batched changed-files judge: ONE LLM call per file across MANY rules.
+   Args: llm-client, complete-fn, rules (vector of rule maps), files (vector of
+   {:path :content}). Sends the rule pack once per file (not per rule×file).
+   Returns {:by-rule {rule-id [violation...]} :files-analyzed int :calls int
+   :duration-ms int :status keyword}."
+  core/analyze-rules-on-files)
+
 (def analyze-rules-parallel
   "Analyze many behavioral rules in parallel batches with per-rule timeouts.
    Args: llm-client, complete-fn, repo-path (string), rules (vector of rule

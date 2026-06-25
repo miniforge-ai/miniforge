@@ -216,6 +216,26 @@
                    (-> @seen :messages first :content))
           "judge prompt must contain the changed file's content"))))
 
+(deftest semantic-rules-batched-into-one-call-per-file-test
+  (testing "two acting semantic rules are judged in ONE batched call per changed
+            file, not one call per rule; both rules' violations are distributed"
+    (let [calls         (atom 0)
+          fake-complete (fn [_client _request]
+                          (swap! calls inc)
+                          {:content (str "[{:rule-id :test/sem-a :line 1 :message \"a\"} "
+                                         "{:rule-id :test/sem-b :line 1 :message \"b\"}]")})
+          ctx           (assoc (ctx-with
+                                [(pack (semantic-rule :id :test/sem-a :phases #{:verify}
+                                                      :action :hard-halt)
+                                       (semantic-rule :id :test/sem-b :phases #{:verify}
+                                                      :action :hard-halt))])
+                               :llm-backend ::client
+                               :complete-fn fake-complete)
+          result        (sut/check-policy-verify dirty-code-artifact ctx)]
+      (is (= 1 @calls) "one batched LLM call for two semantic rules on one file")
+      (is (not (:passed? result)))
+      (is (= 2 (count (:errors result))) "both rules block"))))
+
 ;------------------------------------------------------------------------------ Phase scoping
 
 (deftest phase-scoping-test
