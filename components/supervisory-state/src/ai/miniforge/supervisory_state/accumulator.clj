@@ -28,8 +28,7 @@
    This namespace knows nothing about emission, persistence, or threading.
    It is a pure function from an event-stream prefix to an EntityTable."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
+   [ai.miniforge.config.interface :as config]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -553,10 +552,7 @@
    Throws if the resource is missing — the file ships with the component,
    so its absence indicates a packaging bug worth failing fast on."
   []
-  (if-let [r (io/resource task-kanban-mapping-resource)]
-    (edn/read-string (slurp r))
-    (throw (ex-info "supervisory-state: task-kanban mapping resource missing"
-                    {:resource task-kanban-mapping-resource}))))
+  (config/load-config-resource task-kanban-mapping-resource))
 
 (def ^{:doc "Memoized status→column map loaded lazily from
   [[task-kanban-mapping-resource]]. Tests that need to exercise a
