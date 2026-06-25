@@ -23,11 +23,10 @@
    transition policy explicit, testable, and backed by the shared FSM
    foundation component."
   (:require
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.pr-lifecycle.messages :as messages]
-   [ai.miniforge.schema.interface :as schema]
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; FSM definition
@@ -51,11 +50,9 @@
 
 (defn- load-fsm-config
   []
-  (if-let [resource (io/resource fsm-config-resource)]
-    (->> resource slurp edn/read-string (validate! PrLifecycleFsmConfig))
-    (throw (ex-info (messages/t :config/missing-resource
-                                {:resource fsm-config-resource})
-                    {:hint (messages/t :config/classpath-hint)}))))
+  (validate! PrLifecycleFsmConfig
+             (config/load-config-resource fsm-config-resource
+                                          [:pr-lifecycle/fsm])))
 
 (def ^:private fsm-config
   "Validated PR lifecycle FSM configuration loaded eagerly at require time."

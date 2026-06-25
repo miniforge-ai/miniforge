@@ -33,7 +33,7 @@
    via `schema/validate!` before the pure core runs. Events read from
    disk are filtered with `schema/valid-event?` — events without a
    keyword `:event/type` are dropped at the boundary, so everything
-   the extractors see is well-shaped."
+  the extractors see is well-shaped."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]

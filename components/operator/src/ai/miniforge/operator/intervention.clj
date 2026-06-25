@@ -20,13 +20,12 @@
   "Pure bounded intervention lifecycle helpers.
 
    This namespace models supervisory intervention intent and lifecycle state
-   transitions. It does not apply control actions directly."
+  transitions. It does not apply control actions directly."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
-   [clojure.set :as set]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.operator.messages :as messages]))
+   [ai.miniforge.config.interface :as config]
+   [ai.miniforge.operator.messages :as messages]
+   [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Config
@@ -37,10 +36,9 @@
 
 (defn- load-intervention-config
   []
-  (if-let [resource (io/resource intervention-config-resource)]
-    (:operator/intervention (edn/read-string (slurp resource)))
-    (throw (ex-info "Missing operator intervention config resource"
-                    {:resource intervention-config-resource}))))
+  (:operator/intervention
+   (config/load-config-resource intervention-config-resource
+                                [:operator/intervention])))
 
 (def ^:private intervention-config
   (delay (load-intervention-config)))

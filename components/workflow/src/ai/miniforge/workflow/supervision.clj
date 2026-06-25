@@ -23,8 +23,7 @@
    `workflow.fsm`. It models the runtime supervisory stance around a run,
   not the workflow graph itself."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
+   [ai.miniforge.config.interface :as config]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.messages :as messages]))
 
@@ -37,10 +36,9 @@
 
 (defn- load-supervision-machine-config
   []
-  (if-let [resource (io/resource supervision-config-resource)]
-    (:workflow/supervision (edn/read-string (slurp resource)))
-    (throw (ex-info "Missing workflow supervision config resource"
-                    {:resource supervision-config-resource}))))
+  (:workflow/supervision
+   (config/load-config-resource supervision-config-resource
+                                [:workflow/supervision])))
 
 (def supervision-machine-config
   "Data-driven machine config used by the shared fsm component."
