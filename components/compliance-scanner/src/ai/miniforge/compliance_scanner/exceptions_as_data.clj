@@ -72,20 +72,38 @@
 
 (def ^:private boundary-segment-patterns
   "Namespace segments that mark a boundary file. A file is a boundary
-   if any of its dotted-segment substrings matches one of these."
-  #{"cli" "boundary" "http" "web" "mcp" "consumer" "listener"})
+   if any of its dotted segments matches one of these."
+  #{"cli" "boundary" "http" "web" "mcp" "consumer" "listener" "listeners"})
+
+(def ^:private boundary-prefix-patterns
+  "Whole namespace prefixes that mark boundary bases whose Polylith name
+   cannot be represented as a standalone dotted segment. Keep this list
+   narrow so component names that merely contain boundary words, such as
+   `bb-data-plane-http`, remain non-boundary."
+  #{"ai.miniforge.mcp-context-server"})
 
 (def ^:private boundary-suffix-patterns
   "Whole-namespace suffixes that mark boundary files."
   #{"main"})
 
 (defn- ns-segments
-  "Split a fully-qualified ns symbol into its dotted segments. Returns []
-   when the value is not a usable ns symbol."
+  "Split a fully-qualified ns symbol or string into its dotted segments.
+   Returns [] when the value is not a usable ns value."
   [ns-sym]
   (if (and ns-sym (or (symbol? ns-sym) (string? ns-sym)))
-    (str/split (name ns-sym) #"\.")
+    (str/split (str ns-sym) #"\.")
     []))
+
+(defn- boundary-prefix?
+  [ns-sym]
+  (let [ns-str (when (and ns-sym (or (symbol? ns-sym) (string? ns-sym)))
+                 (str ns-sym))]
+    (boolean
+     (when ns-str
+       (some (fn [prefix]
+               (or (= ns-str prefix)
+                   (str/starts-with? ns-str (str prefix "."))))
+             boundary-prefix-patterns)))))
 
 (defn boundary-namespace?
   "Return true when the given namespace symbol denotes a boundary file
@@ -101,6 +119,7 @@
         last-seg (last segs)]
     (boolean
      (or (some boundary-segment-patterns segs)
+         (boundary-prefix? ns-sym)
          (when last-seg
            (or (contains? boundary-suffix-patterns last-seg)
                (str/ends-with? last-seg "-main")))))))
