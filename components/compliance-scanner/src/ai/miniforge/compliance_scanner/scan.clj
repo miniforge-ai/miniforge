@@ -426,14 +426,22 @@
 
 (defn- run-exceptions-as-data
   "Run the AST-based exceptions-as-data linter against the repo. Returns
-   a vector of Violation maps (already in the canonical scanner shape).
+   a vector of actionable Violation maps when selected, or nil when the
+   rule selector leaves the linter off. Returned rows are already in the
+   canonical scanner shape.
+
+   The raw exceptions-as-data scanner preserves `:fatal-only` records for
+   audit counts, but the top-level compliance review treats only
+   `:cleanup-needed` rows as standards debt. Programmer-error guards are
+   an explicit rule carve-out and should not inflate `bb review` totals.
 
    When `changed-files` is non-nil (incremental mode via `:since`), the
    linter restricts its file walk to the changed set — matching the
    behavior of content rules so `bb review --since` stays fast."
   [repo-path changed-files opts]
   (when (exceptions-as-data-selected? opts)
-    (:violations (exc-data/scan-repo repo-path changed-files))))
+    (filterv #(= :cleanup-needed (:classification %))
+             (:violations (exc-data/scan-repo repo-path changed-files)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Top-level entry point
