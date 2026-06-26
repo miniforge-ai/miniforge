@@ -83,6 +83,21 @@
     (spit f content)
     f))
 
+(defn- run-in-dir!
+  "Run a subprocess in `dir`, clearing inherited Git hook env vars."
+  [dir & cmd]
+  (let [pb       (doto (ProcessBuilder. ^java.util.List (vec cmd))
+                   (.directory dir)
+                   (.inheritIO))
+        env      (.environment pb)
+        git-keys (filterv #(re-find #"^GIT_" %) (keys env))]
+    (doseq [k git-keys] (.remove env k))
+    (let [exit (.waitFor (.start pb))]
+      (when-not (zero? exit)
+        (throw (ex-info "Test subprocess failed"
+                        {:cmd cmd :dir (.getAbsolutePath dir) :exit exit})))
+      exit)))
+
 (deftest scan-repo-detects-210-in-temp-dir
   (testing "scan-repo finds Dewey 210 violations in a synthetic repo"
     (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
@@ -93,13 +108,7 @@
         ;; can build an index (scanner uses `git ls-tree HEAD`).
         ;; Clear ALL GIT_* env vars so pre-commit hook env doesn't
         ;; bleed into the child git processes.
-        (let [run! (fn [& cmd]
-                     (let [pb (doto (ProcessBuilder. ^java.util.List (vec cmd))
-                                (.directory tmp-dir))
-                           env (.environment pb)
-                           git-keys (filterv #(re-find #"^GIT_" %) (keys env))]
-                       (doseq [k git-keys] (.remove env k))
-                       (.waitFor (.start pb))))]
+        (let [run! (partial run-in-dir! tmp-dir)]
           (run! "git" "init")
           ;; Disable GPG/SSH signing — 1Password agent blocks in subprocess contexts
           (run! "git" "config" "commit.gpgsign" "false")
@@ -139,6 +148,39 @@
             (is (every? #(pos-int? (:line %)) viols))))
         (finally
           ;; Cleanup
+          (doseq [f (reverse (file-seq tmp-dir))]
+            (.delete f)))))))
+
+(deftest scan-repo-excludes-fatal-only-exceptions-as-data-rows
+  (testing "top-level review output keeps cleanup-needed rows actionable"
+    (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
+                                 (str "cs-exc-filter-test-" (System/currentTimeMillis)))
+                    .mkdirs)]
+      (try
+        (let [run! (partial run-in-dir! tmp-dir)]
+          (run! "git" "init")
+          (run! "git" "config" "commit.gpgsign" "false")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "--allow-empty" "-m" "init")
+          (write-temp-file! tmp-dir
+            "components/foo/src/ai/miniforge/foo/core.clj"
+            (str "(ns ai.miniforge.foo.core)\n"
+                 "(defn cleanup-site []\n"
+                 "  (throw (ex-info \"GET failed\" {})))\n"
+                 "(defn fatal-site []\n"
+                 "  (throw (ex-info \"Unknown kind\" {})))\n"))
+          (run! "git" "add" ".")
+          (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
+                "commit" "-m" "add exceptions"))
+        (let [result (scan/scan-repo (.getAbsolutePath tmp-dir)
+                                     (.getAbsolutePath tmp-dir)
+                                     {:rules :std/exceptions-as-data})
+              viols  (:violations result)]
+          (is (= [:std/exceptions-as-data] (:rules-scanned result)))
+          (is (= 1 (count viols)))
+          (is (= :cleanup-needed (:classification (first viols))))
+          (is (re-find #"GET failed" (:current (first viols)))))
+        (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 
