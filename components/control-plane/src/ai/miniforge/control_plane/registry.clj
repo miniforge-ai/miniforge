@@ -28,6 +28,7 @@
    Layer 2: Query operations
    Layer 3: Heartbeat updates"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane.state-machine :as sm]))
 
@@ -191,6 +192,12 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Heartbeat updates
 
+(defn- agent-not-found-anomaly
+  [agent-id]
+  (anomaly/anomaly :not-found
+                   (messages/t :registry/agent-not-found)
+                   {:agent/id agent-id}))
+
 (defn record-heartbeat!
   "Record a heartbeat from an agent, updating timestamp and optional fields.
 
@@ -227,15 +234,18 @@
    - agent-id - UUID of the agent
    - new-status - Target status keyword
 
-   Returns: Updated agent record.
+   Returns: Updated agent record, or an anomaly map with
+   `:anomaly/type :not-found` when `agent-id` is absent.
    Throws: ExceptionInfo if transition is invalid."
   [registry agent-id new-status]
   (let [profile (sm/get-profile)
         current-status (get-in @registry [:agents agent-id :agent/status])]
-    (when-not current-status
-      (throw (ex-info (messages/t :registry/agent-not-found) {:agent/id agent-id})))
-    (sm/validate-transition profile current-status new-status)
-    (update-agent! registry agent-id {:agent/status new-status})))
+    (if-not current-status
+      (agent-not-found-anomaly agent-id)
+      (do
+        (sm/validate-transition profile current-status new-status)
+        (or (update-agent! registry agent-id {:agent/status new-status})
+            (agent-not-found-anomaly agent-id))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -19,6 +19,7 @@
 (ns ai.miniforge.control-plane.interface-test
   (:require
    [clojure.test :refer [deftest testing is are]]
+   [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.interface :as cp]))
 
 ;------------------------------------------------------------------------------ State Machine Tests
@@ -129,17 +130,39 @@
         (is (= :running (:agent/status updated)))))))
 
 (deftest transition-agent-test
-  (let [reg (cp/create-registry)
-        agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
-        agent-id (:agent/id agent)]
-    (testing "Valid transition"
+  (testing "Valid transition"
+    (let [reg (cp/create-registry)
+          agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
+          agent-id (:agent/id agent)]
       (cp/transition-agent! reg agent-id :running)
-      (is (= :running (:agent/status (cp/get-agent reg agent-id)))))
+      (is (= :running (:agent/status (cp/get-agent reg agent-id))))))
 
-    (testing "Invalid transition throws"
+  (testing "Invalid transition throws"
+    (let [reg (cp/create-registry)
+          agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
+          agent-id (:agent/id agent)]
+      (cp/transition-agent! reg agent-id :running)
       (cp/transition-agent! reg agent-id :completed)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid"
-        (cp/transition-agent! reg agent-id :running))))))
+                            (cp/transition-agent! reg agent-id :running)))))
+
+  (testing "Missing agent returns not-found anomaly"
+    (let [reg (cp/create-registry)
+          missing-id (java.util.UUID/randomUUID)
+          result (cp/transition-agent! reg missing-id :running)]
+      (is (= :not-found (:anomaly/type result)))
+      (is (= {:agent/id missing-id}
+             (:anomaly/data result)))))
+
+  (testing "Concurrent removal during transition returns not-found anomaly"
+    (let [reg (cp/create-registry)
+          agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
+          agent-id (:agent/id agent)]
+      (with-redefs [registry/update-agent! (fn [& _] nil)]
+        (let [result (cp/transition-agent! reg agent-id :running)]
+          (is (= :not-found (:anomaly/type result)))
+          (is (= {:agent/id agent-id}
+                 (:anomaly/data result))))))))
 
 (deftest agents-by-status-test
   (let [reg (cp/create-registry)]

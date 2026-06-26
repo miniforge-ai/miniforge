@@ -118,7 +118,9 @@
   registry/record-heartbeat!)
 
 (def transition-agent!
-  "Transition an agent to a new status with validation."
+  "Transition an agent to a new status with validation.
+   Returns an updated agent record, or an anomaly map with
+   `:anomaly/type :not-found` when the agent ID is absent."
   registry/transition-agent!)
 
 ;------------------------------------------------------------------------------ Layer 2
