@@ -224,8 +224,10 @@
 ;; Batched judge — one LLM call per file across many rules
 
 (defn- batched-rules-block
-  "Render each rule as a `### <id>` heading block from the `:batched-rule-item`
-   template, joined — no raw prompt strings in code."
+  "Render each rule as a `### <id>` heading block by interpolating the
+   `:batched-rule-item` prompt template, joined. (The heading markup lives in the
+   template, not inline here; `judge-templates` carries a defensive fallback for
+   when the resource is absent.)"
   [rules]
   (let [item (get @judge-templates :batched-rule-item "")]
     (str/join "\n\n"
@@ -238,8 +240,8 @@
                    rules))))
 
 (defn- build-batched-prompt
-  "Batched system + user prompts from the `:batched-system` / `:batched-user`
-   templates (resource/locale), not inline strings."
+  "Build the batched system + user prompts by interpolating the
+   `:batched-system` / `:batched-user` prompt templates from `judge-templates`."
   [rules file-path file-content]
   (let [templates @judge-templates]
     {:system (get templates :batched-system "")

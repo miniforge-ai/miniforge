@@ -253,6 +253,7 @@
                                   "{:rule-id :std/b :line 2 :message \"b bad\"}]")})
           files  [{:path "src/core.clj" :content "(def x 1)"}]
           result (sut/analyze-rules-on-files :mock mock [rule-a rule-b] files)]
+      (is (= 1 @calls) "complete-fn actually invoked exactly once (not just the reported counter)")
       (is (= 1 (:calls result)) "one batched call for two rules on one file")
       (is (= 1 (:files-analyzed result)))
       (is (= 1 (count (get-in result [:by-rule :std/a]))))
@@ -261,9 +262,11 @@
   (testing "a rule whose glob does not match a file is not judged against it"
     (let [clj-rule {:rule/id :std/clj :rule/title "Clj" :rule/category "001" :rule/severity :minor
                     :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
-          mock     (fn [_client _request] {:success true :content "[]"})
+          calls    (atom 0)
+          mock     (fn [_client _request] (swap! calls inc) {:success true :content "[]"})
           files    [{:path "docs/readme.md" :content "text"}]
           result   (sut/analyze-rules-on-files :mock mock [clj-rule] files)]
+      (is (= 0 @calls) "complete-fn never invoked when no rule applies to the file")
       (is (= 0 (:calls result)) "no applicable rule for the file -> no call"))))
 
 (def ^:private base-rule
