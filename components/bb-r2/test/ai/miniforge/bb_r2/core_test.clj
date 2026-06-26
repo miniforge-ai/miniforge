@@ -19,8 +19,9 @@
 (ns ai.miniforge.bb-r2.core-test
   "Pure layer tests: classification + command-vector shape. Side effects
    are exercised by `pull!`/`upload!` via injected `:sh-fn`/`:run-fn` in
-   a single happy-path + missing-key test each."
-  (:require [clojure.test :refer [deftest testing is]]
+   focused success, missing-key, invalid-input, and failure-path tests."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-r2.core :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -89,14 +90,28 @@
                                           :err "The specified key does not exist."})})))))
 
 (deftest test-pull-requires-worker-dir
-  (testing "given no :worker-dir → throws with :opts :worker-dir"
-    (is (thrown? Exception
-                 (sut/pull! "k" "/tmp/d" {:bucket "bkt"})))))
+  (testing "given no :worker-dir → invalid-input anomaly"
+    (let [result (sut/pull! "k" "/tmp/d" {:bucket "bkt"})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :worker-dir (get-in result [:anomaly/data :opts]))))))
 
 (deftest test-pull-requires-bucket
-  (testing "given no :bucket → throws with :opts :bucket"
-    (is (thrown? Exception
-                 (sut/pull! "k" "/tmp/d" {:worker-dir "/tmp/w"})))))
+  (testing "given no :bucket → invalid-input anomaly"
+    (let [result (sut/pull! "k" "/tmp/d" {:worker-dir "/tmp/w"})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :bucket (get-in result [:anomaly/data :opts]))))))
+
+(deftest test-pull-wrangler-error-returns-anomaly
+  (testing "given unknown wrangler failure → fault anomaly"
+    (let [result (sut/pull! "k" "/tmp/d"
+                            {:worker-dir "/tmp/w"
+                             :bucket "bkt"
+                             :sh-fn (fn [& _] {:exit 2 :err "auth failed"})})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= {:exit 2 :err "auth failed"} (:anomaly/data result))))))
 
 (deftest test-upload-invokes-run-fn-and-returns-dest
   (testing "given run-fn → invoked with the built cmd, returns s3 URL"
