@@ -280,6 +280,32 @@
                    (when rule (raw->violation rule file-path v)))))
          vec)))
 
+(defn- judgeable-file?
+  "True when a changed-file entry has the string path/content shape the judge
+   needs and is under the size limit. (A non-string path would throw in the glob
+   match, so this guards it.)"
+  [{:keys [path content]}]
+  (and (string? path) (string? content) (file-under-size-limit? content)))
+
+(defn- file-rule-violations
+  "Judge ONE changed file against the rules whose globs match it. Returns the
+   vector of canonical violations (possibly empty) when a judge call was made, or
+   `nil` when the file is skipped — bad shape, or no rule applies — so no LLM
+   call is spent on it."
+  [llm-client complete-fn rules {:keys [path content] :as file}]
+  (when (judgeable-file? file)
+    (let [applicable (filterv #(file-matches-globs?
+                                path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
+                              rules)]
+      (when (seq applicable)
+        (analyze-file-batched llm-client complete-fn applicable path content)))))
+
+(defn- index-by-rule
+  "Fold a flat seq of canonical violations onto `by-rule` as
+   {rule-id [violation...]}."
+  [by-rule violations]
+  (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v)) by-rule violations))
+
 (defn analyze-rules-on-files
   "Batched changed-files judge: ONE LLM call per file, covering all `rules` whose
    globs match that file (and that are under the size limit). `files` is a vector
@@ -293,20 +319,14 @@
   [llm-client complete-fn rules files]
   (let [start-ms (System/currentTimeMillis)]
     (loop [fs (seq files), by-rule {}, analyzed 0, calls 0]
-      (if-let [{:keys [path content]} (first fs)]
-        ;; Validate the file shape BEFORE touching globs — file-matches-globs?
-        ;; would throw on a non-string path.
-        (if-not (and (string? path) (string? content) (file-under-size-limit? content))
-          (recur (next fs) by-rule analyzed calls)
-          (let [applicable (filterv #(file-matches-globs?
-                                      path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
-                                    rules)]
-            (if (seq applicable)
-              (let [viols   (analyze-file-batched llm-client complete-fn applicable path content)
-                    by-rule (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v))
-                                    by-rule viols)]
-                (recur (next fs) by-rule (inc analyzed) (inc calls)))
-              (recur (next fs) by-rule analyzed calls))))
+      (if-let [file (first fs)]
+        (let [viols (file-rule-violations llm-client complete-fn rules file)]
+          (cond
+            ;; skipped (bad shape or no applicable rule) — no call spent
+            (nil? viols) (recur (next fs) by-rule analyzed calls)
+            ;; judged — one call made; fold its violations (possibly none)
+            :else        (recur (next fs) (index-by-rule by-rule viols)
+                                (inc analyzed) (inc calls))))
         {:by-rule        by-rule
          :files-analyzed analyzed
          :calls          calls
