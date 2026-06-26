@@ -19,7 +19,9 @@
 (ns ai.miniforge.bb-data-plane-http.core-test
   "Layer 0 + Layer 2 tested here. Layer 1 (process lifecycle) is exercised
    by consumer repos running `bb test:signals:fixtures` or equivalent."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [babashka.process :as p]
+            [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-data-plane-http.core :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,11 +70,31 @@
            (sut/http-get-json "http://example"
                               {:http-fn (fn [_] {:status 200 :body "{\"a\":1,\"b\":\"c\"}"})})))))
 
-(deftest test-http-get-json-throws-on-non-200
-  (testing "given 500 response → throws ex-info"
-    (is (thrown? Exception
-                 (sut/http-get-json "http://example"
-                                    {:http-fn (fn [_] {:status 500 :body "err"})})))))
+(deftest test-http-get-json-returns-anomaly-on-non-200
+  (testing "given 500 response → anomaly"
+    (let [result (sut/http-get-json "http://example"
+                                    {:http-fn (fn [_] {:status 500 :body "err"})})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= {:status 500 :body "err"} (:anomaly/data result))))))
+
+(deftest test-http-get-json-returns-anomaly-on-invalid-json
+  (testing "given 200 response with invalid JSON → anomaly"
+    (let [result (sut/http-get-json "http://example"
+                                    {:http-fn (fn [_] {:status 200 :body "{bad"})})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= "http://example" (get-in result [:anomaly/data :url])))
+      (is (= "com.fasterxml.jackson.core.JsonParseException"
+             (get-in result [:anomaly/data :anomaly/ex-class]))))))
+
+(deftest test-http-get-json-returns-anomaly-on-transport-error
+  (testing "given http-fn that throws → anomaly"
+    (let [result (sut/http-get-json "http://example"
+                                    {:http-fn (fn [_] (throw (Exception. "offline")))})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= "offline" (get-in result [:anomaly/data :anomaly/ex-message]))))))
 
 (deftest test-http-post-json-sends-body-and-parses
   (testing "given http-fn capturing args → body serialized, response parsed"
@@ -89,11 +111,31 @@
       (is (= "{\"scenario\":\"live\"}"
              (get-in @captured [:opts :body]))))))
 
-(deftest test-http-post-json-throws-on-non-200
-  (testing "given 400 response → throws ex-info"
-    (is (thrown? Exception
-                 (sut/http-post-json "http://example" {}
-                                     {:http-fn (fn [_ _] {:status 400 :body "bad"})})))))
+(deftest test-http-post-json-returns-anomaly-on-non-200
+  (testing "given 400 response → anomaly"
+    (let [result (sut/http-post-json "http://example" {}
+                                     {:http-fn (fn [_ _] {:status 400 :body "bad"})})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= {:status 400 :body "bad"} (:anomaly/data result))))))
+
+(deftest test-http-post-json-returns-anomaly-on-invalid-json
+  (testing "given 200 response with invalid JSON → anomaly"
+    (let [result (sut/http-post-json "http://example" {:scenario "live"}
+                                     {:http-fn (fn [_ _] {:status 200 :body "{bad"})})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= "http://example" (get-in result [:anomaly/data :url])))
+      (is (= "com.fasterxml.jackson.core.JsonParseException"
+             (get-in result [:anomaly/data :anomaly/ex-class]))))))
+
+(deftest test-http-post-json-returns-anomaly-on-transport-error
+  (testing "given http-fn that throws → anomaly"
+    (let [result (sut/http-post-json "http://example" {:scenario "live"}
+                                     {:http-fn (fn [_ _] (throw (Exception. "offline")))})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= "offline" (get-in result [:anomaly/data :anomaly/ex-message]))))))
 
 ;------------------------------------------------------------------------------ wait-ready!
 ;; Uses injected http + sleep so it's deterministic.
@@ -107,16 +149,26 @@
                              :max-attempts 1})))))
 
 (deftest test-wait-ready-exhausts-attempts
-  (testing "given http-fn that always fails → throws with :attempts"
-    (let [ex (try
-               (sut/wait-ready! "http://example"
-                                {:http-fn (fn [_] (throw (Exception. "nope")))
-                                 :sleep-fn (fn [] nil)
-                                 :max-attempts 3})
-               nil
-               (catch Exception e e))]
-      (is (some? ex))
-      (is (= 3 (:attempts (ex-data ex)))))))
+  (testing "given http-fn that always fails → anomaly with :attempts"
+    (let [result (sut/wait-ready! "http://example"
+                                  {:http-fn (fn [_] (throw (Exception. "nope")))
+                                   :sleep-fn (fn [] nil)
+                                   :max-attempts 3})]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= 3 (get-in result [:anomaly/data :attempts]))))))
+
+(deftest test-wait-ready-reports-process-death
+  (testing "given a dead process handle before readiness → anomaly"
+    (with-redefs [p/alive? (constantly false)]
+      (let [result (sut/wait-ready! "http://example"
+                                    {:http-fn (fn [_] {:status 503})
+                                     :sleep-fn (fn [] nil)
+                                     :max-attempts 3
+                                     :proc-handle ::proc})]
+        (is (anomaly/anomaly? result))
+        (is (= :fault (:anomaly/type result)))
+        (is (= {:health-url "http://example"} (:anomaly/data result)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

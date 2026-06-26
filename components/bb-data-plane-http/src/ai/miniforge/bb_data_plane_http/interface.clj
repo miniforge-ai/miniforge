@@ -66,7 +66,8 @@
 
 (defn wait-ready!
   "Poll `health-url` until it responds (< 500) or attempts exhausted.
-   Throws ex-info on exhaustion or early process death.
+   Returns `:ready` on success or an anomaly on exhaustion or early
+   process death.
    `opts`: `:max-attempts` (60), `:http-fn`, `:sleep-fn` (250 ms),
    `:proc-handle`."
   ([health-url]      (core/wait-ready! health-url {}))
@@ -86,14 +87,14 @@
   ([url opts] (core/http-get-body url opts)))
 
 (defn http-get-json
-  "GET `url`; parse JSON body into keywordized map. Throws ex-info on
-   non-200. `opts`: `:http-fn`."
+  "GET `url`; parse JSON body into keywordized map. Returns an anomaly
+   on non-200. `opts`: `:http-fn`."
   ([url]      (core/http-get-json url {}))
   ([url opts] (core/http-get-json url opts)))
 
 (defn http-post-json
   "POST `url` with `body-map` as JSON. Parse response JSON.
-   Throws ex-info on non-200. `opts`: `:http-fn`."
+   Returns an anomaly on non-200. `opts`: `:http-fn`."
   ([url body-map]      (core/http-post-json url body-map {}))
   ([url body-map opts] (core/http-post-json url body-map opts)))
 

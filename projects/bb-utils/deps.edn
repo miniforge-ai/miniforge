@@ -9,7 +9,8 @@
 
 {:paths []
 
- :deps {ai.miniforge/bb-paths          {:local/root "../../components/bb-paths"}
+ :deps {ai.miniforge/anomaly           {:local/root "../../components/anomaly"}
+        ai.miniforge/bb-paths          {:local/root "../../components/bb-paths"}
         ai.miniforge/bb-dev-tools      {:local/root "../../components/bb-dev-tools"}
         ai.miniforge/bb-out            {:local/root "../../components/bb-out"}
         ai.miniforge/bb-platform       {:local/root "../../components/bb-platform"}

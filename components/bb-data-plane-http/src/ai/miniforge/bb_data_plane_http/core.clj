@@ -22,7 +22,8 @@
    Layer 0: pure config resolution + URL/cmd builders.
    Layer 1: lifecycle side effects (build, start, wait-ready, destroy).
    Layer 2: HTTP helpers that take an injectable `:http-fn`."
-  (:require [ai.miniforge.bb-paths.interface :as paths]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.bb-paths.interface :as paths]
             [ai.miniforge.bb-proc.interface :as proc]
             [babashka.http-client :as http]
             [babashka.process :as p]
@@ -92,10 +93,13 @@
           dead?  (and proc-handle (not (p/alive? proc-handle)))]
       (cond
         ready?                    :ready
-        dead?                     (throw (ex-info "Data plane exited during startup" {}))
-        (>= attempt max-attempts) (throw (ex-info "Data plane did not become ready"
-                                                  {:attempts max-attempts
-                                                   :health-url health-url}))
+        dead?                     (anomaly/anomaly :fault
+                                                   "Data plane exited during startup"
+                                                   {:health-url health-url})
+        (>= attempt max-attempts) (anomaly/anomaly :fault
+                                                   "Data plane did not become ready"
+                                                   {:attempts max-attempts
+                                                    :health-url health-url})
         :else                     (do (sleep-fn) (recur (inc attempt)))))))
 
 (defn destroy!
@@ -114,22 +118,36 @@
 
 (defn http-get-json
   [url {:keys [http-fn] :or {http-fn default-http-get}}]
-  (let [resp (http-fn url)]
-    (if (= 200 (:status resp))
-      (json/parse-string (:body resp) true)
-      (throw (ex-info (str "GET " url " failed")
-                      {:status (:status resp) :body (:body resp)})))))
+  (try
+    (let [resp (http-fn url)]
+      (if (= 200 (:status resp))
+        (json/parse-string (:body resp) true)
+        (anomaly/anomaly :fault
+                         (str "GET " url " failed")
+                         {:status (:status resp) :body (:body resp)})))
+    (catch Exception e
+      (anomaly/exception-anomaly :fault
+                                 (str "GET " url " failed")
+                                 {:url url}
+                                 e))))
 
 (defn http-post-json
   [url body-map {:keys [http-fn] :or {http-fn default-http-post}}]
-  (let [resp (http-fn url
-                      {:headers {"Content-Type" "application/json"}
-                       :body    (json/generate-string body-map)
-                       :throw   false})]
-    (if (= 200 (:status resp))
-      (json/parse-string (:body resp) true)
-      (throw (ex-info (str "POST " url " failed")
-                      {:status (:status resp) :body (:body resp)})))))
+  (try
+    (let [resp (http-fn url
+                        {:headers {"Content-Type" "application/json"}
+                         :body    (json/generate-string body-map)
+                         :throw   false})]
+      (if (= 200 (:status resp))
+        (json/parse-string (:body resp) true)
+        (anomaly/anomaly :fault
+                         (str "POST " url " failed")
+                         {:status (:status resp) :body (:body resp)})))
+    (catch Exception e
+      (anomaly/exception-anomaly :fault
+                                 (str "POST " url " failed")
+                                 {:url url}
+                                 e))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
