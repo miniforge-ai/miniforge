@@ -1,7 +1,8 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/connector    {:local/root "../connector"}
+ :deps {ai.miniforge/anomaly      {:local/root "../anomaly"}
+        ai.miniforge/connector    {:local/root "../connector"}
         ai.miniforge/data-quality {:local/root "../data-quality"}
         ai.miniforge/pipeline     {:local/root "../pipeline"}
-        ai.miniforge/schema          {:local/root "../schema"}}
+        ai.miniforge/schema       {:local/root "../schema"}}
  :aliases {:test {:extra-paths ["test" "test-resources"]
                   :extra-deps {}}}}

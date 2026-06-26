@@ -81,7 +81,9 @@
 
 (defn instantiate-connectors
   "Create connector instances from a {symbolic-ref → type-keyword} map.
-   Returns {:connector-refs {ref → uuid} :connectors {uuid → instance}}."
+   Returns {:connector-refs {ref → uuid} :connectors {uuid → instance}},
+   or an anomaly map with `:anomaly/type :not-found` when a connector type is
+   unregistered."
   [registry connector-refs]
   (conn-reg/instantiate-connectors registry connector-refs))
 

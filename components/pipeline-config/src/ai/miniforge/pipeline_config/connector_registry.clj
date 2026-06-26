@@ -1,6 +1,7 @@
 (ns ai.miniforge.pipeline-config.connector-registry
   "Atom-backed registry mapping connector type keywords to factory functions."
-  (:require [ai.miniforge.pipeline-config.messages :as msg])
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.pipeline-config.messages :as msg])
   (:import [java.util UUID]))
 
 (defn create-connector-registry
@@ -29,7 +30,9 @@
 (defn instantiate-connectors
   "Given a registry and a map of {symbolic-ref → connector-type-keyword},
    create connector instances with assigned UUIDs.
-   Returns {:connector-refs {symbolic-ref → uuid} :connectors {uuid → instance}}."
+   Returns {:connector-refs {symbolic-ref → uuid} :connectors {uuid → instance}}
+   or an anomaly map with `:anomaly/type :not-found` when a connector type is
+   not registered."
   [registry connector-refs]
   (let [reg @registry]
     (reduce-kv
@@ -40,7 +43,9 @@
            (-> acc
                (assoc-in [:connector-refs ref-name] uuid)
                (assoc-in [:connectors uuid] instance)))
-         (throw (ex-info (msg/t :registry/connector-not-found {:type type-kw})
-                         {:type type-kw :ref ref-name}))))
+         (reduced
+          (anomaly/anomaly :not-found
+                           (msg/t :registry/connector-not-found {:type type-kw})
+                           {:type type-kw :ref ref-name}))))
      {:connector-refs {} :connectors {}}
      connector-refs)))

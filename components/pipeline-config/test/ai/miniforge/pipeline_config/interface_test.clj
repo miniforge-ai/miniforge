@@ -216,10 +216,12 @@
           (is (= {:type :mock-connector} inst)))))))
 
 (deftest connector-registry-missing-type-test
-  (testing "instantiate throws for unregistered type"
-    (let [registry (pc/create-connector-registry)]
-      (is (thrown? clojure.lang.ExceptionInfo
-                   (pc/instantiate-connectors registry {:conn/src :unknown}))))))
+  (testing "instantiate returns anomaly for unregistered type"
+    (let [registry (pc/create-connector-registry)
+          result   (pc/instantiate-connectors registry {:conn/src :unknown})]
+      (is (= :not-found (:anomaly/type result)))
+      (is (= {:type :unknown :ref :conn/src}
+             (:anomaly/data result))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Rule registry tests
