@@ -269,6 +269,21 @@
       (is (= 0 @calls) "complete-fn never invoked when no rule applies to the file")
       (is (= 0 (:calls result)) "no applicable rule for the file -> no call"))))
 
+(deftest analyze-rules-on-files-untagged-fails-closed-test
+  (testing "an untagged violation is attributed to EVERY rule in the batch
+            (fail-closed), never dropped — the model forgetting :rule-id must not
+            silently lose a real finding"
+    (let [rule-a {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :major
+                  :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
+          rule-b {:rule/id :std/b :rule/title "B" :rule/category "002" :rule/severity :major
+                  :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
+          mock   (fn [_client _request]
+                   {:success true :content "[{:line 1 :message \"untagged finding\"}]"})
+          result (sut/analyze-rules-on-files :mock mock [rule-a rule-b]
+                                             [{:path "src/core.clj" :content "(def x 1)"}])]
+      (is (= 1 (count (get-in result [:by-rule :std/a]))) "untagged attributed to rule-a")
+      (is (= 1 (count (get-in result [:by-rule :std/b]))) "and to rule-b — fail-closed"))))
+
 (def ^:private base-rule
   {:rule/id :std/test
    :rule/title "Test"

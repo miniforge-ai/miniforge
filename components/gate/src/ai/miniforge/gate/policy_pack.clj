@@ -330,17 +330,20 @@
                  (get-in compiled [:rule :rule/enforcement :action]))))
 
 (defn- acting-semantic-rules
-  "The enabled, phase-applicable rules that resolve to the semantic judge AND
-   carry an acting enforcement action — exactly the rules the batched judge
-   evaluates together. Used to build the batched analyzer so one call per file
-   covers all of them."
-  [packs phase]
+  "The enabled rules that resolve to the semantic judge AND carry an acting
+   enforcement action AND are applicable to this run's `artifact` — exactly the
+   rules the batched judge evaluates together. Applicability uses the same
+   `applicable-artifacts` predicate the compiled per-rule path uses (phase +
+   file-glob + artifact/task constraints), so the batched prompt never includes
+   a rule that compiled evaluation would skip for this run."
+  [packs phase artifact ctx]
   (->> (policy-pack/resolve-rules (mapcat :pack/rules packs))
        (filterv policy-pack/rule-enabled?)
        (filterv #(policy-pack/rule-applies-to-phase? % phase))
        (filterv #(= :semantic (policy-pack/resolve-detector %)))
        (filterv #(contains? judge-acting-actions
-                            (get-in % [:rule/enforcement :action])))))
+                            (get-in % [:rule/enforcement :action])))
+       (filterv #(seq (applicable-artifacts % phase artifact ctx)))))
 
 (defn- run-compiled-rule
   [artifact context compiled]
@@ -484,7 +487,7 @@
     (if (empty? packs)
       {:passed? true :warnings [(no-policy-packs-warning)]}
       (let [artifact (policy-artifact artifact ctx)
-            acting   (acting-semantic-rules packs phase)
+            acting   (acting-semantic-rules packs phase artifact ctx)
             context  (-> (with-semantic-wiring ctx artifact acting) (assoc :phase phase))
             result   (compiled-check-result packs phase artifact context)]
         (when (:compiled? result)

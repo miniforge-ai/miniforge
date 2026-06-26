@@ -263,24 +263,25 @@
 
 (defn- analyze-file-batched
   "One judge call: a single file against MANY rules. Returns canonical violation
-   maps, each attributed to the rule the model tagged it with. Violations tagged
-   with a rule-id not in `rules` are dropped (no hallucinated rules)."
+   maps. A violation tagged with a rule in the batch is attributed to it. A
+   violation the model leaves UNPLACEABLE — no `:rule-id`, or one not in the
+   batch — is FAIL-CLOSED: attributed to every rule in the batch, so a real
+   finding the model forgot (or mis-)tagged is never silently dropped. It blocks
+   until fixed, even if over-attributed. (With a single-rule batch this is just
+   that rule.) Over-attribution is the safe direction for an acting gate;
+   dropping would be a silent enforcement hole."
   [llm-client complete-fn rules file-path file-content]
   (let [by-id    (into {} (map (juxt :rule/id identity)) rules)
         {:keys [system user]} (build-batched-prompt rules file-path file-content)
         response (complete-fn llm-client {:system system
                                           :messages [{:role "user" :content user}]})
         raws     (parse-judge-response (get response :content ""))]
-    (->> raws
-         (keep (fn [v]
-                 ;; Attribute by the model's tag; if a violation is untagged and
-                 ;; there is exactly one rule in the batch, attribute it to that
-                 ;; rule (an unambiguous single-rule batch). Otherwise drop it —
-                 ;; an untagged violation across many rules can't be placed.
-                 (let [rule (or (get by-id (->rule-kw (:rule-id v)))
-                                (when (= 1 (count rules)) (first rules)))]
-                   (when rule (raw->violation rule file-path v)))))
-         vec)))
+    (vec (mapcat
+          (fn [v]
+            (if-let [rule (get by-id (->rule-kw (:rule-id v)))]
+              [(raw->violation rule file-path v)]
+              (mapv #(raw->violation % file-path v) rules)))
+          raws))))
 
 (defn- judgeable-file?
   "True when a changed-file entry has the string path/content shape the judge
