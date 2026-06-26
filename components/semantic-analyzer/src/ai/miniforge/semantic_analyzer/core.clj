@@ -252,9 +252,12 @@
   "Coerce a model-emitted :rule-id (keyword, \":std/foo\" or \"std/foo\" string)
    to a keyword; nil for anything else."
   [x]
-  (cond (keyword? x) x
-        (string? x)  (keyword (str/replace x #"^:" ""))
-        :else        nil))
+  (cond
+    (keyword? x) x
+    (string? x)  (try
+                  (-> x str/trim (str/replace #"^:" "") keyword)
+                  (catch Exception _ nil))
+    :else        nil))
 
 (defn- analyze-file-batched
   "One judge call: a single file against MANY rules. Returns canonical violation
