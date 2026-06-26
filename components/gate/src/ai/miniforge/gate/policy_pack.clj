@@ -127,22 +127,32 @@
 
     :else []))
 
-(defn- changed-files-analyzer
-  "An `analyze-rule`-shaped fn (repo-path ignored) that scopes the judge to the
-   run's changed files instead of scanning the whole repo."
-  [files]
-  (fn [llm-client complete-fn _repo-path rule]
-    (semantic/analyze-rule-on-files llm-client complete-fn rule files)))
+(defn- batched-semantic-analyzer
+  "An `analyze-rule`-shaped fn (repo-path ignored) backed by ONE batched judge
+   call per changed file across ALL `acting-rules`. Memoizes the batch in a
+   per-evaluation atom, so the N per-rule semantic check-fn invocations in a
+   single gate run share one set of LLM calls; each call returns its own rule's
+   slice. Collapses the per-rule-per-file judge into one call per file."
+  [acting-rules files]
+  (let [cache (atom nil)]
+    (fn [llm-client complete-fn _repo-path rule]
+      (let [result (or @cache
+                       (reset! cache (semantic/analyze-rules-on-files
+                                      llm-client complete-fn acting-rules files)))]
+        {:rule/id    (:rule/id rule)
+         :violations (get-in result [:by-rule (:rule/id rule)] [])
+         :status     (:status result)}))))
 
 (defn- with-semantic-wiring
   "Inject the LLM-judge seam the policy-pack semantic detector needs. Derives
    `:llm-client` from the run's `:llm-backend` when absent, sets `:complete-fn`
-   to `llm/complete`, and injects a `:semantic-analyze-fn` that scopes the judge
-   to `artifact`'s changed files (not the whole repo). Also normalizes
-   `:repo-path` (falling back to the execution worktree). When the run carries
-   no LLM backend, the seam stays unwired so compiled semantic checks fail loud
-   according to pack enforcement (fail-closed)."
-  [ctx artifact]
+   to `llm/complete`, and injects a `:semantic-analyze-fn` that runs the batched
+   judge (one call per changed file across `acting-rules`) over `artifact`'s
+   changed files. Also normalizes `:repo-path` (falling back to the execution
+   worktree). When the run carries no LLM backend, the seam stays unwired so
+   compiled semantic checks fail loud according to pack enforcement
+   (fail-closed)."
+  [ctx artifact acting-rules]
   (let [ctx (assoc ctx :repo-path (or (:repo-path ctx)
                                       (:execution/worktree-path ctx)
                                       "."))
@@ -155,8 +165,8 @@
     (if (and (:llm-client ctx)
              (:complete-fn ctx)
              (not (:semantic-analyze-fn ctx)))
-      (assoc ctx :semantic-analyze-fn (changed-files-analyzer
-                                       (artifact-changed-files artifact)))
+      (assoc ctx :semantic-analyze-fn (batched-semantic-analyzer
+                                       acting-rules (artifact-changed-files artifact)))
       ctx)))
 
 (defn- no-policy-packs-warning
@@ -319,6 +329,22 @@
       (contains? judge-acting-actions
                  (get-in compiled [:rule :rule/enforcement :action]))))
 
+(defn- acting-semantic-rules
+  "The enabled rules that resolve to the semantic judge AND carry an acting
+   enforcement action AND are applicable to this run's `artifact` — exactly the
+   rules the batched judge evaluates together. Applicability uses the same
+   `applicable-artifacts` predicate the compiled per-rule path uses (phase +
+   file-glob + artifact/task constraints), so the batched prompt never includes
+   a rule that compiled evaluation would skip for this run."
+  [packs phase artifact ctx]
+  (->> (policy-pack/resolve-rules (mapcat :pack/rules packs))
+       (filterv policy-pack/rule-enabled?)
+       (filterv #(policy-pack/rule-applies-to-phase? % phase))
+       (filterv #(= :semantic (policy-pack/resolve-detector %)))
+       (filterv #(contains? judge-acting-actions
+                            (get-in % [:rule/enforcement :action])))
+       (filterv #(seq (applicable-artifacts % phase artifact ctx)))))
+
 (defn- run-compiled-rule
   [artifact context compiled]
   (if-not (semantic-judge-applies? compiled)
@@ -461,7 +487,8 @@
     (if (empty? packs)
       {:passed? true :warnings [(no-policy-packs-warning)]}
       (let [artifact (policy-artifact artifact ctx)
-            context  (-> (with-semantic-wiring ctx artifact) (assoc :phase phase))
+            acting   (acting-semantic-rules packs phase artifact ctx)
+            context  (-> (with-semantic-wiring ctx artifact acting) (assoc :phase phase))
             result   (compiled-check-result packs phase artifact context)]
         (when (:compiled? result)
           (emit-rule-evidence! ctx phase

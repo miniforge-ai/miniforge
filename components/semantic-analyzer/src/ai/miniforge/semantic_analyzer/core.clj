@@ -30,7 +30,10 @@
     (if-let [url (io/resource judge-prompt-resource)]
       (edn/read-string (slurp url))
       {:system "You are a code reviewer. Return EDN violations or []."
-       :user "Rule: {{rule-title}}\n\n{{knowledge-content}}\n\nFile: {{file-path}}\n```\n{{file-content}}\n```"})))
+       :user "Rule: {{rule-title}}\n\n{{knowledge-content}}\n\nFile: {{file-path}}\n```\n{{file-content}}\n```"
+       :batched-system "You are a code reviewer. Tag each violation with :rule-id. Return EDN violations or []."
+       :batched-rule-item "### {{rule-id}} — {{rule-title}}\n{{rule-description}}\n{{knowledge-content}}"
+       :batched-user "File: {{file-path}}\n```\n{{file-content}}\n```\n\nRules:\n{{rules-block}}\n\nReturn EDN violations tagged with :rule-id, or []."})))
 
 (defn- rule->prompt-bindings
   "Extract prompt interpolation bindings from a rule and file."
@@ -206,6 +209,122 @@
      :files-analyzed (count eligible)
      :duration-ms    (- end-ms start-ms)
      :status         :completed}))
+
+;------------------------------------------------------------------------------ Layer 2b
+;; Batched judge — one LLM call per file across many rules
+
+(defn- batched-rules-block
+  "Render each rule as a `### <id>` heading block by interpolating the
+   `:batched-rule-item` prompt template, joined. (The heading markup lives in the
+   template, not inline here; `judge-templates` carries a defensive fallback for
+   when the resource is absent.)"
+  [rules]
+  (let [item (get @judge-templates :batched-rule-item "")]
+    (str/join "\n\n"
+              (map (fn [r] (pt/interpolate
+                            item
+                            {:rule-id           (str (:rule/id r))
+                             :rule-title        (get r :rule/title "")
+                             :rule-description  (get r :rule/description "")
+                             :knowledge-content (get r :rule/knowledge-content "")}))
+                   rules))))
+
+(defn- build-batched-prompt
+  "Build the batched system + user prompts by interpolating the
+   `:batched-system` / `:batched-user` prompt templates from `judge-templates`."
+  [rules file-path file-content]
+  (let [templates @judge-templates]
+    {:system (get templates :batched-system "")
+     :user   (pt/interpolate (get templates :batched-user "")
+                             {:file-path    file-path
+                              :file-content file-content
+                              :rules-block  (batched-rules-block rules)})}))
+
+(defn- ->rule-kw
+  "Coerce a model-emitted :rule-id (keyword, \":std/foo\" or \"std/foo\" string)
+   to a keyword; nil for anything else."
+  [x]
+  (cond
+    (keyword? x) x
+    (string? x)  (try
+                  (-> x str/trim (str/replace #"^:" "") keyword)
+                  (catch Exception _ nil))
+    :else        nil))
+
+(defn- analyze-file-batched
+  "One judge call: a single file against MANY rules. Returns canonical violation
+   maps. A violation tagged with a rule in the batch is attributed to it. A
+   violation the model leaves UNPLACEABLE — no `:rule-id`, or one not in the
+   batch — is FAIL-CLOSED: attributed to every rule in the batch, so a real
+   finding the model forgot (or mis-)tagged is never silently dropped. It blocks
+   until fixed, even if over-attributed. (With a single-rule batch this is just
+   that rule.) Over-attribution is the safe direction for an acting gate;
+   dropping would be a silent enforcement hole."
+  [llm-client complete-fn rules file-path file-content]
+  (let [by-id    (into {} (map (juxt :rule/id identity)) rules)
+        {:keys [system user]} (build-batched-prompt rules file-path file-content)
+        response (complete-fn llm-client {:system system
+                                          :messages [{:role "user" :content user}]})
+        raws     (parse-judge-response (get response :content ""))]
+    (vec (mapcat
+          (fn [v]
+            (if-let [rule (get by-id (->rule-kw (:rule-id v)))]
+              [(raw->violation rule file-path v)]
+              (mapv #(raw->violation % file-path v) rules)))
+          raws))))
+
+(defn- judgeable-file?
+  "True when a changed-file entry has the string path/content shape the judge
+   needs and is under the size limit. (A non-string path would throw in the glob
+   match, so this guards it.)"
+  [{:keys [path content]}]
+  (and (string? path) (string? content) (file-under-size-limit? content)))
+
+(defn- file-rule-violations
+  "Judge ONE changed file against the rules whose globs match it. Returns the
+   vector of canonical violations (possibly empty) when a judge call was made, or
+   `nil` when the file is skipped — bad shape, or no rule applies — so no LLM
+   call is spent on it."
+  [llm-client complete-fn rules {:keys [path content] :as file}]
+  (when (judgeable-file? file)
+    (let [applicable (filterv #(file-matches-globs?
+                                path (get-in % [:rule/applies-to :file-globs] ["**/*"]))
+                              rules)]
+      (when (seq applicable)
+        (analyze-file-batched llm-client complete-fn applicable path content)))))
+
+(defn- index-by-rule
+  "Fold a flat seq of canonical violations onto `by-rule` as
+   {rule-id [violation...]}."
+  [by-rule violations]
+  (reduce (fn [m v] (update m (:rule/id v) (fnil conj []) v)) by-rule violations))
+
+(defn analyze-rules-on-files
+  "Batched changed-files judge: ONE LLM call per file, covering all `rules` whose
+   globs match that file (and that are under the size limit). `files` is a vector
+   of {:path :content}, `rules` a vector of rule maps. Returns
+   {:by-rule {rule-id [violation...]} :files-analyzed int :calls int
+    :duration-ms int :status :completed}.
+
+   This collapses the per-rule-per-file judge (analyze-rule-on-files run once per
+   rule) into one call per file: the rule pack is sent once per file, not once
+   per (rule, file)."
+  [llm-client complete-fn rules files]
+  (let [start-ms (System/currentTimeMillis)]
+    (loop [fs (seq files), by-rule {}, analyzed 0, calls 0]
+      (if-let [file (first fs)]
+        (let [viols (file-rule-violations llm-client complete-fn rules file)]
+          (cond
+            ;; skipped (bad shape or no applicable rule) — no call spent
+            (nil? viols) (recur (next fs) by-rule analyzed calls)
+            ;; judged — one call made; fold its violations (possibly none)
+            :else        (recur (next fs) (index-by-rule by-rule viols)
+                                (inc analyzed) (inc calls))))
+        {:by-rule        by-rule
+         :files-analyzed analyzed
+         :calls          calls
+         :duration-ms    (- (System/currentTimeMillis) start-ms)
+         :status         :completed}))))
 
 (defn- analyze-rule-with-timeout
   "Run analyze-rule with a timeout. Returns result or timeout marker."
