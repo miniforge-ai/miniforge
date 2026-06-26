@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps  {ai.miniforge/bb-proc {:local/root "../bb-proc"}}
+ :deps  {ai.miniforge/anomaly {:local/root "../anomaly"}
+         ai.miniforge/bb-proc {:local/root "../bb-proc"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {io.github.cognitect-labs/test-runner

@@ -21,7 +21,8 @@
 
    Layer 0: pure command-vector builders — no subprocess, testable.
    Layer 1: side-effecting wrappers that invoke the vectors via bb-proc."
-  (:require [ai.miniforge.bb-proc.interface :as proc]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.bb-proc.interface :as proc]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -52,21 +53,30 @@
 (defn pull!
   [key dest {:keys [worker-dir bucket sh-fn]
              :or   {sh-fn proc/sh}}]
-  (when-not worker-dir
-    (throw (ex-info "bb-r2/pull! requires :worker-dir" {:opts :worker-dir})))
-  (when-not bucket
-    (throw (ex-info "bb-r2/pull! requires :bucket" {:opts :bucket})))
-  (let [result (sh-fn {:dir worker-dir :out :string :err :string}
-                      "npx" "wrangler" "r2" "object" "get"
-                      (str bucket "/" key)
-                      (str "--file=" dest)
-                      "--remote")
-        kind   (classify-wrangler-result result)]
-    (case kind
-      :ok      :ok
-      :missing :missing
-      (throw (ex-info (str "wrangler r2 get failed for " key)
-                      {:exit (:exit result) :err (:err result)})))))
+  (cond
+    (nil? worker-dir)
+    (anomaly/anomaly :invalid-input
+                     "bb-r2/pull! requires :worker-dir"
+                     {:opts :worker-dir})
+
+    (nil? bucket)
+    (anomaly/anomaly :invalid-input
+                     "bb-r2/pull! requires :bucket"
+                     {:opts :bucket})
+
+    :else
+    (let [result (sh-fn {:dir worker-dir :out :string :err :string}
+                        "npx" "wrangler" "r2" "object" "get"
+                        (str bucket "/" key)
+                        (str "--file=" dest)
+                        "--remote")
+          kind   (classify-wrangler-result result)]
+      (case kind
+        :ok      :ok
+        :missing :missing
+        (anomaly/anomaly :fault
+                         (str "wrangler r2 get failed for " key)
+                         {:exit (:exit result) :err (:err result)})))))
 
 (defn upload!
   [bucket src key {:keys [run-fn] :or {run-fn proc/run!} :as opts}]

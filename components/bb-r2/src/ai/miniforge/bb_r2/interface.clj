@@ -27,7 +27,8 @@
 (defn pull!
   "Pull `bucket/key` from R2 via `npx wrangler r2 object get`, writing
    to `dest`. Returns `:ok` on success, `:missing` on a 404-ish wrangler
-   failure, throws on other errors.
+   failure, an `:invalid-input` anomaly when required opts are missing,
+   or a `:fault` anomaly for other wrangler failures.
 
    Required opts: `:worker-dir` (directory where wrangler runs),
    `:bucket`. Optional: `:sh-fn` (defaults to `bb-proc/sh`)."
