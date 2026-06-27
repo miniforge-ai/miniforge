@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/workflow {:local/root "../workflow"}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/workflow {:local/root "../workflow"}
         ai.miniforge/artifact {:local/root "../artifact"}
         ai.miniforge/dag-executor {:local/root "../dag-executor"}
         ai.miniforge/logging {:local/root "../logging"}
