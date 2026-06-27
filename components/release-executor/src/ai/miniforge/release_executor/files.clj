@@ -20,6 +20,7 @@
   "File operations for the release executor.
    Handles writing, deleting, and staging code artifact files."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.release-executor.git :as git]
    [ai.miniforge.release-executor.result :as result]
    [ai.miniforge.logging.interface :as log]
@@ -28,25 +29,52 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; File operation helpers
 
-(defn assert-within-worktree!
-  "Throw ex-info with :type :path-traversal when the resolved file-path escapes
-   the worktree root.  Uses normalized absolute paths so that any combination of
-   '../', symlink components, or redundant separators is collapsed before
-   comparison.
+(defn- existing-ancestor
+  "Return the nearest existing ancestor for `path` after lexical
+   normalization. Used so validation can canonicalize symlinked parents
+   even when the target file itself has not been created yet."
+  [path]
+  (loop [candidate (.normalize (fs/absolutize path))]
+    (cond
+      (nil? candidate) nil
+      (fs/exists? candidate) candidate
+      :else (recur (fs/parent candidate)))))
 
-   This is a programmer-error guard called at the I/O boundary of
-   process-file-action.  It throws rather than returning an anomaly because
-   the surrounding process-file-action methods already catch Exception and
-   convert it into a {:success? false} result."
+(defn- canonical-path
+  "Return a normalized Path with symlinks resolved for every existing
+   ancestor. Missing leaf segments are resolved under the canonicalized
+   nearest ancestor."
+  [path]
+  (let [absolute (.normalize (fs/absolutize path))]
+    (if-let [ancestor (existing-ancestor absolute)]
+      (let [canonical-ancestor (fs/canonicalize ancestor)
+            absolute-ancestor (.normalize (fs/absolutize ancestor))
+            relative-tail (.relativize absolute-ancestor absolute)]
+        (.normalize (.resolve canonical-ancestor relative-tail)))
+      absolute)))
+
+(defn path-traversal-anomaly
+  "Return nil when `file-path` stays inside `worktree-path`, or a
+   canonical anomaly when the resolved path escapes the worktree root.
+   Uses canonical Path comparison so '../', symlink components, and
+   redundant separators are collapsed before comparison."
   [worktree-path file-path]
-  (let [normalized-root (str (fs/normalize (fs/absolutize worktree-path)))
-        normalized-path (str (fs/normalize (fs/absolutize file-path)))]
-    (when-not (fs/starts-with? normalized-path normalized-root)
-      (throw (ex-info "Path traversal rejected: candidate path escapes worktree root"
-                      {:type       :path-traversal
-                       :path       (str file-path)
-                       :root       normalized-root
-                       :normalized normalized-path})))))
+  (let [normalized-root (canonical-path worktree-path)
+        normalized-path (canonical-path file-path)]
+    (when-not (.startsWith normalized-path normalized-root)
+      (anomaly/anomaly :invalid-input
+                       "Path traversal rejected: candidate path escapes worktree root"
+                       {:path       (str file-path)
+                        :root       (str normalized-root)
+                        :normalized (str normalized-path)}))))
+
+(defn- path-validation-failure
+  [action path path-anomaly]
+  {:success? false
+   :action action
+   :path path
+   :error (:anomaly/message path-anomaly)
+   :anomaly path-anomaly})
 
 (defn ensure-parent-dir!
   "Create parent directories for a file path if they don't exist."
@@ -83,11 +111,13 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
-      (assert-within-worktree! worktree-path full-path)
-      (write-file! full-path content)
-      (when logger
-        (log/debug logger :release-executor :file-created {:data {:path path}}))
-      {:success? true :action :create :path path})
+      (if-let [path-anomaly (path-traversal-anomaly worktree-path full-path)]
+        (path-validation-failure :create path path-anomaly)
+        (do
+          (write-file! full-path content)
+          (when logger
+            (log/debug logger :release-executor :file-created {:data {:path path}}))
+          {:success? true :action :create :path path})))
     (catch Exception e
       (when logger
         (log/error logger :release-executor :file-create-failed
@@ -98,11 +128,13 @@
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
-      (assert-within-worktree! worktree-path full-path)
-      (write-file! full-path content)
-      (when logger
-        (log/debug logger :release-executor :file-modified {:data {:path path}}))
-      {:success? true :action :modify :path path})
+      (if-let [path-anomaly (path-traversal-anomaly worktree-path full-path)]
+        (path-validation-failure :modify path path-anomaly)
+        (do
+          (write-file! full-path content)
+          (when logger
+            (log/debug logger :release-executor :file-modified {:data {:path path}}))
+          {:success? true :action :modify :path path})))
     (catch Exception e
       (when logger
         (log/error logger :release-executor :file-modify-failed
@@ -113,11 +145,13 @@
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
-          _ (assert-within-worktree! worktree-path full-path)
-          deleted? (delete-file! full-path)]
-      (when logger
-        (log/debug logger :release-executor :file-deleted {:data {:path path :existed? deleted?}}))
-      {:success? true :action :delete :path path :deleted? deleted?})
+          path-anomaly (path-traversal-anomaly worktree-path full-path)]
+      (if path-anomaly
+        (path-validation-failure :delete path path-anomaly)
+        (let [deleted? (delete-file! full-path)]
+          (when logger
+            (log/debug logger :release-executor :file-deleted {:data {:path path :existed? deleted?}}))
+          {:success? true :action :delete :path path :deleted? deleted?})))
     (catch Exception e
       (when logger
         (log/error logger :release-executor :file-delete-failed
