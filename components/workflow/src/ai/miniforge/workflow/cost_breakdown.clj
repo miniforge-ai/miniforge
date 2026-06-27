@@ -61,8 +61,8 @@
    loop (`:task/implement` and `:task/merge-resolution` per spec §3.5).
    Other phases either run a single shot (`:task/release`) or have
    their iteration semantics tracked elsewhere (e.g., `:task/verify`'s
-   retry budget). Adding iteration counts for non-iterating phases is
-   a programming error and `add-phase-cost` rejects it.
+   retry budget). Adding iteration counts for non-iterating phases
+   returns an anomaly so telemetry emitters can keep errors as data.
 
    Granular components are preserved on purpose — rolling them up into
    aggregates loses the placement-of-attention signal that's the whole
@@ -98,8 +98,8 @@
 (def iteration-phase-keys
   "Subset of `phase-keys` whose phases run an iteration loop. Per spec
    §3.5, `:cost/iterations` is keyed only by these. Adding iteration
-   counts for non-iterating phases is a programming error caught by
-   `add-phase-cost` and the schema."
+   counts for non-iterating phases is rejected by `add-phase-cost` and
+   the schema."
   #{:task/implement
     :task/merge-resolution})
 
@@ -173,33 +173,39 @@
    a cross-phase sum isn't (`5 implement iterations + 2 verify
    iterations = 7 of what?`).
 
-   Throws on unknown phase or iterations-on-non-iteration-phase. Both
-   are programming errors at telemetry-emitter sites; failing here
-   surfaces them at the call site rather than at downstream
-   schema-validation time."
+   Returns a canonical `:anomalies/incorrect` anomaly map on unknown
+   phase or iterations-on-non-iteration-phase. Both represent invalid
+   telemetry-emitter input; returning data lets callers fold the failure
+   into response chains rather than catching exceptions."
   [breakdown {:keys [phase tokens iterations duration-ms usd]
               :or   {tokens 0 iterations 0 duration-ms 0 usd 0.0}}]
-  (when-not (contains? phase-keys phase)
-    (response/throw-anomaly! :anomalies/incorrect
-                             (str "Unknown phase " (pr-str phase) " — must be one of "
-                                  (pr-str phase-key-order))
-                             {:phase phase :known phase-key-order}))
-  (when (and (pos? iterations)
-             (not (contains? iteration-phase-keys phase)))
-    (response/throw-anomaly! :anomalies/incorrect
-                             (str "Phase " (pr-str phase) " does not iterate; "
-                                  ":iterations may only be set for "
-                                  (pr-str (sort iteration-phase-keys)))
-                             {:phase phase :iterations iterations
-                              :allowed (sort iteration-phase-keys)}))
-  (-> breakdown
-      (update :cost/total + tokens)
-      (update-in [:cost/breakdown phase] (fnil + 0) tokens)
-      (cond->
-        (pos? iterations)
-        (update-in [:cost/iterations phase] (fnil + 0) iterations))
-      (update :cost/duration-ms + duration-ms)
-      (update :cost/usd + usd)))
+  (cond
+    (not (contains? phase-keys phase))
+    (response/make-anomaly :anomalies/incorrect
+                           (str "Unknown phase " (pr-str phase) " — must be one of "
+                                (pr-str phase-key-order))
+                           {:anomaly/phase phase
+                            :cost/known-phases phase-key-order})
+
+    (and (pos? iterations)
+         (not (contains? iteration-phase-keys phase)))
+    (response/make-anomaly :anomalies/incorrect
+                           (str "Phase " (pr-str phase) " does not iterate; "
+                                ":iterations may only be set for "
+                                (pr-str (sort iteration-phase-keys)))
+                           {:anomaly/phase phase
+                            :cost/iterations iterations
+                            :cost/allowed-iteration-phases (vec (sort iteration-phase-keys))})
+
+    :else
+    (-> breakdown
+        (update :cost/total + tokens)
+        (update-in [:cost/breakdown phase] (fnil + 0) tokens)
+        (cond->
+          (pos? iterations)
+          (update-in [:cost/iterations phase] (fnil + 0) iterations))
+        (update :cost/duration-ms + duration-ms)
+        (update :cost/usd + usd))))
 
 (defn merge-breakdowns
   "Combine two breakdowns. Used at workflow boundaries where two

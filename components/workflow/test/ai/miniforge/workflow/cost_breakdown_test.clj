@@ -101,14 +101,14 @@
           "release ran but had no iteration-loop counter; map stays empty"))))
 
 (deftest add-phase-cost-rejects-unknown-phase-test
-  (testing "Adding a phase key that isn't in `phase-keys` throws — the
-            error names what was passed and what was acceptable. Catches
-            telemetry-emitter typos at the call site rather than at
-            schema-validation time later."
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"Unknown phase"
-         (cb/add-phase-cost (cb/empty-breakdown)
-                            {:phase :task/imagined :tokens 10})))))
+  (testing "Adding a phase key that isn't in `phase-keys` returns an
+            anomaly naming what was passed and what was acceptable."
+    (let [result (cb/add-phase-cost (cb/empty-breakdown)
+                                    {:phase :task/imagined :tokens 10})]
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (re-find #"Unknown phase" (:anomaly/message result)))
+      (is (= :task/imagined (:anomaly/phase result)))
+      (is (= cb/phase-key-order (:cost/known-phases result))))))
 
 (deftest add-phase-cost-defaults-zero-test
   (testing "Missing keys default to zero. A telemetry emitter that knows
@@ -163,18 +163,21 @@
   (testing "Per spec §3.5, :cost/iterations is keyed only by phases
             that run an iteration loop (`:task/implement`,
             `:task/merge-resolution`). Setting :iterations on any
-            other phase throws — programming-error catch at the
-            telemetry-emitter site rather than letting bogus
-            iteration counts flow into the dashboard."
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"does not iterate"
-         (cb/add-phase-cost (cb/empty-breakdown)
-                            {:phase :task/release :iterations 3}))
-        ":task/release runs once; iterations on it is meaningless")
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo #"does not iterate"
-         (cb/add-phase-cost (cb/empty-breakdown)
-                            {:phase :task/explore :iterations 1}))))
+            other phase returns an anomaly so bogus iteration counts
+            don't flow into the dashboard."
+    (let [release-result (cb/add-phase-cost (cb/empty-breakdown)
+                                            {:phase :task/release :iterations 3})
+          explore-result (cb/add-phase-cost (cb/empty-breakdown)
+                                            {:phase :task/explore :iterations 1})]
+      (is (= :anomalies/incorrect (:anomaly/category release-result))
+          ":task/release runs once; iterations on it is meaningless")
+      (is (re-find #"does not iterate" (:anomaly/message release-result)))
+      (is (= :task/release (:anomaly/phase release-result)))
+      (is (= 3 (:cost/iterations release-result)))
+      (is (= :anomalies/incorrect (:anomaly/category explore-result)))
+      (is (re-find #"does not iterate" (:anomaly/message explore-result)))
+      (is (= :task/explore (:anomaly/phase explore-result)))
+      (is (= 1 (:cost/iterations explore-result)))))
   (testing "Zero iterations on a non-iterating phase is fine — the
             check fires on positive counts only, so callers passing
             an explicit zero (e.g. uniform call shape from a metrics
