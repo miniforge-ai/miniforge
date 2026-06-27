@@ -18,8 +18,7 @@
 
 (ns ai.miniforge.workflow.anomaly.workflow-factory-cost-anomaly-test
   "Coverage for `agent-factory/create-agent-for-phase` and
-   `cost-breakdown/add-phase-cost` boundary escalation via
-   `response/throw-anomaly!`."
+   `cost-breakdown/add-phase-cost` anomaly contracts."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.workflow.agent-factory :as factory]
             [ai.miniforge.workflow.cost-breakdown :as cost])
@@ -52,33 +51,25 @@
       (is (= :anomalies/unsupported (:anomaly/category (ex-data thrown))))
       (is (= :weird-agent (:agent-type (ex-data thrown)))))))
 
-(deftest cost-add-phase-cost-unknown-phase-throws-anomaly
-  (testing "unknown phase keyword raises :anomalies/incorrect"
-    (let [thrown (try
-                   (cost/add-phase-cost {:cost/total 0 :cost/breakdown {}}
-                                        {:phase :weird-phase :tokens 100})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"Unknown phase" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
-      (is (= :weird-phase (:phase (ex-data thrown)))))))
+(deftest cost-add-phase-cost-unknown-phase-returns-anomaly
+  (testing "unknown phase keyword returns :anomalies/incorrect"
+    (let [result (cost/add-phase-cost {:cost/total 0 :cost/breakdown {}}
+                                      {:phase :weird-phase :tokens 100})]
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (re-find #"Unknown phase" (:anomaly/message result)))
+      (is (= :weird-phase (:anomaly/phase result))))))
 
-(deftest cost-add-phase-cost-iterations-on-non-iter-phase-throws-anomaly
-  (testing "iterations > 0 on non-iteration phase raises :anomalies/incorrect"
+(deftest cost-add-phase-cost-iterations-on-non-iter-phase-returns-anomaly
+  (testing "iterations > 0 on non-iteration phase returns :anomalies/incorrect"
     ;; :task/verify is a real phase-key but is NOT in iteration-phase-keys
     ;; (that set is #{:task/implement :task/merge-resolution}). Using a valid
     ;; non-iter phase exercises the "does not iterate" branch rather than
     ;; the unknown-phase branch.
-    (let [thrown (try
-                   (cost/add-phase-cost {:cost/total 0 :cost/breakdown {}}
-                                        {:phase :task/verify
-                                         :tokens 100
-                                         :iterations 3})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"does not iterate" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
-      (is (= :task/verify (:phase (ex-data thrown))))
-      (is (= 3 (:iterations (ex-data thrown)))))))
+    (let [result (cost/add-phase-cost {:cost/total 0 :cost/breakdown {}}
+                                      {:phase :task/verify
+                                       :tokens 100
+                                       :iterations 3})]
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (re-find #"does not iterate" (:anomaly/message result)))
+      (is (= :task/verify (:anomaly/phase result)))
+      (is (= 3 (:cost/iterations result))))))
