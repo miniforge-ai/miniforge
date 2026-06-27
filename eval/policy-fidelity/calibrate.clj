@@ -102,33 +102,46 @@
                             (fn [{:keys [f t]}]
                               (assoc (judge client rules (:rel f) (:content f)) :f f :t t))
                             jobs)
+      ;; index every (fixture, trial) result once — O(1) lookup, not O(n) scan
+      by-cell (into {} (map (fn [r] [[(:rel (:f r)) (:t r)] r])) results)
       ;; ---- per-rule scoring ----
+      ;; Only successfully-judged cells (:status :ok) count toward FP and recall.
+      ;; An :error (LLM/CLI failure) or :parse-fail is NOT evidence the rule is
+      ;; clean — excluding it keeps a failed run from masquerading as a clean
+      ;; pass (and a rule with no successful evaluation can't be certified ready).
       rule-record
       (fn [rule]
-        (let [rid (:rule/id rule)
+        (let [rid      (:rule/id rule)
               ;; a fixture is "clean" for this rule when truth says it does NOT violate it
               clean-fx (remove #(contains? (:seeded %) rid) files)
               viol-fx  (filter #(contains? (:seeded %) rid) files)
-              fired?   (fn [f t] (let [r (first (filter #(and (= (:rel f) (:rel (:f %))) (= t (:t %))) results))]
-                                   (and (= :ok (:status r)) (contains? (:fired r) rid))))
-              why      (fn [f t] (let [r (first (filter #(and (= (:rel f) (:rel (:f %))) (= t (:t %))) results))]
-                                   (get (:why r) rid)))
-              ;; false positives: clean fixture, rule fired (any trial)
-              fp-cases (vec (for [f clean-fx t (range trials) :when (fired? f t)]
+              cell     (fn [f t] (get by-cell [(:rel f) t]))
+              ok?      (fn [f t] (= :ok (:status (cell f t))))
+              fired?   (fn [f t] (contains? (:fired (cell f t)) rid))
+              why      (fn [f t] (get (:why (cell f t)) rid))
+              ;; false positives: clean fixture, successfully judged, rule fired
+              fp-cases (vec (for [f clean-fx t (range trials) :when (and (ok? f t) (fired? f t))]
                               {:fixture (:rel f) :trial t :judge-said (why f t)}))
-              ;; misses: violating fixture, rule did not fire (any trial)
-              fn-cases (vec (for [f viol-fx t (range trials) :when (not (fired? f t))]
+              ;; recall over successfully-judged violating cells only
+              viol-ok  (vec (for [f viol-fx t (range trials) :when (ok? f t)] [f t]))
+              fn-cases (vec (for [[f t] viol-ok :when (not (fired? f t))]
                               {:fixture (:rel f) :trial t}))
-              n-viol-cells (* (count viol-fx) trials)
-              recall   (if (pos? n-viol-cells)
-                         (/ (double (- n-viol-cells (count fn-cases))) n-viol-cells)
-                         1.0)
+              n-ok     (count viol-ok)
+              recall   (if (pos? n-ok) (/ (double (- n-ok (count fn-cases))) n-ok) 1.0)
               clean-fp (count fp-cases)
-              gate-ready? (and (<= clean-fp (:max-clean-fp gate-bar))
+              clean-ok (count (for [f clean-fx t (range trials) :when (ok? f t)] 1))
+              failed   (count (for [f files t (range trials) :when (not (ok? f t))] 1))
+              ;; can't certify a rule we never actually evaluated on its fixtures
+              evaluated? (and (or (empty? clean-fx) (pos? clean-ok))
+                              (or (empty? viol-fx) (pos? n-ok)))
+              gate-ready? (and evaluated?
+                               (<= clean-fp (:max-clean-fp gate-bar))
                                (>= recall (:min-recall gate-bar)))]
           [rid {:recall      (Double/parseDouble (format "%.3f" recall))
                 :clean-fp    clean-fp
                 :gate-ready? gate-ready?
+                :evaluated?  evaluated?
+                :failed-runs failed
                 :fp-cases    fp-cases
                 :fn-cases    fn-cases}]))
       record (into (sorted-map) (map rule-record rules))]
