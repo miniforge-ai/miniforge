@@ -20,7 +20,8 @@
   "`plan` is exhaustively tested as a pure function. `run!` is
    end-to-end over sips/iconutil/swift — exercised via a consumer's
    `bb generate-icon` invocation rather than duplicated here."
-  (:require [clojure.test :refer [deftest testing is]]
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-generate-icon.core :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -65,6 +66,32 @@
   (testing "given an absolute path in cfg → used as-is, not re-rooted"
     (let [p (sut/plan (assoc base-cfg :default-source "/abs/source.png"))]
       (is (= "/abs/source.png" (:default-source p))))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Source resolution.
+
+(deftest test-resolve-source-returns-existing-source
+  (testing "given an existing source path → returns that path"
+    (let [dir (fs/create-temp-dir {:prefix "bb-generate-icon-test-"})
+          src (str (fs/path dir "source.png"))]
+      (try
+        (spit src "png")
+        (is (= src (@#'sut/resolve-source! {:default-source src} nil)))
+        (finally
+          (fs/delete-tree dir))))))
+
+(deftest test-resolve-source-returns-anomaly-when-missing-without-placeholder
+  (testing "given missing source and no placeholder → returns invalid-input anomaly"
+    (let [dir (fs/create-temp-dir {:prefix "bb-generate-icon-missing-test-"})
+          missing-source (str (fs/path dir "missing-source.png"))
+          p {:default-source missing-source}
+          result (@#'sut/resolve-source! p nil)]
+      (try
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= {:source missing-source :cfg p}
+               (:anomaly/data result)))
+        (finally
+          (fs/delete-tree dir))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

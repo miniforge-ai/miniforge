@@ -24,7 +24,9 @@
    Layer 1: side-effecting steps — placeholder synth, iconset build,
    iconutil invocation.
    Layer 2: `run!` orchestrator."
-  (:require [ai.miniforge.bb-out.interface :as out]
+  (:refer-clojure :exclude [run!])
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.bb-out.interface :as out]
             [ai.miniforge.bb-paths.interface :as paths]
             [ai.miniforge.bb-proc.interface :as proc]
             [babashka.fs :as fs]))
@@ -73,7 +75,8 @@
 
 (defn- resolve-source!
   "Return a usable source PNG. Synthesize a placeholder if the default
-   is missing and a placeholder is configured."
+   is missing and a placeholder is configured. Returns an anomaly map with
+   `:anomaly/type :invalid-input` when no source can be resolved."
   [p override]
   (let [requested (or override (:default-source p))]
     (cond
@@ -88,9 +91,10 @@
           (:path (:placeholder p)))
 
       :else
-      (throw (ex-info (str "No source icon at " requested
-                           " and no placeholder configured.")
-                      {:source requested :cfg p})))))
+      (anomaly/anomaly :invalid-input
+                       (str "No source icon at " requested
+                            " and no placeholder configured.")
+                       {:source requested :cfg p}))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Orchestrator.
@@ -99,13 +103,16 @@
   [cfg args]
   (let [p      (plan cfg)
         source (resolve-source! p (first args))]
-    (fs/create-dirs (:output-dir p))
-    (out/section (str "Creating iconset from " source))
-    (generate-iconset! source (:iconset-dir p) (:sizes p))
-    (out/section "Generating .icns")
-    (proc/run! "iconutil" "-c" "icns" (:iconset-dir p) "-o" (:icns-path p))
-    (fs/delete-tree (:iconset-dir p))
-    (println (str "ICNS_PATH=" (:icns-path p)))))
+    (if (anomaly/anomaly? source)
+      source
+      (do
+        (fs/create-dirs (:output-dir p))
+        (out/section (str "Creating iconset from " source))
+        (generate-iconset! source (:iconset-dir p) (:sizes p))
+        (out/section "Generating .icns")
+        (proc/run! "iconutil" "-c" "icns" (:iconset-dir p) "-o" (:icns-path p))
+        (fs/delete-tree (:iconset-dir p))
+        (println (str "ICNS_PATH=" (:icns-path p)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
