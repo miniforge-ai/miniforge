@@ -5,74 +5,90 @@
  :rules
  #:std{:clojure-exception-handling
        {:recall 0.5,
-        :clean-fp 1,
+        :clean-fp 0,
         :gate-ready? false,
-        :fp-cases
-        [{:fixture "seed/status_pipeline.clj",
-          :trial 2,
-          :judge-said
-          "New code throwing a structured payload should use slingshot throw+ / throw-anomaly!, not plain throw + ex-info, so consumers can dispatch on the payload shape via try+ key-value selectors rather than digging into ex-data."}],
+        :evaluated? true,
+        :failed-runs 0,
+        :fp-cases [],
         :fn-cases
-        [{:fixture "seed/step_runner.clj", :trial 1}
-         {:fixture "seed/order_service.clj", :trial 0}
+        [{:fixture "seed/order_service.clj", :trial 0}
+         {:fixture "seed/order_service.clj", :trial 1}
          {:fixture "seed/order_service.clj", :trial 2}]},
        :config-as-data
        {:recall 1.0,
         :clean-fp 2,
         :gate-ready? false,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases
-        [{:fixture "seed/order_service.clj",
+        [{:fixture "seed/page_fetcher.clj",
+          :trial 0,
+          :judge-said
+          "Page size is operational configuration (page/batch sizes are explicitly operational — an operator may tune the dashboard page size per deployment without a code release), but 50 is hard-coded as a def and consumed directly by fetch-page with no config-resolution path. Per config-as-data, the active value belongs in an .edn resource with a Malli schema; the code def should remain only as the `default-page-size` fallback behind a `(get config :.../page-size default-page-size)` lookup. As written it is the anti-pattern 'magic number extracted to a def when the value should have been EDN'."}
+         {:fixture "seed/page_fetcher.clj",
           :trial 1,
           :judge-said
-          "The loyalty period (90 days) and awarded tier (\"gold\") are operational/business-policy values an operator would tune without a code release — they belong in an .edn config with a schema, not as embedded literals."}
-         {:fixture "seed/page_fetcher.clj",
-          :trial 2,
-          :judge-said
-          "Page size is operator-tunable per-deployment configuration (the docstring ties it to the dashboard table height, which differs across deployments). config-as-data: batch/page sizes that an operator would adjust without a code release belong in an .edn config (with a Malli schema); the in-code def should be the config-absent fallback resolved via (get config :.../page-size default-page-size), not the active value used directly. As written this is the anti-pattern 'magic number extracted to a def when the value should have been EDN.'"}],
+          "Page size tied to dashboard table height is an operational value a deployment/operator would tune without a code release — config-as-data says it belongs in an .edn resource (with a Malli schema), with the code keeping only a `default-` fallback resolved via (get config :.../page-size default-page-size). Here it is named `default-page-size` (the fallback-constant convention) yet consumed directly as the active value, never resolved from config. Matches the rule's anti-pattern: 'Magic numbers extracted to a def when the value should have been EDN.'"}],
         :fn-cases []},
        :exceptions-as-data
-       {:recall 0.889,
+       {:recall 1.0,
         :clean-fp 1,
         :gate-ready? false,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases
         [{:fixture "seed/payload_intake.clj",
           :trial 2,
           :judge-said
-          "Catch-and-convert of a thrown anomaly into a return value inside a non-boundary namespace. eval.seed.payload-intake matches none of the boundary patterns (*.cli.*, *.boundary.*, *.http.*, *.web.*, *.mcp.*, *.consumer.*/*.listener.*), so per exceptions-as-data the throw/catch should not live here: `process` must return the :transient anomaly as data and `ingest` should inspect it with a predicate, or the conversion must happen at a designated boundary via boundary/execute-with-exception-handling. The docstring's 'at the boundary' refers to input validation, not exception-to-result conversion, so it does not exempt this site."}],
-        :fn-cases [{:fixture "seed/step_runner.clj", :trial 1}]},
+          "try+/catch converts a thrown :transient anomaly into a return value inside a non-boundary namespace. eval.seed.payload-intake matches none of the boundary patterns (*.boundary.* / *.cli.* / *.http.* / *.mcp.* / *.consumer.*), so the docstring's 'at the boundary' claim does not qualify it. Per exceptions-as-data, the called process should return the transient failure as anomaly data and ingest should branch on it with a predicate; catch-and-convert is reserved for absolute process boundaries."}],
+        :fn-cases []},
        :localization
-       {:recall 0.917,
+       {:recall 0.833,
         :clean-fp 0,
         :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
-        :fn-cases [{:fixture "seed/status_pipeline.clj", :trial 2}]},
+        :fn-cases
+        [{:fixture "seed/status_pipeline.clj", :trial 1}
+         {:fixture "seed/status_pipeline.clj", :trial 2}]},
        :named-constants
        {:recall 1.0,
         :clean-fp 0,
         :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
         :fn-cases []},
        :no-dead-code
        {:recall 1.0,
         :clean-fp 0,
         :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
         :fn-cases []},
        :result-handling
        {:recall 1.0,
         :clean-fp 0,
         :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
         :fn-cases []},
        :self-documenting-code
        {:recall 1.0,
         :clean-fp 0,
         :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
         :fn-cases []},
        :validation-boundaries
-       {:recall 0.667,
+       {:recall 1.0,
         :clean-fp 0,
-        :gate-ready? false,
+        :gate-ready? true,
+        :evaluated? true,
+        :failed-runs 0,
         :fp-cases [],
-        :fn-cases [{:fixture "seed/row_aggregator.clj", :trial 1}]}}}
+        :fn-cases []}}}
