@@ -19,6 +19,7 @@
 (ns ai.miniforge.bb-generate-icon.interface
   "Generate a macOS `.icns` from a source PNG via sips + iconutil.
    Pass-through to `core`."
+  (:refer-clojure :exclude [run!])
   (:require [ai.miniforge.bb-generate-icon.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,7 +42,8 @@
                        :swift-file \"dev/generate-placeholder-icon.swift\"}}
    Paths are resolved relative to the repo root. `args` is the bb
    `*command-line-args*` vector; its first element overrides the source
-   PNG path."
+   PNG path. Returns an anomaly map with `:anomaly/type :invalid-input`
+   when no source icon can be resolved."
   ([cfg] (run! cfg nil))
   ([cfg args] (core/run! cfg args)))
 

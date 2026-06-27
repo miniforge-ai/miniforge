@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
  :deps  {babashka/fs           {:mvn/version "0.5.22"}
+         ai.miniforge/anomaly  {:local/root "../anomaly"}
          ai.miniforge/bb-out   {:local/root "../bb-out"}
          ai.miniforge/bb-paths {:local/root "../bb-paths"}
          ai.miniforge/bb-proc  {:local/root "../bb-proc"}}
