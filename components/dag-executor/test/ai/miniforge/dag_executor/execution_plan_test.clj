@@ -19,7 +19,8 @@
 (ns ai.miniforge.dag-executor.execution-plan-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.dag-executor.execution-plan :as sut]))
+   [ai.miniforge.dag-executor.execution-plan :as sut]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures and factories
@@ -122,34 +123,23 @@
     (is (false? (:valid? (sut/validate-plan (valid-plan :memory-limit-mb 1.5)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; create-execution-plan — round-trip and throw paths
+;; create-execution-plan — round-trip and anomaly paths
 
 (deftest create-execution-plan-returns-plan-unchanged-test
   (testing "A valid plan is returned unchanged (identity, no normalization)"
     (let [plan (valid-plan)]
       (is (= plan (sut/create-execution-plan plan))))))
 
-(deftest create-execution-plan-throws-anomaly-on-invalid-input-test
-  (testing "create-execution-plan throws ExceptionInfo for invalid input,
-            with an :errors key in the ex-data and an :anomalies/incorrect category"
-    (let [thrown (try
-                   (sut/create-execution-plan {:trust-level :rogue})
-                   ::no-throw
-                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (instance? clojure.lang.ExceptionInfo thrown))
-      (let [data (ex-data thrown)
-            anomaly (or (:anomaly data) data)]
-        (is (some? (:errors data)) "ex-data must carry :errors")
-        ;; throw-anomaly! pattern wraps the data under an anomaly category.
-        (is (or (= :anomalies/incorrect (:anomaly/category anomaly))
-                (= :anomalies/incorrect (:anomaly/category data))))))))
+(deftest create-execution-plan-returns-anomaly-on-invalid-input-test
+  (testing "create-execution-plan returns :anomalies/incorrect for invalid input"
+    (let [result (sut/create-execution-plan {:trust-level :rogue})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result)) "anomaly must carry :errors"))))
 
-(deftest create-execution-plan-error-includes-original-plan-test
-  (testing "ex-data carries the offending plan map under :plan"
+(deftest create-execution-plan-anomaly-includes-original-plan-test
+  (testing "anomaly carries the offending plan map under :plan"
     (let [bad {:trust-level :rogue :command "wrong"}
-          thrown (try
-                   (sut/create-execution-plan bad)
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= bad (:plan (ex-data thrown)))))))
+          result (sut/create-execution-plan bad)]
+      (is (response/anomaly-map? result))
+      (is (= bad (:plan result))))))
