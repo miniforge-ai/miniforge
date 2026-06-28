@@ -19,6 +19,7 @@
 (ns ai.miniforge.config.resource-test
   (:require
    [ai.miniforge.config.resource :as resource]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 ;; A real map resource shipped by this component, used for the happy path.
@@ -74,14 +75,33 @@
     (let [ex (try (resource/load-config-resource a-malformed-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (= a-malformed-resource (:config/resource (ex-data ex)))))))
+      (is (= a-malformed-resource (:config/resource (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :malformed-edn (:config/invalid-config-reason (ex-data ex)))))))
+
+(deftest load-config-resource-unreadable-resource
+  (testing "distinguishes resource read failures from malformed EDN"
+    (let [missing-file-url (java.net.URL.
+                            (str "file:/tmp/miniforge-missing-"
+                                 (random-uuid)
+                                 ".edn"))
+          ex (with-redefs [io/resource (constantly missing-file-url)]
+               (try (resource/load-config-resource a-real-resource)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= a-real-resource (:config/resource (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :unreadable-resource
+             (:config/invalid-config-reason (ex-data ex)))))))
 
 (deftest load-config-resource-non-map
   (testing "throws when the EDN parses to a non-map value"
     (let [ex (try (resource/load-config-resource a-non-map-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (= a-non-map-resource (:config/resource (ex-data ex)))))))
+      (is (= a-non-map-resource (:config/resource (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :not-a-map (:config/invalid-config-reason (ex-data ex)))))))
 
 (deftest read-config-resource-or-fail-open
   (testing "returns the fallback for a missing resource"
