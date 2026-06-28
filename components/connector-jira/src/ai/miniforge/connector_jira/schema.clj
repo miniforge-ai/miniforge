@@ -114,6 +114,7 @@
     (response/throw-anomaly! :anomalies/incorrect
                              "Jira config validation failed"
                              {:errors (me/humanize (m/explain schema value))
+                              :config/error :invalid-config
                               :value value}))
   value)
 

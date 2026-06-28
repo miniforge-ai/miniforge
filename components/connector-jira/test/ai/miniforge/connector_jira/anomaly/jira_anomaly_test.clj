@@ -49,6 +49,7 @@
       (is false "should have thrown")
       (catch ExceptionInfo e
         (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
+        (is (= :invalid-config (:config/error (ex-data e))))
         (is (some? (:errors (ex-data e))))))))
 
 (deftest load-resources-missing-edn-throws-anomaly

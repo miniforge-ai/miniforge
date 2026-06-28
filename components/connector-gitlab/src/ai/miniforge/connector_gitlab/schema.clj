@@ -52,6 +52,7 @@
     (response/throw-anomaly! :anomalies/incorrect
                              "GitLab config validation failed"
                              {:errors (me/humanize (m/explain schema value))
+                              :config/error :invalid-config
                               :value value}))
   value)
 
