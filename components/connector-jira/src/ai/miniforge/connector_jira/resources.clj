@@ -33,8 +33,12 @@
   (if-let [res (io/resource resource-path)]
     (edn/read-string (slurp res))
     (response/throw-anomaly! :anomalies/not-found
-                             (str "Jira resource definitions not found: " resource-path)
-                             {:path resource-path})))
+                             (str "Missing classpath resource: "
+                                  "Jira resource definitions not found: "
+                                  resource-path)
+                             {:path resource-path
+                              :classpath/resource resource-path
+                              :config/resource resource-path})))
 
 (def jira-resources
   "Registry of Jira Cloud REST API resource types, loaded from EDN."

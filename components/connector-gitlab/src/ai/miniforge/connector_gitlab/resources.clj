@@ -33,8 +33,12 @@
   (if-let [res (io/resource resource-path)]
     (edn/read-string (slurp res))
     (response/throw-anomaly! :anomalies/not-found
-                             (str "GitLab resource definitions not found: " resource-path)
-                             {:path resource-path})))
+                             (str "Missing classpath resource: "
+                                  "GitLab resource definitions not found: "
+                                  resource-path)
+                             {:path resource-path
+                              :classpath/resource resource-path
+                              :config/resource resource-path})))
 
 (def gitlab-resources
   "Registry of GitLab REST API v4 resource types, loaded from EDN."
