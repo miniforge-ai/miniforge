@@ -13,7 +13,8 @@
   (discover [this handle opts]
     "Discover available schemas. Returns {:schemas [...] :discover/total-count long}")
   (extract [this handle schema-name opts]
-    "Extract records. Returns {:records [...] :extract/cursor map :extract/has-more bool}")
+    "Extract records. Returns {:records [...] :extract/cursor map :extract/has-more bool}
+     or a canonical anomaly map when extraction input is unavailable or invalid.")
   (checkpoint [this handle connector-id cursor-state]
     "Persist cursor state. Returns {:checkpoint/id uuid :checkpoint/status :committed}"))
 

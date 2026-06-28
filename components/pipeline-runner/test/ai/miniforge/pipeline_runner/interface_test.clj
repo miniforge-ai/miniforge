@@ -448,6 +448,28 @@
       (is (= :anomalies/incorrect (:anomaly/category failed)))
       (is (= "Invalid connector config" (:error-message failed))))))
 
+(deftest execute-pipeline-ingest-extract-anomaly-test
+  (testing "Pipeline fails immediately when ingest connector extract returns anomaly"
+    (let [connector (reify
+                      conn/Connector
+                      (connect [_ _ _]
+                        {:connection/handle "extract-handle"
+                         :connector/status :connected})
+                      (close [_ _] {:connector/status :closed})
+                      conn/SourceConnector
+                      (discover [_ _ _] {:schemas []})
+                      (extract [_ _ _ _]
+                        (response/make-anomaly :anomalies/not-found
+                                               "Source file missing"
+                                               {:path "/missing.csv"}))
+                      (checkpoint [_ _ _ _] {}))
+          result    (runner/execute-pipeline test-pipeline {conn-src connector} {})
+          failed    (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (:status failed)))
+      (is (= :anomalies/not-found (:anomaly/category failed)))
+      (is (= "Source file missing" (:error-message failed))))))
+
 (deftest execute-pipeline-publish-connect-anomaly-test
   (testing "Pipeline fails immediately when publish connector connect returns anomaly"
     (let [mock-source (->MockSourceConnector nil)

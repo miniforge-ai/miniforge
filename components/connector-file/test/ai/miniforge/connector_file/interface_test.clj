@@ -22,7 +22,8 @@
             [cheshire.core :as json]
             [ai.miniforge.connector-file.interface :as file-conn]
             [ai.miniforge.connector-file.impl :as impl]
-            [ai.miniforge.connector.interface :as conn]))
+            [ai.miniforge.connector.interface :as conn]
+            [ai.miniforge.response.interface :as response]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test fixtures — temp directory with sample files
@@ -176,12 +177,14 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest extract-file-not-found-test
-  (testing "Extract fails when file does not exist"
+  (testing "Extract returns anomaly when file does not exist"
     (let [fc (file-conn/create-file-connector)
           handle (:connection/handle
                   (conn/connect fc {:file/path (str test-dir "/nonexistent.csv")
-                                    :file/format :csv} {}))]
-      (is (thrown? Exception (conn/extract fc handle "test" {})))
+                                    :file/format :csv} {}))
+          result (conn/extract fc handle "test" {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
       (conn/close fc handle))))
 
 ;; ---------------------------------------------------------------------------

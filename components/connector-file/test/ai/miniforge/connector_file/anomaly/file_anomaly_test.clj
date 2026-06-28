@@ -18,9 +18,11 @@
 
 (ns ai.miniforge.connector-file.anomaly.file-anomaly-test
   "Coverage for `impl/do-connect` config validation + `impl/do-extract`
-   not-found path. Boundary throws route through `response/throw-anomaly!`."
+   not-found path. Boundary throws route through `response/throw-anomaly!`;
+   normal extract failures return anomaly maps."
   (:require [clojure.test :refer [deftest is testing]]
-            [ai.miniforge.connector-file.impl :as impl])
+            [ai.miniforge.connector-file.impl :as impl]
+            [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
 (deftest do-connect-missing-path-throws-anomaly
@@ -48,12 +50,10 @@
         (is (= :anomalies/unsupported (:anomaly/category (ex-data e))))
         (is (= :weird (:format (ex-data e))))))))
 
-(deftest do-extract-nonexistent-file-throws-anomaly
-  (testing "extract from nonexistent path raises :anomalies/not-found"
-    (let [{:keys [connect/handle]} (impl/do-connect {:file/path "/no/such/file.csv"
-                                                     :file/format :csv})]
-      (try
-        (impl/do-extract handle {})
-        (is false "should have thrown")
-        (catch ExceptionInfo e
-          (is (= :anomalies/not-found (:anomaly/category (ex-data e)))))))))
+(deftest do-extract-nonexistent-file-returns-anomaly
+  (testing "extract from nonexistent path returns :anomalies/not-found"
+    (let [{:keys [connection/handle]} (impl/do-connect {:file/path "/no/such/file.csv"
+                                                        :file/format :csv})
+          result (impl/do-extract handle {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result))))))
