@@ -32,7 +32,9 @@
     (edn/read-string (slurp res))
     (response/throw-anomaly! :anomalies/not-found
                              (msg/t :github/resources-not-found {:path resource-path})
-                             {:path resource-path})))
+                             {:path resource-path
+                              :classpath/resource resource-path
+                              :config/resource resource-path})))
 
 (def github-resources
   "Registry of GitHub REST API v3 resource types, loaded from EDN."

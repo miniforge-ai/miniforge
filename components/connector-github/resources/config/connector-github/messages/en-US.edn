@@ -29,7 +29,7 @@
   :github/config-invalid         "GitHub config validation failed: {errors}"
 
   ;; Resources
-  :github/resources-not-found "GitHub resource definitions not found: {path}"
+  :github/resources-not-found "Missing classpath resource: GitHub resource definitions not found: {path}"
 
   ;; Extract
   :github/request-failed     "GitHub API request failed: {status} {error}"
