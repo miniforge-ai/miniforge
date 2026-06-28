@@ -110,16 +110,16 @@
    Arguments:
    - plan-map: Map conforming to ExecutionPlanSchema.
 
-   Returns the validated plan map unchanged if valid.
-   Throws ex-info with :errors key if validation fails."
+   Returns the validated plan map unchanged if valid, or a canonical
+   :anomalies/incorrect map with :errors and :plan when validation fails."
   [plan-map]
   (let [{:keys [valid? errors]} (validate-plan plan-map)]
     (if valid?
       plan-map
-      (response/throw-anomaly! :anomalies/incorrect
-                              "Invalid execution plan"
-                              {:errors errors
-                               :plan   plan-map}))))
+      (response/make-anomaly :anomalies/incorrect
+                             "Invalid execution plan"
+                             {:errors errors
+                              :plan   plan-map}))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -162,6 +162,6 @@
   ;; => good-plan (unchanged)
 
   (create-execution-plan {:image-digest "sha256:abc" :trust-level :unknown})
-  ;; throws ExceptionInfo with :errors
+  ;; => {:anomaly/category :anomalies/incorrect, :errors {...}, :plan {...}, ...}
 
   :leave-this-here)
