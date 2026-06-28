@@ -73,21 +73,22 @@
   [agent-result]
   (if (not= :success (:status agent-result))
     agent-result
-    (let [output   (:output agent-result)
+    (let [failure-opts (select-keys agent-result [:metrics :tokens :duration-ms])
+          output   (:output agent-result)
           tasks    (:plan/tasks output)
           task-ids (set (keep :task/id tasks))]
       (cond
         ;; Zero tasks → :no-tasks DAG skip → silent monolithic implement fallback
         (empty? tasks)
         (response/error
-         (ex-info
-          (str "Planner produced 0 tasks — DAG orchestrator cannot activate. "
-               "Planner must decompose the spec into a non-empty :plan/tasks vector. "
-               "Use :already-satisfied evidence bundle when the work is truly done.")
-          {:phase     :plan
-           :plan/id   (:plan/id output)
-           :plan/name (:plan/name output)
-           :anomaly   :anomalies.dag/no-tasks}))
+         (str "Planner produced 0 tasks — DAG orchestrator cannot activate. "
+              "Planner must decompose the spec into a non-empty :plan/tasks vector. "
+              "Use :already-satisfied evidence bundle when the work is truly done.")
+         (assoc failure-opts
+                :data {:phase     :plan
+                       :plan/id   (:plan/id output)
+                       :plan/name (:plan/name output)
+                       :anomaly   :anomalies.dag/no-tasks}))
 
         ;; Unknown dep refs → orphan tasks at DAG runtime — fail early
         :else
@@ -97,13 +98,13 @@
                              {:task/id (:task/id t) :unknown-dep dep})]
           (if (seq invalid-deps)
             (response/error
-             (ex-info
-              (str "Plan contains tasks with unknown dependency references. "
-                   "Each :task/dependencies entry must be a :task/id from this plan.")
-              {:phase        :plan
-               :plan/id      (:plan/id output)
-               :invalid-deps (vec invalid-deps)
-               :anomaly      :anomalies.dag/unknown-deps}))
+             (str "Plan contains tasks with unknown dependency references. "
+                  "Each :task/dependencies entry must be a :task/id from this plan.")
+             (assoc failure-opts
+                    :data {:phase        :plan
+                           :plan/id      (:plan/id output)
+                           :invalid-deps (vec invalid-deps)
+                           :anomaly      :anomalies.dag/unknown-deps}))
             agent-result))))))
 
 ;------------------------------------------------------------------------------ Layer 1

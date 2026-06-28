@@ -70,7 +70,9 @@
           "zero-task plan must fail with :error, not silently trigger :no-tasks DAG skip")
       (is (= :anomalies.dag/no-tasks
              (get-in result [:error :data :anomaly]))
-          "failure must carry :anomalies.dag/no-tasks anomaly for observability"))))
+          "failure must carry :anomalies.dag/no-tasks anomaly for observability")
+      (is (= 100 (get-in result [:metrics :tokens]))
+          "failure must preserve planner invocation metrics"))))
 
 (deftest unknown-dep-refs-fail-explicitly-test
   (testing "Tasks referencing non-existent task IDs fail with :anomalies.dag/unknown-deps"
@@ -87,7 +89,9 @@
           "unknown dep refs must fail — not silently become orphan tasks at runtime")
       (is (= :anomalies.dag/unknown-deps
              (get-in result [:error :data :anomaly]))
-          "failure must carry :anomalies.dag/unknown-deps anomaly"))))
+          "failure must carry :anomalies.dag/unknown-deps anomaly")
+      (is (= 100 (get-in result [:metrics :tokens]))
+          "failure must preserve planner invocation metrics"))))
 
 (deftest valid-deps-pass-through-test
   (testing "Tasks with dependencies pointing to known task IDs pass through"
