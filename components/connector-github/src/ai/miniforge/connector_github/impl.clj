@@ -195,39 +195,45 @@
   [result]
   (:errors result))
 
-(defn- validate-connect!
-  "Validate config and auth sequentially, throwing on first failure.
-   Auth validation delegates to the shared connector helper, then re-throws
-   with the localized message that interpolates the actual validation errors."
+(defn- validate-connect
+  "Validate config and auth sequentially.
+
+   Returns nil on success. Returns a canonical anomaly map for config
+   failures. Auth validation still delegates to the connector boundary helper
+   and may throw for invalid auth."
   [config auth]
   (let [config-result (gh-schema/validate-config config)]
     (cond
       (gh-schema/invalid? config-result)
       (let [errs (validation-errors config-result)]
-        (response/throw-anomaly! :anomalies/incorrect
-                                 (msg/t :github/config-invalid {:errors errs})
-                                 {:errors errs}))
+        (response/make-anomaly :anomalies/incorrect
+                               (msg/t :github/config-invalid {:errors errs})
+                               {:errors errs}))
 
       (and (nil? (:github/org config)) (nil? (:github/owner config)))
-      (response/throw-anomaly! :anomalies/incorrect
-                               (msg/t :github/owner-or-org-required)
-                               {:config config})
+      (response/make-anomaly :anomalies/incorrect
+                             (msg/t :github/owner-or-org-required)
+                             {:config config})
 
       :else
       (connector/validate-auth-or-throw! auth msg/t :github/auth-invalid))))
 
 ;; -- Lifecycle --
 (defn do-connect
-  "Validate config and auth, register handle. Returns connect-result."
+  "Validate config and auth, register handle.
+
+   Returns a connect-result map on success or a canonical anomaly map when
+   config validation fails."
   [config auth]
-  (validate-connect! config auth)
-  (let [handle       (str (UUID/randomUUID))
-        base-url     (get config :github/base-url "https://api.github.com")
-        auth-headers (if (:auth/method auth) (build-auth-headers auth) {})]
-    (store-handle! handle {:config          (assoc config :github/base-url base-url)
-                           :auth-headers    auth-headers
-                           :last-request-at nil})
-    (connector/connect-result handle)))
+  (if-let [anomaly (validate-connect config auth)]
+    anomaly
+    (let [handle       (str (UUID/randomUUID))
+          base-url     (get config :github/base-url "https://api.github.com")
+          auth-headers (if (:auth/method auth) (build-auth-headers auth) {})]
+      (store-handle! handle {:config          (assoc config :github/base-url base-url)
+                             :auth-headers    auth-headers
+                             :last-request-at nil})
+      (connector/connect-result handle))))
 
 (defn do-close
   "Remove handle state. Returns close-result."

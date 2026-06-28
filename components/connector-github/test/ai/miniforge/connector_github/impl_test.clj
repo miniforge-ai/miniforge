@@ -20,8 +20,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-github.impl :as impl]
             [ai.miniforge.connector-github.resources :as resources]
-            [ai.miniforge.connector-http.rate-limit :as rate]
             [ai.miniforge.connector-http.etag :as etag]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]))
 
 (deftest resource-schemas-test
@@ -96,7 +96,9 @@
 
 (deftest connect-validates-config-test
   (testing "do-connect requires org or owner"
-    (is (thrown? Exception (impl/do-connect {} nil)))))
+    (let [result (impl/do-connect {} nil)]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest connect-close-lifecycle-test
   (testing "connect and close work with org"
