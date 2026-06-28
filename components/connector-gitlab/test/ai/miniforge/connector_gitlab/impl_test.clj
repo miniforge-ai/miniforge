@@ -17,9 +17,11 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.connector-gitlab.impl-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-gitlab.impl :as impl]
             [ai.miniforge.connector-gitlab.resources :as resources]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -47,8 +49,8 @@
     (let [resource-def (resources/get-resource :merge-requests)
           config {:gitlab/project-path "engrammicai/ixi-services/services/ixi"}
           url (resources/build-url "https://gitlab.com" resource-def config)]
-      (is (clojure.string/includes? url "/api/v4/projects/"))
-      (is (clojure.string/includes? url "/merge_requests"))))
+      (is (str/includes? url "/api/v4/projects/"))
+      (is (str/includes? url "/merge_requests"))))
 
   (testing "builds project URL with project-id"
     (let [resource-def (resources/get-resource :issues)
@@ -112,7 +114,9 @@
 
 (deftest connect-validates-config-test
   (testing "do-connect requires project-id or project-path"
-    (is (thrown? Exception (impl/do-connect {} nil)))))
+    (let [result (impl/do-connect {} nil)]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest connect-close-lifecycle-test
   (testing "connect and close with project-path"
@@ -253,6 +257,22 @@
               (is (= {:cursor/type :timestamp-watermark
                       :cursor/value "2026-03-21T10:30:00Z"}
                      (:extract/cursor result))))))
+        (finally
+          (impl/do-close handle))))))
+
+(deftest extract-optional-transient-failure-returns-anomaly-test
+  (testing "optional resource transient failures return anomaly maps"
+    (let [handle (:connection/handle (impl/do-connect {:gitlab/project-id 1} nil))]
+      (try
+        (with-redefs-fn
+          {#'impl/do-request
+           (fn [_url _headers _params]
+             (schema/failure :body "temporarily unavailable" {:error-type :transient}))}
+          (fn []
+            (let [result (impl/do-extract handle "iterations" {})]
+              (is (response/anomaly-map? result))
+              (is (= :anomalies/unavailable (:anomaly/category result)))
+              (is (= :transient (:error-type result))))))
         (finally
           (impl/do-close handle))))))
 

@@ -143,6 +143,21 @@
             (page-fetch-result all-records
                                (final-cursor resource-def all-records))))))))
 
+(defn- exception->anomaly
+  [^clojure.lang.ExceptionInfo e]
+  (let [data (ex-data e)]
+    (if (response/anomaly-map? data)
+      data
+      (response/make-anomaly :anomalies/fault
+                             (or (ex-message e) "GitLab optional resource fetch failed")
+                             data))))
+
+(defn- optional-fetch-failure
+  [^clojure.lang.ExceptionInfo e]
+  (if (= :permanent (:error-type (ex-data e)))
+    (connector/extract-result [] nil false)
+    (exception->anomaly e)))
+
 (defn- timestamp-value
   [record]
   (or (:updated_at record)
@@ -207,21 +222,25 @@
 ;; Lifecycle and source operations
 
 (defn do-connect
-  "Validate config at boundary, register handle."
+  "Validate config at boundary, register handle.
+
+   Returns a connect-result map on success or a canonical anomaly map when
+   required project config is missing."
   [config auth]
   (let [config (assoc config :gitlab/base-url
                       (get config :gitlab/base-url "https://gitlab.com"))]
-    (when-not (has-project? config)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (msg/t :gitlab/project-required)
-                               {:config config}))
-    (schema/validate! schema/GitLabConfig config)
-    (validate-auth! auth)
-    (let [handle (str (UUID/randomUUID))]
-      (store-handle! handle {:config       config
-                              :auth-headers (resolve-auth-headers auth)
-                              :last-request-at nil})
-      (connector/connect-result handle))))
+    (if-not (has-project? config)
+      (response/make-anomaly :anomalies/incorrect
+                             (msg/t :gitlab/project-required)
+                             {:config config})
+      (do
+        (schema/validate! schema/GitLabConfig config)
+        (validate-auth! auth)
+        (let [handle (str (UUID/randomUUID))]
+          (store-handle! handle {:config       config
+                                 :auth-headers (resolve-auth-headers auth)
+                                 :last-request-at nil})
+          (connector/connect-result handle))))))
 
 (defn do-close [handle]
   (remove-handle! handle)
@@ -247,8 +266,7 @@
         (if (:optional? resource-def)
           (try (fetch)
                (catch clojure.lang.ExceptionInfo e
-                 (when-not (= :permanent (:error-type (ex-data e))) (throw e))
-                 (connector/extract-result [] nil false)))
+                 (optional-fetch-failure e)))
           (fetch))))))
 
 (defn do-checkpoint [cursor-state]
