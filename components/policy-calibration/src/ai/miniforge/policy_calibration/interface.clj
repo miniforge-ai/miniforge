@@ -5,7 +5,8 @@
    wires the real LLM judge; tests pass deterministic cells)."
   (:require [ai.miniforge.policy-calibration.core :as core]
             [ai.miniforge.policy-calibration.judge :as judge]
-            [ai.miniforge.policy-calibration.runner :as runner]))
+            [ai.miniforge.policy-calibration.runner :as runner]
+            [ai.miniforge.policy-calibration.gate-check :as gate-check]))
 
 ;; ---- judge cell constructors / accessors (one judge call on one fixture) ----
 (def cell-success
@@ -49,3 +50,16 @@
    judge, calibrate, write the record). Returns the record. This is the body of
    the `policy:calibrate` bb task."
   runner/run-calibration!)
+
+;; ---- build-time gate-readiness check ----
+(def gate-requires-calibration?
+  "True iff a rule gates via the semantic judge (acting action + semantic detector)."
+  gate-check/requires-calibration?)
+(def gate-check
+  "(gate-check rules record) -> {:ok? bool :ungated [rule-id ...]} — hard-halt
+   semantic rules lacking a passing calibration record."
+  gate-check/check)
+(def gate-check-shipped
+  "Load the shipped packs + committed calibration record and run gate-check.
+   Body of the build-time gate-readiness check."
+  gate-check/check-shipped)
