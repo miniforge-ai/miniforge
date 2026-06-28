@@ -31,7 +31,12 @@
   [message data]
   (anomaly/anomaly :invalid-input message data))
 
-(defn cell-ok?   [cell] (not (anomaly/anomaly? cell)))
+(defn cell-ok?
+  "True only for a success cell. A nil or any non-success value (a missing
+   lookup, a misbehaving judge, an anomaly) is NOT ok — it must not be treated
+   as a clean pass."
+  [cell]
+  (and (map? cell) (contains? cell :calibration/fired)))
 (defn cell-fired [cell] (:calibration/fired cell))
 (defn cell-why   [cell] (:calibration/why cell))
 
@@ -91,7 +96,9 @@
         recall-min   (round3 (apply min (map :recall per-run)))
         recall-max   (round3 (apply max (map :recall per-run)))
         clean-fp-max (apply max (map :clean-fp per-run))
-        failed-runs  (reduce + (map :failed per-run))
+        ;; total non-:ok (errored / unparseable) judge cells across all runs —
+        ;; a count of cells, not of runs
+        failed-cells (reduce + (map :failed per-run))
         fp-cases     (vec (distinct (mapcat :fp-cases per-run)))
         fn-cases     (vec (distinct (mapcat :fn-cases per-run)))]
     {:gate-ready?  all-pass?
@@ -103,7 +110,7 @@
      :recall-max   recall-max
      :clean-fp-max clean-fp-max
      :evaluated?   (every? :evaluated? per-run)
-     :failed-runs  failed-runs
+     :failed-cells failed-cells
      :fp-cases     fp-cases
      :fn-cases     fn-cases}))
 
@@ -114,11 +121,20 @@
   (vec (mapcat (fn [batch] (mapv deref (mapv #(future (f %)) batch)))
                (partition-all n coll))))
 
+(defn- judge-cell
+  "Run the injected judge for one (fixture, trial), turning any thrown error into
+   a backend-error cell so an intermittent failure records as data rather than
+   aborting the whole run on deref."
+  [judge-fn rules fixture]
+  (try (judge-fn rules fixture)
+       (catch Throwable e
+         (backend-error "judge threw" {:error (ex-message e)}))))
+
 (defn- run-pass
   [{:keys [rules fixtures judge-fn trials max-parallel gate-bar]}]
   (let [jobs    (for [f fixtures t (range trials)] [f t])
         cells   (into {} (bounded-pmap max-parallel
-                                       (fn [[f t]] [[(:rel f) t] (judge-fn rules f)])
+                                       (fn [[f t]] [[(:rel f) t] (judge-cell judge-fn rules f)])
                                        jobs))
         cell-at (fn [rel t] (get cells [rel t]))]
     (into {} (map (fn [rule]

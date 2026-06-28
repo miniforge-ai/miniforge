@@ -1,7 +1,7 @@
 (ns ai.miniforge.policy-calibration.runner
   "Live calibration run: load config + rules + corpus, build the LLM judge,
    calibrate, and write the record. The thin `policy:calibrate` bb task calls
-   `run!`; all logic lives here, not in bb.edn."
+   `run-calibration!`; all logic lives here, not in bb.edn."
   (:require [ai.miniforge.policy-calibration.config :as config]
             [ai.miniforge.policy-calibration.core :as core]
             [ai.miniforge.policy-calibration.judge :as judge]

@@ -28,7 +28,7 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 2,
-        :failed-runs 0},
+        :failed-cells 0},
        :config-as-data
        {:stable? true,
         :evaluated? true,
@@ -62,7 +62,7 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 3,
-        :failed-runs 0},
+        :failed-cells 0},
        :exceptions-as-data
        {:stable? true,
         :evaluated? true,
@@ -84,7 +84,7 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 1,
-        :failed-runs 0},
+        :failed-cells 0},
        :localization
        {:stable? true,
         :evaluated? true,
@@ -97,7 +97,7 @@
         :gate-ready? true,
         :trials 3,
         :clean-fp-max 0,
-        :failed-runs 0},
+        :failed-cells 0},
        :named-constants
        {:stable? false,
         :evaluated? true,
@@ -113,7 +113,7 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 1,
-        :failed-runs 0},
+        :failed-cells 0},
        :no-dead-code
        {:stable? true,
         :evaluated? true,
@@ -126,7 +126,7 @@
         :gate-ready? true,
         :trials 3,
         :clean-fp-max 0,
-        :failed-runs 0},
+        :failed-cells 0},
        :result-handling
        {:stable? true,
         :evaluated? true,
@@ -139,7 +139,7 @@
         :gate-ready? true,
         :trials 3,
         :clean-fp-max 0,
-        :failed-runs 0},
+        :failed-cells 0},
        :self-documenting-code
        {:stable? false,
         :evaluated? true,
@@ -155,7 +155,7 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 1,
-        :failed-runs 0},
+        :failed-cells 0},
        :validation-boundaries
        {:stable? false,
         :evaluated? true,
@@ -168,4 +168,4 @@
         :gate-ready? false,
         :trials 3,
         :clean-fp-max 0,
-        :failed-runs 0}}}
+        :failed-cells 0}}}

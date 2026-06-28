@@ -23,16 +23,22 @@
         (string? x)  (keyword (str/replace x #"^:" ""))
         :else        nil))
 
+(defn- as-violations
+  "A parsed value is valid only if it is a vector of maps. A vector carrying
+   non-map junk is treated as ::unparseable (malformed) rather than silently
+   dropping entries, which would understate violations."
+  [v]
+  (if (and (vector? v) (every? map? v)) v ::unparseable))
+
 (defn- parse-violations
   "Parse the judge's response into a vector of violation maps, or ::unparseable."
   [content]
   (try
-    (let [s (-> (or content "") (str/replace #"(?s)```(?:edn|clojure)?" "") str/trim)
-          v (edn/read-string s)]
-      (if (vector? v) (filterv map? v) ::unparseable))
+    (as-violations (edn/read-string
+                    (-> (or content "") (str/replace #"(?s)```(?:edn|clojure)?" "") str/trim)))
     (catch Exception _
       (try (if-let [m (re-find #"(?s)\[.*\]" (or content ""))]
-             (filterv map? (edn/read-string m))
+             (as-violations (edn/read-string m))
              ::unparseable)
            (catch Exception _ ::unparseable)))))
 
