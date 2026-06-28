@@ -76,13 +76,23 @@
                       ;; propagate rather than wrap it as a parse error.
                       (.interrupt (Thread/currentThread))
                       (throw e))
+                    (catch java.io.IOException e
+                      (throw (ex-info (t :resource/malformed {:path path})
+                                      (assoc ex-data
+                                             :config/error :invalid-config
+                                             :config/invalid-config-reason :unreadable-resource)
+                                      e)))
                     (catch Exception e
                       (throw (ex-info (t :resource/malformed {:path path})
-                                      ex-data
+                                      (assoc ex-data
+                                             :config/error :invalid-config
+                                             :config/invalid-config-reason :malformed-edn)
                                       e))))]
        (when-not (map? parsed)
          (throw (ex-info (t :resource/not-a-map {:path path})
-                         ex-data)))
+                         (assoc ex-data
+                                :config/error :invalid-config
+                                :config/invalid-config-reason :not-a-map))))
        (let [missing (vec (remove #(contains? parsed %) required-keys))]
          (when (seq missing)
            (throw (ex-info (t :resource/missing-keys {:path path :keys missing})
