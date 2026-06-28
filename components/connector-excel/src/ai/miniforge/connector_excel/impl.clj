@@ -22,11 +22,10 @@
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-excel.messages :as msg]
             [ai.miniforge.response.interface :as response]
-            [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as http])
   (:import [java.io File FileOutputStream]
            [java.util UUID]
-           [org.apache.poi.ss.usermodel WorkbookFactory Cell CellType DateUtil]))
+           [org.apache.poi.ss.usermodel WorkbookFactory Cell DateUtil]))
 
 ;; -- Handle state --
 
@@ -88,7 +87,9 @@
                      records))))))
     (response/throw-anomaly! :anomalies/not-found
                              (msg/t :excel/sheet-not-found {:sheet sheet-name})
-                             {:sheet sheet-name})))
+                             {:sheet sheet-name
+                              :config/error :invalid-config
+                              :config/invalid-config-reason :missing-excel-sheet})))
 
 ;; -- Filtering --
 
@@ -147,13 +148,19 @@
     (cond
       (nil? url)        (response/throw-anomaly! :anomalies/incorrect
                                                  (msg/t :excel/url-required)
-                                                 {:config config})
+                                                 {:config config
+                                                  :config/error :invalid-config
+                                                  :config/invalid-config-reason :missing-excel-url})
       (nil? sheet-name) (response/throw-anomaly! :anomalies/incorrect
                                                  (msg/t :excel/sheet-required)
-                                                 {:config config})
+                                                 {:config config
+                                                  :config/error :invalid-config
+                                                  :config/invalid-config-reason :missing-excel-sheet-name})
       (nil? columns)    (response/throw-anomaly! :anomalies/incorrect
                                                  (msg/t :excel/columns-required)
-                                                 {:config config})
+                                                 {:config config
+                                                  :config/error :invalid-config
+                                                  :config/invalid-config-reason :missing-excel-columns})
       :else
       (let [handle (str (UUID/randomUUID))
             tmp-file (download-to-temp url)

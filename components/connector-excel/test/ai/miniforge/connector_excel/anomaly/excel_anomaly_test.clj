@@ -33,7 +33,10 @@
       (impl/do-connect {:excel/sheet-name "Sheet1" :excel/columns {0 :a}} nil)
       (is false "should have thrown")
       (catch ExceptionInfo e
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
+        (is (= :invalid-config (:config/error (ex-data e))))
+        (is (= :missing-excel-url
+               (:config/invalid-config-reason (ex-data e))))))))
 
 (deftest do-connect-missing-sheet-throws-anomaly
   (testing "missing :excel/sheet-name raises :anomalies/incorrect"
@@ -41,7 +44,10 @@
       (impl/do-connect {:excel/url "http://x/y.xls" :excel/columns {0 :a}} nil)
       (is false "should have thrown")
       (catch ExceptionInfo e
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
+        (is (= :invalid-config (:config/error (ex-data e))))
+        (is (= :missing-excel-sheet-name
+               (:config/invalid-config-reason (ex-data e))))))))
 
 (deftest do-connect-missing-columns-throws-anomaly
   (testing "missing :excel/columns raises :anomalies/incorrect"
@@ -49,7 +55,10 @@
       (impl/do-connect {:excel/url "http://x/y.xls" :excel/sheet-name "Sheet1"} nil)
       (is false "should have thrown")
       (catch ExceptionInfo e
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
+        (is (= :invalid-config (:config/error (ex-data e))))
+        (is (= :missing-excel-columns
+               (:config/invalid-config-reason (ex-data e))))))))
 
 (deftest parse-sheet-missing-sheet-throws-anomaly
   (testing "requesting a sheet absent from the workbook raises :anomalies/not-found"
@@ -61,7 +70,10 @@
           (is false "should have thrown")
           (catch ExceptionInfo e
             (is (= :anomalies/not-found (:anomaly/category (ex-data e))))
-            (is (= "Missing" (:sheet (ex-data e))))))
+            (is (= "Missing" (:sheet (ex-data e))))
+            (is (= :invalid-config (:config/error (ex-data e))))
+            (is (= :missing-excel-sheet
+                   (:config/invalid-config-reason (ex-data e))))))
         (finally
           (.close wb))))))
 
