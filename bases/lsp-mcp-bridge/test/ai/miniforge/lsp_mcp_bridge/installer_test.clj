@@ -19,9 +19,11 @@
 (ns ai.miniforge.lsp-mcp-bridge.installer-test
   "Tests for LSP auto-installer (unit tests, no actual downloads)."
   (:require
-   [clojure.test :refer [deftest is testing]]
    [ai.miniforge.lsp-mcp-bridge.installer :as installer]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.response.interface :as response]
+   [babashka.fs :as fs]
+   [babashka.process :as bp]
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Platform detection
 
@@ -71,3 +73,37 @@
     (let [result (installer/ensure-installed nil :lsp/test ["nonexistent-xyz"])]
       (is (response/anomaly-map? result))
       (is (.contains (:anomaly/message result) "not found")))))
+
+;------------------------------------------------------------------------------ Download failures
+
+(deftest download-file-returns-anomaly-on-curl-failure
+  (testing "curl failure is returned as anomaly data instead of thrown"
+    (with-redefs [bp/sh (fn [_cmd] {:exit 22 :err "not found"})]
+      (let [result (installer/download-file "https://example.test/tool.zip"
+                                            "/tmp/tool.zip")]
+        (is (response/anomaly-map? result))
+        (is (= :anomalies/fault (:anomaly/category result)))
+        (is (= "Download failed" (:anomaly/message result)))
+        (is (= "https://example.test/tool.zip" (:lsp-installer/url result)))
+        (is (= 22 (:lsp-installer/exit result)))
+        (is (= "not found" (:lsp-installer/stderr result)))))))
+
+(deftest install-via-github-propagates-download-anomaly
+  (testing "GitHub installer stops at download anomaly without extraction"
+    (let [bin-dir (fs/create-temp-dir {:prefix "lsp-installer-bin-"})
+          server-entry {:github "example/tool"
+                        :version "v1.0.0"
+                        :binary "tool"
+                        :assets {"test-platform" {:file "tool.zip"
+                                                  :extract :zip}}}]
+      (try
+        (with-redefs [installer/bin-dir (constantly (str bin-dir))
+                      bp/sh (fn [_cmd] {:exit 22 :err "not found"})]
+          (let [result (installer/install-via-github server-entry "test-platform")]
+            (is (response/anomaly-map? result))
+            (is (= :anomalies/fault (:anomaly/category result)))
+            (is (= "Download failed" (:anomaly/message result)))
+            (is (= 22 (:lsp-installer/exit result)))
+            (is (= "not found" (:lsp-installer/stderr result)))))
+        (finally
+          (fs/delete-tree bin-dir))))))

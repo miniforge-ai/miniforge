@@ -84,13 +84,18 @@
 ;; Download and extraction
 
 (defn download-file
-  "Download a file from a URL to a local path."
+  "Download a file from a URL to a local path.
+   Returns nil on success or a canonical anomaly map on curl failure."
   [url dest-path]
   (binding [*out* *err*]
     (println "Downloading" url "..."))
   (let [result (bp/sh ["curl" "-L" "-o" (str dest-path) "--progress-bar" url])]
     (when-not (zero? (:exit result))
-      (throw (ex-info "Download failed" {:url url :exit (:exit result)})))))
+      (response/make-anomaly :anomalies/fault
+                             "Download failed"
+                             {:lsp-installer/url    url
+                              :lsp-installer/exit   (:exit result)
+                              :lsp-installer/stderr (:err result)}))))
 
 (defn extract-zip
   "Extract a zip archive to a directory."
@@ -158,10 +163,13 @@
             dest-dir (bin-dir)]
         (try
           (fs/create-dirs dest-dir)
-          (download-file url archive-path)
-          (assoc state
-                 :url url :temp-dir temp-dir :archive-path archive-path
-                 :dest-dir dest-dir :binary binary)
+          (if-let [download-anomaly (download-file url archive-path)]
+            (do
+              (fs/delete-tree temp-dir)
+              (assoc state :failure download-anomaly))
+            (assoc state
+                   :url url :temp-dir temp-dir :archive-path archive-path
+                   :dest-dir dest-dir :binary binary))
           (catch Exception e
             (fs/delete-tree temp-dir)
             (fail state (str "Download failed: " (.getMessage e))))))))
