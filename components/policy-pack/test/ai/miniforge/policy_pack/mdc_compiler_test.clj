@@ -270,7 +270,27 @@
       (is (str/includes? result "Third numbered step")
           "third numbered item must be preserved")
       (is (not (re-find #"\d+\.\s*$" (str/trim result)))
-          "compiled output must not end with a bare numbered prefix (mid-sentence truncation)"))))
+          "compiled output must not end with a bare numbered prefix (mid-sentence truncation)")))
+
+  (testing "overflowing numbered list ends on a sentence boundary, never mid-word — regression for named-constants #1302"
+    ;; Each step is long enough that the first three together exceed the
+    ;; ~500-char condensation target, so the bullets path must trim to a
+    ;; whole-sentence boundary instead of a raw `subs` (which once shipped
+    ;; a directive ending "The on" mid-word).
+    (let [step (fn [n] (str n ". This is a deliberately long numbered step describing some "
+                            "policy nuance in enough words to push the combined first three "
+                            "steps comfortably past the five-hundred character condensation "
+                            "target so the trimming path is exercised."))
+          body (str "## Agent behavior\n\n"
+                    (str/join "\n" (map step (range 1 6))))
+          result (str/trim (sut/extract-agent-behavior body))]
+      (is (> (count (str/join "\n" (map step (range 1 4)))) 500)
+          "fixture must actually overflow, else the trim branch isn't tested")
+      (is (<= (count result) 510) "still condensed to ~500 chars")
+      (is (re-find #"[.!?]$" result)
+          "must end on sentence-terminating punctuation, not a mid-word cut")
+      (is (str/includes? result "long numbered step")
+          "the surviving prefix must contain whole sentences"))))
 
 ;; ============================================================================
 ;; Layer 2 — mdc->rule compilation tests

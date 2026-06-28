@@ -415,27 +415,38 @@
   [line]
   (boolean (re-matches bullet-line-pattern line)))
 
+(defn- keep-whole-sentences
+  "Largest prefix of `text` made of whole sentences (split on `.!?` +
+   whitespace) that fits within `target-length`, rejoined with single
+   spaces. Falls back to a hard character cut ONLY when the first
+   sentence alone already overflows — so a normal directive never ends
+   mid-word."
+  [text target-length]
+  (let [condensed (reduce (fn [acc s]
+                            (let [candidate (if (str/blank? acc) s (str acc " " s))]
+                              (if (> (count candidate) target-length) (reduced acc) candidate)))
+                          ""
+                          (str/split text #"(?<=[.!?])\s+"))]
+    (if (str/blank? condensed)
+      (subs text 0 (min (count text) target-length))
+      condensed)))
+
 (defn- condense-bullets
-  "Keep first 3 bullets from lines, hard-truncating to target-length."
+  "Keep the first 3 bullets. If the joined result exceeds target-length,
+   trim to whole sentences so the directive never ends mid-word (a raw
+   char cut here once shipped a truncated `named-constants` directive
+   ending \"The on\" — copilot review on miniforge#1302)."
   [lines target-length]
   (let [bullets (filterv bullet-line? lines)
         result  (str/trim (str/join "\n" (take 3 bullets)))]
     (if (<= (count result) target-length)
       result
-      (subs result 0 target-length))))
+      (keep-whole-sentences result target-length))))
 
 (defn- condense-prose
   "Keep complete sentences up to target-length, falling back to hard truncation."
   [text target-length]
-  (let [single-line (str/replace text #"\n+" " ")
-        condensed   (reduce (fn [acc s]
-                              (let [candidate (if (str/blank? acc) s (str acc " " s))]
-                                (if (> (count candidate) target-length) (reduced acc) candidate)))
-                            ""
-                            (str/split single-line #"(?<=[.!?])\s+"))]
-    (if (str/blank? condensed)
-      (subs text 0 (min (count text) target-length))
-      condensed)))
+  (keep-whole-sentences (str/replace text #"\n+" " ") target-length))
 
 (defn- condense-to-length
   "Condense text to approximately target-length characters.

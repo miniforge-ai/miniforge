@@ -56,8 +56,9 @@
   "True iff a rule gates via the semantic judge (acting action + semantic detector)."
   gate-check/requires-calibration?)
 (def gate-check
-  "(gate-check rules record) -> {:ok? bool :ungated [rule-id ...]} — hard-halt
-   semantic rules lacking a passing calibration record."
+  "(gate-check rules record) -> {:ok? bool :ungated [rule-id ...]} — acting
+   semantic rules (:hard-halt or :require-approval) lacking a passing
+   calibration record."
   gate-check/check)
 (def gate-check-shipped
   "Load the shipped packs + committed calibration record and run gate-check.

@@ -72,19 +72,23 @@
 ;; ---- build-time gate-readiness check ----
 
 (deftest gate-check-test
-  (testing "a hard-halt semantic rule without a passing record is ungated; deterministic + non-acting rules are exempt"
-    (let [rules  [{:rule/id :r/sem-ready :rule/detection {:type :custom} :rule/enforcement {:action :hard-halt}}
-                  {:rule/id :r/sem-bad   :rule/detection {:type :custom} :rule/enforcement {:action :hard-halt}}
-                  {:rule/id :r/scan      :rule/detection {:type :content-scan :pattern "x"} :rule/enforcement {:action :hard-halt}}
-                  {:rule/id :r/warn-sem  :rule/detection {:type :custom} :rule/enforcement {:action :warn}}]
-          record {:r/sem-ready {:gate-ready? true} :r/sem-bad {:gate-ready? false}}
+  (testing "an acting semantic rule without a passing record is ungated; deterministic + non-acting rules are exempt"
+    (let [rules  [{:rule/id :r/sem-ready  :rule/detection {:type :custom} :rule/enforcement {:action :hard-halt}}
+                  {:rule/id :r/sem-bad    :rule/detection {:type :custom} :rule/enforcement {:action :hard-halt}}
+                  ;; :require-approval also gates, so it must earn a record too
+                  {:rule/id :r/appr-bad   :rule/detection {:type :custom} :rule/enforcement {:action :require-approval}}
+                  {:rule/id :r/appr-ready :rule/detection {:type :custom} :rule/enforcement {:action :require-approval}}
+                  {:rule/id :r/scan       :rule/detection {:type :content-scan :pattern "x"} :rule/enforcement {:action :hard-halt}}
+                  {:rule/id :r/warn-sem   :rule/detection {:type :custom} :rule/enforcement {:action :warn}}]
+          record {:r/sem-ready  {:gate-ready? true}  :r/sem-bad  {:gate-ready? false}
+                  :r/appr-ready {:gate-ready? true}  :r/appr-bad {:gate-ready? false}}
           result (sut/gate-check rules record)]
       (is (not (:ok? result)))
-      (is (= [:r/sem-bad] (:ungated result))
-          "only the not-gate-ready hard-halt semantic rule is ungated (content-scan + warn exempt)"))))
+      (is (= [:r/sem-bad :r/appr-bad] (:ungated result))
+          "both acting actions (:hard-halt + :require-approval) that lack a passing record are ungated (content-scan + warn exempt)"))))
 
 (deftest shipped-pack-gate-readiness-test
-  (testing "every hard-halt SEMANTIC rule in the shipped pack carries a passing calibration record"
+  (testing "every ACTING SEMANTIC rule (:hard-halt / :require-approval) in the shipped pack carries a passing calibration record"
     (let [{:keys [ok? ungated]} (sut/gate-check-shipped)]
-      (is ok? (str "hard-halt semantic rules lacking a passing calibration record "
+      (is ok? (str "acting semantic rules lacking a passing calibration record "
                    "(sharpen the rule + recalibrate, or reclassify): " (pr-str ungated))))))

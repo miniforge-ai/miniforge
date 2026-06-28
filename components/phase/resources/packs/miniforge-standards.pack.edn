@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-06-28T21:10:32.138-00:00",
+#:pack{:created-at #inst "2026-06-28T21:51:45.687-00:00",
        :version "2026.06",
        :rules
        [#:rule{:title
@@ -509,7 +509,7 @@
         #:rule{:title
                "Named constants — no magic numbers or magic strings in code, always extract to a well-named def with a docstring that explains intent",
                :agent-behavior
-               "1. Every numeric literal larger than 2 or smaller than -1 → check if it deserves a name.\n2. Every string literal with structure (path fragment, format placeholder, enum value) → check if it deserves a name *or* belongs in i18n.\n3. If the same magic literal appears across files — or many times within one file — it MUST be extracted to a shared constant. This covers every \"Magic\" category above: numbers, opaque strings, and structured strings (file paths, format placeholders, status codes). The on",
+               "1. Every numeric literal larger than 2 or smaller than -1 → check if it deserves a name. 2. Every string literal with structure (path fragment, format placeholder, enum value) → check if it deserves a name *or* belongs in i18n. 3. If the same magic literal appears across files — or many times within one file — it MUST be extracted to a shared constant. This covers every \"Magic\" category above: numbers, opaque strings, and structured strings (file paths, format placeholders, status codes).",
                :enforcement
                {:action :hard-halt,
                 :message
@@ -1184,7 +1184,7 @@
                     :std/pre-commit-discipline
                     :std/tests-with-code]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-06-28T21:10:32.138-00:00",
+       :updated-at #inst "2026-06-28T21:51:45.687-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},
