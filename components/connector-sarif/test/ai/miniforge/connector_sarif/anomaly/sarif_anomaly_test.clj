@@ -24,7 +24,8 @@
    `:anomalies/incorrect`."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-sarif.format :as fmt]
-            [ai.miniforge.connector-sarif.impl :as impl])
+            [ai.miniforge.connector-sarif.impl :as impl]
+            [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
 (deftest parse-file-unsupported-format-throws-anomaly
@@ -38,12 +39,10 @@
         (is (= "/nope/no.weird" (:path (ex-data e))))
         (is (= :weird (:format (ex-data e))))))))
 
-(deftest do-connect-invalid-config-throws-anomaly
-  (testing "invalid SARIF config raises :anomalies/incorrect"
-    (try
-      (impl/do-connect {})
-      (is false "should have thrown")
-      (catch ExceptionInfo e
-        (is (re-find #"Invalid SARIF config" (.getMessage e)))
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
-        (is (seq (:errors (ex-data e))))))))
+(deftest do-connect-invalid-config-returns-anomaly
+  (testing "invalid SARIF config returns :anomalies/incorrect"
+    (let [result (impl/do-connect {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (= "Invalid SARIF config" (:anomaly/message result)))
+      (is (seq (:sarif/errors result))))))

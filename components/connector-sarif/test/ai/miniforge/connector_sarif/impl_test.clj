@@ -20,6 +20,7 @@
   (:require [clojure.test :refer [deftest testing is]]
             [cheshire.core :as json]
             [ai.miniforge.connector-sarif.impl :as impl]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.connector-sarif.format :as fmt]))
 
 ;; --------------------------------------------------------------------------
@@ -59,8 +60,11 @@
       (is (string? (:connection/handle result)))
       (impl/do-close (:connection/handle result))))
 
-  (testing "Connect with invalid config throws"
-    (is (thrown? Exception (impl/do-connect {})))))
+  (testing "Connect with invalid config returns anomaly"
+    (let [result (impl/do-connect {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (seq (:sarif/errors result))))))
 
 (deftest test-discover
   (testing "Discover schemas from SARIF file"
