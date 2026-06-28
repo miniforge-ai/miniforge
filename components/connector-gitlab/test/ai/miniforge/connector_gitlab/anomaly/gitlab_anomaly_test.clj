@@ -18,21 +18,20 @@
 
 (ns ai.miniforge.connector-gitlab.anomaly.gitlab-anomaly-test
   "Coverage for `impl/do-connect`, `impl/require-resource!`, and
-   `schema/validate!` boundary escalation via `response/throw-anomaly!`."
+   `schema/validate!` boundary behavior."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.java.io :as io]
             [ai.miniforge.connector-gitlab.impl :as impl]
             [ai.miniforge.connector-gitlab.resources :as resources]
-            [ai.miniforge.connector-gitlab.schema :as schema])
+            [ai.miniforge.connector-gitlab.schema :as schema]
+            [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest do-connect-missing-project-throws-anomaly
-  (testing "config without project-id or project-path raises :anomalies/incorrect"
-    (try
-      (impl/do-connect {} nil)
-      (is false "should have thrown")
-      (catch ExceptionInfo e
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+(deftest do-connect-missing-project-returns-anomaly
+  (testing "config without project-id or project-path returns :anomalies/incorrect"
+    (let [result (impl/do-connect {} nil)]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest require-resource-unknown-throws-anomaly
   (testing "looking up an unknown resource raises :anomalies/not-found"
