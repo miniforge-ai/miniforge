@@ -1,0 +1,171 @@
+{:generated-by "policy-calibration/runner",
+ :model "claude-opus-4-8",
+ :trials 3,
+ :runs 3,
+ :gate-bar {:max-clean-fp 0, :min-recall 0.8},
+ :rules
+ #:std{:clojure-exception-handling
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [{:fixture "seed/order_service.clj"}],
+        :run-verdicts [false false false],
+        :fp-cases
+        [{:fixture "seed/status_pipeline.clj",
+          :judge-said
+          "Structured payload thrown via plain throw + ex-info. If a throw is warranted, use throw+ / throw-anomaly! so consumers can dispatch on the anomaly shape via a key-value selector; plain throw is reserved for genuine Java/JVM exceptions."}
+         {:fixture "seed/status_pipeline.clj",
+          :judge-said
+          "Throws a structured payload via plain throw/ex-info. When a throw is warranted for structured data, use throw+ (or response.anomaly/throw-anomaly!) so consumers can dispatch on the value's shape with a try+ selector; plain throw is reserved for genuine Java/JVM exceptions."}
+         {:fixture "seed/status_pipeline.clj",
+          :judge-said
+          "Structured payload thrown via plain throw/ex-info. When throwing structured data, use throw+ (or throw-anomaly!) so try+ consumers can dispatch on the value's shape rather than digging through ex-data."}
+         {:fixture "seed/status_pipeline.clj",
+          :judge-said
+          "Structured payload thrown via plain throw/ex-info. Rule 211: structured throws use throw+ / response.anomaly/throw-anomaly! so try+ consumers can dispatch on the value's shape; plain throw is reserved for genuine Java/JVM exceptions."}],
+        :recall-min 0.5,
+        :recall-max 0.833,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 2,
+        :failed-cells 0},
+       :config-as-data
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [false false false],
+        :fp-cases
+        [{:fixture "seed/order_service.clj",
+          :judge-said
+          "Reward tier \"gold\" and loyalty period 90 are operator-tunable business policy that should change without a code release; they belong in an .edn config (with a schema), not as embedded literals in code."}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is operational configuration, not a code constant. It satisfies the config-as-data signals: different deployments/dashboard table heights want different values, and an operator should be able to tune the page size without a code release. The active value belongs in an .edn config (e.g. :seed/default-page-size) validated by a schema. Per the rule, the def may remain only as the fallback when config is absent, with fetch-page resolving the value via a config lookup (get config :seed/default-page-size default-page-size) — here it is hard-coded and consumed directly as the active value with no config path."}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is operational configuration — the standard explicitly lists \"page sizes\" as operator-tunable, and the docstring ties this value to a deployment-specific UI concern (dashboard table height) an operator could want to change without a code release. fetch-page consumes default-page-size directly with no config-resolution path and no override argument (it takes only [query], despite the docstring's \"when the caller omits one\"). The default- constant may remain as the fallback when config is silent, but the active value belongs in an .edn config resolved at the boundary (e.g. (get config :page/size default-page-size))."}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is operator-tunable operational config (config-as-data signals 1 and 2: a different deployment / dashboard height wants a different value, and an operator should change it without a code release). The active value 50 is hard-coded in code with no EDN resolution path; fetch-page always uses it and the 'when the caller omits one' override the docstring implies does not exist. The value should live in an .edn config (with a resolve fn reading it), keeping this def only as the absent-config fallback — matches the anti-pattern \"'Magic numbers extracted to a def' when the value should have been EDN.\""}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is an operational value an operator would want to tune per-deployment (config-as-data lists batch/page sizes explicitly). The named-constant `default-page-size` is the correct code-side fallback, but `fetch-page` uses it directly with no config-resolution path — the active value must come from an .edn config (with this def as the silent-config fallback), e.g. (get config :page/default-size default-page-size)."}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is operational configuration, not a code constant. An operator could reasonably want to tune dashboard rows-per-page without a code release (config-as-data signals 1 and 2). It is frozen as the only value in code with no .edn file and no config-resolution path; fetch-page reads default-page-size directly. Per config-as-data the active value belongs in an EDN resource with a Malli schema; the code keeps only a fallback default and resolves via (get config :page-size default-page-size). Directly matches the listed anti-pattern: 'Magic numbers extracted to a def when the value should have been EDN.'"}
+         {:fixture "seed/page_fetcher.clj",
+          :judge-said
+          "Page size is operational configuration — the standard explicitly lists page/batch sizes as operator-tunable values that belong in .edn, with the code-side def kept only as the fallback when config is silent. Here 50 is the active value with no config-resolution path: fetch-page takes only [query] and always uses default-page-size, so no caller, operator, or per-deployment config can override it without a code release. The `default-` prefix and the docstring phrase \"when the caller omits one\" promise a fallback-plus-override pattern, but no EDN lookup (a resolve-* reading e.g. :seed/page-size from resources/config) exists. This is the rejected anti-pattern: \"magic number extracted to a def when the value should have been EDN.\" Move the active value to an .edn config (with a schema) and resolve it, keeping this def as the silent-config fallback."}],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 3,
+        :failed-cells 0},
+       :exceptions-as-data
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [false false false],
+        :fp-cases
+        [{:fixture "seed/payload_intake.clj",
+          :judge-said
+          "Catching a thrown anomaly and converting it into a result map is reserved for absolute boundary namespaces (*.boundary.*, *.cli.*, *.http.*, *.mcp.*, *.consumer.*). The namespace eval.seed.payload-intake matches none of those patterns; a docstring asserting 'at the boundary' does not make the namespace a boundary. Per exceptions-as-data, fix process to return an anomaly as data and inspect it with anomaly?/failed? rather than throwing and catching here."}
+         {:fixture "seed/payload_intake.clj",
+          :judge-said
+          "Catch-to-convert in a non-boundary namespace. eval.seed.payload-intake matches none of the sanctioned boundary patterns (*.cli.*, *.boundary.*, *.http.*, *.mcp.*, *.consumer.*, *.listener.*), so per exceptions-as-data it must return anomalies, not catch thrown ones. The try+/catch here turns a thrown :transient anomaly from process into a schema/failure return — the listed anti-pattern 'try/catch blocks inside non-boundary code paths used to convert thrown exceptions into return values'. A docstring asserting 'at the boundary' does not confer boundary status; boundary status is determined by namespace pattern. Fix: have process return an anomaly directly and branch with schema/failed?/succeeded?, dropping the catch."}
+         {:fixture "seed/payload_intake.clj",
+          :judge-said
+          "Namespace eval.seed.payload-intake matches no boundary pattern (*.cli/*.boundary/*.http/*.web/*.mcp/*.consumer/*.listener). Catching a thrown anomaly ([:anomaly/category :transient]) and converting it to schema/failure is the anti-pattern: the catch selector proves `process` throws an anomaly via throw+ that it should return as data. Fix `process` to return the anomaly directly rather than catch-and-convert here."}],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 1,
+        :failed-cells 0},
+       :localization
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [true true true],
+        :fp-cases [],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? true,
+        :trials 3,
+        :clean-fp-max 0,
+        :failed-cells 0},
+       :named-constants
+       {:stable? false,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [true true false],
+        :fp-cases
+        [{:fixture "seed/payload_intake.clj",
+          :judge-said
+          "The domain enumeration :transient appears inline in two places — the catch selector [:anomaly/category :transient] (line 14) and the failure tag here (line 15). A magic literal that appears in more than one place must be extracted to a shared named def whose docstring explains what the :transient category means."}],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 1,
+        :failed-cells 0},
+       :no-dead-code
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [true true true],
+        :fp-cases [],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? true,
+        :trials 3,
+        :clean-fp-max 0,
+        :failed-cells 0},
+       :result-handling
+       {:stable? true,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [true true true],
+        :fp-cases [],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? true,
+        :trials 3,
+        :clean-fp-max 0,
+        :failed-cells 0},
+       :self-documenting-code
+       {:stable? false,
+        :evaluated? true,
+        :fn-cases [],
+        :run-verdicts [true false true],
+        :fp-cases
+        [{:fixture "seed/order_service.clj",
+          :judge-said
+          "Docstring states the wrong contract: the fn returns the order augmented with :charged?/:tier/:loyalty-days (or throws on failure), not \"the payment result\". A docstring that misstates the return is worse than none; state the real contract and failure mode."}],
+        :recall-min 1.0,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 1,
+        :failed-cells 0},
+       :validation-boundaries
+       {:stable? false,
+        :evaluated? true,
+        :fn-cases [{:fixture "seed/row_aggregator.clj"}],
+        :run-verdicts [true false false],
+        :fp-cases [],
+        :recall-min 0.333,
+        :recall-max 1.0,
+        :runs 3,
+        :gate-ready? false,
+        :trials 3,
+        :clean-fp-max 0,
+        :failed-cells 0}}}

@@ -1,0 +1,12 @@
+;; Gate-readiness calibration configuration (config-as-data).
+;; Operators re-run against a different model / corpus / bar by editing this,
+;; not the code. Validated against ai.miniforge.policy-calibration.config/Config.
+{:model        {:label "opus-4.8" :backend :claude :model "claude-opus-4-8"}
+ :trials       3            ; judge calls per fixture within one run
+ :runs         3            ; independent runs; gate-ready requires passing every run
+ :max-parallel 5            ; concurrent judge calls (modest for CLI backends)
+ :gate-bar     {:max-clean-fp 0 :min-recall 0.80}
+ :pack-paths   ["components/phase/resources/packs/miniforge-standards.pack.edn"
+                "components/phase/resources/packs/miniforge-builtin.pack.edn"]
+ :corpus-root  "eval/policy-fidelity/fixtures"
+ :record-out   "eval/policy-fidelity/calibration.edn"}
