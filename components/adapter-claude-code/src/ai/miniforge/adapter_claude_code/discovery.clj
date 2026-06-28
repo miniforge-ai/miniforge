@@ -49,14 +49,22 @@
     (when (nil? url)
       (throw (ex-info (str "Missing config resource on classpath: " path)
                       {:config/resource path})))
-    (let [parsed (try
-                   (edn/read-string (slurp url))
+    (let [content (slurp url :encoding "UTF-8")
+          parsed (try
+                   (edn/read-string content)
                    (catch Exception e
-                     (throw (ex-info (str "Malformed EDN config resource: " path)
-                                     {:config/resource path} e))))]
+                     (throw (ex-info (str "Invalid classpath config resource; malformed EDN: "
+                                          path)
+                                     {:config/resource path
+                                      :classpath/resource path
+                                      :config/error :malformed-edn}
+                                     e))))]
       (when-not (map? parsed)
-        (throw (ex-info (str "Config resource is not a map: " path)
-                        {:config/resource path})))
+        (throw (ex-info (str "Invalid classpath config resource; expected map: "
+                             path)
+                        {:config/resource path
+                         :classpath/resource path
+                         :config/error :not-a-map})))
       (let [missing (remove #(contains? parsed %) required-keys)]
         (when (seq missing)
           (throw (ex-info (str "Config resource " path " missing keys: " (vec missing))
