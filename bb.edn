@@ -205,6 +205,13 @@
    :requires ([standards])
    :task (standards/review *command-line-args*)}
 
+  policy:calibrate
+  {:doc  "Run gate-readiness calibration over the seeded corpus; writes the calibration record"
+   :task (let [exit (run-clojure-stream!
+                     "-M:dev" "-e"
+                     "(require 'ai.miniforge.policy-calibration.interface)(ai.miniforge.policy-calibration.interface/run-calibration!)")]
+           (when-not (zero? exit) (System/exit exit)))}
+
   work:queue
   {:doc  "Render the prioritized work-spec queue (stdout + work/QUEUE.md)"
    :requires ([work])
