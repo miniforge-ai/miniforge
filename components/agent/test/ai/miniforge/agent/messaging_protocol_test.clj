@@ -20,7 +20,8 @@
   "Tests for AgentMessaging protocol and convenience functions (Layers 4-5)."
   (:require
    [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.agent.interface :as agent]))
+   [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test Fixtures
@@ -64,6 +65,30 @@
 
       ;; Without an event-stream, event is nil (safe no-op)
       (is (nil? (:event result))))))
+
+(deftest test-send-message-invalid-data-returns-anomaly
+  (testing "Invalid outbound message data returns anomaly and is not routed"
+    (let [router (agent/create-message-router)
+          messaging (agent/create-agent-messaging
+                     :implementer
+                     test-implementer-id
+                     test-workflow-id
+                     router)
+          result (agent/send-message
+                  messaging
+                  {:type :invalid-type
+                   :to-agent :planner
+                   :content "bad message"})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (nil? (:message result)))
+      (is (nil? (:event result)))
+      (is (= [] (agent/receive-messages
+                 (agent/create-agent-messaging
+                  :planner
+                  test-planner-id
+                  test-workflow-id
+                  router)))))))
 
 (deftest test-receive-messages
   (testing "Receive messages sent to agent"
