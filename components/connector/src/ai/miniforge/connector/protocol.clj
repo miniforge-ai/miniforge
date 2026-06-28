@@ -11,10 +11,11 @@
 (defprotocol SourceConnector
   "Source connector protocol for data extraction."
   (discover [this handle opts]
-    "Discover available schemas. Returns {:schemas [...] :discover/total-count long}")
+    "Discover available schemas. Returns {:schemas [...] :discover/total-count long}
+     or a canonical anomaly map for unavailable, invalid, or unknown-handle input.")
   (extract [this handle schema-name opts]
     "Extract records. Returns {:records [...] :extract/cursor map :extract/has-more bool}
-     or a canonical anomaly map when extraction input is unavailable or invalid.")
+     or a canonical anomaly map for unavailable, invalid, or unknown-handle input.")
   (checkpoint [this handle connector-id cursor-state]
     "Persist cursor state. Returns {:checkpoint/id uuid :checkpoint/status :committed}"))
 
