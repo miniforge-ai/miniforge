@@ -36,6 +36,13 @@
     (.deleteOnExit dir)
     dir))
 
+(defn- temp-resource-url
+  [contents]
+  (let [file (java.io.File/createTempFile "adapter-config" ".edn")]
+    (.deleteOnExit file)
+    (spit file contents :encoding "UTF-8")
+    (.toURL (.toURI file))))
+
 (defn- write-file!
   "Write content to a file inside dir, creating parents as needed."
   [^java.io.File dir relative-path content]
@@ -218,6 +225,36 @@
                (catch clojure.lang.ExceptionInfo e e))]
       (is (instance? clojure.lang.ExceptionInfo ex))
       (is (= [:nope] (:config/missing-keys (ex-data ex)))))))
+
+(deftest load-config-throws-on-malformed-edn-test
+  (testing "Malformed classpath config carries resource and error data"
+    (let [path "config/adapter_claude_code/malformed-edn.txt"
+          url (temp-resource-url "{:broken")
+          ex (try
+               (with-redefs [io/resource (fn [requested-path]
+                                            (when (= path requested-path) url))]
+                 (#'discovery/load-config path [:k]))
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= path (:config/resource (ex-data ex))))
+      (is (= path (:classpath/resource (ex-data ex))))
+      (is (= :malformed-edn (:config/error (ex-data ex)))))))
+
+(deftest load-config-throws-on-non-map-test
+  (testing "Non-map classpath config carries resource and error data"
+    (let [path "config/adapter_claude_code/non-map.edn"
+          url (temp-resource-url "[:not :a :map]")
+          ex (try
+               (with-redefs [io/resource (fn [requested-path]
+                                            (when (= path requested-path) url))]
+                 (#'discovery/load-config path [:k]))
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= path (:config/resource (ex-data ex))))
+      (is (= path (:classpath/resource (ex-data ex))))
+      (is (= :not-a-map (:config/error (ex-data ex)))))))
 
 (deftest staleness-windows-loads-test
   (testing "Valid resource still loads the expected window keys"
