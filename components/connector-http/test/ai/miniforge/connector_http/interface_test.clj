@@ -48,14 +48,16 @@
         (is (= :closed (:connector/status close-result)))))))
 
 (deftest connect-missing-base-url-test
-  (testing "Connect fails without :http/base-url"
-    (let [hc (http-conn/create-http-connector)]
-      (is (thrown? Exception (conn/connect hc {:http/endpoint "/data"} {}))))))
+  (testing "Connect returns anomaly without :http/base-url"
+    (let [hc (http-conn/create-http-connector)
+          result (conn/connect hc {:http/endpoint "/data"} {})]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest connect-missing-endpoint-test
-  (testing "Connect fails without :http/endpoint"
-    (let [hc (http-conn/create-http-connector)]
-      (is (thrown? Exception (conn/connect hc {:http/base-url "https://api.example.com"} {}))))))
+  (testing "Connect returns anomaly without :http/endpoint"
+    (let [hc (http-conn/create-http-connector)
+          result (conn/connect hc {:http/base-url "https://api.example.com"} {})]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Extract with stubbed HTTP (override do-request)
@@ -160,7 +162,7 @@
         (conn/close hc handle)))))
 
 (deftest extract-http-error-test
-  (testing "Extract throws on HTTP 500"
+  (testing "Extract returns anomaly on HTTP 500"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
                     {:success? false :error-type :transient
@@ -169,11 +171,13 @@
             handle (:connection/handle
                     (conn/connect hc {:http/base-url "https://api.example.com"
                                       :http/endpoint "/data"} {}))]
-        (is (thrown? Exception (conn/extract hc handle "data" {})))
+        (let [result (conn/extract hc handle "data" {})]
+          (is (= :anomalies/unavailable (:anomaly/category result)))
+          (is (= :transient (:error-type result))))
         (conn/close hc handle)))))
 
 (deftest extract-rate-limited-test
-  (testing "Extract throws on HTTP 429"
+  (testing "Extract returns anomaly on HTTP 429"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
                     {:success? false :error-type :rate-limited
@@ -182,8 +186,10 @@
             handle (:connection/handle
                     (conn/connect hc {:http/base-url "https://api.example.com"
                                       :http/endpoint "/data"} {}))]
-        (is (thrown-with-msg? Exception #"Rate limited"
-                              (conn/extract hc handle "data" {})))
+        (let [result (conn/extract hc handle "data" {})]
+          (is (= :anomalies/unavailable (:anomaly/category result)))
+          (is (= :rate-limited (:error-type result)))
+          (is (re-find #"Rate limited" (:anomaly/message result))))
         (conn/close hc handle)))))
 
 ;; ---------------------------------------------------------------------------
@@ -194,12 +200,11 @@
   (testing "Extract with :batch/param-sets fetches all param sets in parallel"
     (let [calls (atom [])]
       (with-redefs [impl/do-request
-                    (fn [_url _headers params]
-                      (swap! calls conj params)
-                      (let [series (get params :series_id)]
-                        {:success? true
-                         :body {:observations [{:date "2026-01-01" :value "1.23"}
-                                               {:date "2026-01-02" :value "4.56"}]}}))]
+                  (fn [_url _headers params]
+                    (swap! calls conj params)
+                    {:success? true
+                     :body {:observations [{:date "2026-01-01" :value "1.23"}
+                                           {:date "2026-01-02" :value "4.56"}]}})]
         (let [hc (http-conn/create-http-connector)
               handle (:connection/handle
                       (conn/connect hc {:http/base-url "https://api.example.com"
@@ -223,7 +228,7 @@
 (deftest batch-extract-enriches-records-test
   (testing "Batch extract merges param-set keys into each record"
     (with-redefs [impl/do-request
-                  (fn [_url _headers params]
+                  (fn [_url _headers _params]
                     {:success? true
                      :body {:data [{:date "2026-01-01" :value "1.0"}]}})]
       (let [hc (http-conn/create-http-connector)
@@ -243,7 +248,7 @@
         (conn/close hc handle)))))
 
 (deftest batch-extract-error-propagates-test
-  (testing "Batch extract propagates errors from individual fetches"
+  (testing "Batch extract returns anomaly from individual fetches"
     (with-redefs [impl/do-request
                   (fn [_url _headers params]
                     (if (= "BAD" (:series_id params))
@@ -256,7 +261,9 @@
                                        :http/response-path [:data]
                                        :batch/param-sets [{:series_id "GOOD"}
                                                           {:series_id "BAD"}]} {}))]
-        (is (thrown? Exception (conn/extract hc handle "data" {})))
+        (let [result (conn/extract hc handle "data" {})]
+          (is (= :anomalies/unavailable (:anomaly/category result)))
+          (is (= :permanent (:error-type result))))
         (conn/close hc handle)))))
 
 ;; ---------------------------------------------------------------------------

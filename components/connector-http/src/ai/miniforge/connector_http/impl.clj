@@ -128,12 +128,12 @@
   (let [base-url (:http/base-url config)
         endpoint (:http/endpoint config)]
     (cond
-      (nil? base-url) (response/throw-anomaly! :anomalies/incorrect
-                                               (msg/t :http/base-url-required)
-                                               {:config config})
-      (nil? endpoint) (response/throw-anomaly! :anomalies/incorrect
-                                               (msg/t :http/endpoint-required)
-                                               {:config config})
+      (nil? base-url) (response/make-anomaly :anomalies/incorrect
+                                             (msg/t :http/base-url-required)
+                                             {:config config})
+      (nil? endpoint) (response/make-anomaly :anomalies/incorrect
+                                             (msg/t :http/endpoint-required)
+                                             {:config config})
 
       :else
       (let [handle       (str (UUID/randomUUID))
@@ -155,9 +155,9 @@
   (if-let [{:keys [config]} (get-handle handle)]
     (connector/discover-result [{:schema/name    (:http/endpoint config)
                               :schema/base-url (:http/base-url config)}])
-    (response/throw-anomaly! :anomalies/not-found
-                             (msg/t :http/handle-not-found {:handle handle})
-                             {:handle handle})))
+    (response/make-anomaly :anomalies/not-found
+                           (msg/t :http/handle-not-found {:handle handle})
+                           {:handle handle})))
 
 (defn- fetch-single
   "Fetch one page of records for a single query-params set.
@@ -169,18 +169,18 @@
         query-params (merge base-query-params
                             (build-page-params pagination offset cursor-value batch-size))
         resp         (do-request url headers query-params)]
-    (when-not (:success? resp)
-      (response/throw-anomaly! :anomalies/unavailable
-                               (str (:error resp))
-                               {:error-type (:error-type resp)}))
-    (let [body     (:body resp)
-          records  (extract-records body response-path)
-          has-more (page-has-more? pagination body offset (count records))
-          next-val (next-cursor-value pagination body offset (count records))
-          cursor   (when next-val
-                     {:cursor/type  (get pagination :type :offset)
-                      :cursor/value next-val})]
-      {:records records :cursor cursor :has-more has-more})))
+    (if-not (:success? resp)
+      (response/make-anomaly :anomalies/unavailable
+                             (str (:error resp))
+                             {:error-type (:error-type resp)})
+      (let [body     (:body resp)
+            records  (extract-records body response-path)
+            has-more (page-has-more? pagination body offset (count records))
+            next-val (next-cursor-value pagination body offset (count records))
+            cursor   (when next-val
+                       {:cursor/type  (get pagination :type :offset)
+                        :cursor/value next-val})]
+        {:records records :cursor cursor :has-more has-more}))))
 
 (defn do-extract
   "Fetch records from the HTTP API.
@@ -199,27 +199,33 @@
       (if-let [param-sets (:batch/param-sets config)]
         ;; Batch mode: pmap over param sets, enrich records with param keys
         (letfn [(fetch-and-enrich [params]
-                  (let [{:keys [records]} (fetch-single
-                                           url headers
-                                           (merge base-qp params)
-                                           response-path pagination opts)]
-                    (mapv #(merge % params) records)))]
-          (let [all-records (vec (apply concat
-                                       (pmap fetch-and-enrich param-sets)))]
-            (touch-handle! handle)
-            (connector/extract-result all-records nil false)))
+                  (let [result (fetch-single
+                                url headers
+                                (merge base-qp params)
+                                response-path pagination opts)]
+                    (if (response/anomaly-map? result)
+                      result
+                      (mapv #(merge % params) (:records result)))))]
+          (let [results (doall (pmap fetch-and-enrich param-sets))]
+            (if-let [anomaly (first (filter response/anomaly-map? results))]
+              anomaly
+              (let [all-records (vec (apply concat results))]
+                (touch-handle! handle)
+                (connector/extract-result all-records nil false)))))
 
         ;; Single mode: one fetch with pagination
         (do
           (enforce-rate-limit! handle-state)
-          (let [{:keys [records cursor has-more]}
-                (fetch-single url headers base-qp response-path pagination opts)]
-            (touch-handle! handle)
-            (connector/extract-result records cursor has-more)))))
+          (let [result (fetch-single url headers base-qp response-path pagination opts)]
+            (if (response/anomaly-map? result)
+              result
+              (let [{:keys [records cursor has-more]} result]
+                (touch-handle! handle)
+                (connector/extract-result records cursor has-more)))))))
 
-    (response/throw-anomaly! :anomalies/not-found
-                             (msg/t :http/handle-not-found {:handle handle})
-                             {:handle handle})))
+    (response/make-anomaly :anomalies/not-found
+                           (msg/t :http/handle-not-found {:handle handle})
+                           {:handle handle})))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
