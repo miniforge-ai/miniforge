@@ -492,6 +492,23 @@
       (is (= :anomalies/incorrect (:anomaly/category failed)))
       (is (= "Invalid sink config" (:error-message failed))))))
 
+(deftest execute-pipeline-publish-anomaly-test
+  (testing "Pipeline fails when publish connector publish returns anomaly"
+    (let [mock-source (->MockSourceConnector nil)
+          sink        (->MockSinkConnector
+                       (response/make-anomaly :anomalies/not-found
+                                              "Output handle missing"
+                                              {:handle "missing-output-handle"}))
+          result      (runner/execute-pipeline
+                       three-stage-pipeline
+                       {conn-src mock-source conn-sink sink}
+                       {})
+          failed      (last (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (:status failed)))
+      (is (= :anomalies/not-found (:anomaly/category failed)))
+      (is (= "Output handle missing" (:error-message failed))))))
+
 (deftest execute-pipeline-ingest-close-failure-does-not-mask-primary-error-test
   (testing "Ingest cleanup closes once and preserves the primary extract failure"
     (let [close-count (atom 0)

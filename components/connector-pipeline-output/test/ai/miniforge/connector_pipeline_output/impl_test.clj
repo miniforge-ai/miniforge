@@ -23,7 +23,8 @@
             [cheshire.core :as json]
             [ai.miniforge.connector-pipeline-output.impl :as impl]
             [ai.miniforge.connector-pipeline-output.schema :as schema]
-            [ai.miniforge.connector-pipeline-output.interface :as iface]))
+            [ai.miniforge.connector-pipeline-output.interface :as iface]
+            [ai.miniforge.response.interface :as response]))
 
 (def ^:private test-dir "target/test-output")
 
@@ -57,6 +58,13 @@
       (is (string? handle))
       (let [close-result (impl/do-close handle)]
         (is (= :closed (:connector/status close-result)))))))
+
+(deftest publish-missing-handle-returns-anomaly
+  (testing "publish returns anomaly data when the output handle is unknown"
+    (let [result (impl/do-publish "missing-output-handle" [{:id 1}] {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "missing-output-handle" (:handle result))))))
 
 (deftest publish-edn-test
   (testing "publish writes manifest.edn and records.edn"

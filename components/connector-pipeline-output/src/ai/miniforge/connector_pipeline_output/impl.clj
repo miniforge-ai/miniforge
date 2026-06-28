@@ -36,12 +36,12 @@
 (defn- remove-handle! [handle] (swap! handles dissoc handle))
 
 (defn- require-handle!
-  "Retrieve handle state or throw."
+  "Retrieve handle state or return an anomaly."
   [handle]
   (or (get-handle handle)
-      (response/throw-anomaly! :anomalies/not-found
-                               (msg/t :output/handle-not-found {:handle handle})
-                               {:handle handle})))
+      (response/make-anomaly :anomalies/not-found
+                             (msg/t :output/handle-not-found {:handle handle})
+                             {:handle handle})))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
@@ -118,9 +118,10 @@
   [handle records opts]
   (let [handle-state (require-handle! handle)
         datasets     (:publish/datasets opts)]
-    (if (and datasets (> (count datasets) 1))
-      (publish-per-dataset! handle-state records datasets opts)
-      (publish-combined! handle-state records opts))))
+    (cond
+      (response/anomaly-map? handle-state) handle-state
+      (and datasets (> (count datasets) 1)) (publish-per-dataset! handle-state records datasets opts)
+      :else (publish-combined! handle-state records opts))))
 
 (comment
   ;; (do-connect {:output/dir "output/test" :output/format :edn})

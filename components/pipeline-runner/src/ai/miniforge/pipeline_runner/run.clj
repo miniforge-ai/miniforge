@@ -173,11 +173,13 @@
               (stage-result id name :failed (anomaly-context connect-result))
               (do
                 (reset! handle (:connection/handle connect-result))
-                (conn/publish connector @handle name input-records
-                              {:publish/mode     (get config :publish-mode
-                                                     (:publish/default-mode default-config))
-                               :publish/datasets (:publish/datasets context)})
-                (stage-result id name :completed {:completed-at (Instant/now)}))))
+                (let [result (conn/publish connector @handle name input-records
+                                           {:publish/mode     (get config :publish-mode
+                                                                  (:publish/default-mode default-config))
+                                            :publish/datasets (:publish/datasets context)})]
+                  (if (response/anomaly-map? result)
+                    (stage-result id name :failed (anomaly-context result))
+                    (stage-result id name :completed {:completed-at (Instant/now)}))))))
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally
