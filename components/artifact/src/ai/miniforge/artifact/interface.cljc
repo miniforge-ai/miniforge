@@ -19,8 +19,7 @@
 (ns ai.miniforge.artifact.interface
   "Public API for the artifact component."
   (:require
-   #?@(:bb []
-       :clj [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
+   [ai.miniforge.artifact.datalevin-store :as datalevin-store]
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
@@ -31,41 +30,29 @@
 
    Re-exported from ai.miniforge.artifact.interface.protocols.artifact-store.
    Implement this protocol to back artifacts with a custom store; the bundled
-   implementations are the Datalevin store (JVM, via create-store) and the
-   Transit store (Babashka compatible, via create-transit-store).
+   implementations are the Datalevin store (via create-store) and the Transit
+   store (via create-transit-store). Both run under bb and the JVM.
 
    Methods: save, load-artifact, query, link, close. See the sub-namespace
    protocol docstrings for each method's purpose and return shape (they do not
    currently document argument contracts or failure modes)."
   p/ArtifactStore)
 
-#?(:bb
-   (defn- create-datalevin-store
-     [opts]
-     (throw (ex-info "Datalevin artifact store is JVM-only; use create-transit-store under Babashka"
-                     {:store :datalevin
-                      :runtime :bb
-                      :opts opts})))
-
-   :clj
-   (defn- create-datalevin-store
-     [opts]
-     (datalevin-store/create-datalevin-store opts)))
-
 (defn create-store
-  "Create a Datalevin-based artifact store (JVM only).
-   For Babashka compatibility, use create-transit-store instead.
+  "Create a Datalevin-based artifact store. Datalevin is reached through the
+   `ai.miniforge.datalevin` bridge (the pod under bb, the lib under Clojure),
+   so this runs under both runtimes.
 
    Options:
-   - :dir      - Directory for storage (nil for in-memory)
+   - :dir      - Directory for storage (omit for a transient store)
    - :logger   - Optional logger
    - :schema   - Optional custom Datalevin schema
 
    Examples:
-     (create-store)                          ; in-memory
+     (create-store)                          ; transient
      (create-store {:dir \"data/artifacts\"})  ; persistent"
   ([] (create-store {}))
-  ([opts] (create-datalevin-store opts)))
+  ([opts] (datalevin-store/create-datalevin-store opts)))
 
 (defn create-transit-store
   "Create a Transit-based artifact store (Babashka compatible).

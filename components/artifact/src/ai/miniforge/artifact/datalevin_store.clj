@@ -17,13 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.artifact.datalevin-store
-  "Datalevin-based artifact store implementation (JVM only).
-
-   This namespace is separate from artifact.core to avoid pulling
-   in JVM-only dependencies (datalevin/nippy) when only the protocol
-   or transit store is needed (Babashka compatibility)."
+  "Datalevin-backed artifact store. Datalevin is reached through the
+   `ai.miniforge.datalevin` bridge — the babashka pod under bb, the JVM lib
+   under Clojure — so this store runs under both runtimes and carries no
+   JVM-only dep of its own."
   (:require
-   [datalevin.core :as d]
+   [ai.miniforge.datalevin.interface :as dl]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.logging.interface :as log]))
 
@@ -45,7 +44,7 @@
   p/ArtifactStore
   (save [_this artifact]
     (let [id (:artifact/id artifact)]
-      (d/transact! conn [artifact])
+      (dl/transact! conn [artifact])
       (when logger
         (log/debug logger :system :artifact/saved
                    {:data {:artifact-id id
@@ -53,30 +52,25 @@
       id))
 
   (load-artifact [_this id]
-    (let [db (d/db conn)
-          result (d/entity db [:artifact/id id])]
-      (when result
-        (into {} result))))
+    (dl/entity-map (dl/db conn) [:artifact/id id]))
 
   (query [_this criteria]
-    (let [db (d/db conn)]
+    (let [db (dl/db conn)
+          ids (dl/q '[:find ?e :where [?e :artifact/id]] db)
+          artifacts (mapv (fn [[eid]] (dl/entity-map db eid)) ids)]
       (if (empty? criteria)
-        ;; Return all artifacts if no criteria
-        (let [all-ids (d/q '[:find ?e :where [?e :artifact/id]] db)]
-          (mapv (fn [[eid]] (into {} (d/entity db eid))) all-ids))
+        artifacts
         ;; Simple filter-based query (Phase 1 - good enough)
-        (let [all-artifacts (d/q '[:find ?e :where [?e :artifact/id]] db)
-              artifacts (mapv (fn [[eid]] (into {} (d/entity db eid))) all-artifacts)]
-          (filter (fn [art]
-                    (every? (fn [[k v]] (= (get art k) v)) criteria))
-                  artifacts)))))
+        (filter (fn [art]
+                  (every? (fn [[k v]] (= (get art k) v)) criteria))
+                artifacts))))
 
   (link [_this parent-id child-id]
     (try
       ;; Add child to parent's children list
-      (d/transact! conn [[:db/add [:artifact/id parent-id] :artifact/children child-id]])
+      (dl/transact! conn [[:db/add [:artifact/id parent-id] :artifact/children child-id]])
       ;; Add parent to child's parents list
-      (d/transact! conn [[:db/add [:artifact/id child-id] :artifact/parents parent-id]])
+      (dl/transact! conn [[:db/add [:artifact/id child-id] :artifact/parents parent-id]])
       (when logger
         (log/debug logger :system :artifact/linked
                    {:data {:parent-id parent-id
@@ -91,37 +85,35 @@
         false)))
 
   (close [_this]
-    (d/close conn)))
+    (dl/close conn)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Public API
 
 (defn create-datalevin-store
-  "Create a new Datalevin-based artifact store (JVM only).
+  "Create a new Datalevin-based artifact store.
 
    Options:
-   - :dir      - Directory for storage (nil for in-memory)
+   - :dir      - Directory for storage (omit for a transient store)
    - :logger   - Optional logger
    - :schema   - Optional custom Datalevin schema (defaults to datalevin-schema)
 
    Examples:
-     (create-datalevin-store)                          ; in-memory
+     (create-datalevin-store)                          ; transient
      (create-datalevin-store {:dir \"data/artifacts\"})  ; persistent
      (create-datalevin-store {:logger my-logger})"
   ([] (create-datalevin-store {}))
   ([{:keys [dir logger schema] :or {schema datalevin-schema}}]
-   (let [conn (if dir
-                (d/get-conn dir schema)
-                (d/get-conn nil schema))]
+   (let [conn (dl/get-conn (or dir (dl/transient-dir)) schema)]
      (when logger
        (log/info logger :system :artifact/store-created
-                 {:data {:type (if dir :persistent :in-memory)
+                 {:data {:type (if dir :persistent :transient)
                          :dir dir}}))
      (->DatalevinStore conn logger))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Create in-memory store
+  ;; Create transient store
   (def store (create-datalevin-store))
 
   ;; Create persistent store

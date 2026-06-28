@@ -4,7 +4,7 @@
         ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/logging {:local/root "../logging"}
-        datalevin/datalevin {:mvn/version "0.9.16"}
+        ai.miniforge/datalevin {:local/root "../datalevin"}
         com.cognitect/transit-clj {:mvn/version "1.0.333"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}
