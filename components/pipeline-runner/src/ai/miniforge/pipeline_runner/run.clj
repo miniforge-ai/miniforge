@@ -5,6 +5,7 @@
             [ai.miniforge.pipeline-runner.core :as core]
             [ai.miniforge.pipeline-runner.messages :as msg]
             [ai.miniforge.dag-executor.interface :as dag]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema])
   (:import [java.time Instant]))
 
@@ -52,6 +53,12 @@
              :error-cause   (:error-message (first causes))
              :error-causes  causes}
       truncated? (assoc :error-causes-truncated? true))))
+
+(defn- anomaly-context
+  [anomaly]
+  {:error-message    (:anomaly/message anomaly)
+   :anomaly/category (:anomaly/category anomaly)
+   :anomaly          anomaly})
 
 (defn- close-handle!
   "Best-effort connector cleanup; close failures must not mask stage outcomes."
@@ -123,23 +130,27 @@
                     {:error-message (msg/t :run/connector-not-found {:ref connector-ref})})
       (let [handle (atom nil)]
         (try
-          (let [auth   (or (extract-auth config) (get context :auth {}))
-                schema (resolve-schema-name config name)
-                cursor (prior-cursor {:stage/id id
-                                      :stage/name name
-                                      :stage/connector-ref connector-ref
-                                      :stage/config config}
-                                     context)]
-            (reset! handle (:connection/handle (conn/connect connector (or config {}) auth)))
-            (let [result (conn/extract connector @handle schema
-                                       (cond-> {:extract/batch-size (get config :connector/page-size
-                                                                         (:connector/page-size default-config))}
-                                         cursor (assoc :extract/cursor cursor)))]
-              (stage-result id name :completed
-                            (merge (timestamps (get context :started-at))
-                                   {:schema-name schema
-                                    :records (:records result)
-                                    :cursor (:extract/cursor result)}))))
+          (let [auth           (or (extract-auth config) (get context :auth {}))
+                schema         (resolve-schema-name config name)
+                cursor         (prior-cursor {:stage/id id
+                                              :stage/name name
+                                              :stage/connector-ref connector-ref
+                                              :stage/config config}
+                                             context)
+                connect-result (conn/connect connector (or config {}) auth)]
+            (if (response/anomaly-map? connect-result)
+              (stage-result id name :failed (anomaly-context connect-result))
+              (do
+                (reset! handle (:connection/handle connect-result))
+                (let [result (conn/extract connector @handle schema
+                                           (cond-> {:extract/batch-size (get config :connector/page-size
+                                                                             (:connector/page-size default-config))}
+                                             cursor (assoc :extract/cursor cursor)))]
+                  (stage-result id name :completed
+                                (merge (timestamps (get context :started-at))
+                                       {:schema-name schema
+                                        :records (:records result)
+                                        :cursor (:extract/cursor result)}))))))
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally
@@ -154,13 +165,17 @@
                     {:error-message (msg/t :run/connector-not-found {:ref connector-ref})})
       (let [handle (atom nil)]
         (try
-          (let [auth (or (extract-auth config) (:auth context {}))]
-            (reset! handle (:connection/handle (conn/connect connector (or config {}) auth)))
-            (conn/publish connector @handle name input-records
-                          {:publish/mode     (get config :publish-mode
-                                                 (:publish/default-mode default-config))
-                           :publish/datasets (:publish/datasets context)})
-            (stage-result id name :completed {:completed-at (Instant/now)}))
+          (let [auth           (or (extract-auth config) (:auth context {}))
+                connect-result (conn/connect connector (or config {}) auth)]
+            (if (response/anomaly-map? connect-result)
+              (stage-result id name :failed (anomaly-context connect-result))
+              (do
+                (reset! handle (:connection/handle connect-result))
+                (conn/publish connector @handle name input-records
+                              {:publish/mode     (get config :publish-mode
+                                                     (:publish/default-mode default-config))
+                               :publish/datasets (:publish/datasets context)})
+                (stage-result id name :completed {:completed-at (Instant/now)}))))
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally

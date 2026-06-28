@@ -3,7 +3,8 @@
 (defprotocol Connector
   "Base connector protocol. All connectors must implement connect and close."
   (connect [this config auth]
-    "Establish connection. Returns {:connection/handle str :connector/status keyword}")
+    "Establish connection. Returns {:connection/handle str :connector/status keyword}
+     or a canonical anomaly map when connection input is invalid.")
   (close [this handle]
     "Terminate connection. Returns {:connector/status :closed}"))
 

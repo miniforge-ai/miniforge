@@ -20,7 +20,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.pipeline-runner.interface :as runner]
             [ai.miniforge.connector.interface :as conn]
-            [ai.miniforge.data-quality.interface :as dq]))
+            [ai.miniforge.data-quality.interface :as dq]
+            [ai.miniforge.response.interface :as response]))
 
 ;; ---------------------------------------------------------------------------
 ;; Constants
@@ -426,6 +427,48 @@
         (is (= [{:error-message "Socket closed"
                  :error-type    "clojure.lang.ExceptionInfo"}]
                (:error-causes failed)))))))
+
+(deftest execute-pipeline-ingest-connect-anomaly-test
+  (testing "Pipeline fails immediately when ingest connector connect returns anomaly"
+    (let [connector (reify
+                      conn/Connector
+                      (connect [_ _ _]
+                        (response/make-anomaly :anomalies/incorrect
+                                               "Invalid connector config"
+                                               {:connector/errors {:path ["missing"]}}))
+                      (close [_ _] {:connector/status :closed})
+                      conn/SourceConnector
+                      (discover [_ _ _] {:schemas []})
+                      (extract [_ _ _ _] (is false "extract should not run"))
+                      (checkpoint [_ _ _ _] {}))
+          result    (runner/execute-pipeline test-pipeline {conn-src connector} {})
+          failed    (first (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (:status failed)))
+      (is (= :anomalies/incorrect (:anomaly/category failed)))
+      (is (= "Invalid connector config" (:error-message failed))))))
+
+(deftest execute-pipeline-publish-connect-anomaly-test
+  (testing "Pipeline fails immediately when publish connector connect returns anomaly"
+    (let [mock-source (->MockSourceConnector nil)
+          sink        (reify
+                        conn/Connector
+                        (connect [_ _ _]
+                          (response/make-anomaly :anomalies/incorrect
+                                                 "Invalid sink config"
+                                                 {:connector/errors {:path ["missing"]}}))
+                        (close [_ _] {:connector/status :closed})
+                        conn/SinkConnector
+                        (publish [_ _ _ _ _] (is false "publish should not run")))
+          result      (runner/execute-pipeline
+                       three-stage-pipeline
+                       {conn-src mock-source conn-sink sink}
+                       {})
+          failed      (last (get-in result [:pipeline-run :pipeline-run/stage-runs]))]
+      (is (not (:success? result)))
+      (is (= :failed (:status failed)))
+      (is (= :anomalies/incorrect (:anomaly/category failed)))
+      (is (= "Invalid sink config" (:error-message failed))))))
 
 (deftest execute-pipeline-ingest-close-failure-does-not-mask-primary-error-test
   (testing "Ingest cleanup closes once and preserves the primary extract failure"

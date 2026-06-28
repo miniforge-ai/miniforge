@@ -49,17 +49,17 @@
   "Validate config and establish a connection handle."
   [config]
   (let [{:keys [valid? errors]} (schema/validate-config config)]
-    (when-not valid?
-      (response/throw-anomaly! :anomalies/incorrect
-                               "Invalid SARIF config"
-                               {:errors errors}))
-    (let [handle (generate-handle)]
-      (connector/store-handle! handles handle
-                               {:sarif/source-path (:sarif/source-path config)
-                                :sarif/format      (get config :sarif/format :auto)
-                                :sarif/csv-columns (get config :sarif/csv-columns nil)})
-      {:connection/handle handle
-       :connector/status  :connected})))
+    (if-not valid?
+      (response/make-anomaly :anomalies/incorrect
+                             "Invalid SARIF config"
+                             {:sarif/errors errors})
+      (let [handle (generate-handle)]
+        (connector/store-handle! handles handle
+                                 {:sarif/source-path (:sarif/source-path config)
+                                  :sarif/format      (get config :sarif/format :auto)
+                                  :sarif/csv-columns (get config :sarif/csv-columns nil)})
+        {:connection/handle handle
+         :connector/status  :connected}))))
 
 (defn do-close
   "Release a connection handle."
