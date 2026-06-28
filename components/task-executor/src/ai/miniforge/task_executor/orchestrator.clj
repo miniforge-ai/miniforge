@@ -72,8 +72,9 @@
                                         :reason :dependency-failed
                                         :failed-dependency task-id})
       (dag/mark-failed! run-atom dependent-id
-                       (ex-info "Dependency failed"
-                                {:dependency-id task-id})))))
+                        {:message "Dependency failed"
+                         :dependency-id task-id}
+                        logger))))
 
 (defn make-execute-task-fn
   [run-context]
@@ -112,7 +113,7 @@
                                   :error (ex-message e)})
 
                       ;; Mark task as failed and cascade
-                      (dag/mark-failed! run-atom task-id e)
+                      (dag/mark-failed! run-atom task-id e logger)
                       (skip-dependent-tasks! run-atom task-id logger)
 
                       {:ok? false

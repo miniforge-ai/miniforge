@@ -107,6 +107,27 @@
          :budget {:tokens 100000
                   :cost-usd 10.0}}))
 
+(deftest skip-dependent-tasks-stores-failure-as-data
+  (testing "dependency cascade records structured failure data, not an exception"
+    (let [tasks {"a" {:task/id "a"
+                      :task/description "root"
+                      :task/dependencies []}
+                 "b" {:task/id "b"
+                      :task/description "dependent"
+                      :task/dependencies ["a"]}}
+          run-atom (dag/create-run-atom
+                    (assoc (-> (dag/create-run-state (random-uuid) tasks)
+                               (assoc-in [:run/tasks "b" :task/status] :running))
+                           :tasks {"a" {:dependencies []}
+                                   "b" {:dependencies ["a"]}}))]
+      (orchestrator/skip-dependent-tasks! run-atom "a" nil)
+      (let [error (get-in @run-atom [:run/tasks "b" :task/error])]
+        (is (= :failed (get-in @run-atom [:run/tasks "b" :task/status])))
+        (is (= {:message "Dependency failed"
+                :dependency-id "a"}
+               error))
+        (is (not (instance? Throwable error)))))))
+
 (defn create-mock-context
   "Create mock execution context."
   [run-atom config execution-tracker]
