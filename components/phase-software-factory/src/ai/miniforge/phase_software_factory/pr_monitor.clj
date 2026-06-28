@@ -94,8 +94,8 @@
             (assoc-in [:phase :result]
                       (if (:success? monitor-result)
                         (response/success result-data)
-                        (response/failure (ex-info "PR monitoring failed"
-                                                    {:failed-prs (:failed-prs monitor-result)}))))
+                        (response/failure "PR monitoring failed"
+                                          {:data {:failed-prs (:failed-prs monitor-result [])}})))
             (assoc :execution/train train-state))))))
 
 (defn leave-pr-monitor
