@@ -34,7 +34,9 @@
 
   (send-message [this message-data]
     "Send a message to another agent.
-     Returns {:message message-map :event event-map}")
+     Returns {:message message-map :event event-map} on success.
+     Returns an anomaly map with {:message nil :event nil} when message-data
+     fails validation.")
 
   (receive-messages [this]
     "Get all messages received by this agent.

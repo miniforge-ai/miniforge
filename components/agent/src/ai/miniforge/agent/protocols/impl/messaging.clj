@@ -233,30 +233,32 @@
                         {:from-agent (:agent-id agent-messaging)
                          :from-instance-id (:instance-id agent-messaging)
                          :workflow-id (:workflow-id agent-messaging)}))
-        router (:router agent-messaging)]
+        router (:router agent-messaging)
+        validation (validate-message-impl message)]
     ;; Validate message
-    (let [validation (validate-message-impl message)]
-      (when-not (:valid? validation)
-        (response/throw-anomaly! :anomalies/incorrect
-                                "Invalid message"
-                                {:message message
-                                 :errors (:errors validation)})))
-    ;; Route message and emit events
-    (let [routed-msg   (route-message-impl router message)
-          stream       (:event-stream agent-messaging)
-          workflow-id  (:message/workflow-id routed-msg)
-          from-agent   (:message/from-agent routed-msg)
-          to-agent     (:message/to-agent routed-msg)
-          message-type (:message/type routed-msg)
-          sent-event   (emit-inter-agent-event!
-                         stream workflow-id from-agent to-agent message-type
-                         events/inter-agent-message-sent)]
-      ;; Emit :agent/message-received on behalf of the recipient agent.
-      (emit-inter-agent-event!
-        stream workflow-id from-agent to-agent message-type
-        events/inter-agent-message-received)
-      {:message routed-msg
-       :event sent-event})))
+    (if-not (:valid? validation)
+      (assoc (response/make-anomaly :anomalies/incorrect
+                                    "Invalid message"
+                                    {:message message
+                                     :errors (:errors validation)})
+             :message nil
+             :event nil)
+      ;; Route message and emit events
+      (let [routed-msg   (route-message-impl router message)
+            stream       (:event-stream agent-messaging)
+            workflow-id  (:message/workflow-id routed-msg)
+            from-agent   (:message/from-agent routed-msg)
+            to-agent     (:message/to-agent routed-msg)
+            message-type (:message/type routed-msg)
+            sent-event   (emit-inter-agent-event!
+                           stream workflow-id from-agent to-agent message-type
+                           events/inter-agent-message-sent)]
+        ;; Emit :agent/message-received on behalf of the recipient agent.
+        (emit-inter-agent-event!
+          stream workflow-id from-agent to-agent message-type
+          events/inter-agent-message-received)
+        {:message routed-msg
+         :event sent-event}))))
 
 (defn receive-messages-impl
   "Get all messages received by agent."
