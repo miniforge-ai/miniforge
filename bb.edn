@@ -212,6 +212,13 @@
                      "(require 'ai.miniforge.policy-calibration.interface)(ai.miniforge.policy-calibration.interface/run-calibration!)")]
            (when-not (zero? exit) (System/exit exit)))}
 
+  policy:gate-check
+  {:doc  "Fail if an acting semantic rule (hard-halt or require-approval) lacks a passing calibration record"
+   :task (let [exit (run-clojure-stream!
+                     "-M:dev" "-e"
+                     "(require 'ai.miniforge.policy-calibration.interface)(let [{:keys [ok? ungated]} (ai.miniforge.policy-calibration.interface/gate-check-shipped)] (when-not ok? (println \"Ungated acting semantic rules:\" ungated)) (System/exit (if ok? 0 1)))")]
+           (when-not (zero? exit) (System/exit exit)))}
+
   work:queue
   {:doc  "Render the prioritized work-spec queue (stdout + work/QUEUE.md)"
    :requires ([work])

@@ -1,4 +1,4 @@
-(ns eval.seed.payload-intake
+(ns eval.seed.boundary.payload-intake
   (:require [ai.miniforge.schema.interface :as schema]
             [slingshot.slingshot :refer [try+]]))
 
