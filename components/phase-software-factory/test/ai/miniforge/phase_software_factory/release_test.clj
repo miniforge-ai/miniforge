@@ -446,7 +446,13 @@
                           (assoc :execution/logger logger)
                           (assoc :phase-config {:phase :release}))
                   interceptor (phase/get-phase-interceptor {:phase :release})]
-              ((:enter interceptor) ctx)
+              (let [result ((:enter interceptor) ctx)
+                    error  (get-in result [:phase :result :error])]
+                (is (= "Release phase failed" (:message error)))
+                (is (= [{:type :gh-auth-failed
+                         :message "gh CLI not authenticated"}]
+                       (get-in error [:data :errors])))
+                (is (= {:files-written 0} (get-in error [:data :metrics]))))
               (is (contains? (entry-events entries) :release/executor-failed)
                   "log/error :release/executor-failed must fire on the :success? false branch — guards the next dogfood post-mortem"))))))))
 

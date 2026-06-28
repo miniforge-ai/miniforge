@@ -423,9 +423,9 @@
                                   {:data {:errors (:errors exec-result)
                                           :metrics (:metrics exec-result)}})
                        (response/failure
-                        (ex-info (messages/t :release/phase-failed)
-                                 {:errors (:errors exec-result)
-                                  :metrics (:metrics exec-result)})))))
+                        (messages/t :release/phase-failed)
+                        {:data {:errors (:errors exec-result)
+                                :metrics (:metrics exec-result)}}))))
                  (catch Exception e
                    ;; The 2026-05-03 dogfood lost the actual exception here —
                    ;; the bare (response/failure e) wraps it but no log line
@@ -451,19 +451,6 @@
         ;; source of truth.
         (cond-> (phase/result-succeeded? result)
           (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
-
-(def ^:private verdicts
-  "Phase 3b verdict tag set for release.
-
-     :approved            — PR opened or release artifact persisted;
-                            `:phase/succeed` event
-     :repair-requested    — release failed with `:on-fail` set; FSM
-                            redirects (subject to budget)
-     :release/zero-files  — curator's empty-diff verdict; FSM
-                            terminates because retrying implement
-                            won't change the curator's decision
-     :exhausted           — release failed without `:on-fail` set"
-  #{:approved :repair-requested :release/zero-files :exhausted})
 
 (defn- compute-verdict
   "Pick the verdict that should flow on the phase result.
