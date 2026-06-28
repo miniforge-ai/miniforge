@@ -146,11 +146,13 @@
                                            (cond-> {:extract/batch-size (get config :connector/page-size
                                                                              (:connector/page-size default-config))}
                                              cursor (assoc :extract/cursor cursor)))]
-                  (stage-result id name :completed
-                                (merge (timestamps (get context :started-at))
-                                       {:schema-name schema
-                                        :records (:records result)
-                                        :cursor (:extract/cursor result)}))))))
+                  (if (response/anomaly-map? result)
+                    (stage-result id name :failed (anomaly-context result))
+                    (stage-result id name :completed
+                                  (merge (timestamps (get context :started-at))
+                                         {:schema-name schema
+                                          :records (:records result)
+                                          :cursor (:extract/cursor result)})))))))
           (catch Exception e
             (stage-result id name :failed (exception-context e)))
           (finally

@@ -85,20 +85,20 @@
   [handle opts]
   (let [{:file/keys [path format]} (require-handle! handle)
         file (io/file path)]
-    (when-not (.exists file)
-      (response/throw-anomaly! :anomalies/not-found
-                               (msg/t :file/not-found {:path path})
-                               {:path path}))
-    (let [all-records (reader/read-file path format)
-          batch-size  (or (:extract/batch-size opts) (count all-records))
-          offset      (or (get-in opts [:extract/cursor :cursor/value]) 0)
-          batch       (vec (take batch-size (drop offset all-records)))
-          new-offset  (+ offset (count batch))
-          has-more    (< new-offset (count all-records))]
-      (connector/extract-result
-       batch
-       {:cursor/type :offset :cursor/value new-offset}
-       has-more))))
+    (if-not (.exists file)
+      (response/make-anomaly :anomalies/not-found
+                             (msg/t :file/not-found {:path path})
+                             {:path path})
+      (let [all-records (reader/read-file path format)
+            batch-size  (or (:extract/batch-size opts) (count all-records))
+            offset      (or (get-in opts [:extract/cursor :cursor/value]) 0)
+            batch       (vec (take batch-size (drop offset all-records)))
+            new-offset  (+ offset (count batch))
+            has-more    (< new-offset (count all-records))]
+        (connector/extract-result
+         batch
+         {:cursor/type :offset :cursor/value new-offset}
+         has-more)))))
 
 (defn do-checkpoint
   "Persist cursor state (no-op for files, returns committed)."
