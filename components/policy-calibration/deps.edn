@@ -1,0 +1,8 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/schema {:local/root "../schema"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ai.miniforge/llm {:local/root "../llm"}
+        metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}
