@@ -81,21 +81,26 @@
 
    Arguments:
      backend - Keyword (or anything `clojure.lang.Named`) backend identifier.
-               Must be non-nil; nil/non-Named values throw `ex-info` rather
+               Must be non-nil; nil/non-Named values return an anomaly rather
                than producing a downstream NPE inside execute-resume!'s
                ProcessBuilder.
 
-   Returns: String binary name (defaults to (name backend))"
+   Returns: String binary name (defaults to (name backend)) or anomaly map."
   [backend]
-  (when (nil? backend)
-    (response/throw-anomaly! :anomalies/incorrect
-                             "binary-for: backend must not be nil"
-                             {:backend backend}))
-  (when-not (instance? clojure.lang.Named backend)
-    (response/throw-anomaly! :anomalies/incorrect
-                             "binary-for: backend must be a keyword or symbol"
-                             {:backend backend :type (type backend)}))
-  (get backend-binaries (keyword backend) (name backend)))
+  (cond
+    (nil? backend)
+    (response/make-anomaly :anomalies/incorrect
+                           "binary-for: backend must not be nil"
+                           {:stream-recovery/backend backend})
+
+    (not (instance? clojure.lang.Named backend))
+    (response/make-anomaly :anomalies/incorrect
+                           "binary-for: backend must be a keyword or symbol"
+                           {:stream-recovery/backend backend
+                            :stream-recovery/type    (type backend)})
+
+    :else
+    (get backend-binaries (keyword backend) (name backend))))
 
 (defn build-resume-command
   "Build the full CLI command vector to resume an agent session.
@@ -105,14 +110,18 @@
      session-id - String session identifier to resume
      extra-args - Optional seq of additional CLI arguments
 
-   Returns: Vector of strings, e.g. [\"claude\" \"--resume\" \"<sid>\"]"
+   Returns: Vector of strings, e.g. [\"claude\" \"--resume\" \"<sid>\"],
+   or an anomaly map when backend input is invalid."
   ([backend session-id]
    (build-resume-command backend session-id []))
   ([backend session-id extra-args]
-   (let [backend-kw (keyword backend)
-         flag       (resume-flag-for backend-kw)
-         binary     (binary-for backend-kw)]
-     (into [binary flag (str session-id)] extra-args))))
+   (let [backend-key (if (string? backend) (keyword backend) backend)
+         binary      (binary-for backend-key)]
+     (if (response/anomaly-map? binary)
+       binary
+       (let [backend-kw (keyword backend-key)
+             flag       (resume-flag-for backend-kw)]
+         (into [binary flag (str session-id)] extra-args))))))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Process management (isolated for testability)
@@ -203,25 +212,33 @@
      {:action :abort,    :reason \"no healthy backends\"}"
   [{:keys [phase-id backend session-id hang-count config allowed-failover-backends]
     :as ctx}]
-  ;; Guard against programmer errors: fail loudly on the watchdog hot-path
-  ;; rather than producing an opaque NPE.
-  (when-not (instance? clojure.lang.IAtom hang-count)
-    (response/throw-anomaly! :anomalies/incorrect
-                             ":hang-count must be an IAtom (e.g. (atom 1))"
-                             {:ctx ctx :type (type hang-count)}))
-  (when (nil? backend)
-    (response/throw-anomaly! :anomalies/incorrect
-                             ":backend is required and must not be nil"
-                             {:ctx ctx}))
-  (let [count       @hang-count
-        backend-kw  (keyword backend)
-        cooldown-ms (get config :backend-switch-cooldown-ms
-                         (:switch-cooldown-ms backend-health/config))
-        threshold   (get config :backend-health-threshold
-                         (:success-rate-threshold backend-health/config))
-        resumable?  (and (string? session-id)
-                         (not (str/blank? session-id)))]
-    (cond
+  ;; Guard against programmer errors on the watchdog hot-path rather than
+  ;; producing an opaque downstream NPE.
+  (or
+   (when-not (instance? clojure.lang.IAtom hang-count)
+     (response/make-anomaly :anomalies/incorrect
+                            ":hang-count must be an IAtom (e.g. (atom 1))"
+                            {:stream-recovery/ctx  ctx
+                             :stream-recovery/type (type hang-count)}))
+   (when (nil? backend)
+     (response/make-anomaly :anomalies/incorrect
+                            ":backend is required and must not be nil"
+                            {:stream-recovery/ctx ctx}))
+   (when-not (or (string? backend)
+                 (instance? clojure.lang.Named backend))
+     (response/make-anomaly :anomalies/incorrect
+                            ":backend must be a keyword, symbol, or string"
+                            {:stream-recovery/ctx  ctx
+                             :stream-recovery/type (type backend)}))
+   (let [count       @hang-count
+         backend-kw  (keyword backend)
+         cooldown-ms (get config :backend-switch-cooldown-ms
+                          (:switch-cooldown-ms backend-health/config))
+         threshold   (get config :backend-health-threshold
+                          (:success-rate-threshold backend-health/config))
+         resumable?  (and (string? session-id)
+                          (not (str/blank? session-id)))]
+     (cond
       ;; First stall — check backend health before committing to a resume attempt
       (= count 1)
       (let [rate (backend-health/get-backend-success-rate backend-kw)]
@@ -284,7 +301,7 @@
            :anomaly?   true}
           {:action   :abort
            :reason   "degenerate hang-count and no resumable session"
-           :anomaly? true})))))
+           :anomaly? true}))))))
 
 ;;------------------------------------------------------------------------------ Layer 4
 ;; Public subprocess restart
@@ -316,15 +333,17 @@
    (execute-resume! backend session-id []))
   ([backend session-id extra-args]
    (let [cmd (build-resume-command backend session-id extra-args)]
-     (try
-       {:process    (start-process! cmd)
-        :backend    (keyword backend)
-        :session-id (str session-id)
-        :command    cmd}
-       (catch java.io.IOException e
-         {:anomaly/category :anomaly.category/fault
-          :anomaly/message  (ex-message e)
-          :cmd              cmd})))))
+     (if (response/anomaly-map? cmd)
+       cmd
+       (try
+         {:process    (start-process! cmd)
+          :backend    (keyword backend)
+          :session-id (str session-id)
+         :command    cmd}
+         (catch java.io.IOException e
+           {:anomaly/category :anomalies/fault
+            :anomaly/message  (ex-message e)
+            :cmd              cmd}))))))
 
 ;;------------------------------------------------------------------------------ Rich comment
 

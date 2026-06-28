@@ -19,56 +19,54 @@
 (ns ai.miniforge.self-healing.anomaly.stream-recovery-anomaly-test
   "Coverage for `stream-recovery/binary-for` and
    `stream-recovery/evaluate-stall-recovery` boundary escalation via
-   `response/throw-anomaly!`. Caller-supplied bad input →
-   `:anomalies/incorrect`."
+   returned anomaly maps. Caller-supplied bad input → `:anomalies/incorrect`."
   (:require [clojure.test :refer [deftest is testing]]
-            [ai.miniforge.self-healing.stream-recovery :as recovery])
-  (:import (clojure.lang ExceptionInfo)))
+            [ai.miniforge.self-healing.stream-recovery :as recovery]))
 
-(deftest binary-for-nil-backend-throws-anomaly
-  (testing "nil backend raises :anomalies/incorrect"
-    (let [thrown (try (#'recovery/binary-for nil) nil (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"backend must not be nil" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+(deftest binary-for-nil-backend-returns-anomaly
+  (testing "nil backend returns :anomalies/incorrect"
+    (let [result (#'recovery/binary-for nil)]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest binary-for-non-named-backend-throws-anomaly
-  (testing "non-keyword non-symbol backend raises :anomalies/incorrect"
-    (let [thrown (try (#'recovery/binary-for "string-backend")
-                      nil
-                      (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"keyword or symbol" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+(deftest binary-for-non-named-backend-returns-anomaly
+  (testing "non-keyword non-symbol backend returns :anomalies/incorrect"
+    (let [result (#'recovery/binary-for "string-backend")]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest evaluate-stall-recovery-non-iatom-hang-count-throws-anomaly
-  (testing "non-IAtom :hang-count raises :anomalies/incorrect"
-    (let [thrown (try
-                   (recovery/evaluate-stall-recovery
-                    {:phase-id :impl
-                     :backend :anthropic
-                     :session-id "sid"
-                     :hang-count 1
-                     :config {}
-                     :allowed-failover-backends []})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #":hang-count must be an IAtom" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+(deftest evaluate-stall-recovery-non-iatom-hang-count-returns-anomaly
+  (testing "non-IAtom :hang-count returns :anomalies/incorrect"
+    (let [result (recovery/evaluate-stall-recovery
+                  {:phase-id :impl
+                   :backend :anthropic
+                   :session-id "sid"
+                   :hang-count 1
+                   :config {}
+                   :allowed-failover-backends []})]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest evaluate-stall-recovery-nil-backend-throws-anomaly
-  (testing "nil :backend raises :anomalies/incorrect"
-    (let [thrown (try
-                   (recovery/evaluate-stall-recovery
-                    {:phase-id :impl
-                     :backend nil
-                     :session-id "sid"
-                     :hang-count (atom 1)
-                     :config {}
-                     :allowed-failover-backends []})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #":backend is required" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+(deftest evaluate-stall-recovery-nil-backend-returns-anomaly
+  (testing "nil :backend returns :anomalies/incorrect"
+    (let [result (recovery/evaluate-stall-recovery
+                  {:phase-id :impl
+                   :backend nil
+                   :session-id "sid"
+                   :hang-count (atom 1)
+                   :config {}
+                   :allowed-failover-backends []})]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
+
+(deftest evaluate-stall-recovery-invalid-backend-returns-anomaly
+  (testing "non-coercible :backend returns :anomalies/incorrect"
+    (let [result (recovery/evaluate-stall-recovery
+                  {:phase-id :impl
+                   :backend 42
+                   :session-id "sid"
+                   :hang-count (atom 1)
+                   :config {}
+                   :allowed-failover-backends []})]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
+
+(deftest execute-resume-invalid-backend-returns-anomaly
+  (testing "invalid backend returns anomaly before ProcessBuilder startup"
+    (let [result (recovery/execute-resume! 42 "sid")]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))

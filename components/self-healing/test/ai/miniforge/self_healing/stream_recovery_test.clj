@@ -87,27 +87,29 @@
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – guard clauses
 
-(deftest evaluate-stall-recovery-nil-backend-throws
-  (testing "nil :backend throws ex-info with clear message"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sut/evaluate-stall-recovery
+(deftest evaluate-stall-recovery-nil-backend-returns-anomaly
+  (testing "nil :backend returns :anomalies/incorrect"
+    (let [result (sut/evaluate-stall-recovery
                   {:phase-id   :implement
                    :backend    nil
                    :session-id "s"
                    :hang-count (atom 1)
                    :config     {}
-                   :allowed-failover-backends []})))))
+                   :allowed-failover-backends []})]
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (re-find #":backend is required" (:anomaly/message result))))))
 
-(deftest evaluate-stall-recovery-non-atom-hang-count-throws
-  (testing "non-atom :hang-count throws ex-info with clear message"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sut/evaluate-stall-recovery
+(deftest evaluate-stall-recovery-non-atom-hang-count-returns-anomaly
+  (testing "non-atom :hang-count returns :anomalies/incorrect"
+    (let [result (sut/evaluate-stall-recovery
                   {:phase-id   :implement
                    :backend    :anthropic
                    :session-id "s"
                    :hang-count 2   ; not an atom
                    :config     {}
-                   :allowed-failover-backends []})))))
+                   :allowed-failover-backends []})]
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (re-find #":hang-count must be an IAtom" (:anomaly/message result))))))
 
 ;;------------------------------------------------------------------------------ evaluate-stall-recovery – :resume path
 
@@ -345,7 +347,7 @@
     (with-redefs [ai.miniforge.self-healing.stream-recovery/start-process!
                   (fn [_cmd] (throw (java.io.IOException. "No such file")))]
       (let [result (sut/execute-resume! :anthropic "sess-fail")]
-        (is (= :anomaly.category/fault (:anomaly/category result)))
+        (is (= :anomalies/fault (:anomaly/category result)))
         (is (string? (:anomaly/message result)))
         (is (vector? (:cmd result)))))))
 
