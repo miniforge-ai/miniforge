@@ -491,7 +491,8 @@
     :else
     (response/throw-anomaly! :anomalies/incorrect
                              "Invalid sink configuration"
-                             {:config sink-config})))
+                             {:config sink-config
+                              :config/error :invalid-config})))
 
 (defn create-sinks-from-config
   "Create sinks from user configuration.
