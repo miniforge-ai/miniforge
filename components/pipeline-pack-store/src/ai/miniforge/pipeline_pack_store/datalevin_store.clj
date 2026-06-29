@@ -118,8 +118,10 @@
 (defn create-store
   "Create a Datalevin-backed pack store.
    Opts:
-     :dir - directory for persistent storage (omit for a transient store)"
+     :dir - directory for persistent storage (nil = in-memory for tests)"
   ([] (create-store {}))
   ([{:keys [dir schema] :or {schema store-schema/datalevin-schema}}]
-   (let [conn (dl/get-conn (or dir (dl/transient-dir)) schema)]
+   ;; JVM-only store, so a nil dir uses Datalevin's in-memory mode directly
+   ;; (the pod's nil-dir limitation that needs `transient-dir` doesn't apply).
+   (let [conn (dl/get-conn dir schema)]
      (->DatalevinPackStore conn))))

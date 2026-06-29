@@ -23,7 +23,6 @@
         ai.miniforge/llm {:local/root "../../components/llm"}
         ai.miniforge/tool {:local/root "../../components/tool"}
         ai.miniforge/artifact {:local/root "../../components/artifact"}
-        ai.miniforge/datalevin {:local/root "../../components/datalevin"}
         ai.miniforge/agent {:local/root "../../components/agent"}
         ai.miniforge/workspace {:local/root "../../components/workspace"}
         ai.miniforge/agent-runtime {:local/root "../../components/agent-runtime"}

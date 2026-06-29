@@ -26,16 +26,14 @@
    instead of `datalevin.core` directly, so the same `.cljc` store code runs
    under both runtimes and no component carries a JVM-only dep of its own.
 
-   The pod must be declared in the consuming bb runtime's `bb.edn :pods`; `bb
-   uberjar` embeds that declaration, so `bb --jar` auto-loads the pod at
-   startup. Two thin helpers paper over pod-specific gaps — see `entity-map`
-   and `transient-dir`.
-
-   Marked `:jvm-only` for miniforge's bb compatibility gate: the pod has no
-   Windows binary and isn't declared in miniforge's cross-platform `bb.edn`, so
-   the `:bb` branch can't load here. The bb path is exercised by the consuming
-   runtime that declares the pod (e.g. thesium-workflows' kg-store + uberjar)."
-  {:miniforge/runtime :jvm-only}
+   The `:bb` branch needs the `huahaiy/datalevin` pod to be declared in the
+   consuming bb runtime's `bb.edn :pods` (the uberjar embeds that, so `bb --jar`
+   auto-loads it). miniforge's own cross-platform runtime does NOT declare the
+   pod (it has no Windows binary), so within miniforge this bridge is used
+   JVM-side — by `pipeline-pack-store` (JVM-only) and, when its pod is present,
+   by external consumers like thesium-workflows' kg-store. It is deliberately
+   kept out of the Babashka CLI project (`projects/miniforge`). Two thin helpers
+   paper over pod-specific gaps — see `entity-map` and `transient-dir`."
   (:require
    ;; `:default` (not `:clj`) so static analysis of the non-bb branch still
    ;; binds `d`; bb takes the pod, every JVM dialect the library.
