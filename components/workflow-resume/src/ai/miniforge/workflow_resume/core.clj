@@ -185,7 +185,8 @@
     (:workflow-resume/resume (edn/read-string (slurp resource)))
     (response/throw-anomaly! :anomalies/not-found
                              "Workflow resume config resource not found"
-                             {:resource resume-config-resource})))
+                             {:resource resume-config-resource
+                              :config/error :invalid-config})))
 
 (def ^:private resume-config
   (delay (read-resume-config)))

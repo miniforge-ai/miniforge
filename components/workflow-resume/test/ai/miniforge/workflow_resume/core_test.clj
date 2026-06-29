@@ -24,10 +24,22 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.core :as core]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors
+
+(deftest missing-resume-config-resource-carries-invalid-config-marker
+  (testing "Missing classpath resume config is an invalid configuration fault"
+    (with-redefs [io/resource (constantly nil)]
+      (let [anomaly (try+
+                      (@#'core/read-resume-config)
+                      (catch [:anomaly/category :anomalies/not-found] m
+                        m))]
+        (is (= :anomalies/not-found (:anomaly/category anomaly)))
+        (is (= "config/workflow-resume/resume.edn" (:resource anomaly)))
+        (is (= :invalid-config (:config/error anomaly)))))))
 
 (deftest reconstructed-status-predicates-test
   (testing "predicates read the reconstructed status flags"
