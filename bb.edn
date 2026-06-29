@@ -3,6 +3,13 @@
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
         ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
 
+ ;; NOTE: the `huahaiy/datalevin` pod is deliberately NOT declared here. It has
+ ;; no Windows binary, and `:pods` loads eagerly on every platform, so declaring
+ ;; it would break every bb task on miniforge's cross-platform CI. The pod is a
+ ;; host-runtime artifact: the runtime that actually runs datalevin under bb
+ ;; (e.g. the Thesium career uberjar) declares it in its own bb.edn. Here the
+ ;; `ai.miniforge.datalevin` bridge + its Datalevin-only consumers run JVM-side.
+
  :paths ["tasks"]
 
  :tasks

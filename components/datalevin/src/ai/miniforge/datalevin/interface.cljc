@@ -1,0 +1,82 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.datalevin.interface
+  "Datalevin access behind one dialect bridge so the JVM dep doesn't leak.
+
+   Datalevin/nippy are JVM-only, so under babashka this requires the
+   `huahaiy/datalevin` pod (`pod.huahaiy.datalevin`) and under Clojure the
+   library (`datalevin.core`); both expose the same connection / transact /
+   query surface. Components that store in Datalevin require this namespace
+   instead of `datalevin.core` directly, so the same `.cljc` store code runs
+   under both runtimes and no component carries a JVM-only dep of its own.
+
+   The `:bb` branch needs the `huahaiy/datalevin` pod to be declared in the
+   consuming bb runtime's `bb.edn :pods` (the uberjar embeds that, so `bb --jar`
+   auto-loads it). miniforge's own cross-platform runtime does NOT declare the
+   pod (it has no Windows binary), so within miniforge this bridge is used
+   JVM-side — by `pipeline-pack-store` (JVM-only) and, when its pod is present,
+   by external consumers like thesium-workflows' kg-store. It is deliberately
+   kept out of the Babashka CLI project (`projects/miniforge`). Two thin helpers
+   paper over pod-specific gaps — see `entity-map` and `transient-dir`."
+  (:require
+   ;; `:default` (not `:clj`) so static analysis of the non-bb branch still
+   ;; binds `d`; bb takes the pod, every JVM dialect the library.
+   #?(:bb      [pod.huahaiy.datalevin :as d]
+      :default [datalevin.core :as d])))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Datalevin surface — re-exported so callers depend on this boundary, not the
+;; lib/pod namespace. `q` is variadic; aliasing the fn preserves that.
+
+(def get-conn  "See `datalevin.core/get-conn`."  d/get-conn)
+(def transact! "See `datalevin.core/transact!`." d/transact!)
+(def db        "See `datalevin.core/db`."        d/db)
+(def q         "See `datalevin.core/q`."         d/q)
+(def pull      "See `datalevin.core/pull`."      d/pull)
+(def close     "See `datalevin.core/close`."     d/close)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Pod-safety helpers
+
+(defn entity-map
+  "Read the entity at `lookup` (a lookup-ref or entity id) from `database` as a
+   plain map, or nil if it has no attributes.
+
+   Uses `pull`, not `entity`: a Datalevin `Entity` isn't transit-serializable,
+   so it can't cross the bb pod boundary, whereas `pull` returns a map. `:db/id`
+   is dropped so the shape matches the older `(into {} (d/entity …))` callers."
+  [database lookup]
+  (some-> (pull database '[*] lookup)
+          (dissoc :db/id)
+          not-empty))
+
+(defn transient-dir
+  "A fresh writable directory, for an omitted store dir. Datalevin's in-memory
+   (`nil`-dir) store isn't usable via the bb pod — the pod process can't create
+   datalevin's own temp coordination dir — so the parent process creates a
+   directory here and hands the pod an existing path.
+
+   Uses `Files/createTempDirectory`, which creates the directory atomically and
+   throws on failure, so a caller never receives a path that wasn't created."
+  []
+  ;; Host (JVM/bb) interop only — never cljs; silence the phantom-dialect pass.
+  #_{:clj-kondo/ignore [:unresolved-symbol :unresolved-namespace]}
+  (str (java.nio.file.Files/createTempDirectory
+        "miniforge-datalevin-"
+        (make-array java.nio.file.attribute.FileAttribute 0))))

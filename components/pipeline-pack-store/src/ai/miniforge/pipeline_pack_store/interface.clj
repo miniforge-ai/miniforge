@@ -19,9 +19,12 @@
 (ns ai.miniforge.pipeline-pack-store.interface
   "Public API for pipeline pack persistence.
 
-   JVM-only: this component is Datalevin-backed and has no non-JVM
-   implementation. Runtime compatibility is declared explicitly via
-   namespace metadata instead of hidden behind dynamic resolution."
+   Datalevin-backed (no transit fallback), reached through the
+   `ai.miniforge.datalevin` bridge. Under bb the bridge needs the
+   `huahaiy/datalevin` pod, a host-runtime artifact not present in miniforge's
+   cross-platform runtime (no Windows binary), so this stays JVM-only here.
+   Runtime compatibility is declared explicitly via namespace metadata instead
+   of hidden behind dynamic resolution."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.pipeline-pack-store.datalevin-store :as datalevin-store]
@@ -30,7 +33,7 @@
 ;; -- Store creation --
 (defn create-store
   "Create a pack store. Options:
-     :dir    - directory for persistent storage (nil = in-memory for tests)
+     :dir    - directory for persistent storage (omit for a transient store)
      :schema - optional Datalevin schema override"
   ([] (datalevin-store/create-store))
   ([opts] (datalevin-store/create-store opts)))

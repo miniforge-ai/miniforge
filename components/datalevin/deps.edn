@@ -1,0 +1,7 @@
+{:paths ["src"]
+ ;; JVM (Clojure) side of the bridge; under bb the `huahaiy/datalevin` pod
+ ;; (declared in the consuming bb runtime's bb.edn :pods) is used instead.
+ ;; Keep the lib + pod versions aligned.
+ :deps {datalevin/datalevin {:mvn/version "0.10.18"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

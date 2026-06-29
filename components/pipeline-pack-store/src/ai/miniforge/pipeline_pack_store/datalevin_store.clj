@@ -17,12 +17,14 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.pipeline-pack-store.datalevin-store
-  "Datalevin implementation of PackStore protocol."
+  "Datalevin implementation of the PackStore protocol. Datalevin is reached
+   through the `ai.miniforge.datalevin` bridge — the babashka pod under bb, the
+   JVM lib under Clojure — so this store runs under both runtimes and carries no
+   JVM-only dep of its own."
   (:require
-   [datalevin.core :as d]
+   [ai.miniforge.datalevin.interface :as dl]
    [ai.miniforge.pipeline-pack-store.protocol :as proto]
-   [ai.miniforge.pipeline-pack-store.schema :as store-schema])
-  (:import [java.util UUID]))
+   [ai.miniforge.pipeline-pack-store.schema :as store-schema]))
 
 (defn- pack->datoms
   "Convert a loaded pack to Datalevin transaction datoms."
@@ -48,12 +50,6 @@
           :metric/source-type (name (:metric/source-type metric))
           :metric/pack-id     pack-id})))))
 
-(defn- entity->map
-  "Convert a Datalevin entity to a plain map."
-  [entity]
-  (when entity
-    (into {} entity)))
-
 (defn- metric-group->latest-snapshot
   "Given [metric-id rows] from a group-by, return the latest snapshot map."
   [[metric-id rows]]
@@ -68,36 +64,34 @@
 
   (save-pack [_this pack]
     (let [datoms (pack->datoms pack)]
-      (d/transact! conn datoms)
+      (dl/transact! conn datoms)
       (get-in pack [:pack/manifest :pack/id])))
 
   (load-pack [_this pack-id]
-    (let [db (d/db conn)
-          result (d/entity db [:pack/id pack-id])]
-      (entity->map result)))
+    (dl/entity-map (dl/db conn) [:pack/id pack-id]))
 
   (list-packs [_this]
-    (let [db (d/db conn)
-          ids (d/q '[:find ?id :where [?e :pack/id ?id]] db)]
-      (mapv (fn [[id]] (entity->map (d/entity db [:pack/id id]))) ids)))
+    (let [db (dl/db conn)
+          ids (dl/q '[:find ?id :where [?e :pack/id ?id]] db)]
+      (mapv (fn [[id]] (dl/entity-map db [:pack/id id])) ids)))
 
   (save-snapshot [_this snapshot]
-    (let [id (or (:snapshot/id snapshot) (str (UUID/randomUUID)))
+    (let [id (or (:snapshot/id snapshot) (str (random-uuid)))
           datom (assoc snapshot :snapshot/id id)]
-      (d/transact! conn [datom])
+      (dl/transact! conn [datom])
       id))
 
   (latest-snapshots [_this pack-id]
-    (let [db (d/db conn)
-          results (d/q '[:find ?sid ?mid ?val ?as-of
-                         :in $ ?pack-id
-                         :where
-                         [?e :snapshot/pack-id ?pack-id]
-                         [?e :snapshot/id ?sid]
-                         [?e :snapshot/metric-id ?mid]
-                         [?e :snapshot/value ?val]
-                         [?e :snapshot/as-of ?as-of]]
-                       db pack-id)]
+    (let [db (dl/db conn)
+          results (dl/q '[:find ?sid ?mid ?val ?as-of
+                          :in $ ?pack-id
+                          :where
+                          [?e :snapshot/pack-id ?pack-id]
+                          [?e :snapshot/id ?sid]
+                          [?e :snapshot/metric-id ?mid]
+                          [?e :snapshot/value ?val]
+                          [?e :snapshot/as-of ?as-of]]
+                        db pack-id)]
       ;; Group by metric-id, take latest by as-of
       (->> results
            (group-by second)
@@ -105,27 +99,29 @@
            vec)))
 
   (save-run [_this run]
-    (let [id (or (:run/id run) (str (UUID/randomUUID)))
+    (let [id (or (:run/id run) (str (random-uuid)))
           datom (assoc run :run/id id)]
-      (d/transact! conn [datom])
+      (dl/transact! conn [datom])
       id))
 
   (runs-for-pack [_this pack-id]
-    (let [db (d/db conn)
-          results (d/q '[:find ?e
-                         :in $ ?pack-id
-                         :where [?e :run/pack-id ?pack-id]]
-                       db pack-id)]
-      (mapv (fn [[eid]] (entity->map (d/entity db eid))) results)))
+    (let [db (dl/db conn)
+          results (dl/q '[:find ?e
+                          :in $ ?pack-id
+                          :where [?e :run/pack-id ?pack-id]]
+                        db pack-id)]
+      (mapv (fn [[eid]] (dl/entity-map db eid)) results)))
 
   (close [_this]
-    (d/close conn)))
+    (dl/close conn)))
 
 (defn create-store
   "Create a Datalevin-backed pack store.
    Opts:
-     :dir - directory for persistent storage (nil = in-memory)"
+     :dir - directory for persistent storage (nil = in-memory for tests)"
   ([] (create-store {}))
   ([{:keys [dir schema] :or {schema store-schema/datalevin-schema}}]
-   (let [conn (d/get-conn dir schema)]
+   ;; JVM-only store, so a nil dir uses Datalevin's in-memory mode directly
+   ;; (the pod's nil-dir limitation that needs `transient-dir` doesn't apply).
+   (let [conn (dl/get-conn dir schema)]
      (->DatalevinPackStore conn))))
