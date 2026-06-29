@@ -118,7 +118,7 @@
 (def register-pack
   "Protocol fn. (register-pack registry pack) registers a pack (or new
    version), keyed by :pack/id and :pack/version. Returns the registered pack;
-   throws an :anomalies/incorrect anomaly when the pack fails schema validation."
+   returns an :invalid-input anomaly map when the pack fails schema validation."
   registry/register-pack)
 
 (def get-pack
