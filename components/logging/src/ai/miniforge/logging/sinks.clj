@@ -270,7 +270,9 @@
     (multi-sink (map create-sink sink-config))
 
     :else
-    (throw (ex-info "Invalid sink configuration" {:config sink-config}))))
+    (throw (ex-info "Invalid sink configuration"
+                    {:config sink-config
+                     :config/error :invalid-config}))))
 
 (defn create-sinks-from-config
   "Create log sinks from user configuration.

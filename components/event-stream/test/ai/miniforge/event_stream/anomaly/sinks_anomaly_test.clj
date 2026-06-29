@@ -82,4 +82,5 @@
                    (catch ExceptionInfo e e))]
       (is (some? thrown))
       (is (= "not-a-sink" (:config (ex-data thrown))))
+      (is (= :invalid-config (:config/error (ex-data thrown))))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
