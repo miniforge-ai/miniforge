@@ -108,8 +108,9 @@
    - registry - ToolRegistry instance
    - tool     - Tool configuration map
 
-   Returns the tool ID on success.
-   Throws if tool config is invalid.
+   Returns the tool ID on success or an anomaly map when tool config is invalid.
+   Throws when :tool/id is not a namespaced keyword, because that is a registry
+   shape invariant.
 
    Example:
      (register! registry {:tool/id :lsp/python
@@ -173,7 +174,8 @@
    - tool-id  - Tool identifier
    - updates  - Map of updates to merge
 
-   Returns updated tool configuration."
+   Returns updated tool configuration or an anomaly map when the tool is missing
+   or the merged configuration is invalid."
   [registry tool-id updates]
   (registry/update-tool registry tool-id updates))
 
