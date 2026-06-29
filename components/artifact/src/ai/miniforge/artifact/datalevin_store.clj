@@ -104,11 +104,15 @@
      (create-datalevin-store {:logger my-logger})"
   ([] (create-datalevin-store {}))
   ([{:keys [dir logger schema] :or {schema datalevin-schema}}]
-   (let [conn (dl/get-conn (or dir (dl/transient-dir)) schema)]
+   (let [store-dir (or dir (dl/transient-dir))
+         conn (dl/get-conn store-dir schema)]
      (when logger
+       ;; Log the effective dir, not the requested one — a transient store is
+       ;; backed by a real temp directory (store-dir), so logging `dir` (nil)
+       ;; would hide where the data actually went.
        (log/info logger :system :artifact/store-created
                  {:data {:type (if dir :persistent :transient)
-                         :dir dir}}))
+                         :dir store-dir}}))
      (->DatalevinStore conn logger))))
 
 ;------------------------------------------------------------------------------ Rich Comment

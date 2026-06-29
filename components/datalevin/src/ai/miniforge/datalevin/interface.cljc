@@ -72,11 +72,13 @@
   "A fresh writable directory, for an omitted store dir. Datalevin's in-memory
    (`nil`-dir) store isn't usable via the bb pod — the pod process can't create
    datalevin's own temp coordination dir — so the parent process creates a
-   directory here and hands the pod an existing path."
+   directory here and hands the pod an existing path.
+
+   Uses `Files/createTempDirectory`, which creates the directory atomically and
+   throws on failure, so a caller never receives a path that wasn't created."
   []
   ;; Host (JVM/bb) interop only — never cljs; silence the phantom-dialect pass.
   #_{:clj-kondo/ignore [:unresolved-symbol :unresolved-namespace]}
-  (let [dir (str (java.io.File. (System/getProperty "java.io.tmpdir")
-                                (str "miniforge-datalevin-" (java.util.UUID/randomUUID))))]
-    (.mkdirs (java.io.File. dir))
-    dir))
+  (str (java.nio.file.Files/createTempDirectory
+        "miniforge-datalevin-"
+        (make-array java.nio.file.attribute.FileAttribute 0))))
