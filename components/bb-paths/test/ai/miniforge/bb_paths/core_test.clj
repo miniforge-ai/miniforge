@@ -90,6 +90,21 @@
           (is (fs/exists? (str root "/bb.edn")))
           (is (fs/exists? nested)))))))
 
+(deftest test-repo-root-missing-bb-edn-carries-invalid-config-marker
+  (testing "given no bb.edn above cwd → reports invalid configuration"
+    (with-scratch
+      (fn [scratch]
+        (let [nested (sut/ensure-dir! (str scratch "/a/b/c"))]
+          (with-redefs [fs/cwd (constantly (fs/path nested))
+                        ai.miniforge.bb-paths.core/find-up (constantly nil)]
+            (let [thrown (try
+                           (sut/repo-root)
+                           nil
+                           (catch clojure.lang.ExceptionInfo e e))]
+              (is (some? thrown))
+              (is (= nested (:cwd (ex-data thrown))))
+              (is (= :invalid-config (:config/error (ex-data thrown)))))))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.bb-paths.core-test)

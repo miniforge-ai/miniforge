@@ -69,9 +69,11 @@
   "Absolute path to the repo root (nearest `bb.edn` above the cwd).
    Throws ex-info if no `bb.edn` is found walking up from cwd."
   []
-  (or (find-up (fs/cwd) "bb.edn")
-      (throw (ex-info "Could not locate bb.edn from cwd"
-                      {:cwd (str (fs/cwd))}))))
+  (let [cwd (fs/cwd)]
+    (or (find-up cwd "bb.edn")
+        (throw (ex-info "Could not locate bb.edn from cwd"
+                        {:cwd (str cwd)
+                         :config/error :invalid-config})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Composes Layer 1.
