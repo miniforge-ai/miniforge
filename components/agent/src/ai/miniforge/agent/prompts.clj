@@ -30,6 +30,14 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Prompt loading
 
+(defn- malformed-prompt-data
+  [agent-type resource-path prompt-data]
+  {:agent-type agent-type
+   :resource-path resource-path
+   :config/error :invalid-config
+   :prompt-data/type (some-> prompt-data type str)
+   :keys (when (map? prompt-data) (keys prompt-data))})
+
 (defn load-prompt
   "Load an agent prompt from the resources directory.
 
@@ -55,16 +63,18 @@
     (if-let [resource (io/resource resource-path)]
       (let [prompt-data (with-open [rdr (io/reader resource)]
                           (edn/read (java.io.PushbackReader. rdr)))]
-        (or (:prompt/system prompt-data)
+        (or (when (map? prompt-data)
+              (:prompt/system prompt-data))
             (response/throw-anomaly! :anomalies/fault
                                     "Prompt data missing :prompt/system key"
-                                    {:agent-type agent-type
-                                     :resource-path resource-path
-                                     :keys (keys prompt-data)})))
+                                    (malformed-prompt-data agent-type
+                                                           resource-path
+                                                           prompt-data))))
       (response/throw-anomaly! :anomalies/fault
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
-                                 :resource-path resource-path}))))
+                                 :resource-path resource-path
+                                 :config/error :invalid-config}))))
 
 (defn load-prompt-data
   "Load full prompt data map from resources.
@@ -90,7 +100,8 @@
       (response/throw-anomaly! :anomalies/fault
                                 "Could not find prompt resource"
                                 {:agent-type agent-type
-                                 :resource-path resource-path}))))
+                                 :resource-path resource-path
+                                 :config/error :invalid-config}))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Progress-monitor factory
