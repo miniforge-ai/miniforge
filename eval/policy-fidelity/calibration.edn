@@ -7,53 +7,29 @@
  #:std{:clojure-exception-handling
        {:stable? true,
         :evaluated? true,
-        :fn-cases [{:fixture "seed/order_service.clj"}],
+        :fn-cases [],
         :failed-cells 0,
-        :run-verdicts [false false false],
-        :fp-cases
-        [{:fixture "seed/status_pipeline.clj",
-          :judge-said
-          "Structured payload thrown via plain throw/ex-info. If a throw is warranted at all, structured payloads must use slingshot throw+ (or throw-anomaly!) so consumers can dispatch on the value's shape instead of digging into ex-data."}
-         {:fixture "seed/status_pipeline.clj",
-          :judge-said
-          "Plain throw with a structured ex-info payload. Per rule 211, structured payloads thrown at a boundary use throw+ / throw-anomaly! (so try+ consumers dispatch on the value's shape); plain throw is reserved for genuine Java/JVM exceptions."}],
-        :recall-min 0.5,
-        :recall-max 0.833,
+        :run-verdicts [true true true],
+        :fp-cases [],
+        :recall-min 1.0,
+        :recall-max 1.0,
         :runs 3,
-        :gate-ready? false,
+        :gate-ready? true,
         :trials 3,
-        :clean-fp-max 1},
+        :clean-fp-max 0},
        :config-as-data
        {:stable? true,
         :evaluated? true,
         :fn-cases [],
         :failed-cells 0,
-        :run-verdicts [false false false],
-        :fp-cases
-        [{:fixture "seed/page_fetcher.clj",
-          :judge-said
-          "Page size is operational configuration — config-as-data explicitly lists page sizes among operator-tunable values, and the docstring ('when the caller omits one') frames 50 as a tunable default. It is hard-coded as a def and consumed directly as the ACTIVE value, with no .edn resource and no resolve-from-config path. The active value belongs in an EDN config (with a Malli schema); default-page-size should remain only as the fallback when config is silent. This is the 'magic number extracted to a def when the value should have been EDN' anti-pattern."}
-         {:fixture "seed/page_fetcher.clj",
-          :judge-said
-          "Page size is operational configuration, not a code constant. The docstring ties it to a per-deployment presentation concern (\"matches the dashboard table height\"), which is exactly the kind of value an operator tunes without a code release. Per config-as-data, the active value belongs in an .edn config (e.g. :page/default-size) with a Malli schema; a def in code is allowed only as the fallback when config is silent, resolved via (get config :page/default-size default-page-size). As written, the def IS the active value with no config layer — the 'magic number extracted to a def when it should be EDN' anti-pattern."}
-         {:fixture "seed/page_fetcher.clj",
-          :judge-said
-          "Page size (50) is an operational, deployment-tunable value — the docstring couples it to the dashboard table height, a per-deployment/UI concern an operator would reasonably change without a code release. Per config-as-data it belongs in an .edn config (with a Malli schema), resolved via a config lookup, keeping this def only as the fallback default. As written the literal is the active value hardcoded in code with no config-resolution path and no caller override (fetch-page takes only [query], so the docstring's 'when the caller omits one' override never exists)."}
-         {:fixture "seed/page_fetcher.clj",
-          :judge-said
-          "Page size (50) is operational configuration, not a code constant: it is tied to the dashboard table height, so an operator could reasonably want a different rows-per-page per deployment without a code release. config-as-data lists 'page sizes' as a tunable and explicitly rejects the 'magic number extracted to a def when the value should have been EDN' anti-pattern. Here the def is not a fallback resolved through a config lookup — it is the active value hardcoded in source. Move it to an .edn config (with a Malli schema), keeping a default-page-size const only as the silent-config fallback resolved via (get config :seed/page-size default-page-size)."}
-         {:fixture "seed/order_service.clj",
-          :judge-said
-          "Tier assignment and the 90-day loyalty window are operational policy an operator would tune without a code release; they belong in an .edn config (with a schema), not as embedded literals in the function body."}
-         {:fixture "seed/page_fetcher.clj",
-          :judge-said
-          "Page size is operational configuration — config-as-data explicitly lists page/batch sizes as operator-tunable, and the docstring ties the value to dashboard table height, which differs per deployment. The active value must come from an .edn config (read at the boundary), with default-page-size retained only as the fallback when config is silent. Here the named constant is consumed directly as the active value with no config lookup, matching the anti-pattern 'magic numbers extracted to a def when the value should have been EDN'."}],
+        :run-verdicts [true true true],
+        :fp-cases [],
         :recall-min 1.0,
         :recall-max 1.0,
         :runs 3,
-        :gate-ready? false,
+        :gate-ready? true,
         :trials 3,
-        :clean-fp-max 2},
+        :clean-fp-max 0},
        :exceptions-as-data
        {:stable? true,
         :evaluated? true,
@@ -74,7 +50,7 @@
         :failed-cells 0,
         :run-verdicts [true true true],
         :fp-cases [],
-        :recall-min 0.917,
+        :recall-min 0.833,
         :recall-max 1.0,
         :runs 3,
         :gate-ready? true,
@@ -120,21 +96,18 @@
         :trials 3,
         :clean-fp-max 0},
        :self-documenting-code
-       {:stable? false,
+       {:stable? true,
         :evaluated? true,
         :fn-cases [],
         :failed-cells 0,
-        :run-verdicts [true true false],
-        :fp-cases
-        [{:fixture "seed/row_aggregator.clj",
-          :judge-said
-          "Public fn carries no docstring stating its contract. The (nil? a) branch encodes a non-obvious 'why' (a is a fold seed that may start nil), and the shapes of a/b are undocumented. Document this boundary fn the way summarize-rows is documented, or make the contract self-evident."}],
+        :run-verdicts [true true true],
+        :fp-cases [],
         :recall-min 1.0,
         :recall-max 1.0,
         :runs 3,
-        :gate-ready? false,
+        :gate-ready? true,
         :trials 3,
-        :clean-fp-max 1},
+        :clean-fp-max 0},
        :validation-boundaries
        {:stable? true,
         :evaluated? true,

@@ -7,7 +7,10 @@
     (reduce-kv (fn [acc _ v] (+ acc v)) 0 rows)
     0))
 
-(defn merge-summaries [a b]
+(defn merge-summaries
+  "Merge two summary maps by summing shared keys. A nil left operand is the
+   fold's initial seed, so it yields the right operand unchanged."
+  [a b]
   (if (nil? a)
     b
     (merge-with + a b)))
