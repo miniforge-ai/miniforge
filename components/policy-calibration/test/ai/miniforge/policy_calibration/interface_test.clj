@@ -1,10 +1,92 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
 (ns ai.miniforge.policy-calibration.interface-test
-  (:require [ai.miniforge.policy-calibration.interface :as sut]
+  (:require [ai.miniforge.policy-calibration.config :as config]
+            [ai.miniforge.policy-calibration.interface :as sut]
+            [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]))
 
 (def ^:private bar {:max-clean-fp 0 :min-recall 0.8})
 
 (defn- cell-at [cells] (fn [rel t] (get cells [rel t])))
+
+(defn- temp-resource-url
+  [content]
+  (let [f (java.io.File/createTempFile "policy-calibration-config-" ".edn")]
+    (.deleteOnExit f)
+    (spit f content)
+    (.toURL (.toURI f))))
+
+(defn- unreadable-resource-url
+  []
+  (java.net.URL.
+   nil
+   "memory://policy-calibration-config-unreadable"
+   (proxy [java.net.URLStreamHandler] []
+     (openConnection [url]
+       (proxy [java.net.URLConnection] [url]
+         (connect [])
+         (getInputStream []
+           (throw (java.io.IOException. "unreadable"))))))))
+
+(deftest load-config-invalid-resource-test
+  (testing "missing config resource carries invalid-config ex-data"
+    (let [ex (with-redefs [io/resource (constantly nil)]
+               (try (config/load-config)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= "policy-calibration/config.edn" (:classpath/resource (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :missing-resource (:config/invalid-config-reason (ex-data ex))))))
+
+  (testing "malformed EDN carries invalid-config ex-data"
+    (let [ex (with-redefs [io/resource (constantly (temp-resource-url "{"))]
+               (try (config/load-config)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :malformed-edn (:config/invalid-config-reason (ex-data ex))))))
+
+  (testing "unreadable resource carries invalid-config ex-data"
+    (let [ex (with-redefs [io/resource (constantly (unreadable-resource-url))]
+               (try (config/load-config)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :unreadable-resource (:config/invalid-config-reason (ex-data ex))))))
+
+  (testing "non-map EDN carries invalid-config ex-data"
+    (let [ex (with-redefs [io/resource (constantly (temp-resource-url "[]"))]
+               (try (config/load-config)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :not-a-map (:config/invalid-config-reason (ex-data ex))))))
+
+  (testing "schema-invalid config carries invalid-config ex-data"
+    (let [ex (with-redefs [io/resource (constantly (temp-resource-url "{}"))]
+               (try (config/load-config)
+                    (catch clojure.lang.ExceptionInfo e e)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :schema-validation (:config/invalid-config-reason (ex-data ex))))
+      (is (some? (:errors (ex-data ex)))))))
 
 (deftest score-rule-clean-and-violating-test
   (testing "0 false-positives + full recall -> gate-ready"
