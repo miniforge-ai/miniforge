@@ -3,13 +3,16 @@
             [ai.miniforge.store.interface :as store]))
 
 (def ^:private default-page-size
-  "Rows per page when the caller omits one; matches the dashboard table height."
+  "Fallback rows-per-page when config is silent. The operational value lives
+   in .edn (:page/size); this def is only the silent-config default."
   50)
 
 (defn fetch-page
-  "Fetch one page of rows, or pass the store anomaly straight through."
-  [query]
-  (let [result (store/query query)]
+  "Fetch one page of rows, or pass the store anomaly straight through.
+   Page size resolves from config, falling back to default-page-size."
+  [config query]
+  (let [size   (get config :page/size default-page-size)
+        result (store/query query)]
     (if (schema/failed? result)
       result
-      (take default-page-size (schema/value result)))))
+      (take size (schema/value result)))))

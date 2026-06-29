@@ -18,8 +18,8 @@
 
  :fixtures
  {"seed/order_service.clj"
-  {:violates #{:std/named-constants :std/exceptions-as-data :std/result-handling :std/localization :std/clojure-exception-handling}
-   :notes "magic 90 + \"gold\" enum; throw in normal flow; manual :status check; ex-info string is an emitted literal"}
+  {:violates #{:std/named-constants :std/exceptions-as-data :std/result-handling :std/localization}
+   :notes "magic 90 + \"gold\" enum; throw in NORMAL flow (= 005 exceptions-as-data, NOT 211 — 211 governs macro choice only for legitimate boundary throws); manual :status check; ex-info string is an emitted literal"}
 
   "seed/greeting_view.clj"
   {:violates #{:std/no-dead-code :std/localization}
