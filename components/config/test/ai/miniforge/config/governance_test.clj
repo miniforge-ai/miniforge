@@ -109,8 +109,13 @@
 
 (deftest load-governance-config-unknown-key-test
   (testing "throws for unknown config key"
-    (is (thrown? clojure.lang.ExceptionInfo
-                (gov/load-governance-config :nonexistent {:skip-digest? true})))))
+    (let [ex (try (gov/load-governance-config :nonexistent {:skip-digest? true})
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :nonexistent (:config-key (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :unknown-governance-config
+             (:config/invalid-config-reason (ex-data ex)))))))
 
 ;------------------------------------------------------------------------------ Regex Compilation
 
@@ -155,9 +160,15 @@
     (let [base {:merge-threshold 0.85}
           pack {:pack/id "test"
                 :pack/trust-level :untrusted
-                :pack/config-overrides {:readiness {:merge-threshold 0.50}}}]
-      (is (thrown? clojure.lang.ExceptionInfo
-                  (gov/apply-pack-overrides :readiness base pack)))))
+                :pack/config-overrides {:readiness {:merge-threshold 0.50}}}
+          ex (try (gov/apply-pack-overrides :readiness base pack)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= "test" (:pack-id (ex-data ex))))
+      (is (= :untrusted (:trust-level (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :untrusted-pack-overrides
+             (:config/invalid-config-reason (ex-data ex))))))
 
   (testing "returns base config when pack has no overrides for key"
     (let [base {:merge-threshold 0.85}
@@ -185,9 +196,34 @@
                 :pack/trust-level :trusted
                 :pack/config-overrides
                 {:knowledge-safety
-                 {:injection-patterns {:role-hijacking ["a"]}}}}]
-      (is (thrown? clojure.lang.ExceptionInfo
-                  (gov/apply-pack-overrides :knowledge-safety base pack))))))
+                 {:injection-patterns {:role-hijacking ["a"]}}}}
+          ex (try (gov/apply-pack-overrides :knowledge-safety base pack)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :role-hijacking (:category (ex-data ex))))
+      (is (= 3 (:before-count (ex-data ex))))
+      (is (= 1 (:after-count (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :knowledge-safety-pattern-shrink
+             (:config/invalid-config-reason (ex-data ex))))))
+
+  (testing "rejects knowledge-safety overrides that remove a category"
+    (let [base {:injection-patterns {:role-hijacking ["a" "b"]
+                                     :jailbreak ["d"]}}
+          pack {:pack/id "test"
+                :pack/trust-level :trusted
+                :pack/config-overrides
+                {:knowledge-safety
+                 {:injection-patterns {:role-hijacking nil}}}}
+          ex (try (gov/apply-pack-overrides :knowledge-safety base pack)
+                  (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= :role-hijacking (:category (ex-data ex))))
+      (is (= 2 (:before-count (ex-data ex))))
+      (is (= 0 (:after-count (ex-data ex))))
+      (is (= :invalid-config (:config/error (ex-data ex))))
+      (is (= :knowledge-safety-pattern-shrink
+             (:config/invalid-config-reason (ex-data ex)))))))
 
 ;------------------------------------------------------------------------------ Regression: Values Match Original Hardcoded Defaults
 

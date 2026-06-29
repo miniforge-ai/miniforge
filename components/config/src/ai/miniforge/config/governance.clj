@@ -176,23 +176,27 @@
         (when (not= :trusted trust-level)
           (throw (ex-info "Only :trusted packs can carry config overrides"
                           {:pack-id (:pack/id pack)
-                           :trust-level trust-level})))
+                           :trust-level trust-level
+                           :config/error :invalid-config
+                           :config/invalid-config-reason :untrusted-pack-overrides})))
         (if (= config-key :knowledge-safety)
           ;; Safety check: count patterns before/after, reject if any category shrinks
           (let [before-categories (:injection-patterns base-config)
                 merged (deep-merge base-config overrides)
                 after-categories (:injection-patterns merged)]
             (doseq [[cat-key before-patterns] before-categories]
-              (let [after-patterns (get after-categories cat-key)]
-                (when (and after-patterns
-                           (< (count after-patterns) (count before-patterns)))
+              (let [after-patterns (get after-categories cat-key)
+                    after-count    (count after-patterns)]
+                (when (< after-count (count before-patterns))
                   (throw (ex-info (str "Knowledge-safety pattern category " (name cat-key)
                                        " would shrink from " (count before-patterns)
-                                       " to " (count after-patterns) " patterns. "
+                                       " to " after-count " patterns. "
                                        "Only additive overrides are allowed.")
                                   {:category cat-key
                                    :before-count (count before-patterns)
-                                   :after-count (count after-patterns)})))))
+                                   :after-count after-count
+                                   :config/error :invalid-config
+                                   :config/invalid-config-reason :knowledge-safety-pattern-shrink})))))
             merged)
           ;; Non-safety configs: merge freely
           (deep-merge base-config overrides))))))
@@ -222,7 +226,9 @@
          resource-config (load-resource-config config-key profile)]
      (when-not resource-config
        (throw (ex-info (str "Governance config not found: " (name config-key))
-                       {:config-key config-key})))
+                       {:config-key config-key
+                        :config/error :invalid-config
+                        :config/invalid-config-reason :unknown-governance-config})))
      ;; Digest verification (before any merging)
      (when-not (:skip-digest? opts)
        (let [filename (get config-key->filename config-key)
