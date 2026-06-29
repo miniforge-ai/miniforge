@@ -17,14 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.tool-registry.anomaly.registry-anomaly-test
-  "Coverage for `tool-registry/registry` boundary escalation via
-   `response/throw-anomaly!`.
+  "Coverage for `tool-registry/registry` anomaly behavior.
 
-   Pre-cleanup, each site was a raw `(throw (ex-info ...))`. Post-
-   cleanup, throws route through the canonical
-   `response/throw-anomaly!` carrying typed anomaly categories
-   (`:anomalies/incorrect`, `:anomalies/not-found`)."
+   Validation/not-found failures return anomaly maps. Hard registry shape
+   invariants still throw typed anomalies."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.tool-registry.registry :as registry])
   (:import
@@ -35,25 +33,21 @@
 
 ;------------------------------------------------------------------------------ register-tool — invalid configuration
 
-(deftest register-tool-invalid-config-throws-anomaly
-  (testing "schema-invalid tool raises :anomalies/incorrect"
+(deftest register-tool-invalid-config-returns-anomaly
+  (testing "schema-invalid tool returns :invalid-input / :anomalies/incorrect"
     (let [reg    (new-registry)
-          thrown (try (registry/register-tool reg {}) nil (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"Invalid tool configuration" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+          result (registry/register-tool reg {})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies/incorrect (:anomaly/subtype result)))
+      (is (= "Invalid tool configuration" (:anomaly/message result))))))
 
 (deftest register-tool-invalid-config-carries-errors
-  (testing "anomaly ex-data carries :tool-id and :errors"
-    (let [reg (new-registry)
-          thrown (try
-                   (registry/register-tool reg {:tool/id :no/such-tool})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= :no/such-tool (:tool-id (ex-data thrown))))
-      (is (contains? (ex-data thrown) :errors))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+  (testing "anomaly data carries :tool-id and schema errors"
+    (let [reg    (new-registry)
+          result (registry/register-tool reg {:tool/id :no/such-tool})]
+      (is (= :no/such-tool (get-in result [:anomaly/data :tool-id])))
+      (is (contains? (:anomaly/data result) :errors)))))
 
 ;------------------------------------------------------------------------------ register-tool — invalid tool id shape
 
@@ -70,21 +64,49 @@
 
 ;------------------------------------------------------------------------------ update-tool — tool not found
 
-(deftest update-tool-not-found-throws-anomaly
-  (testing "missing tool raises :anomalies/not-found"
-    (let [reg (new-registry)]
-      (is (thrown-with-msg?
-           ExceptionInfo
-           #"Tool not found"
-           (registry/update-tool reg :missing/tool {:tool/name "x"}))))))
+(deftest update-tool-not-found-returns-anomaly
+  (testing "missing tool returns :not-found / :anomalies/not-found"
+    (let [reg    (new-registry)
+          result (registry/update-tool reg :missing/tool {:tool/name "x"})]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= :anomalies/not-found (:anomaly/subtype result)))
+      (is (= {:tool-id :missing/tool} (:anomaly/data result))))))
 
 (deftest update-tool-not-found-carries-tool-id
-  (testing "anomaly ex-data carries :tool-id and :anomalies/not-found category"
-    (let [reg (new-registry)
-          thrown (try
-                   (registry/update-tool reg :missing/tool {:tool/name "x"})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= :missing/tool (:tool-id (ex-data thrown))))
-      (is (= :anomalies/not-found (:anomaly/category (ex-data thrown)))))))
+  (testing "anomaly data carries :tool-id"
+    (let [reg    (new-registry)
+          result (registry/update-tool reg :missing/tool {:tool/name "x"})]
+      (is (= :missing/tool (get-in result [:anomaly/data :tool-id]))))))
+
+;------------------------------------------------------------------------------ update-tool — invalid update
+
+(deftest update-tool-invalid-update-returns-anomaly
+  (testing "merged invalid config returns :invalid-input / :anomalies/incorrect"
+    (let [reg  (new-registry)
+          tool {:tool/id :tools/greet
+                :tool/type :function
+                :tool/name "Greet"}]
+      (registry/register-tool reg tool)
+      (let [result (registry/update-tool reg :tools/greet {:tool/type :unknown})]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :anomalies/incorrect (:anomaly/subtype result)))
+        (is (= :tools/greet (get-in result [:anomaly/data :tool-id])))
+        (is (contains? (:anomaly/data result) :errors))))))
+
+(deftest update-tool-id-change-returns-anomaly
+  (testing "updates cannot change the registry key's tool id"
+    (let [reg  (new-registry)
+          tool {:tool/id :tools/greet
+                :tool/type :function
+                :tool/name "Greet"}]
+      (registry/register-tool reg tool)
+      (let [result (registry/update-tool reg :tools/greet {:tool/id :tools/renamed})]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :anomalies/incorrect (:anomaly/subtype result)))
+        (is (= "Tool ID cannot be changed" (:anomaly/message result)))
+        (is (= {:tool-id :tools/greet
+                :requested-tool-id :tools/renamed}
+               (:anomaly/data result)))))))

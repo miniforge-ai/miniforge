@@ -24,6 +24,7 @@
    Layer 2: Query and filter operations
    Layer 3: Status and statistics"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.tool-registry.schema :as schema]
    [ai.miniforge.logging.interface :as log]
@@ -34,12 +35,16 @@
 
 (defprotocol ToolRegistry
   "Protocol for tool registration and lookup."
-  (register-tool [this tool] "Register a tool in the registry.")
+  (register-tool [this tool]
+    "Register a tool in the registry. Returns the tool id or an anomaly map.
+     Throws when :tool/id is not a namespaced keyword, because that is a
+     registry shape invariant.")
   (unregister-tool [this tool-id] "Remove a tool from the registry.")
   (get-tool [this tool-id] "Retrieve a tool by ID.")
   (list-tools [this] "List all registered tools.")
   (find-tools [this query] "Find tools matching query.")
-  (update-tool [this tool-id updates] "Update a tool's configuration.")
+  (update-tool [this tool-id updates]
+    "Update a tool's configuration. Returns the updated tool or an anomaly map.")
   (clear-tools [this] "Remove all tools from the registry."))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -50,23 +55,25 @@
 
   (register-tool [_this tool]
     (let [{:keys [valid? errors]} (schema/validate-tool tool)]
-      (when-not valid?
-        (response/throw-anomaly! :anomalies/incorrect
-                                 "Invalid tool configuration"
-                                 {:tool-id (:tool/id tool)
-                                  :errors errors}))
-      (when-not (schema/valid-tool-id? (:tool/id tool))
-        (response/throw-anomaly! :anomalies/incorrect
-                                 "Tool ID must be a namespaced keyword"
-                                 {:tool-id (:tool/id tool)}))
-      (let [normalized (schema/normalize-tool tool)
-            tool-id (:tool/id normalized)
-            logger (:logger @state)]
-        (swap! (:tools @state) assoc tool-id normalized)
-        (when logger
-          (log/debug logger :system :tool-registry/registered
-                     {:data {:tool-id tool-id}}))
-        tool-id)))
+      (if-not valid?
+        (anomaly/sub-anomaly :invalid-input
+                             :anomalies/incorrect
+                             "Invalid tool configuration"
+                             {:tool-id (:tool/id tool)
+                              :errors errors})
+        (do
+          (when-not (schema/valid-tool-id? (:tool/id tool))
+            (response/throw-anomaly! :anomalies/incorrect
+                                     "Tool ID must be a namespaced keyword"
+                                     {:tool-id (:tool/id tool)}))
+          (let [normalized (schema/normalize-tool tool)
+                tool-id (:tool/id normalized)
+                logger (:logger @state)]
+            (swap! (:tools @state) assoc tool-id normalized)
+            (when logger
+              (log/debug logger :system :tool-registry/registered
+                         {:data {:tool-id tool-id}}))
+            tool-id)))))
 
   (unregister-tool [_this tool-id]
     (let [logger (:logger @state)]
@@ -113,18 +120,28 @@
 
   (update-tool [_this tool-id updates]
     (let [current (get @(:tools @state) tool-id)]
-      (when-not current
-        (response/throw-anomaly! :anomalies/not-found
-                                 "Tool not found"
-                                 {:tool-id tool-id}))
-      (let [updated (merge current updates)
-            {:keys [valid? errors]} (schema/validate-tool updated)]
-        (when-not valid?
-          (response/throw-anomaly! :anomalies/incorrect
+      (if-not current
+        (anomaly/sub-anomaly :not-found
+                             :anomalies/not-found
+                             "Tool not found"
+                             {:tool-id tool-id})
+        (if (and (contains? updates :tool/id)
+                 (not= tool-id (:tool/id updates)))
+          (anomaly/sub-anomaly :invalid-input
+                               :anomalies/incorrect
+                               "Tool ID cannot be changed"
+                               {:tool-id tool-id
+                                :requested-tool-id (:tool/id updates)})
+          (let [updated (merge current updates)
+                {:keys [valid? errors]} (schema/validate-tool updated)]
+            (if-not valid?
+              (anomaly/sub-anomaly :invalid-input
+                                   :anomalies/incorrect
                                    "Invalid update"
-                                   {:tool-id tool-id :errors errors}))
-        (swap! (:tools @state) assoc tool-id updated)
-        updated)))
+                                   {:tool-id tool-id :errors errors})
+              (do
+                (swap! (:tools @state) assoc tool-id updated)
+                updated)))))))
 
   (clear-tools [_this]
     (reset! (:tools @state) {})))

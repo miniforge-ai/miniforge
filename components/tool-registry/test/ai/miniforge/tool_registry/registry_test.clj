@@ -19,8 +19,9 @@
 (ns ai.miniforge.tool-registry.registry-test
   "Tests for tool-registry registry operations."
   (:require
-   [clojure.test :refer [deftest is testing use-fixtures]]
-   [ai.miniforge.tool-registry.registry :as registry]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.tool-registry.registry :as registry]
+   [clojure.test :refer [deftest is testing use-fixtures]]))
 
 ;------------------------------------------------------------------------------ Test fixtures
 
@@ -64,11 +65,11 @@
       (is (some? tool))
       (is (= "Test LSP" (:tool/name tool)))))
 
-  (testing "register invalid tool throws"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid tool configuration"
-         (registry/register-tool *registry* {:tool/id :bad}))))
+  (testing "register invalid tool returns anomaly"
+    (let [result (registry/register-tool *registry* {:tool/id :bad})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies/incorrect (:anomaly/subtype result)))))
 
   (testing "register tool with non-namespaced ID throws"
     (is (thrown-with-msg?
@@ -147,11 +148,19 @@
       (is (= "Test LSP" (:tool/name tool)))
       (is (= :lsp (:tool/type tool)))))
 
-  (testing "update non-existent tool throws"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Tool not found"
-         (registry/update-tool *registry* :nonexistent {:tool/name "New"})))))
+  (testing "update non-existent tool returns anomaly"
+    (let [result (registry/update-tool *registry* :nonexistent {:tool/name "New"})]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= :anomalies/not-found (:anomaly/subtype result)))))
+
+  (testing "update rejects tool id changes"
+    (registry/register-tool *registry* sample-lsp-tool)
+    (let [result (registry/update-tool *registry* :lsp/test
+                                       {:tool/id :lsp/renamed})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :lsp/test (:tool/id (registry/get-tool *registry* :lsp/test)))))))
 
 ;------------------------------------------------------------------------------ Unregister tests
 
