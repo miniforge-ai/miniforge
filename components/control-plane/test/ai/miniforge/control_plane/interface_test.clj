@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.control-plane.interface-test
   (:require
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.interface :as cp]))
@@ -32,6 +33,21 @@
       (is (contains? (set (:task-statuses profile)) :running))
       (is (contains? (set (:task-statuses profile)) :blocked))
       (is (map? (:valid-transitions profile))))))
+
+(deftest load-profile-missing-resource-carries-invalid-config-marker
+  (testing "Missing classpath state profile is an invalid configuration fault"
+    (let [missing-path "control-plane/state-profiles/missing.edn"
+          resource io/resource]
+      (with-redefs [io/resource (fn [path]
+                                  (when-not (= missing-path path)
+                                    (resource path)))]
+        (let [thrown (try
+                       (cp/load-profile missing-path)
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? thrown))
+          (is (= missing-path (:path (ex-data thrown))))
+          (is (= :invalid-config (:config/error (ex-data thrown)))))))))
 
 (deftest valid-transition-test
   (let [profile (cp/get-profile)]

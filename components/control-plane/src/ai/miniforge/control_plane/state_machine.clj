@@ -53,7 +53,8 @@
    (if-let [resource (io/resource path)]
      (edn/read-string (slurp resource))
      (throw (ex-info (messages/t :state-machine/profile-not-found)
-                     {:path path})))))
+                     {:path path
+                      :config/error :invalid-config})))))
 
 (def ^:private profile-cache
   "Cached profile instance."
