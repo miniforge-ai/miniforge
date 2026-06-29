@@ -23,6 +23,7 @@
    Layer 1: In-memory registry implementation
    Layer 2: Registry constructors"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.policy-pack.crypto :as crypto]
    [ai.miniforge.policy-pack.schema :as schema]
    [ai.miniforge.response.interface :as response]
@@ -40,7 +41,7 @@
   ;; CRUD
   (register-pack [this pack]
     "Register a new pack or new version of existing pack.
-     Returns the registered pack.")
+     Returns the registered pack or an anomaly map on validation failure.")
 
   (get-pack [this pack-id]
     "Get latest version of pack.
@@ -73,7 +74,8 @@
   (export-pack [this pack-id version format]
     "Export pack to specified format.
      Format: :edn, :json, or :directory
-     Returns exported data as string or map.")
+     Returns exported data as string/map, or an anomaly map when the pack
+     is not found.")
 
   ;; Validation
   (validate-pack [this pack]
@@ -199,10 +201,11 @@
               version (:pack/version pack)]
           (swap! state assoc-in [:packs pack-id version] pack)
           pack)
-        (response/throw-anomaly! :anomalies/incorrect
-                                 "Invalid pack schema"
-                                 {:errors errors
-                                  :pack-id (:pack/id pack)}))))
+        (anomaly/sub-anomaly :invalid-input
+                             :anomalies/incorrect
+                             "Invalid pack schema"
+                             {:errors errors
+                              :pack-id (:pack/id pack)}))))
 
   (get-pack [this pack-id]
     (let [versions (get-in @state [:packs pack-id])]
@@ -276,10 +279,11 @@
         (response/throw-anomaly! :anomalies/incorrect
                                  "Unknown export format"
                                  {:format format}))
-      (response/throw-anomaly! :anomalies/not-found
-                               "Pack not found"
-                               {:pack-id pack-id
-                                :version version})))
+      (anomaly/sub-anomaly :not-found
+                           :anomalies/not-found
+                           "Pack not found"
+                           {:pack-id pack-id
+                            :version version})))
 
   (validate-pack [_this pack]
     (schema/validate-pack pack))

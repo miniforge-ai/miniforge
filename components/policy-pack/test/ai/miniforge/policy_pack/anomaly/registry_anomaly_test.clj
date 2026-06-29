@@ -17,15 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.policy-pack.anomaly.registry-anomaly-test
-  "Coverage for `policy-pack/registry` boundary escalation via
-   `response/throw-anomaly!`.
+  "Coverage for `policy-pack/registry` anomaly behavior.
 
-   Pre-cleanup, each site was a raw `(throw (ex-info ...))`. Post-
-   cleanup, throws route through the canonical
-   `response/throw-anomaly!` carrying typed anomaly categories
-   (`:anomalies/incorrect`, `:anomalies/unsupported`,
-   `:anomalies/not-found`)."
+   Validation/not-found failures return anomaly maps. Unsupported and
+   intentionally unimplemented surfaces still throw typed anomalies."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.policy-pack.registry :as registry])
   (:import
@@ -36,25 +33,21 @@
 
 ;------------------------------------------------------------------------------ register-pack — invalid schema
 
-(deftest register-pack-invalid-schema-throws-anomaly
-  (testing "schema-invalid pack raises :anomalies/incorrect"
+(deftest register-pack-invalid-schema-returns-anomaly
+  (testing "schema-invalid pack returns :invalid-input / :anomalies/incorrect"
     (let [reg    (new-registry)
-          thrown (try (registry/register-pack reg {:pack/id :bad-pack}) nil (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"Invalid pack schema" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+          result (registry/register-pack reg {:pack/id :bad-pack})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies/incorrect (:anomaly/subtype result)))
+      (is (= "Invalid pack schema" (:anomaly/message result))))))
 
 (deftest register-pack-anomaly-carries-pack-id
-  (testing "anomaly ex-data carries :pack-id, :errors, and :anomalies/incorrect category"
-    (let [reg (new-registry)
-          thrown (try
-                   (registry/register-pack reg {:pack/id :bad})
-                   nil
-                   (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (= :bad (:pack-id (ex-data thrown))))
-      (is (contains? (ex-data thrown) :errors))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+  (testing "anomaly data carries :pack-id and schema errors"
+    (let [reg    (new-registry)
+          result (registry/register-pack reg {:pack/id :bad})]
+      (is (= :bad (get-in result [:anomaly/data :pack-id])))
+      (is (contains? (:anomaly/data result) :errors)))))
 
 ;------------------------------------------------------------------------------ import-pack — unsupported source
 
@@ -68,13 +61,14 @@
 
 ;------------------------------------------------------------------------------ export-pack — pack not found
 
-(deftest export-pack-not-found-throws-anomaly
-  (testing "missing pack raises :anomalies/not-found"
+(deftest export-pack-not-found-returns-anomaly
+  (testing "missing pack returns :not-found / :anomalies/not-found"
     (let [reg    (new-registry)
-          thrown (try (registry/export-pack reg :missing "1.0.0" :edn) nil (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"Pack not found" (.getMessage thrown)))
-      (is (= :anomalies/not-found (:anomaly/category (ex-data thrown)))))))
+          result (registry/export-pack reg :missing "1.0.0" :edn)]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= :anomalies/not-found (:anomaly/subtype result)))
+      (is (= {:pack-id :missing :version "1.0.0"} (:anomaly/data result))))))
 
 ;------------------------------------------------------------------------------ export-pack — unsupported / unknown formats
 
