@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-06-29T02:45:24.803-00:00",
+#:pack{:created-at #inst "2026-06-29T03:11:49.602-00:00",
        :version "2026.06",
        :rules
        [#:rule{:title
@@ -692,13 +692,13 @@
                :description
                "Engineering standard (220): Python + Poetry rules"}
         #:rule{:title
-               "Result handling — use success?/failed? predicates and success/anomaly constructors",
+               "Result handling — use succeeded?/failed? predicates and success/anomaly constructors",
                :agent-behavior
                "1. Use `schema/success` or `schema/failure` — never `{:success? true ...}`.\n2. When checking a result from a called function, use `schema/succeeded?` or `schema/failed?` — never `:success?` key access.\n3. If the result type comes from a different component, check what predicates that component's interface exports. If none exist, that's a gap to flag.",
                :enforcement
                {:action :hard-halt,
                 :message
-                "Hand-built result map or structural success/failure check. Use the success/anomaly constructors and the success?/failed? predicates; never inspect a result's shape."},
+                "Hand-built result map or structural success/failure check. Use the success/anomaly constructors and the succeeded?/failed? predicates; never inspect a result's shape."},
                :applies-to
                {:phases #{:release :review :verify :plan :implement}},
                :severity :major,
@@ -709,7 +709,7 @@
                :detection {:type :custom},
                :category "003",
                :description
-               "Engineering standard (003): Result handling — use success?/failed? predicates and success/anomaly constructors"}
+               "Engineering standard (003): Result handling — use succeeded?/failed? predicates and success/anomaly constructors"}
         #:rule{:title
                "Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE or taught a lesson from the user that should be retained as a new rule",
                :agent-behavior
@@ -1184,7 +1184,7 @@
                     :std/pre-commit-discipline
                     :std/tests-with-code]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-06-29T02:45:24.803-00:00",
+       :updated-at #inst "2026-06-29T03:11:49.602-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},
