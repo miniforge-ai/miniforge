@@ -1,4 +1,4 @@
-#:pack{:created-at #inst "2026-06-28T21:51:45.687-00:00",
+#:pack{:created-at #inst "2026-06-29T03:11:49.602-00:00",
        :version "2026.06",
        :rules
        [#:rule{:title
@@ -492,9 +492,9 @@
                :agent-behavior
                "1. Every string literal in code that gets emitted is a violation —\n2. When adding a new emitted string, decide audience first:\n   - Will any user (operator dashboard counts) see it? → user locale",
                :enforcement
-               {:action :warn,
+               {:action :hard-halt,
                 :message
-                "Standard: Localization — every emitted string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale"},
+                "Raw string literal in emitted output. Route every user- or developer-facing string through a localization catalog via (msg/t :key); add the key to the matching catalog file first."},
                :applies-to
                {:phases #{:release :review :verify :plan :implement}},
                :severity :major,
@@ -530,9 +530,9 @@
                :agent-behavior
                "1. Every PR that adds new functionality — check for the old functionality the new replaces. Did you delete it?\n2. Every PR that adds a function — grep for callers. If there are none, why is it being added?\n3. Every PR that renames a function — make sure no `def old-name new-name` shim is left behind unless the migration plan is documented.",
                :enforcement
-               {:action :warn,
+               {:action :hard-halt,
                 :message
-                "Standard: No dead code, no legacy shims, no commented-out blocks — deleting unused code is part of the change, not a follow-up"},
+                "Dead, unreachable, or commented-out code left in place. Delete it in the change that obsoletes it — git history is the archive; removal is part of the work, not a follow-up."},
                :applies-to
                {:phases #{:release :review :verify :plan :implement}},
                :severity :major,
@@ -692,13 +692,13 @@
                :description
                "Engineering standard (220): Python + Poetry rules"}
         #:rule{:title
-               "Result handling — use success?/failed? predicates and success/anomaly constructors",
+               "Result handling — use succeeded?/failed? predicates and success/anomaly constructors",
                :agent-behavior
                "1. Use `schema/success` or `schema/failure` — never `{:success? true ...}`.\n2. When checking a result from a called function, use `schema/succeeded?` or `schema/failed?` — never `:success?` key access.\n3. If the result type comes from a different component, check what predicates that component's interface exports. If none exist, that's a gap to flag.",
                :enforcement
-               {:action :warn,
+               {:action :hard-halt,
                 :message
-                "Standard: Result handling — use success?/failed? predicates and success/anomaly constructors"},
+                "Hand-built result map or structural success/failure check. Use the success/anomaly constructors and the succeeded?/failed? predicates; never inspect a result's shape."},
                :applies-to
                {:phases #{:release :review :verify :plan :implement}},
                :severity :major,
@@ -709,7 +709,7 @@
                :detection {:type :custom},
                :category "003",
                :description
-               "Engineering standard (003): Result handling — use success?/failed? predicates and success/anomaly constructors"}
+               "Engineering standard (003): Result handling — use succeeded?/failed? predicates and success/anomaly constructors"}
         #:rule{:title
                "Use ALWAYS when asked to CREATE A RULE or UPDATE A RULE or taught a lesson from the user that should be retained as a new rule",
                :agent-behavior
@@ -1050,9 +1050,9 @@
                :agent-behavior
                "When writing code inside a component:\n1. Do NOT add `(when (nil? x) ...)` or schema checks on internal data.\n2. If you feel the urge to validate internal data, ask: is this arriving from outside the component? If no, delete the check.\n3. If arriving from outside (via `interface.clj`), add the validation there — and remove it from the internals.\n4. The schema lives in `schema.clj` or `spec.clj` — not scattered across `core.clj` with `when-let` guards.",
                :enforcement
-               {:action :warn,
+               {:action :hard-halt,
                 :message
-                "Standard: Validation at boundaries — schemas and validation only at interface/external entry points"},
+                "Schema or input validation in the interior. Validate only at interface boundaries and external entry points; trust data inward by construction."},
                :applies-to
                {:phases #{:release :review :verify :plan :implement}},
                :severity :major,
@@ -1184,7 +1184,7 @@
                     :std/pre-commit-discipline
                     :std/tests-with-code]}],
        :trust-level :trusted,
-       :updated-at #inst "2026-06-28T21:51:45.687-00:00",
+       :updated-at #inst "2026-06-29T03:11:49.602-00:00",
        :author "miniforge.ai",
        :taxonomy-ref
        #:taxonomy{:id :miniforge/dewey, :min-version "1.0.0"},
