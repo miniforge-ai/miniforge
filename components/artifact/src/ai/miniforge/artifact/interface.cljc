@@ -19,7 +19,13 @@
 (ns ai.miniforge.artifact.interface
   "Public API for the artifact component."
   (:require
-   [ai.miniforge.artifact.datalevin-store :as datalevin-store]
+   ;; The Datalevin store reaches Datalevin through the `ai.miniforge.datalevin`
+   ;; bridge, which under bb needs the `huahaiy/datalevin` pod — a host-runtime
+   ;; artifact (no Windows binary; not declared in miniforge's cross-platform
+   ;; bb.edn). So under bb only the transit store loads; the Datalevin store is
+   ;; the JVM path.
+   #?@(:bb []
+       :clj [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
@@ -31,17 +37,31 @@
    Re-exported from ai.miniforge.artifact.interface.protocols.artifact-store.
    Implement this protocol to back artifacts with a custom store; the bundled
    implementations are the Datalevin store (via create-store) and the Transit
-   store (via create-transit-store). Both run under bb and the JVM.
+   store (Babashka compatible, via create-transit-store).
 
    Methods: save, load-artifact, query, link, close. See the sub-namespace
    protocol docstrings for each method's purpose and return shape (they do not
    currently document argument contracts or failure modes)."
   p/ArtifactStore)
 
+#?(:bb
+   (defn- create-datalevin-store
+     [opts]
+     (throw (ex-info "Datalevin artifact store needs the huahaiy/datalevin pod under bb (a host-runtime artifact); use create-transit-store here"
+                     {:store :datalevin
+                      :runtime :bb
+                      :opts opts})))
+
+   :clj
+   (defn- create-datalevin-store
+     [opts]
+     (datalevin-store/create-datalevin-store opts)))
+
 (defn create-store
   "Create a Datalevin-based artifact store. Datalevin is reached through the
-   `ai.miniforge.datalevin` bridge (the pod under bb, the lib under Clojure),
-   so this runs under both runtimes.
+   `ai.miniforge.datalevin` bridge (the library on the JVM, the pod under bb).
+   The pod is a host-runtime artifact not present in miniforge's cross-platform
+   runtime, so here this is the JVM path — use create-transit-store under bb.
 
    Options:
    - :dir      - Directory for storage (omit for a transient store)
@@ -52,7 +72,7 @@
      (create-store)                          ; transient
      (create-store {:dir \"data/artifacts\"})  ; persistent"
   ([] (create-store {}))
-  ([opts] (datalevin-store/create-datalevin-store opts)))
+  ([opts] (create-datalevin-store opts)))
 
 (defn create-transit-store
   "Create a Transit-based artifact store (Babashka compatible).

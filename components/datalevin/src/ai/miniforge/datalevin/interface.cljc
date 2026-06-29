@@ -29,7 +29,13 @@
    The pod must be declared in the consuming bb runtime's `bb.edn :pods`; `bb
    uberjar` embeds that declaration, so `bb --jar` auto-loads the pod at
    startup. Two thin helpers paper over pod-specific gaps — see `entity-map`
-   and `transient-dir`."
+   and `transient-dir`.
+
+   Marked `:jvm-only` for miniforge's bb compatibility gate: the pod has no
+   Windows binary and isn't declared in miniforge's cross-platform `bb.edn`, so
+   the `:bb` branch can't load here. The bb path is exercised by the consuming
+   runtime that declares the pod (e.g. thesium-workflows' kg-store + uberjar)."
+  {:miniforge/runtime :jvm-only}
   (:require
    ;; `:default` (not `:clj`) so static analysis of the non-bb branch still
    ;; binds `d`; bb takes the pod, every JVM dialect the library.

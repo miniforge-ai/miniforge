@@ -3,12 +3,12 @@
  :deps {io.github.lispyclouds/bblgum {:git/sha "df647fb50f32e05b26e46e58d7249b4798e469e6"}
         ai.miniforge/bb-utils {:local/root "projects/bb-utils"}}
 
- ;; The datalevin component (and its consumers — artifact, pipeline-pack-store)
- ;; run datalevin under bb via this pod; datalevin/nippy are JVM-only. `bb
- ;; uberjar` embeds this declaration so `bb --jar` auto-loads the pod at
- ;; startup. Keep the pod version aligned with the `datalevin` lib version in
- ;; `components/datalevin/deps.edn`.
- :pods {huahaiy/datalevin {:version "0.10.18"}}
+ ;; NOTE: the `huahaiy/datalevin` pod is deliberately NOT declared here. It has
+ ;; no Windows binary, and `:pods` loads eagerly on every platform, so declaring
+ ;; it would break every bb task on miniforge's cross-platform CI. The pod is a
+ ;; host-runtime artifact: the runtime that actually runs datalevin under bb
+ ;; (e.g. the Thesium career uberjar) declares it in its own bb.edn. Here the
+ ;; `ai.miniforge.datalevin` bridge + its Datalevin-only consumers run JVM-side.
 
  :paths ["tasks"]
 
