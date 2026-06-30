@@ -62,10 +62,11 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest compute-topo-order-still-throws
-  (testing "deprecated throwing variant still throws on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/compute-topo-order *manager* (random-uuid))))))
+(deftest compute-topo-order-alias-not-found
+  (testing "stable alias returns :not-found anomaly"
+    (let [result (dag/compute-topo-order *manager* (random-uuid))]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ affected-repos
 
@@ -81,10 +82,11 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest affected-repos-still-throws
-  (testing "deprecated throwing variant still throws on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/affected-repos *manager* (random-uuid) "repo-a")))))
+(deftest affected-repos-alias-not-found
+  (testing "stable alias returns :not-found anomaly"
+    (let [result (dag/affected-repos *manager* (random-uuid) "repo-a")]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ upstream-repos
 
@@ -100,10 +102,11 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest upstream-repos-still-throws
-  (testing "deprecated throwing variant still throws on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/upstream-repos *manager* (random-uuid) "repo-b")))))
+(deftest upstream-repos-alias-not-found
+  (testing "stable alias returns :not-found anomaly"
+    (let [result (dag/upstream-repos *manager* (random-uuid) "repo-b")]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ merge-order
 
@@ -120,10 +123,11 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest merge-order-still-throws
-  (testing "deprecated throwing variant still throws on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/merge-order *manager* (random-uuid) #{"repo-a"})))))
+(deftest merge-order-alias-not-found
+  (testing "stable alias returns :not-found anomaly"
+    (let [result (dag/merge-order *manager* (random-uuid) #{"repo-a"})]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ validate-dag
 
@@ -140,7 +144,8 @@
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest validate-dag-still-throws
-  (testing "deprecated throwing variant still throws on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/validate-dag *manager* (random-uuid))))))
+(deftest validate-dag-alias-not-found
+  (testing "stable alias returns :not-found anomaly"
+    (let [result (dag/validate-dag *manager* (random-uuid))]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
