@@ -17,8 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.repo-dag.anomaly.add-repo-test
-  "Coverage for `dag/add-repo-anomaly` and its deprecated throwing
-   sibling `dag/add-repo`. Three anomaly classes:
+  "Coverage for `dag/add-repo-anomaly` and its stable alias
+   `dag/add-repo`. Three anomaly classes:
    - `:not-found`     — DAG missing
    - `:invalid-input` — `repo-config` fails schema validation (missing
                         `:repo/type`, malformed `:repo/url`, …)
@@ -66,9 +66,7 @@
 (deftest add-repo-anomaly-invalid-input-on-missing-repo-type
   (testing "repo-config without :repo/type yields :invalid-input anomaly —
             schema rejection short-circuits via make-repo-node-anomaly
-            before the node is appended. Pre-fix this path threw
-            ExceptionInfo via the deprecated throwing validate-schema and
-            silently violated the anomaly-returning contract."
+            before the node is appended."
     (let [d (dag/create-dag *manager* "test-dag")
           bad-config {:repo/url "https://github.com/acme/x"
                       :repo/name "x"} ;; missing :repo/type
@@ -89,16 +87,19 @@
       (is (= :conflict (:anomaly/type result)))
       (is (= "tf" (get-in result [:anomaly/data :repo-name]))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Alias compatibility
 
-(deftest add-repo-still-throws-on-missing-dag
-  (testing "deprecated throwing variant still throws ex-info on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/add-repo *manager* (random-uuid) repo-config)))))
+(deftest add-repo-returns-anomaly-on-missing-dag
+  (testing "stable alias returns anomaly data on missing DAG"
+    (let [result (dag/add-repo *manager* (random-uuid) repo-config)]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))
 
-(deftest add-repo-still-throws-on-duplicate
-  (testing "deprecated throwing variant still throws on duplicate repo"
+(deftest add-repo-returns-anomaly-on-duplicate
+  (testing "stable alias returns anomaly data on duplicate repo"
     (let [d (dag/create-dag *manager* "test-dag")]
       (dag/add-repo *manager* (:dag/id d) repo-config)
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Repo already exists"
-            (dag/add-repo *manager* (:dag/id d) repo-config))))))
+      (let [result (dag/add-repo *manager* (:dag/id d) repo-config)]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (= "tf" (get-in result [:anomaly/data :repo-name])))))))

@@ -832,12 +832,15 @@
       (when-not exists?
         (let [[org _name] (str/split repo #"/" 2)]
           (try+
-            (repo-dag/add-repo mgr dag-id
-                               {:repo/url (str "https://github.com/" repo)
-                                :repo/name repo
-                                :repo/org org
-                                :repo/type :application
-                                :repo/default-branch "main"})
+            (let [result (repo-dag/add-repo-anomaly
+                          mgr dag-id
+                          {:repo/url (str "https://github.com/" repo)
+                           :repo/name repo
+                           :repo/org org
+                           :repo/type :application
+                           :repo/default-branch "main"})]
+              (when-not (anomaly/anomaly? result)
+                result))
             (catch Object _ nil)))))))
 
 (defn train-name-for-repo

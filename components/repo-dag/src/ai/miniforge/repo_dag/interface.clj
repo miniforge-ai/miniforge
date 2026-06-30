@@ -157,21 +157,14 @@
    - dag-id: UUID of the DAG
    - repo-config: Map with repo fields (:repo/url, :repo/name, :repo/type required)
 
-   Returns the updated DAG.
-
-   Throws if:
-   - DAG not found
-   - Repo with same name already exists
-
-   DEPRECATED: prefer [[add-repo-anomaly]], which returns an anomaly map
-   instead of throwing. Retained for backward compatibility.
+   Returns the updated DAG, or an anomaly map when the DAG is missing,
+   the repo config is invalid, or the repo already exists.
 
    Example:
      (add-repo mgr dag-id
                {:repo/url \"https://github.com/acme/terraform-modules\"
                 :repo/name \"terraform-modules\"
                 :repo/type :terraform-module})"
-  {:deprecated "exceptions-as-data — prefer add-repo-anomaly"}
   [manager dag-id repo-config]
   (core/add-repo manager dag-id repo-config))
 
@@ -185,7 +178,7 @@
    - `:conflict`      — a repo with the same `:repo/name` already exists
                         in the DAG
 
-   Prefer this over [[add-repo]] in non-boundary code."
+   Kept for callers that prefer the explicit anomaly-returning name."
   [manager dag-id repo-config]
   (core/add-repo-anomaly manager dag-id repo-config))
 
@@ -197,13 +190,8 @@
    - dag-id: UUID of the DAG
    - repo-name: Name of the repo to remove
 
-   Returns the updated DAG.
-   Also removes all edges referencing this repo.
-
-   Throws if DAG not found.
-
-   DEPRECATED: prefer [[remove-repo-anomaly]]."
-  {:deprecated "exceptions-as-data — prefer remove-repo-anomaly"}
+   Returns the updated DAG or a `:not-found` anomaly.
+   Also removes all edges referencing this repo."
   [manager dag-id repo-name]
   (core/remove-repo manager dag-id repo-name))
 
