@@ -18,7 +18,8 @@
 
 (ns ai.miniforge.connector-sarif.impl
   "SARIF connector implementation — connect, discover, extract, checkpoint."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-sarif.format :as fmt]
             [ai.miniforge.connector-sarif.schema :as schema]
             [ai.miniforge.response.interface :as response]
@@ -31,16 +32,16 @@
 
 (defn- generate-handle [] (str "sarif-" (java.util.UUID/randomUUID)))
 
-(defn- require-handle!
-  "Look up handle state, throw if missing.
-   Delegates to the shared connector helper.
-
-   The `:connector` opt is omitted so the thrown ex-data preserves
-   the historical `{:handle ...}` payload shape; the message already
-   identifies the handle by name."
+(defn- require-handle
+  "Look up handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (str "Unknown handle: " handle)}))
+  (connector/require-handle handles handle
+                            {:message (str "Unknown handle: " handle)}))
+
+(defn- handle-anomaly->response [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 ;; --------------------------------------------------------------------------
 ;; Connect / Close
@@ -77,12 +78,45 @@
 (defn do-discover
   "Discover available schemas in the connected source."
   [handle _opts]
-  (let [state       (require-handle! handle)
-        source-path (:sarif/source-path state)
-        scan-files  (fmt/list-scan-files source-path)]
-    (if (empty? scan-files)
-      {:schemas [] :discover/total-count 0}
-      (let [all-violations  (into []
+  (let [state (require-handle handle)]
+    (if (anomaly/anomaly? state)
+      (handle-anomaly->response state)
+      (let [source-path (:sarif/source-path state)
+            scan-files  (fmt/list-scan-files source-path)]
+        (if (empty? scan-files)
+          {:schemas [] :discover/total-count 0}
+          (let [all-violations  (into []
+                                      (mapcat
+                                       (fn [file-path]
+                                         (try
+                                           (fmt/parse-file file-path
+                                                           (:sarif/format state)
+                                                           (:sarif/csv-columns state))
+                                           (catch Exception e
+                                             (println (str "Warning: Failed to parse " file-path ": " (.getMessage e)))
+                                             [])))
+                                       scan-files))
+                violation-count (count all-violations)
+                csv-count       (count (filter #(str/includes? (:violation/id %) "csv:") all-violations))
+                schemas         (if (pos? violation-count)
+                                  [(build-schema-descriptor :sarif-result violation-count)
+                                   (build-schema-descriptor :csv-violation csv-count)]
+                                  [])]
+            {:schemas schemas :discover/total-count (count schemas)}))))))
+
+;; --------------------------------------------------------------------------
+;; Extract
+
+(defn do-extract
+  "Extract records for a given schema."
+  [handle _schema-name opts]
+  (let [state (require-handle handle)]
+    (if (anomaly/anomaly? state)
+      (handle-anomaly->response state)
+      (let [source-path     (:sarif/source-path state)
+            _limit          (get opts :extract/limit 10000)
+            scan-files      (fmt/list-scan-files source-path)
+            all-violations  (into []
                                   (mapcat
                                    (fn [file-path]
                                      (try
@@ -92,39 +126,10 @@
                                        (catch Exception e
                                          (println (str "Warning: Failed to parse " file-path ": " (.getMessage e)))
                                          [])))
-                                   scan-files))
-            violation-count (count all-violations)
-            csv-count       (count (filter #(str/includes? (:violation/id %) "csv:") all-violations))
-            schemas         (if (pos? violation-count)
-                              [(build-schema-descriptor :sarif-result violation-count)
-                               (build-schema-descriptor :csv-violation csv-count)]
-                              [])]
-        {:schemas schemas :discover/total-count (count schemas)}))))
-
-;; --------------------------------------------------------------------------
-;; Extract
-
-(defn do-extract
-  "Extract records for a given schema."
-  [handle _schema-name opts]
-  (let [state           (require-handle! handle)
-        source-path     (:sarif/source-path state)
-        _limit          (get opts :extract/limit 10000)
-        scan-files      (fmt/list-scan-files source-path)
-        all-violations  (into []
-                              (mapcat
-                               (fn [file-path]
-                                 (try
-                                   (fmt/parse-file file-path
-                                                   (:sarif/format state)
-                                                   (:sarif/csv-columns state))
-                                   (catch Exception e
-                                     (println (str "Warning: Failed to parse " file-path ": " (.getMessage e)))
-                                     [])))
-                               scan-files))]
-    {:records      all-violations
-     :extract/cursor   {:extract/offset 0}
-     :extract/has-more false}))
+                                   scan-files))]
+        {:records      all-violations
+         :extract/cursor   {:extract/offset 0}
+         :extract/has-more false}))))
 
 ;; --------------------------------------------------------------------------
 ;; Checkpoint
@@ -132,6 +137,8 @@
 (defn do-checkpoint
   "Persist cursor state for resumable extraction."
   [handle _connector-id _cursor-state]
-  (let [_state (require-handle! handle)]
-    {:checkpoint/id     (java.util.UUID/randomUUID)
-     :checkpoint/status :committed}))
+  (let [state (require-handle handle)]
+    (if (anomaly/anomaly? state)
+      (handle-anomaly->response state)
+      {:checkpoint/id     (java.util.UUID/randomUUID)
+       :checkpoint/status :committed})))
