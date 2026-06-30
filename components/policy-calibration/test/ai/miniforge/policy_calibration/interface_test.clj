@@ -151,6 +151,29 @@
       (is (not (get-in record [:r/flaky :gate-ready?])) "flaky false-fires on clean")
       (is (true? (:stable? (get record :r/reliable)))))))
 
+(deftest judge-cell-retries-transient-failure-test
+  (testing "a transient judge failure is retried and self-heals — the cell is OK, not a failed cell"
+    (let [calls    (atom 0)
+          ;; throws on the first call only, succeeds after — exercises the retry
+          judge-fn (fn [_rules f]
+                     (if (= 1 (swap! calls inc))
+                       (throw (ex-info "transient backend blip" {}))
+                       (sut/cell-success (:seeded f) {})))
+          record   (sut/calibrate {:rules [{:rule/id :r/x}]
+                                   :fixtures [{:rel "viol.clj" :seeded #{:r/x}}]
+                                   :judge-fn judge-fn :runs 1 :trials 1 :max-parallel 1 :gate-bar bar})]
+      (is (= 0 (:failed-cells (get record :r/x))) "transient failure healed by retry — no failed cell")
+      (is (get-in record [:r/x :gate-ready?]) "the retried success counts toward recall"))))
+
+(deftest judge-cell-gives-up-after-budget-test
+  (testing "a persistent judge failure still records as a failed cell once the retry budget is spent"
+    (let [judge-fn (fn [_ _] (throw (ex-info "persistent backend outage" {})))
+          record   (sut/calibrate {:rules [{:rule/id :r/x}]
+                                   :fixtures [{:rel "viol.clj" :seeded #{:r/x}}]
+                                   :judge-fn judge-fn :runs 1 :trials 1 :max-parallel 1 :gate-bar bar})]
+      (is (= 1 (:failed-cells (get record :r/x))) "persistent failure records as data, not silently dropped")
+      (is (not (get-in record [:r/x :gate-ready?])) "no successful evaluation -> not gate-ready"))))
+
 ;; ---- build-time gate-readiness check ----
 
 (deftest gate-check-test

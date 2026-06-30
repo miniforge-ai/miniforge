@@ -46,11 +46,11 @@
        :localization
        {:stable? true,
         :evaluated? true,
-        :fn-cases [{:fixture "seed/status_pipeline.clj"}],
+        :fn-cases [],
         :failed-cells 0,
         :run-verdicts [true true true],
         :fp-cases [],
-        :recall-min 0.833,
+        :recall-min 1.0,
         :recall-max 1.0,
         :runs 3,
         :gate-ready? true,

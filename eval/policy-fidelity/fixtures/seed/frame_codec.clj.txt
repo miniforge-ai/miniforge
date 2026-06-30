@@ -1,0 +1,12 @@
+(ns eval.seed.frame-codec)
+
+(def ^:private max-frame-bytes
+  "Maximum frame size fixed by the v1 wire protocol — a compatibility
+   invariant, not an operator-tunable value. Changing it would break every
+   deployed peer, so it lives in code as a protocol constant, never in .edn."
+  65535)
+
+(defn frame-too-large?
+  "True when a serialized frame exceeds the protocol's hard size ceiling."
+  [^bytes frame]
+  (> (alength frame) max-frame-bytes))
