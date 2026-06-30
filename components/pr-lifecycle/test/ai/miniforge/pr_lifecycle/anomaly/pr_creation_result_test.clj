@@ -20,8 +20,8 @@
   "Coverage for `controller/pr-creation-result` (anomaly-returning).
 
    PR-creation failure (DAG err) returns a `:fault` anomaly. The
-   boundary site `run-lifecycle!` consumes the anomaly and rethrows
-   via `response/throw-anomaly!` with `:anomalies/fault`."
+   boundary site `run-lifecycle!` consumes the anomaly and returns a
+   failed lifecycle status map."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]

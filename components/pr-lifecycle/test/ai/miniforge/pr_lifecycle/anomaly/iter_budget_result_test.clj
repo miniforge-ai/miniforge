@@ -18,18 +18,15 @@
 
 (ns ai.miniforge.pr-lifecycle.anomaly.iter-budget-result-test
   "Coverage for `controller/iter-budget-result` (anomaly-returning) and
-   the throwing boundary at `handle-ci-failure!` / `handle-review-feedback!`.
+   fix-loop boundary behavior in `handle-ci-failure!` /
+   `handle-review-feedback!`.
 
    Iter-budget exhaustion returns a `:conflict` anomaly. The boundary
-   helpers escalate the anomaly to a slingshot `:anomalies/conflict`
-   throw — preserving the legacy thrown-exception contract for
-   external orchestrators that branch on `clojure.lang.ExceptionInfo`."
+   helpers return the anomaly after recording failure state and history."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.pr-lifecycle.controller :as controller])
-  (:import
-   (clojure.lang ExceptionInfo)))
+   [ai.miniforge.pr-lifecycle.controller :as controller]))
 
 (def ^:private test-task
   {:task/id (random-uuid)
@@ -67,29 +64,31 @@
       (is (anomaly/anomaly? result))
       (is (= :conflict (:anomaly/type result))))))
 
-;------------------------------------------------------------------------------ Boundary helper escalates via slingshot
+;------------------------------------------------------------------------------ Boundary helper returns anomaly after side effects
 
-(deftest handle-ci-failure-escalates-budget-anomaly
-  (testing "handle-ci-failure! rethrows :conflict anomaly as ExceptionInfo"
+(deftest handle-ci-failure-returns-budget-anomaly
+  (testing "handle-ci-failure! returns :conflict anomaly"
     (let [ctrl (controller/create-controller
                 "dag" "run" "task" test-task
                 :worktree-path "/tmp"
                 :max-fix-iterations 2)]
       (swap! ctrl assoc :fix-iterations 2)
-      (is (thrown-with-msg? ExceptionInfo
-                            #"Max fix iterations exceeded"
-                            (controller/handle-ci-failure! ctrl "logs"))))))
+      (let [result (controller/handle-ci-failure! ctrl "logs")]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (= "Max fix iterations exceeded" (:anomaly/message result)))))))
 
-(deftest handle-review-feedback-escalates-budget-anomaly
-  (testing "handle-review-feedback! rethrows :conflict anomaly as ExceptionInfo"
+(deftest handle-review-feedback-returns-budget-anomaly
+  (testing "handle-review-feedback! returns :conflict anomaly"
     (let [ctrl (controller/create-controller
                 "dag" "run" "task" test-task
                 :worktree-path "/tmp"
                 :max-fix-iterations 1)]
       (swap! ctrl assoc :fix-iterations 1)
-      (is (thrown-with-msg? ExceptionInfo
-                            #"Max fix iterations exceeded"
-                            (controller/handle-review-feedback! ctrl [{:body "fix"}]))))))
+      (let [result (controller/handle-review-feedback! ctrl [{:body "fix"}])]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (= "Max fix iterations exceeded" (:anomaly/message result)))))))
 
 (deftest boundary-sets-failed-status-on-budget-exhaustion
   (testing "boundary helper transitions controller to :failed before throwing"
@@ -98,9 +97,7 @@
                 :worktree-path "/tmp"
                 :max-fix-iterations 3)]
       (swap! ctrl assoc :fix-iterations 3)
-      (try
-        (controller/handle-ci-failure! ctrl "logs")
-        (catch ExceptionInfo _e nil))
+      (controller/handle-ci-failure! ctrl "logs")
       (is (= :failed (:status @ctrl))))))
 
 (deftest boundary-records-history-on-budget-exhaustion
@@ -110,8 +107,6 @@
                 :worktree-path "/tmp"
                 :max-fix-iterations 2)]
       (swap! ctrl assoc :fix-iterations 2)
-      (try
-        (controller/handle-ci-failure! ctrl "logs")
-        (catch ExceptionInfo _e nil))
+      (controller/handle-ci-failure! ctrl "logs")
       (is (some #(= :max-fix-iterations-exceeded (:type %))
                 (:history @ctrl))))))
