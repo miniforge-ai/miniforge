@@ -18,7 +18,8 @@
 
 (ns ai.miniforge.connector-github.impl
   "Implementation functions for the GitHub REST API connector."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-github.messages :as msg]
             [ai.miniforge.connector-github.resources :as resources]
             [ai.miniforge.connector-github.schema :as gh-schema]
@@ -176,11 +177,11 @@
 
 ;; -- Helpers --
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :github/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :github/handle-not-found {:handle handle})}))
 
 (defn- require-resource!
   "Look up resource def or throw."
@@ -195,12 +196,17 @@
   [result]
   (:errors result))
 
+(defn- connector-anomaly->response
+  "Convert connector validation anomalies to the response anomaly shape
+   expected by current connector protocol consumers."
+  [category message anomaly]
+  (response/make-anomaly category message (:anomaly/data anomaly)))
+
 (defn- validate-connect
   "Validate config and auth sequentially.
 
-   Returns nil on success. Returns a canonical anomaly map for config
-   failures. Auth validation still delegates to the connector boundary helper
-   and may throw for invalid auth."
+   Returns nil on success. Returns a response anomaly map for config
+   or auth validation failures."
   [config auth]
   (let [config-result (gh-schema/validate-config config)]
     (cond
@@ -216,13 +222,17 @@
                              {:config config})
 
       :else
-      (connector/validate-auth-or-throw! auth msg/t :github/auth-invalid))))
+      (when-let [auth-anomaly (connector/validate-auth auth)]
+        (let [errors (get-in auth-anomaly [:anomaly/data :errors])]
+          (connector-anomaly->response :anomalies/incorrect
+                                       (msg/t :github/auth-invalid {:errors errors})
+                                       auth-anomaly))))))
 
 ;; -- Lifecycle --
 (defn do-connect
   "Validate config and auth, register handle.
 
-   Returns a connect-result map on success or a canonical anomaly map when
+   Returns a connect-result map on success or a response anomaly map when
    config validation fails."
   [config auth]
   (if-let [anomaly (validate-connect config auth)]
@@ -246,24 +256,32 @@
 (defn do-discover
   "Return available resource schemas based on config."
   [handle]
-  (require-handle! handle)
-  (connector/discover-result (resources/resource-schemas)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (connector-anomaly->response :anomalies/not-found
+                                   (:anomaly/message handle-state)
+                                   handle-state)
+      (connector/discover-result (resources/resource-schemas)))))
 
 (defn do-extract
   "Extract records from a GitHub API resource."
   [handle schema-name opts]
-  (let [handle-state (require-handle! handle)
-        resource-def (require-resource! schema-name)
-        resource-key (keyword schema-name)
-        {:keys [config auth-headers]} handle-state
-        cursor       (:extract/cursor opts)
-        headers      (github-headers auth-headers)]
-    (if (= "reviews" schema-name)
-      (extract-reviews handle config headers cursor opts)
-      (let [url          (resources/build-url (:github/base-url config) resource-def config)
-            query-params (resources/build-query-params resource-def cursor opts)
-            {:keys [records cursor]} (fetch-all-pages handle resource-key resource-def headers url query-params)]
-        (connector/extract-result records cursor false)))))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (connector-anomaly->response :anomalies/not-found
+                                   (:anomaly/message handle-state)
+                                   handle-state)
+      (let [resource-def (require-resource! schema-name)
+            resource-key (keyword schema-name)
+            {:keys [config auth-headers]} handle-state
+            cursor       (:extract/cursor opts)
+            headers      (github-headers auth-headers)]
+        (if (= "reviews" schema-name)
+          (extract-reviews handle config headers cursor opts)
+          (let [url          (resources/build-url (:github/base-url config) resource-def config)
+                query-params (resources/build-query-params resource-def cursor opts)
+                {:keys [records cursor]} (fetch-all-pages handle resource-key resource-def headers url query-params)]
+            (connector/extract-result records cursor false)))))))
 
 (defn do-checkpoint
   "Persist cursor state. Returns checkpoint-result."

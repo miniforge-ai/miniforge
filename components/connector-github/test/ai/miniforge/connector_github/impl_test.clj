@@ -314,35 +314,31 @@
       (is (= "W/\"test-etag\"" (get headers "If-None-Match"))))))
 
 ;;------------------------------------------------------------------------------ Layer 2
-;; Migrated validation helpers — confirm the shared connector helpers
-;; preserve the legacy ex-info shape at the protocol boundary.
+;; Migrated validation helpers — connector boundaries return anomalies.
 
-(deftest discover-throws-on-unknown-handle-test
-  (testing "do-discover throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-discover "no-such-handle")
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest discover-returns-anomaly-on-unknown-handle-test
+  (testing "do-discover returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-discover "no-such-handle")]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-throws-on-unknown-handle-test
-  (testing "do-extract throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-extract "no-such-handle" "issues" {})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest extract-returns-anomaly-on-unknown-handle-test
+  (testing "do-extract returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-extract "no-such-handle" "issues" {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
 (deftest connect-rejects-malformed-auth-test
-  (testing "do-connect throws ex-info when auth credential-ref is malformed"
-    (try
-      (impl/do-connect {:github/owner "owner" :github/repo "repo"}
-                       {:auth/method :api-key
-                        ;; Missing :auth/credential-id
-                        :auth/scheme :bearer})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (some? (:errors (ex-data e))))))))
+  (testing "do-connect returns an anomaly when auth credential-ref is malformed"
+    (let [result (impl/do-connect {:github/owner "owner" :github/repo "repo"}
+                                  {:auth/method :api-key
+                                   ;; Missing :auth/credential-id
+                                   :auth/scheme :bearer})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result))))))
 
 (deftest connect-accepts-valid-auth-test
   (testing "do-connect succeeds when auth credential-ref validates"
