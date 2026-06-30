@@ -19,6 +19,7 @@
 (ns ai.miniforge.repo-dag.dag-crud-test
   "Tests for DAG schema, creation, and CRUD operations (Layers 0-2)."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Fixtures
@@ -101,17 +102,19 @@
       ;; Layer should be inferred as :foundations
       (is (= :foundations (-> updated :dag/repos first :repo/layer)))))
 
-  (testing "throws on duplicate repo name"
+  (testing "returns anomaly data on duplicate repo name"
     (let [d (dag/create-dag *manager* "test-dag")]
       (dag/add-repo *manager* (:dag/id d)
                     {:repo/url "https://github.com/acme/tf-modules"
                      :repo/name "tf-modules"
                      :repo/type :terraform-module})
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Repo already exists"
-            (dag/add-repo *manager* (:dag/id d)
-                          {:repo/url "https://github.com/other/tf-modules"
-                           :repo/name "tf-modules"
-                           :repo/type :terraform-module}))))))
+      (let [result (dag/add-repo *manager* (:dag/id d)
+                                 {:repo/url "https://github.com/other/tf-modules"
+                                  :repo/name "tf-modules"
+                                  :repo/type :terraform-module})]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (= "tf-modules" (get-in result [:anomaly/data :repo-name])))))))
 
 (deftest remove-repo-test
   (testing "removes repo from DAG"

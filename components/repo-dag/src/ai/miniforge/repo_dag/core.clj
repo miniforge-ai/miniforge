@@ -517,19 +517,13 @@
     (add-repo-impl store dag-id repo-config))
 
   (add-repo [this dag-id repo-config]
-    (let [result (add-repo-anomaly this dag-id repo-config)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (add-repo-anomaly this dag-id repo-config))
 
   (remove-repo-anomaly [_this dag-id repo-name]
     (remove-repo-impl store dag-id repo-name))
 
   (remove-repo [this dag-id repo-name]
-    (let [result (remove-repo-anomaly this dag-id repo-name)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (remove-repo-anomaly this dag-id repo-name))
 
   (add-edge-anomaly [_this dag-id from-repo to-repo constraint merge-ordering]
     (add-edge-impl store dag-id from-repo to-repo constraint merge-ordering))

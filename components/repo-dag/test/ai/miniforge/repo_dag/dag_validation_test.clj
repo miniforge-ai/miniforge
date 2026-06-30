@@ -19,6 +19,7 @@
 (ns ai.miniforge.repo-dag.dag-validation-test
   "Tests for DAG validation, layers, and edge cases (Layers 7-9)."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Fixtures
@@ -84,10 +85,11 @@
   (testing "operations on nonexistent DAG"
     (let [fake-id (random-uuid)]
       (is (nil? (dag/get-dag *manager* fake-id)))
-      (is (thrown? clojure.lang.ExceptionInfo
-            (dag/add-repo *manager* fake-id
-                          {:repo/url "https://github.com/a" :repo/name "a"
-                           :repo/type :library})))
+      (let [result (dag/add-repo *manager* fake-id
+                                 {:repo/url "https://github.com/a" :repo/name "a"
+                                  :repo/type :library})]
+        (is (anomaly/anomaly? result))
+        (is (= :not-found (:anomaly/type result))))
       (is (thrown? clojure.lang.ExceptionInfo
             (dag/compute-topo-order *manager* fake-id)))))
 
