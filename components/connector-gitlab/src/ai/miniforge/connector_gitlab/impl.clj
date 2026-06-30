@@ -19,7 +19,8 @@
 (ns ai.miniforge.connector-gitlab.impl
   "Implementation functions for the GitLab REST API connector.
    Small composable functions organized in a stratified DAG."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-gitlab.messages :as msg]
             [ai.miniforge.connector-gitlab.resources :as resources]
             [ai.miniforge.connector-gitlab.schema :as schema]
@@ -36,11 +37,11 @@
 (defn- remove-handle! [handle] (connector/remove-handle! handles handle))
 (defn- touch-handle! [handle] (connector/touch-handle! handles handle))
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :gitlab/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :gitlab/handle-not-found {:handle handle})}))
 
 ;; Auth
 
@@ -82,13 +83,22 @@
   [config]
   (some? (or (:gitlab/project-id config) (:gitlab/project-path config))))
 
-(defn- validate-auth!
-  "Validate auth credential reference, throwing on failure with the
-   GitLab-localized message. Delegates to the shared
-   `connector/validate-auth-or-throw!` helper so all the boundary
-   throwers across connector-{jira,gitlab,github} read the same way."
+(defn- validate-auth
+  "Validate auth credential reference, returning a localized response anomaly on failure."
   [auth]
-  (connector/validate-auth-or-throw! auth msg/t :gitlab/auth-invalid))
+  (when-let [auth-anomaly (connector/validate-auth auth)]
+    (let [errors (get-in auth-anomaly [:anomaly/data :errors])]
+      (response/make-anomaly :anomalies/incorrect
+                             (msg/t :gitlab/auth-invalid {:errors errors})
+                             (:anomaly/data auth-anomaly)))))
+
+(defn- handle-anomaly->response
+  "Convert connector handle validation anomalies to the response anomaly shape
+   expected by current connector protocol consumers."
+  [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP
@@ -224,8 +234,8 @@
 (defn do-connect
   "Validate config at boundary, register handle.
 
-   Returns a connect-result map on success or a canonical anomaly map when
-   required project config is missing."
+   Returns a connect-result map on success or a response anomaly map when
+   required project config is missing or auth validation fails."
   [config auth]
   (let [config (assoc config :gitlab/base-url
                       (get config :gitlab/base-url "https://gitlab.com"))]
@@ -235,39 +245,44 @@
                              {:config config})
       (do
         (schema/validate! schema/GitLabConfig config)
-        (validate-auth! auth)
-        (let [handle (str (UUID/randomUUID))]
-          (store-handle! handle {:config       config
-                                 :auth-headers (resolve-auth-headers auth)
-                                 :last-request-at nil})
-          (connector/connect-result handle))))))
+        (if-let [auth-anomaly (validate-auth auth)]
+          auth-anomaly
+          (let [handle (str (UUID/randomUUID))]
+            (store-handle! handle {:config       config
+                                   :auth-headers (resolve-auth-headers auth)
+                                   :last-request-at nil})
+            (connector/connect-result handle)))))))
 
 (defn do-close [handle]
   (remove-handle! handle)
   (connector/close-result))
 
 (defn do-discover [handle]
-  (require-handle! handle)
-  (connector/discover-result (resources/resource-schemas)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (connector/discover-result (resources/resource-schemas)))))
 
 (defn do-extract
   "Extract records from a GitLab API resource."
   [handle schema-name opts]
-  (let [handle-state (require-handle! handle)
-        resource-def (require-resource! schema-name)
-        {:keys [config auth-headers]} handle-state]
-    (if (= "notes" schema-name)
-      (extract-project-notes handle config auth-headers (:extract/cursor opts) opts)
-      (let [url     (resources/build-url (:gitlab/base-url config) resource-def config)
-            params  (resources/build-query-params resource-def (:extract/cursor opts) opts)
-            fetch   (fn [] (let [{:keys [records cursor]}
-                                 (fetch-all-pages handle resource-def url auth-headers params)]
-                             (connector/extract-result records cursor false)))]
-        (if (:optional? resource-def)
-          (try (fetch)
-               (catch clojure.lang.ExceptionInfo e
-                 (optional-fetch-failure e)))
-          (fetch))))))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [resource-def (require-resource! schema-name)
+            {:keys [config auth-headers]} handle-state]
+        (if (= "notes" schema-name)
+          (extract-project-notes handle config auth-headers (:extract/cursor opts) opts)
+          (let [url     (resources/build-url (:gitlab/base-url config) resource-def config)
+                params  (resources/build-query-params resource-def (:extract/cursor opts) opts)
+                fetch   (fn [] (let [{:keys [records cursor]}
+                                     (fetch-all-pages handle resource-def url auth-headers params)]
+                                 (connector/extract-result records cursor false)))]
+            (if (:optional? resource-def)
+              (try (fetch)
+                   (catch clojure.lang.ExceptionInfo e
+                     (optional-fetch-failure e)))
+              (fetch))))))))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
