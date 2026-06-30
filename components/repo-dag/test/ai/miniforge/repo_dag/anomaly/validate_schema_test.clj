@@ -17,9 +17,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.repo-dag.anomaly.validate-schema-test
-  "Coverage for `core/validate-schema-anomaly` and its deprecated
-   throwing sibling `core/validate-schema`. Schema rejection is an
-   :invalid-input anomaly; valid values pass through unchanged."
+  "Coverage for `core/validate-schema-anomaly` and its stable alias
+   `core/validate-schema`. Schema rejection is an :invalid-input anomaly;
+   valid values pass through unchanged."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.core :as core]
@@ -65,24 +65,18 @@
       (is (some? (:errors data)))
       (is (map? (:errors data))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Alias compatibility
 
 (deftest validate-schema-still-returns-on-success
-  (testing "deprecated throwing variant returns the value unchanged"
+  (testing "stable alias returns the value unchanged"
     (is (= valid-repo (core/validate-schema dag/RepoNode valid-repo)))))
 
-(deftest validate-schema-still-throws-ex-info
-  (testing "deprecated throwing variant still throws on bad input"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Schema validation failed"
-          (core/validate-schema dag/RepoNode invalid-repo)))))
-
-(deftest validate-schema-thrown-ex-data-carries-errors
-  (testing "ex-data preserves :schema, :value, and :errors for legacy callers"
-    (try
-      (core/validate-schema dag/RepoNode invalid-repo)
-      (is false "should have thrown")
-      (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          (is (= dag/RepoNode (:schema data)))
-          (is (= invalid-repo (:value data)))
-          (is (map? (:errors data))))))))
+(deftest validate-schema-returns-anomaly-on-failure
+  (testing "stable alias returns the same anomaly data on bad input"
+    (let [result (core/validate-schema dag/RepoNode invalid-repo)
+          data (:anomaly/data result)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= dag/RepoNode (:schema data)))
+      (is (= invalid-repo (:value data)))
+      (is (map? (:errors data))))))

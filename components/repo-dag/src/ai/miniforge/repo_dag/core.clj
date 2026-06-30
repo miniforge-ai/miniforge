@@ -53,20 +53,11 @@
                       :errors (me/humanize (m/explain schema-def value))})))
 
 (defn validate-schema
-  "Validate a value against a schema, returning the value or throwing.
+  "Validate a value against a schema, returning the value or an anomaly map.
 
-   DEPRECATED: prefer [[validate-schema-anomaly]], which returns an anomaly
-   map rather than throwing. Retained for backward compatibility with
-   existing callers that rely on the ex-info shape."
-  {:deprecated "exceptions-as-data — prefer validate-schema-anomaly"}
+   Kept as a stable alias for [[validate-schema-anomaly]]."
   [schema-def value]
-  (let [result (validate-schema-anomaly schema-def value)]
-    (if (anomaly/anomaly? result)
-      (throw (ex-info "Schema validation failed"
-                      {:schema schema-def
-                       :value value
-                       :errors (get-in result [:anomaly/data :errors])}))
-      result)))
+  (validate-schema-anomaly schema-def value))
 
 (defn- build-repo-node
   "Internal: assemble the repo-node map (no validation). Shared between
@@ -94,9 +85,7 @@
 (defn make-repo-node
   "Create a repo node with layer inference if not specified.
 
-   DEPRECATED: prefer [[make-repo-node-anomaly]], which returns an anomaly
-   map rather than throwing on schema validation failure."
-  {:deprecated "exceptions-as-data — prefer make-repo-node-anomaly"}
+   Returns an anomaly map when schema validation fails."
   [repo-config]
   (validate-schema schema/RepoNode (build-repo-node repo-config)))
 
@@ -123,13 +112,12 @@
 (defn make-repo-edge
   "Create a repo edge with default merge ordering.
 
-   DEPRECATED: prefer [[make-repo-edge-anomaly]]."
-  {:deprecated "exceptions-as-data — prefer make-repo-edge-anomaly"}
+   Returns an anomaly map when schema validation fails."
   [edge-config]
   (validate-schema schema/RepoEdge (build-repo-edge edge-config)))
 
 (defn make-dag
-  "Create a new empty DAG."
+  "Create a new empty DAG, or return an anomaly map if validation fails."
   [id dag-name description]
   (let [dag (cond-> {:dag/id id
                      :dag/name dag-name
