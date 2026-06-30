@@ -192,20 +192,15 @@
    fails. Optional 2nd arg `{:message string, :connector keyword}` customizes
    the anomaly message and adds the connector to `:anomaly/data`."
   validation/validate-auth)
-;; Throwing variants (deprecated; kept for incremental per-connector migration):
-(def require-handle!
-  "Look up handle state in `store` by `handle`. Returns the stored state, or
-   throws ex-info (:anomalies/not-found) when the handle is unknown.
-   DEPRECATED: prefer require-handle, which returns an anomaly instead."
-  validation/require-handle!)
+;; Auth throwing compatibility (deprecated; kept until auth callsites migrate):
 (def validate-auth!
   "Validate credential reference `auth`. Returns nil on success (or when `auth`
    is nil); throws ex-info (:anomalies/incorrect) on validation failure.
    DEPRECATED: prefer validate-auth, which returns an anomaly instead."
   validation/validate-auth!)
 
-;; Throwing-with-localized-message helper (used at the connector boundary
-;; until all callers are migrated to the anomaly-returning variant):
+;; Localized auth throwing compatibility (deprecated; kept until auth callsites
+;; migrate):
 (def validate-auth-or-throw!
   "Validate `auth`; on success return nil, on failure throw ex-info
    (:anomalies/incorrect) carrying a localized message and `{:errors [...]}`
