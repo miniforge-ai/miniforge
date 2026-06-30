@@ -121,14 +121,34 @@
   (vec (mapcat (fn [batch] (mapv deref (mapv #(future (f %)) batch)))
                (partition-all n coll))))
 
-(defn- judge-cell
-  "Run the injected judge for one (fixture, trial), turning any thrown error into
-   a backend-error cell so an intermittent failure records as data rather than
-   aborting the whole run on deref."
+(def ^:private judge-cell-max-attempts
+  "Judge calls per (fixture, trial) before a non-OK result is recorded as a
+   failed cell. A single transient backend/format hiccup in a large run
+   (~100+ calls) would otherwise scar the whole record — and, because the
+   judge is batched, that one failed call counts against every rule in the
+   batch. A small bounded retry lets an intermittent failure self-heal while a
+   persistent one still records as data (the error cell is excluded from
+   scoring either way, so this only cleans the evidence, never the verdict)."
+  3)
+
+(defn- judge-once
+  "One judge call, turning any thrown error into a backend-error cell so a
+   failure records as data rather than aborting the run on deref."
   [judge-fn rules fixture]
   (try (judge-fn rules fixture)
        (catch Throwable e
          (backend-error "judge threw" {:error (ex-message e)}))))
+
+(defn- judge-cell
+  "Run the injected judge for one (fixture, trial), retrying a non-OK cell up to
+   `judge-cell-max-attempts` so an intermittent backend/format failure does not
+   scar an otherwise-clean run. Returns the first OK cell, or the last error."
+  [judge-fn rules fixture]
+  (loop [attempt 1]
+    (let [cell (judge-once judge-fn rules fixture)]
+      (if (or (cell-ok? cell) (>= attempt judge-cell-max-attempts))
+        cell
+        (recur (inc attempt))))))
 
 (defn- run-pass
   [{:keys [rules fixtures judge-fn trials max-parallel gate-bar]}]
