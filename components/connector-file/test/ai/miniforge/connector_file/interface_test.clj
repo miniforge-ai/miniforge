@@ -17,13 +17,13 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.connector-file.interface-test
-  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+  (:require [ai.miniforge.response.interface :as response]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.java.io :as io]
             [cheshire.core :as json]
             [ai.miniforge.connector-file.interface :as file-conn]
             [ai.miniforge.connector-file.impl :as impl]
-            [ai.miniforge.connector.interface :as conn]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.connector.interface :as conn]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test fixtures — temp directory with sample files
@@ -283,30 +283,27 @@
       (conn/close fc handle))))
 
 ;; ---------------------------------------------------------------------------
-;; Migrated handle-lookup helper — confirm the shared connector helper
-;; preserves the legacy ex-info shape at the protocol boundary.
+;; Migrated handle-lookup helper — connector boundaries return response
+;; anomalies.
 ;; ---------------------------------------------------------------------------
 
-(deftest discover-throws-on-unknown-handle-test
-  (testing "do-discover throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-discover "no-such-handle")
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest discover-returns-anomaly-on-unknown-handle-test
+  (testing "do-discover returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-discover "no-such-handle")]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-throws-on-unknown-handle-test
-  (testing "do-extract throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-extract "no-such-handle" {})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest extract-returns-anomaly-on-unknown-handle-test
+  (testing "do-extract returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-extract "no-such-handle" {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
-(deftest publish-throws-on-unknown-handle-test
-  (testing "do-publish throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-publish "no-such-handle" [] {})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest publish-returns-anomaly-on-unknown-handle-test
+  (testing "do-publish returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-publish "no-such-handle" [] {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
