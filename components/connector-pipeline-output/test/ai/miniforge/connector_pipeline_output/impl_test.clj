@@ -41,14 +41,19 @@
 (use-fixtures :each clean-test-dir)
 
 (deftest connect-requires-dir
-  (testing "connect throws without :output/dir"
-    (is (thrown? Exception (impl/do-connect {})))))
+  (testing "connect returns anomaly data without :output/dir"
+    (let [result (impl/do-connect {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result))))))
 
 (deftest connect-rejects-unsupported-format
-  (testing "connect throws on unsupported format"
-    (is (thrown? Exception
-                 (impl/do-connect {:output/dir test-dir
-                                   :output/format :xml})))))
+  (testing "connect returns anomaly data on unsupported format"
+    (let [result (impl/do-connect {:output/dir test-dir
+                                   :output/format :xml})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result))))))
 
 (deftest connect-close-lifecycle
   (testing "connect and close work with defaults"
