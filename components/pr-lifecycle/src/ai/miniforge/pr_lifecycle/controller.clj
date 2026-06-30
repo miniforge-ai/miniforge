@@ -33,7 +33,6 @@
    [ai.miniforge.pr-lifecycle.merge :as merge]
    [ai.miniforge.pr-lifecycle.review-monitor :as review]
    [ai.miniforge.release-executor.interface :as release]
-   [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.logging.interface :as log]
    [clojure.string :as str]))
@@ -54,10 +53,8 @@
    anomaly when the iteration budget is exhausted. The anomaly's
    `:anomaly/data` carries `:task-id` and `:iterations`.
 
-   This is the canonical, anomaly-returning entry point. The boundary
-   sites `handle-ci-failure!` and `handle-review-feedback!` consume
-   the anomaly and rethrow via `response/throw-anomaly!` with
-   `:anomalies/conflict`."
+   `handle-ci-failure!` and `handle-review-feedback!` return this anomaly
+   after recording failure state and history."
   [task-id current max-iters]
   (if (>= current max-iters)
     (anomaly/anomaly :conflict
@@ -72,9 +69,8 @@
    `:fault` anomaly when the upstream `create-pr!` returns a DAG
    error. The anomaly's `:anomaly/data` carries `:error`.
 
-   This is the canonical, anomaly-returning entry point. The boundary
-   site `run-lifecycle!` consumes the anomaly and rethrows via
-   `response/throw-anomaly!` with `:anomalies/fault`."
+   `run-lifecycle!` consumes this anomaly as data and returns a failed
+   lifecycle status map."
   [pr-result]
   (if (dag/err? pr-result)
     (anomaly/anomaly :fault
@@ -132,15 +128,16 @@
    :auto-resolve-comments (:auto-resolve-comments controller-defaults)
    :branch-name-prefix (:branch-name-prefix controller-defaults)})
 
-(defn- invalid-transition-ex
-  "Create an exception describing an invalid controller status transition."
+(defn- invalid-transition-anomaly
+  "Create an anomaly describing an invalid controller status transition."
   [current-status new-status transition-result]
-  (ex-info (messages/t :controller/invalid-transition)
-           {:from current-status
-            :to new-status
-            :error (controller-fsm/transition-error-code transition-result)
-            :message (controller-fsm/transition-error-message transition-result)
-            :valid-targets (controller-fsm/valid-targets current-status)}))
+  (anomaly/anomaly :conflict
+                   (messages/t :controller/invalid-transition)
+                   {:from current-status
+                    :to new-status
+                    :error (controller-fsm/transition-error-code transition-result)
+                    :message (controller-fsm/transition-error-message transition-result)
+                    :valid-targets (controller-fsm/valid-targets current-status)}))
 
 (defn- result-status
   "Return a normalized status keyword for result payloads."
@@ -161,7 +158,7 @@
       (assoc controller-state
              :status (controller-fsm/transition-state transition-result)
              :updated-at (java.util.Date.))
-      (throw (invalid-transition-ex current-status new-status transition-result)))))
+      (invalid-transition-anomaly current-status new-status transition-result))))
 
 (defn create-controller
   "Create a PR lifecycle controller for a task.
@@ -232,9 +229,11 @@
   (loop []
     (let [current-state @controller
           updated-state (transition-status current-state new-status)]
-      (if (compare-and-set! controller current-state updated-state)
+      (if (anomaly/anomaly? updated-state)
+        updated-state
+        (if (compare-and-set! controller current-state updated-state)
         (:status updated-state)
-        (recur)))))
+          (recur))))))
 
 (defn add-history!
   "Add an event to controller history."
@@ -413,73 +412,69 @@
   [controller ci-logs]
   (let [{task-id :task/id :keys [task pr config event-bus logger generate-fn]} @controller
         {:keys [worktree-path max-fix-iterations]} config
-        current-iterations (:fix-iterations @controller)]
-
-    (let [budget (iter-budget-result task-id current-iterations max-fix-iterations)]
-      (when (anomaly/anomaly? budget)
+        current-iterations (:fix-iterations @controller)
+        budget (iter-budget-result task-id current-iterations max-fix-iterations)]
+    (if (anomaly/anomaly? budget)
+      (do
         (update-status! controller :failed)
         (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
         (when logger
           (log/warn logger :pr-lifecycle :controller/max-iterations
                     {:message (:anomaly/message budget)
                      :data (:anomaly/data budget)}))
-        (response/throw-anomaly! :anomalies/conflict
-                                 (:anomaly/message budget)
-                                 (:anomaly/data budget))))
+        budget)
+      (do
+        (update-status! controller :fixing)
+        (swap! controller update :fix-iterations inc)
+        (add-history! controller :ci-fix-started {:iteration (inc current-iterations)})
 
-    (update-status! controller :fixing)
-    (swap! controller update :fix-iterations inc)
-    (add-history! controller :ci-fix-started {:iteration (inc current-iterations)})
+        (when logger
+          (log/info logger :pr-lifecycle :controller/fixing-ci
+                    {:message (messages/t :controller/fixing-ci)
+                     :data {:task-id task-id :iteration (inc current-iterations)}}))
 
-    (when logger
-      (log/info logger :pr-lifecycle :controller/fixing-ci
-                {:message (messages/t :controller/fixing-ci)
-                 :data {:task-id task-id :iteration (inc current-iterations)}}))
-
-    (let [fix-result (fix/fix-ci-failure
-                      task pr ci-logs generate-fn
-                      {:worktree-path worktree-path
-                       :logger logger
-                       :event-bus event-bus
-                       :dag/id (:dag/id @controller)
-                       :run/id (:run/id @controller)})]
-      (add-history! controller :ci-fix-completed (fix-completion-data fix-result))
-      fix-result)))
+        (let [fix-result (fix/fix-ci-failure
+                          task pr ci-logs generate-fn
+                          {:worktree-path worktree-path
+                           :logger logger
+                           :event-bus event-bus
+                           :dag/id (:dag/id @controller)
+                           :run/id (:run/id @controller)})]
+          (add-history! controller :ci-fix-completed (fix-completion-data fix-result))
+          fix-result)))))
 
 (defn handle-review-feedback!
   "Handle review feedback by running the fix loop."
   [controller review-comments]
   (let [{task-id :task/id :keys [task pr config event-bus logger generate-fn]} @controller
         {:keys [worktree-path max-fix-iterations auto-resolve-comments]} config
-        current-iterations (:fix-iterations @controller)]
-
-    (let [budget (iter-budget-result task-id current-iterations max-fix-iterations)]
-      (when (anomaly/anomaly? budget)
+        current-iterations (:fix-iterations @controller)
+        budget (iter-budget-result task-id current-iterations max-fix-iterations)]
+    (if (anomaly/anomaly? budget)
+      (do
         (update-status! controller :failed)
         (add-history! controller :max-fix-iterations-exceeded {:iterations current-iterations})
-        (response/throw-anomaly! :anomalies/conflict
-                                 (:anomaly/message budget)
-                                 (:anomaly/data budget))))
+        budget)
+      (do
+        (update-status! controller :fixing)
+        (swap! controller update :fix-iterations inc)
+        (add-history! controller :review-fix-started {:iteration (inc current-iterations)})
 
-    (update-status! controller :fixing)
-    (swap! controller update :fix-iterations inc)
-    (add-history! controller :review-fix-started {:iteration (inc current-iterations)})
+        (when logger
+          (log/info logger :pr-lifecycle :controller/fixing-review
+                    {:message (messages/t :controller/fixing-review)
+                     :data {:task-id task-id :comment-count (count review-comments)}}))
 
-    (when logger
-      (log/info logger :pr-lifecycle :controller/fixing-review
-                {:message (messages/t :controller/fixing-review)
-                 :data {:task-id task-id :comment-count (count review-comments)}}))
-
-    (let [fix-result (fix/fix-review-feedback
-                      task pr review-comments generate-fn
-                      {:worktree-path worktree-path
-                       :logger logger
-                       :event-bus event-bus
-                       :dag/id (:dag/id @controller)
-                       :run/id (:run/id @controller)
-                       :auto-resolve-comments auto-resolve-comments})]
-      (add-history! controller :review-fix-completed (fix-completion-data fix-result))
-      fix-result)))
+        (let [fix-result (fix/fix-review-feedback
+                          task pr review-comments generate-fn
+                          {:worktree-path worktree-path
+                           :logger logger
+                           :event-bus event-bus
+                           :dag/id (:dag/id @controller)
+                           :run/id (:run/id @controller)
+                           :auto-resolve-comments auto-resolve-comments})]
+          (add-history! controller :review-fix-completed (fix-completion-data fix-result))
+          fix-result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Merge
@@ -556,16 +551,18 @@
 
     (try
       ;; Step 1: Create PR if needed
-      (when-not skip-pr-creation?
-        (let [pr-result (create-pr! controller code-artifact)
-              outcome (pr-creation-result pr-result)]
-          (when (anomaly/anomaly? outcome)
-            (response/throw-anomaly! :anomalies/fault
-                                     (:anomaly/message outcome)
-                                     (:anomaly/data outcome)))))
+      (let [creation-outcome (when-not skip-pr-creation?
+                               (pr-creation-result
+                                (create-pr! controller code-artifact)))]
+        (if (anomaly/anomaly? creation-outcome)
+          (do
+            (update-status! controller lifecycle-failed-status)
+            {:status lifecycle-failed-status
+             :error (:anomaly/message creation-outcome)
+             :data (:anomaly/data creation-outcome)})
 
-      ;; Step 2: CI/Review loop
-      (loop []
+          ;; Step 2: CI/Review loop
+          (loop []
         (let [status (:status @controller)]
           (case status
             ;; Start CI monitoring
@@ -659,7 +656,7 @@
             ;; Default
             (do
               (Thread/sleep lifecycle-loop-sleep-ms)
-              (recur)))))
+              (recur)))))))
 
       (catch Exception e
         (let [final-status (if (= lifecycle-failed-status (:status @controller))
