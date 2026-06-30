@@ -29,19 +29,19 @@
 
    Both forms are validation/lookup helpers — exactly the shape the
    exceptions-as-data rule (foundations/005) targets. This namespace
-   centralizes them, providing two variants for each:
+   centralizes the data-returning helpers and retains only auth throwing
+   compatibility while auth callsites finish migrating:
 
    - **Anomaly-returning** (preferred): `require-handle`, `validate-auth`.
      Return the looked-up value or success on the happy path; return a
      canonical anomaly map on failure.
-   - **Throwing** (deprecated, backward-compat): `require-handle!`,
-     `validate-auth!`. Delegate to the anomaly variant and translate an
-     anomaly result into an `ex-info` throw.
+   - **Throwing auth compatibility** (deprecated): `validate-auth!`.
+     Delegates to the anomaly variant and translates an anomaly result into an
+     `ex-info` throw.
 
-   Per-connector callsites still call the local thrower today; migration to
-   the anomaly variant is per-connector follow-on work. Centralizing here
-   removes the duplication and gives every connector the same retire-throw
-   migration path."
+   Per-connector handle callsites now use the anomaly-returning helper.
+   Remaining auth throwing compatibility is retained only until auth
+   callsites are fully migrated."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.connector-auth.interface :as auth]
             [ai.miniforge.connector.handles :as handles]
@@ -74,27 +74,6 @@
   "True when `result` is a credential-ref validation success map."
   [result]
   (true? (:success? result)))
-
-;;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
-
-(defn require-handle!
-  "Look up handle state in `store` or throw `ex-info` when absent.
-
-   DEPRECATED: prefer [[require-handle]] in non-boundary code; it returns
-   an anomaly map instead of throwing, so callers can fold the failure
-   into a response chain. This thrower is retained as a drop-in for the
-   per-connector helpers being migrated incrementally."
-  {:deprecated "exceptions-as-data — prefer require-handle"}
-  ([store handle]
-   (require-handle! store handle nil))
-  ([store handle {:keys [message] :as opts}]
-   (let [result (require-handle store handle opts)]
-     (if (anomaly/anomaly? result)
-       (response/throw-anomaly! :anomalies/not-found
-                                (or message (:anomaly/message result))
-                                (:anomaly/data result))
-       result))))
 
 (defn validate-auth
   "Validate a credential reference, if one is supplied. Return `nil` when
