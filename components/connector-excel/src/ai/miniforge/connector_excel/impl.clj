@@ -19,7 +19,8 @@
 (ns ai.miniforge.connector-excel.impl
   "Implementation functions for the Excel connector.
    Downloads a remote Excel file and extracts records using column mappings."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-excel.messages :as msg]
             [ai.miniforge.response.interface :as response]
             [babashka.http-client :as http])
@@ -179,29 +180,40 @@
 
 ;; -- Source --
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :excel/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :excel/handle-not-found {:handle handle})}))
+
+(defn- handle-anomaly->response [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 (defn do-discover [handle]
-  (let [{:keys [config]} (require-handle! handle)]
-    (connector/discover-result [{:schema/name (:excel/sheet-name config)
-                                 :schema/url  (:excel/url config)}])))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:keys [config]} handle-state]
+        (connector/discover-result [{:schema/name (:excel/sheet-name config)
+                                     :schema/url  (:excel/url config)}])))))
 
 (defn do-extract
   "Parse the Excel sheet and return records."
   [handle _opts]
-  (let [{:keys [config workbook]} (require-handle! handle)
-        {:excel/keys [sheet-name columns data-start-row series-id]} config
-        filter-fn (when-let [min-val (:excel/min-value config)]
-                    (min-value-filter min-val))
-        records   (parse-sheet workbook sheet-name columns
-                               (or data-start-row 0) filter-fn)
-        date-fmt  (:excel/date-format config)
-        enriched  (mapv (partial normalize-record date-fmt series-id) records)]
-    (connector/extract-result enriched nil false)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:keys [config workbook]} handle-state
+            {:excel/keys [sheet-name columns data-start-row series-id]} config
+            filter-fn (when-let [min-val (:excel/min-value config)]
+                        (min-value-filter min-val))
+            records   (parse-sheet workbook sheet-name columns
+                                   (or data-start-row 0) filter-fn)
+            date-fmt  (:excel/date-format config)
+            enriched  (mapv (partial normalize-record date-fmt series-id) records)]
+        (connector/extract-result enriched nil false)))))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
