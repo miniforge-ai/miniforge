@@ -1,0 +1,18 @@
+(ns eval.seed.span-merge)
+
+(defn merge-spans
+  "Merge overlapping [start end] spans into a minimal disjoint set.
+   Input spans need not be sorted."
+  [spans]
+  ;; Sort by start first: a single left-to-right sweep can then merge only
+  ;; adjacent spans, because once sorted any overlapping span is guaranteed
+  ;; adjacent — this avoids the O(n^2) all-pairs comparison.
+  (let [sorted (sort-by first spans)]
+    (reduce (fn [acc [s e]]
+              (if-let [[ps pe] (peek acc)]
+                (if (<= s pe)
+                  (conj (pop acc) [ps (max pe e)])
+                  (conj acc [s e]))
+                (conj acc [s e])))
+            []
+            sorted)))

@@ -18,8 +18,8 @@
 
  :fixtures
  {"seed/order_service.clj"
-  {:violates #{:std/named-constants :std/exceptions-as-data :std/result-handling :std/localization}
-   :notes "magic 90 + \"gold\" enum; throw in NORMAL flow (= 005 exceptions-as-data, NOT 211 — 211 governs macro choice only for legitimate boundary throws); manual :status check; ex-info string is an emitted literal"}
+  {:violates #{:std/named-constants :std/exceptions-as-data :std/result-handling}
+   :notes "magic 90 + \"gold\" enum; throw in NORMAL flow (= 005 exceptions-as-data, NOT 211 — 211 governs macro choice only for legitimate boundary throws); manual :status check. ex-info message is localized via messages/t, so NOT a localization case — the muddy ex-info-in-throw signal is removed; localization is validated on clear emitted strings (greeting_view, i18n_panel)"}
 
   "seed/greeting_view.clj"
   {:violates #{:std/no-dead-code :std/localization}
@@ -30,8 +30,8 @@
    :notes "magic 5/250/3600000 are operational (retry count, backoff, TTL) → config-as-data + named-constants; commented-out + unused private fn"}
 
   "seed/status_pipeline.clj"
-  {:violates #{:std/result-handling :std/exceptions-as-data :std/localization}
-   :notes "manual :status = :ok check; throw on non-success; ex-info string is emitted"}
+  {:violates #{:std/result-handling :std/exceptions-as-data}
+   :notes "manual :status = :ok check; throw on non-success in NORMAL flow (005). ex-info message is localized via messages/t, so NOT a localization case (the muddy ex-info-in-throw signal was removed; localization is validated on clear emitted strings)"}
 
   "seed/i18n_panel.clj"
   {:violates #{:std/localization :std/named-constants}
@@ -63,4 +63,12 @@
 
   "seed/payload_intake.clj"
   {:violates #{}
-   :notes "near-miss precision test: legit WHY comment, validation AT the boundary, correct try+ keyword catch, named const w/ rationale — a faithful judge flags nothing"}}}
+   :notes "near-miss precision test: legit WHY comment, validation AT the boundary, correct try+ keyword catch, named const w/ rationale — a faithful judge flags nothing"}
+
+  "seed/frame_codec.clj"
+  {:violates #{}
+   :notes "config-as-data specificity: a numeric def (65535) that LOOKS operational but is a wire-protocol compatibility invariant, not operator-tunable — correctly a code constant, NOT .edn config. A faithful judge does not fire config-as-data (or named-constants — it has a rationale docstring)."}
+
+  "seed/span_merge.clj"
+  {:violates #{}
+   :notes "self-documenting-code specificity: the comment explains WHY (sort-then-sweep avoids O(n^2)), a non-obvious algorithmic rationale — not narrating WHAT. A faithful judge does not fire self-documenting-code."}}}
