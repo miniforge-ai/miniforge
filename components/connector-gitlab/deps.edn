@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/connector      {:local/root "../connector"}
+ :deps {ai.miniforge/anomaly        {:local/root "../anomaly"}
+        ai.miniforge/connector      {:local/root "../connector"}
         ai.miniforge/connector-auth {:local/root "../connector-auth"}
         ai.miniforge/connector-http {:local/root "../connector-http"}
         ai.miniforge/response       {:local/root "../response"}
