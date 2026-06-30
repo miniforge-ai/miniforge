@@ -17,10 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.connector-jira.impl-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-jira.impl :as impl]
             [ai.miniforge.connector-jira.resources :as resources]
             [ai.miniforge.connector-jira.schema :as jira-schema]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]))
 
 ;;------------------------------------------------------------------------------ Layer 0
@@ -85,30 +87,30 @@
     (let [resource-def (resources/get-resource :issues)
           params (resources/build-query-params resource-def nil {} {:jira/project-key "PROJ"})]
       (is (= 100 (get params "maxResults")))
-      (is (clojure.string/includes? (get params "jql") "project = PROJ"))
-      (is (clojure.string/includes? (get params "jql") "ORDER BY updated DESC"))
+      (is (str/includes? (get params "jql") "project = PROJ"))
+      (is (str/includes? (get params "jql") "ORDER BY updated DESC"))
       (is (string? (get params "fields")))
-      (is (clojure.string/includes? (get params "fields") "key"))))
+      (is (str/includes? (get params "fields") "key"))))
 
   (testing "issues: includes cursor value in JQL"
     (let [resource-def (resources/get-resource :issues)
           cursor {:cursor/type :timestamp-watermark :cursor/value "2026-01-15 10:00"}
           params (resources/build-query-params resource-def cursor {} {:jira/project-key "PROJ"})]
-      (is (clojure.string/includes? (get params "jql") "updated >= \"2026-01-15 10:00\""))))
+      (is (str/includes? (get params "jql") "updated >= \"2026-01-15 10:00\""))))
 
   (testing "issues: no project clause when project-key is absent; sentinel date used"
     (let [resource-def (resources/get-resource :issues)
           params (resources/build-query-params resource-def nil {} {})]
-      (is (not (clojure.string/includes? (get params "jql") "project")))
-      (is (clojure.string/includes? (get params "jql") "updated >= \"2000-01-01"))
-      (is (clojure.string/includes? (get params "jql") "ORDER BY updated DESC"))))
+      (is (not (str/includes? (get params "jql") "project")))
+      (is (str/includes? (get params "jql") "updated >= \"2000-01-01"))
+      (is (str/includes? (get params "jql") "ORDER BY updated DESC"))))
 
   (testing "issues: no project clause when project-key is unresolved placeholder; sentinel date used"
     (let [resource-def (resources/get-resource :issues)
           params (resources/build-query-params resource-def nil {} {:jira/project-key "${JIRA_PROJECT_KEY}"})]
-      (is (not (clojure.string/includes? (get params "jql") "project")))
-      (is (clojure.string/includes? (get params "jql") "updated >= \"2000-01-01"))
-      (is (clojure.string/includes? (get params "jql") "ORDER BY updated DESC"))))
+      (is (not (str/includes? (get params "jql") "project")))
+      (is (str/includes? (get params "jql") "updated >= \"2000-01-01"))
+      (is (str/includes? (get params "jql") "ORDER BY updated DESC"))))
 
   (testing "non-issues: no JQL"
     (let [resource-def (resources/get-resource :boards)
@@ -121,7 +123,8 @@
 
 (deftest connect-validates-config-test
   (testing "do-connect requires :jira/site"
-    (is (thrown? Exception (impl/do-connect {} nil)))))
+    (let [result (impl/do-connect {} nil)]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest connect-close-lifecycle-test
   (testing "connect and close with valid config"
@@ -149,7 +152,7 @@
       (try
         (with-redefs-fn
           {#'impl/do-request
-           (fn [url _headers params]
+           (fn [_url _headers params]
              (swap! calls conj params)
              (let [start-at (get params "startAt" 0)]
                (if (zero? start-at)
@@ -291,35 +294,31 @@
           (impl/do-close handle))))))
 
 ;;------------------------------------------------------------------------------ Layer 6
-;; Migrated validation helpers — confirm the shared connector helpers
-;; preserve the legacy ex-info shape at the protocol boundary.
+;; Migrated validation helpers — connector boundaries return anomalies.
 
-(deftest discover-throws-on-unknown-handle-test
-  (testing "do-discover throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-discover "no-such-handle")
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest discover-returns-anomaly-on-unknown-handle-test
+  (testing "do-discover returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-discover "no-such-handle")]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-throws-on-unknown-handle-test
-  (testing "do-extract throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-extract "no-such-handle" "issues" {})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest extract-returns-anomaly-on-unknown-handle-test
+  (testing "do-extract returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-extract "no-such-handle" "issues" {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
 (deftest connect-rejects-malformed-auth-test
-  (testing "do-connect throws ex-info when auth credential-ref is malformed"
-    (try
-      (impl/do-connect {:jira/site "mycompany"}
-                       {:auth/method :api-key
-                        ;; Missing :auth/credential-id — connector-auth flags this
-                        :auth/scheme :basic})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (some? (:errors (ex-data e))))))))
+  (testing "do-connect returns an anomaly when auth credential-ref is malformed"
+    (let [result (impl/do-connect {:jira/site "mycompany"}
+                                  {:auth/method :api-key
+                                   ;; Missing :auth/credential-id — connector-auth flags this
+                                   :auth/scheme :basic})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result))))))
 
 (deftest connect-accepts-valid-auth-test
   (testing "do-connect succeeds when auth credential-ref validates"

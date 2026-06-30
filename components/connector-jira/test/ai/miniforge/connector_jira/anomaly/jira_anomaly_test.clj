@@ -26,13 +26,10 @@
             [ai.miniforge.connector-jira.schema :as schema])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest do-connect-missing-site-throws-anomaly
-  (testing "config without :jira/site raises :anomalies/incorrect"
-    (try
-      (impl/do-connect {} nil)
-      (is false "should have thrown")
-      (catch ExceptionInfo e
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
+(deftest do-connect-missing-site-returns-anomaly
+  (testing "config without :jira/site returns :anomalies/incorrect"
+    (let [result (impl/do-connect {} nil)]
+      (is (= :anomalies/incorrect (:anomaly/category result))))))
 
 (deftest require-resource-unknown-throws-anomaly
   (testing "looking up an unknown resource raises :anomalies/not-found"
