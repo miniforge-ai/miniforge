@@ -777,12 +777,15 @@
 
 (defn- safe-worktree-path
   "Resolve `relative-path` inside `worktree-path` and return the canonical
-   File, or nil if the resolved path would escape the worktree sandbox."
+   File, or nil if the resolved path would escape the worktree sandbox or
+   if canonicalization fails (I/O error, invalid path)."
   [worktree-path relative-path]
-  (let [worktree (.getCanonicalFile (File. ^String worktree-path))
-        file     (.getCanonicalFile (File. worktree ^String relative-path))]
-    (when (path-inside-worktree? worktree file)
-      file)))
+  (try
+    (let [worktree (.getCanonicalFile (File. ^String worktree-path))
+          file     (.getCanonicalFile (File. worktree ^String relative-path))]
+      (when (path-inside-worktree? worktree file)
+        file))
+    (catch java.io.IOException _ nil)))
 
 (defn copy-file-to
   "Copy a file into the worktree."
