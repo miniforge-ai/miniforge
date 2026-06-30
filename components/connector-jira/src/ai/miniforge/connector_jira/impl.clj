@@ -19,7 +19,8 @@
 (ns ai.miniforge.connector-jira.impl
   "Implementation functions for the Jira Cloud REST API connector.
    Small composable functions organized in a stratified DAG."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-jira.messages :as msg]
             [ai.miniforge.connector-jira.resources :as resources]
             [ai.miniforge.connector-jira.schema :as schema]
@@ -36,11 +37,11 @@
 (defn- remove-handle! [handle] (connector/remove-handle! handles handle))
 (defn- touch-handle! [handle] (connector/touch-handle! handles handle))
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :jira/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :jira/handle-not-found {:handle handle})}))
 
 ;; Auth — Jira Cloud uses Basic auth (email:api-token)
 
@@ -62,13 +63,22 @@
     (build-auth-headers config auth)
     {}))
 
-(defn- validate-auth!
-  "Validate auth credential reference, throwing on failure with the
-   Jira-localized message. Delegates to the shared
-   `connector/validate-auth-or-throw!` helper so all the boundary
-   throwers across connector-{jira,gitlab,github} read the same way."
+(defn- validate-auth
+  "Validate auth credential reference, returning a localized response anomaly on failure."
   [auth]
-  (connector/validate-auth-or-throw! auth msg/t :jira/auth-invalid))
+  (when-let [auth-anomaly (connector/validate-auth auth)]
+    (let [errors (get-in auth-anomaly [:anomaly/data :errors])]
+      (response/make-anomaly :anomalies/incorrect
+                             (msg/t :jira/auth-invalid {:errors errors})
+                             (:anomaly/data auth-anomaly)))))
+
+(defn- handle-anomaly->response
+  "Convert connector handle validation anomalies to the response anomaly shape
+   expected by current connector protocol consumers."
+  [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 ;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP — Jira uses offset pagination (startAt + maxResults), not Link headers.
@@ -120,44 +130,50 @@
 (defn do-connect
   "Validate config at boundary, register handle."
   [config auth]
-  (when-not (:jira/site config)
-    (response/throw-anomaly! :anomalies/incorrect
-                             (msg/t :jira/site-required)
-                             {:config config}))
-  (schema/validate! schema/JiraConfig config)
-  (validate-auth! auth)
-  (let [handle (str (UUID/randomUUID))
-        base-url (resources/build-base-url config)]
-    (store-handle! handle {:config       (assoc config :jira/base-url base-url)
-                            :auth-headers (resolve-auth-headers config auth)
-                            :last-request-at nil})
-    (connector/connect-result handle)))
+  (if-not (:jira/site config)
+    (response/make-anomaly :anomalies/incorrect
+                           (msg/t :jira/site-required)
+                           {:config config})
+    (do
+      (schema/validate! schema/JiraConfig config)
+      (if-let [auth-anomaly (validate-auth auth)]
+        auth-anomaly
+        (let [handle (str (UUID/randomUUID))
+              base-url (resources/build-base-url config)]
+          (store-handle! handle {:config       (assoc config :jira/base-url base-url)
+                                 :auth-headers (resolve-auth-headers config auth)
+                                 :last-request-at nil})
+          (connector/connect-result handle))))))
 
 (defn do-close [handle]
   (remove-handle! handle)
   (connector/close-result))
 
 (defn do-discover [handle]
-  (require-handle! handle)
-  (connector/discover-result (resources/resource-schemas)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (connector/discover-result (resources/resource-schemas)))))
 
 (defn do-extract
   "Extract records from a Jira Cloud API resource.
    Validates records at the API boundary — malformed records from
    the Jira API are filtered out before entering the pipeline."
   [handle schema-name opts]
-  (let [handle-state (require-handle! handle)
-        resource-def (require-resource! schema-name)
-        resource-key (keyword schema-name)
-        {:keys [config auth-headers]} handle-state
-        url          (resources/build-url (:jira/base-url config) resource-def config)
-        params       (resources/build-query-params resource-def (:extract/cursor opts) opts config)
-        response-key (get resource-def :response-key :values)
-        raw-records  (fetch-all-pages handle url auth-headers params response-key)
-        records      (schema/validate-records resource-key raw-records)
-        cursor       (when (= :timestamp-watermark (:cursor-type resource-def))
-                       (http/max-timestamp-cursor timestamp-value records))]
-    (connector/extract-result records cursor false)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [resource-def (require-resource! schema-name)
+            resource-key (keyword schema-name)
+            {:keys [config auth-headers]} handle-state
+            url          (resources/build-url (:jira/base-url config) resource-def config)
+            params       (resources/build-query-params resource-def (:extract/cursor opts) opts config)
+            response-key (get resource-def :response-key :values)
+            raw-records  (fetch-all-pages handle url auth-headers params response-key)
+            records      (schema/validate-records resource-key raw-records)
+            cursor       (when (= :timestamp-watermark (:cursor-type resource-def))
+                           (http/max-timestamp-cursor timestamp-value records))]
+        (connector/extract-result records cursor false)))))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
