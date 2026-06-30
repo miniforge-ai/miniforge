@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/coerce {:local/root "../coerce"}
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/coerce {:local/root "../coerce"}
         ai.miniforge/connector {:local/root "../connector"}
         ai.miniforge/response {:local/root "../response"}
         cheshire/cheshire {:mvn/version "5.12.0"}
