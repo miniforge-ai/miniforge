@@ -20,14 +20,15 @@
   "Implementation functions for the EDGAR connector.
    Queries SEC EDGAR EFTS for filings, fetches filing documents,
    and extracts structured data from XML."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-edgar.messages :as msg]
             [ai.miniforge.connector-http.interface :as http]
             [ai.miniforge.response.interface :as response]
-            [ai.miniforge.schema.interface :as schema]
             [babashka.http-client :as bb-http]
             [cheshire.core :as cheshire]
-            [clojure.data.xml :as xml])
+            [clojure.data.xml :as xml]
+            [clojure.string :as str])
   (:import [java.io ByteArrayInputStream]
            [java.time LocalDate]
            [java.time.format DateTimeFormatter]
@@ -119,7 +120,7 @@
 (defn- fetch-filing-xml
   "Fetch a filing's XML document. Tries common filenames."
   [archives-base adsh cik user-agent filenames]
-  (let [adsh-path (clojure.string/replace adsh "-" "")
+  (let [adsh-path (str/replace adsh "-" "")
         cik-num   (str (parse-long cik))]
     (some (fn [fname]
             (fetch-url (str archives-base "/" cik-num "/" adsh-path "/" fname)
@@ -231,30 +232,44 @@
 
 ;; -- Source --
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :edgar/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :edgar/handle-not-found {:handle handle})}))
+
+(defn- handle-anomaly->response
+  "Convert connector handle validation anomalies to the response anomaly shape
+   expected by current connector protocol consumers."
+  [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 (defn do-discover [handle]
-  (let [{:keys [config]} (require-handle! handle)]
-    (connector/discover-result [{:schema/name        (:edgar/form-type config)
-                                 :schema/aggregation (:edgar/aggregation config)}])))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:keys [config]} handle-state]
+        (connector/discover-result [{:schema/name        (:edgar/form-type config)
+                                     :schema/aggregation (:edgar/aggregation config)}])))))
 
 (defn do-extract
   "Extract aggregated records from EDGAR filings."
   [handle _opts]
-  (let [{:keys [config]} (require-handle! handle)
-        user-agent (:edgar/user-agent config)
-        records    (case (:edgar/aggregation config)
-                     :monthly-buy-sell-ratio
-                     (aggregate-buy-sell-ratio config user-agent)
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:keys [config]} handle-state
+            user-agent (:edgar/user-agent config)
+            records    (case (:edgar/aggregation config)
+                         :monthly-buy-sell-ratio
+                         (aggregate-buy-sell-ratio config user-agent)
 
-                     (response/throw-anomaly! :anomalies/unsupported
-                                              (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
-                                              {:aggregation (:edgar/aggregation config)}))]
-    (connector/extract-result records nil false)))
+                         (response/throw-anomaly! :anomalies/unsupported
+                                                  (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
+                                                  {:aggregation (:edgar/aggregation config)}))]
+        (connector/extract-result records nil false)))))
 
 (defn do-checkpoint [cursor-state]
   (connector/checkpoint-result cursor-state))
