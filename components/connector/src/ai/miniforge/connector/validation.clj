@@ -29,23 +29,15 @@
 
    Both forms are validation/lookup helpers — exactly the shape the
    exceptions-as-data rule (foundations/005) targets. This namespace
-   centralizes the data-returning helpers and retains only auth throwing
-   compatibility while auth callsites finish migrating:
+   centralizes the data-returning helpers:
 
    - **Anomaly-returning** (preferred): `require-handle`, `validate-auth`.
      Return the looked-up value or success on the happy path; return a
      canonical anomaly map on failure.
-   - **Throwing auth compatibility** (deprecated): `validate-auth!`.
-     Delegates to the anomaly variant and translates an anomaly result into an
-     `ex-info` throw.
-
-   Per-connector handle callsites now use the anomaly-returning helper.
-   Remaining auth throwing compatibility is retained only until auth
-   callsites are fully migrated."
+   Connector callsites now use the anomaly-returning helpers directly."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.connector-auth.interface :as auth]
-            [ai.miniforge.connector.handles :as handles]
-            [ai.miniforge.response.interface :as response]))
+            [ai.miniforge.connector.handles :as handles]))
 
 ;;------------------------------------------------------------------------------ Layer 0
 ;; No in-namespace dependencies — anomaly-returning primitives.
@@ -95,52 +87,3 @@
                             (or message "Credential validation failed")
                             (cond-> {:errors errors}
                               connector (assoc :connector connector)))))))))
-
-;;------------------------------------------------------------------------------ Layer 2
-;; Composes Layer 1.
-
-(defn validate-auth!
-  "Validate a credential reference, throwing `ex-info` on failure.
-
-   DEPRECATED: prefer [[validate-auth]] in non-boundary code; it returns
-   an anomaly map instead of throwing. This thrower is retained for the
-   per-connector helpers that have not yet migrated."
-  {:deprecated "exceptions-as-data — prefer validate-auth"}
-  ([auth]
-   (validate-auth! auth nil))
-  ([auth {:keys [message] :as opts}]
-   (let [result (validate-auth auth opts)]
-     (when (anomaly/anomaly? result)
-       (response/throw-anomaly! :anomalies/incorrect
-                                (or message (:anomaly/message result))
-                                (:anomaly/data result))))))
-
-(defn validate-auth-or-throw!
-  "Validate `auth`; on failure throw `ex-info` with a *localized*
-   message and `{:errors [...]}` ex-data.
-
-   - `translator`  — a `messages/t`-shaped function `(fn [key params])`
-                     bound to the calling connector's message catalog.
-   - `message-key` — catalog key whose template interpolates an
-                     `{errors}` placeholder (e.g. `:jira/auth-invalid`).
-
-   Replaces the duplicated jira/gitlab/github callsite shape
-
-       (when-let [a (connector/validate-auth auth)]
-         (let [errs (:errors (:anomaly/data a))]
-           (throw (ex-info (msg/t :<conn>/auth-invalid {:errors errs})
-                           {:errors errs}))))
-
-   The `{:errors …}` argument to the translator is the message
-   template's interpolation parameters, NOT a nested error envelope
-   — the credential errors happen to be both the data the message
-   text surfaces AND the data the thrown `ex-data` carries, so the
-   key name `:errors` appears twice but with different roles. This
-   helper centralizes the read-once / use-twice handling so every
-   connector boundary thrower reads as a single call."
-  [auth translator message-key]
-  (when-let [a (validate-auth auth)]
-    (let [errors (:errors (:anomaly/data a))]
-      (response/throw-anomaly! :anomalies/incorrect
-                               (translator message-key {:errors errors})
-                               {:errors errors}))))
