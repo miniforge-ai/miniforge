@@ -192,19 +192,3 @@
    fails. Optional 2nd arg `{:message string, :connector keyword}` customizes
    the anomaly message and adds the connector to `:anomaly/data`."
   validation/validate-auth)
-;; Auth throwing compatibility (deprecated; kept until auth callsites migrate):
-(def validate-auth!
-  "Validate credential reference `auth`. Returns nil on success (or when `auth`
-   is nil); throws ex-info (:anomalies/incorrect) on validation failure.
-   DEPRECATED: prefer validate-auth, which returns an anomaly instead."
-  validation/validate-auth!)
-
-;; Localized auth throwing compatibility (deprecated; kept until auth callsites
-;; migrate):
-(def validate-auth-or-throw!
-  "Validate `auth`; on success return nil, on failure throw ex-info
-   (:anomalies/incorrect) carrying a localized message and `{:errors [...]}`
-   ex-data. Args: `auth` (credential ref or nil), `translator` (a messages/t
-   function `(fn [key params])` bound to the connector's catalog), and
-   `message-key` (catalog key whose template interpolates `{errors}`)."
-  validation/validate-auth-or-throw!)
