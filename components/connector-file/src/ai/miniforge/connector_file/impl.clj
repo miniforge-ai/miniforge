@@ -19,7 +19,8 @@
 (ns ai.miniforge.connector-file.impl
   "Implementation functions for the file connector.
    Pure logic separated from protocol wiring."
-  (:require [ai.miniforge.connector.interface :as connector]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-file.reader :as reader]
             [ai.miniforge.connector-file.writer :as writer]
             [ai.miniforge.connector-file.messages :as msg]
@@ -67,38 +68,49 @@
 
 ;; -- Source --
 
-(defn- require-handle!
-  "Retrieve handle state or throw, delegating to the shared helper."
+(defn- require-handle
+  "Retrieve handle state or return an anomaly."
   [handle]
-  (connector/require-handle! handles handle
-                             {:message (msg/t :file/handle-not-found {:handle handle})}))
+  (connector/require-handle handles handle
+                            {:message (msg/t :file/handle-not-found {:handle handle})}))
+
+(defn- handle-anomaly->response [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
 
 (defn do-discover
   "Return schema metadata for the connected file."
   [handle]
-  (let [{:file/keys [path]} (require-handle! handle)]
-    (connector/discover-result [{:schema/name (.getName (io/file path))
-                                 :schema/path path}])))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:file/keys [path]} handle-state]
+        (connector/discover-result [{:schema/name (.getName (io/file path))
+                                     :schema/path path}])))))
 
 (defn do-extract
   "Read records from file with offset-based cursor pagination."
   [handle opts]
-  (let [{:file/keys [path format]} (require-handle! handle)
-        file (io/file path)]
-    (if-not (.exists file)
-      (response/make-anomaly :anomalies/not-found
-                             (msg/t :file/not-found {:path path})
-                             {:path path})
-      (let [all-records (reader/read-file path format)
-            batch-size  (or (:extract/batch-size opts) (count all-records))
-            offset      (or (get-in opts [:extract/cursor :cursor/value]) 0)
-            batch       (vec (take batch-size (drop offset all-records)))
-            new-offset  (+ offset (count batch))
-            has-more    (< new-offset (count all-records))]
-        (connector/extract-result
-         batch
-         {:cursor/type :offset :cursor/value new-offset}
-         has-more)))))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:file/keys [path format]} handle-state
+            file (io/file path)]
+        (if-not (.exists file)
+          (response/make-anomaly :anomalies/not-found
+                                 (msg/t :file/not-found {:path path})
+                                 {:path path})
+          (let [all-records (reader/read-file path format)
+                batch-size  (or (:extract/batch-size opts) (count all-records))
+                offset      (or (get-in opts [:extract/cursor :cursor/value]) 0)
+                batch       (vec (take batch-size (drop offset all-records)))
+                new-offset  (+ offset (count batch))
+                has-more    (< new-offset (count all-records))]
+            (connector/extract-result
+             batch
+             {:cursor/type :offset :cursor/value new-offset}
+             has-more)))))))
 
 (defn do-checkpoint
   "Persist cursor state (no-op for files, returns committed)."
@@ -110,7 +122,10 @@
 (defn do-publish
   "Write records to file. Returns publish-result map."
   [handle records opts]
-  (let [{:file/keys [path format]} (require-handle! handle)
-        mode    (or (:publish/mode opts) :overwrite)
-        written (writer/write-file path records format mode)]
-    (connector/publish-result written 0)))
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:file/keys [path format]} handle-state
+            mode    (or (:publish/mode opts) :overwrite)
+            written (writer/write-file path records format mode)]
+        (connector/publish-result written 0)))))
