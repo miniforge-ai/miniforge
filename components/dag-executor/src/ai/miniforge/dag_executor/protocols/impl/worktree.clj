@@ -766,35 +766,55 @@
 ;; File Operations
 ;; ============================================================================
 
+(defn- path-inside-worktree?
+  "True when `file` (a canonicalized File) is the worktree root or is nested
+   inside it. Prevents path-traversal escape via `../` segments."
+  [^File worktree ^File file]
+  (let [root-path (str (.getPath worktree) File/separator)
+        file-path (.getPath file)]
+    (or (= file-path (.getPath worktree))
+        (str/starts-with? file-path root-path))))
+
+(defn- safe-worktree-path
+  "Resolve `relative-path` inside `worktree-path` and return the canonical
+   File, or nil if the resolved path would escape the worktree sandbox."
+  [worktree-path relative-path]
+  (let [worktree (.getCanonicalFile (File. ^String worktree-path))
+        file     (.getCanonicalFile (File. worktree ^String relative-path))]
+    (when (path-inside-worktree? worktree file)
+      file)))
+
 (defn copy-file-to
   "Copy a file into the worktree."
   [worktree-path local-path remote-path]
-  (try
-    (let [source (File. ^String local-path)
-          dest-path (str worktree-path "/" remote-path)
-          dest (File. ^String dest-path)]
-      (.mkdirs (.getParentFile dest))
-      (Files/copy (.toPath source)
-                  (.toPath dest)
-                  (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
-      (result/ok {:copied-bytes (.length source)}))
-    (catch Exception e
-      (result/err :copy-failed (.getMessage e)))))
+  (let [dest (safe-worktree-path worktree-path remote-path)]
+    (if-not dest
+      (result/err :path-traversal (str "path escapes worktree sandbox: " remote-path))
+      (try
+        (let [source (File. ^String local-path)]
+          (.mkdirs (.getParentFile dest))
+          (Files/copy (.toPath source)
+                      (.toPath dest)
+                      (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+          (result/ok {:copied-bytes (.length source)}))
+        (catch Exception e
+          (result/err :copy-failed (.getMessage e)))))))
 
 (defn copy-file-from
   "Copy a file from the worktree."
   [worktree-path remote-path local-path]
-  (try
-    (let [source-path (str worktree-path "/" remote-path)
-          source (File. ^String source-path)
-          dest (File. ^String local-path)]
-      (.mkdirs (.getParentFile dest))
-      (Files/copy (.toPath source)
-                  (.toPath dest)
-                  (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
-      (result/ok {:copied-bytes (.length source)}))
-    (catch Exception e
-      (result/err :copy-failed (.getMessage e)))))
+  (let [source (safe-worktree-path worktree-path remote-path)]
+    (if-not source
+      (result/err :path-traversal (str "path escapes worktree sandbox: " remote-path))
+      (try
+        (let [dest (File. ^String local-path)]
+          (.mkdirs (.getParentFile dest))
+          (Files/copy (.toPath source)
+                      (.toPath dest)
+                      (into-array CopyOption [StandardCopyOption/REPLACE_EXISTING]))
+          (result/ok {:copied-bytes (.length source)}))
+        (catch Exception e
+          (result/err :copy-failed (.getMessage e)))))))
 
 ;; ============================================================================
 ;; Public Utility Functions
