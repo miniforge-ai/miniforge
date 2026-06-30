@@ -165,27 +165,31 @@
         (is (= :library-before-consumer (:edge/constraint edge)))
         (is (= :sequential (:edge/merge-ordering edge))))))
 
-  (testing "throws on missing from-repo"
+  (testing "returns anomaly data on missing from-repo"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
                           {:repo/url "https://github.com/acme/b"
                            :repo/name "repo-b"
-                           :repo/type :application})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"From repo not found"
-            (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-b"
-                          :library-before-consumer :sequential)))))
+                           :repo/type :application})
+          result (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-b"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= "repo-a" (get-in result [:anomaly/data :repo-name])))))
 
-  (testing "throws on self-loop"
+  (testing "returns anomaly data on self-loop"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
                           {:repo/url "https://github.com/acme/a"
                            :repo/name "repo-a"
-                           :repo/type :library})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Self-loop not allowed"
-            (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-a"
-                          :library-before-consumer :sequential)))))
+                           :repo/type :library})
+          result (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-a"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= "repo-a" (get-in result [:anomaly/data :repo-name])))))
 
-  (testing "throws on duplicate edge"
+  (testing "returns anomaly data on duplicate edge"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
                           {:repo/url "https://github.com/acme/a"
@@ -196,10 +200,13 @@
                            :repo/name "repo-b"
                            :repo/type :application})
           _ (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-b"
-                          :library-before-consumer :sequential)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Edge already exists"
-            (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-b"
-                          :library-before-consumer :sequential))))))
+                          :library-before-consumer :sequential)
+          result (dag/add-edge *manager* (:dag/id d) "repo-a" "repo-b"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (= "repo-a" (get-in result [:anomaly/data :from])))
+      (is (= "repo-b" (get-in result [:anomaly/data :to]))))))
 
 (deftest remove-edge-test
   (testing "removes edge from DAG"

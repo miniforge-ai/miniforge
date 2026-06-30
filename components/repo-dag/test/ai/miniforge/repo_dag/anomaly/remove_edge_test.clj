@@ -17,8 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.repo-dag.anomaly.remove-edge-test
-  "Coverage for `dag/remove-edge-anomaly` and its deprecated throwing
-   sibling `dag/remove-edge`. Only failure mode is `:not-found` — DAG missing."
+  "Coverage for `dag/remove-edge-anomaly` and its stable alias
+   `dag/remove-edge`. Only failure mode is `:not-found` — DAG missing."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
@@ -60,9 +60,10 @@
       (is (= :not-found (:anomaly/type result)))
       (is (= missing-id (get-in result [:anomaly/data :dag-id]))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Alias compatibility
 
-(deftest remove-edge-still-throws-on-missing-dag
-  (testing "deprecated throwing variant still throws ex-info on missing DAG"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"DAG not found"
-          (dag/remove-edge *manager* (random-uuid) "repo-a" "repo-b")))))
+(deftest remove-edge-returns-anomaly-on-missing-dag
+  (testing "stable alias returns anomaly data on missing DAG"
+    (let [result (dag/remove-edge *manager* (random-uuid) "repo-a" "repo-b")]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result))))))

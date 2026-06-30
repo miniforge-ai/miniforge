@@ -19,6 +19,7 @@
 (ns ai.miniforge.repo-dag.dag-topology-test
   "Tests for topological sort and cycle detection (Layers 3-4)."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Fixtures
@@ -94,10 +95,12 @@
                           {:repo/url "https://github.com/a" :repo/name "a" :repo/type :library})
           _ (dag/add-repo *manager* (:dag/id d)
                           {:repo/url "https://github.com/b" :repo/name "b" :repo/type :application})
-          _ (dag/add-edge *manager* (:dag/id d) "a" "b" :library-before-consumer :sequential)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Adding edge would create cycle"
-            (dag/add-edge *manager* (:dag/id d) "b" "a"
-                          :library-before-consumer :sequential)))))
+          _ (dag/add-edge *manager* (:dag/id d) "a" "b" :library-before-consumer :sequential)
+          result (dag/add-edge *manager* (:dag/id d) "b" "a"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (= #{"a" "b"} (get-in result [:anomaly/data :cycle-nodes])))))
 
   (testing "detects longer cycle on add-edge"
     (let [d (dag/create-dag *manager* "test-dag")
@@ -108,10 +111,12 @@
           _ (dag/add-repo *manager* (:dag/id d)
                           {:repo/url "https://github.com/c" :repo/name "c" :repo/type :application})
           _ (dag/add-edge *manager* (:dag/id d) "a" "b" :library-before-consumer :sequential)
-          _ (dag/add-edge *manager* (:dag/id d) "b" "c" :library-before-consumer :sequential)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Adding edge would create cycle"
-            (dag/add-edge *manager* (:dag/id d) "c" "a"
-                          :library-before-consumer :sequential)))))
+          _ (dag/add-edge *manager* (:dag/id d) "b" "c" :library-before-consumer :sequential)
+          result (dag/add-edge *manager* (:dag/id d) "c" "a"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (= #{"a" "b" "c"} (get-in result [:anomaly/data :cycle-nodes])))))
 
   (testing "find-cycle-nodes identifies cycle members"
     ;; We can test the pure function directly by creating a dag with a cycle

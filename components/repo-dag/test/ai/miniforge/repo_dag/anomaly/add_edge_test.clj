@@ -17,8 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.repo-dag.anomaly.add-edge-test
-  "Coverage for `dag/add-edge-anomaly` and its deprecated throwing
-   sibling `dag/add-edge`. Seven failure modes:
+  "Coverage for `dag/add-edge-anomaly` and its stable alias
+   `dag/add-edge`. Seven failure modes:
    - `:not-found`     when DAG missing
    - `:not-found`     when from-repo missing
    - `:not-found`     when to-repo missing
@@ -110,9 +110,7 @@
 
 (deftest add-edge-anomaly-invalid-input-on-unknown-constraint
   (testing "unknown :edge/constraint yields :invalid-input anomaly — schema rejection
-            short-circuits via make-repo-edge-anomaly before the edge is appended.
-            Pre-fix this path threw an ExceptionInfo via the deprecated throwing
-            validate-schema and silently violated the anomaly-returning contract."
+            short-circuits via make-repo-edge-anomaly before the edge is appended."
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "repo-a" "repo-b"
                                        :not-a-real-constraint :sequential)]
@@ -158,24 +156,30 @@
       (is (= :conflict (:anomaly/type result)))
       (is (set? (get-in result [:anomaly/data :cycle-nodes]))))))
 
-;------------------------------------------------------------------------------ Throwing-variant compat
+;------------------------------------------------------------------------------ Alias compatibility
 
-(deftest add-edge-still-throws-on-missing-from-repo
-  (testing "deprecated throwing variant still throws ex-info on missing from-repo"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"From repo not found"
-          (dag/add-edge *manager* *dag-id* "ghost" "repo-b"
-                        :library-before-consumer :sequential)))))
+(deftest add-edge-returns-anomaly-on-missing-from-repo
+  (testing "stable alias returns anomaly data on missing from-repo"
+    (let [result (dag/add-edge *manager* *dag-id* "ghost" "repo-b"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= "ghost" (get-in result [:anomaly/data :repo-name]))))))
 
-(deftest add-edge-still-throws-on-self-loop
-  (testing "deprecated throwing variant still throws on self-loop"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Self-loop not allowed"
-          (dag/add-edge *manager* *dag-id* "repo-a" "repo-a"
-                        :library-before-consumer :sequential)))))
+(deftest add-edge-returns-anomaly-on-self-loop
+  (testing "stable alias returns anomaly data on self-loop"
+    (let [result (dag/add-edge *manager* *dag-id* "repo-a" "repo-a"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= "repo-a" (get-in result [:anomaly/data :repo-name]))))))
 
-(deftest add-edge-still-throws-on-cycle
-  (testing "deprecated throwing variant still throws on cycle introduction"
+(deftest add-edge-returns-anomaly-on-cycle
+  (testing "stable alias returns anomaly data on cycle introduction"
     (dag/add-edge *manager* *dag-id* "repo-a" "repo-b"
                   :library-before-consumer :sequential)
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"create cycle"
-          (dag/add-edge *manager* *dag-id* "repo-b" "repo-a"
-                        :library-before-consumer :sequential)))))
+    (let [result (dag/add-edge *manager* *dag-id* "repo-b" "repo-a"
+                               :library-before-consumer :sequential)]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (set? (get-in result [:anomaly/data :cycle-nodes]))))))

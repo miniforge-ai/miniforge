@@ -529,19 +529,13 @@
     (add-edge-impl store dag-id from-repo to-repo constraint merge-ordering))
 
   (add-edge [this dag-id from-repo to-repo constraint merge-ordering]
-    (let [result (add-edge-anomaly this dag-id from-repo to-repo constraint merge-ordering)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (add-edge-anomaly this dag-id from-repo to-repo constraint merge-ordering))
 
   (remove-edge-anomaly [_this dag-id from-repo to-repo]
     (remove-edge-impl store dag-id from-repo to-repo))
 
   (remove-edge [this dag-id from-repo to-repo]
-    (let [result (remove-edge-anomaly this dag-id from-repo to-repo)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (remove-edge-anomaly this dag-id from-repo to-repo))
 
   (get-dag [_this dag-id]
     (get @store dag-id))
