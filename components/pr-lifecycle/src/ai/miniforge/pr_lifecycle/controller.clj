@@ -557,7 +557,7 @@
         (if (anomaly/anomaly? creation-outcome)
           (do
             (update-status! controller lifecycle-failed-status)
-            {:status lifecycle-failed-status
+            {:status (:status @controller)
              :error (:anomaly/message creation-outcome)
              :data (:anomaly/data creation-outcome)})
 

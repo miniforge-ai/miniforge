@@ -665,6 +665,16 @@
           (is (= :failed (:status @ctrl)))
           (is (some #(= :pr-creation-failed (:type %)) (:history @ctrl))))))))
 
+(deftest run-lifecycle-pr-creation-failure-reports-current-status
+  (testing "PR creation anomaly result reports the controller's actual status"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/create-branch! (fn [_path _name]
+                                             (release-failure "git error"))]
+        (let [result (controller/run-lifecycle! ctrl {:code/files []})]
+          (is (= (:status @ctrl) (:status result)))
+          (is (= :failed (:status result)))
+          (is (= "PR creation failed" (:error result))))))))
+
 ;; apply-code-to-files!
 
 (deftest apply-code-to-files-success
