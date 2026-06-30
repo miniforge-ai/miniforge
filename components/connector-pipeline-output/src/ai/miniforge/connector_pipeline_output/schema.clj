@@ -20,8 +20,7 @@
   "Malli schemas, validation, and JSON Schema export for the pipeline
    output contract. These schemas define the public API that downstream
    consumers depend on."
-  (:require [ai.miniforge.response.interface :as response]
-            [malli.core :as m]
+  (:require [malli.core :as m]
             [malli.error :as me]
             [malli.json-schema :as json-schema]))
 
@@ -71,16 +70,6 @@
     {:valid? true :errors nil}
     {:valid? false
      :errors (me/humanize (m/explain schema value))}))
-
-(defn validate!
-  "Validate value against schema, throwing on failure."
-  [schema value]
-  (when-not (m/validate schema value)
-    (response/throw-anomaly! :anomalies/incorrect
-                             "Schema validation failed"
-                             {:errors (me/humanize (m/explain schema value))
-                              :value  value}))
-  value)
 
 (defn validate-config
   "Validate a pipeline output config map."

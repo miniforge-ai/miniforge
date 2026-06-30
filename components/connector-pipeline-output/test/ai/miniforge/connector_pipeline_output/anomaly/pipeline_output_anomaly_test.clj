@@ -18,10 +18,10 @@
 
 (ns ai.miniforge.connector-pipeline-output.anomaly.pipeline-output-anomaly-test
   "Coverage for `format/write-records` and
-   `schema/validate!` boundary escalation via `response/throw-anomaly!`.
+   schema validation anomaly-data conversion.
 
-   Unsupported format → `:anomalies/unsupported`; schema validation failure →
-   `:anomalies/incorrect`."
+   Unsupported format -> `:anomalies/unsupported`; schema validation failure
+   returns structured validation errors for boundary conversion."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-pipeline-output.format :as fmt]
             [ai.miniforge.connector-pipeline-output.schema :as schema])
@@ -37,17 +37,14 @@
         (is (= :anomalies/unsupported (:anomaly/category (ex-data e))))
         (is (= :weird (:format (ex-data e))))))))
 
-(deftest validate-bang-schema-failure-throws-anomaly
-  (testing "schema validation failure raises :anomalies/incorrect"
-    (try
-      (schema/validate! schema/OutputConfig {})
-      (is false "should have thrown")
-      (catch ExceptionInfo e
-        (is (re-find #"Schema validation failed" (.getMessage e)))
-        (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
-        (is (some? (:errors (ex-data e))))))))
+(deftest validate-schema-failure-returns-errors
+  (testing "schema validation failure returns structured errors"
+    (let [result (schema/validate schema/OutputConfig {})]
+      (is (false? (:valid? result)))
+      (is (some? (:errors result))))))
 
-(deftest validate-bang-passes-through-on-success
-  (testing "valid value passes through unchanged"
+(deftest validate-schema-success-returns-valid
+  (testing "valid value returns a valid result"
     (let [valid {:output/dir "/tmp/out" :output/format :edn}]
-      (is (= valid (schema/validate! schema/OutputConfig valid))))))
+      (is (= {:valid? true :errors nil}
+             (schema/validate schema/OutputConfig valid))))))

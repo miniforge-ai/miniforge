@@ -43,6 +43,15 @@
                              (msg/t :output/handle-not-found {:handle handle})
                              {:handle handle})))
 
+(defn- schema-validation-anomaly
+  "Return an anomaly for a failed schema validation result."
+  [value validation]
+  (when-not (:valid? validation)
+    (response/make-anomaly :anomalies/incorrect
+                           "Schema validation failed"
+                           {:errors (:errors validation)
+                            :value  value})))
+
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
 
@@ -51,14 +60,16 @@
   [config]
   (let [config-with-defaults (cond-> config
                                (not (:output/format config))
-                               (assoc :output/format :edn))]
-    (schema/validate! schema/OutputConfig config-with-defaults)
-    (let [handle (str (UUID/randomUUID))]
-      (store-handle! handle {:output/dir           (:output/dir config-with-defaults)
-                              :output/format        (:output/format config-with-defaults)
-                              :output/run-id        (get config :output/run-id (str (UUID/randomUUID)))
-                              :output/pipeline-name (:output/pipeline-name config)})
-      (connector/connect-result handle))))
+                               (assoc :output/format :edn))
+        validation (schema/validate schema/OutputConfig config-with-defaults)]
+    (if-let [anomaly (schema-validation-anomaly config-with-defaults validation)]
+      anomaly
+      (let [handle (str (UUID/randomUUID))]
+        (store-handle! handle {:output/dir           (:output/dir config-with-defaults)
+                               :output/format        (:output/format config-with-defaults)
+                               :output/run-id        (get config :output/run-id (str (UUID/randomUUID)))
+                               :output/pipeline-name (:output/pipeline-name config)})
+        (connector/connect-result handle)))))
 
 (defn do-close [handle]
   (remove-handle! handle)
@@ -81,13 +92,17 @@
 ;; Write helpers
 
 (defn- write-and-validate-manifest!
-  "Build, validate, and write the manifest + JSON Schema."
+  "Build, validate, and write the manifest + JSON Schema, or return an anomaly."
   [handle-state dir run-id schema-name records-file record-count datasets]
   (let [manifest (cond-> (build-manifest handle-state schema-name records-file record-count)
-                   (seq datasets) (assoc :manifest/datasets datasets))]
-    (schema/validate! schema/Manifest (dissoc manifest :manifest/datasets))
-    (fmt/write-manifest dir run-id manifest)
-    (fmt/write-json-schema dir run-id (schema/manifest-json-schema))))
+                   (seq datasets) (assoc :manifest/datasets datasets))
+        manifest-contract (dissoc manifest :manifest/datasets)
+        validation (schema/validate schema/Manifest manifest-contract)]
+    (if-let [anomaly (schema-validation-anomaly manifest-contract validation)]
+      anomaly
+      (do
+        (fmt/write-manifest dir run-id manifest)
+        (fmt/write-json-schema dir run-id (schema/manifest-json-schema))))))
 
 ;;------------------------------------------------------------------------------ Layer 2
 ;; Sink operations
@@ -96,20 +111,24 @@
   "Write all records as a single file."
   [handle-state records opts]
   (let [{:output/keys [dir format run-id]} handle-state
-        records-file (fmt/write-records format dir run-id records)]
-    (write-and-validate-manifest! handle-state dir run-id
-                                   (:publish/schema-name opts) records-file (count records) nil)
-    (connector/publish-result (count records) 0)))
+        records-file (fmt/write-records format dir run-id records)
+        manifest-result (write-and-validate-manifest! handle-state dir run-id
+                                                       (:publish/schema-name opts) records-file (count records) nil)]
+    (if (response/anomaly-map? manifest-result)
+      manifest-result
+      (connector/publish-result (count records) 0))))
 
 (defn- publish-per-dataset!
   "Write separate record files per dataset, plus a combined file."
   [handle-state records datasets opts]
   (let [{:output/keys [dir format run-id]} handle-state
         dataset-files (fmt/write-dataset-records format dir run-id datasets)
-        combined-file (fmt/write-records format dir run-id records)]
-    (write-and-validate-manifest! handle-state dir run-id
-                                   (:publish/schema-name opts) combined-file (count records) dataset-files)
-    (connector/publish-result (count records) 0)))
+        combined-file (fmt/write-records format dir run-id records)
+        manifest-result (write-and-validate-manifest! handle-state dir run-id
+                                                       (:publish/schema-name opts) combined-file (count records) dataset-files)]
+    (if (response/anomaly-map? manifest-result)
+      manifest-result
+      (connector/publish-result (count records) 0))))
 
 (defn do-publish
   "Write records to the pipeline output store.
