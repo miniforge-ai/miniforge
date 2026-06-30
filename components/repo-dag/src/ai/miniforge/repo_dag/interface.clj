@@ -214,22 +214,14 @@
    - constraint: Edge constraint type (see edge-constraints)
    - merge-ordering: How PRs should merge (see merge-orderings)
 
-   Returns the updated DAG.
-
-   Throws if:
-   - DAG not found
-   - Either repo not in DAG
-   - Edge would create a cycle
-   - Edge already exists
-   - Self-loop attempted
-
-   DEPRECATED: prefer [[add-edge-anomaly]].
+   Returns the updated DAG, or an anomaly map when the DAG or repos are
+   missing, the edge input is invalid, the edge already exists, or the edge
+   would create a cycle.
 
    Example:
      (add-edge mgr dag-id
                \"terraform-modules\" \"terraform-live\"
                :module-before-live :sequential)"
-  {:deprecated "exceptions-as-data — prefer add-edge-anomaly"}
   [manager dag-id from-repo to-repo constraint merge-ordering]
   (core/add-edge manager dag-id from-repo to-repo constraint merge-ordering))
 
@@ -245,7 +237,7 @@
    - `:conflict`      — edge already exists, or adding the edge would
                         introduce a cycle (`:cycle-nodes` carried in data)
 
-   Prefer this over [[add-edge]] in non-boundary code."
+   Kept for callers that prefer the explicit anomaly-returning name."
   [manager dag-id from-repo to-repo constraint merge-ordering]
   (core/add-edge-anomaly manager dag-id from-repo to-repo constraint merge-ordering))
 
@@ -258,12 +250,7 @@
    - from-repo: Name of the upstream repo
    - to-repo: Name of the downstream repo
 
-   Returns the updated DAG.
-
-   Throws if DAG not found.
-
-   DEPRECATED: prefer [[remove-edge-anomaly]]."
-  {:deprecated "exceptions-as-data — prefer remove-edge-anomaly"}
+   Returns the updated DAG or a `:not-found` anomaly."
   [manager dag-id from-repo to-repo]
   (core/remove-edge manager dag-id from-repo to-repo))
 
