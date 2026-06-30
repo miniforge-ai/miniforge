@@ -90,8 +90,9 @@
                                   :repo/type :library})]
         (is (anomaly/anomaly? result))
         (is (= :not-found (:anomaly/type result))))
-      (is (thrown? clojure.lang.ExceptionInfo
-            (dag/compute-topo-order *manager* fake-id)))))
+      (let [result (dag/compute-topo-order *manager* fake-id)]
+        (is (anomaly/anomaly? result))
+        (is (= :not-found (:anomaly/type result))))))
 
   (testing "get-all-dags returns all dags"
     (dag/create-dag *manager* "dag-1")

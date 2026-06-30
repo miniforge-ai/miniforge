@@ -275,20 +275,16 @@
    Returns:
    - On success: {:success true :order [repo-names...]}
    - On failure: {:success false :error :cycle-detected :cycle-nodes #{...}}
-
-   Throws ex-info when the DAG does not exist.
-
-   DEPRECATED: prefer [[compute-topo-order-anomaly]].
+   - Missing DAG: `:not-found` anomaly
 
    Example:
      (compute-topo-order mgr dag-id)
      ;; => {:success true :order [\"terraform-modules\" \"terraform-live\" \"k8s\"]}"
-  {:deprecated "exceptions-as-data — prefer compute-topo-order-anomaly"}
   [manager dag-id]
   (core/compute-topo-order manager dag-id))
 
 (defn compute-topo-order-anomaly
-  "Anomaly-returning variant of [[compute-topo-order]].
+  "Explicit implementation name for [[compute-topo-order]].
 
    Returns the topo-sort result map on success, or a `:not-found` anomaly
    when the DAG does not exist."
@@ -303,21 +299,17 @@
    - dag-id: UUID of the DAG
    - changed-repo: Name of the repo that changed
 
-   Returns a set of repo names that are downstream (depend on) the changed repo.
-
-   Throws ex-info when the DAG does not exist.
-
-   DEPRECATED: prefer [[affected-repos-anomaly]].
+   Returns a set of repo names that are downstream (depend on) the changed
+   repo, or a `:not-found` anomaly when the DAG does not exist.
 
    Example:
      (affected-repos mgr dag-id \"terraform-modules\")
      ;; => #{\"terraform-live\" \"k8s-manifests\"}"
-  {:deprecated "exceptions-as-data — prefer affected-repos-anomaly"}
   [manager dag-id changed-repo]
   (core/affected-repos manager dag-id changed-repo))
 
 (defn affected-repos-anomaly
-  "Anomaly-returning variant of [[affected-repos]].
+  "Explicit implementation name for [[affected-repos]].
 
    Returns the set of downstream repo names on success, or a `:not-found`
    anomaly when the DAG does not exist."
@@ -332,21 +324,17 @@
    - dag-id: UUID of the DAG
    - repo-name: Name of the repo to query
 
-   Returns a set of repo names that are upstream (dependencies of) the given repo.
-
-   Throws ex-info when the DAG does not exist.
-
-   DEPRECATED: prefer [[upstream-repos-anomaly]].
+   Returns a set of repo names that are upstream (dependencies of) the given
+   repo, or a `:not-found` anomaly when the DAG does not exist.
 
    Example:
      (upstream-repos mgr dag-id \"k8s-manifests\")
      ;; => #{\"terraform-modules\" \"terraform-live\"}"
-  {:deprecated "exceptions-as-data — prefer upstream-repos-anomaly"}
   [manager dag-id repo-name]
   (core/upstream-repos manager dag-id repo-name))
 
 (defn upstream-repos-anomaly
-  "Anomaly-returning variant of [[upstream-repos]].
+  "Explicit implementation name for [[upstream-repos]].
 
    Returns the set of upstream repo names on success, or a `:not-found`
    anomaly when the DAG does not exist."
@@ -367,19 +355,16 @@
 
    Only considers dependencies between repos in the pr-set.
 
-   Throws ex-info when the DAG does not exist.
-
-   DEPRECATED: prefer [[merge-order-anomaly]].
+   Returns a `:not-found` anomaly when the DAG does not exist.
 
    Example:
      (merge-order mgr dag-id #{\"terraform-modules\" \"terraform-live\"})
      ;; => {:success true :order [\"terraform-modules\" \"terraform-live\"]}"
-  {:deprecated "exceptions-as-data — prefer merge-order-anomaly"}
   [manager dag-id pr-set]
   (core/merge-order manager dag-id pr-set))
 
 (defn merge-order-anomaly
-  "Anomaly-returning variant of [[merge-order]].
+  "Explicit implementation name for [[merge-order]].
 
    Returns the merge-order result map on success, or a `:not-found`
    anomaly when the DAG does not exist."
@@ -406,19 +391,16 @@
    - Edges referencing missing repos
    - Self-loops
 
-   Throws ex-info when the DAG does not exist.
-
-   DEPRECATED: prefer [[validate-dag-anomaly]].
+   Returns a `:not-found` anomaly when the DAG does not exist.
 
    Example:
      (validate-dag mgr dag-id)
      ;; => {:valid? true :errors []}"
-  {:deprecated "exceptions-as-data — prefer validate-dag-anomaly"}
   [manager dag-id]
   (core/validate-dag manager dag-id))
 
 (defn validate-dag-anomaly
-  "Anomaly-returning variant of [[validate-dag]].
+  "Explicit implementation name for [[validate-dag]].
 
    Returns the validation result map on success, or a `:not-found` anomaly
    when the DAG does not exist."

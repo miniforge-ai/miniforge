@@ -417,12 +417,6 @@
     (f dag)
     (dag-not-found-anomaly dag-id)))
 
-(defn- anomaly->ex-info
-  "Translate a repo-dag anomaly back into an ex-info for backward-compat
-   throwing wrappers. Preserves the anomaly's `:anomaly/data` as ex-data."
-  [a]
-  (ex-info (:anomaly/message a) (:anomaly/data a)))
-
 ;------------------------------------------------------------------------------ Layer 1
 ;; Protocol definition
 
@@ -466,40 +460,35 @@
     "Retrieve a DAG by ID. Returns nil if not found.")
 
   (compute-topo-order [this dag-id]
-    "Compute topological sort of repos. Returns {:success true :order [...]} or error.")
+    "Compute topological sort of repos. Returns result map or anomaly.")
 
   (compute-topo-order-anomaly [this dag-id]
-    "Anomaly-returning sibling of `compute-topo-order`. Returns the topo
-     result or a `:not-found` anomaly when the DAG is missing.")
+    "Explicit implementation name used by `compute-topo-order`.")
 
   (affected-repos [this dag-id changed-repo]
-    "Given a changed repo, return all downstream repos that may be affected.")
+    "Given a changed repo, return downstream repos or anomaly.")
 
   (affected-repos-anomaly [this dag-id changed-repo]
-    "Anomaly-returning sibling of `affected-repos`. Returns the downstream
-     repo set or a `:not-found` anomaly when the DAG is missing.")
+    "Explicit implementation name used by `affected-repos`.")
 
   (upstream-repos [this dag-id repo-name]
-    "Return all repos that this repo depends on.")
+    "Return all repos that this repo depends on, or anomaly.")
 
   (upstream-repos-anomaly [this dag-id repo-name]
-    "Anomaly-returning sibling of `upstream-repos`. Returns the upstream
-     repo set or a `:not-found` anomaly when the DAG is missing.")
+    "Explicit implementation name used by `upstream-repos`.")
 
   (merge-order [this dag-id pr-set]
-    "Given a set of PRs across repos, return valid merge order.")
+    "Given a set of PRs across repos, return merge order or anomaly.")
 
   (merge-order-anomaly [this dag-id pr-set]
-    "Anomaly-returning sibling of `merge-order`. Returns the merge-order
-     result or a `:not-found` anomaly when the DAG is missing.")
+    "Explicit implementation name used by `merge-order`.")
 
   ;; Validation
   (validate-dag [this dag-id]
-    "Check for cycles, orphans, invalid references. Returns {:valid? bool :errors [...]}.")
+    "Check for cycles, orphans, and invalid references; returns result or anomaly.")
 
   (validate-dag-anomaly [this dag-id]
-    "Anomaly-returning sibling of `validate-dag`. Returns the validation
-     result or a `:not-found` anomaly when the DAG is missing."))
+    "Explicit implementation name used by `validate-dag`."))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; In-memory implementation
@@ -544,46 +533,31 @@
     (with-dag-or-anomaly store dag-id topo-sort))
 
   (compute-topo-order [this dag-id]
-    (let [result (compute-topo-order-anomaly this dag-id)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (compute-topo-order-anomaly this dag-id))
 
   (affected-repos-anomaly [_this dag-id changed-repo]
     (with-dag-or-anomaly store dag-id #(downstream-repos % changed-repo)))
 
   (affected-repos [this dag-id changed-repo]
-    (let [result (affected-repos-anomaly this dag-id changed-repo)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (affected-repos-anomaly this dag-id changed-repo))
 
   (upstream-repos-anomaly [_this dag-id repo-name]
     (with-dag-or-anomaly store dag-id #(upstream-repos-impl % repo-name)))
 
   (upstream-repos [this dag-id repo-name]
-    (let [result (upstream-repos-anomaly this dag-id repo-name)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (upstream-repos-anomaly this dag-id repo-name))
 
   (merge-order-anomaly [_this dag-id pr-set]
     (with-dag-or-anomaly store dag-id #(compute-merge-order % pr-set)))
 
   (merge-order [this dag-id pr-set]
-    (let [result (merge-order-anomaly this dag-id pr-set)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result)))
+    (merge-order-anomaly this dag-id pr-set))
 
   (validate-dag-anomaly [_this dag-id]
     (with-dag-or-anomaly store dag-id validate-dag-impl))
 
   (validate-dag [this dag-id]
-    (let [result (validate-dag-anomaly this dag-id)]
-      (if (anomaly/anomaly? result)
-        (throw (anomaly->ex-info result))
-        result))))
+    (validate-dag-anomaly this dag-id)))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Factory functions
