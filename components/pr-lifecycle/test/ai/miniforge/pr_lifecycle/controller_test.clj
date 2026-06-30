@@ -25,6 +25,7 @@
    PR creation step functions."
   (:require
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.pr-lifecycle.controller :as controller]
    [ai.miniforge.pr-lifecycle.controller-config :as controller-config]
    [ai.miniforge.pr-lifecycle.merge :as merge]
@@ -86,13 +87,11 @@
      :events events}))
 
 (defn transition-error-data
-  "Return ex-data for an invalid controller status transition."
+  "Return anomaly data for an invalid controller status transition."
   [controller target-status]
-  (try
-    (controller/update-status! controller target-status)
-    nil
-    (catch clojure.lang.ExceptionInfo ex
-      (ex-data ex))))
+  (let [result (controller/update-status! controller target-status)]
+    (when (anomaly/anomaly? result)
+      (:anomaly/data result))))
 
 ;------------------------------------------------------------------------------ Controller Creation
 
@@ -436,29 +435,31 @@
 ;------------------------------------------------------------------------------ Fix Iteration Enforcement
 
 (deftest handle-ci-failure-max-iterations-test
-  (testing "handle-ci-failure! throws when max iterations exceeded"
+  (testing "handle-ci-failure! returns anomaly when max iterations exceeded"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp"
                  :max-fix-iterations 3)]
       ;; Simulate having already used all iterations
       (swap! ctrl assoc :fix-iterations 3)
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            (max-fix-iterations-exceeded-pattern)
-            (controller/handle-ci-failure! ctrl "some ci logs"))))))
+      (let [result (controller/handle-ci-failure! ctrl "some ci logs")]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (re-find (max-fix-iterations-exceeded-pattern)
+                     (:anomaly/message result)))))))
 
 (deftest handle-review-feedback-max-iterations-test
-  (testing "handle-review-feedback! throws when max iterations exceeded"
+  (testing "handle-review-feedback! returns anomaly when max iterations exceeded"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp"
                  :max-fix-iterations 2)]
       (swap! ctrl assoc :fix-iterations 2)
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            (max-fix-iterations-exceeded-pattern)
-            (controller/handle-review-feedback! ctrl [{:body "Fix"}]))))))
+      (let [result (controller/handle-review-feedback! ctrl [{:body "Fix"}])]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (re-find (max-fix-iterations-exceeded-pattern)
+                     (:anomaly/message result)))))))
 
 (deftest handle-ci-failure-increments-iteration-before-max-test
   (testing "handle-ci-failure! transitions to :fixing and increments counter"
@@ -490,9 +491,7 @@
                  :worktree-path "/tmp"
                  :max-fix-iterations 3)]
       (swap! ctrl assoc :fix-iterations 3)
-      (try
-        (controller/handle-ci-failure! ctrl "logs")
-        (catch clojure.lang.ExceptionInfo _e nil))
+      (controller/handle-ci-failure! ctrl "logs")
       (is (= :failed (:status @ctrl))))))
 
 (deftest handle-ci-failure-records-history-on-max-exceeded-test
@@ -502,21 +501,20 @@
                  :worktree-path "/tmp"
                  :max-fix-iterations 2)]
       (swap! ctrl assoc :fix-iterations 2)
-      (try
-        (controller/handle-ci-failure! ctrl "logs")
-        (catch clojure.lang.ExceptionInfo _e nil))
+      (controller/handle-ci-failure! ctrl "logs")
       (is (some #(= :max-fix-iterations-exceeded (:type %)) (:history @ctrl))))))
 
 (deftest handle-ci-failure-zero-max-iterations-test
-  (testing "handle-ci-failure! immediately throws when max-fix-iterations is 0"
+  (testing "handle-ci-failure! immediately returns anomaly when max-fix-iterations is 0"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp"
-                 :max-fix-iterations 0)]
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            (max-fix-iterations-exceeded-pattern)
-            (controller/handle-ci-failure! ctrl "logs"))))))
+                 :max-fix-iterations 0)
+          result (controller/handle-ci-failure! ctrl "logs")]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (re-find (max-fix-iterations-exceeded-pattern)
+                   (:anomaly/message result))))))
 
 (deftest handle-ci-failure-records-normalized-result-status-test
   (testing "handle-ci-failure! records normalized result status in history"
@@ -666,6 +664,16 @@
           (is (dag/err? result))
           (is (= :failed (:status @ctrl)))
           (is (some #(= :pr-creation-failed (:type %)) (:history @ctrl))))))))
+
+(deftest run-lifecycle-pr-creation-failure-reports-current-status
+  (testing "PR creation anomaly result reports the controller's actual status"
+    (let [ctrl (make-controller)]
+      (with-redefs [release/create-branch! (fn [_path _name]
+                                             (release-failure "git error"))]
+        (let [result (controller/run-lifecycle! ctrl {:code/files []})]
+          (is (= (:status @ctrl) (:status result)))
+          (is (= :failed (:status result)))
+          (is (= "PR creation failed" (:error result))))))))
 
 ;; apply-code-to-files!
 
