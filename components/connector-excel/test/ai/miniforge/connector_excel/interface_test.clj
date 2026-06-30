@@ -17,7 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.connector-excel.interface-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [ai.miniforge.response.interface :as response]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-excel.impl :as impl]))
 
 (deftest cell-value-nil-test
@@ -126,21 +127,19 @@
     (is (thrown? Exception (impl/do-connect {:excel/url "x" :excel/sheet-name "S"} nil)))))
 
 ;;------------------------------------------------------------------------------ Layer 2
-;; Migrated handle-lookup helper — confirm the shared connector helper
-;; preserves the legacy ex-info shape at the protocol boundary.
+;; Migrated handle-lookup helper — connector boundaries return response
+;; anomalies.
 
-(deftest discover-throws-on-unknown-handle-test
-  (testing "do-discover throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-discover "no-such-handle")
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest discover-returns-anomaly-on-unknown-handle-test
+  (testing "do-discover returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-discover "no-such-handle")]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-throws-on-unknown-handle-test
-  (testing "do-extract throws ex-info with :handle key when handle missing"
-    (try
-      (impl/do-extract "no-such-handle" {})
-      (is false "expected ex-info")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= "no-such-handle" (:handle (ex-data e))))))))
+(deftest extract-returns-anomaly-on-unknown-handle-test
+  (testing "do-extract returns an anomaly with :handle when handle is missing"
+    (let [result (impl/do-extract "no-such-handle" {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "no-such-handle" (:handle result))))))
