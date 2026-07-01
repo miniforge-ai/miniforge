@@ -99,8 +99,9 @@
   Args: task-id (string), task (definition map), run-context (shared context).
 
   Returns {:ok? true :value lifecycle-result} on success, or
-  {:ok? false :error throwable :error-classification map} on failure. Never
-  throws — all exceptions are caught and the task is marked failed in the DAG."
+  {:ok? false :error error-map :error-classification map} on expected DAG
+  failures. Unexpected exceptions are caught and returned as throwables, and the
+  task is marked failed in the DAG."
   runner/execute-task)
 
 ;; Orchestrator - concurrent execution and scheduler integration
