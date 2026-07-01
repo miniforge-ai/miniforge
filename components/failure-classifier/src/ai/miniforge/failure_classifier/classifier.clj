@@ -14,6 +14,7 @@
    Layer 1: Classification strategies (pure)
    Layer 2: Orchestration (pure)"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.failure-classifier.taxonomy :as taxonomy]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -192,14 +193,16 @@
   (let [message (failure-message failure-context)
         context (failure-record-context failure-context)
         attribution (dependency-attribution dependency-pattern)]
-    (taxonomy/make-classified-dependency-failure
-     {:failure/class failure-class
-      :failure/message message
-      :failure/source (:failure/source attribution)
-      :failure/vendor (:failure/vendor attribution)
-      :dependency/class (:dependency/class attribution)
-      :dependency/retryability (:dependency/retryability attribution)
-      :failure/context context})))
+    (if (anomaly/anomaly? attribution)
+      attribution
+      (taxonomy/make-classified-dependency-failure
+       {:failure/class failure-class
+        :failure/message message
+        :failure/source (:failure/source attribution)
+        :failure/vendor (:failure/vendor attribution)
+        :dependency/class (:dependency/class attribution)
+        :dependency/retryability (:dependency/retryability attribution)
+        :failure/context context}))))
 
 (defn- classify-standard-record
   "Construct canonical classified failure without dependency attribution."

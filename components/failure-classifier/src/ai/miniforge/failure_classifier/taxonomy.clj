@@ -165,7 +165,8 @@
 
 (defn- constructor-anomaly?
   [x]
-  (and (map? x) (= :invalid-input (:anomaly/type x))))
+  (and (anomaly/anomaly? x)
+       (= :invalid-input (:anomaly/type x))))
 
 (defn- require-field
   "Return an anomaly when a required field is nil."

@@ -22,6 +22,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.failure-classifier.interface :as fc]
+   [ai.miniforge.failure-classifier.taxonomy :as taxonomy]
    [clojure.test :refer [deftest is testing]]))
 
 ;; ---------------------------------------------------------------------------- Taxonomy tests
@@ -374,6 +375,18 @@
                  (select-keys record (keys expected))))
           (is (= (:error/message input) (:failure/message record)))
           (is (fc/dependency-failure? record)))))))
+
+(deftest classify-record-propagates-dependency-attribution-anomaly-test
+  (testing "dependency attribution anomalies are returned directly"
+    (let [expected (anomaly/anomaly :invalid-input
+                                    "Synthetic dependency attribution failure"
+                                    {:source :test})]
+      (with-redefs [taxonomy/make-dependency-attribution (fn [_] expected)]
+        (let [result (fc/classify-record
+                      {:error/message "Anthropic API service unavailable"})]
+          (is (identical? expected result))
+          (is (anomaly/anomaly? result))
+          (is (= :invalid-input (:anomaly/type result))))))))
 
 (deftest classify-exception-record-test
   (let [record (fc/classify-exception-record
