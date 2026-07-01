@@ -41,12 +41,20 @@
    :metrics       (:execution/metrics output-ctx)
    :timestamp     (java.time.Instant/now)})
 
+(defn- exception-message
+  [exception]
+  (cond
+    (instance? Throwable exception) (ex-message exception)
+    (map? exception) (:message exception)
+    (some? exception) (str exception)
+    :else nil))
+
 (defn- make-exception-signal
   "Build a minimal failure signal when execution context is unavailable."
   [workflow exception]
   {:signal/type :workflow-failed
    :workflow-id (:workflow/id workflow)
-   :error       (when exception (ex-message exception))
+   :error       (exception-message exception)
    :timestamp   (java.time.Instant/now)})
 
 ;------------------------------------------------------------------------------ Layer 0

@@ -187,16 +187,27 @@
     (while (:paused @control-state)
       (Thread/sleep (defaults/pause-poll-interval-ms)))))
 
-(defn- check-stopped!
-  "Throw if the control state indicates a stop command."
+(defn- check-stopped
+  "Return a dashboard-stop anomaly when the control state is stopped."
   [control-state]
   (when (:stopped @control-state)
     (log/warn runner-logger :system :workflow/execution-stopped
               {:message (messages/t :status/stopped-dashboard)
                :data {:reason :dashboard-stop}})
-    (response/throw-anomaly! :anomalies.dashboard/stop
-                             (messages/t :status/stopped-control)
-                             {:reason :dashboard-stop})))
+    (anomaly/sub-anomaly :conflict
+                         :anomalies.dashboard/stop
+                         (messages/t :status/stopped-control)
+                         {:reason :dashboard-stop})))
+
+(defn- apply-dashboard-stop
+  "Mark context failed after a dashboard stop request."
+  [context stop-anomaly]
+  (-> context
+      (update :execution/errors conj
+              (make-execution-error :dashboard-stop
+                                    (:anomaly/message stop-anomaly)
+                                    {:data (:anomaly/data stop-anomaly)}))
+      (ctx/transition-to-failed)))
 
 (defn- apply-rate-limit-failure
   "Mark context as failed due to rate limiting."
@@ -227,32 +238,33 @@
   "Execute single pipeline iteration: control check -> health -> phase -> backoff."
   [pipeline context callbacks iteration control-state]
   (await-resume! control-state)
-  (check-stopped! control-state)
-  (let [supervision-runtime (:execution/supervision-runtime context)
-        workflow-state (monitoring/build-supervision-state context iteration)
-        supervision-result (monitoring/check-workflow-supervision
-                            supervision-runtime
-                            workflow-state)
-        iteration-result
-        (if (= :halt (:status supervision-result))
-          (monitoring/handle-supervision-halt
-           context
-           supervision-result
-           ctx/transition-to-failed)
-          (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
-                                                       ctx/merge-metrics
-                                                       ctx/transition-to-completed
-                                                       ctx/transition-to-failed)
-                              (monitoring/clear-transient-state))
-                _ (env/persist-workspace-at-phase-boundary! context phase-ctx)
-                phase-error-msg (get-in phase-ctx
-                                        [:execution/phase-results
-                                         (:execution/current-phase phase-ctx)
-                                         :error :message] "")]
-            (if (rate-limited? phase-error-msg)
-              (apply-rate-limit-failure phase-ctx phase-error-msg)
-              (do (apply-backoff-if-retrying! phase-ctx context)
-                  (apply-health-switch phase-ctx)))))]
+  (let [iteration-result
+        (if-let [stop-anomaly (check-stopped control-state)]
+          (apply-dashboard-stop context stop-anomaly)
+          (let [supervision-runtime (:execution/supervision-runtime context)
+                workflow-state (monitoring/build-supervision-state context iteration)
+                supervision-result (monitoring/check-workflow-supervision
+                                    supervision-runtime
+                                    workflow-state)]
+            (if (= :halt (:status supervision-result))
+              (monitoring/handle-supervision-halt
+               context
+               supervision-result
+               ctx/transition-to-failed)
+              (let [phase-ctx (-> (exec/execute-phase-step pipeline context callbacks
+                                                           ctx/merge-metrics
+                                                           ctx/transition-to-completed
+                                                           ctx/transition-to-failed)
+                                  (monitoring/clear-transient-state))
+                    _ (env/persist-workspace-at-phase-boundary! context phase-ctx)
+                    phase-error-msg (get-in phase-ctx
+                                            [:execution/phase-results
+                                             (:execution/current-phase phase-ctx)
+                                             :error :message] "")]
+                (if (rate-limited? phase-error-msg)
+                  (apply-rate-limit-failure phase-ctx phase-error-msg)
+                  (do (apply-backoff-if-retrying! phase-ctx context)
+                      (apply-health-switch phase-ctx)))))))]
     (checkpoint-store/persist-execution-state! iteration-result)
     iteration-result))
 
@@ -411,18 +423,34 @@
    mode forbids worktree fallback (N11 §7.4).
 
    This is the canonical, anomaly-returning entry point. The single
-   in-component caller (`run-pipeline`) escalates the anomaly to a
-   slingshot throw at the boundary so external callers (CLI / MCP /
-   orchestrator) keep their existing exception-shaped contract."
+   in-component caller (`run-pipeline`) converts the anomaly into a
+   failed execution context so external callers still receive the
+   runner's normal context-shaped result."
   [workflow input opts]
   (or (governed-capsule-missing-anomaly opts)
       (assemble-initial-context workflow input opts)))
 
+(defn- initial-context-anomaly->failed-context
+  [workflow input opts context-anomaly]
+  (-> (ctx/create-context workflow input opts)
+      (update :execution/errors conj
+              (make-execution-error :initial-context-anomaly
+                                    (:anomaly/message context-anomaly)
+                                    {:data (:anomaly/data context-anomaly)
+                                     :anomaly context-anomaly}))
+      (ctx/transition-to-failed)))
+
 (defn- execute-pipeline-loop
   "Execute the phase pipeline loop. Returns final context."
   [pipeline initial-ctx callbacks control-state max-phases]
-  (if (empty? pipeline)
+  (cond
+    (terminal-state? initial-ctx)
+    initial-ctx
+
+    (empty? pipeline)
     (handle-empty-pipeline initial-ctx)
+
+    :else
     (let [max-phase-retries (defaults/max-consecutive-phase-retries)]
       ;; `consecutive` counts how many times the phase about to run has been
       ;; the active phase in immediately consecutive iterations. A healthy
@@ -483,18 +511,10 @@
          callbacks           (wrap-phase-callbacks event-stream opts)
          skip-lifecycle?     (:skip-lifecycle-events opts)
          ctx-or-anomaly      (build-initial-context workflow input opts)
-         _                   (when (anomaly/anomaly? ctx-or-anomaly)
-                               ;; Boundary throw: run-pipeline is the
-                               ;; runner's escalation point. External
-                               ;; callers (CLI / MCP / orchestrator)
-                               ;; expect either a final context map or
-                               ;; an exception, so a governed-mode
-                               ;; misconfiguration becomes a slingshot
-                               ;; throw with the legacy ex-info shape.
-                               (response/throw-anomaly! :anomalies.workflow/no-capsule-executor
-                                                        (:anomaly/message ctx-or-anomaly)
-                                                        {}))
-         initial-ctx         ctx-or-anomaly
+         initial-ctx         (if (anomaly/anomaly? ctx-or-anomaly)
+                               (initial-context-anomaly->failed-context workflow input opts
+                                                                        ctx-or-anomaly)
+                               ctx-or-anomaly)
          output-ctx-vol      (volatile! nil)
          exception-vol       (volatile! nil)]
 
@@ -513,7 +533,8 @@
                          #_{:clj-kondo/ignore [:unresolved-namespace :unresolved-symbol]}
                          (catch [:anomaly/category :anomalies.dashboard/stop]
                                 {:keys [anomaly/message]}
-                           (vreset! exception-vol (ex-info message {:type :dashboard-stop}))
+                           (vreset! exception-vol {:type :dashboard-stop
+                                                   :message message})
                            (-> initial-ctx
                                (update :execution/errors conj
                                        (make-execution-error :dashboard-stop message))
@@ -522,7 +543,9 @@
                          (catch Object e
                            (let [throwable (:throwable &throw-context)
                                  msg (if (instance? Throwable e) (ex-message e) (str e))]
-                             (vreset! exception-vol (or throwable (ex-info msg {})))
+                             (vreset! exception-vol (or throwable
+                                                        {:type :pipeline-exception
+                                                         :message msg}))
                              (-> initial-ctx
                                  (update :execution/errors conj
                                          (make-execution-error :pipeline-exception msg
