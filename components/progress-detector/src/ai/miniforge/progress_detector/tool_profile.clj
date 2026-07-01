@@ -46,8 +46,8 @@
    should use `make-registry` and pass the result explicitly to the
    2-arity query functions to avoid global state."
   (:require
-   [ai.miniforge.progress-detector.schema :as schema]
-   [ai.miniforge.response.interface :as response]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.progress-detector.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Registry construction
@@ -75,20 +75,24 @@
      registry-atom - atom holding the registry map
      profile       - map satisfying the ToolProfile schema
 
-   Returns the new registry map. Throws via ex-info if profile is
-   missing :tool/id or fails schema validation — caller bug."
+   Returns the new registry map on success, or an `:invalid-input`
+   anomaly when profile is missing :tool/id or fails schema validation."
   [registry-atom profile]
   (let [tool-id (:tool/id profile)]
-    (when-not tool-id
-      (response/throw-anomaly! :anomalies/incorrect
-                               "Tool profile must include :tool/id"
-                               {:profile profile}))
-    (when-not (schema/valid-tool-profile? profile)
-      (response/throw-anomaly! :anomalies/incorrect
-                               "Tool profile fails ToolProfile schema validation"
-                               {:profile profile
-                                :errors  (schema/explain-tool-profile profile)})))
-  (swap! registry-atom assoc (:tool/id profile) profile))
+    (cond
+      (nil? tool-id)
+      (anomaly/anomaly :invalid-input
+                       "Tool profile must include :tool/id"
+                       {:profile profile})
+
+      (not (schema/valid-tool-profile? profile))
+      (anomaly/anomaly :invalid-input
+                       "Tool profile fails ToolProfile schema validation"
+                       {:profile profile
+                        :errors  (schema/explain-tool-profile profile)})
+
+      :else
+      (swap! registry-atom assoc tool-id profile))))
 
 (defn unregister!
   [registry-atom tool-id]

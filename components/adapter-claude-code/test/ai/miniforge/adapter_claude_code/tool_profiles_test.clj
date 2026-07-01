@@ -24,9 +24,10 @@
    default-tool-registry is also asserted, but indirectly — the act
    of requiring `tool-profiles` triggers the defonce side-effect."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.adapter-claude-code.tool-profiles :as sut]
-   [ai.miniforge.progress-detector.interface :as pd]))
+   [ai.miniforge.progress-detector.interface :as pd]
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Expected-shape constants
@@ -87,6 +88,21 @@
         (sut/register-profiles! registry)
         (is (= after-first @registry)
             "registry value identical after second register call")))))
+
+(deftest register-profiles-propagates-first-anomaly-test
+  (testing "bulk registration returns the first invalid profile anomaly"
+    (let [registry (pd/make-tool-registry)
+          first-profile {:tool/id :tool/First
+                         :determinism :unstable}
+          bad-profile {:tool/id :tool/Bad
+                       :determinism :NOT_VALID}
+          skipped-profile {:tool/id :tool/Skipped
+                           :determinism :unstable}]
+      (with-redefs [sut/claude-cli-profiles [first-profile bad-profile skipped-profile]]
+        (let [result (sut/register-profiles! registry)]
+          (is (anomaly/anomaly? result))
+          (is (= :invalid-input (:anomaly/type result)))
+          (is (= #{:tool/First} (set (pd/all-tool-ids registry)))))))))
 
 (deftest registry-determinism-lookup-test
   (testing "registered profiles answer pd/tool-determinism queries"
