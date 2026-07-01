@@ -17,13 +17,13 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.failure-classifier.exception-anomaly-hint-shape-test
-  "Lock the anomaly-classification hint shape written into ex-data by
-   the brick's private `invalid-constructor-input` exception builder
+  "Lock the anomaly-classification hint shape returned by
+   the brick's private `invalid-constructor-input` constructor helper
    (taxonomy.clj) after the W2 anomaly convergence flip, and the
    dispatch-equivalence of the new shape against the legacy one.
 
    Pre-flip the builder wrote `:anomaly/category :anomalies/incorrect`
-   into ex-data — the legacy classification key. Post-flip it writes
+   into ex-data — the legacy classification key. Post-flip it returns
    `:anomaly/type :invalid-input` directly, because
    `:anomalies/incorrect` is one of the cognitect-standard categories
    that the convergence runbook maps 1:1 to a generic type with no
@@ -42,15 +42,16 @@
    and the dispatch test below pins the canonical-hint-only dispatch
    path it relies on."
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.failure-classifier.interface :as fc]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.failure-classifier.interface :as fc]
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Named literals + test factories.
 
 (def ^:private incomplete-attribution
   "Attribution map missing `:failure/class` — triggers
-   `require-field!` → `invalid-constructor-input` through
+   `require-field` -> `invalid-constructor-input` through
    `make-classified-failure`."
   {:failure/message "boom"})
 
@@ -61,37 +62,32 @@
 
 (def ^:private invalid-input-canonical-hint
   "Canonical anomaly hint for the cognitect-standard
-   `:invalid-input` class — what `invalid-constructor-input` writes
-   into ex-data post-flip."
+   `:invalid-input` class — what `invalid-constructor-input` returns
+   post-flip."
   {:anomaly/type :invalid-input})
-
-(defn- catch-ex-data
-  "Run `thunk`, return the ex-data of any thrown ex-info (nil
-   otherwise). Lets the producer assertions stay flat."
-  [thunk]
-  (try (thunk) nil
-       (catch clojure.lang.ExceptionInfo e (ex-data e))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Shape assertions on the post-flip producers.
 
 (deftest invalid-constructor-input-emits-canonical-invalid-input-hint
-  (testing ":anomaly/type :invalid-input is written into ex-data"
-    (let [data (catch-ex-data #(fc/make-classified-failure incomplete-attribution))]
-      (is (some? data) "incomplete attribution throws ex-info")
-      (is (= :invalid-input (:anomaly/type data))
-          "canonical :anomaly/type is set per the runbook generic-standard map")))
+  (testing ":anomaly/type :invalid-input is returned by constructor anomaly"
+    (let [result (fc/make-classified-failure incomplete-attribution)]
+      (is (some? result) "incomplete attribution returns anomaly data")
+      (is (anomaly/anomaly? result) "constructor result satisfies canonical anomaly schema")
+      (is (= :invalid-input (:anomaly/type result))
+          "canonical :anomaly/type is set per the runbook generic-standard map")
+      (is (inst? (:anomaly/at result)) ":anomaly/at is a construction timestamp")))
 
-  (testing "legacy hint keys are absent from the producer ex-data"
+  (testing "legacy hint keys are absent from the producer anomaly"
     ;; `contains?` (not nil-check) — pre-flip the producer wrote
     ;; `:anomaly/category :anomalies/incorrect`, and `(:anomaly/category
     ;; data)` would also return nil when the key were re-introduced with
     ;; an explicit nil value. Pin absence so a regression to either of
     ;; the legacy producer shapes is caught.
-    (let [data (catch-ex-data #(fc/make-classified-failure incomplete-attribution))]
-      (is (false? (contains? data :anomaly/category))
+    (let [result (fc/make-classified-failure incomplete-attribution)]
+      (is (false? (contains? result :anomaly/category))
           ":anomaly/category key is not present on post-flip producer")
-      (is (false? (contains? data :anomaly/subtype))
+      (is (false? (contains? result :anomaly/subtype))
           ":anomalies/incorrect is cognitect-standard, no subtype key attached"))))
 
 ;------------------------------------------------------------------------------ Layer 2

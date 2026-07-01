@@ -9,6 +9,7 @@
    Layer 0: Config loading
    Layer 1: Schemas and predicates"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -154,35 +155,34 @@
     value))
 
 (defn- invalid-constructor-input
-  "Create a canonical ex-info payload for invalid constructor inputs.
+  "Create a canonical anomaly map for invalid constructor inputs.
 
-   The ex-data carries the canonical anomaly classification key
-   (`:anomaly/type :invalid-input`) so any catcher routing through
-   `classify-failure` resolves to the same `:failure.class/*` it would
-   have under the legacy `:anomaly/category :anomalies/incorrect`
-   shape. `:anomalies/incorrect` is one of the eight cognitect-standard
-   categories the convergence runbook maps 1:1 to a generic
-   `:anomaly/type` with no subtype."
+   The top-level `:anomaly/type :invalid-input` lets callers route the
+   result through `classify-failure` the same way they routed the
+   former exception data shape."
   [message data]
-  (ex-info message (assoc data :anomaly/type :invalid-input)))
+  (anomaly/anomaly :invalid-input message data))
 
-(defn- require-field!
-  "Require a non-nil field and throw ex-info when missing."
+(defn- constructor-anomaly?
+  [x]
+  (and (anomaly/anomaly? x)
+       (= :invalid-input (:anomaly/type x))))
+
+(defn- require-field
+  "Return an anomaly when a required field is nil."
   [field-name value data]
   (when (nil? value)
-    (throw (invalid-constructor-input
-            (str "Missing required field " field-name)
-            (assoc data :field field-name))))
-  value)
+    (invalid-constructor-input
+     (str "Missing required field " field-name)
+     (assoc data :field field-name))))
 
-(defn- validate-enum!
-  "Validate an enum field when present and throw ex-info when invalid."
+(defn- validate-enum
+  "Return an anomaly when a present enum field is invalid."
   [field-name value valid-fn data]
   (when (and (some? value) (not (valid-fn value)))
-    (throw (invalid-constructor-input
-            (str "Invalid value for " field-name)
-            (assoc data :field field-name :value value))))
-  value)
+    (invalid-constructor-input
+     (str "Invalid value for " field-name)
+     (assoc data :field field-name :value value))))
 
 (defn make-dependency-attribution
   "Construct canonical dependency attribution.
@@ -194,21 +194,23 @@
     vendor :failure/vendor
     dependency-class :dependency/class
     retryability :dependency/retryability}]
-  (require-field! :failure/source source {:constructor :dependency-attribution})
-  (validate-enum! :failure/source source valid-failure-source?
-                  {:constructor :dependency-attribution})
-  (validate-enum! :failure/vendor vendor valid-dependency-vendor?
-                  {:constructor :dependency-attribution})
-  (validate-enum! :dependency/class dependency-class valid-dependency-class?
-                  {:constructor :dependency-attribution})
-  (validate-enum! :dependency/retryability retryability valid-dependency-retryability?
-                  {:constructor :dependency-attribution})
-  (let [resolved-class (value-or-default dependency-class :unknown)
-        resolved-retryability (value-or-default retryability :non-retryable)]
-    (cond-> {:failure/source source
-             :dependency/class resolved-class
-             :dependency/retryability resolved-retryability}
-      vendor (assoc :failure/vendor vendor))))
+  (if-let [validation-error
+           (or (require-field :failure/source source {:constructor :dependency-attribution})
+               (validate-enum :failure/source source valid-failure-source?
+                              {:constructor :dependency-attribution})
+               (validate-enum :failure/vendor vendor valid-dependency-vendor?
+                              {:constructor :dependency-attribution})
+               (validate-enum :dependency/class dependency-class valid-dependency-class?
+                              {:constructor :dependency-attribution})
+               (validate-enum :dependency/retryability retryability valid-dependency-retryability?
+                              {:constructor :dependency-attribution}))]
+    validation-error
+    (let [resolved-class (value-or-default dependency-class :unknown)
+          resolved-retryability (value-or-default retryability :non-retryable)]
+      (cond-> {:failure/source source
+               :dependency/class resolved-class
+               :dependency/retryability resolved-retryability}
+        vendor (assoc :failure/vendor vendor)))))
 
 (defn make-classified-dependency-failure
   "Construct canonical classified dependency failure."
@@ -216,35 +218,41 @@
     message :failure/message
     context :failure/context
     :as dependency-attribution}]
-  (require-field! :failure/class failure-class
-                  {:constructor :classified-dependency-failure})
-  (require-field! :failure/message message
-                  {:constructor :classified-dependency-failure})
-  (validate-enum! :failure/class failure-class valid-failure-class?
-                  {:constructor :classified-dependency-failure})
-  (let [attribution (make-dependency-attribution dependency-attribution)]
-    (cond-> {:failure/class failure-class
-             :failure/message message
-             :failure/source (:failure/source attribution)
-             :dependency/class (:dependency/class attribution)
-             :dependency/retryability (:dependency/retryability attribution)}
-      (:failure/vendor attribution) (assoc :failure/vendor (:failure/vendor attribution))
-      context (assoc :failure/context context))))
+  (if-let [validation-error
+           (or (require-field :failure/class failure-class
+                              {:constructor :classified-dependency-failure})
+               (require-field :failure/message message
+                              {:constructor :classified-dependency-failure})
+               (validate-enum :failure/class failure-class valid-failure-class?
+                              {:constructor :classified-dependency-failure}))]
+    validation-error
+    (let [attribution (make-dependency-attribution dependency-attribution)]
+      (if (constructor-anomaly? attribution)
+        attribution
+        (cond-> {:failure/class failure-class
+                 :failure/message message
+                 :failure/source (:failure/source attribution)
+                 :dependency/class (:dependency/class attribution)
+                 :dependency/retryability (:dependency/retryability attribution)}
+          (:failure/vendor attribution) (assoc :failure/vendor (:failure/vendor attribution))
+          context (assoc :failure/context context))))))
 
 (defn make-classified-failure
   "Construct canonical classified failure."
   [{failure-class :failure/class
     message :failure/message
     context :failure/context}]
-  (require-field! :failure/class failure-class
-                  {:constructor :classified-failure})
-  (require-field! :failure/message message
-                  {:constructor :classified-failure})
-  (validate-enum! :failure/class failure-class valid-failure-class?
-                  {:constructor :classified-failure})
-  (cond-> {:failure/class failure-class
-           :failure/message message}
-    context (assoc :failure/context context)))
+  (if-let [validation-error
+           (or (require-field :failure/class failure-class
+                              {:constructor :classified-failure})
+               (require-field :failure/message message
+                              {:constructor :classified-failure})
+               (validate-enum :failure/class failure-class valid-failure-class?
+                              {:constructor :classified-failure}))]
+    validation-error
+    (cond-> {:failure/class failure-class
+             :failure/message message}
+      context (assoc :failure/context context))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

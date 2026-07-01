@@ -20,8 +20,10 @@
 
 (ns ai.miniforge.failure-classifier.classifier-test
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.failure-classifier.interface :as fc]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.failure-classifier.interface :as fc]
+   [ai.miniforge.failure-classifier.taxonomy :as taxonomy]
+   [clojure.test :refer [deftest is testing]]))
 
 ;; ---------------------------------------------------------------------------- Taxonomy tests
 
@@ -132,40 +134,50 @@
              :failure/context {:phase :plan}})))))
 
 (deftest dependency-constructor-validation-test
-  (testing "dependency attribution constructor rejects missing required fields"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Missing required field :failure/source"
-         (fc/make-dependency-attribution {}))))
+  (testing "dependency attribution constructor returns anomaly for missing required fields"
+    (let [result (fc/make-dependency-attribution {})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
+      (is (re-find #"Missing required field :failure/source"
+                   (:anomaly/message result)))))
 
-  (testing "dependency attribution constructor rejects invalid enum values"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :dependency/class"
-         (fc/make-dependency-attribution
-          {:failure/source :external-provider
-           :dependency/class :bogus})))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :failure/vendor"
-         (fc/make-dependency-attribution
-          {:failure/source :external-provider
-           :failure/vendor :bogus}))))
+  (testing "dependency attribution constructor returns anomaly for invalid enum values"
+    (let [result (fc/make-dependency-attribution
+                  {:failure/source :external-provider
+                   :dependency/class :bogus})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
+      (is (re-find #"Invalid value for :dependency/class"
+                   (:anomaly/message result))))
+    (let [result (fc/make-dependency-attribution
+                  {:failure/source :external-provider
+                   :failure/vendor :bogus})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
+      (is (re-find #"Invalid value for :failure/vendor"
+                   (:anomaly/message result)))))
 
-  (testing "classified dependency failure constructor rejects invalid required fields"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Missing required field :failure/class"
-         (fc/make-classified-dependency-failure
-          {:failure/message "oops"
-           :failure/source :external-provider})))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :failure/class"
-         (fc/make-classified-dependency-failure
-          {:failure/class :bogus
-           :failure/message "oops"
-           :failure/source :external-provider})))))
+  (testing "classified dependency failure constructor returns anomaly for invalid required fields"
+    (let [result (fc/make-classified-dependency-failure
+                  {:failure/message "oops"
+                   :failure/source :external-provider})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
+      (is (re-find #"Missing required field :failure/class"
+                   (:anomaly/message result))))
+    (let [result (fc/make-classified-dependency-failure
+                  {:failure/class :bogus
+                   :failure/message "oops"
+                   :failure/source :external-provider})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
+      (is (re-find #"Invalid value for :failure/class"
+                   (:anomaly/message result))))))
 
 ;; ---------------------------------------------------------------------------- Classification by anomaly category
 
@@ -363,6 +375,18 @@
                  (select-keys record (keys expected))))
           (is (= (:error/message input) (:failure/message record)))
           (is (fc/dependency-failure? record)))))))
+
+(deftest classify-record-propagates-dependency-attribution-anomaly-test
+  (testing "dependency attribution anomalies are returned directly"
+    (let [expected (anomaly/anomaly :invalid-input
+                                    "Synthetic dependency attribution failure"
+                                    {:source :test})]
+      (with-redefs [taxonomy/make-dependency-attribution (fn [_] expected)]
+        (let [result (fc/classify-record
+                      {:error/message "Anthropic API service unavailable"})]
+          (is (identical? expected result))
+          (is (anomaly/anomaly? result))
+          (is (= :invalid-input (:anomaly/type result))))))))
 
 (deftest classify-exception-record-test
   (let [record (fc/classify-exception-record
