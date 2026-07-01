@@ -228,7 +228,10 @@
 
 (defn parse-project-list-output
   "Parse a Polylith `ws get:changes:changed-or-affected-projects`
-   response into a vector of project names."
+   response into a vector of project names.
+
+   Returns a vector on valid blank/sequential/set output, or
+   `{:ok? false :error ...}` when the output is invalid or unparseable."
   [output]
   (let [trimmed (some-> output str/trim not-empty)]
     (if-not trimmed
