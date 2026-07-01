@@ -30,11 +30,12 @@
 
    Validation boundary: public API fns (`reconstruct-context`,
    `trim-pipeline`, `resolve-workflow-identity`) validate their inputs
-   via `schema/validate!` before the pure core runs. Events read from
+   via `schema/validate` before the pure core runs. Events read from
    disk are filtered with `schema/valid-event?` — events without a
    keyword `:event/type` are dropped at the boundary, so everything
   the extractors see is well-shaped."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
@@ -145,14 +146,14 @@
        first
        :workflow/spec))
 
-(defn- ensure-reconstruction-source!
-  [checkpoint-data events-dir workflow-id raw-events]
-  (when-not (or checkpoint-data (seq raw-events))
-    (response/throw-anomaly! :anomalies/not-found
-                             (str "No events found for workflow: " workflow-id)
-                             {:workflow-id workflow-id
-                              :events-dir (str events-dir)
-                              :raw-event-count (count raw-events)})))
+(defn- ensure-reconstruction-source
+  [checkpoint-data events-dir workflow-id events raw-events]
+  (when-not (or checkpoint-data (seq events))
+    (anomaly/anomaly :not-found
+                     (str "No events found for workflow: " workflow-id)
+                     {:workflow-id workflow-id
+                      :events-dir (str events-dir)
+                      :raw-event-count (count raw-events)})))
 
 (defn- checkpoint-status
   [checkpoint-data]
@@ -183,10 +184,10 @@
   []
   (if-let [resource (io/resource resume-config-resource)]
     (:workflow-resume/resume (edn/read-string (slurp resource)))
-    (response/throw-anomaly! :anomalies/not-found
-                             "Workflow resume config resource not found"
-                             {:resource resume-config-resource
-                              :config/error :invalid-config})))
+    (anomaly/anomaly :not-found
+                     "Workflow resume config resource not found"
+                     {:resource resume-config-resource
+                      :config/error :invalid-config})))
 
 (def ^:private resume-config
   (delay (read-resume-config)))
@@ -318,46 +319,52 @@
      :dag-paused?          — boolean
      :dag-pause-reason     — keyword or nil
 
-   Throws `:anomalies/not-found` if no valid events exist for the
-   workflow — adapters translate that to a user-facing error. Events
-   that fail shape validation (missing or non-keyword `:event/type`)
-   are silently dropped at the boundary."
+   Returns a `:not-found` anomaly if no valid events exist for the
+   workflow. Events that fail shape validation (missing or non-keyword
+   `:event/type`) are silently dropped at the boundary."
   [events-dir workflow-id]
-  (schema/validate! schema/ReconstructContextInput
-                    {:events-dir events-dir :workflow-id workflow-id}
-                    {:message "Invalid reconstruct-context input"})
-  (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
-        raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
-        events (vec (filter schema/valid-event? raw-events))
-        _ (ensure-reconstruction-source! checkpoint-data events-dir workflow-id raw-events)
-        by-type (group-by :event/type events)
-        phase-results (restored-phase-results checkpoint-data events)
-        completed-phases (restored-completed-phases checkpoint-data events phase-results)
-        workflow-spec (find-workflow-spec events)
-        started-event (first (get by-type :workflow/started))
-        machine-snapshot (:machine-snapshot checkpoint-data)
-        completed? (reconstructed-completed? by-type checkpoint-data)
-        failed? (reconstructed-failed? by-type checkpoint-data)
-        completed-dag-tasks (restored-completed-dag-tasks checkpoint-data events)
-        completed-dag-artifacts (restored-completed-dag-artifacts checkpoint-data events)
-        workspace-checkpoint (restored-workspace-checkpoint events)
-        dag-pause-info (restored-dag-pause-info checkpoint-data events)]
-    {:phase-results phase-results
-     :completed-phases completed-phases
-     :workflow-spec workflow-spec
-     :workflow-id (or (:execution/id machine-snapshot)
-                      (:workflow/id started-event)
-                      workflow-id)
-     :completed? completed?
-     :failed? failed?
-     :event-count (count events)
-     :completed-dag-tasks completed-dag-tasks
-     :completed-dag-artifacts completed-dag-artifacts
-     :workspace-checkpoint workspace-checkpoint
-     :dag-paused? (boolean dag-pause-info)
-     :dag-pause-reason (:pause-reason dag-pause-info)
-     :machine-snapshot machine-snapshot
-     :checkpoint-manifest (:manifest checkpoint-data)}))
+  (anomaly/let-ok [_config @resume-config
+                   _valid (schema/validate schema/ReconstructContextInput
+                                           {:events-dir events-dir
+                                            :workflow-id workflow-id}
+                                           {:message "Invalid reconstruct-context input"
+                                            :schema-name :workflow-resume/reconstruct-context})]
+    (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
+          raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
+          events (vec (filter schema/valid-event? raw-events))]
+      (anomaly/let-ok [_source (ensure-reconstruction-source checkpoint-data
+                                                             events-dir
+                                                             workflow-id
+                                                             events
+                                                             raw-events)]
+        (let [by-type (group-by :event/type events)
+              phase-results (restored-phase-results checkpoint-data events)
+              completed-phases (restored-completed-phases checkpoint-data events phase-results)
+              workflow-spec (find-workflow-spec events)
+              started-event (first (get by-type :workflow/started))
+              machine-snapshot (:machine-snapshot checkpoint-data)
+              completed? (reconstructed-completed? by-type checkpoint-data)
+              failed? (reconstructed-failed? by-type checkpoint-data)
+              completed-dag-tasks (restored-completed-dag-tasks checkpoint-data events)
+              completed-dag-artifacts (restored-completed-dag-artifacts checkpoint-data events)
+              workspace-checkpoint (restored-workspace-checkpoint events)
+              dag-pause-info (restored-dag-pause-info checkpoint-data events)]
+          {:phase-results phase-results
+           :completed-phases completed-phases
+           :workflow-spec workflow-spec
+           :workflow-id (or (:execution/id machine-snapshot)
+                            (:workflow/id started-event)
+                            workflow-id)
+           :completed? completed?
+           :failed? failed?
+           :event-count (count events)
+           :completed-dag-tasks completed-dag-tasks
+           :completed-dag-artifacts completed-dag-artifacts
+           :workspace-checkpoint workspace-checkpoint
+           :dag-paused? (boolean dag-pause-info)
+           :dag-pause-reason (:pause-reason dag-pause-info)
+           :machine-snapshot machine-snapshot
+           :checkpoint-manifest (:manifest checkpoint-data)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pipeline trimming
@@ -370,13 +377,15 @@
    leading completed phases removed. Completed phases after the first
    incomplete phase are preserved."
   [workflow completed-phases]
-  (schema/validate! schema/TrimPipelineInput
-                    {:workflow workflow :completed-phases completed-phases}
-                    {:message "Invalid trim-pipeline input"})
-  (let [completed-set (set completed-phases)
-        remaining (vec (drop-while #(completed-set (:phase %))
-                                   (get workflow :workflow/pipeline [])))]
-    (assoc workflow :workflow/pipeline remaining)))
+  (anomaly/let-ok [_valid (schema/validate schema/TrimPipelineInput
+                                           {:workflow workflow
+                                            :completed-phases completed-phases}
+                                           {:message "Invalid trim-pipeline input"
+                                            :schema-name :workflow-resume/trim-pipeline})]
+    (let [completed-set (set completed-phases)
+          remaining (vec (drop-while #(completed-set (:phase %))
+                                     (get workflow :workflow/pipeline [])))]
+      (assoc workflow :workflow/pipeline remaining))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Identity resolution
@@ -441,7 +450,7 @@
       it's a synthetic DAG-task key.
    3. The caller-supplied `fallback-fn` (typically a selection profile).
 
-   Throws `:anomalies/not-found` if no source yields a loadable type.
+   Returns a `:not-found` anomaly if no source yields a loadable type.
 
    Arguments:
    - `reconstructed` — context map from `reconstruct-context`
@@ -455,23 +464,25 @@
    identifier-regex gate above keeps the legacy path working for
    well-formed names while rejecting human-title strings."
   [reconstructed fallback-fn]
-  (schema/validate! schema/ResolveWorkflowIdentityInput
-                    {:reconstructed reconstructed :fallback-fn fallback-fn}
-                    {:message "Invalid resolve-workflow-identity input"})
-  (let [workflow-spec (:workflow-spec reconstructed)
-        machine-snapshot (:machine-snapshot reconstructed)
-        workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
-        workflow-type (or (candidate-workflow-type workflow-spec)
-                          (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
-                            workflow-id-from-snapshot)
-                          (fallback-fn))
-        workflow-version (or (get workflow-spec :version)
-                             (:execution/workflow-version machine-snapshot)
-                             "latest")]
-    (when-not workflow-type
-      (response/throw-anomaly! :anomalies/not-found
-                              "Could not resolve a workflow type for resume"
-                              {:operation :resume-workflow
-                               :workflow-spec workflow-spec}))
-    {:workflow-type workflow-type
-     :workflow-version workflow-version}))
+  (anomaly/let-ok [_valid (schema/validate schema/ResolveWorkflowIdentityInput
+                                           {:reconstructed reconstructed
+                                            :fallback-fn fallback-fn}
+                                           {:message "Invalid resolve-workflow-identity input"
+                                            :schema-name :workflow-resume/resolve-workflow-identity})]
+    (let [workflow-spec (:workflow-spec reconstructed)
+          machine-snapshot (:machine-snapshot reconstructed)
+          workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
+          workflow-type (or (candidate-workflow-type workflow-spec)
+                            (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
+                              workflow-id-from-snapshot)
+                            (fallback-fn))
+          workflow-version (or (get workflow-spec :version)
+                               (:execution/workflow-version machine-snapshot)
+                               "latest")]
+      (if workflow-type
+        {:workflow-type workflow-type
+         :workflow-version workflow-version}
+        (anomaly/anomaly :not-found
+                         "Could not resolve a workflow type for resume"
+                         {:operation :resume-workflow
+                          :workflow-spec workflow-spec})))))

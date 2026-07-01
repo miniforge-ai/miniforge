@@ -116,9 +116,9 @@
    :workspace-checkpoint :dag-paused? bool :dag-pause-reason keyword-or-nil
    :machine-snapshot :checkpoint-manifest}.
 
-   Throws `:anomalies/not-found` when no valid events exist for the
-   workflow. Throws on invalid input args. Events failing shape
-   validation (missing/non-keyword `:event/type`) are dropped silently."
+   Returns a canonical anomaly when no valid events exist for the
+   workflow or input args are invalid. Events failing shape validation
+   (missing/non-keyword `:event/type`) are dropped silently."
   core/reconstruct-context)
 
 (def trim-pipeline
@@ -127,7 +127,7 @@
    Args: a workflow map with `:workflow/pipeline` and a collection of
    completed phase keywords. Returns the workflow with only the leading
    completed-phase prefix removed (completed phases after the first
-   incomplete phase are preserved). Throws on invalid input args."
+   incomplete phase are preserved), or an anomaly on invalid input."
   core/trim-pipeline)
 
 (def resolve-workflow-identity
@@ -140,6 +140,6 @@
 
    Preference for type: keyword-valid id from the recorded spec, then the
    machine-snapshot `:execution/workflow-id` (unless a synthetic DAG-task
-   key), then `fallback-fn`. Throws `:anomalies/not-found` if no source
-   yields a loadable type; throws on invalid input args."
+   key), then `fallback-fn`. Returns a canonical anomaly if no source
+   yields a loadable type or input args are invalid."
   core/resolve-workflow-identity)
