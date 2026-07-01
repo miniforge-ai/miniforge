@@ -18,9 +18,10 @@
 
 (ns ai.miniforge.progress-detector.anomaly.progress-detector-anomaly-test
   "Coverage for `event-envelope/validate-observation!`,
-   `config/merge-config`, and `tool-profile/register!` boundary
-   escalation via `response/throw-anomaly!`."
-  (:require [clojure.test :refer [deftest is testing]]
+   `config/merge-config`, and `tool-profile/register!` anomaly return
+   contracts."
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.progress-detector.config :as config]
             [ai.miniforge.progress-detector.event-envelope :as envelope]
             [ai.miniforge.progress-detector.tool-profile :as tool-profile])
@@ -52,23 +53,22 @@
       (is (re-find #"requires at least one layer" (.getMessage thrown)))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
-(deftest register-missing-tool-id-throws-anomaly
-  (testing "profile missing :tool/id raises :anomalies/incorrect"
+(deftest register-missing-tool-id-returns-anomaly
+  (testing "profile missing :tool/id returns :invalid-input"
     (let [registry (atom {})
-          thrown (try (tool-profile/register! registry {})
-                      nil
-                      (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"must include :tool/id" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+          result (tool-profile/register! registry {})]
+      (is (anomaly/anomaly? result))
+      (is (re-find #"must include :tool/id" (:anomaly/message result)))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= {} @registry)))))
 
-(deftest register-invalid-schema-throws-anomaly
-  (testing "profile failing schema validation raises :anomalies/incorrect"
+(deftest register-invalid-schema-returns-anomaly
+  (testing "profile failing schema validation returns :invalid-input"
     (let [registry (atom {})
-          thrown (try (tool-profile/register! registry {:tool/id :bogus
-                                                        :tool/garbage 42})
-                      nil
-                      (catch ExceptionInfo e e))]
-      (is (some? thrown))
-      (is (re-find #"ToolProfile schema validation" (.getMessage thrown)))
-      (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+          result (tool-profile/register! registry {:tool/id :bogus
+                                                   :tool/garbage 42})]
+      (is (anomaly/anomaly? result))
+      (is (re-find #"ToolProfile schema validation" (:anomaly/message result)))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (seq (get-in result [:anomaly/data :errors])))
+      (is (= {} @registry)))))

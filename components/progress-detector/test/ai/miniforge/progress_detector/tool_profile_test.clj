@@ -9,6 +9,7 @@
    The API is registration-based — components contribute profiles via
    register!. There is no built-in EDN-driven default registry."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.progress-detector.tool-profile :as sut]))
 
@@ -59,16 +60,21 @@
       (is (= :stable-with-resource-version
              (sut/determinism-of :tool/Read reg)))))
 
-  (testing "register! throws on profile missing :tool/id"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sut/register! (sut/make-registry)
-                                {:determinism :unstable}))))
+  (testing "register! returns anomaly data on profile missing :tool/id"
+    (let [reg (sut/make-registry)
+          result (sut/register! reg {:determinism :unstable})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= {} @reg))))
 
-  (testing "register! throws on profile failing schema validation"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (sut/register! (sut/make-registry)
-                                {:tool/id :tool/Bad
-                                 :determinism :NOT_A_VALID_LEVEL})))))
+  (testing "register! returns anomaly data on profile failing schema validation"
+    (let [reg (sut/make-registry)
+          result (sut/register! reg {:tool/id :tool/Bad
+                                     :determinism :NOT_A_VALID_LEVEL})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (seq (get-in result [:anomaly/data :errors])))
+      (is (= {} @reg)))))
 
 (deftest unregister!-test
   (testing "unregister! removes the profile"

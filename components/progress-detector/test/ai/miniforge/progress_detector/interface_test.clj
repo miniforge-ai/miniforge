@@ -150,11 +150,12 @@
   (testing "tool-determinism returns :unstable for unregistered tools"
     (is (= :unstable (pd/tool-determinism :tool/Unknown (pd/make-tool-registry)))))
 
-  (testing "register-tool-profile! validates against ToolProfile schema"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (pd/register-tool-profile! (pd/make-tool-registry)
+  (testing "register-tool-profile! returns anomaly data on invalid ToolProfile"
+    (let [result (pd/register-tool-profile! (pd/make-tool-registry)
                                             {:tool/id :tool/Bad
-                                             :determinism :NOT_VALID})))))
+                                             :determinism :NOT_VALID})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (seq (get-in result [:anomaly/data :errors]))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Config merge

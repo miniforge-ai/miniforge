@@ -224,8 +224,8 @@
 (defn register-tool-profile!
   "Add or overwrite a tool profile in `registry-atom`.
 
-   Throws via ex-info if the profile fails ToolProfile schema
-   validation — caller bug. Returns the new registry map.
+   Returns the new registry map on success, or an `:invalid-input`
+   anomaly if the profile fails ToolProfile schema validation.
 
    Arguments:
      registry-atom - atom holding the registry (typically the
