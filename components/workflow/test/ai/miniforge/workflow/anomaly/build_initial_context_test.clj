@@ -88,13 +88,14 @@
 
 (deftest run-pipeline-context-anomaly-returns-failed-context
   (testing "run-pipeline converts build-initial-context anomaly to failed context"
-    (with-redefs [runner/acquire-environment
-                  (fn [_workflow _input opts] [nil opts])]
-      (let [result (runner/run-pipeline workflow input
-                                        {:execution-mode :governed
-                                         :skip-lifecycle-events true})]
-        (is (= :failed (:execution/status result)))
-        (is (some #(= :initial-context-anomaly (:type %))
-                  (:execution/errors result)))
-        (is (= :governed
-               (-> result :execution/errors first :data :execution-mode)))))))
+    (with-redefs-fn {#'runner/acquire-environment
+                     (fn [_workflow _input opts] [nil opts])}
+      (fn []
+        (let [result (runner/run-pipeline workflow input
+                                          {:execution-mode :governed
+                                           :skip-lifecycle-events true})]
+          (is (= :failed (:execution/status result)))
+          (is (some #(= :initial-context-anomaly (:type %))
+                    (:execution/errors result)))
+          (is (= :governed
+                 (-> result :execution/errors first :data :execution-mode))))))))
