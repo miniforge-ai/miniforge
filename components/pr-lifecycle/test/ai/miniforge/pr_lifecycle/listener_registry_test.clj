@@ -381,5 +381,8 @@
         (let [r (reg/write-registry! *worktree* reg/empty-registry)]
           (is (not (dag/ok? r)))
           (is (= :listener-registry/write-failed (get-in r [:error :code])))
+          (is (= tmp-path (get-in r [:error :data :tmp-path])))
+          (is (= "java.lang.UnsupportedOperationException"
+                 (get-in r [:error :data :exception-class])))
           (is (not (fs/exists? tmp-path))
               ".tmp file should be deleted on move failure to avoid accumulating stale artifacts"))))))
