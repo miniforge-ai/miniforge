@@ -114,6 +114,19 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
+(deftest interrupted-exception-rethrow-is-fatal-only
+  (testing "InterruptedException rethrows preserve cancellation"
+    (let [src "(ns ai.miniforge.foo.loop)
+              (defn poll []
+                (try
+                  (Thread/sleep 1)
+                  (catch InterruptedException e
+                    (.interrupt (Thread/currentThread))
+                    (throw e))))"
+          {:keys [violations]} (exc/analyze-content "loop.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
 (deftest plain-failure-is-cleanup-needed
   (testing "messages without programmer-error markers are :cleanup-needed"
     (let [src "(ns ai.miniforge.foo.core)

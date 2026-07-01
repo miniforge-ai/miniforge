@@ -67,6 +67,19 @@
       (is (pos? (count violations)))
       (is (some #{:throw :ctor} (map :kind violations))))))
 
+(deftest ordinary-rethrow-remains-cleanup-needed
+  (testing "simple rethrow outside InterruptedException catch is still actionable"
+    (let [src "(ns ai.miniforge.foo.core)
+              (defn run []
+                (try
+                  (do-work)
+                  (catch Exception e
+                    (record e)
+                    (throw e))))"
+          {:keys [violations]} (exc/analyze-content "foo.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :cleanup-needed (:classification (first violations)))))))
+
 (deftest reports-line-and-column
   (testing "every violation carries a usable line:col location"
     (let [src "(ns ai.miniforge.foo.core)\n\n(defn b []\n  (throw (ex-info \"m\" {})))"

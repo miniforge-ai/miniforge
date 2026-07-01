@@ -335,8 +335,10 @@
   "Return the severity classification for a throw-shaped form found in
    a non-boundary namespace. Programmer-error guards are `:fatal-only`
    (informational); everything else is `:cleanup-needed`."
-  [form]
-  (if (programmer-error-guard? form)
+  [form context]
+  (if (or (and (:interrupted-catch? context)
+               (:simple-rethrow? context))
+          (programmer-error-guard? form))
     :fatal-only
     :cleanup-needed))
 
@@ -357,6 +359,30 @@
    block and its body is dev-only. The inventory excludes these."
   #{'comment 'clojure.core/comment})
 
+(defn- interrupted-exception-catch?
+  [form]
+  (and (seq? form)
+       (= 'catch (first form))
+       (let [class-sym (second form)]
+         (and (symbol? class-sym)
+              (= "InterruptedException" (name class-sym))))))
+
+(defn- simple-rethrow?
+  [form]
+  (and (seq? form)
+       (= 'throw (first form))
+       (= 2 (count form))
+       (symbol? (second form))))
+
+(defn- child-context
+  [context form child]
+  (cond-> context
+    (interrupted-exception-catch? form)
+    (assoc :interrupted-catch? true)
+
+    (simple-rethrow? child)
+    (assoc :simple-rethrow? true)))
+
 (defn- visit-form
   "Walk a single form and conj violation records onto `acc!` (a transient
    vector). Recurses into seqable children, including vectors and maps.
@@ -368,7 +394,9 @@
 
    `boundary?` is computed once at the file level — when true, the file
    yields no violations regardless of contents."
-  [acc! file-path boundary? form]
+  ([acc! file-path boundary? form]
+   (visit-form acc! file-path boundary? {} form))
+  ([acc! file-path boundary? context form]
   (cond
     boundary?
     acc!
@@ -382,29 +410,34 @@
 
         kind
         (conj! acc! (->violation-record file-path form
-                                        (classify-throw-site form)
+                                        (classify-throw-site form context)
                                         kind))
 
         :else
-        (reduce (fn [a child] (visit-form a file-path boundary? child))
+        (reduce (fn [a child]
+                  (visit-form a
+                              file-path
+                              boundary?
+                              (child-context context form child)
+                              child))
                 acc!
                 form)))
 
     (or (vector? form) (set? form))
-    (reduce (fn [a child] (visit-form a file-path boundary? child))
+    (reduce (fn [a child] (visit-form a file-path boundary? context child))
             acc!
             form)
 
     (map? form)
     (reduce (fn [a [k v]]
               (-> a
-                  (visit-form file-path boundary? k)
-                  (visit-form file-path boundary? v)))
+                  (visit-form file-path boundary? context k)
+                  (visit-form file-path boundary? context v)))
             acc!
             form)
 
     :else
-    acc!))
+    acc!)))
 
 (defn analyze-content
   "Analyze a single Clojure source file's content. Returns a map with:
