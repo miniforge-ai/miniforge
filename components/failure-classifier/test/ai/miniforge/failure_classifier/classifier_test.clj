@@ -20,8 +20,9 @@
 
 (ns ai.miniforge.failure-classifier.classifier-test
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.failure-classifier.interface :as fc]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.failure-classifier.interface :as fc]
+   [clojure.test :refer [deftest is testing]]))
 
 ;; ---------------------------------------------------------------------------- Taxonomy tests
 
@@ -134,7 +135,9 @@
 (deftest dependency-constructor-validation-test
   (testing "dependency attribution constructor returns anomaly for missing required fields"
     (let [result (fc/make-dependency-attribution {})]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
       (is (re-find #"Missing required field :failure/source"
                    (:anomaly/message result)))))
 
@@ -142,13 +145,17 @@
     (let [result (fc/make-dependency-attribution
                   {:failure/source :external-provider
                    :dependency/class :bogus})]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
       (is (re-find #"Invalid value for :dependency/class"
                    (:anomaly/message result))))
     (let [result (fc/make-dependency-attribution
                   {:failure/source :external-provider
                    :failure/vendor :bogus})]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
       (is (re-find #"Invalid value for :failure/vendor"
                    (:anomaly/message result)))))
 
@@ -156,14 +163,18 @@
     (let [result (fc/make-classified-dependency-failure
                   {:failure/message "oops"
                    :failure/source :external-provider})]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
       (is (re-find #"Missing required field :failure/class"
                    (:anomaly/message result))))
     (let [result (fc/make-classified-dependency-failure
                   {:failure/class :bogus
                    :failure/message "oops"
                    :failure/source :external-provider})]
+      (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
+      (is (inst? (:anomaly/at result)))
       (is (re-find #"Invalid value for :failure/class"
                    (:anomaly/message result))))))
 

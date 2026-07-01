@@ -42,8 +42,9 @@
    and the dispatch test below pins the canonical-hint-only dispatch
    path it relies on."
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [ai.miniforge.failure-classifier.interface :as fc]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.failure-classifier.interface :as fc]
+   [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Named literals + test factories.
@@ -72,8 +73,10 @@
   (testing ":anomaly/type :invalid-input is returned by constructor anomaly"
     (let [result (fc/make-classified-failure incomplete-attribution)]
       (is (some? result) "incomplete attribution returns anomaly data")
+      (is (anomaly/anomaly? result) "constructor result satisfies canonical anomaly schema")
       (is (= :invalid-input (:anomaly/type result))
-          "canonical :anomaly/type is set per the runbook generic-standard map")))
+          "canonical :anomaly/type is set per the runbook generic-standard map")
+      (is (inst? (:anomaly/at result)) ":anomaly/at is a construction timestamp")))
 
   (testing "legacy hint keys are absent from the producer anomaly"
     ;; `contains?` (not nil-check) — pre-flip the producer wrote

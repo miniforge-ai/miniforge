@@ -9,6 +9,7 @@
    Layer 0: Config loading
    Layer 1: Schemas and predicates"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
@@ -160,9 +161,7 @@
    result through `classify-failure` the same way they routed the
    former exception data shape."
   [message data]
-  {:anomaly/type :invalid-input
-   :anomaly/message message
-   :anomaly/data data})
+  (anomaly/anomaly :invalid-input message data))
 
 (defn- constructor-anomaly?
   [x]
