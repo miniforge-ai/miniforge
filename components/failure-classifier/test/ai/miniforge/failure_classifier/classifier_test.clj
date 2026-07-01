@@ -132,40 +132,40 @@
              :failure/context {:phase :plan}})))))
 
 (deftest dependency-constructor-validation-test
-  (testing "dependency attribution constructor rejects missing required fields"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Missing required field :failure/source"
-         (fc/make-dependency-attribution {}))))
+  (testing "dependency attribution constructor returns anomaly for missing required fields"
+    (let [result (fc/make-dependency-attribution {})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (re-find #"Missing required field :failure/source"
+                   (:anomaly/message result)))))
 
-  (testing "dependency attribution constructor rejects invalid enum values"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :dependency/class"
-         (fc/make-dependency-attribution
-          {:failure/source :external-provider
-           :dependency/class :bogus})))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :failure/vendor"
-         (fc/make-dependency-attribution
-          {:failure/source :external-provider
-           :failure/vendor :bogus}))))
+  (testing "dependency attribution constructor returns anomaly for invalid enum values"
+    (let [result (fc/make-dependency-attribution
+                  {:failure/source :external-provider
+                   :dependency/class :bogus})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (re-find #"Invalid value for :dependency/class"
+                   (:anomaly/message result))))
+    (let [result (fc/make-dependency-attribution
+                  {:failure/source :external-provider
+                   :failure/vendor :bogus})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (re-find #"Invalid value for :failure/vendor"
+                   (:anomaly/message result)))))
 
-  (testing "classified dependency failure constructor rejects invalid required fields"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Missing required field :failure/class"
-         (fc/make-classified-dependency-failure
-          {:failure/message "oops"
-           :failure/source :external-provider})))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid value for :failure/class"
-         (fc/make-classified-dependency-failure
-          {:failure/class :bogus
-           :failure/message "oops"
-           :failure/source :external-provider})))))
+  (testing "classified dependency failure constructor returns anomaly for invalid required fields"
+    (let [result (fc/make-classified-dependency-failure
+                  {:failure/message "oops"
+                   :failure/source :external-provider})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (re-find #"Missing required field :failure/class"
+                   (:anomaly/message result))))
+    (let [result (fc/make-classified-dependency-failure
+                  {:failure/class :bogus
+                   :failure/message "oops"
+                   :failure/source :external-provider})]
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (re-find #"Invalid value for :failure/class"
+                   (:anomaly/message result))))))
 
 ;; ---------------------------------------------------------------------------- Classification by anomaly category
 
