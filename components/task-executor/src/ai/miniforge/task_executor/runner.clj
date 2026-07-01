@@ -65,7 +65,7 @@
 (defn acquire-resources!
   "Acquire worktree and environment for task execution.
 
-  Returns: {:worktree-acquired? bool, :env-record map} or throws on error"
+  Returns DAG ok with {:worktree-acquired? bool, :env-record map}, or DAG error."
   [task-id lock-pool executor logger config]
   (log-event logger :acquiring-resources task-id {})
 
@@ -73,28 +73,31 @@
   (let [worktree-result (dag/acquire-worktree! lock-pool task-id
                                                (:worktree-acquire-timeout-ms defaults)
                                                logger)]
-    (when (dag/err? worktree-result)
-      (throw (ex-info "Failed to acquire worktree"
-                      {:task-id task-id
-                       :error (:error worktree-result)})))
+    (if (dag/err? worktree-result)
+      (dag/err :task-executor/worktree-acquire-failed
+               "Failed to acquire worktree"
+               {:task-id task-id
+                :error (:error worktree-result)})
+      ;; Acquire environment from executor
+      (let [env-config {:repo-url (:repo-url config)
+                        :branch (:branch config "main")
+                        :env (:env config {})
+                        :resources (:resources config {})}
+            env-result (dag/acquire-environment! executor task-id env-config)]
+        (if (dag/err? env-result)
+          (do
+            (dag/release-worktree! lock-pool task-id logger)
+            (dag/err :task-executor/environment-acquire-failed
+                     "Failed to acquire environment"
+                     {:task-id task-id
+                      :error (:error env-result)}))
 
-    ;; Acquire environment from executor
-    (let [env-config {:repo-url (:repo-url config)
-                      :branch (:branch config "main")
-                      :env (:env config {})
-                      :resources (:resources config {})}
-          env-result (dag/acquire-environment! executor task-id env-config)]
-      (when (dag/err? env-result)
-        (dag/release-worktree! lock-pool task-id logger)
-        (throw (ex-info "Failed to acquire environment"
-                        {:task-id task-id
-                         :error (:error env-result)})))
+          (do
+            (log-event logger :resources-acquired task-id
+                       {:env-id (get-in env-result [:data :env-id])})
 
-      (log-event logger :resources-acquired task-id
-                 {:env-id (get-in env-result [:value :env-id])})
-
-      {:worktree-acquired? true
-       :env-record (:value env-result)})))
+            (dag/ok {:worktree-acquired? true
+                     :env-record (:data env-result)})))))))
 
 (defn generate-code!
   "Run inner loop to generate code artifact.
@@ -199,26 +202,28 @@
    A parse failure means the agent would have no structured context and
    would waste its entire turn budget exploring the codebase.
 
-   Returns nil on success. Throws ex-info on failure so the caller
-   can fail-fast and surface a clear error without touching the environment."
+   Returns DAG ok on success. Returns DAG error on failure so the caller
+   can fail-fast before touching the environment."
   [task-id task logger]
-  (when-let [spec-path (or (get-in task [:spec/provenance :source-file])
-                           (get task :spec/source-file)
-                           (get task :spec-path))]
-    (log-event logger :validating-spec task-id {:spec-path spec-path})
-    (try
-      (spec-parser/parse-spec-file spec-path)
-      (log-event logger :spec-valid task-id {:spec-path spec-path})
-      nil
-      (catch Exception e
-        (throw (ex-info
-                (str "Spec validation failed — refusing to spawn agent without valid spec. "
-                     "Fix the spec at: " spec-path ". "
-                     "Cause: " (ex-message e))
-                {:task-id   task-id
-                 :spec-path spec-path
-                 :cause     (ex-message e)}
-                e))))))
+  (if-let [spec-path (or (get-in task [:spec/provenance :source-file])
+                         (get task :spec/source-file)
+                         (get task :spec-path))]
+    (do
+      (log-event logger :validating-spec task-id {:spec-path spec-path})
+      (try
+        (spec-parser/parse-spec-file spec-path)
+        (log-event logger :spec-valid task-id {:spec-path spec-path})
+        (dag/ok nil)
+        (catch Exception e
+          (dag/err
+           :task-executor/spec-validation-failed
+           (str "Spec validation failed — refusing to spawn agent without valid spec. "
+                "Fix the spec at: " spec-path ". "
+                "Cause: " (ex-message e))
+           {:task-id task-id
+            :spec-path spec-path
+            :cause (ex-message e)}))))
+    (dag/ok nil)))
 
 (defn calculate-cost-usd
   "Calculate estimated cost in USD based on tokens used.
@@ -265,6 +270,68 @@
                  :end-time end-time}]
     (dag/update-metrics! run-atom task-id metrics)))
 
+(defn- task-state
+  [run-atom task-id]
+  (when run-atom
+    (get-in @run-atom [:tasks task-id :state])))
+
+(defn- fail-task-with-error!
+  [task-id run-atom logger start-time error]
+  (log-event logger :task-execution-failed task-id
+             {:error (:message error)
+              :duration-ms (- (System/currentTimeMillis) start-time)
+              :error-classification (:code error)})
+  (dag/mark-failed! run-atom task-id error logger)
+  {:ok? false
+   :error error
+   :error-classification {:type (:code error)}})
+
+(defn- fail-task-with-exception!
+  [task-id run-atom logger start-time e]
+  (let [classified (error-classifier/classify-error e (task-state run-atom task-id))]
+    (log-event logger :task-execution-failed task-id
+               {:error (ex-message e)
+                :cause (ex-cause e)
+                :duration-ms (- (System/currentTimeMillis) start-time)
+                :error-classification (:type classified)
+                :vendor (:vendor classified)})
+
+    (dag/mark-failed! run-atom task-id e logger)
+
+    {:ok? false
+     :error e
+     :error-classification classified}))
+
+(defn- run-task-after-resources!
+  [task-id task task-context run-atom logger start-time env-record]
+  (let [task-context-with-env (assoc task-context :env-record env-record)
+        generation-result (generate-code! task-id task task-context-with-env)
+        code-artifact (:artifact generation-result)
+        lifecycle-result (run-pr-lifecycle! task-id task code-artifact task-context-with-env)]
+    (update-task-metrics! run-atom task-id lifecycle-result start-time)
+    (log-event logger :task-execution-completed task-id
+               {:status (:status lifecycle-result)
+                :pr-url (:pr-url lifecycle-result)
+                :duration-ms (- (System/currentTimeMillis) start-time)})
+    {:ok? true
+     :value lifecycle-result}))
+
+(defn- continue-with-resources!
+  [task-id task task-context run-atom logger start-time env-record resource-result]
+  (if (dag/err? resource-result)
+    (fail-task-with-error! task-id run-atom logger start-time (:error resource-result))
+    (let [env (get-in resource-result [:data :env-record])]
+      (reset! env-record env)
+      (run-task-after-resources! task-id task task-context run-atom logger start-time env))))
+
+(defn- continue-after-spec-validation!
+  [task-id task task-context run-atom lock-pool executor logger config start-time env-record spec-result]
+  (if (dag/err? spec-result)
+    (fail-task-with-error! task-id run-atom logger start-time (:error spec-result))
+    (continue-with-resources!
+     task-id task task-context run-atom logger start-time env-record
+     (acquire-resources! task-id lock-pool executor logger config))))
+
 (defn execute-task
   [task-id task run-context]
   (let [{:keys [run-atom executor logger lock-pool config]} run-context
@@ -277,53 +344,12 @@
 
     (let [env-record (atom nil)]
       (try
-        ;; Step 0: Validate spec — fail fast before spending any resources
-        (validate-spec! task-id task logger)
-
-        ;; Step 1: Acquire resources
-        (let [resources (acquire-resources! task-id lock-pool executor logger config)]
-          (reset! env-record (:env-record resources)))
-
-        ;; Step 2: Generate code
-        (let [generation-result (generate-code! task-id task
-                                               (assoc task-context
-                                                      :env-record @env-record))
-              code-artifact (:artifact generation-result)
-
-              ;; Step 3 & 4: Run PR lifecycle (blocking)
-              lifecycle-result (run-pr-lifecycle! task-id task code-artifact
-                                                 (assoc task-context
-                                                        :env-record @env-record))]
-
-          ;; Step 5: Update metrics (with timing)
-          (update-task-metrics! run-atom task-id lifecycle-result start-time)
-
-          (log-event logger :task-execution-completed task-id
-                     {:status (:status lifecycle-result)
-                      :pr-url (:pr-url lifecycle-result)
-                      :duration-ms (- (System/currentTimeMillis) start-time)})
-
-          {:ok? true
-           :value lifecycle-result})
+        (continue-after-spec-validation!
+         task-id task task-context run-atom lock-pool executor logger config start-time env-record
+         (validate-spec! task-id task logger))
 
         (catch Exception e
-          ;; Classify the error to provide user-friendly context
-          (let [task-state (when run-atom
-                            (get-in @run-atom [:tasks task-id :state]))
-                classified (error-classifier/classify-error e task-state)]
-            (log-event logger :task-execution-failed task-id
-                       {:error (ex-message e)
-                        :cause (ex-cause e)
-                        :duration-ms (- (System/currentTimeMillis) start-time)
-                        :error-classification (:type classified)
-                        :vendor (:vendor classified)})
-
-            ;; Mark task as failed in DAG
-            (dag/mark-failed! run-atom task-id e logger)
-
-            {:ok? false
-             :error e
-             :error-classification classified}))
+          (fail-task-with-exception! task-id run-atom logger start-time e))
 
         (finally
           ;; Always clean up resources
