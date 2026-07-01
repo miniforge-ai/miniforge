@@ -19,11 +19,12 @@
 (ns ai.miniforge.event-stream.archive-test
   "Tests for the BD-2b sub-3b atomic archive operation."
   (:require
-   [clojure.test :refer [deftest is]]
-   [clojure.java.io :as io]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.archive :as archive]
    [ai.miniforge.event-stream.manifest :as manifest]
-   [ai.miniforge.event-stream.sinks :as sinks])
+   [ai.miniforge.event-stream.sinks :as sinks]
+   [clojure.java.io :as io]
+   [clojure.test :refer [deftest is]])
   (:import
    [java.util UUID]))
 
@@ -142,6 +143,23 @@
                             (archive/archive-workflow!
                              test-workflow-id {:base-dir base}))))))
 
+(deftest archive-workflow!-returns-manifest-save-anomaly
+  (with-temp-base
+    (fn [base]
+      (let [live (seed-live-workflow! base test-workflow-id)
+            result (archive/archive-workflow!
+                    test-workflow-id
+                    {:base-dir base
+                     :snapshot-watermark
+                     {:workflow_sequence_number -1
+                      :last_event_id "018f3a9c8e4b12d0"}})]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :invalid-manifest
+               (get-in result [:anomaly/data :reason])))
+        (is (.exists live)
+            "archive side effects stop when manifest validation returns an anomaly")))))
+
 ;------------------------------------------------------------------------------ recover-incomplete-archive!
 
 (deftest recover-incomplete-archive!-finishes-archiving-state
@@ -237,3 +255,16 @@
           (is (= #{(str wid-a) (str wid-b)} recovered)))
         (is (.exists (io/file (archived-dir-for base wid-a) "archived.marker")))
         (is (.exists (io/file (archived-dir-for base wid-b) "archived.marker")))))))
+
+(deftest recover-all-incomplete!-propagates-recovery-anomaly
+  (with-temp-base
+    (fn [base]
+      (let [wid (UUID/fromString "00000000-0000-0000-0000-0000000000cc")
+            d (seed-live-workflow! base wid)
+            m (manifest/load-manifest d)
+            recovery-anomaly (anomaly/anomaly :invalid-input
+                                              "recovery failed"
+                                              {:reason :test-recovery-failed})]
+        (manifest/save-manifest! d (manifest/transition-archive m :archiving))
+        (with-redefs [archive/recover-incomplete-archive! (fn [_ _] recovery-anomaly)]
+          (is (= recovery-anomaly (archive/recover-all-incomplete! base))))))))

@@ -50,6 +50,7 @@
    and `ProcessHandle/of` indirectly via the manifest module)."
   {:miniforge/runtime :jvm-only}
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.manifest :as manifest]
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.storage-layout :as layout]
@@ -137,13 +138,14 @@
    comes for free; we only need to fsync the parent dir afterwards
    to commit the rename of the manifest tempfile."
   [^File live-dir {:keys [snapshot-watermark]}]
-  (let [current (manifest/load-manifest live-dir)
-        staged  (cond-> (manifest/transition-archive current :archiving)
-                  snapshot-watermark
-                  (assoc :snapshot_watermark snapshot-watermark))]
-    (manifest/save-manifest! live-dir staged)
-    (fsync-dir! live-dir)
-    staged))
+  (let [current (manifest/load-manifest live-dir)]
+    (anomaly/let-ok [transitioned (manifest/transition-archive current :archiving)
+                     staged-manifest (cond-> transitioned
+                                       snapshot-watermark
+                                       (assoc :snapshot_watermark snapshot-watermark))
+                     _saved (manifest/save-manifest! live-dir staged-manifest)]
+      (fsync-dir! live-dir)
+      staged-manifest)))
 
 (defn- complete-snapshot-rename!
   "Step 5: rename `snapshot.transit.json.tmp` → `snapshot.transit.json`
@@ -166,15 +168,15 @@
    Writing the marker first would produce a directory that appears complete
    to the scanner even though the manifest still reads `:archiving`."
   [^File archived-dir]
-  (let [m (manifest/load-manifest archived-dir)
-        completed (-> m
-                      (manifest/transition-archive :archived)
-                      (assoc :archived_at (str (java.time.Instant/now))))]
-    (manifest/save-manifest! archived-dir completed)
-    (touch-marker! (marker-path archived-dir))
-    (fsync-dir! archived-dir)
-    (fsync-dir! (.getParentFile archived-dir))
-    completed))
+  (let [m (manifest/load-manifest archived-dir)]
+    (anomaly/let-ok [transitioned (manifest/transition-archive m :archived)
+                     completed (assoc transitioned
+                                      :archived_at (str (java.time.Instant/now)))
+                     _saved (manifest/save-manifest! archived-dir completed)]
+      (touch-marker! (marker-path archived-dir))
+      (fsync-dir! archived-dir)
+      (fsync-dir! (.getParentFile archived-dir))
+      completed)))
 
 ;------------------------------------------------------------------------------ Layer 2 — workflow-bound orchestration over Layer 1
 
@@ -225,16 +227,16 @@
     ;; we're recovering, the manifest is already :archiving and the
     ;; state machine rolls back to :live first (legal edge) before
     ;; re-transitioning.
-    (when (= :live (:archive_status current))
-      (stage-archiving! live-dir opts))
-    ;; Step 5: rename the snapshot tmp into place.
-    (complete-snapshot-rename! live-dir)
-    ;; Step 6: atomic dir rename.
-    (.mkdirs (.getParentFile archived))
-    (atomic-rename! live-dir archived)
-    ;; Steps 7–8: marker + archived_at + fsync.
-    (mark-archive-complete! archived)
-    archived))
+    (anomaly/let-ok [_staged (when (= :live (:archive_status current))
+                               (stage-archiving! live-dir opts))]
+      ;; Step 5: rename the snapshot tmp into place.
+      (complete-snapshot-rename! live-dir)
+      ;; Step 6: atomic dir rename.
+      (.mkdirs (.getParentFile archived))
+      (atomic-rename! live-dir archived)
+      ;; Steps 7–8: marker + archived_at + fsync.
+      (anomaly/let-ok [_completed (mark-archive-complete! archived)]
+        archived))))
 
 (defn recover-incomplete-archive!
   "Resume a half-finished archive at `live-dir` (manifest's
@@ -258,8 +260,8 @@
       (do (complete-snapshot-rename! live-dir)
           (.mkdirs (.getParentFile archived))
           (atomic-rename! live-dir archived)
-          (mark-archive-complete! archived)
-          archived)
+          (anomaly/let-ok [_completed (mark-archive-complete! archived)]
+            archived))
       ;; Live dir missing but archived dir lacks the marker — pick
       ;; up at step 7.
       (and in-archd (not (.exists (marker-path archived))))
@@ -296,7 +298,14 @@
    workflow-ids. Intended for boot-time recovery — production
    callers invoke this once before resuming normal operation."
   [base-dir]
-  (vec
-    (for [{:keys [workflow-id]} (scan-incomplete-archives base-dir)]
-      (do (recover-incomplete-archive! base-dir workflow-id)
-          workflow-id))))
+  (let [result (reduce (fn [recovered {:keys [workflow-id]}]
+                         (let [next-result (recover-incomplete-archive!
+                                             base-dir workflow-id)]
+                           (if (anomaly/anomaly? next-result)
+                             (reduced next-result)
+                             (conj recovered workflow-id))))
+                       []
+                       (scan-incomplete-archives base-dir))]
+    (if (anomaly/anomaly? result)
+      result
+      (vec result))))
