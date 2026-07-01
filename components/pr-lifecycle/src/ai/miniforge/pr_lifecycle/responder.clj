@@ -30,7 +30,6 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
-   [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [clojure.string :as str]))
 
@@ -51,9 +50,9 @@
    when `url` is a recognizable GitHub PR URL, or an `:invalid-input`
    anomaly carrying `:url` in `:anomaly/data`.
 
-   This is the canonical, anomaly-returning entry point. The boundary
-   site `respond-to-comments!` consumes the anomaly and rethrows via
-   `response/throw-anomaly!` with `:anomalies/incorrect`."
+   This is the canonical, anomaly-returning entry point. The
+   orchestrator returns the anomaly unchanged so callers can decide
+   how to surface it."
   [url]
   (or (parse-pr-url url)
       (anomaly/anomaly :invalid-input
@@ -212,10 +211,9 @@
    `{:comments vector :groups vector}` on success, or a `:fault`
    anomaly when the upstream `poller/fetch-pr-comments` errors.
 
-   This is the canonical, anomaly-returning entry point. The boundary
-   helper `fetch-actionable-comments` rethrows via
-   `response/throw-anomaly!` with `:anomalies/fault` for legacy
-   slingshot consumers."
+   This is the canonical, anomaly-returning entry point. The
+   orchestrator returns the anomaly unchanged so callers can decide
+   how to surface it."
   [worktree-path pr-number]
   (let [result (poller/fetch-pr-comments worktree-path pr-number)]
     (if (dag/err? result)
@@ -227,19 +225,6 @@
             actionable (filter-actionable-comments all)]
         {:comments actionable
          :groups (group-comments-by-file actionable)}))))
-
-(defn- fetch-actionable-comments
-  "Boundary helper. Calls `fetch-actionable-comments-result`; on
-   anomaly result raises a slingshot `:anomalies/fault` throw.
-
-   Returns `{:comments vector :groups vector}` on success."
-  [worktree-path pr-number]
-  (let [result (fetch-actionable-comments-result worktree-path pr-number)]
-    (if (anomaly/anomaly? result)
-      (response/throw-anomaly! :anomalies/fault
-                               (:anomaly/message result)
-                               (:anomaly/data result))
-      result)))
 
 (defn- respond-result
   "Build the response summary map."
@@ -272,22 +257,26 @@
     :comments-found int
     :files-processed int
     :fixes [{:path :succeeded? :comment-ids :replied? :resolved?}]
-    :pushed? bool}"
+    :pushed? bool}
+
+   Returns an anomaly map unchanged when the PR URL is invalid or PR
+   comment fetching fails."
   [pr-url worktree-path run-fix-fn push-fn opts]
   (let [parsed (parse-pr-url-result pr-url)]
-    (when (anomaly/anomaly? parsed)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (:anomaly/message parsed)
-                               (:anomaly/data parsed)))
-    (let [{:keys [number]} parsed
-          {:keys [comments groups]} (fetch-actionable-comments worktree-path number)]
-      (if (empty? groups)
-        (respond-result number 0 0 [] false)
-        (let [context (gather-context worktree-path number groups)
-              ;; Process comment groups in parallel
-              fix-futures (mapv #(future (process-comment-group
-                                         worktree-path number run-fix-fn context opts %))
-                                groups)
-              fixes (mapv deref fix-futures)
-              pushed? (if (some :succeeded? fixes) (push-fn) false)]
-          (respond-result number (count comments) (count groups) fixes pushed?))))))
+    (if (anomaly/anomaly? parsed)
+      parsed
+      (let [{:keys [number]} parsed
+            fetch-result (fetch-actionable-comments-result worktree-path number)]
+        (if (anomaly/anomaly? fetch-result)
+          fetch-result
+          (let [{:keys [comments groups]} fetch-result]
+            (if (empty? groups)
+              (respond-result number (count comments) 0 [] false)
+              (let [context (gather-context worktree-path number groups)
+                    ;; Process comment groups in parallel
+                    fix-futures (mapv #(future (process-comment-group
+                                               worktree-path number run-fix-fn context opts %))
+                                      groups)
+                    fixes (mapv deref fix-futures)
+                    pushed? (if (some :succeeded? fixes) (push-fn) false)]
+                (respond-result number (count comments) (count groups) fixes pushed?)))))))))

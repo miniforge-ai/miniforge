@@ -23,6 +23,7 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.github :as github]
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
@@ -150,6 +151,20 @@
         (is (= 0 (:files-processed result)))
         (is (false? (:pushed? result)))))))
 
+(deftest respond-to-comments-comments-without-file-groups-test
+  (testing "counts actionable comments even when no file groups are processable"
+    (with-redefs [poller/fetch-pr-comments
+                  (fn [_ _] (dag/ok {:comments [(dissoc review-comment :comment/path)]}))]
+      (let [result (responder/respond-to-comments!
+                    "https://github.com/org/repo/pull/1"
+                    "/tmp/worktree"
+                    (fn [_ _] {})
+                    (fn [] true)
+                    {})]
+        (is (= 1 (:comments-found result)))
+        (is (= 0 (:files-processed result)))
+        (is (false? (:pushed? result)))))))
+
 (deftest respond-to-comments-with-comments-test
   (testing "processes comments, runs fix, and reports results"
     (let [fix-calls (atom [])]
@@ -228,9 +243,31 @@
         (is (false? (:pushed? result)))))))
 
 (deftest respond-to-comments-invalid-url-test
-  (testing "throws on unparseable PR URL"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Could not parse"
-          (responder/respond-to-comments! "not-a-url" "/tmp" (fn [_ _] {}) (fn [] true) {})))))
+  (testing "returns anomaly on unparseable PR URL"
+    (let [result (responder/respond-to-comments! "not-a-url" "/tmp" (fn [_ _] {}) (fn [] true) {})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
+
+(deftest respond-to-comments-fetch-failure-test
+  (testing "returns fetch anomaly without running fixes or pushing"
+    (let [fix-called? (atom false)
+          push-called? (atom false)]
+      (with-redefs [poller/fetch-pr-comments
+                    (fn [_ _] (dag/err :network "down"))]
+        (let [result (responder/respond-to-comments!
+                      "https://github.com/org/repo/pull/1"
+                      "/tmp/worktree"
+                      (fn [& _]
+                        (reset! fix-called? true)
+                        {})
+                      (fn []
+                        (reset! push-called? true)
+                        true)
+                      {})]
+          (is (anomaly/anomaly? result))
+          (is (= :fault (:anomaly/type result)))
+          (is (false? @fix-called?))
+          (is (false? @push-called?)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

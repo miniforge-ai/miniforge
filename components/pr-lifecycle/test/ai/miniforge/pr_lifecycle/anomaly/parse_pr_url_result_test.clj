@@ -18,16 +18,15 @@
 
 (ns ai.miniforge.pr-lifecycle.anomaly.parse-pr-url-result-test
   "Coverage for `responder/parse-pr-url-result` (anomaly-returning) and
-   the boundary throw via `responder/respond-to-comments!`.
+   the anomaly passthrough via `responder/respond-to-comments!`.
 
-   Unrecognized URL → `:invalid-input` anomaly. The boundary helper
-   escalates via `response/throw-anomaly!` with `:anomalies/incorrect`."
+   Unrecognized URL -> `:invalid-input` anomaly. The orchestrator
+   returns the anomaly unchanged so callers can decide how to surface
+   it."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]
-   [ai.miniforge.pr-lifecycle.responder :as responder])
-  (:import
-   (clojure.lang ExceptionInfo)))
+   [ai.miniforge.pr-lifecycle.responder :as responder]))
 
 ;------------------------------------------------------------------------------ Happy path
 
@@ -59,15 +58,15 @@
   (testing "nil URL yields :invalid-input anomaly"
     (is (anomaly/anomaly? (responder/parse-pr-url-result nil)))))
 
-;------------------------------------------------------------------------------ Boundary helper escalates via slingshot
+;------------------------------------------------------------------------------ Orchestrator preserves anomaly values
 
-(deftest respond-to-comments-escalates-url-parse-anomaly
-  (testing "respond-to-comments! rethrows anomaly as ExceptionInfo"
-    (is (thrown-with-msg?
-         ExceptionInfo
-         #"Could not parse PR number from URL"
-         (responder/respond-to-comments! "https://gitlab.com/x/y/pull/1"
-                                         "/tmp"
-                                         (fn [& _] {})
-                                         (fn [] true)
-                                         {})))))
+(deftest respond-to-comments-preserves-url-parse-anomaly
+  (testing "respond-to-comments! returns parse anomaly unchanged"
+    (let [result (responder/respond-to-comments! "https://gitlab.com/x/y/pull/1"
+                                                 "/tmp"
+                                                 (fn [& _] {})
+                                                 (fn [] true)
+                                                 {})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= "Could not parse PR number from URL" (:anomaly/message result))))))
