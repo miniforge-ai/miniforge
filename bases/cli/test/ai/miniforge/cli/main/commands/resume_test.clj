@@ -18,6 +18,8 @@
 
 (ns ai.miniforge.cli.main.commands.resume-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [clojure.test :refer [deftest is testing]]
    [clojure.java.io :as io]
    [cheshire.core :as json]
@@ -28,8 +30,8 @@
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
-   [ai.miniforge.automation-edge-correlator.interface :as correlator]
-   [ai.miniforge.workflow-resume.interface :as wr]))
+   [ai.miniforge.workflow-resume.interface :as wr]
+   [slingshot.slingshot :refer [try+]]))
 
 (deftest resolve-resume-workflow-test
   (testing "recorded workflow spec wins over configured fallback"
@@ -58,6 +60,19 @@
            clojure.lang.ExceptionInfo
            #"Could not resolve a workflow type for resume"
            (sut/resolve-resume-workflow {}))))))
+
+(deftest throw-resume-anomaly-preserves-canonical-metadata-test
+  (testing "CLI escalation keeps the original return-value anomaly fields"
+    (let [source (anomaly/anomaly :invalid-input
+                                  "Invalid resume request"
+                                  {:workflow-id "bad"})
+          thrown (try+
+                  (#'sut/throw-resume-anomaly! source)
+                  (catch [:anomaly/category :anomalies/incorrect] m m))]
+      (is (= :anomalies/incorrect (:anomaly/category thrown)))
+      (is (= :invalid-input (:anomaly/type thrown)))
+      (is (= (:anomaly/at source) (:anomaly/at thrown)))
+      (is (= "bad" (:workflow-id thrown))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; read-event-file — bug fix coverage

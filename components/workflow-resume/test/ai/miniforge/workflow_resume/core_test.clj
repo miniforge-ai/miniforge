@@ -41,6 +41,22 @@
         (is (= :invalid-config
                (get-in result [:anomaly/data :config/error])))))))
 
+(deftest reconstruct-context-propagates-resume-config-anomaly-test
+  (testing "configuration faults short-circuit before disk reads"
+    (let [config-anomaly (anomaly/anomaly
+                          :not-found
+                          "Missing resume configuration"
+                          {:resource "config/workflow-resume/resume.edn"})]
+      (with-redefs [core/resume-config (delay config-anomaly)
+                    workflow-checkpoints/load-checkpoint-data
+                    (fn [_workflow-id]
+                      (throw (ex-info "checkpoint should not be read" {})))
+                    es/read-workflow-events-by-id
+                    (fn [_events-dir _workflow-id]
+                      (throw (ex-info "events should not be read" {})))]
+        (is (= config-anomaly
+               (core/reconstruct-context "/tmp/unused-events" (str (random-uuid)))))))))
+
 (deftest reconstructed-status-predicates-test
   (testing "predicates read the reconstructed status flags"
     (let [completed {:completed? true}
@@ -550,6 +566,21 @@
           (let [ctx (core/reconstruct-context base-dir wf-id)]
             (is (= 1 (:event-count ctx)))
             (is (= [:plan] (:completed-phases ctx)))))))))
+
+(deftest reconstruct-context-rejects-malformed-only-events-test
+  (with-temp-events-dir
+    (fn [base-dir]
+      (let [wf-id (str (random-uuid))
+            wf-dir (doto (io/file base-dir wf-id) .mkdirs)]
+        (write-event! wf-dir "20260421T000002Z-b.json"
+                      {"legacy" "no event/type here"})
+        (write-event! wf-dir "20260421T000003Z-c.json"
+                      {"~:event/type" "workflow/phase-completed"})
+        (testing "parseable events without a valid discriminator are not a resume source"
+          (let [result (core/reconstruct-context base-dir wf-id)]
+            (is (anomaly/anomaly? result))
+            (is (= :not-found (:anomaly/type result)))
+            (is (= 2 (get-in result [:anomaly/data :raw-event-count])))))))))
 
 (deftest trim-pipeline-validates-workflow-shape-test
   (testing "workflow without :workflow/pipeline is rejected"

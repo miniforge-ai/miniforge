@@ -75,7 +75,7 @@
   [ev]
   (m/validate EventBase ev))
 
-(defn validate!
+(defn validate
   "Return `value` if it matches `schema`, otherwise return a canonical
    `:invalid-input` anomaly."
   [schema value opts]

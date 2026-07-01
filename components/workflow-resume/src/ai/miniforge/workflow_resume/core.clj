@@ -30,7 +30,7 @@
 
    Validation boundary: public API fns (`reconstruct-context`,
    `trim-pipeline`, `resolve-workflow-identity`) validate their inputs
-   via `schema/validate!` before the pure core runs. Events read from
+   via `schema/validate` before the pure core runs. Events read from
    disk are filtered with `schema/valid-event?` — events without a
    keyword `:event/type` are dropped at the boundary, so everything
   the extractors see is well-shaped."
@@ -147,8 +147,8 @@
        :workflow/spec))
 
 (defn- ensure-reconstruction-source
-  [checkpoint-data events-dir workflow-id raw-events]
-  (when-not (or checkpoint-data (seq raw-events))
+  [checkpoint-data events-dir workflow-id events raw-events]
+  (when-not (or checkpoint-data (seq events))
     (anomaly/anomaly :not-found
                      (str "No events found for workflow: " workflow-id)
                      {:workflow-id workflow-id
@@ -323,17 +323,19 @@
    workflow. Events that fail shape validation (missing or non-keyword
    `:event/type`) are silently dropped at the boundary."
   [events-dir workflow-id]
-  (anomaly/let-ok [_valid (schema/validate! schema/ReconstructContextInput
-                                            {:events-dir events-dir
-                                             :workflow-id workflow-id}
-                                            {:message "Invalid reconstruct-context input"
-                                             :schema-name :workflow-resume/reconstruct-context})]
+  (anomaly/let-ok [_config @resume-config
+                   _valid (schema/validate schema/ReconstructContextInput
+                                           {:events-dir events-dir
+                                            :workflow-id workflow-id}
+                                           {:message "Invalid reconstruct-context input"
+                                            :schema-name :workflow-resume/reconstruct-context})]
     (let [checkpoint-data (workflow-checkpoints/load-checkpoint-data workflow-id)
           raw-events (or (es/read-workflow-events-by-id events-dir workflow-id) [])
           events (vec (filter schema/valid-event? raw-events))]
       (anomaly/let-ok [_source (ensure-reconstruction-source checkpoint-data
                                                              events-dir
                                                              workflow-id
+                                                             events
                                                              raw-events)]
         (let [by-type (group-by :event/type events)
               phase-results (restored-phase-results checkpoint-data events)
@@ -375,11 +377,11 @@
    leading completed phases removed. Completed phases after the first
    incomplete phase are preserved."
   [workflow completed-phases]
-  (anomaly/let-ok [_valid (schema/validate! schema/TrimPipelineInput
-                                            {:workflow workflow
-                                             :completed-phases completed-phases}
-                                            {:message "Invalid trim-pipeline input"
-                                             :schema-name :workflow-resume/trim-pipeline})]
+  (anomaly/let-ok [_valid (schema/validate schema/TrimPipelineInput
+                                           {:workflow workflow
+                                            :completed-phases completed-phases}
+                                           {:message "Invalid trim-pipeline input"
+                                            :schema-name :workflow-resume/trim-pipeline})]
     (let [completed-set (set completed-phases)
           remaining (vec (drop-while #(completed-set (:phase %))
                                      (get workflow :workflow/pipeline [])))]
@@ -462,11 +464,11 @@
    identifier-regex gate above keeps the legacy path working for
    well-formed names while rejecting human-title strings."
   [reconstructed fallback-fn]
-  (anomaly/let-ok [_valid (schema/validate! schema/ResolveWorkflowIdentityInput
-                                            {:reconstructed reconstructed
-                                             :fallback-fn fallback-fn}
-                                            {:message "Invalid resolve-workflow-identity input"
-                                             :schema-name :workflow-resume/resolve-workflow-identity})]
+  (anomaly/let-ok [_valid (schema/validate schema/ResolveWorkflowIdentityInput
+                                           {:reconstructed reconstructed
+                                            :fallback-fn fallback-fn}
+                                           {:message "Invalid resolve-workflow-identity input"
+                                            :schema-name :workflow-resume/resolve-workflow-identity})]
     (let [workflow-spec (:workflow-spec reconstructed)
           machine-snapshot (:machine-snapshot reconstructed)
           workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)

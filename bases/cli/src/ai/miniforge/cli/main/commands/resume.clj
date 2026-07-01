@@ -71,7 +71,10 @@
   (when (anomaly/anomaly? a)
     (response/throw-anomaly! (anomaly-category a)
                              (:anomaly/message a)
-                             (:anomaly/data a))))
+                             (merge (:anomaly/data a)
+                                    (select-keys a [:anomaly/type
+                                                    :anomaly/subtype
+                                                    :anomaly/at])))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Thin delegations kept for compatibility with existing callers/tests
