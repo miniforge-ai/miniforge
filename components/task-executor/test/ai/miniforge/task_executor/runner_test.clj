@@ -23,6 +23,7 @@
   code generation → PR lifecycle → metrics accumulation → cleanup."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.task-executor.runner :as runner]
    [clojure.test :refer [deftest testing is]]))
 
@@ -264,6 +265,39 @@
       (is (= :active (:status env))
           "Environment should be active"))))
 
+(deftest acquire-resources-worktree-failure-test
+  (testing "worktree acquisition failure returns DAG error data"
+    (with-redefs [dag/acquire-worktree! (fn [& _]
+                                          (dag/err :timeout
+                                                   "worktree timeout"
+                                                   {:holder-id "task-1"}))]
+      (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
+        (is (dag/err? result))
+        (is (= :task-executor/worktree-acquire-failed
+               (get-in result [:error :code])))
+        (is (= :timeout
+               (get-in result [:error :data :error :code])))))))
+
+(deftest acquire-resources-environment-failure-test
+  (testing "environment acquisition failure releases the worktree and returns DAG error data"
+    (let [released? (atom false)]
+      (with-redefs [dag/acquire-worktree! (fn [& _]
+                                            (dag/ok {:holder-id "task-1"}))
+                    dag/acquire-environment! (fn [& _]
+                                               (dag/err :environment-unavailable
+                                                        "environment unavailable"
+                                                        {:executor :mock}))
+                    dag/release-worktree! (fn [& _]
+                                            (reset! released? true)
+                                            (dag/ok {:released true}))]
+        (let [result (runner/acquire-resources! "task-1" nil nil nil {})]
+          (is (dag/err? result))
+          (is (= :task-executor/environment-acquire-failed
+                 (get-in result [:error :code])))
+          (is (= :environment-unavailable
+                 (get-in result [:error :data :error :code])))
+          (is (true? @released?)))))))
+
 (deftest code-generation-failure-test
   (testing "Code generation failure marks task as failed"
     (let [dag-executor (mock-dag-executor)
@@ -450,10 +484,10 @@
 
 (deftest validate-spec-no-path-test
   (testing "no-op when task has no spec path"
-    (is (nil? (runner/validate-spec! "task-1" {} nil))
+    (is (dag/ok? (runner/validate-spec! "task-1" {} nil))
         "Should return nil when no spec-related key present"))
   (testing "no-op when task has other keys but no spec path"
-    (is (nil? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
+    (is (dag/ok? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
         "Should return nil for task with no spec path")))
 
 (deftest validate-spec-valid-file-test
@@ -465,25 +499,31 @@
                      "---\n\n"
                      "## Design\n\nSome design content.\n"))
           task {:spec/source-file path}]
-      (is (nil? (runner/validate-spec! "task-1" task nil))
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
           "Should return nil for valid spec"))))
 
 (deftest validate-spec-missing-file-test
-  (testing "throws when spec path points to a nonexistent file"
-    (let [task {:spec/source-file "/nonexistent/path/spec.md"}]
-      (is (thrown-with-msg? Exception #"Spec validation failed"
-            (runner/validate-spec! "task-1" task nil))))))
+  (testing "returns DAG error when spec path points to a nonexistent file"
+    (let [task {:spec/source-file "/nonexistent/path/spec.md"}
+          result (runner/validate-spec! "task-1" task nil)]
+      (is (dag/err? result))
+      (is (= :task-executor/spec-validation-failed
+             (get-in result [:error :code])))
+      (is (re-find #"Spec validation failed"
+                   (get-in result [:error :message]))))))
 
 (deftest validate-spec-malformed-spec-test
   (testing "plain markdown without frontmatter is now valid — decorated from H1"
     (let [path (write-temp-spec! "# Compliance Scanner M2\n\nExecute phase design.")
           task {:spec/source-file path}]
-      (is (nil? (runner/validate-spec! "task-1" task nil)))))
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil)))))
 
-  (testing "spec-path key is also checked — throws for nonexistent file"
-    (let [task {:spec-path "/nonexistent/spec.md"}]
-      (is (thrown-with-msg? Exception #"Spec validation failed"
-            (runner/validate-spec! "task-1" task nil))))))
+  (testing "spec-path key is also checked — returns DAG error for nonexistent file"
+    (let [task {:spec-path "/nonexistent/spec.md"}
+          result (runner/validate-spec! "task-1" task nil)]
+      (is (dag/err? result))
+      (is (= :task-executor/spec-validation-failed
+             (get-in result [:error :code]))))))
 
 (deftest validate-spec-provenance-key-test
   (testing "reads spec path from :spec/provenance :source-file"
@@ -493,7 +533,7 @@
                      "description: D\n"
                      "---\n"))
           task {:spec/provenance {:source-file path}}]
-      (is (nil? (runner/validate-spec! "task-1" task nil))
+      (is (dag/ok? (runner/validate-spec! "task-1" task nil))
           "Should accept path nested under :spec/provenance"))))
 
 ;------------------------------------------------------------------------------ calculate-cost-usd Tests
