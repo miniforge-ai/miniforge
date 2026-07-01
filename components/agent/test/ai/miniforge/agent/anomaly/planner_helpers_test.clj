@@ -18,10 +18,9 @@
 
 (ns ai.miniforge.agent.anomaly.planner-helpers-test
   "Coverage for the planner's anomaly-returning helpers introduced
-   during the exceptions-as-data migration. The boundary throws
-   inside `create-planner` still escalate via slingshot under the
-   agent taxonomy, but the underlying decisions are now testable as
-   plain data."
+   during the exceptions-as-data migration. The create-planner boundary
+   now converts these expected anomalies into canonical response/error
+   values under the agent taxonomy."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.agent.planner :as planner]
             [ai.miniforge.anomaly.interface :as anomaly]))
