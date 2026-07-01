@@ -331,13 +331,22 @@
       (str (subs one-line 0 max-len) " …")
       one-line)))
 
+(defn- simple-rethrow?
+  [form]
+  (and (seq? form)
+       (= 'throw (first form))
+       (= 2 (count form))
+       (symbol? (second form))))
+
 (defn- classify-throw-site
   "Return the severity classification for a throw-shaped form found in
-   a non-boundary namespace. Programmer-error guards are `:fatal-only`
+   a non-boundary namespace. Programmer-error guards and exact
+   `InterruptedException` catch-binding rethrows are `:fatal-only`
    (informational); everything else is `:cleanup-needed`."
   [form context]
-  (if (or (and (:interrupted-catch? context)
-               (:simple-rethrow? context))
+  (if (or (and (:interrupted-binding context)
+               (simple-rethrow? form)
+               (= (second form) (:interrupted-binding context)))
           (programmer-error-guard? form))
     :fatal-only
     :cleanup-needed))
@@ -367,21 +376,18 @@
          (and (symbol? class-sym)
               (= "InterruptedException" (name class-sym))))))
 
-(defn- simple-rethrow?
+(defn- interrupted-catch-binding
   [form]
-  (and (seq? form)
-       (= 'throw (first form))
-       (= 2 (count form))
-       (symbol? (second form))))
+  (when (interrupted-exception-catch? form)
+    (let [binding-sym (nth form 2 nil)]
+      (when (symbol? binding-sym)
+        binding-sym))))
 
 (defn- child-context
-  [context form child]
-  (cond-> context
-    (interrupted-exception-catch? form)
-    (assoc :interrupted-catch? true)
-
-    (simple-rethrow? child)
-    (assoc :simple-rethrow? true)))
+  [context form _child]
+  (if-let [binding-sym (interrupted-catch-binding form)]
+    (assoc context :interrupted-binding binding-sym)
+    context))
 
 (defn- visit-form
   "Walk a single form and conj violation records onto `acc!` (a transient
