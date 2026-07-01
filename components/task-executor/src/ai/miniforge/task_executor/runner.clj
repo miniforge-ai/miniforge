@@ -253,7 +253,7 @@
    - review-cycles: Number of review iterations
    - pr-url: GitHub PR URL
    - status: Final status (:merged, :failed, etc.)"
-  [run-atom task-id lifecycle-result start-time]
+  [run-atom _task-id lifecycle-result start-time]
   (let [total-tokens (get lifecycle-result :total-tokens 0)
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)
@@ -268,12 +268,12 @@
                  :status (:status lifecycle-result)
                  :start-time start-time
                  :end-time end-time}]
-    (dag/update-metrics! run-atom task-id metrics)))
+    (dag/update-metrics! run-atom metrics nil)))
 
 (defn- task-state
   [run-atom task-id]
   (when run-atom
-    (get-in @run-atom [:tasks task-id :state])))
+    (get-in @run-atom [:run/tasks task-id])))
 
 (defn- fail-task-with-error!
   [task-id run-atom logger start-time error]

@@ -298,6 +298,25 @@
                  (get-in result [:error :data :error :code])))
           (is (true? @released?)))))))
 
+(deftest execute-task-resource-failure-returns-error-data-test
+  (testing "DAG error data is recorded in state and returned to the caller"
+    (let [run-atom (atom (dag/create-run-state
+                          (random-uuid)
+                          {"task-1" (assoc (dag/create-task-state "task-1" #{})
+                                           :task/status :running)}))]
+      (with-redefs [dag/acquire-worktree! (fn [& _]
+                                            (dag/err :timeout
+                                                     "worktree timeout"
+                                                     {:holder-id "task-1"}))]
+        (let [result (runner/execute-task "task-1" {:task/id "task-1"} {:run-atom run-atom})]
+          (is (false? (:ok? result)))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in result [:error-classification :type])))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in result [:error :code])))
+          (is (= :task-executor/worktree-acquire-failed
+                 (get-in @run-atom [:run/tasks "task-1" :task/error :code]))))))))
+
 (deftest code-generation-failure-test
   (testing "Code generation failure marks task as failed"
     (let [dag-executor (mock-dag-executor)
@@ -413,6 +432,22 @@
       (is (> (:duration-ms @metrics-tracker 0) 10000)
           "Should accumulate duration from both phases"))))
 
+(deftest update-task-metrics-updates-dag-run-metrics-test
+  (testing "task lifecycle metrics are passed to DAG run metrics as a map"
+    (let [run-atom (atom (dag/create-run-state
+                          (random-uuid)
+                          {"task-1" (dag/create-task-state "task-1" #{})}))
+          start-time (- (System/currentTimeMillis) 100)
+          lifecycle-result {:total-tokens 1000
+                            :fix-iterations 2
+                            :ci-runs 1
+                            :review-cycles 1
+                            :pr-url "https://github.com/org/repo/pull/123"
+                            :status :merged}]
+      (runner/update-task-metrics! run-atom "task-1" lifecycle-result start-time)
+      (is (= 1000 (get-in @run-atom [:run/metrics :tokens-used])))
+      (is (= :merged (get-in @run-atom [:run/metrics :status]))))))
+
 (deftest task-execution-exception-handling-test
   (testing "Unexpected exceptions are caught and logged"
     (let [dag-executor (-> (mock-dag-executor)
@@ -485,10 +520,10 @@
 (deftest validate-spec-no-path-test
   (testing "no-op when task has no spec path"
     (is (dag/ok? (runner/validate-spec! "task-1" {} nil))
-        "Should return nil when no spec-related key present"))
+        "Should return DAG ok when no spec-related key present"))
   (testing "no-op when task has other keys but no spec path"
     (is (dag/ok? (runner/validate-spec! "task-1" {:task/description "Do stuff"} nil))
-        "Should return nil for task with no spec path")))
+        "Should return DAG ok for task with no spec path")))
 
 (deftest validate-spec-valid-file-test
   (testing "returns nil for a well-formed markdown spec"
@@ -500,7 +535,7 @@
                      "## Design\n\nSome design content.\n"))
           task {:spec/source-file path}]
       (is (dag/ok? (runner/validate-spec! "task-1" task nil))
-          "Should return nil for valid spec"))))
+          "Should return DAG ok for valid spec"))))
 
 (deftest validate-spec-missing-file-test
   (testing "returns DAG error when spec path points to a nonexistent file"
