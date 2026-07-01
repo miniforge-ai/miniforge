@@ -41,6 +41,7 @@
    by the cleanup path (sub-3) which both run on the JVM."
   {:miniforge/runtime :jvm-only}
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [cheshire.core :as json]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -51,7 +52,6 @@
    [java.lang.management ManagementFactory]
    [java.net InetAddress]
    [java.nio.file Files StandardCopyOption]
-   [java.nio.file.attribute FileAttribute]
    [java.time Instant]
    [java.util.concurrent Executors ScheduledExecutorService TimeUnit]))
 
@@ -142,22 +142,22 @@
    :archived   #{:tombstoned}
    :tombstoned #{}})
 
-(defn- ^String iso-now
+(defn- iso-now
   "ISO-8601 instant for `lease_renewed_at` / `created_at` etc."
-  []
+  ^String []
   (str (Instant/now)))
 
-(defn- ^String pid-string
+(defn- pid-string
   "Process id as a string. Built from the JMX runtime bean name —
    `pid@host` on hotspot — so we don't need Java-9-only APIs."
-  []
+  ^String []
   (let [name (.getName (ManagementFactory/getRuntimeMXBean))]
     (first (str/split name #"@"))))
 
-(defn- ^String hostname-string
+(defn- hostname-string
   "Best-effort canonical hostname. Falls back to `\"unknown-host\"` if
    DNS / lookup fails — the field is informational, not load-bearing."
-  []
+  ^String []
   (try (.getCanonicalHostName (InetAddress/getLocalHost))
        (catch Exception _ "unknown-host")))
 
@@ -172,14 +172,17 @@
   "Last-resort logging when no `:on-error` callback is supplied. Writes
    a single-line warning to stderr so persistent IO failures during
    the heartbeat are observable in the operator's terminal / CI logs
-   rather than silently disappearing. The workflow runner is the
+   rather than silently disappearing. Accepts either a Throwable or an
+   anomaly map returned by `renew-lease!`. The workflow runner is the
    normal caller and should prefer to wire its own logger via
    `:on-error`."
-  [^Throwable t workflow-dir]
+  [failure workflow-dir]
   (binding [*out* *err*]
     (println (str "WARNING: manifest heartbeat renew failed for "
                   (.getAbsolutePath ^File (io/file workflow-dir))
-                  ": " (.getMessage t)))))
+                  ": " (if (anomaly/anomaly? failure)
+                         (:anomaly/message failure)
+                         (.getMessage ^Throwable failure))))))
 
 (defn stop-heartbeat!
   "Shut a heartbeat executor down. Waits up to `:timeout-ms` (default
@@ -209,7 +212,7 @@
 (defn legal-archive-transition?
   "True iff the manifest may move from `from` to `to`."
   [from to]
-  (boolean (contains? (get legal-archive-transitions from #{}) to)))
+  (contains? (get legal-archive-transitions from #{}) to))
 
 (defn fresh-owner
   "Build an owner map with the calling process's pid + host, marking
@@ -255,17 +258,19 @@
 
 (defn transition-archive
   "Pure: move the manifest's `archive_status` from its current value
-   to `to`, returning the updated manifest. Throws ex-info on illegal
-   moves so callers can't silently corrupt the state machine."
+   to `to`, returning the updated manifest. Returns a canonical
+   `:conflict` anomaly on illegal moves so callers can't silently
+   corrupt the state machine."
   [manifest to]
   (let [from (:archive_status manifest)]
     (if (legal-archive-transition? from to)
       (assoc manifest :archive_status to)
-      (throw (ex-info "Illegal archive_status transition"
-                      {:reason :illegal-archive-transition
-                       :from   from
-                       :to     to
-                       :workflow-id (:workflow_id manifest)})))))
+      (anomaly/anomaly :conflict
+                       "Illegal archive_status transition"
+                       {:reason :illegal-archive-transition
+                        :from   from
+                        :to     to
+                        :workflow-id (:workflow_id manifest)}))))
 
 (defn init-active
   "Build a fresh `:active` / `:live` manifest for a new workflow.
@@ -324,79 +329,82 @@
    with `ATOMIC_MOVE` + `REPLACE_EXISTING`. A reader during the move
    sees either the old file or the new — never a half-written one.
 
-   Throws on schema-validation failure so callers can't silently
-   persist a corrupt shape."
+   Returns a canonical `:invalid-input` anomaly on schema-validation
+   failure so callers can't silently persist a corrupt shape."
   [workflow-dir manifest]
-  (when-let [err (explain manifest)]
-    (throw (ex-info "Manifest fails schema validation"
-                    {:reason :invalid-manifest
-                     :workflow-dir (.getAbsolutePath ^File (io/file workflow-dir))
-                     :error err})))
-  (let [^File dir   (io/file workflow-dir)
-        _           (.mkdirs dir)
-        ^File final (manifest-path dir)
-        ^File tmp   (io/file dir (str manifest-filename ".tmp"))]
-    ;; Cheshire writes keyword keys via `name`, so the snake_case keys
-    ;; in the manifest map (e.g. `:workflow_id`) round-trip as
-    ;; `"workflow_id"` on disk. Keyword *values* (status enums, the
-    ;; UUID workflow id) need explicit conversion before serialization
-    ;; — the `update`s below stringify them; `load-manifest` reverses
-    ;; the conversions on read.
-    (with-open [w (io/writer tmp)]
-      (json/generate-stream
-        (-> manifest
-            (update :workflow_id str)
-            (update :status name)
-            (update :archive_status name)
-            (update :snapshot_status name))
-        w
-        {:pretty true}))
-    ;; fsync the tmp file before moving so a crash mid-rename doesn't
-    ;; leave an empty manifest on disk.
-    (with-open [raf (java.io.RandomAccessFile. tmp "rw")]
-      (.force (.getChannel raf) true))
-    (Files/move (.toPath tmp)
-                (.toPath final)
-                (into-array java.nio.file.CopyOption
-                            [StandardCopyOption/ATOMIC_MOVE
-                             StandardCopyOption/REPLACE_EXISTING]))
-    final))
+  (if-let [err (explain manifest)]
+    (anomaly/anomaly :invalid-input
+                     "Manifest fails schema validation"
+                     {:reason :invalid-manifest
+                      :workflow-dir (.getAbsolutePath ^File (io/file workflow-dir))
+                      :error err})
+    (let [^File dir   (io/file workflow-dir)
+          _           (.mkdirs dir)
+          ^File final (manifest-path dir)
+          ^File tmp   (io/file dir (str manifest-filename ".tmp"))]
+      ;; Cheshire writes keyword keys via `name`, so the snake_case keys
+      ;; in the manifest map (e.g. `:workflow_id`) round-trip as
+      ;; `"workflow_id"` on disk. Keyword *values* (status enums, the
+      ;; UUID workflow id) need explicit conversion before serialization
+      ;; — the `update`s below stringify them; `load-manifest` reverses
+      ;; the conversions on read.
+      (with-open [w (io/writer tmp)]
+        (json/generate-stream
+          (-> manifest
+              (update :workflow_id str)
+              (update :status name)
+              (update :archive_status name)
+              (update :snapshot_status name))
+          w
+          {:pretty true}))
+      ;; fsync the tmp file before moving so a crash mid-rename doesn't
+      ;; leave an empty manifest on disk.
+      (with-open [raf (java.io.RandomAccessFile. tmp "rw")]
+        (.force (.getChannel raf) true))
+      (Files/move (.toPath tmp)
+                  (.toPath final)
+                  (into-array java.nio.file.CopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      final)))
 
 ;------------------------------------------------------------------------------ Layer 3 — manifest-bound IO composing Layer 2 read + write
 
 (defn renew-lease!
   "Re-stamp the lease and write the manifest atomically. Returns the
-   updated manifest. Idempotent — a missing manifest is a no-op
-   returning nil so the heartbeat doesn't crash if the workflow is
-   archived between ticks."
+   updated manifest, an anomaly from `save-manifest!`, or nil when the
+   manifest is absent. Idempotent — a missing manifest is a no-op so
+   the heartbeat doesn't crash if the workflow is archived between
+   ticks."
   [workflow-dir]
   (when-let [m (load-manifest workflow-dir)]
     (let [renewed (renew-lease m)]
-      (save-manifest! workflow-dir renewed)
-      renewed)))
+      (anomaly/let-ok [_saved (save-manifest! workflow-dir renewed)]
+        renewed))))
 
 ;------------------------------------------------------------------------------ Layer 4 — scheduled orchestration
 
-(defn ^ScheduledExecutorService start-heartbeat!
+(defn start-heartbeat!
   "Start a single-threaded scheduled executor that renews the
    manifest's lease every `:period-seconds` (default
    `heartbeat-period-seconds`). Returns the executor handle for
    `stop-heartbeat!`.
 
    Renew failures: a transient IO error during a beat must not crash
-   the workflow runner. By default any caught Throwable is reported
-   via `default-heartbeat-error-log!` (a stderr warning) so persistent
-   failures are visible. Callers that have a structured logger
-   should pass `:on-error` instead — that callback fully replaces the
-   default and is the recommended path for production wiring.
+   the workflow runner. By default any caught Throwable, or returned
+   anomaly, is reported via
+   `default-heartbeat-error-log!` (a stderr warning) so persistent
+   failures are visible. Callers that have a structured logger should
+   pass `:on-error` instead — that callback fully replaces the default
+   and is the recommended path for production wiring.
 
    The sub-3 cleanup path's `lease-fresh?` check tolerates a single
    missed renew via the TTL > period default, so a one-off swallowed
    error does not falsely flag the workflow as crashed."
-  ([workflow-dir]
+  (^ScheduledExecutorService [workflow-dir]
    (start-heartbeat! workflow-dir {}))
-  ([workflow-dir {:keys [period-seconds on-error]
-                  :or   {period-seconds heartbeat-period-seconds}}]
+  (^ScheduledExecutorService [workflow-dir {:keys [period-seconds on-error]
+                                            :or   {period-seconds heartbeat-period-seconds}}]
    (let [report-error (or on-error
                           #(default-heartbeat-error-log! % workflow-dir))
          ^ScheduledExecutorService ex
@@ -408,8 +416,11 @@
      (.scheduleAtFixedRate ex
                            ^Runnable
                            (fn []
-                             (try (renew-lease! workflow-dir)
-                                  (catch Throwable t (report-error t))))
+                             (try
+                               (let [result (renew-lease! workflow-dir)]
+                                 (when (anomaly/anomaly? result)
+                                   (report-error result)))
+                               (catch Throwable t (report-error t))))
                            (long period-seconds)
                            (long period-seconds)
                            TimeUnit/SECONDS)

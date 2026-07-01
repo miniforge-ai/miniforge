@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.cli.workflow-runner
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [babashka.fs :as fs]
    [clojure.string :as str]
    [clojure.edn :as edn]
@@ -931,7 +932,12 @@
   [{:keys [dir marked?]} workflow-id]
   (when (and dir @marked?)
     (try
-      ((:archive-workflow! *manifest-ops*) workflow-id)
+      (let [result ((:archive-workflow! *manifest-ops*) workflow-id)]
+        (when (anomaly/anomaly? result)
+          (binding [*out* *err*]
+            (println (str "WARNING: archive of workflow " workflow-id
+                          " failed: " (:anomaly/message result)
+                          " (will be recovered by the cleanup pass)")))))
       (catch Exception e
         (binding [*out* *err*]
           (println (str "WARNING: archive of workflow " workflow-id
