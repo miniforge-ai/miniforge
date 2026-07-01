@@ -22,6 +22,7 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string]
+   [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
@@ -326,6 +327,16 @@
              (oci-cli/with-acquisition-timeout t (fn [] :body-ran)))
           (str "timeout " (pr-str t) " must run the body without the guard")))))
 
+(deftest with-acquisition-timeout-disabled-body-exception-returns-error-result-test
+  (testing "disabled deadline still returns body exceptions as failure data"
+    (let [result (oci-cli/with-acquisition-timeout
+                   nil
+                   (fn [] (throw (ex-info "boom" {:tag :disabled-timeout}))))]
+      (is (result/err? result))
+      (is (= :acquire-failed (:code (:error result))))
+      (is (= :disabled-timeout
+             (get-in result [:error :data :exception-data :tag]))))))
+
 (deftest with-acquisition-timeout-cancels-the-future-on-timeout-test
   (testing "the inner future is cancelled when the deadline fires"
     ;; The body runs an inner sleep that records `cancelled?` via
@@ -348,19 +359,19 @@
       (is (= true (deref cancelled? 2000 :no-interrupt))
           "future-cancel must propagate InterruptedException into the body"))))
 
-(deftest with-acquisition-timeout-exception-passthrough-test
-  (testing "exceptions thrown by the body propagate as the original throwable, not ExecutionException"
-    (let [thrown (try
-                   (oci-cli/with-acquisition-timeout
-                     5000
-                     (fn [] (throw (ex-info "boom" {:tag :original}))))
-                   nil
-                   (catch clojure.lang.ExceptionInfo e e))]
-      (is (some? thrown) "the original ex-info must propagate")
-      (is (= "boom" (ex-message thrown)))
-      (is (= :original (:tag (ex-data thrown))))
-      ;; Without the unwrap, callers would see java.util.concurrent.ExecutionException.
-      (is (not (instance? java.util.concurrent.ExecutionException thrown))))))
+(deftest with-acquisition-timeout-body-exception-returns-error-result-test
+  (testing "exceptions thrown by the body return failure data instead of throwing"
+    (let [result (oci-cli/with-acquisition-timeout
+                   5000
+                   (fn [] (throw (ex-info "boom" {:tag :original}))))]
+      (is (false? (:ok? result)))
+      (is (= :acquire-failed (:code (:error result))))
+      (is (= "boom" (:message (:error result))))
+      (is (= :acquire-environment! (get-in result [:error :data :surface])))
+      (is (= "clojure.lang.ExceptionInfo"
+             (get-in result [:error :data :exception-class])))
+      (is (= {:tag :original}
+             (get-in result [:error :data :exception-data]))))))
 
 (deftest run-runtime-interrupt-destroys-child-process-test
   (testing "interrupting a runtime call does not wait for the child command to finish"
@@ -380,6 +391,46 @@
       (.join worker 4000)
       (is (false? (.isAlive worker))
           "interrupt must destroy the child and end the worker well before the 5s sleep"))))
+
+(deftest run-runtime-returns-interrupted-result-test
+  (testing "run-runtime reports interruption as process result data"
+    (let [descriptor {:runtime/executable "/bin/sleep"}
+          started? (promise)
+          runtime-result (promise)
+          worker (Thread.
+                   (fn []
+                     (deliver started? true)
+                     (deliver runtime-result
+                              (oci-cli/run-runtime descriptor "5"))))]
+      (.start worker)
+      (is (= true (deref started? 1000 false)))
+      (.interrupt worker)
+      (let [result (deref runtime-result 4000 :timeout)]
+        (is (not= :timeout result))
+        (is (= 130 (:exit result)))
+        (is (clojure.string/includes? (:err result) "interrupted"))))))
+
+(deftest bootstrap-workspace-command-failure-returns-error-result-test
+  (testing "bootstrap command failures are returned as result data"
+    (let [bootstrap-workspace! (private-fn 'bootstrap-workspace!)
+          exec-results (atom [{:data {:exit-code 1
+                                      :stderr "fatal: could not read password\n"}}])]
+      (with-redefs [oci-cli/exec-in-container
+                    (fn [_descriptor _container-id _cmd _opts]
+                      (let [r (first @exec-results)]
+                        (swap! exec-results rest)
+                        r))]
+        (let [result (bootstrap-workspace! (docker-descriptor)
+                                           "container-1"
+                                           "/workspace"
+                                           {:repo-url "https://github.com/o/r.git"
+                                            :branch "main"})]
+          (is (result/err? result))
+          (is (= :container-command-failed (:code (:error result))))
+          (is (clojure.string/includes? (:message (:error result))
+                                        "Workspace bootstrap failed"))
+          (is (clojure.string/includes? (get-in result [:error :data :stderr])
+                                        "could not read password")))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

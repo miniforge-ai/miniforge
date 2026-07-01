@@ -40,7 +40,6 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
-   [ai.miniforge.response.interface :as response]
    [clojure.java.io]
    [clojure.string :as str]))
 
@@ -60,6 +59,21 @@
    test-side mock landed; the production-side guard lives here."
   120000)
 
+(defn- acquire-failed-result
+  [throwable]
+  (result/err :acquire-failed
+              (or (ex-message throwable) "OCI runtime acquire failed")
+              (cond-> {:surface :acquire-environment!
+                       :exception-class (.getName (class throwable))}
+                (ex-data throwable) (assoc :exception-data (ex-data throwable)))))
+
+(defn- call-acquire-body
+  [body-fn]
+  (try
+    (body-fn)
+    (catch Throwable t
+      (acquire-failed-result t))))
+
 (defn with-acquisition-timeout
   "Run `body-fn` (zero-arity) with a wall-clock deadline. Returns the
    body's return value when it completes in time, or a `:timeout`
@@ -71,20 +85,19 @@
 
    Caveats and follow-ups:
 
-   - Exceptions thrown by `body-fn` propagate as the original throwable.
-     `deref` would otherwise wrap them in `ExecutionException`; this fn
-     unwraps via `(.getCause)` so callers that catch `ExceptionInfo` or
-     other specific types still see the original.
+   - Exceptions thrown by `body-fn` are returned as a standard
+     `:acquire-failed` error result. `deref` would otherwise wrap them
+     in `ExecutionException`; this fn captures the original throwable so
+     callers receive explicit failure data instead of exception control
+     flow.
    - `future-cancel` only interrupts the worker thread; it does NOT
      interrupt owned child processes now that runtime calls use
      ProcessBuilder directly instead of `clojure.java.shell/sh`."
   [timeout-ms body-fn]
   (if (or (nil? timeout-ms) (not (pos? timeout-ms)))
-    (body-fn)
+    (call-acquire-body body-fn)
     (let [fut (future
-                (try
-                  {::ok (body-fn)}
-                  (catch Throwable t {::throwable t})))
+                {::ok (call-acquire-body body-fn)})
           deref-result (deref fut timeout-ms ::timeout)]
       (cond
         (= ::timeout deref-result)
@@ -98,9 +111,6 @@
                            timeout-ms "ms — likely a stuck daemon or image pull")
                       {:timeout-ms timeout-ms
                        :surface :acquire-environment!}))
-
-        (contains? deref-result ::throwable)
-        (throw (::throwable deref-result))
 
         :else
         (::ok deref-result)))))
@@ -166,7 +176,7 @@
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
-          (throw e))))
+          {:exit 130 :err (or (ex-message e) "Runtime command interrupted") :out ""})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
@@ -195,7 +205,11 @@
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
-          (throw e))))
+          {:exit 130
+           :err (or (ex-message e) "Runtime command interrupted")
+           :out ""
+           :out-bytes (byte-array 0)
+           :err-bytes (byte-array 0)})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
 
@@ -584,26 +598,33 @@
    Returns (fn [cmd] -> result-map).
 
    Options:
-   - :throw-on-error? — throw ex-info on non-zero exit (default false)
-   - :error-prefix — prefix for thrown error messages
+   - :error-on-failure? — return result/err on non-zero exit (default false)
+   - :error-prefix — prefix for result error messages
    - :sanitize? — sanitize tokens in error messages (default false)"
   [descriptor container-id workdir
-   & {:keys [throw-on-error? error-prefix sanitize?]
-      :or {throw-on-error? false error-prefix "Command failed" sanitize? false}}]
+   & {:keys [error-on-failure? error-prefix sanitize?]
+      :or {error-on-failure? false error-prefix "Command failed" sanitize? false}}]
   (fn [cmd]
     (let [r (exec-in-container descriptor container-id cmd {:workdir workdir})]
-      (when (and throw-on-error?
-                 (not (zero? (get-in r [:data :exit-code] 1))))
+      (if (and error-on-failure?
+               (not (zero? (get-in r [:data :exit-code] 1))))
         (let [safe-cmd (if sanitize? (sanitize-token (str cmd)) (str cmd))
               stderr   (if sanitize?
                          (sanitize-token (or (get-in r [:data :stderr]) ""))
                          (or (get-in r [:data :stderr]) ""))]
-          (response/throw-anomaly! :anomalies/fault
-                                  (str error-prefix ": " safe-cmd
-                                       (when (seq stderr) (str "\n" stderr)))
-                                  {:cmd safe-cmd :stderr stderr
-                                   :exit (get-in r [:data :exit-code])})))
-      r)))
+          (result/err :container-command-failed
+                      (str error-prefix ": " safe-cmd
+                           (when (seq stderr) (str "\n" stderr)))
+                      {:cmd safe-cmd
+                       :stderr stderr
+                       :exit (get-in r [:data :exit-code])}))
+        r))))
+
+(defn- chain-container-command
+  [result cmd-fn]
+  (if (result/ok? result)
+    (cmd-fn)
+    result))
 
 ;; ============================================================================
 ;; Workspace Bootstrap (N11 §4.2)
@@ -639,12 +660,13 @@
 (defn- bootstrap-workspace!
   "Clone a git repository into the container workspace after creation.
    Runs git clone, configures git identity, and checks out the target branch.
-   No-op when repo-url is nil (local mode / pre-existing workspace).
+   Returns a result map with bootstrap metadata. No-op success when
+   repo-url is nil (local mode / pre-existing workspace).
    Uses config-based token resolution (profile + env fallback) rather than
    URL-guessing. Converts SSH URLs to HTTPS for containers where SSH agents
    are not available."
   [descriptor container-name workdir env-config]
-  (when-let [repo-url (:repo-url env-config)]
+  (if-let [repo-url (:repo-url env-config)]
     (let [branch    (get env-config :branch "main")
           host-kind (or (:host-kind env-config)
                         (infer-host-kind repo-url))
@@ -657,23 +679,33 @@
                       (authenticated-https-url https-url token host-kind)
                       repo-url)
           exec!  (container-exec-fn descriptor container-name "/"
-                                    :throw-on-error? true
+                                    :error-on-failure? true
                                     :error-prefix "Workspace bootstrap failed"
                                     :sanitize? true)
           clone-cmd (str "git clone --branch " branch " --single-branch "
-                         clone-url " " workdir)]
-      (exec! clone-cmd)
-      ;; Use --local (not --global) since container rootfs is read-only
-      (exec! (str "git -C " workdir " config user.email 'miniforge@miniforge.ai'"))
-      (exec! (str "git -C " workdir " config user.name 'miniforge'"))
-      ;; Set push URL with token so persist-workspace! can push
-      (when token
-        (exec! (str "git -C " workdir " remote set-url --push origin "
-                    (authenticated-https-url https-url token host-kind))))
-      (let [sha-r (exec! (str "git -C " workdir " rev-parse HEAD"))
-            base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-        (cond-> {:base-branch branch}
-          (seq base-sha) (assoc :base-sha base-sha))))))
+                         clone-url " " workdir)
+          result (-> (exec! clone-cmd)
+                     ;; Use --local (not --global) since container rootfs is read-only
+                     (chain-container-command
+                      #(exec! (str "git -C " workdir
+                                   " config user.email 'miniforge@miniforge.ai'")))
+                     (chain-container-command
+                      #(exec! (str "git -C " workdir " config user.name 'miniforge'"))))]
+      (if (result/err? result)
+        result
+        (let [push-url-result (if token
+                                (exec! (str "git -C " workdir " remote set-url --push origin "
+                                            (authenticated-https-url https-url token host-kind)))
+                                result)
+              sha-r (chain-container-command
+                     push-url-result
+                     #(exec! (str "git -C " workdir " rev-parse HEAD")))]
+          (if (result/ok? sha-r)
+            (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
+              (result/ok (cond-> {:base-branch branch}
+                           (seq base-sha) (assoc :base-sha base-sha))))
+            sha-r))))
+    (result/ok nil)))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
@@ -729,15 +761,18 @@
                                               network)]
           (if (result/ok? create-result)
             ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-            (let [bootstrap-metadata (bootstrap-workspace! descriptor container-name workdir env-config)
-                  ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-                  image-digest (container-image-digest descriptor container-name)
-                  metadata (cond-> (merge (get create-result :data {})
-                                           bootstrap-metadata)
-                             image-digest (assoc :image-digest image-digest))]
-              (result/ok (proto/create-environment-record
-                          container-name (descriptor/kind descriptor) task-id workdir
-                          (assoc env-config :metadata metadata))))
+            (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
+              (if (result/ok? bootstrap-result)
+                (let [bootstrap-metadata (:data bootstrap-result)
+                      ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+                      image-digest (container-image-digest descriptor container-name)
+                      metadata (cond-> (merge (get create-result :data {})
+                                               bootstrap-metadata)
+                                 image-digest (assoc :image-digest image-digest))]
+                  (result/ok (proto/create-environment-record
+                              container-name (descriptor/kind descriptor) task-id workdir
+                              (assoc env-config :metadata metadata))))
+                bootstrap-result))
             create-result)))))
 
   (execute! [_this environment-id command opts]
