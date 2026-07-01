@@ -84,7 +84,9 @@
   (core/changed-projects-since-stable-command))
 
 (defn parse-project-list-output
-  "Parse a changed-or-affected project list response into project names."
+  "Parse a changed-or-affected project list response into project names.
+
+   Returns a vector on success, or `{:ok? false :error ...}` on invalid input."
   [output]
   (core/parse-project-list-output output))
 

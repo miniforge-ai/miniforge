@@ -58,6 +58,26 @@
             (recur (+ elapsed heartbeat-ms)))
           (:exit result))))))
 
+(defn- parse-error?
+  [value]
+  (false? (:ok? value)))
+
+(defn- print-parse-error!
+  [result]
+  (let [{:keys [code message data]} (:error result)]
+    (binding [*out* *err*]
+      (println (str "Stable-derived test input failed: " (name code)))
+      (println message)
+      (when (seq data)
+        (println (pr-str data))))))
+
+(defn- exit-on-parse-error!
+  [result]
+  (when (parse-error? result)
+    (print-parse-error! result)
+    (System/exit 2))
+  result)
+
 (defn- stable-tags
   []
   (->> (sh-string (concat ["git" "tag" "-l"]
@@ -69,8 +89,9 @@
 
 (defn- changed-projects-since-stable
   []
-  (->> (sh-string (bb-test-runner/changed-projects-since-stable-command))
-       bb-test-runner/parse-project-list-output))
+  (-> (sh-string (bb-test-runner/changed-projects-since-stable-command))
+      bb-test-runner/parse-project-list-output
+      exit-on-parse-error!))
 
 (defn- full-suite-step
   []
@@ -90,7 +111,8 @@
 
 (defn -main
   [& args]
-  (let [parsed-args (bb-test-runner/parse-diagnostic-args args)]
+  (let [parsed-args (exit-on-parse-error!
+                     (bb-test-runner/parse-diagnostic-args args))]
     (if-not (bb-test-runner/stable-tags-present? (stable-tags))
       (System/exit (run-step! (full-suite-step)))
       (if-let [plan (effective-plan parsed-args)]
