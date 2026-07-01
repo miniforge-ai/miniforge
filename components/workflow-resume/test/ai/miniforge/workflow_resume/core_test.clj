@@ -18,14 +18,14 @@
 
 (ns ai.miniforge.workflow-resume.core-test
   (:require
-   [clojure.test :refer [deftest testing is]]
-   [clojure.java.io :as io]
-   [cheshire.core :as json]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.interface.checkpoints :as workflow-checkpoints]
    [ai.miniforge.workflow-resume.core :as core]
    [ai.miniforge.workflow-resume.interface :as wr]
-   [slingshot.slingshot :refer [try+]]))
+   [cheshire.core :as json]
+   [clojure.java.io :as io]
+   [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure extractors
@@ -33,13 +33,13 @@
 (deftest missing-resume-config-resource-carries-invalid-config-marker
   (testing "Missing classpath resume config is an invalid configuration fault"
     (with-redefs [io/resource (constantly nil)]
-      (let [anomaly (try+
-                      (@#'core/read-resume-config)
-                      (catch [:anomaly/category :anomalies/not-found] m
-                        m))]
-        (is (= :anomalies/not-found (:anomaly/category anomaly)))
-        (is (= "config/workflow-resume/resume.edn" (:resource anomaly)))
-        (is (= :invalid-config (:config/error anomaly)))))))
+      (let [result (@#'core/read-resume-config)]
+        (is (anomaly/anomaly? result))
+        (is (= :not-found (:anomaly/type result)))
+        (is (= "config/workflow-resume/resume.edn"
+               (get-in result [:anomaly/data :resource])))
+        (is (= :invalid-config
+               (get-in result [:anomaly/data :config/error])))))))
 
 (deftest reconstructed-status-predicates-test
   (testing "predicates read the reconstructed status flags"
@@ -242,12 +242,11 @@
              (fn [] :default-sdlc)))))
 
   (testing "neither spec nor fallback → :anomalies/not-found"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Could not resolve a workflow type for resume"
-         (core/resolve-workflow-identity
-           {}
-           (constantly nil))))))
+    (let [result (core/resolve-workflow-identity {} (constantly nil))]
+      (is (anomaly/anomaly? result))
+      (is (= :not-found (:anomaly/type result)))
+      (is (= :resume-workflow
+             (get-in result [:anomaly/data :operation]))))))
 
 (deftest resolve-workflow-identity-prefers-workflow-type-key-test
   (testing ":workflow-type wins over :name when both are present"
@@ -422,11 +421,10 @@
 (deftest reconstruct-context-missing-workflow-test
   (with-temp-events-dir
     (fn [base-dir]
-      (testing "missing workflow dir → :anomalies/not-found"
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"No events found for workflow:"
-             (core/reconstruct-context base-dir (str (random-uuid)))))))))
+      (testing "missing workflow dir → :not-found anomaly"
+        (let [result (core/reconstruct-context base-dir (str (random-uuid)))]
+          (is (anomaly/anomaly? result))
+          (is (= :not-found (:anomaly/type result))))))))
 
 (deftest reconstruct-context-prefers-machine-snapshot-test
   (testing "checkpoint data restores workflow and DAG resume state without requiring event files"
@@ -523,16 +521,14 @@
   (with-temp-events-dir
     (fn [base-dir]
       (testing "nil workflow-id is rejected before disk access"
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"Invalid reconstruct-context input"
-             (core/reconstruct-context base-dir nil))))
+        (let [result (core/reconstruct-context base-dir nil)]
+          (is (anomaly/anomaly? result))
+          (is (= :invalid-input (:anomaly/type result)))))
 
       (testing "non-string/non-uuid workflow-id is rejected"
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo
-             #"Invalid reconstruct-context input"
-             (core/reconstruct-context base-dir 42)))))))
+        (let [result (core/reconstruct-context base-dir 42)]
+          (is (anomaly/anomaly? result))
+          (is (= :invalid-input (:anomaly/type result))))))))
 
 (deftest reconstruct-context-filters-malformed-events-test
   (with-temp-events-dir
@@ -557,22 +553,19 @@
 
 (deftest trim-pipeline-validates-workflow-shape-test
   (testing "workflow without :workflow/pipeline is rejected"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid trim-pipeline input"
-         (core/trim-pipeline {:wrong-shape true} []))))
+    (let [result (core/trim-pipeline {:wrong-shape true} [])]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))))
 
   (testing "pipeline entries without :phase keyword are rejected"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid trim-pipeline input"
-         (core/trim-pipeline {:workflow/pipeline [{:no-phase "here"}]} [])))))
+    (let [result (core/trim-pipeline {:workflow/pipeline [{:no-phase "here"}]} [])]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
 
 (deftest resolve-workflow-identity-validates-fallback-fn-test
   (testing "non-function fallback is rejected"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid resolve-workflow-identity input"
-         (core/resolve-workflow-identity
-           {:workflow-spec {:name "x"}}
-           "not a function")))))
+    (let [result (core/resolve-workflow-identity
+                  {:workflow-spec {:name "x"}}
+                  "not a function")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))

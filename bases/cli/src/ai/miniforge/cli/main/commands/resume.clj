@@ -20,7 +20,7 @@
   "CLI adapter for workflow resume.
 
    Domain logic lives in the `workflow-resume` component — this
-   namespace is the thin CLI shell: parses args, wires runtime
+  namespace is the thin CLI shell: parses args, wires runtime
    (event-stream, supervisory, LLM client), prints progress, invokes
    `run-pipeline` on the trimmed workflow.
 
@@ -28,6 +28,7 @@
    — for backward compatibility — via the `--resume <id>` flag on
    `mf run`."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.string :as str]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
@@ -58,6 +59,20 @@
    CLI boundary without dynamic namespace resolution."
   workflow/run-pipeline)
 
+(defn- anomaly-category
+  [a]
+  (case (:anomaly/type a)
+    :not-found :anomalies/not-found
+    :invalid-input :anomalies/incorrect
+    :anomalies/fault))
+
+(defn- throw-resume-anomaly!
+  [a]
+  (when (anomaly/anomaly? a)
+    (response/throw-anomaly! (anomaly-category a)
+                             (:anomaly/message a)
+                             (:anomaly/data a))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Thin delegations kept for compatibility with existing callers/tests
 
@@ -73,9 +88,11 @@
    default selection profile as fallback. Thin wrapper over the
    component's `resolve-workflow-identity`."
   [reconstructed]
-  (wr/resolve-workflow-identity
-    reconstructed
-    #(selection-config/resolve-selection-profile :default)))
+  (let [result (wr/resolve-workflow-identity
+                reconstructed
+                #(selection-config/resolve-selection-profile :default))]
+    (throw-resume-anomaly! result)
+    result))
 
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Status semantics
@@ -117,7 +134,8 @@
         _ (when-not quiet
             (display/print-info (messages/t :resume/resuming
                                             {:workflow-id workflow-id})))
-        reconstructed (wr/reconstruct-context events-dir (str workflow-id))]
+        reconstructed (wr/reconstruct-context events-dir (str workflow-id))
+        _ (throw-resume-anomaly! reconstructed)]
 
     (if (:completed? reconstructed)
       (do (display/print-info (messages/t :resume/already-completed)) nil)
@@ -133,7 +151,9 @@
                   (messages/t :resume/events-found
                               {:count (:event-count reconstructed)})))
 
-            {:keys [workflow-type workflow-version]} (resolve-resume-workflow reconstructed)
+            identity (resolve-resume-workflow reconstructed)
+            _ (throw-resume-anomaly! identity)
+            {:keys [workflow-type workflow-version]} identity
             {:keys [workflow]} (load-workflow workflow-type workflow-version {})
 
             machine-snapshot (:machine-snapshot reconstructed)
@@ -141,6 +161,7 @@
             resume-workflow (if (and machine-snapshot (not failed-checkpoint?))
                               workflow
                               (wr/trim-pipeline workflow completed-phases))
+            _ (throw-resume-anomaly! resume-workflow)
             remaining-pipeline (:workflow/pipeline resume-workflow)
             resume-run-id (or (:execution/id machine-snapshot) (random-uuid))
             _ (when-not quiet

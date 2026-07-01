@@ -74,6 +74,7 @@
    ;; GROUP 3b: timeline-based events show
    [ai.miniforge.cli.main.commands.events :as cmd-events]
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.pr-train.interface :as pr-train]
@@ -245,6 +246,8 @@
         events (es/read-workflow-events-by-id events-dir workflow-id)
         reconstructed (wr/reconstruct-context events-dir workflow-id)
         last-event (last events)]
+    (when (anomaly/anomaly? reconstructed)
+      (throw (ex-info (:anomaly/message reconstructed) reconstructed)))
     {:workflow-id workflow-id
      :status (reconstructed-status reconstructed (:event/timestamp last-event))
      :spec-name (some-> reconstructed :workflow-spec :name)
