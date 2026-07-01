@@ -655,6 +655,20 @@
                        "No LLM backend provided for planner agent"
                        {:phase :plan})))
 
+(defn- anomaly->response-error
+  "Convert an expected planner anomaly into the canonical agent error response."
+  ([category anom]
+   (anomaly->response-error category anom {}))
+  ([category anom {:keys [data tokens metrics]}]
+   (response/error
+    (:anomaly/message anom)
+    (cond-> {:data (merge {:anomaly/category category
+                           :anomaly/type (:anomaly/type anom)}
+                          (:anomaly/data anom)
+                          data)}
+      tokens (assoc :tokens tokens)
+      metrics (assoc :metrics metrics)))))
+
 (defn create-planner
   "Create a Planner agent with optional configuration overrides.
 
@@ -683,48 +697,41 @@
       (fn [context input]
         (let [resolved-client (model/resolve-llm-client-for-role
                                :planner (get opts :llm-backend (:llm-backend context)))
-              client-or-anom  (require-llm-client-or-anomaly resolved-client)
-              ;; Boundary site: escalate the missing-backend anomaly
-              ;; to a slingshot throw under the agent taxonomy so
-              ;; external try+ callers see the same shape they did
-              ;; before the data-first migration.
-              llm-client      (if (anomaly/anomaly? client-or-anom)
-                                (response/throw-anomaly! :anomalies.agent/llm-error
-                                                        (:anomaly/message client-or-anom)
-                                                        (:anomaly/data client-or-anom))
-                                client-or-anom)
-              on-chunk (:on-chunk context)
-              spec-text (spec->text input)
-              existing-files (:task/existing-files input)
-              effective-system (str @planner-system-prompt
-                                    (get input :task/behavior-addendum ""))
-              budget (assemble-within-budget
-                      spec-text existing-files effective-system (:model config)
-                      (get @planner-prompt-data :prompt/context-window-reserve-tokens 50000))
-              user-prompt (:user-prompt budget)]
-          (emit-prompt-size! context budget)
-          (when (:shed? budget)
-            (log/info logger :planner :planner/context-shed
-                      {:data {:file-count (:file-count budget)
-                              :window (:window budget)
-                              :estimated-tokens-before (:est-full budget)
-                              :estimated-tokens-after (:est-final budget)}}))
-          ;; Irreducible overflow: bail pre-flight (no LLM call) rather than
-          ;; pay for a request the model will reject. N12 §5.4-5.5.
-          (when (:over-after-shed? budget)
-            (response/throw-anomaly!
-             :anomalies.agent/invoke-failed
-             (if (:shed? budget)
-               "Planner prompt exceeds the model's context window even after shedding inlined file bodies to a manifest"
-               "Planner prompt (spec + system) exceeds the model's context window; no inlined files to shed")
-             {:context-overflow true
-              :estimated-tokens (:est-final budget)
-              :context-window (:window budget)
-              :tokens 0}))
-          ;; Past this point `llm-client` is non-nil — the
-          ;; require-llm-client-or-anomaly boundary above already
-          ;; escalated when the backend was missing.
-          (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
+              client-or-anom  (require-llm-client-or-anomaly resolved-client)]
+          (if (anomaly/anomaly? client-or-anom)
+            (anomaly->response-error :anomalies.agent/llm-error client-or-anom)
+            (let [llm-client client-or-anom
+                  on-chunk (:on-chunk context)
+                  spec-text (spec->text input)
+                  existing-files (:task/existing-files input)
+                  effective-system (str @planner-system-prompt
+                                        (get input :task/behavior-addendum ""))
+                  budget (assemble-within-budget
+                          spec-text existing-files effective-system (:model config)
+                          (get @planner-prompt-data :prompt/context-window-reserve-tokens 50000))
+                  user-prompt (:user-prompt budget)]
+              (emit-prompt-size! context budget)
+              (when (:shed? budget)
+                (log/info logger :planner :planner/context-shed
+                          {:data {:file-count (:file-count budget)
+                                  :window (:window budget)
+                                  :estimated-tokens-before (:est-full budget)
+                                  :estimated-tokens-after (:est-final budget)}}))
+              ;; Irreducible overflow: bail pre-flight (no LLM call) rather than
+              ;; pay for a request the model will reject. N12 §5.4-5.5.
+              (if (:over-after-shed? budget)
+                (anomaly->response-error
+                 :anomalies.agent/invoke-failed
+                 (anomaly/anomaly
+                  :fault
+                  (if (:shed? budget)
+                    "Planner prompt exceeds the model's context window even after shedding inlined file bodies to a manifest"
+                    "Planner prompt (spec + system) exceeds the model's context window; no inlined files to shed")
+                  {:context-overflow true
+                   :estimated-tokens (:est-final budget)
+                   :context-window (:window budget)
+                   :tokens 0}))
+                (let [{:keys [llm-result artifact worktree-artifacts context-misses]}
                   (artifact-session/with-session context
                     #(invoke-planner-session % llm-client user-prompt
                                              effective-system config context
@@ -775,52 +782,45 @@
                       num-turns   (:num-turns final-llm-response)
                       plan-or-anom (parsed-plan-or-anomaly final-submitted-plan
                                                            final-parsed-plan
-                                                           final-llm-response)
-                      ;; Boundary site: escalate the parse-miss anomaly
-                      ;; to a slingshot throw under the agent taxonomy
-                      ;; so external try+ callers see the same shape
-                      ;; they did before the data-first migration.
-                      plan (if (anomaly/anomaly? plan-or-anom)
-                             ;; Carry the spent-token count into the anomaly
-                             ;; data so the failure path still reports cost
-                             ;; (exception-error preserves ex-data → the phase
-                             ;; surfaces :tokens into :execution/metrics). A
-                             ;; failed plan turn still SPENT tokens; dropping
-                             ;; them made the run summary read $0.0000.
-                             (response/throw-anomaly! :anomalies.agent/invoke-failed
-                                                     (:anomaly/message plan-or-anom)
-                                                     (assoc (:anomaly/data plan-or-anom)
-                                                            :tokens tokens))
-                             plan-or-anom)
-                      plan-final (finalize-plan plan)]
-                  ;; Check for already-satisfied response
-                  (if (= :already-satisfied (:plan/status plan-final))
-                    (let [criteria (get input :spec/acceptance-criteria
-                                       (get input :acceptance-criteria []))
-                          validation (validate-already-satisfied plan-final criteria)]
-                      (if (:valid? validation)
-                        (let [output {:plan/id (random-uuid)
-                                      :plan/name "already-satisfied"
-                                      :plan/tasks []
-                                      :plan/summary (:plan/summary plan-final)
-                                      :plan/evidence (get plan-final :plan/evidence [])}]
-                          (assoc (response/success output {:tokens tokens})
-                                 :status :already-satisfied))
-                        ;; Reject false already-satisfied — force planning
-                        (do
-                          (log/info logger :planner :planner/already-satisfied-rejected
-                                    {:data {:reason (:reason validation)}})
-                          (response/error (str "Already-satisfied claim rejected: "
-                                               (:reason validation))
+                                                           final-llm-response)]
+                  (if (anomaly/anomaly? plan-or-anom)
+                    ;; Carry the spent-token count into the anomaly data so the
+                    ;; failure path still reports cost. A failed plan turn still
+                    ;; SPENT tokens; dropping them made summaries read $0.0000.
+                    (anomaly->response-error
+                     :anomalies.agent/invoke-failed
+                     plan-or-anom
+                     {:data {:tokens tokens}
+                      :tokens tokens})
+                    (let [plan-final (finalize-plan plan-or-anom)]
+                      ;; Check for already-satisfied response
+                      (if (= :already-satisfied (:plan/status plan-final))
+                        (let [criteria (get input :spec/acceptance-criteria
+                                           (get input :acceptance-criteria []))
+                              validation (validate-already-satisfied plan-final criteria)]
+                          (if (:valid? validation)
+                            (let [output {:plan/id (random-uuid)
+                                          :plan/name "already-satisfied"
+                                          :plan/tasks []
+                                          :plan/summary (:plan/summary plan-final)
+                                          :plan/evidence (get plan-final :plan/evidence [])}]
+                              (assoc (response/success output {:tokens tokens})
+                                     :status :already-satisfied))
+                            ;; Reject false already-satisfied — force planning
+                            (do
+                              (log/info logger :planner :planner/already-satisfied-rejected
+                                        {:data {:reason (:reason validation)}})
+                              (response/error (str "Already-satisfied claim rejected: "
+                                                   (:reason validation))
+                                              {:tokens tokens
+                                               :metrics {:tokens tokens}}))))
+                        (response/success plan-final
                                           {:tokens tokens
-                                           :metrics {:tokens tokens}}))))
-                    (response/success plan-final
-                                      {:tokens tokens
-                                       :metrics (cond-> {:tasks-created (count (:plan/tasks plan-final))
-                                                         :complexity (:plan/estimated-complexity plan-final)
+                                           :metrics (cond-> {:tasks-created (count (:plan/tasks plan-final))
+                                                             :complexity (:plan/estimated-complexity plan-final)
                                                          :tokens tokens}
                                                   stop-reason (assoc :stop-reason stop-reason)
-                                                  num-turns   (assoc :num-turns num-turns))})))
+                                                  num-turns   (assoc :num-turns num-turns))})))))
                 ;; LLM call failed — preserve the full llm-error shape
                 ;; into :data so the phase-completed event carries
                 ;; :type (e.g. "cli_error" / "adaptive_timeout"),
@@ -828,7 +828,7 @@
                 ;; post-mortem. Iters 11-12 lost this context and
                 ;; produced undiagnosable \"Unknown error\" / bare
                 ;; \"Process timed out\" phase errors.
-                (result-boundary/error-response final-normalized "LLM call failed")))))
+                (result-boundary/error-response final-normalized "LLM call failed"))))))))
 
       :validate-fn validate-plan
 
