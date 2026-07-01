@@ -34,8 +34,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Helpers
 
-(defn assert-safe-container-path!
-  "Assert that `path` is safe to interpolate into a single-quoted shell argument
+(defn- unsafe-container-path-result
+  [message type path]
+  (result/shell-failure message {:type type :path path}))
+
+(defn validate-safe-container-path
+  "Return nil when `path` is safe to interpolate into a single-quoted shell argument
    and cannot escape the container working directory.
 
    Two classes of attack are blocked:
@@ -48,23 +52,29 @@
       single-quote, backslash, backtick, $, !, space, tab, newline, NUL,
       and the glob/redirect set (; | & > < ( ) { } * ? [ ] # ~).
 
-   Throws ex-info with {:type :path-traversal} or {:type :shell-injection}
-   on violation."
+   Returns a shell failure result with `:type :path-traversal` or
+   `:type :shell-injection` on violation."
   [path]
   (let [s (str path)]
-    (when (or (str/starts-with? s "/")
-              (re-find #"^[A-Za-z]:" s))
-      (throw (ex-info "Path traversal rejected: sandbox path must be relative"
-                      {:type :path-traversal
-                       :path s})))
-    (when (re-find #"(^|[/\\])\.\.([/\\]|$)" s)
-      (throw (ex-info "Path traversal rejected: sandbox path contains .. segment"
-                      {:type :path-traversal
-                       :path s})))
-    (when (re-find #"['\\`$! \t\n\r\x00;|&><(){}*?\[\]#~]" s)
-      (throw (ex-info "Shell injection rejected: sandbox path contains unsafe character"
-                      {:type :shell-injection
-                       :path s})))))
+    (cond
+      (or (str/starts-with? s "/")
+          (re-find #"^[A-Za-z]:" s))
+      (unsafe-container-path-result
+       "Path traversal rejected: sandbox path must be relative"
+       :path-traversal
+       s)
+
+      (re-find #"(^|[/\\])\.\.([/\\]|$)" s)
+      (unsafe-container-path-result
+       "Path traversal rejected: sandbox path contains .. segment"
+       :path-traversal
+       s)
+
+      (re-find #"['\\`$! \t\n\r\x00;|&><(){}*?\[\]#~]" s)
+      (unsafe-container-path-result
+       "Shell injection rejected: sandbox path contains unsafe character"
+       :shell-injection
+       s))))
 
 (defn exec!
   "Execute a command in the sandbox environment.
@@ -174,21 +184,23 @@
 (defn write-file!
   "Write content to a file inside the sandbox container.
    Uses base64 encoding to safely transfer arbitrary content.
-   Throws ex-info with {:type :path-traversal} if path contains `..` segments."
+   Returns a shell failure result if `path` is unsafe."
   [executor env-id path content]
-  (assert-safe-container-path! path)
-  (let [encoded (.encodeToString (java.util.Base64/getEncoder)
-                                  (.getBytes content "UTF-8"))
-        cmd (str "mkdir -p \"$(dirname '" path "')\" && "
-                 "echo '" encoded "' | base64 -d > '" path "'")]
-    (exec! executor env-id cmd)))
+  (if-let [invalid (validate-safe-container-path path)]
+    invalid
+    (let [encoded (.encodeToString (java.util.Base64/getEncoder)
+                                   (.getBytes content "UTF-8"))
+          cmd (str "mkdir -p \"$(dirname '" path "')\" && "
+                   "echo '" encoded "' | base64 -d > '" path "'")]
+      (exec! executor env-id cmd))))
 
 (defn delete-file!
   "Delete a file inside the sandbox container.
-   Throws ex-info with {:type :path-traversal} if path contains `..` segments."
+   Returns a shell failure result if `path` is unsafe."
   [executor env-id path]
-  (assert-safe-container-path! path)
-  (exec! executor env-id (str "rm -f '" path "'")))
+  (if-let [invalid (validate-safe-container-path path)]
+    invalid
+    (exec! executor env-id (str "rm -f '" path "'"))))
 
 (defn stage-files!
   "Stage files in the sandbox container."
