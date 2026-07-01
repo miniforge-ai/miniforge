@@ -166,7 +166,9 @@
             :worker-id id
             :lease-path (.getAbsolutePath lease-path)
             :workers-dir (.getAbsolutePath workers-dir)})
-    error (assoc :anomaly/cause (ex-message error))))
+    error (assoc :anomaly/ex-message (ex-message error)
+                 :anomaly/ex-class (str (class error)))
+    (ex-data error) (assoc :anomaly/ex-data (ex-data error))))
 
 (defn- workers-exhausted-anomaly
   [workers-dir]
@@ -291,7 +293,8 @@
   "Allocate a new snowflake generator. Acquires a worker-id lease under
    `:workers-dir` (default `~/.miniforge/events/.workers/`).
 
-   Returns a map carrying:
+   Returns a canonical anomaly when worker lease acquisition fails.
+   Otherwise returns a map carrying:
      :state      atom with {:last-ts :last-seq :worker-id}
      :worker-id  long, 0..1023
      :lease      lease handle (release on close!)

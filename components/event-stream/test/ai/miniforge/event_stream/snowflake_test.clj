@@ -276,7 +276,9 @@
         (let [result (sf/acquire-worker-lease! not-a-dir)]
           (is (response/anomaly-map? result))
           (is (= :anomalies/unavailable (:anomaly/category result)))
-          (is (= :lease-io-failure (:reason result))))))))
+          (is (= :lease-io-failure (:reason result)))
+          (is (string? (:anomaly/ex-message result)))
+          (is (string? (:anomaly/ex-class result))))))))
 
 (deftest create-generator-propagates-lease-anomaly
   (let [lease-anomaly (response/make-anomaly

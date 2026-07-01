@@ -98,6 +98,32 @@
     (is (= :anomalies/incorrect (:anomaly/category result)))
     (is (= :pre-epoch-clock (:reason result)))))
 
+(deftest create-envelope-propagates-anomaly-generator
+  (let [generator-anomaly (response/make-anomaly
+                           :anomalies/busy
+                           "No worker slots"
+                           {:reason :workers-exhausted})
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator-anomaly})
+        result (core/create-envelope stream :test/event (random-uuid) "hello")]
+    (is (identical? generator-anomaly result))))
+
+(deftest create-envelope-does-not-consume-sequence-on-id-anomaly
+  (let [wf-id (random-uuid)
+        generator {:state     (atom {:last-ts -1
+                                     :last-seq -1
+                                     :worker-id 0})
+                   :worker-id 0
+                   :lease     {:worker-id 0}
+                   :now-fn    (constantly 0)}
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator})
+        result (core/create-envelope stream :test/event wf-id "bad")]
+    (is (response/anomaly-map? result))
+    (swap! stream dissoc :snowflake-generator)
+    (is (= 0 (:event/sequence-number
+              (core/create-envelope stream :test/event wf-id "good"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; publish! sink integration
 

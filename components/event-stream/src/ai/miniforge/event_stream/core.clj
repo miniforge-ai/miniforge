@@ -68,8 +68,11 @@
 
 (defn- next-event-id
   [generator]
-  (if generator
+  (cond
+    (response/anomaly-map? generator) generator
+    generator
     (snowflake/next-id! generator)
+    :else
     (random-uuid)))
 
 (defn create-envelope
@@ -106,29 +109,29 @@
    ;; window where two concurrent producers see the same number.
    ;; The previous read-then-swap pattern WAS racey; reviewers
    ;; flagged it on PR #814.
-   (let [[old _new] (swap-vals! stream
-                                update-in
-                                [:sequence-numbers workflow-id]
-                                (fnil inc 0))
-         seq-num    (get-in old [:sequence-numbers workflow-id] 0)
-         generator  (:snowflake-generator @stream)
-         event-id   (next-event-id generator)]
+   (let [generator (:snowflake-generator @stream)
+         event-id  (next-event-id generator)]
      (if (response/anomaly-map? event-id)
        event-id
-       (cond-> {:event/type event-type
-                :event/id event-id
-                :event/timestamp (java.util.Date.)
-                :event/version event-version
-                :event/sequence-number seq-num
-                :workflow/id workflow-id
-                :message message}
-         (:org/id opts)            (assoc :org/id (:org/id opts))
-         (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
-         (:repo/id opts)           (assoc :repo/id (:repo/id opts))
-         (:auth/context opts)      (assoc :auth/context (:auth/context opts))
-         (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
-         (:agent/id opts)          (assoc :agent/id (:agent/id opts))
-         (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts)))))))
+       (let [[old _new] (swap-vals! stream
+                                    update-in
+                                    [:sequence-numbers workflow-id]
+                                    (fnil inc 0))
+             seq-num    (get-in old [:sequence-numbers workflow-id] 0)]
+         (cond-> {:event/type event-type
+                  :event/id event-id
+                  :event/timestamp (java.util.Date.)
+                  :event/version event-version
+                  :event/sequence-number seq-num
+                  :workflow/id workflow-id
+                  :message message}
+           (:org/id opts)            (assoc :org/id (:org/id opts))
+           (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
+           (:repo/id opts)           (assoc :repo/id (:repo/id opts))
+           (:auth/context opts)      (assoc :auth/context (:auth/context opts))
+           (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
+           (:agent/id opts)          (assoc :agent/id (:agent/id opts))
+           (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event bus operations
