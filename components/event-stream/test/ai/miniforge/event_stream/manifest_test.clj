@@ -19,8 +19,10 @@
 (ns ai.miniforge.event-stream.manifest-test
   "Tests for the BD-2b sub-2 per-workflow manifest module."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.manifest :as manifest]
    [clojure.test :refer [deftest testing is]]
-   [ai.miniforge.event-stream.manifest :as manifest])
+   [clojure.java.io :as io])
   (:import
    [java.time Instant]
    [java.util UUID]))
@@ -111,15 +113,20 @@
     (is (not (manifest/legal-archive-transition? :archived :live)))
     (is (not (manifest/legal-archive-transition? :archived :archiving)))))
 
-(deftest transition-archive-throws-on-illegal-move
+(deftest transition-archive-returns-anomaly-on-illegal-move
   (let [m (manifest/init-active test-workflow-id)]
     (is (= :archiving
            (:archive_status (manifest/transition-archive m :archiving)))
         "live → archiving is the canonical happy path")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Illegal archive_status transition"
-                          (manifest/transition-archive m :archived))
-        "live → archived must skip :archiving and is illegal")))
+    (let [result (manifest/transition-archive m :archived)]
+      (is (anomaly/anomaly? result))
+      (is (= :conflict (:anomaly/type result)))
+      (is (= :illegal-archive-transition
+             (get-in result [:anomaly/data :reason])))
+      (is (= test-workflow-id
+             (get-in result [:anomaly/data :workflow-id])))
+      (is (= :live (get-in result [:anomaly/data :from])))
+      (is (= :archived (get-in result [:anomaly/data :to]))))))
 
 (deftest mark-terminal-stamps-completed-at-and-status
   (let [m (manifest/init-active test-workflow-id)]
@@ -205,10 +212,14 @@
   (with-temp-dir
     (fn [dir]
       (let [bogus (assoc (manifest/init-active test-workflow-id)
-                         :status :not-a-status)]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"fails schema validation"
-                              (manifest/save-manifest! dir bogus)))))))
+                         :status :not-a-status)
+            result (manifest/save-manifest! dir bogus)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :invalid-manifest
+               (get-in result [:anomaly/data :reason])))
+        (is (false? (.exists (io/file dir "manifest.json")))
+            "invalid manifests must not be persisted")))))
 
 (deftest renew-lease!-no-op-when-manifest-absent
   (with-temp-dir
@@ -216,6 +227,17 @@
       (is (nil? (manifest/renew-lease! dir))
           "missing manifest is a no-op so a heartbeat tick can race
            archival without crashing"))))
+
+(deftest renew-lease!-propagates-save-anomaly
+  (with-temp-dir
+    (fn [dir]
+      (let [m (manifest/init-active test-workflow-id)
+            save-anomaly (anomaly/anomaly :invalid-input
+                                          "save failed"
+                                          {:reason :test-save-failed})]
+        (manifest/save-manifest! dir m)
+        (with-redefs [manifest/save-manifest! (fn [_ _] save-anomaly)]
+          (is (= save-anomaly (manifest/renew-lease! dir))))))))
 
 (deftest renew-lease!-bumps-on-disk
   (with-temp-dir
