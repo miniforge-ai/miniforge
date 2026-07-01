@@ -18,14 +18,14 @@
 
 (ns ai.miniforge.workflow.anomaly.build-initial-context-test
   "Coverage for `runner/build-initial-context` (anomaly-returning) and
-   its boundary escalation in `runner/run-pipeline`.
+   its failed-context conversion in `runner/run-pipeline`.
 
    The single failure mode this site protects is the N11 §7.4
    invariant: `:governed` execution-mode requires a pre-acquired
    capsule executor + environment-id; missing either is
-   `:invalid-input`. The boundary at `run-pipeline` rethrows via
-   slingshot so external callers (CLI / MCP / orchestrator) keep
-   their existing exception-shaped contract."
+   `:invalid-input`. `run-pipeline` converts that anomaly to a failed
+   execution context so callers receive the runner's normal result
+   shape."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workflow.runner :as runner]))
@@ -33,8 +33,8 @@
 (def workflow
   {:workflow/id :test
    :workflow/version "1.0.0"
-   :workflow/phases [{:phase/id :start}]
-   :workflow/pipeline [{:phase :start}]})
+   :workflow/phases []
+   :workflow/pipeline []})
 
 (def input {:repo-url "https://example.test/repo"})
 
@@ -78,19 +78,24 @@
       (is (true? (get-in result [:anomaly/data :has-executor?])))
       (is (false? (get-in result [:anomaly/data :has-environment-id?]))))))
 
-;------------------------------------------------------------------------------ Boundary escalation
+;------------------------------------------------------------------------------ run-pipeline conversion
 ;;
-;; `run-pipeline` is the runner's escalation point: external callers
-;; expect either a final context map or a thrown exception. A governed
-;; misconfiguration becomes a slingshot
-;; `:anomalies.workflow/no-capsule-executor` ex-info at the
-;; `run-pipeline` boundary.
-;;
-;; That escalation is *not* exercised here because `run-pipeline`'s
-;; happy path runs `acquire-environment` first, which has its own
-;; governed-mode throw at `acquire-execution-environment!` (covered by
-;; `check_executor_for_mode_test.clj`). For an end-to-end test of the
-;; build-initial-context boundary throw specifically, the caller would
-;; need to stub `acquire-environment` so the no-capsule-executor path
-;; surfaces in `run-pipeline`'s let bindings rather than upstream. The
-;; runner's existing pipeline tests cover that integration.
+;; `run-pipeline` runs `acquire-environment` before
+;; `build-initial-context`; the test below stubs the private acquire
+;; helper so the context-building anomaly is exercised directly rather
+;; than being masked by runner-environment's separate governed-mode
+;; acquisition checks.
+
+(deftest run-pipeline-context-anomaly-returns-failed-context
+  (testing "run-pipeline converts build-initial-context anomaly to failed context"
+    (with-redefs-fn {#'runner/acquire-environment
+                     (fn [_workflow _input opts] [nil opts])}
+      (fn []
+        (let [result (runner/run-pipeline workflow input
+                                          {:execution-mode :governed
+                                           :skip-lifecycle-events true})]
+          (is (= :failed (:execution/status result)))
+          (is (some #(= :initial-context-anomaly (:type %))
+                    (:execution/errors result)))
+          (is (= :governed
+                 (-> result :execution/errors first :data :execution-mode))))))))

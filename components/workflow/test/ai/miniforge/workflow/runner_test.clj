@@ -229,6 +229,22 @@
       (is (= :failed (:execution/status result)))
       (is (some #(= :empty-pipeline (:type %)) (:execution/errors result))))))
 
+(deftest run-pipeline-stopped-control-state-test
+  (testing "dashboard stop request returns a failed context"
+    (let [workflow {:workflow/id :test
+                    :workflow/version "1.0.0"
+                    :workflow/pipeline [{:phase test-done-phase}]}
+          result (runner/run-pipeline
+                  workflow
+                  {:task "Test"}
+                  {:control-state (atom {:paused false
+                                         :stopped true
+                                         :adjustments {}})
+                   :skip-lifecycle-events true})]
+      (is (= :failed (:execution/status result)))
+      (is (some #(= :dashboard-stop (:type %))
+                (:execution/errors result))))))
+
 (deftest run-pipeline-done-only-test
   (testing "run-pipeline completes with just :done phase"
     (let [workflow {:workflow/id :test
