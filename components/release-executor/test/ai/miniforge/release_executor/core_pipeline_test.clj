@@ -518,6 +518,29 @@
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-write-pr-doc state))))))
 
+(deftest step-write-pr-doc-writes-relative-path-test
+  (testing "write-file! receives a relative docs/pull-requests path, never absolute"
+    (let [seen-path (atom :unset)]
+      (with-redefs [sandbox/write-file! (fn [_exec _env path _content]
+                                          (reset! seen-path path)
+                                          {:success? true})
+                    sandbox/exec! (fn [& _] {:success? true :output ""})]
+        (let [result (sut/step-write-pr-doc
+                      {:create-pr? true
+                       :worktree-path "/abs/host/worktree"
+                       :executor :mock
+                       :environment-id "env-1"
+                       :branch "mf/feature"
+                       :release-meta {:release/pr-title "feat: add thing"}})]
+          (is (not (sut/failed? result)))
+          (is (string? @seen-path) "write-file! must have been called")
+          (is (not (str/starts-with? @seen-path "/"))
+              "path must be relative — absolute paths are rejected by the sandbox")
+          (is (not (str/includes? @seen-path "/abs/host/worktree"))
+              "path must not embed the host worktree-path")
+          (is (str/starts-with? @seen-path "docs/pull-requests/")
+              "doc lands under docs/pull-requests/ relative to the container workdir"))))))
+
 ;; ============================================================================
 ;; format-files-changed
 ;; ============================================================================
@@ -687,7 +710,7 @@
   ;; The 2026-06-15 rn-03 dogfood logged `pr-doc-generation-failed - Path
   ;; traversal rejected: sandbox path must be relative` on every release: the
   ;; step passed an ABSOLUTE `worktree-path/docs/...` to sandbox/write-file!,
-  ;; but assert-safe-container-path! rejects any leading `/`. The doc must be
+  ;; but sandbox path validation rejects any leading `/`. The doc must be
   ;; written with a path relative to the container workdir (the git add already
   ;; uses rel-path). Pin the contract so the regression cannot return.
   (testing "write-file! receives a relative docs/pull-requests path, never absolute"

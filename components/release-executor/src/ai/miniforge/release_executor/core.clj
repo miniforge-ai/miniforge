@@ -418,30 +418,34 @@
     (failed? state) state
     (not (:create-pr? state)) state
     :else
-    (let [{:keys [worktree-path release-meta pr-number pr-url branch
+    (let [{:keys [release-meta pr-number pr-url branch
                   executor environment-id logger]} state
           filename (pr-doc-filename (:release/pr-title release-meta))
           rel-path (str "docs/pull-requests/" filename)
-          full-path (str worktree-path "/" rel-path)
           content (render-pr-doc release-meta
                                  {:pr-number pr-number
                                   :pr-url pr-url
                                   :branch branch})]
       (try
         ;; Write via executor (governed) — never touch host filesystem
-        (sandbox/write-file! executor environment-id full-path content)
-        (when logger
-          (log/info logger :release-executor :pr-doc-written
-                    {:data {:path rel-path}}))
-        ;; Stage the doc and amend the commit to include it
-        (sandbox/exec! executor environment-id
-                       (str "git add " rel-path))
-        (sandbox/exec! executor environment-id
-                       "git commit --amend --no-edit --no-verify")
-        ;; Force-push since we amended — route through executor with token
-        (sandbox/exec! executor environment-id
-                       "git push --force-with-lease"
-                       (gh-exec-opts state))
+        (let [write-r (sandbox/write-file! executor environment-id rel-path content)]
+          (if (result/succeeded? write-r)
+            (do
+              (when logger
+                (log/info logger :release-executor :pr-doc-written
+                          {:data {:path rel-path}}))
+              ;; Stage the doc and amend the commit to include it
+              (sandbox/exec! executor environment-id
+                             (str "git add " rel-path))
+              (sandbox/exec! executor environment-id
+                             "git commit --amend --no-edit --no-verify")
+              ;; Force-push since we amended — route through executor with token
+              (sandbox/exec! executor environment-id
+                             "git push --force-with-lease"
+                             (gh-exec-opts state)))
+            (when logger
+              (log/warn logger :release-executor :pr-doc-write-failed
+                        {:message (:error write-r)}))))
         state
       (catch Exception e
         (when logger
@@ -570,7 +574,7 @@
                   executor environment-id logger code-artifacts workflow-data]} state
           filename (pr-doc-filename (:release/pr-title release-meta))
           ;; Relative to the container workdir (the worktree root). The sandbox
-          ;; rejects absolute paths (assert-safe-container-path!), so this must
+          ;; rejects absolute paths, so this must
           ;; NOT be prefixed with worktree-path — the executor resolves it
           ;; against the workdir. The git add below already uses rel-path.
           rel-path (str "docs/pull-requests/" filename)
@@ -581,22 +585,29 @@
                    workflow-data)]
       (try
         ;; Write via executor (governed) — never touch host filesystem
-        (sandbox/write-file! executor environment-id rel-path content)
-        (when logger
-          (log/info logger :release-executor :pr-doc-generated
-                    {:data {:path rel-path}}))
-        ;; Stage the doc and amend the commit to include it
-        (sandbox/exec! executor environment-id
-                       (str "git add " rel-path))
-        (sandbox/exec! executor environment-id
-                       "git commit --amend --no-edit --no-verify")
-        ;; Force-push since we amended — route through executor with token
-        (sandbox/exec! executor environment-id
-                       "git push --force-with-lease"
-                       (gh-exec-opts state))
-        (assoc state
-               :pr-doc-path rel-path
-               :pr-doc-content content)
+        (let [write-r (sandbox/write-file! executor environment-id rel-path content)]
+          (if (result/succeeded? write-r)
+            (do
+              (when logger
+                (log/info logger :release-executor :pr-doc-generated
+                          {:data {:path rel-path}}))
+              ;; Stage the doc and amend the commit to include it
+              (sandbox/exec! executor environment-id
+                             (str "git add " rel-path))
+              (sandbox/exec! executor environment-id
+                             "git commit --amend --no-edit --no-verify")
+              ;; Force-push since we amended — route through executor with token
+              (sandbox/exec! executor environment-id
+                             "git push --force-with-lease"
+                             (gh-exec-opts state))
+              (assoc state
+                     :pr-doc-path rel-path
+                     :pr-doc-content content))
+            (do
+              (when logger
+                (log/warn logger :release-executor :pr-doc-generation-failed
+                          {:message (:error write-r)}))
+              state)))
         (catch Exception e
           (when logger
             (log/warn logger :release-executor :pr-doc-generation-failed
