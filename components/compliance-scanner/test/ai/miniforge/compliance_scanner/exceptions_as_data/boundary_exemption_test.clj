@@ -51,6 +51,11 @@
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.tools)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.server)))))
 
+(deftest response-anomaly-bridge-is-boundary
+  (testing "the canonical thrown-anomaly bridge is an explicit boundary"
+    (is (true? (exc/boundary-namespace? 'ai.miniforge.response.anomaly)))
+    (is (false? (exc/boundary-namespace? 'ai.miniforge.response.translate)))))
+
 (deftest core-namespaces-are-not-boundaries
   (testing "ordinary component core namespaces are not boundaries"
     (is (false? (exc/boundary-namespace? 'ai.miniforge.agent.planner)))
@@ -72,5 +77,14 @@
               (defn boom []
                 (throw (ex-info \"500\" {:status 500})))"
           {:keys [boundary? violations]} (exc/analyze-content "routes.clj" src)]
+      (is (true? boundary?))
+      (is (zero? (count violations))))))
+
+(deftest response-anomaly-bridge-yields-zero-violations
+  (testing "throw+ inside response.anomaly is the canonical escalation bridge"
+    (let [src "(ns ai.miniforge.response.anomaly)
+              (defn throw-anomaly! [a]
+                (throw+ a))"
+          {:keys [boundary? violations]} (exc/analyze-content "anomaly.clj" src)]
       (is (true? boundary?))
       (is (zero? (count violations))))))

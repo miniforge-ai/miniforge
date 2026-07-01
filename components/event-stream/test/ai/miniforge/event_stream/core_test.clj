@@ -84,6 +84,28 @@
       (is (nil? (:workflow/id env)))
       (is (= 0 (:event/sequence-number env))))))
 
+;------------------------------------------------------------------------------ Layer 0
+;; knowledge failure constructors
+
+(deftest knowledge-promotion-failed-accepts-failure-data-test
+  (testing "promotion failure event can be built from error data without ex-info"
+    (let [stream (no-op-stream)
+          event (core/knowledge-promotion-failed stream
+                                                 {:zettel/id "z-1"
+                                                  :error "promotion blocked"})]
+      (is (= :knowledge/promotion-failed (:event/type event)))
+      (is (= "promotion blocked" (:knowledge/error event)))
+      (is (= "Knowledge promotion failed: promotion blocked"
+             (:message event))))))
+
+(deftest knowledge-failure-constructors-preserve-throwable-messages-test
+  (testing "existing Throwable callers keep the same message behavior"
+    (let [stream (no-op-stream)
+          err (ex-info "synthesis failed" {:cause :test})
+          event (core/knowledge-synthesis-failed stream err)]
+      (is (= :knowledge/synthesis-failed (:event/type event)))
+      (is (= "synthesis failed" (:knowledge/error event))))))
+
 (deftest create-envelope-propagates-snowflake-anomaly
   (let [generator {:state     (atom {:last-ts -1
                                      :last-seq -1

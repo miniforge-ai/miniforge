@@ -79,8 +79,13 @@
   "Whole namespace prefixes that mark boundary bases whose Polylith name
    cannot be represented as a standalone dotted segment. Keep this list
    narrow so component names that merely contain boundary words, such as
-   `bb-data-plane-http`, remain non-boundary."
-  #{"ai.miniforge.mcp-context-server"})
+   `bb-data-plane-http`, remain non-boundary.
+
+   `ai.miniforge.response.anomaly` is the repository's canonical
+   thrown-anomaly bridge; it is intentionally a boundary even though the
+   component name is not a generic protocol segment."
+  #{"ai.miniforge.mcp-context-server"
+    "ai.miniforge.response.anomaly"})
 
 (def ^:private boundary-suffix-patterns
   "Whole-namespace suffixes that mark boundary files."
@@ -209,7 +214,9 @@
    "classpath"
    "integrity"
    "invalid-config"
-   "unregistered-at-resolve"])
+   "unregistered-at-resolve"
+   "unmapped"
+   "no matching"])
 
 (defn- collect-text
   "Collect every string-shaped piece of evidence — string literals plus
@@ -218,7 +225,7 @@
    because i18n messages live as keyword tokens (e.g.
    `:config/missing-resource`) and the inventory uses those names as the
    programmer-error signal. Bounded depth keeps the walk cheap."
-  ([form] (collect-text form 6))
+  ([form] (collect-text form 8))
   ([form depth]
    (cond
      (zero? depth)        []

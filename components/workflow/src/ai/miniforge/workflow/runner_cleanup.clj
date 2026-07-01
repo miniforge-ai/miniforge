@@ -113,7 +113,7 @@
     (doseq [err errors]
       (when event-stream
         (events/publish-event! event-stream
-                        (es/knowledge-promotion-failed event-stream (ex-info (:error err) err)))))))
+                        (es/knowledge-promotion-failed event-stream err))))))
 
 (defn- release-acquired-environments! [acquired-env]
   (when acquired-env

@@ -1565,26 +1565,34 @@
 ;------------------------------------------------------------------------------ Layer 7
 ;; Observer / knowledge failure events
 
+(defn- failure-message
+  [failure]
+  (cond
+    (instance? Throwable failure) (ex-message failure)
+    (map? failure) (or (:error failure) (:message failure) (pr-str failure))
+    (some? failure) (str failure)
+    :else nil))
+
 (defn observer-signal-failed
   "Emit when observe-workflow-signal! fails to forward a signal to the meta-loop."
   [stream workflow-id error]
   (-> (create-envelope stream :observer/signal-failed workflow-id
-                       (str "Observer signal failed: " (ex-message error)))
-      (assoc :observer/error (ex-message error))))
+                       (str "Observer signal failed: " (failure-message error)))
+      (assoc :observer/error (failure-message error))))
 
 (defn knowledge-synthesis-failed
   "Emit when synthesize-patterns! fails."
   [stream error]
   (-> (create-envelope stream :knowledge/synthesis-failed nil
-                       (str "Knowledge synthesis failed: " (ex-message error)))
-      (assoc :knowledge/error (ex-message error))))
+                       (str "Knowledge synthesis failed: " (failure-message error)))
+      (assoc :knowledge/error (failure-message error))))
 
 (defn knowledge-promotion-failed
   "Emit when promote-mature-learnings! fails."
   [stream error]
   (-> (create-envelope stream :knowledge/promotion-failed nil
-                       (str "Knowledge promotion failed: " (ex-message error)))
-      (assoc :knowledge/error (ex-message error))))
+                       (str "Knowledge promotion failed: " (failure-message error)))
+      (assoc :knowledge/error (failure-message error))))
 
 ;------------------------------------------------------------------------------ Layer 9
 ;; Routing trigger events (N5-delta-4 §4.2)
