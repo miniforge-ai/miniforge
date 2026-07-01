@@ -82,6 +82,38 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
+(deftest no-matching-reflection-helper-is-fatal-only
+  (testing "reflection helper arity misses are programmer errors"
+    (let [src "(ns ai.miniforge.foo.reflect)
+              (defn construct [ctor]
+                (or ctor
+                    (throw (ex-info \"No matching constructor\" {:arity 3}))))"
+          {:keys [violations]} (exc/analyze-content "reflect.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
+(deftest unmapped-dispatch-table-category-is-fatal-only
+  (testing "unmapped category guards protect closed dispatch tables"
+    (let [src "(ns ai.miniforge.foo.dispatch)
+              (defn category-type [category]
+                (or (lookup category)
+                    (throw (IllegalArgumentException.
+                            (str \"Unmapped category: \" category)))))"
+          {:keys [violations]} (exc/analyze-content "dispatch.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
+(deftest nested-invalid-config-marker-is-fatal-only
+  (testing "nested invalid-config ex-data marks fail-fast config guards"
+    (let [src "(ns ai.miniforge.foo.config)
+              (defn read-config [path]
+                (throw (ex-info \"Malformed config resource\"
+                                (assoc {:config/resource path}
+                                       :config/error :invalid-config))))"
+          {:keys [violations]} (exc/analyze-content "config.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
 (deftest plain-failure-is-cleanup-needed
   (testing "messages without programmer-error markers are :cleanup-needed"
     (let [src "(ns ai.miniforge.foo.core)
