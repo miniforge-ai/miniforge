@@ -1068,6 +1068,9 @@
    Returns:
    {:pr-number :comments-found :files-processed :fixes :pushed?}
 
+   Returns an anomaly map unchanged when the PR URL is invalid or PR
+   comment fetching fails.
+
    Example:
      (respond-to-comments!
        \"https://github.com/org/repo/pull/123\"

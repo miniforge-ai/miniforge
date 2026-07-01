@@ -18,11 +18,10 @@
 
 (ns ai.miniforge.pr-lifecycle.anomaly.fetch-actionable-comments-result-test
   "Coverage for `responder/fetch-actionable-comments-result`
-   (anomaly-returning) and the private boundary helper.
+   (anomaly-returning).
 
-   Upstream poller error → `:fault` anomaly. The private boundary
-   helper rethrows via `response/throw-anomaly!` with
-   `:anomalies/fault`."
+   Upstream poller error -> `:fault` anomaly. The orchestrator returns
+   the anomaly unchanged so callers can decide how to surface it."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.anomaly.interface :as anomaly]

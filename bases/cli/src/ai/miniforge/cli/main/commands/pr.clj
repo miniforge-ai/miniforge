@@ -22,8 +22,10 @@
    [babashka.process :as process]
    [cheshire.core :as json]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.display :as display]
+   [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.pr-monitor :as pr-monitor]
    [ai.miniforge.cli.main.commands.pr-review :as pr-review]
    [ai.miniforge.cli.messages :as messages]
@@ -169,12 +171,12 @@
       (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
         (when-not number
           (display/print-error (messages/t :pr/respond-bad-url))
-          (System/exit 1))
+          (shared/exit! 1))
         (display/print-info (messages/t :pr/respond-checkout {:number number}))
         (let [branch (checkout-pr! number)]
           (when-not branch
             (display/print-error (messages/t :pr/respond-checkout-failed))
-            (System/exit 1))
+            (shared/exit! 1))
           (display/print-info (messages/t :pr/respond-on-branch {:branch branch}))
           (let [cwd (System/getProperty "user.dir")
                 result (pr-lifecycle/respond-to-comments!
@@ -183,14 +185,18 @@
                           (workflow-runner/run-workflow-from-spec! spec (merge {:quiet true} run-opts)))
                         push!
                         opts)]
-            (display/print-info
-             (messages/t :pr/respond-done
-                         {:comments (:comments-found result)
-                          :files    (:files-processed result)
-                          :fixed    (count (filter :succeeded? (:fixes result)))
-                          :pushed   (if (:pushed? result)
-                                      (messages/t :pr/respond-pushed)
-                                      "")}))))))))
+            (if (anomaly/anomaly? result)
+              (do
+                (display/print-error (:anomaly/message result))
+                (shared/exit! 1))
+              (display/print-info
+               (messages/t :pr/respond-done
+                           {:comments (:comments-found result)
+                            :files    (:files-processed result)
+                            :fixed    (count (filter :succeeded? (:fixes result)))
+                            :pushed   (if (:pushed? result)
+                                        (messages/t :pr/respond-pushed)
+                                        "")})))))))))
 
 (defn pr-merge-cmd
   [opts]
