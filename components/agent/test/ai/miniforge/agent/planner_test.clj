@@ -86,16 +86,22 @@
 ;; Invoke tests
 
 (deftest planner-invoke-test
-  (testing "throws when no LLM backend provided"
-    (let [agent (planner/create-planner)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
-            (core/invoke agent {} "Build a user login system")))))
+  (testing "returns error data when no LLM backend provided"
+    (let [agent (planner/create-planner)
+          result (core/invoke agent {} "Build a user login system")]
+      (is (= :error (:status result)))
+      (is (= "No LLM backend provided for planner agent"
+             (get-in result [:error :message])))
+      (is (= :anomalies.agent/llm-error
+             (get-in result [:error :data :anomaly/category])))))
 
-  (testing "throws with context but no LLM backend"
-    (let [agent (planner/create-planner)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
-            (core/invoke agent {:codebase {:has-tests? true}}
-                         "Add feature to existing codebase")))))
+  (testing "returns error data with context but no LLM backend"
+    (let [agent (planner/create-planner)
+          result (core/invoke agent {:codebase {:has-tests? true}}
+                              "Add feature to existing codebase")]
+      (is (= :error (:status result)))
+      (is (= "No LLM backend provided for planner agent"
+             (get-in result [:error :message])))))
 
   (testing "writes existing files into the planner context cache"
     (let [cached-files (atom nil)
@@ -498,10 +504,12 @@
 ;; Full cycle tests
 
 (deftest planner-cycle-test
-  (testing "full invoke-validate cycle throws without LLM"
-    (let [agent (planner/create-planner)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"No LLM backend"
-            (core/cycle-agent agent {} "Create a REST API endpoint"))))))
+  (testing "full invoke-validate cycle returns error data without LLM"
+    (let [agent (planner/create-planner)
+          result (core/cycle-agent agent {} "Create a REST API endpoint")]
+      (is (= :error (:status result)))
+      (is (= "No LLM backend provided for planner agent"
+             (get-in result [:error :message]))))))
 
 ;------------------------------------------------------------------------------ Layer 6
 ;; Tool-disallow-list — role-scoped restriction so the planner cannot
