@@ -204,9 +204,12 @@
    "invariant"
    "missing"
    "missing-resource"
+   "non-fn"
+   "non-keyword"
    "classpath"
    "integrity"
-   "invalid-config"])
+   "invalid-config"
+   "unregistered-at-resolve"])
 
 (defn- collect-text
   "Collect every string-shaped piece of evidence — string literals plus

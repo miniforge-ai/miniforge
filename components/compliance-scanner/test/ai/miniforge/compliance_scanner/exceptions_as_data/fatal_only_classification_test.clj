@@ -54,6 +54,34 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
+(deftest registry-contract-message-key-is-fatal-only
+  (testing "localized registry contract keys are programmer-error guards"
+    (let [src "(ns ai.miniforge.foo.registry)
+              (defn register-widget! [widget-key f]
+                (when-not (keyword? widget-key)
+                  (throw (IllegalArgumentException.
+                           (messages/t :widgets/non-keyword-key
+                                       {:value (pr-str widget-key)}))))
+                (when-not (ifn? f)
+                  (throw (IllegalArgumentException.
+                           (messages/t :widgets/non-fn-value
+                                       {:value (pr-str f)})))))"
+          {:keys [violations]} (exc/analyze-content "registry.clj" src)]
+      (is (= 2 (count violations)))
+      (is (every? #(= :fatal-only (:classification %)) violations)))))
+
+(deftest registry-resolution-invariant-is-fatal-only
+  (testing "validated-but-missing registry resolution keys are fatal-only"
+    (let [src "(ns ai.miniforge.foo.registry)
+              (defn resolve-widget [k]
+                (or (lookup-widget k)
+                    (throw (IllegalStateException.
+                             (messages/t :widgets/unregistered-at-resolve
+                                         {:widget k})))))"
+          {:keys [violations]} (exc/analyze-content "registry.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
 (deftest plain-failure-is-cleanup-needed
   (testing "messages without programmer-error markers are :cleanup-needed"
     (let [src "(ns ai.miniforge.foo.core)
