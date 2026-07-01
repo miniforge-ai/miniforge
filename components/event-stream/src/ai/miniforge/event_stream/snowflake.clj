@@ -56,8 +56,8 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.messages :as messages]
+   [ai.miniforge.response.interface :as response]
    [clojure.java.io :as io]
-   [clojure.string :as str]
    [ai.miniforge.logging.interface :as log]))
 
 ;; NOTE: The worker-id lease path constructs java.io.RandomAccessFile,
@@ -155,6 +155,31 @@
   []
   (io/file (config/miniforge-home) "events" ".workers"))
 
+(defn- lease-io-anomaly
+  [workers-dir lease-path id error]
+  (cond-> (response/make-anomaly
+           :anomalies/unavailable
+           (messages/t :snowflake/lease-io-failure
+                       {:worker-id id
+                        :lease-path (.getAbsolutePath lease-path)})
+           {:reason :lease-io-failure
+            :worker-id id
+            :lease-path (.getAbsolutePath lease-path)
+            :workers-dir (.getAbsolutePath workers-dir)})
+    error (assoc :anomaly/ex-message (ex-message error)
+                 :anomaly/ex-class (str (class error)))
+    (ex-data error) (assoc :anomaly/ex-data (ex-data error))))
+
+(defn- workers-exhausted-anomaly
+  [workers-dir]
+  (response/make-anomaly
+   :anomalies/busy
+   (messages/t :snowflake/workers-exhausted
+               {:max max-workers})
+   {:reason :workers-exhausted
+    :max    max-workers
+    :workers-dir (.getAbsolutePath workers-dir)}))
+
 (defn- write-lease-metadata!
   "Truncate `channel` and write the worker-id + acquire timestamp as
    EDN. Force to disk. Metadata is informational only — the OS-level
@@ -188,41 +213,32 @@
    `:workers-exhausted` even when no slots are actually contended."
   [workers-dir ^long id]
   (.mkdirs workers-dir)
-  (let [lease-path (io/file workers-dir (str id ".lease"))
-        raf       (java.io.RandomAccessFile. lease-path "rw")
-        channel   (.getChannel raf)]
+  (let [lease-path (io/file workers-dir (str id ".lease"))]
     ;; Resolve OverlappingFileLockException lazily via Class/forName so
     ;; this namespace stays loadable in Babashka (which doesn't ship
     ;; java.nio.channels). A typed `(catch java.nio.channels...)` would
     ;; force compile-time class resolution and break BB load.
     (try
-      (let [lock (.tryLock channel)]
-        (if lock
-          (do
-            (write-lease-metadata! channel id)
-            {:channel channel :lock lock :worker-id id :raf raf})
-          (do (.close raf) nil)))
+      (let [raf     (java.io.RandomAccessFile. lease-path "rw")
+            channel (.getChannel raf)]
+        (try
+          (let [lock (.tryLock channel)]
+            (if lock
+              (do
+                (write-lease-metadata! channel id)
+                {:channel channel :lock lock :worker-id id :raf raf})
+              (do (.close raf) nil)))
+          (catch Exception e
+            (try (.close raf) (catch Exception _))
+            (if (instance? (Class/forName "java.nio.channels.OverlappingFileLockException") e)
+              ;; This JVM already holds an overlapping lock on the same
+              ;; file. Treat as "slot held" and let the caller advance.
+              nil
+              ;; Real IO/permission failure. Return an explicit anomaly
+              ;; rather than silently masking it as :workers-exhausted later.
+              (lease-io-anomaly workers-dir lease-path id e)))))
       (catch Exception e
-        (try (.close raf) (catch Exception _))
-        (if (instance? (Class/forName "java.nio.channels.OverlappingFileLockException") e)
-          ;; This JVM already holds an overlapping lock on the same
-          ;; file. Treat as "slot held" and let the caller advance.
-          nil
-          ;; Real IO/permission failure. Wrap with context and propagate
-          ;; rather than silently masking as :workers-exhausted later.
-          ;; Localized via messages/t. acquire-worker-lease! and its
-          ;; sole caller (create-generator at process startup) are at
-          ;; the edge — an exception is the right shape vs a data
-          ;; anomaly that callers would have to convert back to a
-          ;; failure signal.
-          (throw (ex-info (messages/t :snowflake/lease-io-failure
-                                      {:worker-id id
-                                       :lease-path (.getAbsolutePath lease-path)})
-                          {:reason :lease-io-failure
-                           :worker-id id
-                           :lease-path (.getAbsolutePath lease-path)
-                           :workers-dir (.getAbsolutePath workers-dir)}
-                          e)))))))
+        (lease-io-anomaly workers-dir lease-path id e)))))
 
 (defn acquire-worker-lease!
   "Walk slots 0..1023 and acquire the first whose lease file is
@@ -244,24 +260,20 @@
    or crash), so stale leases reclaim themselves without explicit
    teardown.
 
-   Throws ex-info (localized) when all slots are held — typical only
-   when 1024+ miniforge processes coexist on the same host. This is
-   an edge condition raised at generator construction; an exception
-   is the right shape vs a data anomaly per the project's
-   exceptions-as-data conventions."
+   Returns a canonical anomaly when all slots are held — typical only
+   when 1024+ miniforge processes coexist on the same host — or when
+   lease-file I/O fails."
   [workers-dir]
   (loop [id 0]
     (cond
       (>= id max-workers)
-      (throw (ex-info (messages/t :snowflake/workers-exhausted
-                                  {:max max-workers})
-                      {:reason :workers-exhausted
-                       :max    max-workers
-                       :workers-dir (.getAbsolutePath workers-dir)}))
+      (workers-exhausted-anomaly workers-dir)
       :else
-      (if-let [lease (try-acquire-slot workers-dir id)]
-        lease
-        (recur (inc id))))))
+      (let [lease (try-acquire-slot workers-dir id)]
+        (cond
+          (response/anomaly-map? lease) lease
+          lease lease
+          :else (recur (inc id)))))))
 
 (defn release-lease!
   "Release a worker-id lease. Idempotent. The OS would release on JVM
@@ -281,7 +293,8 @@
   "Allocate a new snowflake generator. Acquires a worker-id lease under
    `:workers-dir` (default `~/.miniforge/events/.workers/`).
 
-   Returns a map carrying:
+   Returns a canonical anomaly when worker lease acquisition fails.
+   Otherwise returns a map carrying:
      :state      atom with {:last-ts :last-seq :worker-id}
      :worker-id  long, 0..1023
      :lease      lease handle (release on close!)
@@ -292,13 +305,15 @@
    side effects."
   [& [{:keys [workers-dir now-fn logger lease]
        :or   {now-fn (fn ^long [] (System/currentTimeMillis))}}]]
-  (let [lease (or lease (acquire-worker-lease! (or workers-dir (default-workers-dir))))
-        worker-id (:worker-id lease)]
-    {:state     (atom (initial-state worker-id))
-     :worker-id worker-id
-     :lease     lease
-     :now-fn    now-fn
-     :logger    logger}))
+  (let [lease (or lease (acquire-worker-lease! (or workers-dir (default-workers-dir))))]
+    (if (response/anomaly-map? lease)
+      lease
+      (let [worker-id (:worker-id lease)]
+        {:state     (atom (initial-state worker-id))
+         :worker-id worker-id
+         :lease     lease
+         :now-fn    now-fn
+         :logger    logger}))))
 
 (defn close!
   "Release the generator's worker-id lease. Idempotent."
@@ -349,14 +364,16 @@
            nil
            (into-array Object [(Long/valueOf park-budget-nanos)])))
 
-(defn- pre-epoch-error
+(defn- pre-epoch-anomaly
   [now-ms worker-id]
-  (ex-info (messages/t :snowflake/pre-epoch-clock
-                       {:now-ms now-ms :epoch-ms miniforge-epoch-ms})
-           {:reason     :pre-epoch-clock
-            :now-ms     now-ms
-            :epoch-ms   miniforge-epoch-ms
-            :worker-id  worker-id}))
+  (response/make-anomaly
+   :anomalies/incorrect
+   (messages/t :snowflake/pre-epoch-clock
+               {:now-ms now-ms :epoch-ms miniforge-epoch-ms})
+   {:reason     :pre-epoch-clock
+    :now-ms     now-ms
+    :epoch-ms   miniforge-epoch-ms
+    :worker-id  worker-id}))
 
 (defn- handle-rollback!
   "Side-effect: warn once on first rollback observation. Park before
@@ -379,17 +396,20 @@
                 ^long (:last-seq new-state))))
 
 (defn next-id-long!
-  "Internal: generate the next snowflake as a primitive long. Parks on
+  "Internal: generate the next snowflake as a long. Parks on
    clock rollback or sequence exhaustion (≤100µs per retry via
    `LockSupport/parkNanos` rather than `Thread/sleep`).
-   Public id functions (`next-id!`, `next-id-hex!`) wrap this."
-  ^long [{:keys [state now-fn ^long worker-id] :as gen}]
+   Public id functions (`next-id!`, `next-id-hex!`) wrap this.
+
+   Returns a canonical anomaly when the wall clock is before the
+   miniforge epoch."
+  [{:keys [state now-fn ^long worker-id] :as gen}]
   (loop [warned? false]
     (let [now-ms (long (now-fn))
           old    @state
           r      (next-state old now-ms)]
       (cond
-        (= r ::pre-epoch)        (throw (pre-epoch-error now-ms worker-id))
+        (= r ::pre-epoch)        (pre-epoch-anomaly now-ms worker-id)
         (= r ::clock-rollback)   (recur (handle-rollback! gen now-ms (:last-ts old) warned?))
         (= r ::seq-exhausted)    (do (park-briefly!) (recur warned?))
         :else
@@ -402,12 +422,18 @@
    snowflake bits live in the UUID's most-significant 64 bits; low 64
    bits are zero. The UUID's string form sorts lexically by creation
    order on a single host."
-  ^java.util.UUID [generator]
-  (long->uuid (next-id-long! generator)))
+  [generator]
+  (let [id (next-id-long! generator)]
+    (if (response/anomaly-map? id)
+      id
+      (long->uuid id))))
 
 (defn next-id-hex!
   "Generate the next snowflake event id as a 16-char lowercase hex
    string. Use this for filenames and other places where the UUID's
    hyphens are inconvenient."
-  ^String [generator]
-  (format-hex (next-id-long! generator)))
+  [generator]
+  (let [id (next-id-long! generator)]
+    (if (response/anomaly-map? id)
+      id
+      (format-hex id))))

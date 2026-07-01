@@ -66,6 +66,15 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope constructor
 
+(defn- next-event-id
+  [generator]
+  (cond
+    (response/anomaly-map? generator) generator
+    generator
+    (snowflake/next-id! generator)
+    :else
+    (random-uuid)))
+
 (defn create-envelope
   "Create an event envelope with sequence numbering.
 
@@ -100,28 +109,29 @@
    ;; window where two concurrent producers see the same number.
    ;; The previous read-then-swap pattern WAS racey; reviewers
    ;; flagged it on PR #814.
-   (let [[old _new] (swap-vals! stream
-                                update-in
-                                [:sequence-numbers workflow-id]
-                                (fnil inc 0))
-         seq-num    (get-in old [:sequence-numbers workflow-id] 0)
-         generator  (:snowflake-generator @stream)]
-     (cond-> {:event/type event-type
-              :event/id (if generator
-                          (snowflake/next-id! generator)
-                          (random-uuid))
-              :event/timestamp (java.util.Date.)
-              :event/version event-version
-              :event/sequence-number seq-num
-              :workflow/id workflow-id
-              :message message}
-       (:org/id opts)            (assoc :org/id (:org/id opts))
-       (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
-       (:repo/id opts)           (assoc :repo/id (:repo/id opts))
-       (:auth/context opts)      (assoc :auth/context (:auth/context opts))
-       (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
-       (:agent/id opts)          (assoc :agent/id (:agent/id opts))
-       (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))
+   (let [generator (:snowflake-generator @stream)
+         event-id  (next-event-id generator)]
+     (if (response/anomaly-map? event-id)
+       event-id
+       (let [[old _new] (swap-vals! stream
+                                    update-in
+                                    [:sequence-numbers workflow-id]
+                                    (fnil inc 0))
+             seq-num    (get-in old [:sequence-numbers workflow-id] 0)]
+         (cond-> {:event/type event-type
+                  :event/id event-id
+                  :event/timestamp (java.util.Date.)
+                  :event/version event-version
+                  :event/sequence-number seq-num
+                  :workflow/id workflow-id
+                  :message message}
+           (:org/id opts)            (assoc :org/id (:org/id opts))
+           (:workspace/id opts)      (assoc :workspace/id (:workspace/id opts))
+           (:repo/id opts)           (assoc :repo/id (:repo/id opts))
+           (:auth/context opts)      (assoc :auth/context (:auth/context opts))
+           (:event/parent-id opts)   (assoc :event/parent-id (:event/parent-id opts))
+           (:agent/id opts)          (assoc :agent/id (:agent/id opts))
+           (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event bus operations
@@ -343,25 +353,27 @@
    eliminating the TOCTOU window that allowed a publish to slip through
    after `quiesce!` fenced the workflow."
   [stream event]
-  ;; Fast path: check quiesce before acquiring the in-flight slot so
-  ;; already-quiesced workflows skip the swap! entirely.
-  (or (rejection-if-quiesced stream event)
-      (let [result (with-in-flight stream event
-                     (fn []
-                       (let [{:keys [sinks subscribers filters logger]} @stream]
-                         (deliver-to-sinks! sinks event logger)
-                         (record-event! stream event)
-                         (deliver-to-subscribers! subscribers filters event logger)
-                         (log-published! logger event)
-                         event)))]
-        ;; with-in-flight returns quiesced-sentinel when the workflow was
-        ;; fenced during the atomic acquire (the TOCTOU window). Convert
-        ;; to the canonical rejection shape so callers see a consistent
-        ;; {:rejected? true ...} map regardless of which path triggered it.
-        (if (= result quiesced-sentinel)
-          (do (log-rejection! (:logger @stream) event)
-              (rejection-result event :workflow-quiesced))
-          result))))
+  (if (response/anomaly-map? event)
+    event
+    ;; Fast path: check quiesce before acquiring the in-flight slot so
+    ;; already-quiesced workflows skip the swap! entirely.
+    (or (rejection-if-quiesced stream event)
+        (let [result (with-in-flight stream event
+                       (fn []
+                         (let [{:keys [sinks subscribers filters logger]} @stream]
+                           (deliver-to-sinks! sinks event logger)
+                           (record-event! stream event)
+                           (deliver-to-subscribers! subscribers filters event logger)
+                           (log-published! logger event)
+                           event)))]
+          ;; with-in-flight returns quiesced-sentinel when the workflow was
+          ;; fenced during the atomic acquire (the TOCTOU window). Convert
+          ;; to the canonical rejection shape so callers see a consistent
+          ;; {:rejected? true ...} map regardless of which path triggered it.
+          (if (= result quiesced-sentinel)
+            (do (log-rejection! (:logger @stream) event)
+                (rejection-result event :workflow-quiesced))
+            result)))))
 
 (defn subscribe!
   ([stream subscriber-id callback]

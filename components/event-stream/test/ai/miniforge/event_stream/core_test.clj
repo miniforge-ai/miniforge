@@ -23,6 +23,7 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.phase.interface :as phase]
    [clojure.test :refer [deftest testing is]]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.core :as core]))
 
 ;------------------------------------------------------------------------------ Helpers
@@ -83,6 +84,46 @@
       (is (nil? (:workflow/id env)))
       (is (= 0 (:event/sequence-number env))))))
 
+(deftest create-envelope-propagates-snowflake-anomaly
+  (let [generator {:state     (atom {:last-ts -1
+                                     :last-seq -1
+                                     :worker-id 0})
+                   :worker-id 0
+                   :lease     {:worker-id 0}
+                   :now-fn    (constantly 0)}
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator})
+        result (core/create-envelope stream :test/event (random-uuid) "hello")]
+    (is (response/anomaly-map? result))
+    (is (= :anomalies/incorrect (:anomaly/category result)))
+    (is (= :pre-epoch-clock (:reason result)))))
+
+(deftest create-envelope-propagates-anomaly-generator
+  (let [generator-anomaly (response/make-anomaly
+                           :anomalies/busy
+                           "No worker slots"
+                           {:reason :workers-exhausted})
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator-anomaly})
+        result (core/create-envelope stream :test/event (random-uuid) "hello")]
+    (is (identical? generator-anomaly result))))
+
+(deftest create-envelope-does-not-consume-sequence-on-id-anomaly
+  (let [wf-id (random-uuid)
+        generator {:state     (atom {:last-ts -1
+                                     :last-seq -1
+                                     :worker-id 0})
+                   :worker-id 0
+                   :lease     {:worker-id 0}
+                   :now-fn    (constantly 0)}
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator})
+        result (core/create-envelope stream :test/event wf-id "bad")]
+    (is (response/anomaly-map? result))
+    (swap! stream dissoc :snowflake-generator)
+    (is (= 0 (:event/sequence-number
+              (core/create-envelope stream :test/event wf-id "good"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; publish! sink integration
 
@@ -93,6 +134,17 @@
       (core/publish! stream event)
       (is (= 1 (count @collected)))
       (is (= :test/sink (:event/type (first @collected)))))))
+
+(deftest publish-returns-anomaly-without-delivery
+  (let [{:keys [stream collected]} (collect-stream)
+        anomaly (response/make-anomaly
+                 :anomalies/incorrect
+                 "invalid event"
+                 {:reason :pre-epoch-clock})
+        result (core/publish! stream anomaly)]
+    (is (identical? anomaly result))
+    (is (empty? @collected))
+    (is (empty? (:events @stream)))))
 
 (deftest publish-sink-error-handling-test
   (testing "publish! continues when a sink throws"
