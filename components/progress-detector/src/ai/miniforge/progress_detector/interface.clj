@@ -225,7 +225,8 @@
   "Add or overwrite a tool profile in `registry-atom`.
 
    Returns the new registry map on success, or an `:invalid-input`
-   anomaly if the profile fails ToolProfile schema validation.
+   anomaly if the profile is missing `:tool/id` or fails ToolProfile
+   schema validation.
 
    Arguments:
      registry-atom - atom holding the registry (typically the

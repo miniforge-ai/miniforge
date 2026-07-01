@@ -33,6 +33,7 @@
    `register-profiles!` is itself idempotent (each entry overwrites
    by :tool/id) so re-invocation in tests or after reload is safe."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.progress-detector.interface :as pd]
    [clojure.edn                              :as edn]
    [clojure.java.io                          :as io]))
@@ -79,15 +80,26 @@
    Arguments:
      registry - registry atom (defaults to pd/default-tool-registry)
 
-   Returns: the final registry map."
+   Returns the final registry map on success. If a profile is invalid,
+   returns the first `:invalid-input` anomaly from progress-detector;
+   profiles registered before the anomaly remain registered and later
+   profiles are skipped."
   ([]
    (register-profiles! pd/default-tool-registry))
   ([registry]
-   (last (mapv #(pd/register-tool-profile! registry %) claude-cli-profiles))))
+   (reduce
+    (fn [_ profile]
+      (let [result (pd/register-tool-profile! registry profile)]
+        (if (anomaly/anomaly? result)
+          (reduced result)
+          result)))
+    @registry
+    claude-cli-profiles)))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Load-time contribution
 
+#_{:clj-kondo/ignore [:unused-private-var]}
 (defonce ^:private registered?
   ;; Side-effect at namespace load: contribute the eight profiles to
   ;; the process-wide registry. defonce makes it a one-shot;
@@ -99,7 +111,6 @@
 
 (comment
   ;; Inspect the registered profiles
-  (require '[ai.miniforge.progress-detector.interface :as pd])
   (pd/all-tool-ids)
   ;; => [:tool/Bash :tool/Edit :tool/Glob :tool/Grep :tool/Read
   ;;     :tool/WebFetch :tool/WebSearch :tool/Write]

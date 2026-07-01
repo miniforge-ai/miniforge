@@ -22,6 +22,12 @@ response anomalies to canonical anomaly data.
 
 ## Validation
 
-- `clojure -M:dev:test -e '(require ...progress-detector tests...) ...'`
+- `clojure -M:dev:test -e '(require (quote clojure.test) (quote ai.miniforge.progress-detector.tool-profile-test) (quote
+  ai.miniforge.progress-detector.anomaly.progress-detector-anomaly-test) (quote
+  ai.miniforge.progress-detector.interface-test) (quote ai.miniforge.adapter-claude-code.tool-profiles-test)) (let [r
+  (clojure.test/run-tests (quote ai.miniforge.progress-detector.tool-profile-test) (quote
+  ai.miniforge.progress-detector.anomaly.progress-detector-anomaly-test) (quote
+  ai.miniforge.progress-detector.interface-test) (quote ai.miniforge.adapter-claude-code.tool-profiles-test))] (when
+  (pos? (+ (:fail r) (:error r))) (System/exit 1)))'`
 - `clj-kondo --lint` on changed progress-detector files
 - `bb pre-commit`
