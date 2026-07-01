@@ -114,14 +114,15 @@
    [:registry/last-updated inst?]
    [:registry/listeners    [:map-of :string [:vector ListenerEntry]]]])
 
-(defn validate-entry!
-  "Throw on invalid entry; return entry otherwise. Used by `register!`."
+(defn validate-entry
+  "Return a DAG result for `entry` validation. Used by `register!`."
   [entry]
-  (when-not (m/validate ListenerEntry entry)
-    (throw (ex-info "invalid listener entry"
-                    {:errors (m/explain ListenerEntry entry)
-                     :anomaly :listener-registry/invalid-entry})))
-  entry)
+  (if (m/validate ListenerEntry entry)
+    (dag/ok entry)
+    (dag/err :listener-registry/invalid-entry
+             "invalid listener entry"
+             {:errors (m/explain ListenerEntry entry)
+              :anomaly :listener-registry/invalid-entry})))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Pure state operations
@@ -267,16 +268,6 @@
   (dag/ok {:listener-id (:listener/id entry)
            :path        (:path (:data write-result))}))
 
-(defn- invalid-entry-error
-  "Translate a malli-validation `ExceptionInfo` from `validate-entry!`
-   into a typed DAG error. Honors a caller-supplied `:anomaly` key
-   when present."
-  [^Throwable e]
-  (let [data (ex-data e)]
-    (dag/err (or (:anomaly data) :listener-registry/invalid-entry)
-             (.getMessage e)
-             data)))
-
 ;; ── Lookup + active-entry assertion (pure registry queries) ─────────
 
 (defn- find-listener
@@ -340,27 +331,33 @@
   [worktree-path]
   (str (fs/path (str worktree-path) default-storage-path)))
 
+(defn- trailing-forms-error
+  [path trailing]
+  (dag/err :listener-registry/read-failed
+           (str "registry file " path " has trailing forms after first value")
+           {:path path
+            :trailing trailing}))
+
 (defn- read-single-edn-form
   "Read exactly one EDN form from `raw`, asserting EOF after.
-   Returns the parsed value or throws ex-info on:
-   - parse failure inside `edn/read` (re-thrown)
-   - trailing forms (a valid first form followed by anything but
-     whitespace / EOF)
+   Returns a DAG result containing the parsed value. Parse failures
+   inside `edn/read` still bubble to `read-registry`'s I/O boundary;
+   trailing forms are expected data corruption and return
+   `:listener-registry/read-failed` directly.
 
    Using PushbackReader + double-read with `:eof` sentinel is the
    only way to detect trailing garbage without parsing the whole
    string first. `edn/read-string` reads the first form and silently
    discards the rest, so a corrupted file like `\"{:a 1} extra junk\"`
    would otherwise round-trip as `{:a 1}`."
-  [raw]
+  [path raw]
   (let [eof-sentinel ::eof
         rdr (java.io.PushbackReader. (java.io.StringReader. ^String raw))
         first-form (edn/read {:eof eof-sentinel} rdr)
         next-form  (edn/read {:eof eof-sentinel} rdr)]
-    (when-not (identical? eof-sentinel next-form)
-      (throw (ex-info "trailing forms after first registry value"
-                      {:trailing next-form})))
-    first-form))
+    (if (identical? eof-sentinel next-form)
+      (dag/ok first-form)
+      (trailing-forms-error path next-form))))
 
 (defn- schema-error
   "Build a typed `:listener-registry/read-failed` for a registry value
@@ -379,10 +376,13 @@
   [path raw]
   (if (str/blank? raw)
     (dag/ok empty-registry)
-    (let [parsed (read-single-edn-form raw)]
-      (if (m/validate Registry parsed)
-        (dag/ok parsed)
-        (schema-error path parsed)))))
+    (let [parse-r (read-single-edn-form path raw)]
+      (if-not (dag/ok? parse-r)
+        parse-r
+        (let [parsed (:data parse-r)]
+          (if (m/validate Registry parsed)
+            (dag/ok parsed)
+            (schema-error path parsed)))))))
 
 (defn- read-failure
   "Build a typed `:listener-registry/read-failed` for a slurp /
@@ -445,7 +445,11 @@
                  (reduce + 0 (map count (vals (:registry/listeners registry))))})
         (catch Throwable move-err
           (best-effort-delete! tmp-path)
-          (throw move-err)))
+          (dag/err :listener-registry/write-failed
+                   (str "failed to write " path ": " (.getMessage move-err))
+                   {:path path
+                    :tmp-path tmp-path
+                    :exception-class (some-> move-err class .getName)})))
       (catch Throwable e
         (dag/err :listener-registry/write-failed
                  (str "failed to write " path ": " (.getMessage e))
@@ -494,12 +498,11 @@
       (dag/err :listener-registry/invalid-registered-by
                (str ":registered-by must be one of " valid-registered-by)
                {:received registered-by})
-      (let [entry (build-entry params)]
-        (try
-          (validate-entry! entry)
-          (persist-new-entry! worktree-path entry)
-          (catch clojure.lang.ExceptionInfo e
-            (invalid-entry-error e)))))))
+      (let [entry      (build-entry params)
+            validation (validate-entry entry)]
+        (if-not (dag/ok? validation)
+          validation
+          (persist-new-entry! worktree-path (:data validation)))))))
 
 (defn- transition-from-active!
   "Internal: load → assert entry is `:active` → update → write.
