@@ -202,6 +202,18 @@
     (is (= ["miniforge" "miniforge-core"]
            (sut/parse-project-list-output "[\"miniforge\" \"miniforge-core\"]")))))
 
+(deftest test-parse-project-list-output-returns-error-data-for-invalid-output
+  (testing "invalid Polylith ws output is returned as error data"
+    (let [result (sut/parse-project-list-output "{:not :a-project-list}")]
+      (is (false? (:ok? result)))
+      (is (= :bb-test-runner/invalid-project-list
+             (get-in result [:error :code])))))
+  (testing "unparseable Polylith ws output is returned as error data"
+    (let [result (sut/parse-project-list-output "[")]
+      (is (false? (:ok? result)))
+      (is (= :bb-test-runner/invalid-project-list
+             (get-in result [:error :code]))))))
+
 (deftest test-sanitize-git-worktree-env-strips-worktree-vars
   (testing "git worktree vars do not leak into child test processes"
     (is (= {"PATH" "/usr/bin" "FOO" "bar"}
@@ -244,15 +256,15 @@
              "seed:17"])))))
 
 (deftest test-parse-diagnostic-args-rejects-invalid-numeric-values
-  (testing "numeric diagnostic args fail with contextual ex-info"
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid stable-derived diagnostic argument"
-         (sut/parse-diagnostic-args ["start-size:abc"])))
-    (is (thrown-with-msg?
-         clojure.lang.ExceptionInfo
-         #"Invalid stable-derived diagnostic argument"
-         (sut/parse-diagnostic-args ["seed:not-a-number"])))))
+  (testing "numeric diagnostic args return contextual error data"
+    (let [result (sut/parse-diagnostic-args ["start-size:abc"])]
+      (is (false? (:ok? result)))
+      (is (= :bb-test-runner/invalid-diagnostic-arg
+             (get-in result [:error :code]))))
+    (let [result (sut/parse-diagnostic-args ["seed:not-a-number"])]
+      (is (false? (:ok? result)))
+      (is (= :bb-test-runner/invalid-diagnostic-arg
+             (get-in result [:error :code]))))))
 
 (deftest test-order-projects-supports-declared-and-backward-order
   (testing "diagnostic ordering keeps stable sequences controllable"

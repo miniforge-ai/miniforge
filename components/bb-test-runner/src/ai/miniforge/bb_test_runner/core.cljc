@@ -34,7 +34,7 @@
             [clojure.test :as t])
   (:import
    [clojure.lang PersistentQueue]
-   [java.lang Long NumberFormatException String System]
+   [java.lang Exception Long NumberFormatException String System]
    [java.nio.charset StandardCharsets]
    [java.nio.file Files]
    [java.util ArrayList Collection Collections Random]))
@@ -211,13 +211,20 @@
         marker "get:changes:changed-or-affected-projects"
         marker-index (.indexOf argv marker)]
     (if (neg? marker-index)
-      (throw (ex-info "Changed-projects command is missing the Polylith change marker."
+      (throw (ex-info "Invariant failed: changed-projects command is missing the Polylith change marker."
                       {:argv argv
                        :marker marker}))
       (let [insert-index (inc marker-index)]
         (vec (concat (subvec argv 0 insert-index)
                      ["since:stable"]
                      (subvec argv insert-index)))))))
+
+(defn- parse-error
+  [code message data]
+  {:ok? false
+   :error {:code code
+           :message message
+           :data data}})
 
 (defn parse-project-list-output
   "Parse a Polylith `ws get:changes:changed-or-affected-projects`
@@ -226,13 +233,20 @@
   (let [trimmed (some-> output str/trim not-empty)]
     (if-not trimmed
       []
-      (let [parsed (edn/read-string trimmed)]
-        (cond
-          (sequential? parsed) (mapv str parsed)
-          (set? parsed) (->> parsed (map str) sort vec)
-          :else (throw (ex-info "Expected a sequential or set project list."
-                                {:output output
-                                 :parsed parsed})))))))
+      (try
+        (let [parsed (edn/read-string trimmed)]
+          (cond
+            (sequential? parsed) (mapv str parsed)
+            (set? parsed) (->> parsed (map str) sort vec)
+            :else (parse-error :bb-test-runner/invalid-project-list
+                               "Expected a sequential or set project list."
+                               {:output output
+                                :parsed parsed})))
+        (catch Exception e
+          (parse-error :bb-test-runner/invalid-project-list
+                       "Failed to parse project list output."
+                       {:output output
+                        :cause (.getMessage e)}))))))
 
 (defn sanitize-git-worktree-env
   "Remove git worktree/index variables that must not leak into child
@@ -266,13 +280,21 @@
   [arg prefix]
   (let [raw (subs arg (count prefix))]
     (try
-      (Long/parseLong raw)
+      {:ok? true :data (Long/parseLong raw)}
       (catch NumberFormatException ex
-        (throw (ex-info "Invalid stable-derived diagnostic argument."
-                        {:arg arg
-                         :prefix prefix
-                         :expected-format (str prefix "N")}
-                        ex))))))
+        (parse-error :bb-test-runner/invalid-diagnostic-arg
+                     "Invalid stable-derived diagnostic argument."
+                     {:arg arg
+                      :prefix prefix
+                      :expected-format (str prefix "N")
+                      :cause (.getMessage ex)})))))
+
+(defn- assoc-long-arg
+  [acc k arg prefix]
+  (let [parsed (parse-long-arg arg prefix)]
+    (if (:ok? parsed)
+      (assoc acc k (:data parsed))
+      (reduced parsed))))
 
 (defn parse-diagnostic-args
   "Parse supported stable-derived diagnostic CLI arguments.
@@ -295,7 +317,7 @@
        (assoc acc :projects (parse-project-selector arg))
 
        (str/starts-with? arg "start-size:")
-       (assoc acc :start-size (parse-long-arg arg "start-size:"))
+       (assoc-long-arg acc :start-size arg "start-size:")
 
        (str/starts-with? arg "direction:")
        (assoc acc :direction (keyword (subs arg (count "direction:"))))
@@ -304,7 +326,7 @@
        (assoc acc :order (keyword (subs arg (count "order:"))))
 
        (str/starts-with? arg "seed:")
-       (assoc acc :seed (parse-long-arg arg "seed:"))
+       (assoc-long-arg acc :seed arg "seed:")
 
        :else acc))
    {}
@@ -461,7 +483,7 @@
    (defn- classpath-test-roots
      "JVM placeholder for the Babashka-only classpath discovery path."
      []
-     (throw (ex-info "bb-test-runner run-all is only available under Babashka"
+     (throw (ex-info "Unsupported runtime: bb-test-runner run-all is only available under Babashka"
                      {:runtime :jvm
                       :namespace 'ai.miniforge.bb-test-runner.core}))))
 
