@@ -204,11 +204,11 @@
                           checkpoint synthesis is wired.
      :base-dir            Override base events dir (tests).
 
-   Throws on failure inside the manifest state machine or the
-   rename. Idempotent against partial state via
-   `recover-incomplete-archive!` — running archive-workflow! on a
-   directory whose manifest is already `:archiving` resumes from
-   step 5 rather than re-staging from step 3."
+   Returns an anomaly on expected manifest state-machine/validation
+   failures; throws on filesystem rename failures. Idempotent against
+   partial state via `recover-incomplete-archive!` — running
+   archive-workflow! on a directory whose manifest is already
+   `:archiving` resumes from step 5 rather than re-staging from step 3."
   [workflow-id & [{:keys [base-dir] :as opts}]]
   (let [base       (or base-dir (sinks/default-events-dir))
         live-dir   (sinks/live-workflow-dir base workflow-id)
@@ -295,8 +295,9 @@
 (defn recover-all-incomplete!
   "Walk `base-dir` and finish every half-completed archive found by
    `scan-incomplete-archives`. Returns a vector of recovered
-   workflow-ids. Intended for boot-time recovery — production
-   callers invoke this once before resuming normal operation."
+   workflow-ids, or the first anomaly returned by recovery. Intended
+   for boot-time recovery — production callers invoke this once before
+   resuming normal operation."
   [base-dir]
   (let [result (reduce (fn [recovered {:keys [workflow-id]}]
                          (let [next-result (recover-incomplete-archive!

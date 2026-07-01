@@ -172,14 +172,17 @@
   "Last-resort logging when no `:on-error` callback is supplied. Writes
    a single-line warning to stderr so persistent IO failures during
    the heartbeat are observable in the operator's terminal / CI logs
-   rather than silently disappearing. The workflow runner is the
+   rather than silently disappearing. Accepts either a Throwable or an
+   anomaly map returned by `renew-lease!`. The workflow runner is the
    normal caller and should prefer to wire its own logger via
    `:on-error`."
-  [^Throwable t workflow-dir]
+  [failure workflow-dir]
   (binding [*out* *err*]
     (println (str "WARNING: manifest heartbeat renew failed for "
                   (.getAbsolutePath ^File (io/file workflow-dir))
-                  ": " (.getMessage t)))))
+                  ": " (if (anomaly/anomaly? failure)
+                         (:anomaly/message failure)
+                         (.getMessage ^Throwable failure))))))
 
 (defn stop-heartbeat!
   "Shut a heartbeat executor down. Waits up to `:timeout-ms` (default
@@ -369,9 +372,10 @@
 
 (defn renew-lease!
   "Re-stamp the lease and write the manifest atomically. Returns the
-   updated manifest. Idempotent — a missing manifest is a no-op
-   returning nil so the heartbeat doesn't crash if the workflow is
-   archived between ticks."
+   updated manifest, an anomaly from `save-manifest!`, or nil when the
+   manifest is absent. Idempotent — a missing manifest is a no-op so
+   the heartbeat doesn't crash if the workflow is archived between
+   ticks."
   [workflow-dir]
   (when-let [m (load-manifest workflow-dir)]
     (let [renewed (renew-lease m)]
@@ -387,11 +391,12 @@
    `stop-heartbeat!`.
 
    Renew failures: a transient IO error during a beat must not crash
-   the workflow runner. By default any caught Throwable is reported
-   via `default-heartbeat-error-log!` (a stderr warning) so persistent
-   failures are visible. Callers that have a structured logger
-   should pass `:on-error` instead — that callback fully replaces the
-   default and is the recommended path for production wiring.
+   the workflow runner. By default any caught Throwable, or returned
+   anomaly, is reported via
+   `default-heartbeat-error-log!` (a stderr warning) so persistent
+   failures are visible. Callers that have a structured logger should
+   pass `:on-error` instead — that callback fully replaces the default
+   and is the recommended path for production wiring.
 
    The sub-3 cleanup path's `lease-fresh?` check tolerates a single
    missed renew via the TTL > period default, so a one-off swallowed
@@ -411,8 +416,11 @@
      (.scheduleAtFixedRate ex
                            ^Runnable
                            (fn []
-                             (try (renew-lease! workflow-dir)
-                                  (catch Throwable t (report-error t))))
+                             (try
+                               (let [result (renew-lease! workflow-dir)]
+                                 (when (anomaly/anomaly? result)
+                                   (report-error result)))
+                               (catch Throwable t (report-error t))))
                            (long period-seconds)
                            (long period-seconds)
                            TimeUnit/SECONDS)

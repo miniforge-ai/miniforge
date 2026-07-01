@@ -17,14 +17,17 @@ from thrown exceptions to canonical anomaly data.
 - Return `:invalid-input` anomaly maps for invalid manifest shapes.
 - Propagate manifest anomalies through archive orchestration before filesystem
   side effects continue.
+- Log returned heartbeat/archive anomalies at the production callers instead of
+  silently treating them as success.
 - Update manifest/archive regressions to assert the data-returning contract.
 
 ## Validation
 
 - `clojure -M:dev:test -e '(require (quote clojure.test) (quote ai.miniforge.event-stream.manifest-test) (quote
-  ai.miniforge.event-stream.archive-test)) (let [r (clojure.test/run-tests (quote
-  ai.miniforge.event-stream.manifest-test) (quote ai.miniforge.event-stream.archive-test))] (when (pos? (+ (:fail r)
-  (:error r))) (System/exit 1)))'`
+  ai.miniforge.event-stream.archive-test) (quote ai.miniforge.cli.workflow-runner.manifest-wiring-test)) (let [r
+  (clojure.test/run-tests (quote ai.miniforge.event-stream.manifest-test) (quote
+  ai.miniforge.event-stream.archive-test) (quote ai.miniforge.cli.workflow-runner.manifest-wiring-test))] (when
+  (pos? (+ (:fail r) (:error r))) (System/exit 1)))'`
 - Scoped exceptions-as-data scanner: `{:cleanup-needed 0, :fatal-only 1}`
-- `clj-kondo --lint` on changed event-stream source/test files
+- `clj-kondo --lint` on changed event-stream/CLI source/test files
 - `bb pre-commit`

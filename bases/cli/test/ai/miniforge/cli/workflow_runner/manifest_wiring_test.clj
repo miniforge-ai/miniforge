@@ -24,9 +24,10 @@
    orchestration: lifecycle ordering, idempotent terminal marking,
    nil-event-stream short-circuit, exception-tolerant cleanup."
   (:require
-   [clojure.test :refer [deftest is]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.workflow-runner :as sut]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es]
+   [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Fixture
 
@@ -227,6 +228,19 @@
                  {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
                  :wid))
           "archive exception must not propagate"))))
+
+(deftest archive-workflow-manifest!-logs-archive-anomalies
+  (let [archive-anomaly (anomaly/anomaly :invalid-input
+                                         "manifest invalid"
+                                         {:reason :test})]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
+                                                           archive-anomaly)}]
+      (let [err (java.io.StringWriter.)]
+        (binding [*err* err]
+          (is (nil? (sut/archive-workflow-manifest!
+                     {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+                     :wid)))
+          (is (re-find #"manifest invalid" (str err))))))))
 
 (deftest finish-workflow-manifest!-restores-interrupt-flag
   ;; stop-heartbeat! raises InterruptedException via awaitTermination.
