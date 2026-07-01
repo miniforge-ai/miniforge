@@ -29,6 +29,7 @@
 
    Core stays schema-free — it runs on pre-validated data."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -75,14 +76,15 @@
   (m/validate EventBase ev))
 
 (defn validate!
-  "Throw ex-info if `value` doesn't match `schema`. Returns `value`
-   unchanged on success, so it composes cleanly into threading
-   pipelines."
+  "Return `value` if it matches `schema`, otherwise return a canonical
+   `:invalid-input` anomaly."
   [schema value opts]
   (if (m/validate schema value)
     value
-    (throw (ex-info (get opts :message "Invalid input")
-                    (merge {:schema (m/form schema)
-                            :value value
-                            :errors (me/humanize (m/explain schema value))}
-                           (dissoc opts :message))))))
+    (anomaly/validation-anomaly
+     (get opts :message "Invalid input")
+     (get opts :schema-name :workflow-resume/input)
+     value
+     (merge {:schema (m/form schema)
+             :errors (me/humanize (m/explain schema value))}
+            (dissoc opts :message :schema-name)))))
