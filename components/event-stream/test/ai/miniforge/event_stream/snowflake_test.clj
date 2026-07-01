@@ -19,8 +19,9 @@
 (ns ai.miniforge.event-stream.snowflake-test
   "Tests for the BD-2b Snowflake event-id generator."
   (:require
-   [clojure.test :refer [deftest testing is]]
+   [clojure.test :refer [deftest is]]
    [clojure.java.io :as io]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.snowflake :as sf])
   (:import
    [java.util UUID]))
@@ -160,14 +161,25 @@
       (is (zero? (bit-and id sf/max-seq))
           "sequence resets at the new ms"))))
 
-(deftest next-id!-throws-on-pre-epoch-clock
+(deftest next-id!-returns-anomaly-on-pre-epoch-clock
   ;; If the wall clock is somehow before the miniforge epoch, the bit
-  ;; layout would corrupt (negative ts shifts into worker bits). Throw
-  ;; loudly rather than silently emit garbage.
-  (let [gen (generator-with-fixed-clock [(- sf/miniforge-epoch-ms 1)])]
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"before the miniforge epoch"
-                          (sf/next-id-long! gen)))))
+  ;; layout would corrupt (negative ts shifts into worker bits). Return
+  ;; an explicit anomaly rather than silently emit garbage.
+  (let [gen (generator-with-fixed-clock [(- sf/miniforge-epoch-ms 1)])
+        result (sf/next-id-long! gen)]
+    (is (response/anomaly-map? result))
+    (is (= :anomalies/incorrect (:anomaly/category result)))
+    (is (= :pre-epoch-clock (:reason result)))))
+
+(deftest next-id-wrappers-propagate-pre-epoch-anomaly
+  (let [uuid-result (sf/next-id!
+                     (generator-with-fixed-clock [(- sf/miniforge-epoch-ms 1)]))
+        hex-result  (sf/next-id-hex!
+                     (generator-with-fixed-clock [(- sf/miniforge-epoch-ms 1)]))]
+    (is (response/anomaly-map? uuid-result))
+    (is (response/anomaly-map? hex-result))
+    (is (= :pre-epoch-clock (:reason uuid-result)))
+    (is (= :pre-epoch-clock (:reason hex-result)))))
 
 (deftest next-id!-stalls-on-clock-rollback
   (let [base-ts (+ sf/miniforge-epoch-ms 1000)
@@ -255,6 +267,24 @@
         (sf/release-lease! lease)
         (is (nil? (sf/release-lease! lease))
             "second release is a no-op, not an error")))))
+
+(deftest acquire-worker-lease!-returns-anomaly-on-lease-io-failure
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [not-a-dir (io/file dir "occupied")]
+        (spit not-a-dir "not a directory")
+        (let [result (sf/acquire-worker-lease! not-a-dir)]
+          (is (response/anomaly-map? result))
+          (is (= :anomalies/unavailable (:anomaly/category result)))
+          (is (= :lease-io-failure (:reason result))))))))
+
+(deftest create-generator-propagates-lease-anomaly
+  (let [lease-anomaly (response/make-anomaly
+                       :anomalies/busy
+                       "No worker slots"
+                       {:reason :workers-exhausted})
+        result (sf/create-generator {:lease lease-anomaly})]
+    (is (identical? lease-anomaly result))))
 
 (deftest create-generator-acquires-worker-lease
   (with-temp-workers-dir
