@@ -42,7 +42,7 @@
 (def ReleaseArtifact
   [:map
    [:release/id uuid?]
-   [:release/branch-name [:re #"^[a-zA-Z0-9._/\-]{1,100}$"]]
+   [:release/branch-name [:re #"^[a-zA-Z0-9][a-zA-Z0-9._/\-]{0,99}$"]]
    [:release/commit-message [:string {:min 1}]]
    [:release/pr-title [:string {:min 1 :max 70}]]
    [:release/pr-description [:string {:min 1}]]

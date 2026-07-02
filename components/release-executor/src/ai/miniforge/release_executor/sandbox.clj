@@ -80,10 +80,24 @@
   "Return nil when `branch` is safe to interpolate unquoted into a shell
    command (git checkout -b, git push, --base). Allows only
    [a-zA-Z0-9._/-] — the character set git itself permits for branch names.
-   Rejects anything else, including shell metacharacters and whitespace."
+   Additionally rejects blank names and names starting with '-', which
+   would be interpreted by git as option flags (option injection)."
   [branch]
   (let [s (str branch)]
-    (when (re-find #"[^a-zA-Z0-9._/\-]" s)
+    (cond
+      (str/blank? s)
+      (unsafe-container-path-result
+       "Shell injection rejected: branch name must not be blank"
+       :shell-injection
+       s)
+
+      (str/starts-with? s "-")
+      (unsafe-container-path-result
+       "Shell injection rejected: branch name must not start with '-'"
+       :shell-injection
+       s)
+
+      (re-find #"[^a-zA-Z0-9._/\-]" s)
       (unsafe-container-path-result
        "Shell injection rejected: branch name contains unsafe character"
        :shell-injection
@@ -402,10 +416,11 @@
    reads the merge-base range rather than the staged index. Used in
    the boundary-commits release path."
   [executor env-id base-branch]
-  (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "...HEAD --numstat"))]
-    (when (result/succeeded? r)
-      (numstat-totals (:output r "")))))
+  (when-not (validate-safe-branch-name base-branch)
+    (let [r (exec! executor env-id
+                   (str "git diff origin/" base-branch "...HEAD --numstat"))]
+      (when (result/succeeded? r)
+        (numstat-totals (:output r ""))))))
 
 (defn count-test-defs-range
   "Count deftest forms added/removed in `origin/<base>...HEAD` (three-dot,
@@ -414,10 +429,11 @@
    branch introduced — not deltas caused by `origin/<base>` moving
    forward concurrently."
   [executor env-id base-branch]
-  (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "...HEAD -U0"))]
-    (when (result/succeeded? r)
-      (count-deftest (:output r "")))))
+  (when-not (validate-safe-branch-name base-branch)
+    (let [r (exec! executor env-id
+                   (str "git diff origin/" base-branch "...HEAD -U0"))]
+      (when (result/succeeded? r)
+        (count-deftest (:output r ""))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
