@@ -42,7 +42,7 @@
 (def ReleaseArtifact
   [:map
    [:release/id uuid?]
-   [:release/branch-name [:string {:min 1 :max 100}]]
+   [:release/branch-name [:re #"^[a-zA-Z0-9._/\-]{1,100}$"]]
    [:release/commit-message [:string {:min 1}]]
    [:release/pr-title [:string {:min 1 :max 70}]]
    [:release/pr-description [:string {:min 1}]]
@@ -67,11 +67,6 @@
        :errors (schema/explain ReleaseArtifact artifact)}
       ;; Additional validations
       (cond
-        ;; Branch name shouldn't have spaces
-        (str/includes? (:release/branch-name artifact "") " ")
-        {:valid? false
-         :errors {:branch-name "Branch name cannot contain spaces"}}
-
         ;; PR title too long
         (> (count (:release/pr-title artifact "")) 70)
         {:valid? false
