@@ -141,13 +141,17 @@
   [plan descriptor security-config]
   (let [findings   (scan-plan plan descriptor security-config)
         by-action  (group-by :security/action findings)
-        hard-stops (get by-action :hard-stop)
-        reviews    (get by-action :review)
-        warnings   (get by-action :warn)]
+        reviews    (get by-action :review [])
+        warnings   (get by-action :warn [])
+        ;; Fail closed: any finding whose action is not explicitly :review or
+        ;; :warn — e.g. a :rootless-action misconfigured to an unknown keyword —
+        ;; is treated as a hard-stop rather than silently dropped. A security
+        ;; gate must never weaken enforcement on unexpected input.
+        hard-stops (into [] (remove (comp #{:review :warn} :security/action)) findings)]
     (if (seq hard-stops)
       (response/make-anomaly :anomalies/forbidden
                              "Execution plan violates a hard-stop capsule-isolation policy"
-                             {:security/findings (vec hard-stops)})
+                             {:security/findings hard-stops})
       (response/success {:security/decision (if (seq reviews) :review :pass)
-                         :security/review   (vec reviews)
-                         :security/warnings (vec warnings)}))))
+                         :security/review   reviews
+                         :security/warnings warnings}))))

@@ -106,6 +106,15 @@
       (is (contains? (rules-fired (:security/findings result))
                      :std/runtime-require-rootless)))))
 
+(deftest unknown-action-fails-closed-test
+  (testing "a finding with an unexpected action (misconfigured :rootless-action) is escalated to a hard-stop, never dropped"
+    (let [result (sut/check-plan-security base-plan rooted-descriptor
+                                          (assoc config :rootless-action :bogus-typo))]
+      (is (response/anomaly-map? result) "unknown action must not silently pass")
+      (is (= :anomalies/forbidden (:anomaly/category result)))
+      (is (contains? (rules-fired (:security/findings result))
+                     :std/runtime-require-rootless)))))
+
 (deftest hard-stop-precedes-review-test
   (testing "a socket mount hard-stops and is not also double-reported as a host-mount review"
     (let [plan   (assoc base-plan :mounts
