@@ -430,10 +430,11 @@
    rule selector leaves the linter off. Returned rows are already in the
    canonical scanner shape.
 
-   The raw exceptions-as-data scanner preserves `:fatal-only` records for
-   audit counts, but the top-level compliance review treats only
-   `:cleanup-needed` rows as standards debt. Programmer-error guards are
-   an explicit rule carve-out and should not inflate `bb review` totals.
+   The raw exceptions-as-data scanner preserves `:fatal-only` and
+   `:local-boundary` records for audit counts, but the top-level compliance
+   review treats only `:cleanup-needed` rows as standards debt.
+   Programmer-error guards and documented local boundary wrappers are explicit
+   rule carve-outs and should not inflate `bb review` totals.
 
    When `changed-files` is non-nil (incremental mode via `:since`), the
    linter restricts its file walk to the changed set — matching the
