@@ -34,20 +34,10 @@ remain in the raw scanner output for audit visibility.
 
 ## Verification
 
-- `clj-kondo --lint components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj
-  components/compliance-scanner/src/ai/miniforge/compliance_scanner/scan.clj
-  components/compliance-scanner/test/ai/miniforge/compliance_scanner/exceptions_as_data/local_boundary_classification_te
-  st.clj components/compliance-scanner/test/ai/miniforge/compliance_scanner/exceptions_as_data/output_format_test.clj
-  components/compliance-scanner/test/ai/miniforge/compliance_scanner/scan_test.clj`
-- `clojure -M:dev:test -e '(require (quote clojure.test) (quote
-  ai.miniforge.compliance-scanner.exceptions-as-data.local-boundary-classification-test) (quote
-  ai.miniforge.compliance-scanner.exceptions-as-data.output-format-test) (quote
-  ai.miniforge.compliance-scanner.scan-test)) (let [r (clojure.test/run-tests (quote
-  ai.miniforge.compliance-scanner.exceptions-as-data.local-boundary-classification-test) (quote
-  ai.miniforge.compliance-scanner.exceptions-as-data.output-format-test) (quote
-  ai.miniforge.compliance-scanner.scan-test))] (when (pos? (+ (:fail r) (:error r))) (System/exit 1)))'`
-- `clojure -M:dev -e '(require (quote ai.miniforge.compliance-scanner.exceptions-as-data)) (let [result
-  (ai.miniforge.compliance-scanner.exceptions-as-data/scan-repo "." nil)] (prn (:counts result)))'`
+- `clj-kondo` on the scanner source and touched tests
+- focused `clojure -M:dev:test` coverage for local boundary classification,
+  output shape, and top-level scan filtering
+- raw exceptions-as-data scanner count check
 
 Scan delta on this branch:
 
