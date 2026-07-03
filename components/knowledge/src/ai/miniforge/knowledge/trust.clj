@@ -242,15 +242,15 @@
   [pack-graph]
   ;; Rule 3: Validate cross-trust references first (graph structure)
   (let [graph-validation (validate-cross-trust-references pack-graph)]
-    (when-not (valid? graph-validation)
-      (throw (ex-info "Invalid pack graph" graph-validation)))
-
-    ;; Collect all validation errors
-    (let [errors (concat (collect-authority-errors pack-graph)
-                         (collect-tainted-errors pack-graph))]
-      (if (empty? errors)
-        (schema/valid {:packs (keys pack-graph)})
-        (schema/invalid-with-errors (vec errors))))))
+    (if-not (valid? graph-validation)
+      (schema/invalid-with-errors [(:error graph-validation)]
+                                  {:graph-validation graph-validation})
+      ;; Collect all validation errors
+      (let [errors (concat (collect-authority-errors pack-graph)
+                           (collect-tainted-errors pack-graph))]
+        (if (empty? errors)
+          (schema/valid {:packs (keys pack-graph)})
+          (schema/invalid-with-errors (vec errors)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

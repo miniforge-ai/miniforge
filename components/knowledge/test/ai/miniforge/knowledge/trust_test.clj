@@ -281,13 +281,15 @@
       (is (not (:valid? result)))
       (is (seq (:errors result)))))
 
-  (testing "INVALID: Fails on circular dependency"
-    (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/data
-                                               :dependencies ["pack-b"])
-                 "pack-b" (trust/make-pack-ref "pack-b" :trusted :authority/data
-                                               :dependencies ["pack-a"])}]
-      (is (thrown? Exception
-                   (trust/validate-transitive-trust graph))))))
+	  (testing "INVALID: Fails on circular dependency"
+	    (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/data
+	                                               :dependencies ["pack-b"])
+	                 "pack-b" (trust/make-pack-ref "pack-b" :trusted :authority/data
+	                                               :dependencies ["pack-a"])}
+	          result (trust/validate-transitive-trust graph)]
+	      (is (not (:valid? result)))
+	      (is (seq (:errors result)))
+	      (is (re-find #"Circular dependency" (first (:errors result)))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
