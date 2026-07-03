@@ -397,12 +397,45 @@
        (= 2 (count form))
        (symbol? (second form))))
 
+(def ^:private cleanup-rethrow-markers
+  "Cleanup operations that make a same-catch rethrow informational.
+
+   This is deliberately narrow: a log-and-rethrow remains actionable, while
+   scheduler shutdown and future cancellation preserve resources before
+   propagating the original failure."
+  #{"shutdownNow" ".shutdownNow" "future-cancel"})
+
+(defn- cleanup-call?
+  [form]
+  (boolean
+   (some cleanup-rethrow-markers
+         (map name (filter symbol? (tree-seq coll? seq form))))))
+
+(defn- cleanup-before-rethrow?
+  [catch-form binding-sym]
+  (let [body (drop 3 catch-form)]
+    (loop [forms body
+           saw-cleanup? false]
+      (if-let [form (first forms)]
+        (cond
+          (and (simple-rethrow? form)
+               (= binding-sym (second form)))
+          saw-cleanup?
+
+          (cleanup-call? form)
+          (recur (next forms) true)
+
+          :else
+          (recur (next forms) saw-cleanup?))
+        false))))
+
 (defn- classify-throw-site
   "Return the severity classification for a throw-shaped form found in
    a non-boundary namespace. Documented local boundary wrappers are
-   `:local-boundary`; programmer-error guards and exact `InterruptedException`
-   catch-binding rethrows are `:fatal-only` (informational); everything else
-   is `:cleanup-needed`."
+   `:local-boundary`; programmer-error guards, exact `InterruptedException`
+   catch-binding rethrows, and explicit cleanup-preserving same-binding
+   rethrows are `:fatal-only` (informational); everything else is
+   `:cleanup-needed`."
   [form context]
   (cond
     (local-boundary-wrapper? context)
@@ -411,6 +444,9 @@
     (or (and (:interrupted-binding context)
              (simple-rethrow? form)
              (= (second form) (:interrupted-binding context)))
+        (and (:cleanup-rethrow-binding context)
+             (simple-rethrow? form)
+             (= (second form) (:cleanup-rethrow-binding context)))
         (programmer-error-guard? form))
     :fatal-only
 
@@ -452,10 +488,16 @@
 (defn- child-context
   [context form _child]
   (let [defn-data   (defn-context form)
-        interrupted (interrupted-catch-binding form)]
+        interrupted (interrupted-catch-binding form)
+        catch-binding (when (and (seq? form)
+                                 (= 'catch (first form)))
+                        (nth form 2 nil))]
     (cond-> context
       defn-data (merge defn-data)
-      interrupted (assoc :interrupted-binding interrupted))))
+      interrupted (assoc :interrupted-binding interrupted)
+      (and (symbol? catch-binding)
+           (cleanup-before-rethrow? form catch-binding))
+      (assoc :cleanup-rethrow-binding catch-binding))))
 
 (defn- visit-form
   "Walk a single form and conj violation records onto `acc!` (a transient

@@ -127,6 +127,46 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
+(deftest cleanup-preserving-rethrow-is-fatal-only
+  (testing "resource cleanup followed by same-binding rethrow is informational"
+    (let [src "(ns ai.miniforge.foo.scheduler)
+              (defn schedule [executor task]
+                (try
+                  (.schedule executor task)
+                  (catch Throwable t
+                    (.shutdownNow executor)
+                    (throw t))))"
+          {:keys [violations]} (exc/analyze-content "scheduler.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
+(deftest future-cancel-rethrow-is-fatal-only
+  (testing "future cancellation before rethrow preserves task cleanup"
+    (let [src "(ns ai.miniforge.foo.batch)
+              (defn await-all [futures]
+                (try
+                  (mapv deref futures)
+                  (catch Throwable t
+                    (doseq [f futures]
+                      (future-cancel f))
+                    (throw t))))"
+          {:keys [violations]} (exc/analyze-content "batch.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
+(deftest log-only-rethrow-remains-cleanup-needed
+  (testing "logging before rethrow does not make the site informational"
+    (let [src "(ns ai.miniforge.foo.runner)
+              (defn run []
+                (try
+                  (step)
+                  (catch Exception e
+                    (log/error e)
+                    (throw e))))"
+          {:keys [violations]} (exc/analyze-content "runner.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :cleanup-needed (:classification (first violations)))))))
+
 (deftest plain-failure-is-cleanup-needed
   (testing "messages without programmer-error markers are :cleanup-needed"
     (let [src "(ns ai.miniforge.foo.core)
