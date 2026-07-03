@@ -33,10 +33,12 @@
    and the executor picks it up without code changes."
   (:require
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.dag-executor.plan-security :as plan-security]
    [ai.miniforge.dag-executor.result :as result]
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
@@ -467,6 +469,21 @@
           (when (seq digest) digest))))
     (catch Exception _ nil)))
 
+(defn image-config-digest
+  "Return the bare `sha256:<64hex>` content-addressed config digest for a local
+   image, or nil on failure. Uses the image `.Id` (always present on any local
+   image, including ones built locally that carry no registry RepoDigests), so
+   the pinned digest can be resolved BEFORE the container is created — the value
+   the capsule security gate checks (runtime-require-image-digest-pin)."
+  [descriptor image]
+  (try
+    (let [result (run-runtime descriptor
+                              "image" "inspect" image
+                              "--format" "{{.Id}}")]
+      (when (zero? (:exit result))
+        (some-> (:out result) str/trim not-empty)))
+    (catch Exception _ nil)))
+
 ;; ============================================================================
 ;; Image Management
 ;; ============================================================================
@@ -708,6 +725,34 @@
     (result/ok nil)))
 
 ;; ============================================================================
+;; Capsule security gate — runtime enforcement of the runtime-* policies
+;; ============================================================================
+
+(defn security-gate-check
+  "Run the capsule-isolation security gate for a pending launch. Resolves the
+   image's content-addressed digest via `digest-fn` (injected for testing),
+   synthesizes the plan the gate inspects (pinned digest + host mounts), and
+   applies `plan-security/check-plan-security`. The host-path allowlist is the
+   sandbox workdir (the only host path a well-formed plan mounts today).
+
+   Returns `result/ok` carrying the gate decision when the launch may proceed
+   (a passing gate may still carry non-blocking :security/warnings — e.g. a
+   non-rootless runtime in OSS), or `result/err :security-policy-violation`
+   with the findings on a hard-stop. A nil digest fails closed (hard-stop),
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin."
+  [descriptor image env-config digest-fn]
+  (let [plan            {:image-digest (digest-fn descriptor image)
+                         :mounts       (get env-config :mounts [])}
+        security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
+                         :rootless-action     plan-security/default-rootless-action}
+        decision        (plan-security/check-plan-security plan descriptor security-config)]
+    (if (response/anomaly-map? decision)
+      (result/err :security-policy-violation
+                  (:anomaly/message decision)
+                  {:security/findings (:security/findings decision)})
+      (result/ok (:output decision)))))
+
+;; ============================================================================
 ;; OciCliExecutor Record
 ;; ============================================================================
 
@@ -749,31 +794,37 @@
           (when-let [image-key (->> task-runner-images
                                     (some (fn [[k v]] (when (= image (:image v)) k))))]
             (ensure-image! descriptor image-key)))
-        (let [container-name (str container-name-prefix
-                                   (subs (str task-id) 0 container-name-uuid-slice))
-              workdir (get env-config :workdir default-workdir)
-              create-result (create-container descriptor
-                                              container-name
-                                              image
-                                              workdir
-                                              (:env env-config)
-                                              (:resources env-config)
-                                              network)]
-          (if (result/ok? create-result)
-            ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
-            (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
-              (if (result/ok? bootstrap-result)
-                (let [bootstrap-metadata (:data bootstrap-result)
-                      ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
-                      image-digest (container-image-digest descriptor container-name)
-                      metadata (cond-> (merge (get create-result :data {})
-                                               bootstrap-metadata)
-                                 image-digest (assoc :image-digest image-digest))]
-                  (result/ok (proto/create-environment-record
-                              container-name (descriptor/kind descriptor) task-id workdir
-                              (assoc env-config :metadata metadata))))
-                bootstrap-result))
-            create-result)))))
+        ;; Capsule security gate (runtime-* policies): resolve the pinned image
+        ;; digest and check the plan BEFORE launch. A hard-stop (forbidden)
+        ;; aborts the acquire without creating a container.
+        (let [gate-result (security-gate-check descriptor image env-config image-config-digest)]
+          (if (result/err? gate-result)
+            gate-result
+            (let [container-name (str container-name-prefix
+                                      (subs (str task-id) 0 container-name-uuid-slice))
+                  workdir (get env-config :workdir default-workdir)
+                  create-result (create-container descriptor
+                                                  container-name
+                                                  image
+                                                  workdir
+                                                  (:env env-config)
+                                                  (:resources env-config)
+                                                  network)]
+              (if (result/ok? create-result)
+                ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
+                (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
+                  (if (result/ok? bootstrap-result)
+                    (let [bootstrap-metadata (:data bootstrap-result)
+                          ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
+                          image-digest (container-image-digest descriptor container-name)
+                          metadata (cond-> (merge (get create-result :data {})
+                                                   bootstrap-metadata)
+                                     image-digest (assoc :image-digest image-digest))]
+                      (result/ok (proto/create-environment-record
+                                  container-name (descriptor/kind descriptor) task-id workdir
+                                  (assoc env-config :metadata metadata))))
+                    bootstrap-result))
+                create-result)))))))
 
   (execute! [_this environment-id command opts]
     (try
