@@ -129,17 +129,35 @@
   [state]
   (contains? terminal-states state))
 
-(defn transition
-  "Attempt a state transition. Returns updated loop state or throws if invalid."
+(defn transition-result
+  "Attempt a state transition.
+
+   Returns the updated loop state on success, or an `:invalid-input` anomaly
+   when the FSM rejects the transition."
   [loop-state new-state]
   (let [current-state (:loop/state loop-state)
         transition-event (get transition-events [current-state new-state])]
-    (when-not transition-event
+    (if-not transition-event
+      (anomaly/anomaly :invalid-input
+                       invalid-transition-message
+                       (invalid-transition-data current-state new-state))
+      (assoc loop-state
+             :loop/state new-state
+             :loop/updated-at (java.util.Date.)))))
+
+(defn transition
+  "Boundary compatibility wrapper around [[transition-result]].
+
+   Returns updated loop state on success. On FSM rejection, throws `ex-info`
+   to preserve the existing caller contract. Prefer the anomaly-returning
+   [[transition-result]] in non-boundary code when callers can branch on
+   anomaly data."
+  [loop-state new-state]
+  (let [result (transition-result loop-state new-state)]
+    (if (anomaly/anomaly? result)
       (throw (ex-info invalid-transition-message
-                      (invalid-transition-data current-state new-state))))
-    (assoc loop-state
-           :loop/state new-state
-           :loop/updated-at (java.util.Date.))))
+                      (:anomaly/data result)))
+      result)))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Loop state constructors (pure functions)
