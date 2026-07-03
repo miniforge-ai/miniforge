@@ -168,7 +168,12 @@
                  "(defn cleanup-site []\n"
                  "  (throw (ex-info \"GET failed\" {})))\n"
                  "(defn fatal-site []\n"
-                 "  (throw (ex-info \"Unknown kind\" {})))\n"))
+                 "  (throw (ex-info \"Unknown kind\" {})))\n"
+                 "(defn boundary-site!\n"
+                 "  \"Boundary wrapper around `boundary-site`. Calls the canonical\n"
+                 "   anomaly-returning fn and throws only for legacy callers.\"\n"
+                 "  []\n"
+                 "  (throw (ex-info \"legacy boundary\" {})))\n"))
           (run! "git" "add" ".")
           (run! "git" "-c" "user.email=test@test.com" "-c" "user.name=Test"
                 "commit" "-m" "add exceptions"))

@@ -29,7 +29,8 @@
    positives.
 
    Layer 0: Pure classification — boundary namespace patterns,
-            programmer-error guards, throw-shaped form recognition
+            local boundary wrappers, programmer-error guards,
+            throw-shaped form recognition
    Layer 1: File-level analysis — read forms with location metadata,
             walk recursively, classify each candidate site
    Layer 2: Repo-level scan entry point — enumerate target files,
@@ -253,6 +254,64 @@
         joined (str/lower-case (str/join " " tokens))]
     (boolean (some #(str/includes? joined %) programmer-error-markers))))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Local boundary-wrapper classification
+
+(defn- defn-form?
+  [form]
+  (and (seq? form)
+       (symbol? (first form))
+       (contains? #{"defn" "defn-"} (name (first form)))))
+
+(defn- bang-symbol?
+  [sym]
+  (and (symbol? sym)
+       (str/ends-with? (name sym) "!")))
+
+(defn- defn-context
+  "Extract the local function name, docstring, and metadata from a defn form.
+   This is intentionally small: enough for classifier context, not a full
+   defn parser."
+  [form]
+  (when (defn-form? form)
+    (let [name-sym (second form)
+          tail     (nnext form)
+          [doc tail'] (if (string? (first tail))
+                        [(first tail) (next tail)]
+                        [nil tail])
+          attr-map (when (map? (first tail')) (first tail'))
+          metadata (merge (meta name-sym) attr-map)]
+      {:defn-name name-sym
+       :defn-doc  doc
+       :defn-meta metadata})))
+
+(defn- local-boundary-wrapper?
+  "True when the enclosing defn is a documented local compatibility boundary.
+
+   Whole boundary namespaces are exempt earlier. This narrower classifier
+   covers the post-cleanup shape used inside ordinary component namespaces:
+   a canonical anomaly-returning function plus a retained thrower that bridges
+   old exception callers. Undocumented throwers remain `:cleanup-needed`."
+  [context]
+  (let [doc-text  (str/lower-case (or (:defn-doc context) ""))
+        meta-text (str/lower-case (str/join " " (collect-text (:defn-meta context))))
+        evidence  (str doc-text " " meta-text)]
+    (boolean
+     (or
+      (and (str/includes? evidence "exceptions-as-data")
+           (str/includes? evidence "prefer"))
+      (and (str/includes? doc-text "boundary")
+           (or (str/includes? doc-text "anomaly-returning")
+               (str/includes? doc-text "canonical")))
+      (and (str/includes? doc-text "throws via")
+           (str/includes? doc-text "anomaly-returning"))
+      (and (bang-symbol? (:defn-name context))
+           (str/includes? doc-text "anomaly")
+           (or (str/includes? doc-text "boundary")
+               (str/includes? doc-text "legacy")
+               (str/includes? doc-text "compat")
+               (str/includes? doc-text "prefer")))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Reader integration
 
@@ -340,15 +399,22 @@
 
 (defn- classify-throw-site
   "Return the severity classification for a throw-shaped form found in
-   a non-boundary namespace. Programmer-error guards and exact
-   `InterruptedException` catch-binding rethrows are `:fatal-only`
-   (informational); everything else is `:cleanup-needed`."
+   a non-boundary namespace. Documented local boundary wrappers are
+   `:local-boundary`; programmer-error guards and exact `InterruptedException`
+   catch-binding rethrows are `:fatal-only` (informational); everything else
+   is `:cleanup-needed`."
   [form context]
-  (if (or (and (:interrupted-binding context)
-               (simple-rethrow? form)
-               (= (second form) (:interrupted-binding context)))
-          (programmer-error-guard? form))
+  (cond
+    (local-boundary-wrapper? context)
+    :local-boundary
+
+    (or (and (:interrupted-binding context)
+             (simple-rethrow? form)
+             (= (second form) (:interrupted-binding context)))
+        (programmer-error-guard? form))
     :fatal-only
+
+    :else
     :cleanup-needed))
 
 (defn- ->violation-record
@@ -385,9 +451,11 @@
 
 (defn- child-context
   [context form _child]
-  (if-let [binding-sym (interrupted-catch-binding form)]
-    (assoc context :interrupted-binding binding-sym)
-    context))
+  (let [defn-data   (defn-context form)
+        interrupted (interrupted-catch-binding form)]
+    (cond-> context
+      defn-data (merge defn-data)
+      interrupted (assoc :interrupted-binding interrupted))))
 
 (defn- visit-form
   "Walk a single form and conj violation records onto `acc!` (a transient
@@ -526,6 +594,9 @@
                     :fatal-only
                     (str kind-name " classified :fatal-only "
                          "(programmer-error guard); informational only")
+                    :local-boundary
+                    (str kind-name " inside documented local boundary wrapper; "
+                         "informational only")
                     (str kind-name " outside boundary namespace; "
                          "consider returning an anomaly map"))]
     (-> (factory/->violation
@@ -610,7 +681,7 @@
      :violations    - vector of Violation maps (severity :warning)
      :files-scanned - count of files inspected
      :rule/id       - rule identifier
-     :counts        - {:cleanup-needed N :fatal-only M}
+     :counts        - {:cleanup-needed N :fatal-only M :local-boundary K}
 
    Pure data. The function does not write reports, does not throw, and
    does not call System/exit — this is the linter, not a gate."
@@ -622,12 +693,14 @@
          per-file    (mapv (fn [rel] (analyze-file repo-root rel)) files)
          violations  (vec (apply concat per-file))
          cleanup     (count (filter #(= :cleanup-needed (:classification %)) violations))
-         fatal       (count (filter #(= :fatal-only (:classification %)) violations))]
+         fatal       (count (filter #(= :fatal-only (:classification %)) violations))
+         local-boundary (count (filter #(= :local-boundary (:classification %)) violations))]
      {:violations    violations
       :files-scanned (count files)
       :rule/id       rule-id
       :counts        {:cleanup-needed cleanup
-                      :fatal-only     fatal}})))
+                      :fatal-only     fatal
+                      :local-boundary local-boundary}})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 

@@ -67,7 +67,7 @@
        (testing "linter contract keys"
          (is (= :warning (:severity v)) "severity is :warning, never :error")
          (is (false? (:auto-fixable? v)) "linter does not auto-fix")
-         (is (contains? #{:cleanup-needed :fatal-only}
+         (is (contains? #{:cleanup-needed :fatal-only :local-boundary}
                         (:classification v))))))))
 
 (deftest empty-repo-yields-zero-violations
@@ -76,7 +76,8 @@
      (let [result (exc/scan-repo (.getAbsolutePath root))]
        (is (= [] (:violations result)))
        (is (= 0 (:files-scanned result)))
-       (is (= {:cleanup-needed 0 :fatal-only 0} (:counts result)))))))
+       (is (= {:cleanup-needed 0 :fatal-only 0 :local-boundary 0}
+              (:counts result)))))))
 
 (deftest summary-counts-match-classifications
   (with-temp-repo
@@ -87,8 +88,14 @@
            "(defn cleanup-site []\n"
            "  (throw (ex-info \"GET failed\" {})))\n"
            "(defn fatal-site []\n"
-           "  (throw (ex-info \"Unknown thing\" {})))\n"))
+           "  (throw (ex-info \"Unknown thing\" {})))\n"
+           "(defn boundary-site!\n"
+           "  \"Boundary wrapper around `boundary-site`. Calls the canonical\n"
+           "   anomaly-returning fn and throws only for legacy callers.\"\n"
+           "  []\n"
+           "  (throw (ex-info \"legacy boundary\" {})))\n"))
      (let [{:keys [counts violations]} (exc/scan-repo (.getAbsolutePath root))]
-       (is (= 2 (count violations)))
+       (is (= 3 (count violations)))
        (is (= 1 (:cleanup-needed counts)))
-       (is (= 1 (:fatal-only counts)))))))
+       (is (= 1 (:fatal-only counts)))
+       (is (= 1 (:local-boundary counts)))))))
