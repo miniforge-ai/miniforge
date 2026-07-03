@@ -121,6 +121,17 @@
 
 (deftest transition-test
   (let [loop-state (inner/create-inner-loop test-task {})]
+    (testing "transition-result returns updated state for valid transition"
+      (let [next-state (inner/transition-result loop-state :generating)]
+        (is (= :generating (:loop/state next-state)))))
+
+    (testing "transition-result returns anomaly for invalid transition"
+      (let [result (inner/transition-result loop-state :complete)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :pending (get-in result [:anomaly/data :from])))
+        (is (= :complete (get-in result [:anomaly/data :to])))))
+
     (testing "valid transition updates state"
       (let [next-state (inner/transition loop-state :generating)]
         (is (= :generating (:loop/state next-state)))))
