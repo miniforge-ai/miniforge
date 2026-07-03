@@ -132,6 +132,14 @@
         (is (= :pending (get-in result [:anomaly/data :from])))
         (is (= :complete (get-in result [:anomaly/data :to])))))
 
+    (testing "transition-result returns anomaly for terminal state transition"
+      (let [terminal-state (assoc loop-state :loop/state :complete)
+            result (inner/transition-result terminal-state :generating)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :complete (get-in result [:anomaly/data :from])))
+        (is (= :generating (get-in result [:anomaly/data :to])))))
+
     (testing "valid transition updates state"
       (let [next-state (inner/transition loop-state :generating)]
         (is (= :generating (:loop/state next-state)))))
