@@ -76,6 +76,33 @@
        :shell-injection
        s))))
 
+(defn validate-safe-branch-name
+  "Return nil when `branch` is safe to interpolate unquoted into a shell
+   command (git checkout -b, git push, --base). Allows only
+   [a-zA-Z0-9._/-] — the character set git itself permits for branch names.
+   Additionally rejects blank names and names starting with '-', which
+   would be interpreted by git as option flags (option injection)."
+  [branch]
+  (let [s (str branch)]
+    (cond
+      (str/blank? s)
+      (unsafe-container-path-result
+       "Shell injection rejected: branch name must not be blank"
+       :shell-injection
+       s)
+
+      (str/starts-with? s "-")
+      (unsafe-container-path-result
+       "Shell injection rejected: branch name must not start with '-'"
+       :shell-injection
+       s)
+
+      (re-find #"[^a-zA-Z0-9._/\-]" s)
+      (unsafe-container-path-result
+       "Shell injection rejected: branch name contains unsafe character"
+       :shell-injection
+       s))))
+
 (defn exec!
   "Execute a command in the sandbox environment.
    Returns {:success? bool :output string :error string}.
@@ -127,8 +154,10 @@
    `git add .` would find nothing to stage. `:base-branch` is still
    tracked for the PR-creation step, which uses it as the merge base."
   [executor env-id branch-name base-branch]
-  (let [checkout-r (exec! executor env-id
-                          (str "git checkout -b " branch-name))]
+  (if-let [guard (validate-safe-branch-name branch-name)]
+    guard
+    (let [checkout-r (exec! executor env-id
+                            (str "git checkout -b " branch-name))]
     (if (result/succeeded? checkout-r)
       (result/shell-success {:branch branch-name :base-branch base-branch})
       (let [ts-name (str branch-name "-" (System/currentTimeMillis))
@@ -137,7 +166,7 @@
         (if (result/succeeded? retry-r)
           (result/shell-success {:branch ts-name :base-branch base-branch})
           (result/shell-failure (str "Failed to create branch: " (:error retry-r))
-                               {:branch nil}))))))
+                               {:branch nil})))))))
 
 (defn create-branch!
   "Create a new git branch inside the sandbox container, off the current
@@ -160,7 +189,8 @@
    merge-base resolve instead of failing on a missing remote-tracking ref.
    Returns a shell-result."
   [executor env-id branch]
-  (exec! executor env-id (str "git fetch origin " branch)))
+  (or (validate-safe-branch-name branch)
+      (exec! executor env-id (str "git fetch origin " branch))))
 
 (defn commits-ahead-of-base
   "Count commits HEAD has added since branching from `origin/<base>`.
@@ -174,12 +204,13 @@
    implement-phase boundary, the release branch inherits them and
    there is nothing left to stage."
   [executor env-id base-branch]
-  (let [r (exec! executor env-id
-                 (str "git rev-list --count --right-only origin/" base-branch "...HEAD"))]
-    (when (result/succeeded? r)
+  (when-not (validate-safe-branch-name base-branch)
+    (let [r (exec! executor env-id
+                   (str "git rev-list --count --right-only origin/" base-branch "...HEAD"))]
+      (when (result/succeeded? r)
       (try
         (Long/parseLong (str/trim (:output r "0")))
-        (catch NumberFormatException _ nil)))))
+        (catch NumberFormatException _ nil))))))
 
 (defn write-file!
   "Write content to a file inside the sandbox container.
@@ -248,8 +279,9 @@
    Retries with GH_TOKEN HTTPS auth if SSH push fails."
   ([executor env-id branch-name] (push-branch! executor env-id branch-name {}))
   ([executor env-id branch-name opts]
-   (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
-     (if (result/succeeded? result)
+   (or (validate-safe-branch-name branch-name)
+       (let [result (exec! executor env-id (str "git push -u origin " branch-name) opts)]
+         (if (result/succeeded? result)
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
          (let [url-r (exec! executor env-id "git remote get-url origin" {})
@@ -258,7 +290,7 @@
            (if https-url
              (push-with-https-fallback! executor env-id branch-name remote-url https-url opts)
              result))
-         result)))))
+         result))))))
 
 (defn- parse-pr-ref
   "Parse a gh PR URL into {:pr-url :pr-number}, or nil when the output carries
@@ -303,27 +335,28 @@
      rather than opening a duplicate."
   ([executor env-id pr-opts] (create-pr! executor env-id pr-opts {}))
   ([executor env-id {:keys [title body base-branch]} exec-opts]
-   (let [base (or base-branch "main")
-         escaped-title (str/replace title "'" "'\\''")
-         escaped-body (str/replace (or body "") "'" "'\\''")
-         cmd (str "gh pr create"
-                  " --title '" escaped-title "'"
-                  " --body '" escaped-body "'"
-                  " --base " base)
-         r (exec! executor env-id cmd exec-opts)]
-     (cond
-       (result/succeeded? r)
-       (if-let [pr (parse-pr-ref (:output r ""))]
-         (result/shell-success pr)
-         (result/shell-failure (msg/t :pr/create-unconfirmed
-                                      {:output (str/trim (:output r ""))})
-                               {:pr-url nil :pr-number nil}))
+   (let [base (or base-branch "main")]
+     (or (validate-safe-branch-name base)
+         (let [escaped-title (str/replace title "'" "'\\''")
+               escaped-body (str/replace (or body "") "'" "'\\''")
+               cmd (str "gh pr create"
+                        " --title '" escaped-title "'"
+                        " --body '" escaped-body "'"
+                        " --base " base)
+               r (exec! executor env-id cmd exec-opts)]
+           (cond
+             (result/succeeded? r)
+             (if-let [pr (parse-pr-ref (:output r ""))]
+               (result/shell-success pr)
+               (result/shell-failure (msg/t :pr/create-unconfirmed
+                                            {:output (str/trim (:output r ""))})
+                                     {:pr-url nil :pr-number nil}))
 
-       (pr-already-exists? (:error r))
-       (reuse-existing-pr! executor env-id exec-opts (:error r))
+             (pr-already-exists? (:error r))
+             (reuse-existing-pr! executor env-id exec-opts (:error r))
 
-       :else
-       (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))
+             :else
+             (result/shell-failure (:error r) {:pr-url nil :pr-number nil})))))))
 
 (defn edit-pr-body!
   "Update the body of an existing PR using gh CLI.
@@ -383,10 +416,11 @@
    reads the merge-base range rather than the staged index. Used in
    the boundary-commits release path."
   [executor env-id base-branch]
-  (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "...HEAD --numstat"))]
-    (when (result/succeeded? r)
-      (numstat-totals (:output r "")))))
+  (when-not (validate-safe-branch-name base-branch)
+    (let [r (exec! executor env-id
+                   (str "git diff origin/" base-branch "...HEAD --numstat"))]
+      (when (result/succeeded? r)
+        (numstat-totals (:output r ""))))))
 
 (defn count-test-defs-range
   "Count deftest forms added/removed in `origin/<base>...HEAD` (three-dot,
@@ -395,10 +429,11 @@
    branch introduced — not deltas caused by `origin/<base>` moving
    forward concurrently."
   [executor env-id base-branch]
-  (let [r (exec! executor env-id
-                 (str "git diff origin/" base-branch "...HEAD -U0"))]
-    (when (result/succeeded? r)
-      (count-deftest (:output r "")))))
+  (when-not (validate-safe-branch-name base-branch)
+    (let [r (exec! executor env-id
+                   (str "git diff origin/" base-branch "...HEAD -U0"))]
+      (when (result/succeeded? r)
+        (count-deftest (:output r ""))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
