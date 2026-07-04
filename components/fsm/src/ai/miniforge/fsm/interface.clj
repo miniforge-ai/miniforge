@@ -76,6 +76,12 @@
      (transition machine state {:type :fail :data {:error \"timeout\"}})"
   core/transition)
 
+(def transition-result
+  "Transition given an event, returning a state or a canonical anomaly for a
+   state-local unknown event. Non-unknown statechart failures are thrown
+   unchanged."
+  core/transition-result)
+
 (def current-state
   "Get current state keyword from state map.
 

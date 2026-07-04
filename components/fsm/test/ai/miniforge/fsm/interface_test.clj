@@ -20,6 +20,7 @@
   "Tests for the FSM component."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.fsm.interface :as fsm]))
 
 ;; ============================================================================
@@ -99,6 +100,25 @@
           "typed category so boundaries can catch + emit :fsm/unknown-event")
       (is (= {:type :unknown-event} (:fsm/event (ex-data ex)))
           "ex-data names the offending event for diagnosis"))))
+
+(deftest transition-result-unknown-event-returns-anomaly-test
+  (testing "transition-result returns a canonical anomaly for unknown events"
+    (let [machine (fsm/define-machine
+                   {:fsm/id :test
+                    :fsm/initial :idle
+                    :fsm/states {:idle {:on {:start :running}}
+                                 :running {:type :final}}})
+          s0 (fsm/initialize machine)
+          result (fsm/transition-result machine s0 :unknown-event)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies/fsm-unknown-event (:anomaly/subtype result)))
+      (is (= {:anomaly/category :anomalies/fsm-unknown-event
+              :fsm/state s0
+              :fsm/event {:type :unknown-event}}
+             (:anomaly/data result)))
+      (is (some? (:cause (meta result)))
+          "preserves the clj-statecharts cause for the boundary wrapper"))))
 
 (deftest transition-with-event-data-test
   (testing "transition accepts event with data"
