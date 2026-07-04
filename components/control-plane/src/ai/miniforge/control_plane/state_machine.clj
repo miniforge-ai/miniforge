@@ -25,11 +25,12 @@
    completed, failed, unreachable, terminated.
 
    Layer 0: Profile loading
-   Layer 1: Transition validation
-   Layer 2: Event mapping"
+  Layer 1: Transition validation
+  Layer 2: Event mapping"
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.control-plane.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -96,22 +97,31 @@
   (let [transitions (:valid-transitions profile)]
     (contains? (get transitions from-status #{}) to-status)))
 
-(defn validate-transition
-  "Validate a state transition. Returns nil on success, throws on invalid.
+(defn validate-transition-result
+  "Validate a state transition. Returns nil on success or an anomaly on invalid.
 
    Arguments:
    - profile    - State profile map
    - from-status - Current agent status
-   - to-status  - Desired agent status
-
-   Throws: ExceptionInfo if transition is invalid."
+   - to-status  - Desired agent status"
   [profile from-status to-status]
   (when-not (valid-transition? profile from-status to-status)
-    (throw (ex-info (messages/t :state-machine/invalid-transition)
-                    {:from from-status
-                     :to to-status
-                     :valid-targets (get (:valid-transitions profile)
-                                        from-status #{})}))))
+    (anomaly/anomaly :invalid-input
+                     (messages/t :state-machine/invalid-transition)
+                     {:from from-status
+                      :to to-status
+                      :valid-targets (get (:valid-transitions profile)
+                                         from-status #{})})))
+
+(defn validate-transition
+  "Boundary wrapper around the canonical anomaly-returning
+   [[validate-transition-result]]. Returns nil on success and throws only for
+   legacy callers. Prefer `validate-transition-result` in non-boundary code."
+  [profile from-status to-status]
+  (let [result (validate-transition-result profile from-status to-status)]
+    (when (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Event mapping
