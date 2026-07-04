@@ -158,17 +158,23 @@
 
 
 (defn- atomic-write!
-  "Write content to file atomically via temp + rename."
+  "Write content to file via temp + move, preferring atomic replacement."
   [file content]
   (let [parent (.getParentFile file)
         tmp (java.io.File/createTempFile "zettel-" ".edn.tmp" parent)]
     (try
       (spit tmp content)
-      (Files/move (.toPath tmp)
-                  (.toPath file)
-                  (into-array StandardCopyOption
-                              [StandardCopyOption/ATOMIC_MOVE
-                               StandardCopyOption/REPLACE_EXISTING]))
+      (try
+        (Files/move (.toPath tmp)
+                    (.toPath file)
+                    (into-array StandardCopyOption
+                                [StandardCopyOption/ATOMIC_MOVE
+                                 StandardCopyOption/REPLACE_EXISTING]))
+        (catch Exception _e
+          (Files/move (.toPath tmp)
+                      (.toPath file)
+                      (into-array StandardCopyOption
+                                  [StandardCopyOption/REPLACE_EXISTING]))))
       (finally
         (when (.exists tmp)
           (.delete tmp))))))

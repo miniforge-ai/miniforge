@@ -149,7 +149,8 @@
       {:ok? false
        :error {:code :scheduler-exception
                :message (ex-message e)
-               :exception e}})))
+               :class (some-> e class .getName)
+               :data (ex-data e)}})))
 
 (defn- scheduler-result-state
   [result]
@@ -165,9 +166,16 @@
 
 (defn- scheduler-count
   [state old-key run-key]
-  (count (or (get state old-key)
-             (get state run-key)
-             #{})))
+  (if-let [task-statuses (seq (vals (:run/tasks state)))]
+    (case old-key
+      :pending (count (filter #(= :pending (:task/status %)) task-statuses))
+      :running (count (filter #(#{:running :implementing} (:task/status %)) task-statuses))
+      :completed (+ (count (:run/completed state))
+                    (count (:run/merged state)))
+      (count (or (get state run-key) #{})))
+    (count (or (get state old-key)
+               (get state run-key)
+               #{}))))
 
 (defn- continue-scheduler?
   [result status]

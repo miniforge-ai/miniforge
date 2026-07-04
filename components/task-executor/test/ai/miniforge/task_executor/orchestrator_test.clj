@@ -542,8 +542,42 @@
           (is (= :failed (:run/status final-state)))
           (is (= :failed (:status final-state)))
           (is (= :scheduler-exception (get-in final-state [:run/error :code])))
+          (is (= "clojure.lang.ExceptionInfo" (get-in final-state [:run/error :class])))
+          (is (= {:phase :test} (get-in final-state [:run/error :data])))
+          (is (not (contains? (:run/error final-state) :exception)))
           (is (some (fn [[event data]]
                       (and (= :dag-execution-error event)
                            (= "scheduler boom" (:error data))
                            (= :scheduler-exception (:code data))))
                     @events)))))))
+
+(deftest execute-dag-logs-current-run-state-task-counts-test
+  (testing "scheduler iteration logging derives counts from dag-executor run-state"
+    (let [run-state {:run/status :running
+                     :run/tasks {"pending" {:task/status :pending}
+                                 "running" {:task/status :running}
+                                 "implementing" {:task/status :implementing}
+                                 "completed" {:task/status :completed}
+                                 "merged" {:task/status :merged}}
+                     :run/completed #{"completed"}
+                     :run/merged #{"merged"}}
+          run-atom (atom run-state)
+          events (atom [])]
+      (with-redefs [dag/create-dag-from-tasks (fn [_dag-id _task-defs & _opts]
+                                                run-state)
+                    dag/create-run-atom (fn [_] run-atom)
+                    dag/schedule-iteration (fn [_ _]
+                                             {:continue? false
+                                              :run-state run-state})
+                    orchestrator/create-orchestrated-scheduler-context
+                    (fn [_ _] {:execute-task-fn (fn [& _] nil)})
+                    orchestrator/log-event (fn [_logger event data]
+                                             (swap! events conj [event data]))]
+        (orchestrator/execute-dag! "dag-123" [] {})
+        (let [iteration-data (some (fn [[event data]]
+                                     (when (= :scheduler-iteration event)
+                                       data))
+                                   @events)]
+          (is (= 1 (:tasks-pending iteration-data)))
+          (is (= 2 (:tasks-running iteration-data)))
+          (is (= 2 (:tasks-completed iteration-data))))))))
