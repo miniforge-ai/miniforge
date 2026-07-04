@@ -156,15 +156,16 @@
    branch on nil). Any other failure propagates from the FSM result API."
   [loop-state event]
   (let [current-state (phase-fsm-state loop-state)
-        transitioned (fsm/transition-result phase-machine current-state event)
-        next-phase (some-> transitioned fsm/current-state)]
-    (when (and (not (anomaly/anomaly? transitioned))
-               next-phase
-               (not= (fsm/current-state current-state) next-phase))
-      (assoc loop-state
-             :loop/fsm-state transitioned
-             :loop/phase next-phase
-             :loop/updated-at (java.util.Date.)))))
+        current-phase (fsm/current-state current-state)
+        transitioned (fsm/transition-result phase-machine current-state event)]
+    (when-not (anomaly/anomaly? transitioned)
+      (let [next-phase (fsm/current-state transitioned)]
+        (when (and next-phase
+                   (not= current-phase next-phase))
+          (assoc loop-state
+                 :loop/fsm-state transitioned
+                 :loop/phase next-phase
+                 :loop/updated-at (java.util.Date.)))))))
 
 (defn valid-phase-transition?
   "Check whether a phase transition event is allowed."

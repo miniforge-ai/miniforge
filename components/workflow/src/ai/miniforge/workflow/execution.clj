@@ -352,7 +352,7 @@
    keyed off.
 
    Returns updated context with refreshed machine projections or
-  terminal failure."
+   terminal failure."
   [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
   (let [prior-state (:execution/fsm-state ctx)
         prior-current-state (workflow-fsm/current-state prior-state)
