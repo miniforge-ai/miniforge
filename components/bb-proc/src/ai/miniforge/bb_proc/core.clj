@@ -85,9 +85,10 @@
 (defn run!
   "Boundary wrapper around the canonical result-returning `sh`.
 
-   Run a command inheriting stdio. Throws ex-info on non-zero exit for legacy
-   bang-callers; prefer `sh` in non-boundary code when callers can branch on
-   the process result map. Accepts an optional opts map as the first arg."
+   Run a command through babashka.process/sh. Throws ex-info on non-zero exit
+   for legacy bang-callers; prefer `sh` in non-boundary code when callers can
+   branch on the process result map. Accepts an optional opts map as the first
+   arg, including stdio overrides such as `:out` / `:err`."
   [& args]
   (let [[opts cmd] (split-opts args)
         result     (apply p/sh (merge {:continue true} opts) (resolved-cmd cmd))]
