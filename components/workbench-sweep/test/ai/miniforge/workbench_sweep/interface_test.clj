@@ -125,6 +125,41 @@
         config (assoc (base-config out-dir "/nonexistent") :replicates 1)]
     (is (thrown? clojure.lang.ExceptionInfo (sut/run-sweep! config)))))
 
+(deftest chain-run-harvest-vector-is-merged-and-packless-evals-get-declared-scope
+  ;; What `mf chain run --policy-eval-out` writes: a VECTOR of per-gate
+  ;; evaluations, with packs-applied empty (gate events carry no pack
+  ;; ids). The sweep merges the vector and fills the declared scope.
+  (let [work (tmp-dir! "wb-sweep-vec")
+        out-dir (str (io/file work "out"))
+        eval-path (str (io/file work "harvest.edn"))
+        _ (spit eval-path
+                (pr-str [{:policy-eval/id #uuid "00000000-0000-4000-8000-0000000000cc"
+                          :policy-eval/passed? true
+                          :policy-eval/packs-applied []
+                          :policy-eval/violations []
+                          :policy-eval/evaluated-at #inst "2026-07-04T00:00:00.000-00:00"}
+                         {:policy-eval/id #uuid "00000000-0000-4000-8000-0000000000cd"
+                          :policy-eval/passed? false
+                          :policy-eval/packs-applied []
+                          :policy-eval/violations
+                          [{:violation/rule-id :foundations/no-todo-fixme
+                            :violation/severity :medium
+                            :violation/category :style
+                            :violation/message "TODO"
+                            :violation/remediable? true}]
+                          :policy-eval/evaluated-at #inst "2026-07-04T00:01:00.000-00:00"}]))
+        config {:experiment-id "e" :out-dir out-dir :registry-version "v"
+                :packs-applied ["miniforge/foundations"]
+                :variants [{:label "harvested" :policy-eval eval-path}]}
+        {:keys [snapshots]} (sut/run-sweep! config)
+        snap (json/parse-string (slurp (first snapshots)) true)
+        by-id (into {} (map (juxt :state_var_id identity)) (:evaluations snap))]
+    (is (= 1 (count snapshots)))
+    (is (contains? by-id "miniforge.policy.foundations.pass_rate")
+        "declared pack scope projects per-rule + rate rows despite empty packs-applied")
+    (is (= "fail" (:status (by-id "miniforge.policy.foundations.no-todo-fixme")))
+        "merged violation from the second gate lands on its rule")))
+
 (deftest config-validation-rejects-commandless-executable-variants
   (is (thrown? clojure.lang.ExceptionInfo
                (sut/run-sweep! {:experiment-id "e" :out-dir "/tmp/x"

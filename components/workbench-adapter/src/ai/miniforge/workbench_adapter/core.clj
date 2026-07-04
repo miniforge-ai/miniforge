@@ -267,6 +267,30 @@
     (vec (concat (mapcat identity per-pack)
                  [(critical-block-evaluation policy-eval evaluated-at)]))))
 
+(defn merge-policy-evals
+  "Merge several PolicyEvaluation records (one chain run emits one per
+   gate) into a single aggregate evaluation for projection: violations
+   and packs-applied are unioned, passed? is the conjunction, and
+   evaluated-at is the latest. A fresh id is minted — per N5-delta-1, an
+   aggregate is a NEW record, never a mutation of a prior one. A
+   single-element input returns that element unchanged."
+  [evals]
+  {:pre [(seq evals)]}
+  (if (= 1 (count evals))
+    (first evals)
+    (let [latest (apply max-key #(inst-ms (:policy-eval/evaluated-at %)) evals)]
+      (cond-> {:policy-eval/id (random-uuid)
+               :policy-eval/passed? (every? :policy-eval/passed? evals)
+               :policy-eval/packs-applied (vec (distinct (mapcat :policy-eval/packs-applied evals)))
+               :policy-eval/violations (vec (mapcat :policy-eval/violations evals))
+               :policy-eval/evaluated-at (:policy-eval/evaluated-at latest)}
+        (some :policy-eval/workflow-run-id evals)
+        (assoc :policy-eval/workflow-run-id (some :policy-eval/workflow-run-id evals))
+        (:policy-eval/target-type latest)
+        (assoc :policy-eval/target-type (:policy-eval/target-type latest))
+        (contains? latest :policy-eval/target-id)
+        (assoc :policy-eval/target-id (:policy-eval/target-id latest))))))
+
 (defn- entity-bag [policy-eval]
   {:miniforge.policy_eval
    {:policy_eval_id (str (:policy-eval/id policy-eval))

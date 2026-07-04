@@ -78,10 +78,22 @@
                                       (str/join "\n"))})))
     {:out out :err err}))
 
-(defn- read-policy-eval [path]
-  (edn/read-string {:readers {'uuid parse-uuid
-                              'inst #(java.time.Instant/parse %)}}
-                   (slurp path)))
+(defn- read-policy-eval
+  "Read a harvested PolicyEvaluation EDN file. `mf chain run
+   --policy-eval-out` writes a VECTOR (one record per gate) — merged to
+   one aggregate here; a bare map passes through. When the record
+   carries no packs-applied (gate events don't name packs), the sweep's
+   declared `:packs-applied` fills in so per-rule rows still project."
+  [path packs-applied]
+  (let [parsed (edn/read-string {:readers {'uuid parse-uuid
+                                           'inst #(java.time.Instant/parse %)}}
+                                (slurp path))
+        pe (if (sequential? parsed)
+             (adapter/merge-policy-evals (vec parsed))
+             parsed)]
+    (if (and (seq packs-applied) (empty? (:policy-eval/packs-applied pe)))
+      (assoc pe :policy-eval/packs-applied (vec packs-applied))
+      pe)))
 
 ;; ---------------------------------------------------------------- one run
 
@@ -101,7 +113,7 @@
 (defn execute-one!
   "Execute (or collect) one (variant x replicate) and emit its snapshot.
    Returns the snapshot path."
-  [{:keys [experiment-id out-dir registry-version command config-sha]} packs variant replicate]
+  [{:keys [experiment-id out-dir registry-version command config-sha packs-applied]} packs variant replicate]
   (let [label (:label variant)
         eval-path (or (:policy-eval variant)
                       (str (io/file out-dir "evals" (str label "-r" replicate ".edn"))))
@@ -115,7 +127,7 @@
     (let [now (str (java.time.Instant/now))
           stamp (id-stamp now)
           snapshot (adapter/policy-eval->snapshot
-                    (read-policy-eval eval-path)
+                    (read-policy-eval eval-path packs-applied)
                     packs
                     {:snapshot-id (str "wb-miniforge-" label "-r" replicate "-" stamp)
                      :run-id (str "run-" label "-r" replicate "-" stamp)
@@ -149,7 +161,8 @@
   (let [packs (adapter/load-packs! (or packs-dir (adapter/builtin-packs-dir)))
         k (or replicates 1)
         ctx (assoc (select-keys config [:experiment-id :out-dir
-                                        :registry-version :command])
+                                        :registry-version :command
+                                        :packs-applied])
                    :config-sha config-sha)]
     (.mkdirs (io/file out-dir))
     (clear-stale-snapshots! out-dir)

@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [babashka.fs :as fs]
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.edn :as edn]
    [cheshire.core :as json]
@@ -1255,12 +1256,46 @@
         (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
           (println (display/colorize :red (messages/t :workflow-runner/chain-failed-at {:step (when failed-step (name failed-step))}))))))))
 
+(defn- ->edn-inst
+  "Coerce any inst to java.util.Date so `pr-str` emits a readable #inst
+   literal (java.time.Instant prints as an unreadable #object)."
+  [t]
+  (if (and (inst? t) (not (instance? java.util.Date t)))
+    (java.util.Date. (inst-ms t))
+    t))
+
+(defn write-policy-evals!
+  "Serialize the run's supervisory PolicyEvaluation records to `path` as
+   an EDN vector — the input the workbench adapter/sweep projects into a
+   comparable snapshot. Loud when the run produced none: a run with no
+   policy evaluations cannot be compared on policy state variables, so
+   writing an empty file would only defer the failure somewhere
+   quieter."
+  [supervisor path quiet]
+  (let [evals (->> (supervisory/policy-evals supervisor)
+                   (sort-by (comp inst-ms :policy-eval/evaluated-at))
+                   (mapv #(update % :policy-eval/evaluated-at ->edn-inst)))]
+    (if (seq evals)
+      (do (io/make-parents path)
+          (spit path (pr-str evals))
+          (when-not quiet
+            (println (messages/t :workflow-runner/policy-evals-written
+                                 {:count (count evals) :path path}))))
+      (binding [*out* *err*]
+        (println (messages/t :workflow-runner/policy-evals-none {:path path}))))))
+
 (defn run-chain!
   "Execute a chain of workflows.
 
    Arguments:
    - chain-id: Chain identifier keyword (e.g. :reporting-chain)
-   - opts: {:version \"latest\" :spec \"spec.edn\" :input-json \"{...}\" :quiet false}"
+   - opts: {:version \"latest\" :spec \"spec.edn\" :input-json \"{...}\"
+            :policy-eval-out \"path.edn\" :quiet false}
+
+   `:policy-eval-out` — after the chain completes, write the run's
+   supervisory PolicyEvaluation records (materialized from the gate
+   events the run emitted) to this path as EDN, ready for the
+   workbench-adapter/workbench-sweep projection."
   [chain-id opts]
   (let [quiet (get opts :quiet false)
         version (get opts :version "latest")]
@@ -1269,7 +1304,7 @@
             chain-def (:chain chain-result)
             chain-input (resolve-chain-input opts)
             event-stream (es/create-event-stream)
-            _supervisor (supervisory/attach! event-stream)
+            supervisor (supervisory/attach! event-stream)
             ;; N15-6: see meta-loop attach above for rationale.
             _correlator (correlator/attach! event-stream)
             llm-client (context/create-llm-client nil nil quiet)
@@ -1290,6 +1325,8 @@
         (try
           (let [result (workflow/run-chain chain-def chain-input context)]
             (print-chain-result result quiet)
+            (when-let [out (:policy-eval-out opts)]
+              (write-policy-evals! supervisor out quiet))
             result)
           (finally
             (progress-cleanup))))

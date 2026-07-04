@@ -156,6 +156,32 @@
     (is (sut/valid-snapshot? snapshot))
     (is (= variant (:variant snapshot)))))
 
+(deftest merge-policy-evals-aggregates-a-multi-gate-run
+  (let [g1 {:policy-eval/id (random-uuid)
+            :policy-eval/passed? true
+            :policy-eval/packs-applied ["miniforge/foundations"]
+            :policy-eval/violations []
+            :policy-eval/evaluated-at #inst "2026-07-04T00:00:00.000-00:00"}
+        g2 {:policy-eval/id (random-uuid)
+            :policy-eval/workflow-run-id (random-uuid)
+            :policy-eval/passed? false
+            :policy-eval/packs-applied ["miniforge/foundations" "miniforge/task-scope"]
+            :policy-eval/violations [{:violation/rule-id :foundations/no-todo-fixme
+                                      :violation/severity :medium
+                                      :violation/category :style
+                                      :violation/message "TODO"
+                                      :violation/remediable? true}]
+            :policy-eval/evaluated-at #inst "2026-07-04T00:01:00.000-00:00"}
+        merged (sut/merge-policy-evals [g1 g2])]
+    (is (= false (:policy-eval/passed? merged)) "one failing gate fails the aggregate")
+    (is (= ["miniforge/foundations" "miniforge/task-scope"]
+           (:policy-eval/packs-applied merged)) "packs unioned, order-stable")
+    (is (= 1 (count (:policy-eval/violations merged))))
+    (is (= (:policy-eval/evaluated-at g2) (:policy-eval/evaluated-at merged)) "latest wins")
+    (is (not (contains? #{(:policy-eval/id g1) (:policy-eval/id g2)}
+                        (:policy-eval/id merged))) "aggregate gets a fresh id")
+    (is (= g1 (sut/merge-policy-evals [g1])) "single element passes through")))
+
 (deftest confidence-is-earned-not-invented
   ;; Mechanical scanners are deterministic; 1.0 is a statement, not a vibe.
   (let [snapshot (sut/policy-eval->snapshot policy-eval packs opts)]

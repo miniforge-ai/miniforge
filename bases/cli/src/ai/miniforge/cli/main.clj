@@ -393,7 +393,7 @@
 ;; Chain commands
 (defn chain-run-cmd
   [m]
-  (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
+  (let [{:keys [chain-id version spec input-json policy-eval-out quiet]} (get-opts m)]
     (if-not chain-id
       (display/print-error (messages/t :chain-run/usage
                                        {:command (app-config/command-string "chain run <chain-id> [options]")}))
@@ -403,6 +403,7 @@
          {:version (or version "latest")
           :spec spec
           :input-json input-json
+          :policy-eval-out policy-eval-out
           :quiet (boolean quiet)})
         (catch Exception e
           (display/print-error (messages/t :chain-run/failed

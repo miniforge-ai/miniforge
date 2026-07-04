@@ -81,10 +81,11 @@
 
 (def chain-run-flag-spec
   (with-help-flag
-    {:version    {:coerce :string :alias :v :default "latest"}
-     :spec       {:alias :s}
-     :input-json {}
-     :quiet      {:coerce :boolean :alias :q}}))
+    {:version         {:coerce :string :alias :v :default "latest"}
+     :spec            {:alias :s}
+     :input-json      {}
+     :policy-eval-out {:coerce :string}
+     :quiet           {:coerce :boolean :alias :q}}))
 
 (def chain-list-flag-spec
   (with-help-flag {}))

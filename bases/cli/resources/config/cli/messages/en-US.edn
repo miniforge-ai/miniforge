@@ -716,6 +716,8 @@
   :workflow-runner/chain-steps "   Steps: {count}"
   :workflow-runner/chain-completed "✓ Chain completed — {count} steps in {duration}ms"
   :workflow-runner/chain-failed-at "✗ Chain failed at step: {step}"
+  :workflow-runner/policy-evals-written "Wrote {count} policy evaluation(s) to {path}"
+  :workflow-runner/policy-evals-none "No policy evaluations materialized for this run; {path} not written (did any gates run?)"
   :workflow-runner/chain-execution-failed "\n❌ Chain execution failed: {error}"
   :workflow-runner/no-chains "No chains found."
   :workflow-runner/available-chains "\nAvailable Chains:"

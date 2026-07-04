@@ -68,6 +68,14 @@
   (validate! :state-var-registry schema/StateVarRegistry
              (core/packs->registry packs version)))
 
+(defn merge-policy-evals
+  "Merge several PolicyEvaluations (one per gate of a run) into one
+   aggregate record for projection — violations/packs unioned, passed?
+   conjoined, latest evaluated-at, fresh id. Single element passes
+   through unchanged."
+  [evals]
+  (core/merge-policy-evals evals))
+
 (defn policy-eval->snapshot
   "Project a supervisory PolicyEvaluation into a validated
    `workbench_snapshot/v1`. `opts`:
@@ -155,9 +163,12 @@
   [{:keys [policy-eval packs-dir registry-version out
            snapshot-id run-id experiment-id label model method
            workflow prompt axes]}]
-  (let [pe (edn/read-string {:readers {'uuid parse-uuid
-                                       'inst #(java.time.Instant/parse %)}}
-                            (slurp (str policy-eval)))
+  (let [parsed (edn/read-string {:readers {'uuid parse-uuid
+                                           'inst #(java.time.Instant/parse %)}}
+                                (slurp (str policy-eval)))
+        ;; `mf chain run --policy-eval-out` writes a VECTOR (one record
+        ;; per gate); a bare map is accepted for hand-rolled inputs.
+        pe (if (sequential? parsed) (merge-policy-evals (vec parsed)) parsed)
         packs (load-packs! (str (or packs-dir (builtin-packs-dir))))
         now (str (java.time.Instant/now))
         stamp (-> now (str/replace #"\.[0-9]+" "") (str/replace #"[:\-]" ""))
