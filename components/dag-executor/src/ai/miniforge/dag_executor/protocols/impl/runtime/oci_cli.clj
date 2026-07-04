@@ -514,6 +514,24 @@
     (catch Exception _e
       nil)))
 
+(defn pull-image!
+  "Pull `image` via the runtime. Best-effort: a failed pull (e.g. a
+   locally-built image with no registry) leaves the image absent, which the
+   caller surfaces as a nil digest."
+  [descriptor image]
+  (try (run-runtime descriptor "pull" image) (catch Exception _ nil)))
+
+(defn resolve-image-digest!
+  "Resolve the pinned `sha256:<64hex>` digest for `image`, pulling it first when
+   it is not present locally so `image inspect` can read it (inspect does not
+   pull). Returns nil only when the image cannot be resolved even after a pull —
+   a genuinely unpinnable image, which the security gate then blocks. This is
+   the production digest resolver injected into `security-gate-check`."
+  [descriptor image]
+  (when-not (image-exists? descriptor image)
+    (pull-image! descriptor image))
+  (image-config-digest descriptor image))
+
 (defn find-dockerfile-path
   "Find the Dockerfile resource on the classpath or filesystem.
    Returns absolute path to the Dockerfile."
@@ -797,7 +815,7 @@
         ;; Capsule security gate (runtime-* policies): resolve the pinned image
         ;; digest and check the plan BEFORE launch. A hard-stop (forbidden)
         ;; aborts the acquire without creating a container.
-        (let [gate-result (security-gate-check descriptor image env-config image-config-digest)]
+        (let [gate-result (security-gate-check descriptor image env-config resolve-image-digest!)]
           (if (result/err? gate-result)
             gate-result
             (let [container-name (str container-name-prefix
@@ -817,9 +835,15 @@
                     (let [bootstrap-metadata (:data bootstrap-result)
                           ;; Capture image SHA256 digest for evidence record (N11 §11 SHOULD)
                           image-digest (container-image-digest descriptor container-name)
+                          ;; Surface the gate's non-blocking findings (rootless
+                          ;; warning, host-mount review) on the environment record.
+                          gate-warnings (get-in gate-result [:data :security/warnings])
+                          gate-review   (get-in gate-result [:data :security/review])
                           metadata (cond-> (merge (get create-result :data {})
                                                    bootstrap-metadata)
-                                     image-digest (assoc :image-digest image-digest))]
+                                     image-digest (assoc :image-digest image-digest)
+                                     (seq gate-warnings) (assoc :security/warnings gate-warnings)
+                                     (seq gate-review)   (assoc :security/review gate-review))]
                       (result/ok (proto/create-environment-record
                                   container-name (descriptor/kind descriptor) task-id workdir
                                   (assoc env-config :metadata metadata))))

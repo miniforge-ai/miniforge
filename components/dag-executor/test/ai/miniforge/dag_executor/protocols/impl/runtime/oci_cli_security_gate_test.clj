@@ -17,9 +17,10 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli-security-gate-test
-  "Capsule security gate wiring: acquire-environment! runs check-plan-security
-   on the resolved plan before launch. The digest resolver is injected so these
-   run without a container runtime."
+  "Capsule security gate: unit tests for `security-gate-check`, the gate step
+   `acquire-environment!` runs on the resolved plan before launch. The digest
+   resolver is injected, so these exercise the gate decision (block / warn /
+   review / pass) without a container runtime."
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.result :as result]
