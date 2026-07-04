@@ -25,11 +25,11 @@
    completed, failed, unreachable, terminated.
 
    Layer 0: Profile loading
-   Layer 1: Transition validation
-   Layer 2: Event mapping"
+  Layer 1: Transition validation
+  Layer 2: Event mapping"
   (:require
-  [clojure.edn :as edn]
-  [clojure.java.io :as io]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.control-plane.messages :as messages]))
 
