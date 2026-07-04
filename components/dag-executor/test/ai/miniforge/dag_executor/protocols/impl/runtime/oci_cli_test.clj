@@ -20,6 +20,7 @@
   "Tests for OCI-CLI executor: token sanitization, URL auth, image
    management, descriptor wiring."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]
    [clojure.string]
    [ai.miniforge.dag-executor.result :as result]
@@ -91,6 +92,15 @@
       (is false "expected ex-info")
       (catch clojure.lang.ExceptionInfo e
         (is (= :unknown-runtime (-> e ex-data :runtime/unknown-kind)))))))
+
+(deftest descriptor-validation-result-returns-anomaly-test
+  (testing "constructed descriptor schema drift returns a canonical anomaly"
+    (let [result (@#'descriptor/validate-descriptor-result
+                  {:runtime/kind :docker})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :runtime/descriptor
+             (get-in result [:anomaly/data :anomaly/schema]))))))
 
 ;; ============================================================================
 ;; sanitize-token

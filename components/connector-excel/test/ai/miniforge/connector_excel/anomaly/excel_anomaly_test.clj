@@ -23,6 +23,7 @@
    `response/throw-anomaly!`."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-excel.impl :as impl]
+            [ai.miniforge.response.interface :as response]
             [babashka.http-client :as http])
   (:import (clojure.lang ExceptionInfo)
            (org.apache.poi.xssf.usermodel XSSFWorkbook)))
@@ -89,3 +90,11 @@
         (catch ExceptionInfo e
           (is (= :anomalies/unavailable (:anomaly/category (ex-data e))))
           (is (= 503 (:status (ex-data e)))))))))
+
+(deftest download-to-temp-result-non-2xx-returns-anomaly
+  (testing "non-2xx HTTP response can be represented without throwing"
+    (with-redefs [http/get (fn [_url _opts] {:status 503 :body (byte-array 0)})]
+      (let [result (@#'impl/download-to-temp-result "http://x/y.xls")]
+        (is (response/anomaly-map? result))
+        (is (= :anomalies/unavailable (:anomaly/category result)))
+        (is (= 503 (:status result)))))))

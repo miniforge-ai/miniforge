@@ -35,6 +35,7 @@
    can never be mistaken for captured production data."
   (:require
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.emitter :as emitter]
    [ai.miniforge.supervisory-state.schema :as schema]
    [clojure.java.io :as io]
@@ -263,18 +264,29 @@
    {:family :decision     :ctor emitter/decision-upserted     :schema schema/DecisionCard       :entity decision-entity}
    {:family :intervention :ctor emitter/intervention-upserted :schema schema/InterventionRequest :entity intervention-entity}])
 
+(defn- validate-result
+  "Validate `entity` against `entity-schema`, returning the entity on success
+   or a legacy response anomaly map on schema drift."
+  [family entity-schema entity]
+  (if (m/validate entity-schema entity)
+    entity
+    (response/make-anomaly :anomalies/incorrect
+                           (str "Golden fixture entity invalid for " family)
+                           {:family family
+                            :errors (me/humanize (m/explain entity-schema entity))})))
+
 ;------------------------------------------------------------------------------ Layer 3
 ;; Event construction — real constructor + real encoder, pinned envelope
 
 (defn- validate!
-  "Throw with a malli explanation when `entity` does not conform to
-   `entity-schema`. The generator fails closed: a fixture that does not
-   validate against the current schema must never be written."
+  "Boundary wrapper around the anomaly-returning `validate-result`.
+   The generator fails closed: a fixture that does not validate against the
+   current schema must never be written."
   [family entity-schema entity]
-  (when-not (m/validate entity-schema entity)
-    (throw (ex-info (str "Golden fixture entity invalid for " family)
-                    {:family family
-                     :errors (me/humanize (m/explain entity-schema entity))}))))
+  (let [result (validate-result family entity-schema entity)]
+    (when (response/anomaly-map? result)
+      (throw (ex-info (:anomaly/message result)
+                      (select-keys result [:family :errors]))))))
 
 (defn- pin-envelope
   "Replace the nondeterministic envelope fields (`create-envelope`
