@@ -83,8 +83,11 @@
 ;; Process invocations
 
 (defn run!
-  "Run a command inheriting stdio. Throws ex-info on non-zero exit.
-   Accepts an optional opts map as the first arg."
+  "Boundary wrapper around the canonical result-returning `sh`.
+
+   Run a command inheriting stdio. Throws ex-info on non-zero exit for legacy
+   bang-callers; prefer `sh` in non-boundary code when callers can branch on
+   the process result map. Accepts an optional opts map as the first arg."
   [& args]
   (let [[opts cmd] (split-opts args)
         result     (apply p/sh (merge {:continue true} opts) (resolved-cmd cmd))]

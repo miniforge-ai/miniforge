@@ -176,7 +176,12 @@
 
 (defn acquire-execution-environment!
   "Acquire an isolated execution environment before pipeline starts.
-   Returns env map, or nil (local) / throws (governed) on failure."
+   Boundary wrapper around the anomaly-returning executor availability check.
+
+   Returns env map, or nil (local) / throws (governed) on failure. Governed
+   acquisition failure deliberately escalates for legacy runner callers that
+   rely on try+ exception flow; prefer anomaly-returning helpers such as
+   `check-executor-for-mode` for non-boundary branching."
   [workflow-id {:keys [repo-url branch repo-path execution-mode executor-config
                        resume-workspace]}]
   (let [mode (get {:governed :governed} execution-mode :local)]
