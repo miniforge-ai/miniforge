@@ -32,7 +32,7 @@
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [throw+ try+]])
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayInputStream]
    [java.util.concurrent LinkedBlockingQueue TimeUnit]))
@@ -857,6 +857,12 @@
    :err (:err process-result)
    :exit (:exit process-result)})
 
+(defn stream-anomaly-result [out-lines stream-anomaly]
+  {:out (str/join "\n" out-lines)
+   :err (:anomaly/message stream-anomaly)
+   :exit -1
+   :anomaly stream-anomaly})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^:private eof-sentinel
@@ -987,7 +993,8 @@
   [line-or-signal out-lines dump-writer on-line last-line-at line-timeout-ms]
   (cond
     (anomaly-signal? line-or-signal)
-    (throw+ line-or-signal)
+    {:done? true
+     :anomaly line-or-signal}
 
     (eof-signal? line-or-signal)
     {:done? true}
@@ -1007,6 +1014,7 @@
 (defn process-stream-lines [out-reader monitor on-line]
   (let [out-lines (atom [])
         timeout-reason (atom nil)
+        stream-anomaly (atom nil)
         line-timeout-ms (stream-line-timeout-ms)
         last-line-at (atom (System/currentTimeMillis))
         dump-writer (open-stream-dump-writer)
@@ -1016,7 +1024,7 @@
       (loop []
         (if-let [t (pm/check-timeout monitor)]
           (reset! timeout-reason t)
-          (let [{:keys [done? timeout]}
+          (let [{:keys [done? timeout anomaly]}
                 (process-stream-signal (stream-poll-signal line-queue)
                                        out-lines
                                        dump-writer
@@ -1024,6 +1032,7 @@
                                        last-line-at
                                        line-timeout-ms)]
             (cond
+              anomaly (reset! stream-anomaly anomaly)
               done? nil
               timeout (reset! timeout-reason timeout)
               :else (recur)))))
@@ -1031,7 +1040,8 @@
         (stop-stream-reader! reader-thread out-reader)
         (when dump-writer (.close dump-writer))))
     {:lines @out-lines
-     :timeout @timeout-reason}))
+     :timeout @timeout-reason
+     :anomaly @stream-anomaly}))
 
 (defn clean-env
   "Build environment map without CLAUDECODE to allow nested Claude CLI sessions.
@@ -1195,7 +1205,7 @@
    returns, so the existing `timeout-result` path handles it
    identically. The PR-C auto-resumer keys on `:type :network-drop` to
    know it should resume from the last persisted checkpoint."
-  [{:keys [backend-key consecutive-failures failure-threshold probe-interval-ms]
+  [{:keys [backend-key consecutive-failures probe-interval-ms]
     :as   diag}]
   {:type           :network-drop
    :backend-key    backend-key
@@ -1280,7 +1290,7 @@
                                     ;; safe to double-tap.
                                     (try (.destroyForcibly process)
                                          (catch Exception _ nil)))})))
-         {:keys [lines timeout]}
+         {:keys [lines timeout anomaly]}
          (try
            (process-stream-lines out-reader monitor on-line)
            (finally
@@ -1296,14 +1306,21 @@
          ;; stagnation, total-max, or network-drop) — the subprocess
          ;; is hung or silent. Kill it so `deref` returns immediately
          ;; instead of waiting 10 min for a process that will not exit.
-         join-timeout (if effective-timeout
+         terminal-failure (or effective-timeout anomaly)
+         join-timeout (if terminal-failure
                         (post-kill-join-timeout-ms)
                         (process-join-timeout-ms))
          result (stop-stream-process! stream-process
-                                      (boolean effective-timeout)
+                                      (boolean terminal-failure)
                                       join-timeout)]
-     (if effective-timeout
+     (cond
+       effective-timeout
        (timeout-result lines effective-timeout)
+
+       anomaly
+       (stream-anomaly-result lines anomaly)
+
+       :else
        (success-result lines result)))))
 
 ;------------------------------------------------------------------------------ Layer 2
