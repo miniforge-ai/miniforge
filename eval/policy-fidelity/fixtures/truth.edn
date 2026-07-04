@@ -71,4 +71,24 @@
 
   "seed/span_merge.clj"
   {:violates #{}
-   :notes "self-documenting-code specificity: the comment explains WHY (sort-then-sweep avoids O(n^2)), a non-obvious algorithmic rationale — not narrating WHAT. A faithful judge does not fire self-documenting-code."}}}
+   :notes "self-documenting-code specificity: the comment explains WHY (sort-then-sweep avoids O(n^2)), a non-obvious algorithmic rationale — not narrating WHAT. A faithful judge does not fire self-documenting-code."}
+
+  "seed/cli_main.clj"
+  {:violates #{:std/clojure-exception-handling}
+   :notes "211 THROW-side (distinct from step_runner's catch-side): -main is an absolute boundary, so throwing is 005-COMPLIANT — but a STRUCTURED payload (:anomaly/category map) thrown via plain ex-info must use throw+/throw-anomaly! per 211. Message is localized via messages/t (localization clean); no magic literals."}
+
+  "seed/item_processor.clj"
+  {:violates #{:std/self-documenting-code}
+   :notes "self-documenting-code (distinct from billing_calc's arithmetic narration): comments narrate WHAT the control flow does ('loop over every item', 'if active call the handler') — pure restatement, no WHY. No strings/throws/magic/validation."}
+
+  "seed/internal_revalidate.clj"
+  {:violates #{:std/validation-boundaries}
+   :notes "validation-boundaries (distinct from row_aggregator's type guards): an internal helper re-runs m/validate on `order` that the docstring states already passed interface validation upstream — redundant interior validation. No magic literals or strings."}
+
+  "seed/time_constants.clj"
+  {:violates #{}
+   :notes "config-as-data specificity (distinct from frame_codec): seconds-per-day (24*60*60) LOOKS like a magic number but is a fixed unit conversion, not operator-tunable — correctly a code constant with composed-math intent + rationale docstring. Clean w.r.t. config-as-data AND named-constants."}
+
+  "seed/swap_ordering.clj"
+  {:violates #{}
+   :notes "self-documenting-code specificity (distinct from span_merge): the comment explains WHY (read the count from swap!'s return, not a separate deref, to avoid an over-count race) — a non-obvious concurrency rationale, not WHAT. A faithful judge flags nothing."}}}

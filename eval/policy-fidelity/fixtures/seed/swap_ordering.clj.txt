@@ -1,0 +1,8 @@
+(ns eval.seed.swap-ordering)
+
+(defn record-and-count
+  "Append `event` to `log` and return the new count."
+  [log event]
+  ;; Count from the swap! return value, not a separate deref: a concurrent
+  ;; append landing between the swap! and a deref would over-count.
+  (count (swap! log conj event)))

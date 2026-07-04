@@ -1,0 +1,12 @@
+(ns eval.seed.time-constants)
+
+(def ^:private seconds-per-day
+  "Seconds in a calendar day (24*60*60). A fixed unit conversion, not an
+   operator-tunable value — a day is always 86400 seconds — so it lives in
+   code as a constant, never in .edn config."
+  (* 24 60 60))
+
+(defn days->seconds
+  "Convert a whole-day count to seconds."
+  [days]
+  (* days seconds-per-day))

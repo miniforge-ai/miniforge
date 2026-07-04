@@ -1,0 +1,8 @@
+(ns eval.seed.item-processor)
+
+(defn process-items [items handle]
+  ;; loop over every item in the collection
+  (doseq [item items]
+    ;; if the item is active, call the handler on it
+    (when (:active? item)
+      (handle item))))
