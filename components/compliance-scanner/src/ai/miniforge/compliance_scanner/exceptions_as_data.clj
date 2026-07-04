@@ -485,8 +485,9 @@
       (when (symbol? binding-sym)
         binding-sym))))
 
-(defn- child-context
-  [context form _child]
+(defn- form-context
+  "Enrich traversal context once for a parent form before walking children."
+  [context form]
   (let [defn-data   (defn-context form)
         interrupted (interrupted-catch-binding form)
         catch-binding (when (and (seq? form)
@@ -530,14 +531,11 @@
                                         kind))
 
         :else
-        (reduce (fn [a child]
-                  (visit-form a
-                              file-path
-                              boundary?
-                              (child-context context form child)
-                              child))
-                acc!
-                form)))
+        (let [child-context (form-context context form)]
+          (reduce (fn [a child]
+                    (visit-form a file-path boundary? child-context child))
+                  acc!
+                  form))))
 
     (or (vector? form) (set? form))
     (reduce (fn [a child] (visit-form a file-path boundary? context child))
