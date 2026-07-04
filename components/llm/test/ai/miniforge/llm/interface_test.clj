@@ -19,6 +19,7 @@
 (ns ai.miniforge.llm.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [clojure.string :as str]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.llm.interface :as llm]
             [ai.miniforge.llm.messages :as msg]
             [ai.miniforge.llm.protocols.records.llm-client]
@@ -701,6 +702,25 @@
           result (impl/process-stream-lines reader monitor (fn [_] nil))]
       (is (= [] (:lines result)))
       (is (nil? (:timeout result))))))
+
+(deftest process-stream-lines-read-failure-is-anomaly-data-test
+  (testing "reader failures return canonical anomaly data instead of throwing"
+    (let [reader (java.io.BufferedReader.
+                  (proxy [java.io.Reader] []
+                    (read [_cbuf _off _len]
+                      (throw (java.io.IOException. "stream read failed")))
+                    (close [] nil)))
+          monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms 1000
+                    :max-total-ms 1000
+                    :min-activity-interval-ms 1})
+          result (impl/process-stream-lines reader monitor (fn [_] nil))
+          stream-anomaly (:anomaly result)]
+      (is (= [] (:lines result)))
+      (is (nil? (:timeout result)))
+      (is (anomaly/anomaly? stream-anomaly))
+      (is (= :fault (:anomaly/type stream-anomaly)))
+      (is (= "stream read failed" (:anomaly/message stream-anomaly))))))
 
 (def ^:private start-stream-reader! #'impl/start-stream-reader!)
 (def ^:private stop-stream-reader!  #'impl/stop-stream-reader!)
