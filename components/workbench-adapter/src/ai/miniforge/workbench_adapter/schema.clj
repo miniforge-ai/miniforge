@@ -69,10 +69,17 @@
 
 ;; ---------------------------------------------------------------- snapshot
 
+(def VariantRef
+  [:map {:closed true}
+   [:id :string]
+   [:version {:optional true} :string]])
+
 (def RunVariant
   [:map {:closed false}
    [:experiment_id :string]
    [:label :string]
+   [:workflow {:optional true} VariantRef]
+   [:prompt {:optional true} VariantRef]
    [:model {:optional true} :string]
    [:method {:optional true} :string]
    [:axes {:optional true} [:map-of :keyword :string]]])

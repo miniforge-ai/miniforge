@@ -94,6 +94,12 @@
                                        (java.nio.file.Files/readAllBytes
                                         (.toPath (io/file (str path)))))))))
 
+(defn- parse-ref
+  "`\"id@version\"` -> `{:id \"id\" :version \"version\"}`; bare id ok."
+  [s]
+  (let [[id version] (str/split (str s) #"@" 2)]
+    (cond-> {:id id} version (assoc :version version))))
+
 (defn- write-json! [value path]
   (some-> (io/file path) .getParentFile .mkdirs)
   (spit path (json/generate-string value {:pretty true}))
@@ -137,9 +143,13 @@
   "`clojure -X` entry: project a PolicyEvaluation EDN file into a
    snapshot. Args: `{:policy-eval \"eval.edn\" :packs-dir \"...\"
    :registry-version \"...\" :out \"...\"}` plus optional
-   `:snapshot-id :run-id :experiment-id :label :model :method`."
+   `:snapshot-id :run-id :experiment-id :label :model :method`,
+   `:workflow`/`:prompt` (versioned refs as `\"id@version\"` strings —
+   workflow-chain and prompt permutations are first-class variant axes),
+   and `:axes` (an EDN map of any further axes)."
   [{:keys [policy-eval packs-dir registry-version out
-           snapshot-id run-id experiment-id label model method]}]
+           snapshot-id run-id experiment-id label model method
+           workflow prompt axes]}]
   (let [pe (edn/read-string {:readers {'uuid parse-uuid
                                        'inst #(java.time.Instant/parse %)}}
                             (slurp (str policy-eval)))
@@ -158,10 +168,14 @@
                            :source-hashes [(sha256-file policy-eval)]
                            :metadata {:emitter "miniforge.workbench-adapter"}}
                     (and experiment-id label)
-                    (assoc :variant (cond-> {:experiment_id (str experiment-id)
-                                             :label label}
-                                      model (assoc :model (str model))
-                                      method (assoc :method (str method))))))]
+                    (assoc :variant
+                           (cond-> {:experiment_id (str experiment-id)
+                                    :label label}
+                             model (assoc :model (str model))
+                             method (assoc :method (str method))
+                             workflow (assoc :workflow (parse-ref workflow))
+                             prompt (assoc :prompt (parse-ref prompt))
+                             (seq axes) (assoc :axes (update-keys axes keyword))))))]
     (write-snapshot! snapshot (str out))
     (println "wrote" (str out) "-" (count (:evaluations snapshot)) "evaluations"))
   nil)

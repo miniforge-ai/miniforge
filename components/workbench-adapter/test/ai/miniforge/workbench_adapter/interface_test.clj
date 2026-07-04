@@ -143,6 +143,19 @@
   (is (thrown? clojure.lang.ExceptionInfo
                (sut/policy-eval->snapshot {:policy-eval/passed? false} packs opts))))
 
+(deftest workflow-and-prompt-are-first-class-variant-axes
+  ;; Workflow-chain and prompt permutations validate through the emit
+  ;; schema as typed VariantRefs — no label-string smuggling.
+  (let [variant {:experiment_id "miniforge.policy.chain-sweep"
+                 :label "chain-a"
+                 :workflow {:id "n2-standard-chain" :version "2026.06.01"}
+                 :prompt {:id "implement-phase" :version "v7"}
+                 :axes {:executor "fleet" :retries "0"}}
+        snapshot (sut/policy-eval->snapshot policy-eval packs
+                                            (assoc opts :variant variant))]
+    (is (sut/valid-snapshot? snapshot))
+    (is (= variant (:variant snapshot)))))
+
 (deftest confidence-is-earned-not-invented
   ;; Mechanical scanners are deterministic; 1.0 is a statement, not a vibe.
   (let [snapshot (sut/policy-eval->snapshot policy-eval packs opts)]
