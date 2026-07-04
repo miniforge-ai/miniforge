@@ -32,6 +32,7 @@
    [clojure.java.shell :as shell]
    [clojure.string :as str]
    [babashka.fs :as fs]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.phase-software-factory.release :as release]
@@ -635,6 +636,19 @@
                               #"Release phase received code artifact with zero files"
                               ((:enter interceptor) ctx-with-config))
             "Release should fail fast when environment has no changed files"))))))
+
+(deftest release-files-result-returns-zero-files-anomaly-test
+  (testing "zero-files is available as anomaly data"
+    (let [impl-result {:environment-id "task-1"}
+          result (#'release/release-files-result [] [] impl-result "/tmp/task-1")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies.phase/enter-failed (:anomaly/subtype result)))
+      (is (= {:type :release/zero-files
+              :phase :release
+              :environment-id "task-1"
+              :worktree-path "/tmp/task-1"}
+             (:anomaly/data result))))))
 
 (deftest release-ignores-non-substantive-paths-test
   (testing "iter-23 regression: a worktree dirty ONLY with .miniforge-session-id

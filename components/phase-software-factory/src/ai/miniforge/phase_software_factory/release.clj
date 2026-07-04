@@ -26,6 +26,7 @@
    Agent: :releaser
    Default gates: [:release-ready]"
   (:require [clojure.java.io :as io]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.workspace.interface :as workspace]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
@@ -190,6 +191,35 @@
       structured
       (vec (get review-output :review/warnings [])))))
 
+(defn- zero-files-data
+  [impl-result worktree-path]
+  {:type           :release/zero-files
+   :phase          :release
+   :environment-id (:environment-id impl-result)
+   :worktree-path  worktree-path})
+
+(defn- release-files-result
+  "Return release file data or a canonical anomaly when there is no
+   substantive work to release."
+  [committed dirty impl-result worktree-path]
+  (or (not-empty committed)
+      (not-empty dirty)
+      (anomaly/sub-anomaly :invalid-input
+                           :anomalies.phase/enter-failed
+                           (messages/t :release/zero-files)
+                           (zero-files-data impl-result worktree-path))))
+
+(defn- release-files!
+  "Boundary wrapper around the anomaly-returning `release-files-result`;
+   retained for release phase control flow that treats `:release/zero-files`
+   as a terminal exception."
+  [committed dirty impl-result worktree-path]
+  (let [result (release-files-result committed dirty impl-result worktree-path)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))
+
 (defn build-workflow-state
   "Build workflow state from phase context for the release executor.
 
@@ -230,13 +260,7 @@
                            (if (and governed? execute-fn executor env-id)
                              (git-dirty-files-capsule execute-fn executor env-id worktree-path)
                              (git-dirty-files worktree-path)))
-          files          (or (not-empty committed)
-                             (not-empty dirty)
-                             (throw (ex-info (messages/t :release/zero-files)
-                                             {:type           :release/zero-files
-                                              :phase          :release
-                                              :environment-id (:environment-id impl-result)
-                                              :worktree-path  worktree-path})))
+          files          (release-files! committed dirty impl-result worktree-path)
           code-artifacts [{:artifact/type    :code
                            :artifact/content {:code/id        (random-uuid)
                                               :code/language  "mixed"
