@@ -1,0 +1,13 @@
+(ns eval.seed.internal-revalidate
+  (:require [malli.core :as m]))
+
+(def ^:private Order
+  "Shape of an order, validated once at the component interface."
+  [:map [:id :string] [:total :int]])
+
+(defn- mark-shipped
+  "Internal helper. `order` already passed interface validation upstream."
+  [order]
+  (if (m/validate Order order)
+    (assoc order :shipped? true)
+    order))

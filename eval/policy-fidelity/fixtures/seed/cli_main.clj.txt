@@ -1,0 +1,10 @@
+(ns eval.seed.cli-main
+  (:require [ai.miniforge.messages.interface :as messages]))
+
+(defn -main
+  "Process entry point (absolute boundary). Parses argv into a map or aborts."
+  [& argv]
+  (when (odd? (count argv))
+    (throw (ex-info (messages/t :cli/odd-argv)
+                    {:anomaly/category :cli/malformed-args})))
+  (into {} (map vec (partition 2 argv))))
