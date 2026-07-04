@@ -61,6 +61,10 @@
    (valid-transition? profile :running :blocked) ;=> true"
   sm/valid-transition?)
 
+(def validate-transition-result
+  "Validate a state transition. Returns nil on success or an anomaly on invalid."
+  sm/validate-transition-result)
+
 (def terminal?
   "Check if a status is terminal.
    (terminal? profile :completed) ;=> true"

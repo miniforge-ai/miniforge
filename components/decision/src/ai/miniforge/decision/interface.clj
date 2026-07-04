@@ -69,6 +69,9 @@
 (def explain
   "Humanized explanation of why `value` fails `schema`. (schema value) -> map|nil."
   spec/explain)
+(def validate-result
+  "Return `value` if it validates against `schema`, else return an anomaly."
+  spec/validate-result)
 (def validate
   "Return `value` if it validates against `schema`, else throw. (schema value) -> value."
   spec/validate)

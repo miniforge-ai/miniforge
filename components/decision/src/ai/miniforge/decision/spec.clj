@@ -22,6 +22,7 @@
    Layer 1: Checkpoint and episode schemas
    Layer 2: Validation helpers"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -188,11 +189,24 @@
   (some-> (m/explain schema value)
           me/humanize))
 
-(defn validate
+(defn validate-result
+  "Return `value` when it validates against `schema`, else return an anomaly."
   [schema value]
   (if (valid? schema value)
     value
-    (throw (ex-info "Decision schema validation failed"
-                    {:schema schema
-                     :value value
-                     :errors (explain schema value)}))))
+    (anomaly/anomaly :invalid-input
+                     "Decision schema validation failed"
+                     {:schema schema
+                      :value value
+                      :errors (explain schema value)})))
+
+(defn validate
+  "Boundary wrapper around the canonical anomaly-returning
+   [[validate-result]]. Returns `value` on success and throws only for
+   legacy callers. Prefer `validate-result` in non-boundary code."
+  [schema value]
+  (let [result (validate-result schema value)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))

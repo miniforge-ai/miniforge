@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.decision.interface-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.decision.interface :as decision]
    [ai.miniforge.decision.spec :as spec]))
@@ -483,6 +484,21 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (decision/validate spec/DecisionResponse
                                     {:type :approve :authority-role :alien})))))
+
+(deftest validate-result-returns-anomaly-on-malformed-input-test
+  (testing "validate-result returns a typed anomaly instead of throwing"
+    (let [result (decision/validate-result
+                  spec/DecisionResponse
+                  {:type :approve :authority-role :alien})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (contains? (get-in result [:anomaly/data :errors])
+                     :authority-role)))))
+
+(deftest validate-result-returns-value-on-valid-input-test
+  (testing "validate-result returns the original valid value"
+    (let [response (valid-approve-response)]
+      (is (= response (decision/validate-result spec/DecisionResponse response))))))
 
 (deftest constructed-checkpoints-conform-to-schema-test
   (testing "Each happy-path constructor produces a value that satisfies DecisionCheckpoint"

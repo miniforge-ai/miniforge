@@ -18,8 +18,10 @@
 
 (ns ai.miniforge.control-plane.interface-test
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest testing is are]]
+   [ai.miniforge.control-plane.state-machine :as sm]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.interface :as cp]))
 
@@ -68,6 +70,22 @@
         :failed    :running
         :terminated :running
         :blocked   :completed))))
+
+(deftest validate-transition-result-test
+  (let [profile (cp/get-profile)]
+    (testing "valid transitions return nil"
+      (is (nil? (cp/validate-transition-result profile :running :blocked))))
+
+    (testing "invalid transitions return anomaly data"
+      (let [result (cp/validate-transition-result profile :completed :running)]
+        (is (anomaly/anomaly? result))
+        (is (= :invalid-input (:anomaly/type result)))
+        (is (= :completed (get-in result [:anomaly/data :from])))
+        (is (= :running (get-in result [:anomaly/data :to])))))
+
+    (testing "legacy validate-transition still throws"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (sm/validate-transition profile :completed :running))))))
 
 (deftest terminal-test
   (let [profile (cp/get-profile)]
