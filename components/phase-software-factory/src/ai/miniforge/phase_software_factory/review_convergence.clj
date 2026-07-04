@@ -26,6 +26,7 @@
    when that file is absent."
   (:require
    [ai.miniforge.agent.interface :as agent]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [clojure.string :as str]
    [malli.core :as m]))
@@ -62,20 +63,39 @@
     {:default default-max-warning-only-cycles}
     [:int {:min 1}]]])
 
-(defn validate-convergence-config!
-  "Throw IllegalArgumentException when `config`'s convergence keys are
-   invalid. Merges the fallbacks UNDER config first, so a partial override
-   (only one key) is accepted while an invalid VALUE still fails fast."
+(defn- convergence-config-candidate
   [config]
-  (let [merged (merge {:review/warning-churn-policy    default-warning-churn-policy
-                       :review/max-warning-only-cycles default-max-warning-only-cycles}
-                      (select-keys config [:review/warning-churn-policy
-                                           :review/max-warning-only-cycles]))]
-    (when-not (m/validate ReviewConvergenceConfigSchema merged)
+  (merge {:review/warning-churn-policy    default-warning-churn-policy
+          :review/max-warning-only-cycles default-max-warning-only-cycles}
+         (select-keys config [:review/warning-churn-policy
+                              :review/max-warning-only-cycles])))
+
+(defn validate-convergence-config-result
+  "Validate `config`'s convergence keys. Returns config on success or a
+   canonical invalid-input anomaly on failure. Merges the fallbacks UNDER
+   config first, so a partial override is accepted while an invalid VALUE
+   remains explicit data."
+  [config]
+  (let [merged (convergence-config-candidate config)]
+    (if (m/validate ReviewConvergenceConfigSchema merged)
+      (merge config merged)
+      (anomaly/validation-anomaly
+       (messages/ts :review/invalid-convergence-config)
+       :review-convergence/config
+       merged
+       (m/explain ReviewConvergenceConfigSchema merged)))))
+
+(defn validate-convergence-config!
+  "Boundary wrapper around the canonical anomaly-returning
+   `validate-convergence-config-result`. Prefer the result function; this
+   wrapper preserves fail-fast startup semantics for invalid defaults.edn."
+  [config]
+  (let [result (validate-convergence-config-result config)]
+    (when (anomaly/anomaly? result)
       (throw (IllegalArgumentException.
-              (str (messages/ts :review/invalid-convergence-config)
+              (str (:anomaly/message result)
                    " "
-                   (pr-str (m/explain ReviewConvergenceConfigSchema merged))))))))
+                   (pr-str (:anomaly/data result))))))))
 
 ;; ----------------------------------------------------------------------------
 ;; Decision primitives (pure)

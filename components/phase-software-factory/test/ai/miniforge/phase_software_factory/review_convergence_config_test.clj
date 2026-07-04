@@ -20,6 +20,7 @@
   "Tests for review convergence policy config — named constants, Malli schema,
    and defaults loaded from resources/config/phase/defaults.edn."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]
    [ai.miniforge.phase-software-factory.messages :as messages]
@@ -96,6 +97,27 @@
           candidate (select-keys cfg [:review/warning-churn-policy
                                       :review/max-warning-only-cycles])]
       (is (valid? candidate)))))
+
+(deftest test-validate-convergence-config-result-returns-anomaly
+  (testing "invalid convergence config is returned as a canonical anomaly"
+    (let [result (rconv/validate-convergence-config-result
+                  {:review/warning-churn-policy  :unknown-policy
+                   :review/max-warning-only-cycles 0})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :review-convergence/config
+             (get-in result [:anomaly/data :anomaly/schema])))
+      (is (some? (get-in result [:anomaly/data :anomaly/explain]))))))
+
+(deftest test-validate-convergence-config-result-normalizes-defaults
+  (testing "valid partial config returns the validated defaults merged in"
+    (let [result (rconv/validate-convergence-config-result
+                  {:review/max-warning-only-cycles 4
+                   :review/other-key :kept})]
+      (is (= :accept-with-warnings
+             (:review/warning-churn-policy result)))
+      (is (= 4 (:review/max-warning-only-cycles result)))
+      (is (= :kept (:review/other-key result))))))
 
 (deftest test-defaults-edn-policy-matches-constant
   (testing "defaults.edn :review/warning-churn-policy matches the fallback constant"

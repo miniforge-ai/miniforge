@@ -104,18 +104,34 @@
       (and attach-vh? (contains? event :resource/version-hash))
       (assoc :resource/version-hash (:resource/version-hash event)))))
 
-(defn- validate-observation!
-  "Throw ex-info if obs fails Observation schema validation, else
-   return obs unchanged."
+(defn- validate-observation-result
+  "Validate obs against Observation. Returns obs on success or a legacy
+   response anomaly map on failure."
   [event obs]
   (if (m/validate schema/Observation obs)
     obs
-    (response/throw-anomaly! :anomalies/incorrect
-                             (msg/t :envelope/validation-failed)
-                             {:type   ::validation-failed
-                              :event  event
-                              :obs    obs
-                              :errors (m/explain schema/Observation obs)})))
+    (response/make-anomaly :anomalies/incorrect
+                           (msg/t :envelope/validation-failed)
+                           {:type   ::validation-failed
+                            :event  event
+                            :obs    obs
+                            :errors (m/explain schema/Observation obs)})))
+
+(defn- validate-observation!
+  "Boundary wrapper around the anomaly-returning
+   `validate-observation-result`. Preserves the historical throwing
+   normalizer contract for callers."
+  [event obs]
+  (let [result (validate-observation-result event obs)]
+    (if (response/anomaly-map? result)
+      (response/throw-anomaly! (:anomaly/category result)
+                               (:anomaly/message result)
+                               (dissoc result
+                                       :anomaly/category
+                                       :anomaly/message
+                                       :anomaly/id
+                                       :anomaly/timestamp))
+      result)))
 
 (defn make-normalizer
   "Return a per-run normalizer function. The returned fn closes over
