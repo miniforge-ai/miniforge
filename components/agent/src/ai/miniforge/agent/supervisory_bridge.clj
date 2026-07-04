@@ -25,6 +25,7 @@
    family, so this bridge emits equivalent events for direct in-process agents
   when a workflow event-stream is present."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.agent.core :as core]
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.event-stream.interface :as events])
@@ -261,18 +262,34 @@
                       :executing
                       :failed))))
 
+(defn- invocation-exception-anomaly
+  [e]
+  (anomaly/exception-anomaly :fault
+                             (or (ex-message e) "Agent invocation failed")
+                             {:agent/error-source :direct-invocation}
+                             e))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Public wrapper
 
-(defn invoke-with-projection
+(defn invoke-with-projection-result
   "Run `invoke-fn` while mirroring the invocation into `:control-plane/agent-*`
-   events when the context is bound to a workflow event-stream."
+   events when the context is bound to a workflow event-stream.
+
+   Returns the agent result on success, or an anomaly when invocation throws.
+   This is the canonical anomaly-returning API for non-boundary callers."
   [agent task context invoke-fn]
   (if-not (executable-context? context)
-    (invoke-fn)
+    (try
+      (invoke-fn)
+      (catch Exception e
+        (invocation-exception-anomaly e)))
     (let [session-id-value (session-id agent task context)]
       (if-not session-id-value
-        (invoke-fn)
+        (try
+          (invoke-fn)
+          (catch Exception e
+            (invocation-exception-anomaly e)))
         (do
           (emit-started! agent task context session-id-value)
           (try
@@ -281,4 +298,19 @@
               result)
             (catch Exception e
               (emit-failed! task context session-id-value)
-              (throw e))))))))
+              (invocation-exception-anomaly e))))))))
+
+(defn invoke-with-projection
+  "Boundary compatibility wrapper around [[invoke-with-projection-result]].
+
+   Returns the agent result on success. When the canonical anomaly-returning
+   function reports invocation failure, throws `ex-info` to preserve the
+   existing `agent/invoke` caller contract. Prefer
+   [[invoke-with-projection-result]] in non-boundary code when callers can
+   branch on anomaly data."
+  [agent task context invoke-fn]
+  (let [result (invoke-with-projection-result agent task context invoke-fn)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))
