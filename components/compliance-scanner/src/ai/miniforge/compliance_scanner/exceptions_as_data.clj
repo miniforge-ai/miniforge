@@ -215,6 +215,7 @@
    "classpath"
    "integrity"
    "invalid-config"
+   "not-function"
    "unregistered-at-resolve"
    "unmapped"
    "no matching"])
@@ -397,6 +398,12 @@
        (= 2 (count form))
        (symbol? (second form))))
 
+(defn- throw-anomaly-form?
+  [form]
+  (and (seq? form)
+       (symbol? (first form))
+       (= "throw-anomaly!" (name (first form)))))
+
 (def ^:private cleanup-rethrow-markers
   "Cleanup operations that make a same-catch rethrow informational.
 
@@ -439,6 +446,10 @@
   [form context]
   (cond
     (local-boundary-wrapper? context)
+    :local-boundary
+
+    (and (:response-chain-boundary? context)
+         (throw-anomaly-form? form))
     :local-boundary
 
     (or (and (:interrupted-binding context)
@@ -495,6 +506,10 @@
                         (nth form 2 nil))]
     (cond-> context
       defn-data (merge defn-data)
+      (and (seq? form)
+           (symbol? (first form))
+           (= "execute-with-handling" (name (first form))))
+      (assoc :response-chain-boundary? true)
       interrupted (assoc :interrupted-binding interrupted)
       (and (symbol? catch-binding)
            (cleanup-before-rethrow? form catch-binding))
