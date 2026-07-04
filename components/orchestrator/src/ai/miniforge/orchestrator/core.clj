@@ -172,7 +172,12 @@
                 (when (and (:promote? promotion-check) learning-id)
                   (try
                     (knowledge/promote-learning knowledge-store learning-id {})
-                    (catch Exception _e nil)))))
+                    (catch Exception e
+                      (log/warn (:logger knowledge-store)
+                                :orchestrator
+                                :orchestrator/promote-learning-failed
+                                {:error (ex-message e) :learning-id learning-id})
+                      nil)))))
             learning)))))
 
   (should-promote-learning? [_this learning]
