@@ -86,6 +86,25 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
+(deftest response-chain-execute-with-handling-throw-anomaly-is-local-boundary
+  (testing "throw-anomaly inside response-chain handling is captured into returned data"
+    (let [src "(ns ai.miniforge.foo.core
+                (:require [ai.miniforge.response.interface :as response]))
+              (defn run-gate [chain result]
+                (response/execute-with-handling
+                 chain
+                 :gate
+                 (fn [_] :anomalies.gate/check-failed)
+                 (fn []
+                   (if (:passed? result)
+                     result
+                     (response/throw-anomaly! :anomalies.gate/validation-failed
+                                              \"Gate validation failed\"
+                                              {:errors (:errors result)})))))"
+          {:keys [violations]} (exc/analyze-content "foo.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :local-boundary (:classification (first violations)))))))
+
 (deftest undocumented-bang-thrower-remains-cleanup-needed
   (testing "a bang name alone is not enough to exempt a throw"
     (let [src "(ns ai.miniforge.foo.core)

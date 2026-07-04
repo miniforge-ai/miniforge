@@ -114,6 +114,18 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
+(deftest localized-not-function-message-key-is-fatal-only
+  (testing "localized non-callable function guards are programmer errors"
+    (let [src "(ns ai.miniforge.foo.gate)
+              (defn check [provided]
+                (when (and (some? provided) (not (ifn? provided)))
+                  (throw (IllegalArgumentException.
+                          (messages/t :behavioral/check-fn-not-function
+                                      {:class (class provided)})))))"
+          {:keys [violations]} (exc/analyze-content "gate.clj" src)]
+      (is (= 1 (count violations)))
+      (is (= :fatal-only (:classification (first violations)))))))
+
 (deftest interrupted-exception-rethrow-is-fatal-only
   (testing "InterruptedException rethrows preserve cancellation"
     (let [src "(ns ai.miniforge.foo.loop)
