@@ -435,7 +435,8 @@
      an anomaly map on failure.")
 
   (remove-repo [this dag-id repo-name]
-    "Remove a repository from the DAG. Returns the updated DAG or an anomaly.")
+    "Remove a repository from the DAG and remove edges referencing it.
+     Returns the updated DAG or an anomaly.")
 
   (remove-repo-anomaly [this dag-id repo-name]
     "Anomaly-returning sibling of `remove-repo`. Returns the updated DAG
@@ -630,7 +631,13 @@
   (add-edge mgr (:dag/id dag)
             "k8s-manifests" "terraform-modules"
             :library-before-consumer :sequential)
-  ;; => {:dag-id ..., :from "k8s-manifests", :to "terraform-modules", :cycle-nodes #{"terraform-modules" "terraform-live" "k8s-manifests"}}
+  ;; => {:anomaly/type :conflict
+  ;;     :anomaly/message "Adding edge would create cycle"
+  ;;     :anomaly/data {:dag-id ...
+  ;;                    :from "k8s-manifests"
+  ;;                    :to "terraform-modules"
+  ;;                    :cycle-nodes #{"terraform-modules" "terraform-live" "k8s-manifests"}}
+  ;;     :anomaly/at ...}
 
   ;; Anomaly-returning sibling
   (add-edge-anomaly mgr (:dag/id dag)
