@@ -19,6 +19,7 @@
 (ns ai.miniforge.workspace.core-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.workspace.interface :as sut]))
 
 (deftest resolves-worktree-path-from-ctx
@@ -41,6 +42,16 @@
   (testing "governed mode via :execution/opts :execution-mode also fails closed"
     (is (thrown? clojure.lang.ExceptionInfo
                  (sut/resolve-execution-workdir {:execution/opts {:execution-mode :governed}})))))
+
+(deftest governed-run-can-return-workdir-anomaly
+  (testing "result API returns anomaly data instead of throwing"
+    (let [result (sut/resolve-execution-workdir-result {:execution/mode :governed} "verify")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies/workdir-unresolved (:anomaly/subtype result)))
+      (is (= :anomalies/workdir-unresolved
+             (get-in result [:anomaly/data :anomaly/category])))
+      (is (= "verify" (get-in result [:anomaly/data :workspace/site]))))))
 
 (deftest local-run-falls-back-to-cwd
   (testing "no worktree path + local (default) mode → process CWD"

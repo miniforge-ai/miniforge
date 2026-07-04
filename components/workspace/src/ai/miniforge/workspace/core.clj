@@ -24,7 +24,9 @@
    worktree was absent — the wrong-tree source of greenfield/empty work that
    passed gates against the wrong files. This is the intended single home for
    that read; a lint forbidding `(System/getProperty \"user.dir\")` elsewhere
-   in execution namespaces is a planned follow-up (it does not exist yet).")
+   in execution namespaces is a planned follow-up (it does not exist yet)."
+  (:require
+   [ai.miniforge.anomaly.interface :as anomaly]))
 
 (def ^:private worktree-path-keys
   "Context keys, in priority order, that carry the execution worktree path.
@@ -49,8 +51,42 @@
                    (get-in ctx [:execution/opts :execution-mode])
                    :local)))
 
+(defn- workdir-unresolved-message
+  [label]
+  (str "Execution worktree-path unresolved in a governed run"
+       (when label (str " (" label ")"))
+       " -- refusing to fall back to the process CWD (no silent downgrade)."))
+
+(defn- workdir-unresolved-data
+  [ctx label]
+  {:anomaly/category :anomalies/workdir-unresolved
+   :workspace/site label
+   :execution/mode (or (:execution/mode ctx)
+                       (get-in ctx [:execution/opts :execution-mode])
+                       :local)
+   :workspace/tried worktree-path-keys})
+
+(defn resolve-execution-workdir-result
+  "Resolve the execution worktree path from `ctx`, returning a string or a
+   canonical anomaly map instead of throwing.
+
+   Governed runs with no ctx worktree path fail closed with an
+   `:invalid-input` / `:anomalies/workdir-unresolved` anomaly. Local runs keep
+   the dev-convenience process-CWD fallback."
+  ([ctx] (resolve-execution-workdir-result ctx nil))
+  ([ctx label]
+   (if-let [wt (ctx-worktree-path ctx)]
+     wt
+     (if (governed? ctx)
+       (anomaly/sub-anomaly :invalid-input
+                            :anomalies/workdir-unresolved
+                            (workdir-unresolved-message label)
+                            (workdir-unresolved-data ctx label))
+       (System/getProperty "user.dir")))))
+
 (defn resolve-execution-workdir
-  "Resolve the execution worktree path from `ctx`.
+  "Boundary wrapper around the anomaly-returning
+   `resolve-execution-workdir-result`.
 
    - Worktree path present on ctx → return it.
    - Absent on a GOVERNED run → throw a typed `:anomalies/workdir-unresolved`
@@ -63,16 +99,8 @@
    that want to log which resolver site degraded."
   ([ctx] (resolve-execution-workdir ctx nil))
   ([ctx label]
-   (if-let [wt (ctx-worktree-path ctx)]
-     wt
-     (if (governed? ctx)
-       (throw (ex-info (str "Execution worktree-path unresolved in a governed run"
-                            (when label (str " (" label ")"))
-                            " — refusing to fall back to the process CWD (no silent downgrade).")
-                       {:anomaly/category :anomalies/workdir-unresolved
-                        :workspace/site label
-                        :execution/mode (or (:execution/mode ctx)
-                                            (get-in ctx [:execution/opts :execution-mode])
-                                            :local)
-                        :workspace/tried worktree-path-keys}))
-       (System/getProperty "user.dir")))))
+   (let [result (resolve-execution-workdir-result ctx label)]
+     (if (anomaly/anomaly? result)
+       (throw (ex-info (:anomaly/message result)
+                       (:anomaly/data result)))
+       result))))
