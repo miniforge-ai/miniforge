@@ -24,6 +24,7 @@
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.event-stream.interface :as events]
             [ai.miniforge.gate.interface :as gate]
             [ai.miniforge.phase.interface :as phase]
@@ -196,13 +197,6 @@
    :anomalies.workflow/invalid-transition
    (phase-transition-event-message event)))
 
-(defn- max-redirects-exceeded-anomaly
-  []
-  (let [max-redirects (defaults/max-redirects)]
-    (response/make-anomaly
-     :anomalies.workflow/max-redirects-exceeded
-     (messages/t :status/max-redirects {:max-redirects max-redirects}))))
-
 (defn- phase-transition-failure
   [ctx event anomaly transition-to-failed-fn]
   (let [message (phase-transition-event-message event)]
@@ -358,20 +352,15 @@
    keyed off.
 
    Returns updated context with refreshed machine projections or
-   terminal failure."
+  terminal failure."
   [ctx event _pipeline _transition-to-completed-fn transition-to-failed-fn]
   (let [prior-state (:execution/fsm-state ctx)
-        ;; The FSM kernel now THROWS a typed :anomalies/fsm-unknown-event
-        ;; instead of silently returning the state unchanged (Fable §2.2). At
-        ;; this boundary an unknown phase event is a terminal invalid
-        ;; transition: catch it and route through the same fail path as a
-        ;; no-op transition — loud, but graceful, not a crashed run.
-        next-ctx (try
-                   (context/transition-execution ctx event)
-                   (catch clojure.lang.ExceptionInfo e
-                     (if (= :anomalies/fsm-unknown-event (:anomaly/category (ex-data e)))
-                       ::unknown-event
-                       (throw e))))
+        prior-current-state (workflow-fsm/current-state prior-state)
+        ;; At this boundary an unknown phase event is a terminal invalid
+        ;; transition: route the anomaly-returning FSM result through the same
+        ;; fail path as a no-op transition — loud, but graceful, not a crashed
+        ;; run.
+        next-ctx (context/transition-execution-result ctx event)
         fail (fn [] (phase-transition-failure ctx
                                               event
                                               (invalid-phase-transition-anomaly event)
@@ -379,8 +368,9 @@
     (cond
       ;; Unknown event is always a terminal invalid transition here — never
       ;; return the sentinel; never let :phase/retry leak it out.
-      (= ::unknown-event next-ctx) (fail)
-      (not= prior-state (:execution/fsm-state next-ctx)) next-ctx
+      (anomaly/anomaly? next-ctx) (fail)
+      (not= prior-current-state
+            (workflow-fsm/current-state (:execution/fsm-state next-ctx))) next-ctx
       (= :phase/retry event) next-ctx
       :else (fail))))
 

@@ -26,6 +26,7 @@
    Layer 1: Loop state management
    Layer 2: Phase execution (stub)"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.messages :as loop-messages]
@@ -149,21 +150,16 @@
    Returns updated loop state, or nil if the transition is forbidden — the FSM
    has no such event from the current state (advancing past the terminal
    :observe phase, rolling back to a later phase, etc.). The FSM raises
-   :anomalies/fsm-unknown-event for a forbidden transition; that one anomaly is
-   converted to the documented nil here (callers — advance-phase, rollback-phase,
-   valid-phase-transition? — branch on nil) rather than letting it escape. Any
-   other failure propagates."
+   :anomalies/fsm-unknown-event for a forbidden transition through its
+   anomaly-returning result API; that one anomaly is converted to the documented
+   nil here (callers — advance-phase, rollback-phase, valid-phase-transition? —
+   branch on nil). Any other failure propagates from the FSM result API."
   [loop-state event]
   (let [current-state (phase-fsm-state loop-state)
-        transitioned (try
-                       (fsm/transition phase-machine current-state event)
-                       (catch clojure.lang.ExceptionInfo e
-                         (if (= :anomalies/fsm-unknown-event
-                                (:anomaly/category (ex-data e)))
-                           nil
-                           (throw e))))
+        transitioned (fsm/transition-result phase-machine current-state event)
         next-phase (some-> transitioned fsm/current-state)]
-    (when (and next-phase
+    (when (and (not (anomaly/anomaly? transitioned))
+               next-phase
                (not= (fsm/current-state current-state) next-phase))
       (assoc loop-state
              :loop/fsm-state transitioned

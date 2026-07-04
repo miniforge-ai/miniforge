@@ -193,6 +193,12 @@
   [machine state event]
   (fsm/transition machine state event))
 
+(defn transition-execution-result
+  "Apply an event to a compiled execution machine snapshot, returning the new
+   state or a canonical FSM anomaly for state-local unknown events."
+  [machine state event]
+  (fsm/transition-result machine state event))
+
 (defn- terminal-state-message
   [current-state]
   (messages/t :status/terminal-state-transition {:state current-state}))
