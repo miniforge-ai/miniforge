@@ -1,0 +1,12 @@
+{:paths ["src"]
+ :deps {;; knowledge: used by policy-pack's loader but under-declared there;
+        ;; declared here so the component test classpath composes standalone.
+        ai.miniforge/knowledge {:local/root "../knowledge"}
+        babashka/process {:mvn/version "0.5.22"}
+        ai.miniforge/policy-pack {:local/root "../policy-pack"}
+        ai.miniforge/supervisory-state {:local/root "../supervisory-state"}
+        cheshire/cheshire {:mvn/version "5.13.0"}
+        metosin/malli {:mvn/version "0.16.4"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {io.github.cognitect-labs/test-runner
+                               {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}

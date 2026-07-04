@@ -87,6 +87,7 @@
                        "components/repo-dag/src"
                        "components/event-stream/src"
                        "components/supervisory-state/src"
+                       "components/workbench-adapter/src"
                        "components/automation-edge-correlator/src"
                        "components/pr-scoring/src"
                        "components/workflow-resume/src"

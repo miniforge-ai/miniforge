@@ -189,6 +189,24 @@
            (when-not (zero? exit)
              (System/exit exit)))}
 
+  workbench:registry
+  {:doc  "Generate the miniforge state_var_registry/v1 from the builtin policy packs (one state variable per rule + per-pack pass rates + the critical-violations gate). Vendor the output into workbench-contract fixtures/miniforge/ after pack changes. Optional args pass through to emit-registry! (:packs-dir :version :out)."
+   :task (let [exit (apply run-clojure-stream!
+                           (concat ["-X:dev"
+                                    "ai.miniforge.workbench-adapter.interface/emit-registry!"]
+                                   *command-line-args*))]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
+  workbench:snapshot
+  {:doc  "Project a supervisory PolicyEvaluation EDN file into a Minibench workbench_snapshot/v1 (per-rule pass/fail rows, ready for `minibench compare`). Required args: :policy-eval :registry-version :out; optional: :experiment-id :label :model :method."
+   :task (let [exit (apply run-clojure-stream!
+                           (concat ["-X:dev"
+                                    "ai.miniforge.workbench-adapter.interface/emit-snapshot!"]
+                                   *command-line-args*))]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   ;; ──────────────────────────────────────────────────────────────────────────
   ;; Pre-commit
   ;; ──────────────────────────────────────────────────────────────────────────
