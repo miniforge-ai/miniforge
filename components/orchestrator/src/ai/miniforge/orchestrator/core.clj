@@ -173,8 +173,10 @@
                   (try
                     (knowledge/promote-learning knowledge-store learning-id {})
                     (catch Exception e
-                      (log/warn e :orchestrator :orchestrator/promote-learning-failed
-                                {:learning-id learning-id})
+                      (log/warn (:logger knowledge-store)
+                                :orchestrator
+                                :orchestrator/promote-learning-failed
+                                {:error (ex-message e) :learning-id learning-id})
                       nil)))))
             learning)))))
 
