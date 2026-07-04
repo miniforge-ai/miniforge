@@ -19,9 +19,11 @@
 (ns ai.miniforge.agent.runtime-supervisory-projection-test
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.agent.supervisory-bridge :as supervisory-bridge]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.agent.interface.protocols.agent :as agent-proto]
    [ai.miniforge.agent.specialized :as specialized]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.supervisory-state.interface :as supervisory]))
 
@@ -164,6 +166,31 @@
       (is (= :failed (:cp/to-status state-change)))
       (is (= :failed (:agent/status agent-entity))))))
 
+(deftest direct-agent-invoke-result-projects-failure-events-as-anomaly
+  (testing "the canonical result path returns anomaly data after projecting failed events"
+    (let [stream (create-stream)
+          _supervisor (supervisory/attach! stream)
+          workflow-id (random-uuid)
+          task (invoke-task)
+          ctx (invoke-context stream workflow-id)
+          ex (ex-info "projection boom" {:cause :test})
+          result (supervisory-bridge/invoke-with-projection-result
+                  (throwing-agent ex)
+                  task
+                  ctx
+                  (fn [] (throw ex)))
+          heartbeat (last-event stream :control-plane/agent-heartbeat)
+          state-change (last-event stream :control-plane/agent-state-changed)
+          agent-upserted (last-event stream :supervisory/agent-upserted)
+          agent-entity (:supervisory/entity agent-upserted)]
+      (is (anomaly/anomaly? result))
+      (is (= :fault (:anomaly/type result)))
+      (is (= "projection boom" (:anomaly/message result)))
+      (is (= {:cause :test} (get-in result [:anomaly/data :anomaly/ex-data])))
+      (is (= :failed (:cp/status heartbeat)))
+      (is (= :failed (:cp/to-status state-change)))
+      (is (= :failed (:agent/status agent-entity))))))
+
 (deftest direct-agent-invoke-emits-failure-events-before-rethrow
   (testing "a thrown exception still projects terminal failed events before the exception escapes"
     (let [stream (create-stream)
@@ -176,6 +203,7 @@
         (agent/invoke (throwing-agent ex) task ctx)
         (is false "expected invoke to rethrow the original exception")
         (catch clojure.lang.ExceptionInfo caught
+          (is (identical? ex caught))
           (is (= "projection boom" (ex-message caught)))))
       (let [heartbeat (last-event stream :control-plane/agent-heartbeat)
             state-change (last-event stream :control-plane/agent-state-changed)
