@@ -28,3 +28,9 @@
    local → process CWD. The single sanctioned `(System/getProperty
    \"user.dir\")` read. See `core` ns."
   core/resolve-execution-workdir)
+
+(def resolve-execution-workdir-result
+  "Resolve the execution worktree path from ctx. Present → return it; absent +
+   governed → return a canonical `:anomalies/workdir-unresolved` anomaly
+   (fail closed); absent + local → process CWD."
+  core/resolve-execution-workdir-result)
