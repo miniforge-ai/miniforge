@@ -21,8 +21,9 @@
 
    Generates code artifacts from plans.
    Agent: :implementer
-   Default gates: [:syntax :lint]"
+  Default gates: [:syntax :lint]"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
@@ -104,13 +105,26 @@
    :test-output (truncate-test-output
                  (get-in verify-result [:result :metrics :test-output]))})
 
-(defn- resolve-worktree-path
-  "Resolve the worktree path from execution context.
-   Fails fast if no environment has been acquired — do not fall back to host filesystem."
+(defn- resolve-worktree-path-result
+  "Resolve the worktree path from execution context, returning a path or a
+   canonical anomaly. Do not fall back to the host filesystem when no
+   environment has been acquired."
   [ctx]
   (or (get ctx :execution/worktree-path)
-      (throw (ex-info (messages/t :implement/no-worktree)
-                      {:ctx-keys (keys ctx)}))))
+      (anomaly/sub-anomaly :invalid-input
+                           :anomalies.phase/enter-failed
+                           (messages/t :implement/no-worktree)
+                           {:ctx-keys (vec (keys ctx))})))
+
+(defn- resolve-worktree-path
+  "Boundary wrapper around the anomaly-returning
+   `resolve-worktree-path-result`; retained for existing exception callers."
+  [ctx]
+  (let [result (resolve-worktree-path-result ctx)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))
 
 (defn- base-ref-candidates
   "Return candidate refs for collecting the promoted task artifact."

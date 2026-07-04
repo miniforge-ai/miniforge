@@ -25,6 +25,7 @@
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.verify :as verify]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]))
@@ -145,6 +146,16 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Verify phase has no execution environment"
                             (verify/enter-verify ctx))))))
+
+(deftest require-environment-result-returns-anomaly-test
+  (testing "missing verify environment is available as anomaly data"
+    (let [ctx (-> (create-base-context)
+                  (dissoc :execution/environment-id))
+          result (#'verify/require-environment-result ctx)]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies.phase/enter-failed (:anomaly/subtype result)))
+      (is (= :verify (get-in result [:anomaly/data :phase]))))))
 
 (deftest enter-verify-uses-execution-worktree-path-test
   (testing "enter-verify passes :execution/worktree-path to test runner"

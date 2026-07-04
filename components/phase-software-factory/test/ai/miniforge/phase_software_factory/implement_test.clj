@@ -22,6 +22,7 @@
   Tests artifact creation, validation, and error handling."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase-software-factory.implement :as implement]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase.loader :as loader]
@@ -84,6 +85,14 @@
   [{:keys [implementer-result]}]
   (response/success (:output implementer-result)
                     {:metrics (:metrics implementer-result)}))
+
+(deftest resolve-worktree-path-result-returns-anomaly-test
+  (testing "missing implement worktree is available as anomaly data"
+    (let [result (#'implement/resolve-worktree-path-result {:execution/id :test})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :anomalies.phase/enter-failed (:anomaly/subtype result)))
+      (is (= [:execution/id] (get-in result [:anomaly/data :ctx-keys]))))))
 
 (defn mock-curator-error
   "Mock for agent/curate-implement-output that returns the same error
