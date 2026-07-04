@@ -30,6 +30,7 @@
       :runtime/rootless?    boolean
       :runtime/capabilities #{keyword}}"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
@@ -105,6 +106,29 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Construction
 
+(defn- validate-descriptor-result
+  "Validate a constructed descriptor. Returns descriptor on success or a
+   canonical invalid-input anomaly on schema drift."
+  [descriptor]
+  (if (m/validate DescriptorSchema descriptor)
+    descriptor
+    (anomaly/validation-anomaly
+     "Constructed descriptor failed schema validation"
+     :runtime/descriptor
+     descriptor
+     (m/explain DescriptorSchema descriptor))))
+
+(defn- validate-descriptor!
+  "Boundary wrapper around the canonical anomaly-returning
+   `validate-descriptor-result`. This preserves fail-fast descriptor
+   construction for callers while keeping schema drift representable as data."
+  [descriptor]
+  (let [result (validate-descriptor-result descriptor)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      {:runtime/invalid-descriptor descriptor}))
+      result)))
+
 (defn make-descriptor
   "Build a runtime descriptor from a config map.
 
@@ -131,10 +155,7 @@
                         :runtime/version      nil
                         :runtime/rootless?    false
                         :runtime/capabilities capabilities}]
-      (when-not (m/validate DescriptorSchema descriptor)
-        (throw (ex-info "Constructed descriptor failed schema validation"
-                        {:runtime/invalid-descriptor descriptor})))
-      descriptor)))
+      (validate-descriptor! descriptor))))
 
 ;------------------------------------------------------------------------------ Layer 4
 ;; Accessors

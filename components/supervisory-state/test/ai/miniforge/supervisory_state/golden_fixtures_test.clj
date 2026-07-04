@@ -25,6 +25,7 @@
    a fresh generation — so any entity-shape change fails here with a
    regenerate instruction instead of silently breaking the Rust consumer."
   (:require
+   [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.golden-fixtures :as golden-fixtures]
    [ai.miniforge.supervisory-state.schema :as schema]
    [clojure.java.io :as io]
@@ -82,6 +83,17 @@
    :task-node    schema/TaskNode
    :decision     schema/DecisionCard
    :intervention schema/InterventionRequest})
+
+(deftest validate-result-returns-anomaly-for-invalid-entity
+  (testing "invalid golden fixture entities are represented as anomaly data"
+    (let [result (@#'golden-fixtures/validate-result
+                  :workflow-run
+                  schema/WorkflowRun
+                  {:not :valid})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (= :workflow-run (:family result)))
+      (is (some? (:errors result))))))
 
 ;------------------------------------------------------------------------------ Tests
 

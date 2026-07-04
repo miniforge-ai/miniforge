@@ -121,22 +121,38 @@
 
 ;; -- Download --
 
-(defn- download-to-temp
-  "Download a URL to a temporary file. Returns the File."
+(defn- download-to-temp-result
+  "Download a URL to a temporary file. Returns the File or a legacy response
+   anomaly map when the HTTP response is not successful."
   [url]
   (let [resp (http/get url {:as      :bytes
                             :headers {"User-Agent" "Mozilla/5.0"}
                             :throw   false})
         status (:status resp)]
-    (when-not (<= 200 status 299)
-      (response/throw-anomaly! :anomalies/unavailable
-                               (msg/t :excel/download-failed {:error (str "HTTP " status)})
-                               {:status status}))
-    (let [tmp (File/createTempFile "connector-excel-" ".xls")]
-      (.deleteOnExit tmp)
-      (with-open [out (FileOutputStream. tmp)]
-        (.write out ^bytes (:body resp)))
-      tmp)))
+    (if-not (<= 200 status 299)
+      (response/make-anomaly :anomalies/unavailable
+                             (msg/t :excel/download-failed {:error (str "HTTP " status)})
+                             {:status status})
+      (let [tmp (File/createTempFile "connector-excel-" ".xls")]
+        (.deleteOnExit tmp)
+        (with-open [out (FileOutputStream. tmp)]
+          (.write out ^bytes (:body resp)))
+        tmp))))
+
+(defn- download-to-temp
+  "Boundary wrapper around the anomaly-returning `download-to-temp-result`.
+   Preserves the connector's historical throwing download contract."
+  [url]
+  (let [result (download-to-temp-result url)]
+    (if (response/anomaly-map? result)
+      (response/throw-anomaly! (:anomaly/category result)
+                               (:anomaly/message result)
+                               (dissoc result
+                                       :anomaly/category
+                                       :anomaly/message
+                                       :anomaly/id
+                                       :anomaly/timestamp))
+      result)))
 
 ;; -- Lifecycle --
 
