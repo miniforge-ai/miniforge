@@ -1,0 +1,37 @@
+;; Title: Miniforge.ai
+;; Subtitle: workbench-sweep example — chain permutation sweep config
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;; Licensed under the Apache License, Version 2.0.
+;;
+;; Copy, edit, run from the miniforge repo root:
+;;   bb workbench:registry :version '"2026.07.05.1"'          # once, after pack changes
+;;   bb workbench:sweep    :config  '"/abs/chain-sweep.edn"'
+;;   minibench compare /tmp/mf-chain-sweep
+;;
+;; Every variant runs the SAME spec (the controlled task); only the
+;; declared axes differ. k replicates share the label; run ids stay
+;; distinct — the comparison kernel groups replicates by label.
+{:experiment-id "miniforge.policy.chain-permutation"
+ :out-dir "/tmp/mf-chain-sweep"
+ :registry-version "2026.07.05.1"   ; must match the generated registry
+ :replicates 3
+ ;; Gate events carry no pack ids; declare the packs the swept chains
+ ;; enforce so per-rule rows project (see workbench-sweep schema).
+ :packs-applied ["miniforge/foundations"]
+ ;; One execution per (variant x replicate). {chain} comes from each
+ ;; variant's :bindings; {out} is where the harvested PolicyEvaluation
+ ;; vector must land — chain run's --policy-eval-out writes it.
+ :command ["clojure" "-M:dev" "-m" "ai.miniforge.cli.main"
+           "chain" "run" "{chain}"
+           "--spec" "/abs/path/to/the-one-spec.edn"
+           "--policy-eval-out" "{out}"
+           "--quiet"]
+ :variants
+ [{:label "spec-to-pr"
+   :workflow {:id "spec-to-pr" :version "1.0.0"}
+   :method "governed"
+   :bindings {:chain "spec-to-pr"}}
+  {:label "sdlc-to-deploy"
+   :workflow {:id "sdlc-to-deploy" :version "1.0.0"}
+   :method "governed"
+   :bindings {:chain "sdlc-to-deploy"}}]}
