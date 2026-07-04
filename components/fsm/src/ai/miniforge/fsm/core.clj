@@ -35,6 +35,7 @@
      :completed {:type :final}
      :failed    {:type :final}}}"
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [statecharts.core :as sc]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -124,8 +125,53 @@
   [machine]
   (sc/initialize machine))
 
+(defn- event-map
+  [event]
+  (if (keyword? event)
+    {:type event}
+    event))
+
+(defn- unknown-event-message
+  [state event-map]
+  (str "FSM unknown event " (pr-str (:type event-map))
+       " at state " (pr-str (get state :_state state))))
+
+(defn- unknown-event-data
+  [state event-map]
+  {:anomaly/category :anomalies/fsm-unknown-event
+   :fsm/state state
+   :fsm/event event-map})
+
+(defn- statechart-transition-result
+  "Boundary wrapper around clj-statecharts transition, returning a canonical
+   unknown-event anomaly while preserving unexpected statechart failures as
+   exceptions."
+  [machine state event-map]
+  (try
+    (sc/transition machine state event-map)
+    (catch clojure.lang.ExceptionInfo e
+      (if (re-find #"got unknown event" (ex-message e))
+        (with-meta
+          (anomaly/sub-anomaly :invalid-input
+                               :anomalies/fsm-unknown-event
+                               (unknown-event-message state event-map)
+                               (unknown-event-data state event-map))
+          {:cause e})
+        (throw e)))))
+
+(defn transition-result
+  "Transition the machine given an event, returning the new state or a
+   canonical anomaly for a state-local unknown event.
+
+   Unexpected `ExceptionInfo` failures are rethrown as-is so this public API
+   never returns a Throwable where callers expect state-or-anomaly data."
+  [machine state event]
+  (statechart-transition-result machine state (event-map event)))
+
 (defn transition
-  "Transition the machine given an event.
+  "Boundary wrapper around the anomaly-returning `transition-result`.
+
+   Transition the machine given an event.
 
    Arguments:
      machine - Compiled machine definition
@@ -142,23 +188,12 @@
    error or an ignore that MUST be declared in the machine — both should be
    loud. Callers that legitimately tolerate it catch this category."
   [machine state event]
-  (let [event-map (if (keyword? event)
-                    {:type event}
-                    event)]
-    (try
-      (sc/transition machine state event-map)
-      (catch clojure.lang.ExceptionInfo e
-        (if (re-find #"got unknown event" (ex-message e))
-          ;; Compact message — just the state NAME (:_state), not the whole
-          ;; state map (which can be large / carry sensitive context). The
-          ;; full state is in ex-data :fsm/state for diagnosis.
-          (throw (ex-info (str "FSM unknown event " (pr-str (:type event-map))
-                               " at state " (pr-str (get state :_state state)))
-                          {:anomaly/category :anomalies/fsm-unknown-event
-                           :fsm/state state
-                           :fsm/event event-map}
-                          e))
-          (throw e))))))
+  (let [result (transition-result machine state event)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)
+                      (:cause (meta result))))
+      result)))
 
 (defn current-state
   "Get the current state value from a state map.
