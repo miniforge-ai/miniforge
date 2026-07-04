@@ -138,6 +138,59 @@
      :max-parallel (:max-parallel config (:max-parallel defaults))
      :config config}))
 
+(defn- schedule-iteration-result
+  "Run one scheduler iteration, returning failures as data so the orchestrator
+   can record a terminal failed run instead of relying on exception control
+   flow from the scheduler boundary."
+  [run-atom scheduler-context]
+  (try
+    (dag/schedule-iteration run-atom scheduler-context)
+    (catch Exception e
+      {:ok? false
+       :error {:code :scheduler-exception
+               :message (ex-message e)
+               :class (some-> e class .getName)
+               :data (ex-data e)}})))
+
+(defn- scheduler-result-state
+  [result]
+  (cond
+    (:ok? result) (:value result)
+    (contains? result :run-state) (:run-state result)
+    :else result))
+
+(defn- scheduler-status
+  [state]
+  (or (:status state)
+      (:run/status state)))
+
+(defn- scheduler-count
+  [state old-key run-key]
+  (if-let [task-statuses (seq (vals (:run/tasks state)))]
+    (case old-key
+      :pending (count (filter #(= :pending (:task/status %)) task-statuses))
+      :running (count (filter #(#{:running :implementing} (:task/status %)) task-statuses))
+      :completed (+ (count (:run/completed state))
+                    (count (:run/merged state)))
+      (count (or (get state run-key) #{})))
+    (count (or (get state old-key)
+               (get state run-key)
+               #{}))))
+
+(defn- continue-scheduler?
+  [result status]
+  (if (contains? result :continue?)
+    (:continue? result)
+    (not (#{:completed :failed :budget-exceeded} status))))
+
+(defn- mark-scheduler-error!
+  [run-atom error]
+  (swap! run-atom assoc
+         :status :failed
+         :run/status :failed
+         :error error
+         :run/error error))
+
 (defn execute-dag!
   [dag-id task-defs config]
   (let [{:keys [logger budget state-profile state-profile-provider]} config
@@ -155,29 +208,28 @@
                                                 :task-count (count task-defs)})
 
     ;; Run scheduler loop
-    (try
-      (loop [iteration 0]
-        (let [result (dag/schedule-iteration run-atom scheduler-context)]
+    (loop [iteration 0]
+      (let [result (schedule-iteration-result run-atom scheduler-context)]
+        (if (= false (:ok? result))
+          (let [error (:error result)]
+            (log-event logger :dag-execution-error
+                       {:error (:message error)
+                        :code (:code error)})
+            (mark-scheduler-error! run-atom error))
+          (let [state (scheduler-result-state result)
+                status (scheduler-status state)]
 
-          (when (:ok? result)
-            (let [state (:value result)
-                  status (:status state)]
+            (log-event logger :scheduler-iteration
+                       {:iteration iteration
+                        :status status
+                        :tasks-pending (scheduler-count state :pending :run/pending)
+                        :tasks-running (scheduler-count state :running :run/running)
+                        :tasks-completed (scheduler-count state :completed :run/completed)})
 
-              (log-event logger :scheduler-iteration
-                         {:iteration iteration
-                          :status status
-                          :tasks-pending (count (:pending state))
-                          :tasks-running (count (:running state))
-                          :tasks-completed (count (:completed state))})
-
-              ;; Continue if not terminal
-              (when-not (#{:completed :failed :budget-exceeded} status)
-                (Thread/sleep (:scheduler-poll-interval-ms defaults)) ; Poll interval
-                (recur (inc iteration)))))))
-
-      (catch Exception e
-        (log-event logger :dag-execution-error {:error (ex-message e)})
-        (throw e)))
+            ;; Continue if not terminal
+            (when (continue-scheduler? result status)
+              (Thread/sleep (:scheduler-poll-interval-ms defaults)) ; Poll interval
+              (recur (inc iteration)))))))
 
     ;; Return final state
     (let [final-state @run-atom]
