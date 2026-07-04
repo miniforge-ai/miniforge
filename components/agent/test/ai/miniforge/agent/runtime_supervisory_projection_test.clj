@@ -203,6 +203,7 @@
         (agent/invoke (throwing-agent ex) task ctx)
         (is false "expected invoke to rethrow the original exception")
         (catch clojure.lang.ExceptionInfo caught
+          (is (identical? ex caught))
           (is (= "projection boom" (ex-message caught)))))
       (let [heartbeat (last-event stream :control-plane/agent-heartbeat)
             state-change (last-event stream :control-plane/agent-state-changed)

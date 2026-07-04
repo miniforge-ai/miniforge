@@ -269,6 +269,29 @@
                              {:agent/error-source :direct-invocation}
                              e))
 
+(defn- invoke-with-projection*
+  [agent task context invoke-fn handle-exception]
+  (if-not (executable-context? context)
+    (try
+      (invoke-fn)
+      (catch Exception e
+        (handle-exception e)))
+    (let [session-id-value (session-id agent task context)]
+      (if-not session-id-value
+        (try
+          (invoke-fn)
+          (catch Exception e
+            (handle-exception e)))
+        (do
+          (emit-started! agent task context session-id-value)
+          (try
+            (let [result (invoke-fn)]
+              (emit-finished! task context session-id-value result)
+              result)
+            (catch Exception e
+              (emit-failed! task context session-id-value)
+              (handle-exception e))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Public wrapper
 
@@ -279,26 +302,11 @@
    Returns the agent result on success, or an anomaly when invocation throws.
    This is the canonical anomaly-returning API for non-boundary callers."
   [agent task context invoke-fn]
-  (if-not (executable-context? context)
-    (try
-      (invoke-fn)
-      (catch Exception e
-        (invocation-exception-anomaly e)))
-    (let [session-id-value (session-id agent task context)]
-      (if-not session-id-value
-        (try
-          (invoke-fn)
-          (catch Exception e
-            (invocation-exception-anomaly e)))
-        (do
-          (emit-started! agent task context session-id-value)
-          (try
-            (let [result (invoke-fn)]
-              (emit-finished! task context session-id-value result)
-              result)
-            (catch Exception e
-              (emit-failed! task context session-id-value)
-              (invocation-exception-anomaly e))))))))
+  (invoke-with-projection* agent
+                           task
+                           context
+                           invoke-fn
+                           invocation-exception-anomaly))
 
 (defn invoke-with-projection
   "Boundary compatibility wrapper around [[invoke-with-projection-result]].
@@ -309,8 +317,9 @@
    [[invoke-with-projection-result]] in non-boundary code when callers can
    branch on anomaly data."
   [agent task context invoke-fn]
-  (let [result (invoke-with-projection-result agent task context invoke-fn)]
-    (if (anomaly/anomaly? result)
-      (throw (ex-info (:anomaly/message result)
-                      (:anomaly/data result)))
-      result)))
+  (invoke-with-projection* agent
+                           task
+                           context
+                           invoke-fn
+                           (fn [e]
+                             (throw e))))
