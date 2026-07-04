@@ -198,6 +198,15 @@
            (when-not (zero? exit)
              (System/exit exit)))}
 
+  workbench:sweep
+  {:doc  "Run a permutation sweep: execute every variant (workflow chain / prompt / model / method / axes) x replicates from an EDN config, emitting one variant-tagged workbench snapshot per run for `minibench compare`. Usage: bb workbench:sweep :config '\"/abs/sweep.edn\"'"
+   :task (let [exit (apply run-clojure-stream!
+                           (concat ["-X:dev"
+                                    "ai.miniforge.workbench-sweep.interface/sweep!"]
+                                   *command-line-args*))]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   workbench:snapshot
   {:doc  "Project a supervisory PolicyEvaluation EDN file into a Minibench workbench_snapshot/v1 (per-rule pass/fail rows, ready for `minibench compare`). Required args: :policy-eval :registry-version :out; optional: :experiment-id :label :model :method."
    :task (let [exit (apply run-clojure-stream!

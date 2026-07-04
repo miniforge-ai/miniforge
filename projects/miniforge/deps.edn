@@ -68,6 +68,8 @@
         ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
         ;; Minibench workbench projection (policy evals -> workbench snapshots)
         ai.miniforge/workbench-adapter {:local/root "../../components/workbench-adapter"}
+        ;; Permutation sweep runner (variants x replicates -> compare-ready snapshots)
+        ai.miniforge/workbench-sweep {:local/root "../../components/workbench-sweep"}
         ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ;; Self-healing: workaround detection, backend health tracking

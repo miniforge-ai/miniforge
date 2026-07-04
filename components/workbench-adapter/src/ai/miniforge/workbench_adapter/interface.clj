@@ -117,11 +117,16 @@
 
 ;; ---------------------------------------------------------------- clojure -X
 
-(def ^:private builtin-packs-dir
-  "The builtin policy packs on the classpath, resolved via a known pack
-   resource so the path holds wherever the workspace is checked out."
+(def ^:private builtin-packs-dir*
   (delay (-> (io/resource "policy_pack/packs/foundations-1.0.0.pack.edn")
              io/file .getParentFile str)))
+
+(defn builtin-packs-dir
+  "The builtin policy packs directory on the classpath, resolved via a
+   known pack resource so the path holds wherever the workspace is
+   checked out."
+  []
+  @builtin-packs-dir*)
 
 (defn- today-datever []
   (str (str/replace (str (java.time.LocalDate/now java.time.ZoneOffset/UTC)) "-" ".") ".1"))
@@ -132,7 +137,7 @@
    `:version` (default: today's DateVer `YYYY.MM.DD.1`),
    `:out` (default: `/tmp/miniforge-state-vars.json`)."
   [{:keys [packs-dir version out]}]
-  (let [packs (load-packs! (str (or packs-dir @builtin-packs-dir)))
+  (let [packs (load-packs! (str (or packs-dir (builtin-packs-dir))))
         registry (packs->registry packs (str (or version (today-datever))))
         out (str (or out "/tmp/miniforge-state-vars.json"))]
     (write-registry! registry out)
@@ -153,7 +158,7 @@
   (let [pe (edn/read-string {:readers {'uuid parse-uuid
                                        'inst #(java.time.Instant/parse %)}}
                             (slurp (str policy-eval)))
-        packs (load-packs! (str (or packs-dir @builtin-packs-dir)))
+        packs (load-packs! (str (or packs-dir (builtin-packs-dir))))
         now (str (java.time.Instant/now))
         stamp (-> now (str/replace #"\.[0-9]+" "") (str/replace #"[:\-]" ""))
         label (some-> label str)
