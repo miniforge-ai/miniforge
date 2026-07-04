@@ -111,7 +111,8 @@
    :artifact-store — Artifact persistence store
    :knowledge-store — Knowledge base store
    :event-stream   — Event stream for telemetry"
-  (:require [ai.miniforge.response.interface :as response]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.response.interface :as response]
             [ai.miniforge.workflow.checkpoint-store :as checkpoint-store]
             [ai.miniforge.workflow.fsm :as fsm]
             [ai.miniforge.workflow.monitoring :as monitoring]
@@ -180,6 +181,25 @@
                         (:execution/status next-ctx))
              (nil? (:execution/ended-at next-ctx)))
         (assoc :execution/ended-at (System/currentTimeMillis))))
+    ctx))
+
+(defn transition-execution-result
+  "Apply an event to the authoritative execution machine and refresh
+   projections, returning a canonical FSM anomaly for state-local unknown
+   events instead of throwing."
+  [ctx event]
+  (if-let [machine (:execution/fsm-machine ctx)]
+    (let [fsm-state (:execution/fsm-state ctx)
+          result (fsm/transition-execution-result machine fsm-state event)]
+      (if (anomaly/anomaly? result)
+        result
+        (let [next-ctx (sync-machine-projections
+                        (assoc ctx :execution/fsm-state result))]
+          (cond-> next-ctx
+            (and (contains? #{:completed :failed :cancelled}
+                            (:execution/status next-ctx))
+                 (nil? (:execution/ended-at next-ctx)))
+            (assoc :execution/ended-at (System/currentTimeMillis))))))
     ctx))
 
 (defn active-or-last-phase
