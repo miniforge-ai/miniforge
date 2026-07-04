@@ -29,7 +29,9 @@
    [ai.miniforge.logging.interface :as log]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Store protocol and in-memory implementation
@@ -162,10 +164,14 @@
         tmp (java.io.File/createTempFile "zettel-" ".edn.tmp" parent)]
     (try
       (spit tmp content)
-      (.renameTo tmp file)
-      (catch Exception e
-        (when (.exists tmp) (.delete tmp))
-        (throw e)))))
+      (Files/move (.toPath tmp)
+                  (.toPath file)
+                  (into-array StandardCopyOption
+                              [StandardCopyOption/ATOMIC_MOVE
+                               StandardCopyOption/REPLACE_EXISTING]))
+      (finally
+        (when (.exists tmp)
+          (.delete tmp))))))
 
 (defn- load-zettel-file
   "Load a single .edn zettel file. Returns zettel map or nil."

@@ -521,3 +521,29 @@
           (is (= run-state final-state))
           (is (= :software-factory (get-in @captured [:opts :state-profile])))
           (is (= provider (get-in @captured [:opts :state-profile-provider]))))))))
+
+(deftest execute-dag-records-scheduler-exceptions-as-failed-data-test
+  (testing "scheduler exceptions are recorded on the run state instead of escaping"
+    (let [run-state {:run/status :running
+                     :run/tasks {}}
+          run-atom (atom run-state)
+          events (atom [])]
+      (with-redefs [dag/create-dag-from-tasks (fn [_dag-id _task-defs & _opts]
+                                                run-state)
+                    dag/create-run-atom (fn [_] run-atom)
+                    dag/schedule-iteration (fn [_ _]
+                                             (throw (ex-info "scheduler boom"
+                                                             {:phase :test})))
+                    orchestrator/create-orchestrated-scheduler-context
+                    (fn [_ _] {:execute-task-fn (fn [& _] nil)})
+                    orchestrator/log-event (fn [_logger event data]
+                                             (swap! events conj [event data]))]
+        (let [final-state (orchestrator/execute-dag! "dag-123" [] {})]
+          (is (= :failed (:run/status final-state)))
+          (is (= :failed (:status final-state)))
+          (is (= :scheduler-exception (get-in final-state [:run/error :code])))
+          (is (some (fn [[event data]]
+                      (and (= :dag-execution-error event)
+                           (= "scheduler boom" (:error data))
+                           (= :scheduler-exception (:code data))))
+                    @events)))))))
