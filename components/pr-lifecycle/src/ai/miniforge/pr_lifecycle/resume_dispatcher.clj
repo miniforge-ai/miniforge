@@ -112,16 +112,29 @@
    :resume/listener     (cond-> {:agent/id (:agent/id listener)}
                           (:session/id listener) (assoc :session/id (:session/id listener)))})
 
-(defn validate-primer!
-  "Throw on invalid primer; return primer otherwise. Used by
-   `dispatch-to-channel!` before any I/O."
+(defn validate-primer-result
+  "Validate primer shape. Returns a DAG ok result carrying the primer, or a
+   DAG err result with the same diagnostic payload the legacy throwing wrapper
+   exposes."
   [primer]
-  (when-not (m/validate ResumePrimer primer)
-    (throw (ex-info "invalid resume primer"
-                    {:errors  (m/explain ResumePrimer primer)
-                     :anomaly :resume-dispatcher/invalid-primer
-                     :primer  primer})))
-  primer)
+  (if (m/validate ResumePrimer primer)
+    (dag/ok primer)
+    (dag/err :resume-dispatcher/invalid-primer
+             "invalid resume primer"
+             {:errors (m/explain ResumePrimer primer)
+              :anomaly :resume-dispatcher/invalid-primer
+              :primer primer})))
+
+(defn validate-primer!
+  "Boundary wrapper around the canonical DAG-result-returning
+   `validate-primer-result`. Prefer `validate-primer-result`; this retains
+   the historical ex-info contract for direct callers."
+  [primer]
+  (let [result (validate-primer-result primer)]
+    (if (dag/ok? result)
+      (:data result)
+      (throw (ex-info (get-in result [:error :message])
+                      (get-in result [:error :data]))))))
 
 (defn channel-supported?
   "Pure predicate: true when the listener's channel kind has a real
@@ -276,17 +289,14 @@
    invoke. Returns DAG result. Does NOT mark the listener
    `:dispatched` — that's the caller's job after success."
   [primer listener]
-  (try
-    (validate-primer! primer)
-    (let [kind (get-in listener [:resume-channel :channel/kind])
-          handler (get channel-handlers kind)]
-      (if handler
-        (handler primer listener)
-        (not-yet-wired-error listener)))
-    (catch clojure.lang.ExceptionInfo e
-      (dag/err (or (:anomaly (ex-data e)) :resume-dispatcher/invalid-primer)
-               (.getMessage e)
-               (ex-data e)))))
+  (let [primer-result (validate-primer-result primer)]
+    (if-not (dag/ok? primer-result)
+      primer-result
+      (let [kind (get-in listener [:resume-channel :channel/kind])
+            handler (get channel-handlers kind)]
+        (if handler
+          (handler (:data primer-result) listener)
+          (not-yet-wired-error listener))))))
 
 (defn dispatch-listener!
   "Build primer + dispatch + mark dispatched on success.

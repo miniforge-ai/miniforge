@@ -100,6 +100,18 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (sut/validate-primer! {:resume/pr-url "x"})))))
 
+(deftest validate-primer-result-returns-dag-error-on-bad-shape
+  (testing "validate-primer-result returns a DAG error instead of throwing"
+    (let [result (sut/validate-primer-result {:resume/pr-url "x"})]
+      (is (false? (get result :ok?)))
+      (is (= :resume-dispatcher/invalid-primer
+             (get-in result [:error :code])))
+      (is (= :resume-dispatcher/invalid-primer
+             (get-in result [:error :data :anomaly])))
+      (is (= {:resume/pr-url "x"}
+             (get-in result [:error :data :primer])))
+      (is (some? (get-in result [:error :data :errors]))))))
+
 ;; ── channel-supported? + not-yet-wired ───────────────────────────────
 
 (deftest channel-supported-only-webhook-in-v0

@@ -24,7 +24,8 @@
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.progress-detector.config :as config]
             [ai.miniforge.progress-detector.event-envelope :as envelope]
-            [ai.miniforge.progress-detector.tool-profile :as tool-profile])
+            [ai.miniforge.progress-detector.tool-profile :as tool-profile]
+            [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
 (deftest validate-observation-schema-failure-throws-anomaly
@@ -45,6 +46,16 @@
       ;; entries.
       (is (seq (.getMessage thrown)))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
+
+(deftest validate-observation-result-returns-anomaly
+  (testing "private validate-observation-result returns the anomaly map"
+    (let [result (@#'envelope/validate-observation-result
+                  {}
+                  {:not-a-real :observation})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (= ::envelope/validation-failed (:type result)))
+      (is (some? (:errors result))))))
 
 (deftest merge-config-empty-layers-throws-anomaly
   (testing "empty layers raises :anomalies/incorrect"
