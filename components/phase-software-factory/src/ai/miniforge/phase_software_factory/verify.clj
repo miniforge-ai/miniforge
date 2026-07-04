@@ -23,7 +23,8 @@
    No tester agent: the implementer wrote both source and test files;
    this phase validates them by running the test suite.
    Default gates: [:tests-pass :coverage]"
-  (:require [ai.miniforge.phase.interface :as phase]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.workspace.interface :as workspace]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.messages :as messages]
@@ -269,6 +270,25 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
 
+(defn- require-environment-result
+  "Return nil when the verify execution environment exists, otherwise return a
+   canonical anomaly describing the fail-closed phase entry error."
+  [ctx]
+  (when-not (get ctx :execution/environment-id)
+    (anomaly/sub-anomaly :invalid-input
+                         :anomalies.phase/enter-failed
+                         (messages/t :verify/no-environment)
+                         {:phase :verify
+                          :hint (messages/t :verify/no-environment-hint)})))
+
+(defn- require-environment!
+  "Boundary wrapper around the anomaly-returning
+   `require-environment-result`; retained for existing exception callers."
+  [ctx]
+  (when-let [result (require-environment-result ctx)]
+    (throw (ex-info (:anomaly/message result)
+                    (:anomaly/data result)))))
+
 (defn enter-verify
   "Execute verification phase.
 
@@ -284,10 +304,7 @@
         _ (phase/emit-phase-started! ctx :verify)
 
         ;; Fail fast if no executor environment has been acquired
-        _ (when-not (get ctx :execution/environment-id)
-            (throw (ex-info (messages/t :verify/no-environment)
-                            {:phase :verify
-                             :hint (messages/t :verify/no-environment-hint)})))
+        _ (require-environment! ctx)
 
         worktree-path (workspace/resolve-execution-workdir ctx "verify")
 
