@@ -77,14 +77,15 @@
       (is (fn? (:check g))))))
 
 (deftest get-gate-unknown-test
-  (testing "get-gate returns default for unknown gate"
+  (testing "get-gate returns a fail-closed default for an unknown gate"
     (let [g (gate/get-gate :unknown-gate)]
       (is (map? g))
       (is (= :unknown-gate (:name g)))
       (is (fn? (:check g)))
-      ;; Default gate should pass
+      ;; Unknown gate must fail closed, not pass through.
       (let [result ((:check g) {} {})]
-        (is (:passed? result))))))
+        (is (false? (:passed? result)))
+        (is (= :unknown-gate (-> result :errors first :type)))))))
 
 ;; ============================================================================
 ;; Gate check tests
