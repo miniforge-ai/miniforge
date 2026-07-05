@@ -49,15 +49,32 @@
       :repair (fn [artifact errors ctx] -> {:success? bool :artifact ...})}"
   identity)
 
-;; Default: unknown gates pass through with warning
+;; Unknown gates fail CLOSED. A phase that references a gate the registry cannot
+;; resolve — misspelled, renamed, or never registered — must halt, not wave the
+;; artifact through. In a system that sells fail-closed governance the unknown
+;; case is the dangerous one. Deliberate pass-through has an explicit, separate
+;; home: the :noop gate below, so "unknown" and "intentionally skipped" stay
+;; distinct and greppable.
 (defmethod get-gate :default
   [gate-kw]
   {:name gate-kw
-   :description "Unknown gate (pass-through)"
+   :description "Unknown gate (fail-closed)"
    :check (fn [_artifact _ctx]
-            {:passed? true
-             :warnings [{:type :unknown-gate
-                         :message (str "Unknown gate: " gate-kw ", passing through")}]})
+            {:passed? false
+             :errors [{:type :unknown-gate
+                       :message (str "Unknown gate: " gate-kw
+                                     " — no registered implementation")}]})
+   :repair nil})
+
+;; Explicit, named pass-through for a phase that intentionally runs no blocking
+;; gate. Distinct from an unknown gate (which fails closed above).
+(register-gate! :noop)
+
+(defmethod get-gate :noop
+  [_]
+  {:name :noop
+   :description "Intentional pass-through (no gate)"
+   :check (fn [_artifact _ctx] {:passed? true})
    :repair nil})
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -70,6 +87,18 @@
      Set of gate keywords"
   []
   @registered-gates)
+
+(defn gate-registered?
+  "True when gate-kw resolves to its own get-gate implementation rather than the
+   fail-closed :default. `get-method` returns the :default method for any
+   unregistered keyword, so comparing against it detects a real registration.
+
+   Callers that check gates defined in other namespaces (policy, behavioral, …)
+   must load those implementations first (require `gate.interface`); a gate whose
+   defmethod has not been loaded reads as unregistered."
+  [gate-kw]
+  (not= (get-method get-gate gate-kw)
+        (get-method get-gate :default)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

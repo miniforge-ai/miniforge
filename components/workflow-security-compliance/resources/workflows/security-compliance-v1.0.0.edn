@@ -70,8 +70,14 @@
              :time-seconds 300}}
 
    :sec-classify
+   ;; Classification runs in this phase's body (see workflow_security_compliance
+   ;; core.clj), not as a registry gate — :classification-gate belongs to the
+   ;; loop Gate protocol, a different system from the multimethod :gates runner.
+   ;; :noop marks the deliberate skip explicitly (the multimethod default now
+   ;; fails closed on an unresolved gate, so the prior bare :classification-gate
+   ;; reference would halt this phase).
    {:agent nil
-    :gates [:classification-gate]
+    :gates [:noop]
     :budget {:tokens 5000
              :iterations 1
              :time-seconds 120}}

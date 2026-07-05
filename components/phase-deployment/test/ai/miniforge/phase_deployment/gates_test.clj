@@ -18,6 +18,9 @@
 
 (ns ai.miniforge.phase-deployment.gates-test
   (:require [ai.miniforge.gate.registry :as registry]
+            ;; Loads the gate-component gates (e.g. :policy-pack) the deploy
+            ;; defaults reference alongside the deployment-owned gates below.
+            [ai.miniforge.gate.interface]
             [ai.miniforge.phase-deployment.gates :as sut]
             [clojure.test :refer [deftest is testing]]))
 
@@ -46,3 +49,14 @@
   (testing "gate descriptions are loaded from EDN-backed configuration"
     (is (= "Validates health endpoints return HTTP 2xx"
            (:description (registry/get-gate :health-check))))))
+
+(deftest deploy-default-gate-references-resolve-test
+  (testing "every gate the shipped deploy defaults reference resolves to a real
+            registration — none falls through to the fail-closed :default. The
+            deployment gates (deploy-healthy/health-check/provision-validated)
+            register via defmethod without register-gate!, so this guards the
+            resolve path list-gates would miss."
+    (doseq [gate-kw [:policy-pack :provision-validated :deploy-healthy :health-check]]
+      (is (registry/gate-registered? gate-kw)
+          (str gate-kw " is referenced by deploy-defaults but has no registered "
+               "gate — it would fail closed at deploy")))))
