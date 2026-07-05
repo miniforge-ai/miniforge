@@ -17,9 +17,9 @@ shallow merge. A workflow phase that declared `:gates [...]` replaced the
 phase-type default's gate vector wholesale, silently dropping
 `:policy-verify` / `:policy-review` with no error and no warning.
 
-This was not hypothetical: `quick-fix-v2.0.0` declares `:verify :gates
-[:tests-pass]`, so every quick-fix run dropped `:policy-verify` — the verify
-phase ran no policy enforcement.
+This was not hypothetical: `quick-fix-v2.0.0` declares
+`:verify :gates [:tests-pass]`, so every quick-fix run dropped `:policy-verify`
+— the verify phase ran no policy enforcement.
 
 ## Fix
 
