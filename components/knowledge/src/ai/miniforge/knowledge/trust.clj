@@ -35,6 +35,7 @@
    - :authority/data        - Reference material only (any trust level)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
+   [ai.miniforge.knowledge.messages :as msg]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string]))
 
@@ -105,10 +106,9 @@
     (if (and (= :authority/instruction (:authority target-pack))
              (not= :trusted (:trust-level target-pack)))
       (schema/invalid
-       (str "Instruction authority cannot be granted transitively: "
-            "Pack " (:pack-id target-pack) " is " (:trust-level target-pack)
-            " but has :authority/instruction. "
-            "Only :trusted packs may have instruction authority."))
+       (msg/t :trust/instruction-not-transitive
+              {:pack-id (:pack-id target-pack)
+               :trust-level (:trust-level target-pack)}))
       (schema/valid))))
 
 (defn compute-inherited-trust-level
@@ -137,11 +137,12 @@
      (cond
        (:cycle? context)
        (schema/invalid
-        (str "Circular dependency detected: "
-             (clojure.string/join " -> " (:path context))))
+        (msg/t :trust/circular-dependency
+               {:path (clojure.string/join (msg/t :trust/path-separator)
+                                           (:path context))}))
 
        (:missing? context)
-       (schema/invalid (str "Missing dependency: " pack-id))
+       (schema/invalid (msg/t :trust/missing-dependency {:pack-id pack-id}))
 
        :else nil))))
 
@@ -169,9 +170,8 @@
                       (fn [_node-id node _path]
                         (= :tainted (:trust-level node))))]
         (schema/invalid
-         (str "Pack " pack-id " has :authority/instruction but "
-              "transitively includes tainted content from "
-              (:found-id found))
+         (msg/t :trust/tainted-in-instruction-chain
+                {:pack-id pack-id :found-id (:found-id found)})
          {:tainted-path (:path found)})
         (schema/valid)))))
 
