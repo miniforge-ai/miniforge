@@ -60,8 +60,8 @@
   (validate-schema-anomaly schema-def value))
 
 (defn- build-repo-node
-  "Internal: assemble the repo-node map (no validation). Shared between
-   the throwing and anomaly-returning constructors so the two never drift."
+  "Internal: assemble the repo-node map (no validation). Shared by
+   repo-node constructors so their behavior never drifts."
   [{:keys [repo/url repo/name repo/org repo/type repo/layer repo/default-branch repo/watch-config]
     :or {default-branch "main"}}]
   (let [inferred-layer (or layer (schema/infer-layer type))]
@@ -90,8 +90,8 @@
   (validate-schema schema/RepoNode (build-repo-node repo-config)))
 
 (defn- build-repo-edge
-  "Internal: assemble the edge map (no validation). Shared between the
-   throwing and anomaly-returning constructors."
+  "Internal: assemble the edge map (no validation). Shared by
+   repo-edge constructors."
   [{:keys [edge/from edge/to edge/constraint edge/merge-ordering edge/validation]
     :or {merge-ordering :sequential}}]
   (cond-> {:edge/from from
@@ -428,28 +428,29 @@
     "Create a new empty DAG. Returns the created DAG.")
 
   (add-repo [this dag-id repo-config]
-    "Add a repository node to the DAG. Returns updated DAG.")
+    "Add a repository node to the DAG. Returns the updated DAG or an anomaly.")
 
   (add-repo-anomaly [this dag-id repo-config]
     "Anomaly-returning sibling of `add-repo`. Returns the updated DAG or
      an anomaly map on failure.")
 
   (remove-repo [this dag-id repo-name]
-    "Remove a repository from the DAG (and its edges). Returns updated DAG.")
+    "Remove a repository from the DAG and remove edges referencing it.
+     Returns the updated DAG or an anomaly.")
 
   (remove-repo-anomaly [this dag-id repo-name]
     "Anomaly-returning sibling of `remove-repo`. Returns the updated DAG
      or a `:not-found` anomaly when the DAG is missing.")
 
   (add-edge [this dag-id from-repo to-repo constraint merge-ordering]
-    "Add a dependency edge between repos. Returns updated DAG or error if invalid.")
+    "Add a dependency edge between repos. Returns updated DAG or an anomaly.")
 
   (add-edge-anomaly [this dag-id from-repo to-repo constraint merge-ordering]
     "Anomaly-returning sibling of `add-edge`. Returns the updated DAG or
      an anomaly map on failure.")
 
   (remove-edge [this dag-id from-repo to-repo]
-    "Remove a dependency edge. Returns updated DAG.")
+    "Remove a dependency edge. Returns updated DAG or an anomaly.")
 
   (remove-edge-anomaly [this dag-id from-repo to-repo]
     "Anomaly-returning sibling of `remove-edge`. Returns the updated DAG
@@ -627,13 +628,16 @@
   ;; => {:valid? true, :errors []}
 
   ;; Try to create a cycle
-  (try
-    (add-edge mgr (:dag/id dag)
-              "k8s-manifests" "terraform-modules"
-              :library-before-consumer :sequential)
-    (catch Exception e
-      (ex-data e)))
-  ;; => {:dag-id ..., :from "k8s-manifests", :to "terraform-modules", :cycle-nodes #{"terraform-modules" "terraform-live" "k8s-manifests"}}
+  (add-edge mgr (:dag/id dag)
+            "k8s-manifests" "terraform-modules"
+            :library-before-consumer :sequential)
+  ;; => {:anomaly/type :conflict
+  ;;     :anomaly/message "Adding edge would create cycle"
+  ;;     :anomaly/data {:dag-id ...
+  ;;                    :from "k8s-manifests"
+  ;;                    :to "terraform-modules"
+  ;;                    :cycle-nodes #{"terraform-modules" "terraform-live" "k8s-manifests"}}
+  ;;     :anomaly/at ...}
 
   ;; Anomaly-returning sibling
   (add-edge-anomaly mgr (:dag/id dag)
