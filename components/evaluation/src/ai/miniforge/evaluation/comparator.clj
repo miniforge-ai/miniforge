@@ -35,9 +35,6 @@
           n (count vals)]
       (/ (reduce + (map #(squared-deviation m %) vals)) (dec n)))))
 
-(defn- std-dev [vals]
-  (Math/sqrt (variance vals)))
-
 (defn- welch-t-test
   "Welch's t-test for unequal variances. Returns approximate p-value.
    This is a simplified two-tailed test."

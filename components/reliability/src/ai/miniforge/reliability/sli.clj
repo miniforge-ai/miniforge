@@ -46,13 +46,6 @@
                 (.after ^java.util.Date ts cutoff)))
             metrics)))
 
-(defn- filter-by-tier
-  "Filter metrics by workflow tier, if specified."
-  [metrics tier]
-  (if tier
-    (filter #(= tier (:tier %)) metrics)
-    metrics))
-
 (defn- percentile
   "Compute percentile from sorted values."
   [sorted-vals p]
