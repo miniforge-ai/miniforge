@@ -25,13 +25,14 @@
    harness).
 
    - check-behavioral  : delegates to policy-pack/check-artifact with phase
-                         context {:phase :observe :task-type :modify} and
-                         uses the severity cascade from gate.policy.
+                         context {:phase :observe :task-type :modify}, which
+                         classifies violations by each rule's enforcement action
+                         (:hard-halt / :require-approval block; :warn / :audit
+                         warn) — not by severity.
    - repair-behavioral : always returns {:success? false} — behavioral
                          violations cannot be fixed in-place; the caller
                          must redirect to :implement."
   (:require [ai.miniforge.gate.messages :as msg]
-            [ai.miniforge.gate.policy   :as policy]
             [ai.miniforge.gate.registry :as registry]
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]))
@@ -43,16 +44,6 @@
   []
   {:type :no-policy-packs
    :message (msg/t :behavioral/no-policy-packs)})
-
-(defn- passed-cascade?
-  [{:keys [blocking approval-required]}]
-  (and (empty? blocking)
-       (empty? approval-required)))
-
-(defn- violation-results
-  [result-type violations]
-  (mapv #(policy/violation->gate-result result-type %)
-        violations))
 
 (defn- behavioral-check-error-warning
   [message]
@@ -85,12 +76,14 @@
                                    instead of redefining clojure.core fns
                                    globally (which races with parallel tests).
                                    Signature: (fn [packs artifact opts]) ->
-                                   {:violations [...]}.
+                                   the check-artifact result
+                                   {:passed? :blocking :require-approval
+                                    :warnings :audits}.
 
    Returns:
      {:passed? bool
-      :errors  [{:type :behavioral-violation :severity … :message … …}]
-      :warnings [{:type :behavioral-warning :severity … :message … …}]}"
+      :errors  [{:code … :severity … :message … …}]
+      :warnings [{:code … :severity … :message … …}]}"
   [artifact ctx]
   ;; Programmer-error guard runs OUTSIDE the try/catch on purpose.
   ;; A non-nil non-callable :check-fn is a misconfiguration the caller
@@ -111,17 +104,11 @@
       (if (empty? packs)
         {:passed?  true
          :warnings [(no-policy-packs-warning)]}
-        (let [result   (check-fn packs artifact {:phase :observe :task-type :modify})
-              cascade  (policy/evaluate-severity-cascade (get result :violations []))
-              blocking (get cascade :blocking [])
-              approval-required (get cascade :approval-required [])
-              warnings (get cascade :warnings [])
-              audits (get cascade :audits [])]
-          {:passed?  (passed-cascade? cascade)
-           :errors   (violation-results :behavioral-violation
-                                        (concat blocking approval-required))
-           :warnings (violation-results :behavioral-warning
-                                        (concat warnings audits))})))
+        (let [{:keys [passed? blocking require-approval warnings audits]}
+              (check-fn packs artifact {:phase :observe :task-type :modify})]
+          {:passed?  (and passed? (empty? require-approval))
+           :errors   (vec (concat blocking require-approval))
+           :warnings (vec (concat warnings audits))})))
     (catch Exception e
       {:passed?  true
        :warnings [(behavioral-check-error-warning (ex-message e))]})))
