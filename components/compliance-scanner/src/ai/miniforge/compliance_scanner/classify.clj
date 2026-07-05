@@ -93,7 +93,7 @@
      :current "(get m :timeout 5000)"}
     {:rule/id :std/clojure :rule/category "210"
      :file    "server/handler.clj"
-     :current "(or (:status m) :pending)"}
+     :current "(get m :status :pending)"}
     {:rule/id :std/datever :rule/category "730"
      :file    "build.clj"
      :current "1.2.3"}
