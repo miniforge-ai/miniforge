@@ -35,7 +35,7 @@
    - :authority/data        - Reference material only (any trust level)"
   (:require
    [ai.miniforge.algorithms.interface :as alg]
-   [ai.miniforge.knowledge.messages :as msg]
+   [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.schema.interface :as schema]
    [clojure.string]))
 
@@ -106,7 +106,7 @@
     (if (and (= :authority/instruction (:authority target-pack))
              (not= :trusted (:trust-level target-pack)))
       (schema/invalid
-       (msg/t :trust/instruction-not-transitive
+       (messages/t :trust/instruction-not-transitive
               {:pack-id (:pack-id target-pack)
                :trust-level (:trust-level target-pack)}))
       (schema/valid))))
@@ -137,12 +137,12 @@
      (cond
        (:cycle? context)
        (schema/invalid
-        (msg/t :trust/circular-dependency
-               {:path (clojure.string/join (msg/t :trust/path-separator)
+        (messages/t :trust/circular-dependency
+               {:path (clojure.string/join (messages/t :trust/path-separator)
                                            (:path context))}))
 
        (:missing? context)
-       (schema/invalid (msg/t :trust/missing-dependency {:pack-id pack-id}))
+       (schema/invalid (messages/t :trust/missing-dependency {:pack-id pack-id}))
 
        :else nil))))
 
@@ -170,7 +170,7 @@
                       (fn [_node-id node _path]
                         (= :tainted (:trust-level node))))]
         (schema/invalid
-         (msg/t :trust/tainted-in-instruction-chain
+         (messages/t :trust/tainted-in-instruction-chain
                 {:pack-id pack-id :found-id (:found-id found)})
          {:tainted-path (:path found)})
         (schema/valid)))))
