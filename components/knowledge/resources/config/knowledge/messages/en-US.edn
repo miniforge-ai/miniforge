@@ -13,4 +13,11 @@
 
   ;; Pattern detection / synthesis
   :pattern/title   "Recurring pattern: {tag} ({count} occurrences)"
-  :pattern/content "## Recurring Pattern\n\nThe tag `{tag}` appears across {count} learnings, suggesting a systemic pattern.\n\n### Related Learnings\n\n{learnings}"}}
+  :pattern/content "## Recurring Pattern\n\nThe tag `{tag}` appears across {count} learnings, suggesting a systemic pattern.\n\n### Related Learnings\n\n{learnings}"
+
+  ;; Trust-graph validation diagnostics
+  :trust/instruction-not-transitive "Instruction authority cannot be granted transitively: Pack {pack-id} is {trust-level} but has :authority/instruction. Only :trusted packs may have instruction authority."
+  :trust/circular-dependency        "Circular dependency detected: {path}"
+  :trust/path-separator             " -> "
+  :trust/missing-dependency         "Missing dependency: {pack-id}"
+  :trust/tainted-in-instruction-chain "Pack {pack-id} has :authority/instruction but transitively includes tainted content from {found-id}"}}
