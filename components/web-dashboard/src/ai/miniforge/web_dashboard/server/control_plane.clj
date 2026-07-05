@@ -120,8 +120,8 @@
                                   (let [decision (cp/create-decision
                                                   agent-id
                                                   (:summary d)
-                                                  {:type (keyword (or (:type d) "choice"))
-                                                   :priority (keyword (or (:priority d) "medium"))
+                                                  {:type (keyword (or (get d :type) "choice"))
+                                                   :priority (keyword (or (get d :priority) "medium"))
                                                    :context (:context d)
                                                    :options (:options d)})]
                                     (cp/submit-decision! decision-manager decision)

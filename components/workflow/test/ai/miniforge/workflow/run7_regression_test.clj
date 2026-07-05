@@ -87,8 +87,8 @@
 ;; ============================================================================
 ;; Fix 2: Terminal event fallback when constructor is nil
 ;;
-;; Root cause: (when-let [constructor (requiring-resolve ...)] ...) silently
-;; did nothing when the constructor var was not resolvable.
+;; Root cause: an optional dynamic constructor lookup silently did nothing when
+;; the constructor var was not resolvable.
 ;; ============================================================================
 
 (deftest publish-workflow-completed-fallback-test
@@ -155,8 +155,7 @@
   (testing "execute-phase-lifecycle clears :phase before entering next phase"
     ;; Simulate a context with a stale :phase map from a previous phase
     ;; (e.g., verify left a redirect transition request on it)
-    (let [stale-phase #_{:clj-kondo/ignore [:unresolved-var]}
-                      (phase/request-redirect {:name :verify
+    (let [stale-phase (phase/request-redirect {:name :verify
                                                :status :failed
                                                :duration-ms 3000}
                                               :implement)

@@ -34,6 +34,9 @@
    [clojure.string :as str]
    [ai.miniforge.policy-pack.mdc-compiler :as sut]))
 
+(def requiring-resolve-pattern
+  (str "\\(" "requiring-resolve" "\\s"))
+
 ;; ============================================================================
 ;; Layer 0 — split-frontmatter tests
 ;; ============================================================================
@@ -328,7 +331,7 @@
     (let [content (str "---\ndewey: \"212\"\n"
                        "description: No requiring-resolve\n"
                        "globs: [\"**/*.clj\"]\n"
-                       "detection.pattern: \"\\(requiring-resolve\\s\"\n"
+                       "detection.pattern: \"" requiring-resolve-pattern "\"\n"
                        "enforcement.action: hard-halt\n"
                        "enforcement.message: Use a direct require\n"
                        "---\n\n# No requiring-resolve\n\nbody")
@@ -337,14 +340,14 @@
       (is (= "Use a direct require" (get-in rule [:rule/enforcement :message])))
       (is (= :major (:rule/severity rule)) "a blocking rule is at least :major")
       (is (= :content-scan (get-in rule [:rule/detection :type])))
-      (is (= "\\(requiring-resolve\\s" (get-in rule [:rule/detection :pattern])))))
+      (is (= requiring-resolve-pattern (get-in rule [:rule/detection :pattern])))))
   (testing "an unrecognized action falls back to the alwaysApply default, not garbage"
     (let [content (str "---\ndewey: \"001\"\ndescription: X\nalwaysApply: true\n"
                        "enforcement.action: bogus-action\n---\n\n# X\n\nbody")
           rule (:rule (sut/mdc->rule "x.mdc" content))]
       (is (= :warn (get-in rule [:rule/enforcement :action])))))
   (testing "no enforcement override → existing default (advisory rule audits)"
-    (let [content (str "---\ndewey: \"001\"\ndescription: X\n---\n\n# X\n\nbody")
+    (let [content "---\ndewey: \"001\"\ndescription: X\n---\n\n# X\n\nbody"
           rule (:rule (sut/mdc->rule "x.mdc" content))]
       (is (= :audit (get-in rule [:rule/enforcement :action]))))))
 

@@ -198,7 +198,7 @@
       :auto-fixable? true :rationale "Header absent"}
      {:rule/id :std/clojure :rule/category "210" :rule/title "Clojure Map Access"
       :file "components/bar/src/core.clj" :line 5
-      :current "(or (:status m) :ok)" :suggested nil
+      :current "(get m :status :ok)" :suggested "(get m :status :ok)"
       :auto-fixable? false :rationale "Possible JSON-mapped field"}])
 
   (def p (plan viols "."))
