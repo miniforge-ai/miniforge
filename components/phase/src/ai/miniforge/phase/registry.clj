@@ -114,8 +114,40 @@
   []
   (set (keys @defaults-registry)))
 
+(def policy-gates
+  "Governance gates a phase-config override must never drop from the phase-type
+   default. A workflow's per-phase `:gates` may add or trim mechanical gates
+   (syntax, lint, coverage, …) freely, but silently losing policy enforcement is
+   the one merge outcome a governance system cannot allow: the shallow
+   `(merge defaults config)` let a workflow that declared `:gates [...]` at
+   verify/review replace the default vector wholesale, dropping
+   `:policy-verify`/`:policy-review` with no signal (e.g. quick-fix-v2's verify).
+   `merge-with-defaults` re-adds any of these the default enforced but the
+   override omitted. Extend this set when a new governance gate ships."
+  #{:policy-verify :policy-review :policy-pack})
+
+(defn merge-gates
+  "Merge an override `:gates` vector over the phase-type default's. The result is
+   the override's gates in declared order, followed by any policy gate (see
+   `policy-gates`) the default enforced that the override dropped — so an
+   override can extend or trim mechanical gates but cannot disable policy
+   enforcement."
+  [default-gates override-gates]
+  (let [override-set (set override-gates)
+        preserved    (filterv #(and (contains? policy-gates %)
+                                     (not (contains? override-set %)))
+                              default-gates)]
+    (into (vec override-gates) preserved)))
+
 (defn merge-with-defaults
   "Merge user config with phase defaults.
+
+   Shallow-merges `config` over the phase-type defaults, with one exception for
+   `:gates`: a config `:gates` override replaces the default vector, EXCEPT that
+   policy gates (`policy-gates`) the default enforced are re-added if the override
+   dropped them. This closes the silent-override footgun where a workflow
+   declaring `:gates [...]` at verify/review dropped `:policy-verify`/
+   `:policy-review` wholesale.
 
    Arguments:
      config - User-provided phase config
@@ -123,8 +155,11 @@
    Returns:
      Merged config with defaults"
   [{:keys [phase] :as config}]
-  (let [defaults (phase-defaults phase)]
-    (merge defaults config)))
+  (let [defaults (phase-defaults phase)
+        merged   (merge defaults config)]
+    (if (contains? config :gates)
+      (assoc merged :gates (merge-gates (:gates defaults) (:gates config)))
+      merged)))
 
 (defn valid-config?
   "Check if phase config is valid against schema."
