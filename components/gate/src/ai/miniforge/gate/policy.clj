@@ -183,11 +183,15 @@
    and never gates. Fail-closed: any exception during evaluation blocks.
 
    Arguments:
-     artifact - Artifact with :content
+     artifact - Artifact with :artifact/content (and optional :artifact/path),
+                forwarded to policy-pack/check-artifact
      ctx      - Execution context with :policy-packs, :task-type, :phase
 
    Returns:
-     {:passed? bool :errors [] :warnings [] :approval-required []}"
+     {:passed? bool :errors [] :warnings [] :approval-required []}. Blocking
+     require-approval violations appear in BOTH :errors (so the failure carries
+     detail — `gate.interface/check-gate` emits failure events from :errors
+     only) and :approval-required (the subset needing approval)."
   [artifact ctx]
   (try+
     (let [packs (get ctx :policy-packs [])
@@ -202,7 +206,7 @@
         (let [{:keys [passed? blocking require-approval warnings audits]}
               (policy-pack/check-artifact packs artifact {:task-type task-type :phase phase})]
           {:passed?           (and passed? (empty? require-approval))
-           :errors            (vec blocking)
+           :errors            (vec (concat blocking require-approval))
            :approval-required (vec require-approval)
            :warnings          (vec (concat warnings audits))})))
     (catch Object e

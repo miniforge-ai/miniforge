@@ -144,3 +144,16 @@
                   {:policy-packs [hard-halt-major-pack]})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result))))))
+
+(deftest check-policy-pack-blocks-require-approval-with-detail
+  (testing ":require-approval blocks the gate AND lands in :errors, so the
+            failure carries detail (check-gate emits failure events from :errors)"
+    (let [pack   (assoc-in hard-halt-major-pack
+                           [:pack/rules 0 :rule/enforcement :action] :require-approval)
+          result (policy/check-policy-pack
+                  {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
+                  {:policy-packs [pack]})]
+      (is (false? (:passed? result)))
+      (is (= 1 (count (:errors result))))
+      (is (= :no-danger-token (-> result :errors first :code)))
+      (is (= 1 (count (:approval-required result)))))))
