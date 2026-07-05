@@ -53,11 +53,20 @@
 
 ;; Tests inject a `:check-fn` via the ctx map. Local DI keeps stubs scoped to
 ;; the call site and avoids global mutation for normal policy-pack behavior.
+;; The stub returns the same shape as `policy-pack/check-artifact`: violations
+;; already bucketed by enforcement action, with :passed? = (empty? blocking).
 
 (defn- stub-check-fn
-  "Build a stub policy-pack check fn that returns the given violations."
-  [violations]
-  (fn [_packs _artifact _opts] {:violations violations}))
+  "Build a stub check fn returning a check-artifact-shaped result. Each bucket
+   defaults to empty; :passed? mirrors check-artifact ((empty? blocking))."
+  [& {:keys [blocking require-approval warnings audits]
+      :or   {blocking [] require-approval [] warnings [] audits []}}]
+  (fn [_packs _artifact _opts]
+    {:passed?          (empty? blocking)
+     :blocking         blocking
+     :require-approval require-approval
+     :warnings         warnings
+     :audits           audits}))
 
 (defn- throwing-check-fn
   "Build a stub policy-pack check fn that throws with the given message."
@@ -70,67 +79,63 @@
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
-                   :check-fn     (stub-check-fn [])})]
+                   :check-fn     (stub-check-fn)})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result)))
       (is (empty? (:warnings result))))))
 
 (deftest check-behavioral-blocking-violations-test
-  (testing "Fails with errors when :critical violations are returned"
+  (testing "Fails with errors when :hard-halt (blocking) violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     (stub-check-fn
-                                  [{:violation/severity    :critical
-                                    :violation/rule-id     :no-file-deletion
-                                    :violation/message     "Deleted a protected file"
-                                    :violation/remediation "Restore the file"}])})]
+                                  :blocking [{:code     :no-file-deletion
+                                              :severity :critical
+                                              :message  "Deleted a protected file"}])})]
       (is (false? (:passed? result)))
       (is (= 1 (count (:errors result))))
-      (is (= :behavioral-violation (-> result :errors first :type)))
-      (is (= :critical (-> result :errors first :severity)))
+      (is (= :no-file-deletion (-> result :errors first :code)))
       (is (empty? (:warnings result))))))
 
-(deftest check-behavioral-high-severity-test
-  (testing "Fails when :high violations are returned (approval-required bucket)"
+(deftest check-behavioral-approval-required-test
+  (testing "Fails when :require-approval violations are returned (deploy-style
+            fail-closed: approval cannot be granted inline, so the gate blocks)"
     (let [result (behavioral/check-behavioral
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     (stub-check-fn
-                                  [{:violation/severity :high
-                                    :violation/rule-id  :sensitive-path
-                                    :violation/message  "Wrote to sensitive path"}])})]
+                                  :require-approval [{:code    :sensitive-path
+                                                      :message "Wrote to sensitive path"}])})]
       (is (false? (:passed? result)))
       (is (= 1 (count (:errors result))))
-      (is (= :behavioral-violation (-> result :errors first :type))))))
+      (is (= :sensitive-path (-> result :errors first :code))))))
 
 (deftest check-behavioral-warning-violations-test
-  (testing "Passes with warnings when only :medium violations are returned"
+  (testing "Passes with warnings when only :warn violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     (stub-check-fn
-                                  [{:violation/severity :medium
-                                    :violation/message  "Consider using a helper fn"}])})]
+                                  :warnings [{:code    :prefer-helper
+                                              :message "Consider using a helper fn"}])})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result)))
       (is (= 1 (count (:warnings result))))
-      (is (= :behavioral-warning (-> result :warnings first :type))))))
+      (is (= :prefer-helper (-> result :warnings first :code))))))
 
 (deftest check-behavioral-audit-violations-test
-  (testing "Passes silently (warnings) when only :low/:info violations are returned"
+  (testing "Passes (warnings) when only :audit violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
                   {:policy-packs [{:id :test-pack}]
                    :phase        :observe
                    :check-fn     (stub-check-fn
-                                  [{:violation/severity :low
-                                    :violation/message  "Audit: read an extra file"}
-                                   {:violation/severity :info
-                                    :violation/message  "Info: large diff"}])})]
+                                  :audits [{:code :extra-read :message "Audit: read an extra file"}
+                                           {:code :large-diff :message "Info: large diff"}])})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result)))
       (is (= 2 (count (:warnings result)))))))

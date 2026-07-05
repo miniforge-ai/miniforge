@@ -24,8 +24,7 @@
    - :review-approved - Review approval check
    - :release-ready - Release readiness check
    - :plan-complete - Plan completeness check"
-  (:require [ai.miniforge.event-stream.interface :as event-stream]
-            [ai.miniforge.gate.messages  :as msg]
+  (:require [ai.miniforge.gate.messages  :as msg]
             [ai.miniforge.gate.registry  :as registry]
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]
@@ -174,100 +173,42 @@
    :repair nil})
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Severity cascade
-
-(defn evaluate-severity-cascade
-  "Classify violations by severity into cascade buckets.
-
-   Arguments:
-     violations - Vector of violation maps with :violation/severity keys
-
-   Returns:
-     {:blocking          [...] ; :critical -> hard-halt
-      :approval-required [...] ; :high -> require approval
-      :warnings          [...] ; :medium -> warn, passes
-      :audits            [...]} ; :low/:info -> audit, passes silently"
-  [violations]
-  (reduce
-   (fn [acc violation]
-     (let [severity (:violation/severity violation)]
-       (cond
-         (= :critical severity) (update acc :blocking conj violation)
-         (= :high severity)     (update acc :approval-required conj violation)
-         (= :medium severity)   (update acc :warnings conj violation)
-         :else                  (update acc :audits conj violation))))
-   {:blocking [] :approval-required [] :warnings [] :audits []}
-   violations))
-
-(defn request-approval-for-violations!
-  "Create approval requests for :high (approval-required) violations.
-
-   Arguments:
-     event-stream-atom - Atom used as the approval manager store
-     violations        - Vector of approval-required violation maps
-
-   Returns:
-     {:approval-ids [...] :pending-count int}"
-  [event-stream-atom violations]
-  (let [approvals (mapv (fn [violation]
-                          (event-stream/create-approval-request
-                           (random-uuid)
-                           ["policy-reviewer"]
-                           1
-                           {:metadata {:violation/rule-id    (:violation/rule-id violation)
-                                       :violation/message    (:violation/message violation)
-                                       :violation/severity   (:violation/severity violation)
-                                       :violation/remediation (:violation/remediation violation)}}))
-                        violations)]
-    (run! #(event-stream/store-approval! event-stream-atom %) approvals)
-    {:approval-ids  (mapv :approval/id approvals)
-     :pending-count (count approvals)}))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Policy Pack Gate (delegates to policy-pack component with severity cascade)
-
-(defn violation->gate-result
-  "Convert a violation map to a gate result entry."
-  [result-type violation]
-  (cond-> {:type result-type
-           :severity (:violation/severity violation)
-           :message (:violation/message violation)}
-    (:violation/rule-id violation) (assoc :rule-id (:violation/rule-id violation))
-    (:violation/remediation violation) (assoc :remediation (:violation/remediation violation))))
+;; Policy Pack Gate (classifies by enforcement action, via policy-pack)
 
 (defn check-policy-pack
-  "Check artifact against loaded policy packs with severity cascade.
-
-   Severity cascade:
-   - :critical -> hard-halt (blocks gate, errors)
-   - :high     -> require-approval (blocks unless approved)
-   - :medium   -> warn (passes with warnings)
-   - :low/:info -> audit (passes silently, recorded in evidence)
+  "Check artifact against loaded policy packs, classifying each violation by its
+   rule's enforcement action (`:rule/enforcement :action`) via
+   `policy-pack/check-artifact`. `:hard-halt` and `:require-approval` block the
+   gate; `:warn` and `:audit` are non-blocking warnings. Severity is advisory
+   and never gates. Fail-closed: any exception during evaluation blocks.
 
    Arguments:
-     artifact - Artifact with :content
+     artifact - Artifact with :artifact/content (and optional :artifact/path),
+                forwarded to policy-pack/check-artifact
      ctx      - Execution context with :policy-packs, :task-type, :phase
 
    Returns:
-     {:passed? bool :errors [] :warnings [] :approval-required []}"
+     {:passed? bool :errors [] :warnings [] :approval-required []}. Blocking
+     require-approval violations appear in BOTH :errors (so the failure carries
+     detail — `gate.interface/check-gate` emits failure events from :errors
+     only) and :approval-required (the subset needing approval)."
   [artifact ctx]
   (try+
     (let [packs (get ctx :policy-packs [])
           task-type (get ctx :task-type :implement)
           phase (get ctx :phase :implement)]
       (if (empty? packs)
-        {:passed? true :warnings [{:type :no-policy-packs
-                                    :message "No policy packs loaded"}]}
-        (let [result   (policy-pack/check-artifact packs artifact {:task-type task-type :phase phase})
-              cascade  (evaluate-severity-cascade (:violations result []))
-              blocking          (:blocking cascade)
-              approval-required (:approval-required cascade)
-              warnings          (:warnings cascade)]
-          {:passed? (and (empty? blocking) (empty? approval-required))
-           :errors (mapv #(violation->gate-result :policy-violation %) blocking)
-           :approval-required (mapv #(violation->gate-result :approval-required %) approval-required)
-           :warnings (mapv #(violation->gate-result :policy-warning %)
-                           (concat warnings (:audits cascade)))})))
+        {:passed? true
+         :errors []
+         :approval-required []
+         :warnings [{:type :no-policy-packs
+                     :message (msg/t :policy-pack/no-policy-packs)}]}
+        (let [{:keys [passed? blocking require-approval warnings audits]}
+              (policy-pack/check-artifact packs artifact {:task-type task-type :phase phase})]
+          {:passed?           (and passed? (empty? require-approval))
+           :errors            (vec (concat blocking require-approval))
+           :approval-required (vec require-approval)
+           :warnings          (vec (concat warnings audits))})))
     (catch Object e
       {:passed? false
        :errors [{:type :policy-check-error
@@ -289,7 +230,7 @@
 (defmethod registry/get-gate :policy-pack
   [_]
   {:name :policy-pack
-   :description "Validates code against loaded policy packs with severity cascade"
+   :description "Validates code against loaded policy packs by enforcement action"
    :check check-policy-pack
    :repair repair-policy-pack})
 
