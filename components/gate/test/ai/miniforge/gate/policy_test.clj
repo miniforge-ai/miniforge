@@ -95,3 +95,52 @@
                (-> result :errors first :message)))
         (is (empty? (:warnings result)))
         (is (empty? (:approval-required result)))))))
+
+;; -------------------------------------------------------------------------- check-policy-pack enforcement-action classification
+;; Regression: the gate must classify by :rule/enforcement :action, not severity.
+;; A :major/:minor rule and every content-scan violation (which carries no
+;; :severity) previously fell through a severity cascade to a silent pass.
+
+(def ^:private hard-halt-major-pack
+  "One rule: :major severity, :hard-halt enforcement, content-scan detection (so
+   the violation carries no :severity key). Must block the gate."
+  {:pack/id      "test-deploy-block"
+   :pack/version "2026.07.04"
+   :pack/rules   [{:rule/id          :no-danger-token
+                   :rule/severity    :major
+                   :rule/detection   {:type :content-scan :pattern "DANGER"}
+                   :rule/enforcement {:action  :hard-halt
+                                      :message "Danger token present"}}]})
+
+(defn- warn-major-pack
+  "As hard-halt-major-pack, but :warn enforcement — must pass (advisory)."
+  []
+  (assoc-in hard-halt-major-pack [:pack/rules 0 :rule/enforcement :action] :warn))
+
+(deftest check-policy-pack-blocks-major-hard-halt-rule
+  (testing ":major :hard-halt content-scan rule blocks the deploy gate"
+    (let [result (policy/check-policy-pack
+                  {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
+                  {:policy-packs [hard-halt-major-pack]})]
+      (is (false? (:passed? result)))
+      (is (= 1 (count (:errors result))))
+      (is (= :no-danger-token (-> result :errors first :code)))
+      (is (empty? (:approval-required result))))))
+
+(deftest check-policy-pack-passes-major-warn-rule
+  (testing ":major :warn rule passes with a warning — severity does not gate"
+    (let [result (policy/check-policy-pack
+                  {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
+                  {:policy-packs [(warn-major-pack)]})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (= 1 (count (:warnings result))))
+      (is (= :no-danger-token (-> result :warnings first :code))))))
+
+(deftest check-policy-pack-clean-artifact-passes
+  (testing "no rule fires → gate passes clean"
+    (let [result (policy/check-policy-pack
+                  {:artifact/content "nothing to see here" :artifact/path "main.tf"}
+                  {:policy-packs [hard-halt-major-pack]})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result))))))
