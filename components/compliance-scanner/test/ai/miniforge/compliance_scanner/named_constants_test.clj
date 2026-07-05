@@ -44,6 +44,14 @@
     (is (= [] (tokens "(def h sha256-hex)")) "digits inside a symbol")
     (is (= [] (tokens "(str \"ver 300\")")) "number in a string arg")))
 
+(deftest char-literals-not-retokenized-test
+  (testing "unicode/octal/named char literals don't leak digits as numbers"
+    (is (= [] (tokens "(def c \\u0030)")) "\\u0030 digits not a number")
+    (is (= [] (tokens "(def c \\o101)")) "\\o101 digits not a number")
+    (is (= [] (tokens "(when (= ch \\newline) x)")) "named char literal")
+    (is (= [] (tokens "(def c \\1)")) "digit char literal is not a magic number")
+    (is (= ["42"] (tokens "(def c \\a) (def n 42)")) "a real number after a char literal still flags")))
+
 (deftest string-with-newline-keeps-line-numbers-test
   (testing "a multi-line string does not desync line tracking"
     (let [r (sut/scan-numeric-tokens "(def s \"a\nb\")\n(def n 42)")]

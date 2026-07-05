@@ -105,9 +105,17 @@
             (let [eol (let [j (str/index-of content "\n" i)] (or j n))]
               (recur eol line (+ col (- eol i)) acc))
 
-            ;; char literal \x — skip the backslash and the next char
+            ;; char literal — skip the backslash AND the whole char name, so a
+            ;; unicode/octal literal's digits (e.g. u0030, o101) aren't
+            ;; re-tokenized as a number. A named/unicode/octal literal is a run
+            ;; of alphanumerics; a punctuation literal is a single char.
             (= c \\)
-            (recur (min n (+ i 2)) line (+ col 2) acc)
+            (let [j (inc i)]
+              (if (and (< j n) (Character/isLetterOrDigit (.charAt content j)))
+                (let [end (loop [k j] (if (and (< k n) (Character/isLetterOrDigit (.charAt content k)))
+                                        (recur (inc k)) k))]
+                  (recur end line (+ col (- end i)) acc))
+                (recur (min n (+ i 2)) line (+ col 2) acc)))
 
             ;; string literal — skip to the closing unescaped quote
             (= c \")
@@ -159,16 +167,26 @@
          (filter target-file?)
          vec)))
 
+(defn- safe-slurp
+  "Read a file, returning its content or nil on any I/O error (permissions,
+   encoding, transient failure). The locator is best-effort — a single
+   unreadable file must not abort the whole scan."
+  [f]
+  (try (slurp f) (catch Exception _ nil)))
+
 (defn scan-repo
   "Scan `repo-root` for magic numeric literals. Returns
    {:violations [...] :files-scanned N :rule/id :std/named-constants
-    :counts {:magic-numeric N}}. Pure locator: no writes, no throw, no exit."
+    :counts {:magic-numeric N}}. Pure locator: no writes, no throw, no exit —
+   an unreadable file is skipped, not raised."
   ([repo-root] (scan-repo repo-root nil))
   ([repo-root changed-files]
    (let [files (cond->> (list-target-files repo-root)
                  changed-files (filterv (set changed-files)))
          violations (vec (mapcat (fn [rel]
-                                   (analyze-content rel (slurp (io/file repo-root rel))))
+                                   (if-let [content (safe-slurp (io/file repo-root rel))]
+                                     (analyze-content rel content)
+                                     []))
                                  files))]
      {:violations    violations
       :files-scanned (count files)

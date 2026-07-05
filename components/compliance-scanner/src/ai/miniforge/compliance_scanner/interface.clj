@@ -125,8 +125,10 @@
 
 (defn scan-named-constants
   "Locate magic NUMERIC literals against `repo-root` (Dewey 006). Deterministic,
-   LLM-free MEASUREMENT: returns `:violations` (line/col/token), `:files-scanned`,
-   `:counts` {:magic-numeric N}, `:rule/id`. A triage LOCATOR, not a gate — it
+   LLM-free MEASUREMENT: returns `:violations` (each with `:file`, `:line`,
+   `:column`, `:current` (the literal token), `:kind` `:magic-numeric`, and
+   `:rule/id`), plus `:files-scanned`, `:counts` {:magic-numeric N}, `:rule/id`.
+   A triage LOCATOR, not a gate — it
    over-reports (no math-identity / self-documenting-keyword exemptions) and does
    not cover structured-string magic literals; the semantic judge still owns
    those and the fix (extraction needs a name + intent docstring)."
