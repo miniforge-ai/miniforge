@@ -32,7 +32,8 @@
             [ai.miniforge.compliance-scanner.report             :as report]
             [ai.miniforge.compliance-scanner.execute            :as execute]
             [ai.miniforge.compliance-scanner.comments           :as comments]
-            [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]))
+            [ai.miniforge.compliance-scanner.exceptions-as-data :as exc-data]
+            [ai.miniforge.compliance-scanner.named-constants    :as named-const]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
@@ -117,6 +118,22 @@
    with `:violations`, `:files-scanned`, `:counts`, and `:rule/id`."
   [repo-root]
   (exc-data/scan-repo repo-root))
+
+(def named-constants-rule-id
+  "Stable rule id for the named-constants locator."
+  named-const/rule-id)
+
+(defn scan-named-constants
+  "Locate magic NUMERIC literals against `repo-root` (Dewey 006). Deterministic,
+   LLM-free MEASUREMENT: returns `:violations` (each with `:file`, `:line`,
+   `:column`, `:current` (the literal token), `:kind` `:magic-numeric`, and
+   `:rule/id`), plus `:files-scanned`, `:counts` {:magic-numeric N}, `:rule/id`.
+   A triage LOCATOR, not a gate — it
+   over-reports (no math-identity / self-documenting-keyword exemptions) and does
+   not cover structured-string magic literals; the semantic judge still owns
+   those and the fix (extraction needs a name + intent docstring)."
+  [repo-root]
+  (named-const/scan-repo repo-root))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Phase entry points
