@@ -340,7 +340,7 @@
    - id - Rule ID keyword (e.g., :310-import-preservation)
    - title - Short title
    - description - Full description
-   - severity - :critical, :high, :low, or :info
+   - severity - :critical, :high, :medium, :low, or :info
    - category - Dewey category string (e.g., \"310\")
    - detection - Detection config map
    - enforcement - Enforcement config map
@@ -493,7 +493,7 @@
     :rule/severity :high
     :rule/enforcement {:action :warn :message "Warning"}}
    {:rule/id :test
-    :rule/severity :low  ; Less severe, but original keeps major
+    :rule/severity :low  ; Less severe, but original keeps high
     :rule/enforcement {:action :hard-halt :message "Halt"}})
   ;; => severity stays :high, enforcement escalates to :hard-halt
 

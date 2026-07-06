@@ -72,7 +72,7 @@
 
 (deftest rule-severity-schema-test
   (testing "valid severity keywords pass"
-    (doseq [sev [:critical :high :low :info]]
+    (doseq [sev [:critical :high :medium :low :info]]
       (is (sut/valid? sut/RuleSeverity sev)
           (str sev " should be valid"))))
 
