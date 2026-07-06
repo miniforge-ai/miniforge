@@ -22,9 +22,46 @@
    Referenced by detection entries in the deployment-safety policy pack
   via :check-fn symbols."
   (:require [ai.miniforge.phase-deployment.messages :as msg]
+            [ai.miniforge.policy-pack.interface :as pp]
             [ai.miniforge.schema.interface :as schema]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Deployment policy pack (supplied to the :policy-pack gate)
+
+(def ^:private deployment-safety-pack-resource
+  "Classpath location of the shipped deployment-safety policy pack."
+  "packs/deployment-safety/pack.edn")
+
+(def ^:private deployment-safety-pack
+  "Memoized deployment-safety pack — read once per JVM (the classpath is stable
+   for a process). nil only when the resource is absent; a present-but-malformed
+   pack throws on deref, which the provision enter surfaces as a phase failure
+   rather than a silent skip."
+  (delay
+    (when-let [res (io/resource deployment-safety-pack-resource)]
+      (edn/read-string (slurp res)))))
+
+(declare register-detectors!)
+
+(def ^:private detectors-registered
+  "Registers the deployment custom detectors exactly once, lazily. Registration
+   is NOT a namespace load-time side effect on purpose: register-custom-fn!
+   validates detector arity via JVM reflection, which throws under babashka/SCI
+   (the GraalVM-compat load check). Deref happens at gate time on the JVM."
+  (delay (register-detectors!)))
+
+(defn deployment-policy-packs
+  "The policy packs the provision gate evaluates — the shipped deployment-safety
+   pack. Empty when the pack resource is absent, in which case the :policy-pack
+   gate fails closed (no deploy without deployment policy). Ensures the custom
+   detectors are registered before the pack is evaluated."
+  []
+  @detectors-registered
+  (if-let [pack @deployment-safety-pack] [pack] []))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Preview parsing + violation helpers
@@ -100,6 +137,31 @@
                   :limit max-nodes}
                  {:node-pools (count node-pools)
                   :limit max-nodes}))))
+
+;------------------------------------------------------------------------------ Layer 2
+;; Custom-detector registration
+;;
+;; The policy-pack engine invokes a :custom rule's detector as (f artifact ctx),
+;; artifact being {:artifact/content ... :artifact/path ...}. The check fns above
+;; take the preview content directly, so register thin adapters that unwrap
+;; :artifact/content (falling back to the value itself, so the fns stay callable
+;; with a raw preview in tests/REPL). Without registration these rules resolve to
+;; the semantic judge instead of running deterministically.
+
+(defn- preview-content
+  [artifact]
+  (or (:artifact/content artifact) artifact))
+
+(defn- register-detectors!
+  "Register the deployment custom detectors. Invoked once via
+   `detectors-registered`, not at load time (see that delay's docstring)."
+  []
+  (pp/register-custom-fn!
+   'ai.miniforge.phase-deployment.policy/check-resource-count
+   (fn [artifact ctx] (check-resource-count (preview-content artifact) ctx)))
+  (pp/register-custom-fn!
+   'ai.miniforge.phase-deployment.policy/check-gke-node-limit
+   (fn [artifact ctx] (check-gke-node-limit (preview-content artifact) ctx))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

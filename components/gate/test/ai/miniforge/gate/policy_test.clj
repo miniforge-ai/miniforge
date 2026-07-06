@@ -82,6 +82,17 @@
 ;; or evaluation crashed. Pin that it is now fail-closed and returns the
 ;; full docstring-promised result shape.
 
+(deftest check-policy-pack-fails-closed-on-empty-packs
+  (testing "no packs at the deploy gate blocks (fail-closed) — zero deploy policy
+            is a misconfiguration, not a silent pass"
+    (let [result (policy/check-policy-pack {:artifact/content "x"} {:policy-packs []})]
+      (is (false? (:passed? result)))
+      (is (= :no-policy-packs (-> result :errors first :type)))
+      (is (empty? (:warnings result))))
+    (testing "absent :policy-packs key is also empty → fail-closed"
+      (let [result (policy/check-policy-pack {:artifact/content "x"} {})]
+        (is (false? (:passed? result)))))))
+
 (deftest check-policy-pack-fails-closed-on-exception
   (testing "any exception during evaluation blocks the artifact"
     (with-redefs [policy-pack/check-artifact

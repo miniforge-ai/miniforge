@@ -20,7 +20,7 @@
                     :patterns ["\"delete\""
                                "\"replace\""
                                "\"deleteBeforeReplace\""]}
-   :rule/enforcement {:action :block
+   :rule/enforcement {:action :hard-halt
                       :message "Pulumi preview contains destructive operations. Review and approve explicitly."}}
 
   {:rule/id :deploy/resource-count-limit
@@ -30,7 +30,7 @@
    :rule/category :safety
    :rule/applies-to {:phases #{:provision}}
    :rule/detection {:type :custom
-                    :check-fn 'ai.miniforge.phase-deployment.policy/check-resource-count}
+                    :custom-fn ai.miniforge.phase-deployment.policy/check-resource-count}
    :rule/enforcement {:action :warn
                       :message "Large infrastructure change detected. Verify scope is intentional."}}
 
@@ -55,7 +55,7 @@
    :rule/category :cost
    :rule/applies-to {:phases #{:provision}}
    :rule/detection {:type :custom
-                    :check-fn 'ai.miniforge.phase-deployment.policy/check-gke-node-limit}
+                    :custom-fn ai.miniforge.phase-deployment.policy/check-gke-node-limit}
    :rule/enforcement {:action :warn
                       :message "GKE node pool exceeds recommended size. Verify cost impact."}}
 
@@ -68,5 +68,5 @@
    :rule/detection {:type :content-scan
                     :patterns ["(?i)(password|secret|api[_-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"
                                "(?i)PRIVATE KEY"]}
-   :rule/enforcement {:action :block
+   :rule/enforcement {:action :hard-halt
                       :message "Potential secrets detected in manifests. Use Secret Manager instead."}}]}
