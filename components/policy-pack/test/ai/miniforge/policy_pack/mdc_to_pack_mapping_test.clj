@@ -915,7 +915,7 @@
       (is (keyword? (:rule/id rule)))
       (is (string? (:rule/title rule)))
       (is (string? (:rule/description rule)))
-      (is (#{:critical :high :low :info} (:rule/severity rule)))
+      (is (#{:critical :high :medium :low :info} (:rule/severity rule)))
       (is (string? (:rule/category rule)))
 
       ;; Applicability

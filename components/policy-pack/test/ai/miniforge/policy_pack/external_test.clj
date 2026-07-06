@@ -82,6 +82,7 @@
                   {:diff "diff --git a/test.py b/test.py\n--- a/test.py\n+++ b/test.py\n@@ -1 +1,2 @@\n+# TODO: fix\n"})]
       (is (contains? (:evaluation/summary result) :critical))
       (is (contains? (:evaluation/summary result) :high))
+      (is (contains? (:evaluation/summary result) :medium))
       (is (contains? (:evaluation/summary result) :low))
       (is (contains? (:evaluation/summary result) :info))
       (is (contains? (:evaluation/summary result) :total)))))
