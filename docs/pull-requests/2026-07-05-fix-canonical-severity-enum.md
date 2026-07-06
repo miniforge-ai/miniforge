@@ -39,8 +39,10 @@ and what external consumers expect.
 - `normalize-severity` — coerces legacy `:major → :high`, `:minor → :low`;
   canonical/other values unchanged. The bridge that lets producers/readers
   migrate incrementally without an unvalidated mismatch.
-- `compare-severity` / `more-severe` — ordering helpers (these already existed,
-  duplicated, in `policy-pack/core`; they move here as the shared authority).
+- `compare-severity` / `more-severe` — ordering helpers. These already exist,
+  duplicated, in `policy-pack/core`; this PR adds the shared copy in `schema`,
+  and the `policy-pack` duplicates are deleted when it migrates (follow-up), so
+  the two coexist until then.
 
 ## Follow-ups (this is step 1 of a series)
 

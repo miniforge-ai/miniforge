@@ -125,8 +125,9 @@
    :common/pos-number [:double {:min 0.0}]})
 
 (def Severity
-  "Malli enum for a canonical severity level (see `severities`)."
-  (into [:enum] severities))
+  "Malli enum for a canonical severity level (see `severities`). Reuses the
+   `:severity` registry entry so there is one constructed enum, not two copies."
+  (:severity registry))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composite schemas
