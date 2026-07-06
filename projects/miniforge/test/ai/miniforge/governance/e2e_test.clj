@@ -209,7 +209,7 @@
       (let [result (ks/check-pack-root
                     {:artifact/path "/tmp/evil/malicious.edn"} {})]
         (is (some? result))
-        (is (= :major (:severity (first result))))))))
+        (is (= :high (:severity (first result))))))))
 
 ;; ============================================================================
 ;; Scenario 3: Approval Lifecycle with Event Tracing
