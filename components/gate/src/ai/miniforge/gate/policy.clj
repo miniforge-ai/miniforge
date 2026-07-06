@@ -180,7 +180,14 @@
    rule's enforcement action (`:rule/enforcement :action`) via
    `policy-pack/check-artifact`. `:hard-halt` and `:require-approval` block the
    gate; `:warn` and `:audit` are non-blocking warnings. Severity is advisory
-   and never gates. Fail-closed: any exception during evaluation blocks.
+   and never gates.
+
+   Fail-closed: any exception during evaluation blocks, AND an empty pack set
+   blocks. This gate guards the deploy path, where zero policy is a
+   misconfiguration, not an allowance — the caller (e.g. the provision phase)
+   supplies the deployment policy pack via ctx `:policy-packs`. (The
+   phase-scoped SDLC gate keeps the softer skip-on-no-packs posture, since a
+   repo legitimately without a standards pack is allowed there.)
 
    Arguments:
      artifact - Artifact with :artifact/content (and optional :artifact/path),
@@ -198,11 +205,11 @@
           task-type (get ctx :task-type :implement)
           phase (get ctx :phase :implement)]
       (if (empty? packs)
-        {:passed? true
-         :errors []
+        {:passed? false
+         :errors [{:type :no-policy-packs
+                   :message (msg/t :policy-pack/no-policy-packs-blocked)}]
          :approval-required []
-         :warnings [{:type :no-policy-packs
-                     :message (msg/t :policy-pack/no-policy-packs)}]}
+         :warnings []}
         (let [{:keys [passed? blocking require-approval warnings audits]}
               (policy-pack/check-artifact packs artifact {:task-type task-type :phase phase})]
           {:passed?           (and passed? (empty? require-approval))

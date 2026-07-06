@@ -22,6 +22,7 @@
             [ai.miniforge.phase-deployment.defaults :as defaults]
             [ai.miniforge.phase-deployment.evidence :as evidence]
             [ai.miniforge.phase-deployment.messages :as msg]
+            [ai.miniforge.phase-deployment.policy :as policy]
             [ai.miniforge.phase-deployment.shell :as shell]
             [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.schema.interface :as schema]))
@@ -144,6 +145,10 @@
                       :updates (:updates analysis)
                       :deletes (:deletes analysis)}})
     (-> ctx
+        ;; Supply the deployment policy pack so the :policy-pack gate has
+        ;; something to evaluate. Absent this, the gate sees no packs and fails
+        ;; closed (a deploy must carry deployment policy).
+        (assoc :policy-packs (policy/deployment-policy-packs))
         (assoc-in [:phase :name] :provision)
         (assoc-in [:phase :gates] (get-in config [:phase-config :gates]))
         (assoc-in [:phase :budget] (get-in config [:phase-config :budget]))

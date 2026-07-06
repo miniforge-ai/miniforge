@@ -19,6 +19,8 @@
 (ns ai.miniforge.phase-deployment.policy-test
   (:require
    [ai.miniforge.phase-deployment.policy :as sut]
+   [ai.miniforge.policy-pack.interface :as pp]
+   [cheshire.core :as json]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -49,3 +51,34 @@
                   {:Steps [{:Op "create" :type "gcp:container/nodePool:NodePool"}]}
                   {:max-nodes 2})]
       (is (nil? result)))))
+
+;------------------------------------------------------------------------------ Layer 1
+;; Deployment policy pack supplied to the provision gate
+
+(deftest deployment-policy-packs-is-non-empty
+  (testing "the shipped deployment-safety pack is loaded and supplied — so the
+            fail-closed :policy-pack gate has policy to evaluate"
+    (let [packs (sut/deployment-policy-packs)]
+      (is (= 1 (count packs)))
+      (is (= :miniforge/deployment-safety (:pack/id (first packs)))))))
+
+(deftest deployment-pack-blocks-destructive-preview
+  (testing "a destructive Pulumi preview trips a :hard-halt rule (proving the
+            :block->:hard-halt fix — the rule now actually blocks)"
+    (let [packs   (sut/deployment-policy-packs)
+          preview (json/generate-string {:steps [{:op "delete" :type "gcp:sql:Instance"}]})
+          result  (pp/check-artifact packs
+                                     {:artifact/content preview :artifact/path "preview.json"}
+                                     {:phase :provision})]
+      (is (false? (:passed? result)))
+      (is (seq (:blocking result))))))
+
+(deftest deployment-pack-passes-benign-preview
+  (testing "a create-only preview under limits passes the pack"
+    (let [packs   (sut/deployment-policy-packs)
+          preview (json/generate-string {:steps [{:op "create" :type "gcp:storage:Bucket"}]})
+          result  (pp/check-artifact packs
+                                     {:artifact/content preview :artifact/path "preview.json"}
+                                     {:phase :provision})]
+      (is (true? (:passed? result)))
+      (is (empty? (:blocking result))))))

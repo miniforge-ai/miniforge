@@ -24,7 +24,32 @@
   (:require [ai.miniforge.phase-deployment.messages :as msg]
             [ai.miniforge.schema.interface :as schema]
             [cheshire.core :as json]
+            [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Deployment policy pack (supplied to the :policy-pack gate)
+
+(def ^:private deployment-safety-pack-resource
+  "Classpath location of the shipped deployment-safety policy pack."
+  "packs/deployment-safety/pack.edn")
+
+(def ^:private deployment-safety-pack
+  "Memoized deployment-safety pack — read once per JVM (the classpath is stable
+   for a process). nil only when the resource is absent; a present-but-malformed
+   pack throws on deref, which the provision enter surfaces as a phase failure
+   rather than a silent skip."
+  (delay
+    (when-let [res (io/resource deployment-safety-pack-resource)]
+      (edn/read-string (slurp res)))))
+
+(defn deployment-policy-packs
+  "The policy packs the provision gate evaluates — the shipped deployment-safety
+   pack. Empty when the pack resource is absent, in which case the :policy-pack
+   gate fails closed (no deploy without deployment policy)."
+  []
+  (if-let [pack @deployment-safety-pack] [pack] []))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Preview parsing + violation helpers

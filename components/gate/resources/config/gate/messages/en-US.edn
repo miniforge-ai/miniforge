@@ -36,8 +36,15 @@
   "Runs standards-pack rules targeting the review phase against the artifact"
 
   ;; Policy-pack gate — no-packs warning (pack resource missing / none loaded).
+  ;; Used by the phase-scoped SDLC gate, where a repo legitimately without a
+  ;; standards pack is an allowed skip.
   :policy-pack/no-policy-packs
   "No policy packs loaded — pack gate skipped"
+
+  ;; Policy-pack gate — fail-closed no-packs error (the :policy-pack gate on the
+  ;; deploy path, where zero policy is a misconfiguration, not an allowance).
+  :policy-pack/no-policy-packs-blocked
+  "No policy packs loaded — policy gate fails closed (a policy pack was expected)"
 
   ;; Policy-pack gate — repair-required result message.
   :policy-pack/repair-required
