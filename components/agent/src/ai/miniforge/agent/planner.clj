@@ -117,20 +117,6 @@
           :else
           {:valid? true :errors nil})))))
 
-;; NOTE: Helper function for commented-out generate-plan function
-#_(defn make-task
-  "Helper to create a task with generated ID."
-  [{:keys [description type dependencies acceptance-criteria estimated-effort]
-    :or {dependencies []
-         acceptance-criteria []
-         estimated-effort :medium}}]
-  (cond-> {:task/id (random-uuid)
-           :task/description description
-           :task/type type}
-    (seq dependencies) (assoc :task/dependencies dependencies)
-    (seq acceptance-criteria) (assoc :task/acceptance-criteria acceptance-criteria)
-    estimated-effort (assoc :task/estimated-effort estimated-effort)))
-
 (defn format-existing-files
   "Format existing file contents for inclusion in the user prompt.
 
@@ -322,64 +308,6 @@
 
 ;; make-fallback-plan removed — silent fallback masks real failures.
 ;; Plan generation now throws with evidence on failure (see invoke-fn below).
-
-;; NOTE: This function is currently unused but kept as reference for future implementation
-;; where plan generation may be delegated to a separate function rather than done inline.
-#_(defn generate-plan
-  "Generate a plan from analyzed specification.
-   In a real implementation, this would use an LLM with the system prompt."
-  [analysis context]
-  ;; Generate a basic plan structure
-  ;; In production, this would be LLM-generated based on the system prompt
-  (let [{:keys [spec-text estimated-complexity has-tests?]} analysis
-        plan-id (random-uuid)
-        base-name (or (:plan-name context)
-                      (str "plan-" (subs (str plan-id) 0 8)))
-        design-task (make-task
-                     {:description (str "Design solution for: " (subs spec-text 0 (min 100 (count spec-text))))
-                      :type :design
-                      :acceptance-criteria ["Design document created"
-                                            "Approach reviewed and approved"]
-                      :estimated-effort :medium})
-        impl-task (make-task
-                   {:description "Implement the designed solution"
-                    :type :implement
-                    :dependencies [(:task/id design-task)]
-                    :acceptance-criteria ["Code compiles without errors"
-                                          "Follows project conventions"
-                                          "No linter warnings"]
-                    :estimated-effort (case estimated-complexity
-                                        :low :small
-                                        :medium :medium
-                                        :high :large)})
-        test-task (make-task
-                   {:description "Write tests for the implementation"
-                    :type :test
-                    :dependencies [(:task/id impl-task)]
-                    :acceptance-criteria ["Unit tests pass"
-                                          "Edge cases covered"
-                                          "Test coverage meets threshold"]
-                    :estimated-effort :medium})
-        review-task (make-task
-                     {:description "Code review checkpoint"
-                      :type :review
-                      :dependencies [(:task/id test-task)]
-                      :acceptance-criteria ["Code reviewed"
-                                            "All comments addressed"]
-                      :estimated-effort :small})]
-    {:plan/id plan-id
-     :plan/name base-name
-     :plan/tasks [design-task impl-task test-task review-task]
-     :plan/estimated-complexity estimated-complexity
-     :plan/risks (cond-> []
-                   (= :high estimated-complexity)
-                   (conj "High complexity may require iteration")
-
-                   (not has-tests?)
-                   (conj "No existing test infrastructure"))
-     :plan/assumptions ["Requirements are complete and stable"
-                        "Dependencies are available"]
-     :plan/created-at (java.util.Date.)}))
 
 (defn repair-plan
   "Attempt to repair a plan based on validation errors."
