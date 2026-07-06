@@ -39,20 +39,21 @@ the first time**:
     not a valid enforcement action, so post-PR1 the "block destructive
     production ops" and "block secrets in manifests" rules classified as nothing
     and would not have blocked.
-  - `:check-fn 'sym` → `:check-fn sym` (2 rules): the leading quote made
-    `clojure.edn` read the symbol with the apostrophe baked into the namespace.
+  - `:check-fn 'sym` → `:custom-fn sym` (2 rules): the leading quote made
+    `clojure.edn` read the symbol with the apostrophe baked into the namespace,
+    AND the resolver expects the key `:custom-fn` (not `:check-fn`) plus an
+    explicit registry entry. `phase_deployment/policy.clj` now registers both
+    detectors via `register-custom-fn!`, with a thin adapter that unwraps
+    `:artifact/content` (the engine invokes `(f artifact ctx)`, the fns take the
+    preview content). So the two `:warn` rules now run deterministically instead
+    of routing to the unwired semantic judge.
 
 Net effect: a destructive Pulumi preview (delete/replace) now blocks the
-provision gate; a public-endpoint preview requires approval; a benign preview
-passes.
+provision gate; a public-endpoint preview requires approval; a large-change
+preview warns; a benign preview passes.
 
 ## Out of scope (noted, not fixed here)
 
-- The two `:custom` `:warn` rules (resource-count, gke-node-limit) use
-  `:check-fn` where the resolver expects `:custom-fn`, and their detector fns are
-  unregistered — so they route to the (unwired, no-op) semantic judge. They are
-  non-blocking and are detection-quality work (Finding 7). Left as-is (current
-  behavior; verified they no-op without error).
 - The pack's `:high`/`:medium`/`:critical` severities fail the current 4-level
   pack schema enum (`valid-pack?` is false). Severity is advisory post-PR1 and
   `check-artifact` does not validate, so gating is unaffected. These become

@@ -82,3 +82,17 @@
                                      {:phase :provision})]
       (is (true? (:passed? result)))
       (is (empty? (:blocking result))))))
+
+(deftest deployment-pack-custom-warn-rule-fires
+  (testing "the registered custom detector runs deterministically over the
+            artifact content — a 25-create preview warns (non-blocking), proving
+            the :custom-fn key + registration + artifact-content adapter work"
+    (let [packs   (sut/deployment-policy-packs)
+          preview (json/generate-string {:steps (vec (repeat 25 {:op "create"
+                                                                  :type "gcp:compute:Instance"}))})
+          result  (pp/check-artifact packs
+                                     {:artifact/content preview :artifact/path "preview.json"}
+                                     {:phase :provision})]
+      (is (true? (:passed? result)))
+      (is (empty? (:blocking result)))
+      (is (some #(= :deploy/resource-count-limit (:code %)) (:warnings result))))))
