@@ -112,7 +112,7 @@
 ;; A :high/:low rule and every content-scan violation (which carries no
 ;; :severity) previously fell through a severity cascade to a silent pass.
 
-(def ^:private hard-halt-major-pack
+(def ^:private hard-halt-high-pack
   "One rule: :high severity, :hard-halt enforcement, content-scan detection (so
    the violation carries no :severity key). Must block the gate."
   {:pack/id      "test-deploy-block"
@@ -123,26 +123,26 @@
                    :rule/enforcement {:action  :hard-halt
                                       :message "Danger token present"}}]})
 
-(defn- warn-major-pack
-  "As hard-halt-major-pack, but :warn enforcement — must pass (advisory)."
+(defn- warn-high-pack
+  "As hard-halt-high-pack, but :warn enforcement — must pass (advisory)."
   []
-  (assoc-in hard-halt-major-pack [:pack/rules 0 :rule/enforcement :action] :warn))
+  (assoc-in hard-halt-high-pack [:pack/rules 0 :rule/enforcement :action] :warn))
 
-(deftest check-policy-pack-blocks-major-hard-halt-rule
+(deftest check-policy-pack-blocks-high-hard-halt-rule
   (testing ":high :hard-halt content-scan rule blocks the deploy gate"
     (let [result (policy/check-policy-pack
                   {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
-                  {:policy-packs [hard-halt-major-pack]})]
+                  {:policy-packs [hard-halt-high-pack]})]
       (is (false? (:passed? result)))
       (is (= 1 (count (:errors result))))
       (is (= :no-danger-token (-> result :errors first :code)))
       (is (empty? (:approval-required result))))))
 
-(deftest check-policy-pack-passes-major-warn-rule
+(deftest check-policy-pack-passes-high-warn-rule
   (testing ":high :warn rule passes with a warning — severity does not gate"
     (let [result (policy/check-policy-pack
                   {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
-                  {:policy-packs [(warn-major-pack)]})]
+                  {:policy-packs [(warn-high-pack)]})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result)))
       (is (= 1 (count (:warnings result))))
@@ -152,14 +152,14 @@
   (testing "no rule fires → gate passes clean"
     (let [result (policy/check-policy-pack
                   {:artifact/content "nothing to see here" :artifact/path "main.tf"}
-                  {:policy-packs [hard-halt-major-pack]})]
+                  {:policy-packs [hard-halt-high-pack]})]
       (is (true? (:passed? result)))
       (is (empty? (:errors result))))))
 
 (deftest check-policy-pack-blocks-require-approval-with-detail
   (testing ":require-approval blocks the gate AND lands in :errors, so the
             failure carries detail (check-gate emits failure events from :errors)"
-    (let [pack   (assoc-in hard-halt-major-pack
+    (let [pack   (assoc-in hard-halt-high-pack
                            [:pack/rules 0 :rule/enforcement :action] :require-approval)
           result (policy/check-policy-pack
                   {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
