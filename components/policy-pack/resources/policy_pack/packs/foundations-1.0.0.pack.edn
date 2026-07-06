@@ -73,7 +73,7 @@
   {:rule/id          :foundations/require-resource-tags
    :rule/title       "Require Resource Tags"
    :rule/description "Ensures Terraform resources include a tags block. Untagged resources violate cost-allocation and ownership-tracking policies."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
@@ -87,7 +87,7 @@
   {:rule/id          :foundations/enforce-naming-convention
    :rule/title       "Enforce Naming Convention"
    :rule/description "Scans for Terraform resource names that do not follow snake_case convention. Consistent naming prevents confusion across modules."
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
@@ -115,7 +115,7 @@
   {:rule/id          :foundations/no-unsafe-rust
    :rule/title       "No Unsafe Rust"
    :rule/description "Detects unsafe blocks in Rust code. Unsafe bypasses borrow checker guarantees and must be explicitly justified and reviewed."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.rs"]
                        :phases #{:implement :review}}
@@ -130,7 +130,7 @@
   {:rule/id          :foundations/no-unwrap-in-lib
    :rule/title       "No Unwrap in Library Code"
    :rule/description "Detects .unwrap() calls in Rust library code. Panicking on None/Err is acceptable in tests and examples but not in library functions."
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/src/**/*.rs"]
                        :phases #{:implement :review}}
@@ -152,7 +152,7 @@
   {:rule/id          :foundations/no-force-unwrap-swift
    :rule/title       "No Force Unwrap in Swift"
    :rule/description "Detects force-unwrap (!) on optionals in Swift. Force-unwrap crashes at runtime when the value is nil."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.swift"]
                        :phases #{:implement :review}}
@@ -171,7 +171,7 @@
   {:rule/id          :foundations/no-force-cast-swift
    :rule/title       "No Force Cast in Swift"
    :rule/description "Detects force casts (as!) in Swift. Force casts crash at runtime when the type doesn't match."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.swift"]
                        :phases #{:implement :review}}
@@ -200,7 +200,7 @@
   {:rule/id          :foundations/no-requiring-resolve
    :rule/title       "No requiring-resolve in Clojure"
    :rule/description "Detects requiring-resolve calls. Direct namespace requires are preferred — requiring-resolve is only appropriate for true plugin/extension points where the dependency is genuinely optional at the module level."
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.clj" "**/*.cljc"]
                        :phases #{:implement :review}}
@@ -215,7 +215,7 @@
   {:rule/id          :foundations/no-inline-anon-fns
    :rule/title       "No Inline Anonymous Functions in Pipelines"
    :rule/description "Detects multi-line anonymous functions passed to map, keep, filter, mapcat, reduce. Extract to named defn- for testability and readability."
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "001"
    :rule/applies-to  {:file-globs ["**/*.clj" "**/*.cljc"]
                        :phases #{:implement :review}}

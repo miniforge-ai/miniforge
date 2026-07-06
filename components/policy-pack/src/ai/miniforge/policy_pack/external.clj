@@ -131,7 +131,7 @@
    Returns:
    {:evaluation/passed? bool
     :evaluation/violations [{:rule-id kw :severity kw :message str :path str}]
-    :evaluation/summary {:critical int :major int :minor int :info int :total int}
+    :evaluation/summary {:critical int :high int :medium int :low int :info int :total int}
     :evaluation/artifacts-checked int
     :evaluation/packs-applied [string]}"
   [packs pr-data]
@@ -149,7 +149,7 @@
                       artifacts)
         ;; Aggregate violations
         all-violations (mapcat :violations results)
-        severity-counts (merge {:critical 0 :major 0 :minor 0 :info 0}
+        severity-counts (merge {:critical 0 :high 0 :medium 0 :low 0 :info 0}
                                (frequencies (map :severity all-violations)))
         total (count all-violations)
         has-blocking? (some (comp seq :blocking) results)]

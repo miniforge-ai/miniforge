@@ -111,7 +111,7 @@
    :no-markdown-agent-interface
    "No Markdown Agent Interface"
    "Runtime agent definitions must come from EDN packs, not markdown documentation"
-   :major
+   :high
    "900"
    {:type :custom
     :custom-fn 'ai.miniforge.policy-pack.knowledge-safety/check-agent-source}
@@ -127,7 +127,7 @@
    :prompt-injection-tripwire
    "Prompt Injection Tripwire"
    "Detect and flag potential prompt injection attacks in untrusted content"
-   :major
+   :high
    "900"
    {:type :content-scan
     :patterns (all-injection-patterns config)}
@@ -162,7 +162,7 @@
    :pack-root-allowlist
    "Pack Root Allowlist"
    "Packs must only be loaded from declared registry root directories"
-   :major
+   :high
    "900"
    {:type :custom
     :custom-fn 'ai.miniforge.policy-pack.knowledge-safety/check-pack-root}
@@ -250,7 +250,7 @@
                       default-pack-roots)]
     (when path
       (when-not (some #(str/starts-with? (str path) %) allowlist)
-        [(violation :major (str "Pack loaded from non-allowlisted path: " path)
+        [(violation :high (str "Pack loaded from non-allowlisted path: " path)
                     :path path
                     :allowlist allowlist)]))))
 
@@ -266,7 +266,7 @@
         (concat
          (map (fn [v] (violation :critical (:message v) :raw v))
               (:violations result))
-         (map (fn [w] (violation :minor (:message w) :raw w))
+         (map (fn [w] (violation :low (:message w) :raw w))
               (:warnings result)))))))
 
 (defn- first-violation-detector

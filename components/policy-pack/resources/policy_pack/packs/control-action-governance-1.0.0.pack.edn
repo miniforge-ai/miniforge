@@ -76,7 +76,7 @@
   {:rule/id          :ctrl/risk-classification
    :rule/title       "Risk Classification"
    :rule/description "Classifies control actions by risk level (low, medium, high, critical) and applies proportional governance controls. Higher-risk actions require stronger authentication, additional approvals, and tighter blast-radius limits."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:phases #{:plan}}
    :rule/detection   {:type :custom}

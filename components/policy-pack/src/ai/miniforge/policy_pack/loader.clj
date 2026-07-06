@@ -626,7 +626,7 @@
   (normalize-rule {:rule/id :test
                    :rule/title "Test"
                    :rule/description "Desc"
-                   :rule/severity :major
+                   :rule/severity :high
                    :rule/category "300"
                    :rule/applies-to {:task-types [:import]}  ; vector, not set
                    :rule/detection {:type :content-scan}

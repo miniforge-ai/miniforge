@@ -102,7 +102,7 @@
   "Evaluate an external PR against policy packs in read-only mode.
    (evaluate-external-pr packs pr-data) returns
    {:evaluation/passed? bool :evaluation/violations [...]
-   :evaluation/summary {:critical :major :minor :info :total}
+   :evaluation/summary {:critical :high :medium :low :info :total}
    :evaluation/artifacts-checked int :evaluation/packs-applied [string]}."
   external/evaluate-external-pr)
 

@@ -52,7 +52,7 @@
   {:rule/id          :extpr/trigger-governance
    :rule/title       "Trigger Governance"
    :rule/description "Ensures PR evaluation triggers (webhooks, scheduled scans, manual invocations) are authorized and follow the configured trigger policy. Prevents unauthorized or spoofed evaluation triggers."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "700"
    :rule/applies-to  {:phases #{:review}}
    :rule/detection   {:type :custom}
@@ -63,7 +63,7 @@
   {:rule/id          :extpr/feedback-governance
    :rule/title       "Feedback Governance"
    :rule/description "Governs how evaluation feedback is communicated back to PR authors. Ensures feedback follows the configured format, includes actionable remediation guidance, and does not leak internal policy details to external contributors."
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "700"
    :rule/applies-to  {:phases #{:review}}
    :rule/detection   {:type :custom}

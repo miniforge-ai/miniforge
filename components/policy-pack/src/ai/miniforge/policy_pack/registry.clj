@@ -363,7 +363,7 @@
                   :pack/rules [{:rule/id :test-rule
                                 :rule/title "Test Rule"
                                 :rule/description "A test rule"
-                                :rule/severity :major
+                                :rule/severity :high
                                 :rule/category "300"
                                 :rule/applies-to {}
                                 :rule/detection {:type :content-scan

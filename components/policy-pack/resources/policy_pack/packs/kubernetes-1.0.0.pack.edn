@@ -43,7 +43,7 @@
  [{:rule/id          :k8s/no-latest-tag
    :rule/title       "No Latest Image Tag"
    :rule/description "Detects container images using the :latest tag. Mutable tags make deployments non-reproducible and break rollback guarantees."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "320"
    :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
                                     "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
@@ -60,7 +60,7 @@
   {:rule/id          :k8s/require-resource-limits
    :rule/title       "Require Resource Limits"
    :rule/description "Ensures all containers declare CPU and memory limits. Missing limits allow unbounded resource consumption and noisy-neighbor failures."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "320"
    :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
                                     "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"
@@ -95,7 +95,7 @@
   {:rule/id          :k8s/require-probes
    :rule/title       "Require Health Probes"
    :rule/description "Ensures containers declare liveness and readiness probes. Missing probes prevent Kubernetes from detecting and recovering from failures."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "320"
    :rule/applies-to  {:file-globs ["**/k8s/**/*.yaml" "**/k8s/**/*.yml"
                                     "**/kubernetes/**/*.yaml" "**/kubernetes/**/*.yml"

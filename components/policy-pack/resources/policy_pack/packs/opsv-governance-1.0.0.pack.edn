@@ -78,7 +78,7 @@
   {:rule/id          :opsv/abort-gate
    :rule/title       "Abort Condition Gate"
    :rule/description "Validates that rollback/abort conditions are defined before deployment proceeds. Every deployment must have a clear abort signal (error rate, latency, health check) and automated rollback trigger."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "500"
    :rule/applies-to  {:phases #{:plan}}
    :rule/detection   {:type :custom}
@@ -100,7 +100,7 @@
   {:rule/id          :opsv/evidence-completeness
    :rule/title       "Evidence Completeness"
    :rule/description "Validates that all required evidence artifacts (plan output, approval records, test results, observability baseline) are present before marking a deployment as complete. Incomplete evidence blocks phase transition."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "500"
    :rule/applies-to  {:phases #{:review :verify}}
    :rule/detection   {:type :custom}

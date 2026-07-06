@@ -37,7 +37,7 @@
   schema/PackManifest)
 
 (def RuleSeverity
-  "Malli enum schema (`[:enum :critical :major :minor :info]`) for a rule's
+  "Malli enum schema (`[:enum :critical :high :medium :low :info]`) for a rule's
    severity level."
   schema/RuleSeverity)
 
@@ -58,7 +58,7 @@
   schema/RuleDetection)
 
 (def rule-severities
-  "Vector of severity keywords `[:critical :major :minor :info]`, ordered most
+  "Vector of severity keywords `[:critical :high :medium :low :info]`, ordered most
    to least severe."
   schema/rule-severities)
 
