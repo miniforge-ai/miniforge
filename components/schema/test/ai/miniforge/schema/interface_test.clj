@@ -243,3 +243,32 @@
   (test/run-tests 'ai.miniforge.schema.interface-test)
 
   :leave-this-here)
+
+;------------------------------------------------------------------------------ Layer 1
+;; Canonical severity
+
+(deftest severities-are-canonical-five-level
+  (testing "the shared severity enum is the 5-level scale, most to least severe"
+    (is (= [:critical :high :medium :low :info] schema/severities))
+    (is (= {:critical 0 :high 1 :medium 2 :low 3 :info 4} schema/severity-order))))
+
+(deftest severity-schema-rejects-legacy-values
+  (testing "Severity accepts canonical values and rejects legacy :major/:minor"
+    (is (schema/valid? schema/Severity :high))
+    (is (schema/valid? schema/Severity :info))
+    (is (not (schema/valid? schema/Severity :major)))
+    (is (not (schema/valid? schema/Severity :minor)))))
+
+(deftest normalize-severity-maps-legacy-to-canonical
+  (testing ":major->:high, :minor->:low, canonical/other unchanged"
+    (is (= :high (schema/normalize-severity :major)))
+    (is (= :low (schema/normalize-severity :minor)))
+    (is (= :critical (schema/normalize-severity :critical)))
+    (is (= :medium (schema/normalize-severity :medium)))))
+
+(deftest severity-comparison
+  (testing "compare-severity / more-severe order by rank"
+    (is (neg? (schema/compare-severity :critical :low)))
+    (is (pos? (schema/compare-severity :info :high)))
+    (is (zero? (schema/compare-severity :medium :medium)))
+    (is (= :critical (schema/more-severe :low :critical)))))
