@@ -40,10 +40,10 @@
     (is (= :critical (map-severity {"error" :critical} "error"))))
 
   (testing "maps keyword values by name"
-    (is (= :major (map-severity {"warning" :major} :warning))))
+    (is (= :high (map-severity {"warning" :high} :warning))))
 
-  (testing "defaults to :minor for unknown"
-    (is (= :minor (map-severity {"error" :critical} "unknown")))))
+  (testing "defaults to :low for unknown"
+    (is (= :low (map-severity {"error" :critical} "unknown")))))
 
 ;; ============================================================================
 ;; Filter matching
@@ -115,7 +115,7 @@
           result  (sut/apply-mapping mapping output)]
       (is (= 1 (count result)))
       (is (= "src/main.rs" (:file (first result))))
-      (is (= :major (:rule/severity (first result)))))))
+      (is (= :high (:rule/severity (first result)))))))
 
 ;; ============================================================================
 ;; Full mapping application — ruff
@@ -128,7 +128,7 @@
           result  (sut/apply-mapping mapping output)]
       (is (= 1 (count result)))
       (is (= "app.py" (:file (first result))))
-      (is (= :major (:rule/severity (first result)))))))
+      (is (= :high (:rule/severity (first result)))))))
 
 ;; ============================================================================
 ;; Empty / error cases

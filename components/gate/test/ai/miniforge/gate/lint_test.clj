@@ -30,7 +30,7 @@
                                  :severity :critical}]
                      :warnings [{:code :no-todos
                                  :message "Found TODO"
-                                 :severity :minor}]})]
+                                 :severity :low}]})]
       (is (= {:passed? false
               :errors [{:type :policy-violation
                         :message "Found secret"
@@ -38,7 +38,7 @@
                         :rule-id :no-secrets}]
               :warnings [{:type :policy-warning
                           :message "Found TODO"
-                          :severity :minor
+                          :severity :low
                           :rule-id :no-todos}]}
              (lint/run-policy-pack-check {:content "SECRET TODO"}
                                          {:policy-packs [:standards]}))))))

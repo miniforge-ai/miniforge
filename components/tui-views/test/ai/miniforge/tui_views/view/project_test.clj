@@ -298,17 +298,17 @@
 
 (deftest severity-summary-nodes-all-zero
   (testing "All-zero summary → nil"
-    (is (nil? (sut/severity-summary-nodes {:critical 0 :major 0 :minor 0 :info 0})))))
+    (is (nil? (sut/severity-summary-nodes {:critical 0 :high 0 :medium 0 :low 0 :info 0})))))
 
 (deftest severity-summary-nodes-mixed
   (testing "Mixed counts → summary string"
-    (let [nodes (sut/severity-summary-nodes {:critical 1 :major 0 :minor 3 :info 2})]
+    (let [nodes (sut/severity-summary-nodes {:critical 1 :high 0 :medium 3 :low 0 :info 2})]
       (is (= 1 (count nodes)))
       (let [label (:label (first nodes))]
         (is (.contains label "1 critical"))
-        (is (.contains label "3 minor"))
+        (is (.contains label "3 medium"))
         (is (.contains label "2 info"))
-        (is (not (.contains label "major")))))))
+        (is (not (.contains label "high")))))))
 
 ;; ============================================================================
 ;; violation-nodes
@@ -321,7 +321,7 @@
 (deftest violation-nodes-present
   (testing "Non-empty violations → header + colored child nodes"
     (let [violations [{:severity :critical :message "Bad thing" :auto-fixable? false}
-                      {:severity :minor :message "Small thing" :auto-fixable? true}]
+                      {:severity :low :message "Small thing" :auto-fixable? true}]
           nodes (sut/violation-nodes violations)]
       (is (= 3 (count nodes)))
       (is (.contains (:label (first nodes)) "2"))

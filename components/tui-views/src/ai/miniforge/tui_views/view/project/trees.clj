@@ -195,11 +195,15 @@
 
 (defn severity-prefix [severity]
   (case severity
-    :critical "\u2718 CRIT " :major "\u2718 MAJR "
-    :minor    "\u26a0 MINR " :info  "\u2139 INFO " "\u26a0 "))
+    :critical "\u2718 CRIT " :high "\u2718 HIGH "
+    :medium   "\u26a0 MEDM " :low  "\u26a0 LOW  "
+    :info     "\u2139 INFO " "\u26a0 "))
 
 (defn severity-color [severity]
-  (case severity :critical status-fail :major status-fail :minor status-warning :info status-info nil))
+  (case severity
+    :critical status-fail :high status-fail
+    :medium   status-warning :low status-warning
+    :info status-info nil))
 
 (defn pack-detail-nodes
   "Build detail child nodes for a pack at depth 3.
@@ -231,8 +235,9 @@
   (when summary
     (let [parts (cond-> []
                   (pos? (:critical summary 0)) (conj (str (:critical summary) " critical"))
-                  (pos? (:major summary 0))    (conj (str (:major summary) " major"))
-                  (pos? (:minor summary 0))    (conj (str (:minor summary) " minor"))
+                  (pos? (:high summary 0))     (conj (str (:high summary) " high"))
+                  (pos? (:medium summary 0))   (conj (str (:medium summary) " medium"))
+                  (pos? (:low summary 0))      (conj (str (:low summary) " low"))
                   (pos? (:info summary 0))     (conj (str (:info summary) " info")))]
       (when (seq parts)
         [(tree-node (str "Summary: " (str/join ", " parts)) 1)]))))

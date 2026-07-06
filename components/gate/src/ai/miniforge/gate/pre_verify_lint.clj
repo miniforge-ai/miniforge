@@ -61,7 +61,7 @@
    :line     (get v :line 0)
    :message  (get v :current "")
    :rule-id  (get v :rule/id)
-   :severity (get v :rule/severity :major)})
+   :severity (get v :rule/severity :high)})
 
 (defn check-pre-verify-lint
   "Run configured linters on the worktree before verify."
