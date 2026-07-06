@@ -43,7 +43,7 @@
   [severity-map raw-value]
   (let [key (if (keyword? raw-value) (name raw-value) raw-value)]
     (get severity-map key
-         (get severity-map raw-value :minor))))
+         (get severity-map raw-value :low))))
 
 (defn- record->violation
   "Transform a single parsed record into the canonical violation shape

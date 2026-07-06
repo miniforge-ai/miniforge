@@ -141,7 +141,7 @@
    (LLM-judge) detector. Defaults to an acting (:hard-halt) enforcement action."
   [& {:keys [id phases action severity]
       :or   {id :test/semantic phases #{:verify :review}
-             action :hard-halt severity :major}}]
+             action :hard-halt severity :high}}]
   {:rule/id          id
    :rule/enabled?    true
    :rule/severity    severity

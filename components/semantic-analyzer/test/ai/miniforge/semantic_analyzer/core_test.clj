@@ -95,7 +95,7 @@
 (deftest raw->violation-test
   (testing "produces canonical violation shape"
     (let [rule {:rule/id :std/test :rule/category "001"
-                :rule/title "Test Rule" :rule/severity :major}
+                :rule/title "Test Rule" :rule/severity :high}
           v    {:line 42 :current "(bad code)" :message "This is bad"}
           result (raw->violation rule "src/foo.clj" v)]
       (is (= :std/test (:rule/id result)))
@@ -145,7 +145,7 @@
     (let [rule       {:rule/id :std/stratified-design
                       :rule/title "Stratified Design"
                       :rule/category "001"
-                      :rule/severity :major
+                      :rule/severity :high
                       :rule/knowledge-content "Use layers."}
           mock-complete (fn [_client _request]
                           {:success true
@@ -202,7 +202,7 @@
     (let [rule {:rule/id :std/test
                 :rule/title "Test Rule"
                 :rule/category "001"
-                :rule/severity :minor
+                :rule/severity :low
                 :rule/knowledge-content "Check for test."
                 :rule/applies-to {:file-globs ["components/semantic-analyzer/test/**/*.clj"]}}
           call-count (atom 0)
@@ -220,7 +220,7 @@
     (let [rule    {:rule/id :std/test
                    :rule/title "Test Rule"
                    :rule/category "001"
-                   :rule/severity :minor
+                   :rule/severity :low
                    :rule/knowledge-content "Check it."
                    :rule/applies-to {:file-globs ["src/*.clj"]}}
           judged  (atom [])
@@ -241,9 +241,9 @@
 
 (deftest analyze-rules-on-files-batched-test
   (testing "one LLM call per file across many rules; violations distributed by rule-id"
-    (let [rule-a {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :major
+    (let [rule-a {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :high
                   :rule/knowledge-content "no a" :rule/applies-to {:file-globs ["src/*.clj"]}}
-          rule-b {:rule/id :std/b :rule/title "B" :rule/category "002" :rule/severity :major
+          rule-b {:rule/id :std/b :rule/title "B" :rule/category "002" :rule/severity :high
                   :rule/knowledge-content "no b" :rule/applies-to {:file-globs ["src/*.clj"]}}
           calls  (atom 0)
           mock   (fn [_client _request]
@@ -260,7 +260,7 @@
       (is (= 1 (count (get-in result [:by-rule :std/b]))))
       (is (= :std/a (:rule/id (first (get-in result [:by-rule :std/a])))))))
   (testing "a rule whose glob does not match a file is not judged against it"
-    (let [clj-rule {:rule/id :std/clj :rule/title "Clj" :rule/category "001" :rule/severity :minor
+    (let [clj-rule {:rule/id :std/clj :rule/title "Clj" :rule/category "001" :rule/severity :low
                     :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
           calls    (atom 0)
           mock     (fn [_client _request] (swap! calls inc) {:success true :content "[]"})
@@ -273,9 +273,9 @@
   (testing "an untagged violation is attributed to EVERY rule in the batch
             (fail-closed), never dropped — the model forgetting :rule-id must not
             silently lose a real finding"
-    (let [rule-a {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :major
+    (let [rule-a {:rule/id :std/a :rule/title "A" :rule/category "001" :rule/severity :high
                   :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
-          rule-b {:rule/id :std/b :rule/title "B" :rule/category "002" :rule/severity :major
+          rule-b {:rule/id :std/b :rule/title "B" :rule/category "002" :rule/severity :high
                   :rule/knowledge-content "k" :rule/applies-to {:file-globs ["src/*.clj"]}}
           mock   (fn [_client _request]
                    {:success true :content "[{:line 1 :message \"untagged finding\"}]"})
@@ -288,7 +288,7 @@
   {:rule/id :std/test
    :rule/title "Test"
    :rule/category "001"
-   :rule/severity :minor
+   :rule/severity :low
    :rule/knowledge-content "Test rule."
    :rule/applies-to {:file-globs ["src/*.clj"]}})
 

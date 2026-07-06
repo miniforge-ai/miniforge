@@ -64,7 +64,7 @@
    :risk {:risk/score 0.2 :risk/level :low :risk/factors []}
    :policy {:policy/overall :pass
             :policy/packs-applied []
-            :policy/summary {:critical 0 :major 0 :minor 0 :info 0 :total 0}
+            :policy/summary {:critical 0 :high 0 :low 0 :info 0 :total 0}
             :policy/violations []}
    :recommendation :merge})
 

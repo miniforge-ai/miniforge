@@ -46,8 +46,8 @@
    :severity [:level]}
   :mapping/severity-map
   {"error"   :critical
-   "warning" :major
-   "info"    :minor}}
+   "warning" :high
+   "info"    :low}}
 
  ;; ── Clippy (Rust) ──────────────────────────────────────────────────────────
  {:mapping/id          :clippy
@@ -62,8 +62,8 @@
    :severity [:message :level]}
   :mapping/severity-map
   {"error"   :critical
-   "warning" :major
-   "note"    :minor
+   "warning" :high
+   "note"    :low
    "help"    :info}}
 
  ;; ── ESLint ─────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@
    :severity [:severity]}
   :mapping/severity-map
   {2 :critical
-   1 :major}}
+   1 :high}}
 
  ;; ── golangci-lint ──────────────────────────────────────────────────────────
  {:mapping/id          :golangci-lint
@@ -95,8 +95,8 @@
    :severity [:Severity]}
   :mapping/severity-map
   {"error"   :critical
-   "warning" :major
-   "info"    :minor}}
+   "warning" :high
+   "info"    :low}}
 
  ;; ── ruff (Python) ──────────────────────────────────────────────────────────
  {:mapping/id          :ruff
@@ -110,10 +110,10 @@
    :severity [:type]}
   :mapping/severity-map
   {"E"       :critical
-   "W"       :major
-   "C"       :minor
+   "W"       :high
+   "C"       :low
    "R"       :info
-   "warning" :major
+   "warning" :high
    "error"   :critical}}
 
  ;; ── SwiftLint ──────────────────────────────────────────────────────────────
@@ -128,4 +128,4 @@
    :severity [:severity]}
   :mapping/severity-map
   {"error"   :critical
-   "warning" :major}}]
+   "warning" :high}}]
