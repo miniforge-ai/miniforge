@@ -4,6 +4,7 @@
         ai.miniforge/algorithms {:local/root "../algorithms"}
         ai.miniforge/config {:local/root "../config"}
         ai.miniforge/response {:local/root "../response"}
+        ai.miniforge/schema {:local/root "../schema"}
         metosin/malli {:mvn/version "0.16.4"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

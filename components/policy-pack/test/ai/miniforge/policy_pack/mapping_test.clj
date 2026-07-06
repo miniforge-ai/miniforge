@@ -44,7 +44,7 @@
    :pack/rules       [{:rule/id          :test/copyright
                         :rule/title       "Copyright Header"
                         :rule/description "Require copyright header"
-                        :rule/severity    :minor
+                        :rule/severity    :low
                         :rule/category    "810"
                         :rule/applies-to  {}
                         :rule/detection   {:type :content-scan :pattern "copyright"}
@@ -52,7 +52,7 @@
                        {:rule/id          :test/ops-rule
                         :rule/title       "Ops Rule"
                         :rule/description "Operations check"
-                        :rule/severity    :major
+                        :rule/severity    :high
                         :rule/category    "500"
                         :rule/applies-to  {}
                         :rule/detection   {:type :content-scan :pattern "test"}

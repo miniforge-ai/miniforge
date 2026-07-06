@@ -551,11 +551,11 @@
                            (contains? valid-enforcement-actions fm-action) fm-action
                            always-apply :warn
                            :else :audit)
-          ;; A rule that opts into blocking is at least :major.
+          ;; A rule that opts into blocking is at least :high (canonical scale).
           severity       (cond
-                           (= action :hard-halt) :major
-                           always-apply :major
-                           :else :minor)
+                           (= action :hard-halt) :high
+                           always-apply :high
+                           :else :low)
           enforcement-msg (or (some-> enforcement-fm (get "message") str str/trim
                                       not-empty)
                               (str "Standard: " title))

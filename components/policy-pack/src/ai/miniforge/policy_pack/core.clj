@@ -30,17 +30,11 @@
    - Enforcement escalation (stricter wins)"
   (:require
    [ai.miniforge.policy-pack.detection :as detection]
-   [ai.miniforge.policy-pack.registry :as registry]))
+   [ai.miniforge.policy-pack.registry :as registry]
+   [ai.miniforge.schema.interface :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Severity and enforcement comparison
-
-(def severity-order
-  "Severity levels from most to least severe."
-  {:critical 0
-   :major 1
-   :minor 2
-   :info 3})
 
 (def enforcement-order
   "Enforcement actions from strictest to most lenient."
@@ -49,17 +43,14 @@
    :warn 2
    :audit 3})
 
-(defn compare-severity
-  "Compare two severity levels.
-   Returns negative if a is more severe, positive if b is more severe, 0 if equal."
-  [a b]
-  (- (get severity-order a 99)
-     (get severity-order b 99)))
+(def compare-severity
+  "Compare two severities by the shared canonical order (negative if a is more
+   severe, positive if b is, 0 if equal)."
+  shared/compare-severity)
 
-(defn more-severe
-  "Return the more severe of two severity levels."
-  [a b]
-  (if (neg? (compare-severity a b)) a b))
+(def more-severe
+  "Return the more severe of two severities (shared canonical order)."
+  shared/more-severe)
 
 (defn compare-enforcement
   "Compare two enforcement actions.
@@ -349,7 +340,7 @@
    - id - Rule ID keyword (e.g., :310-import-preservation)
    - title - Short title
    - description - Full description
-   - severity - :critical, :major, :minor, or :info
+   - severity - :critical, :high, :medium, :low, or :info
    - category - Dewey category string (e.g., \"310\")
    - detection - Detection config map
    - enforcement - Enforcement config map
@@ -489,8 +480,8 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Test severity comparison
-  (compare-severity :critical :major)  ;; => -1 (critical more severe)
-  (more-severe :minor :major)          ;; => :major
+  (compare-severity :critical :high)  ;; => -1 (critical more severe)
+  (more-severe :low :high)          ;; => :high
 
   ;; Test enforcement comparison
   (compare-enforcement :hard-halt :warn)  ;; => -2 (hard-halt stricter)
@@ -499,12 +490,12 @@
   ;; Test rule merging
   (merge-rules
    {:rule/id :test
-    :rule/severity :major
+    :rule/severity :high
     :rule/enforcement {:action :warn :message "Warning"}}
    {:rule/id :test
-    :rule/severity :minor  ; Less severe, but original keeps major
+    :rule/severity :low  ; Less severe, but original keeps high
     :rule/enforcement {:action :hard-halt :message "Halt"}})
-  ;; => severity stays :major, enforcement escalates to :hard-halt
+  ;; => severity stays :high, enforcement escalates to :hard-halt
 
   ;; Create a pack
   (def test-pack
@@ -513,7 +504,7 @@
                  [(create-rule :no-todos
                                "No TODOs"
                                "Don't leave TODOs in code"
-                               :minor "800"
+                               :low "800"
                                (content-scan-detection "TODO")
                                (warn-enforcement "Found TODO comment"))]))
 
@@ -525,8 +516,8 @@
 
   ;; Resolve rules from multiple packs
   (resolve-rules
-   [{:rule/id :test :rule/severity :minor :rule/enforcement {:action :warn}}
-    {:rule/id :test :rule/severity :major :rule/enforcement {:action :hard-halt}}
+   [{:rule/id :test :rule/severity :low :rule/enforcement {:action :warn}}
+    {:rule/id :test :rule/severity :high :rule/enforcement {:action :hard-halt}}
     {:rule/id :other :rule/severity :info :rule/enforcement {:action :audit}}])
 
   :leave-this-here)

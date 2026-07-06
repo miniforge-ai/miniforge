@@ -64,7 +64,7 @@
   {:rule/id          :risk/audit-connector-actions
    :rule/title       "Audit Connector Actions"
    :rule/description "Ensures all connector-mediated external actions (API calls, database writes, messaging) are recorded in the immutable audit log. Connector actions without audit trail are rejected."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:phases #{:implement}}
    :rule/detection   {:type :custom}

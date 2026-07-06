@@ -75,7 +75,7 @@
   {:rule/id          :cap/require-reapproval
    :rule/title       "Require Reapproval for Scope Changes"
    :rule/description "Requires human reapproval when an agent's capability scope changes mid-task. Prevents incremental scope creep by requiring explicit human acknowledgement of expanded access."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:phases #{:implement}}
    :rule/detection   {:type :custom}

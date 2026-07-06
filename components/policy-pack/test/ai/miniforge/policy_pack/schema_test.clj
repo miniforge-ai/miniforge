@@ -35,9 +35,9 @@
 ;; ============================================================================
 
 (deftest rule-severities-test
-  (testing "rule-severities is a vector of four keywords in descending severity"
-    (is (= [:critical :major :minor :info] sut/rule-severities))
-    (is (= 4 (count sut/rule-severities)))))
+  (testing "rule-severities is the canonical five-keyword scale, descending"
+    (is (= [:critical :high :medium :low :info] sut/rule-severities))
+    (is (= 5 (count sut/rule-severities)))))
 
 (deftest enforcement-actions-test
   (testing "enforcement-actions ordered from strictest to most lenient"
@@ -72,13 +72,13 @@
 
 (deftest rule-severity-schema-test
   (testing "valid severity keywords pass"
-    (doseq [sev [:critical :major :minor :info]]
+    (doseq [sev [:critical :high :medium :low :info]]
       (is (sut/valid? sut/RuleSeverity sev)
           (str sev " should be valid"))))
 
-  (testing "invalid values rejected"
+  (testing "invalid values rejected — incl. the legacy :major/:minor"
     (are [v] (not (sut/valid? sut/RuleSeverity v))
-      :warning :error :high :low "critical" nil 42)))
+      :warning :error :major :minor "critical" nil 42)))
 
 (deftest rule-enforcement-schema-test
   (testing "valid enforcement actions pass"
@@ -260,7 +260,7 @@
   {:rule/id          :test/example
    :rule/title       "Example Rule"
    :rule/description "An example rule for testing"
-   :rule/severity    :minor
+   :rule/severity    :low
    :rule/category    "testing"
    :rule/applies-to  {:task-types #{:create}}
    :rule/detection   {:type :custom}
@@ -335,7 +335,7 @@
     (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/id "not-keyword")))))
 
   (testing ":rule/severity must be valid enum"
-    (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/severity :high)))))
+    (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/severity :major)))))
 
   (testing ":rule/category must be string"
     (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/category :testing))))))
@@ -589,7 +589,7 @@
          {:rule/id               :std/stratified-design
           :rule/title            "Stratified Design"
           :rule/description      "Engineering standard (001): Stratified Design"
-          :rule/severity         :major
+          :rule/severity         :high
           :rule/category         "001"
           :rule/applies-to       {:phases #{:plan :implement :review :verify :release}}
           :rule/detection        {:type :custom}

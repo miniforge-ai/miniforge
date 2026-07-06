@@ -315,7 +315,7 @@
         (is (= :std/stratified-design (:rule/id rule)))
         (is (= "Stratified Design" (:rule/title rule)))
         (is (= "Engineering standard (001): Stratified Design" (:rule/description rule)))
-        (is (= :major (:rule/severity rule)))
+        (is (= :high (:rule/severity rule)))
         (is (= "001" (:rule/category rule)))
         (is (true? (:rule/always-inject? rule)))
         (is (= all-phases (get-in rule [:rule/applies-to :phases])))
@@ -327,7 +327,7 @@
 
 (deftest mdc->rule-enforcement-action-override-test
   (testing "frontmatter enforcement.action :hard-halt makes the rule BLOCKING
-            (content-scan detector + :major severity), so a gate can block on it"
+            (content-scan detector + :high severity), so a gate can block on it"
     (let [content (str "---\ndewey: \"212\"\n"
                        "description: No requiring-resolve\n"
                        "globs: [\"**/*.clj\"]\n"
@@ -338,7 +338,7 @@
           rule (:rule (sut/mdc->rule "clojure-no-requiring-resolve.mdc" content))]
       (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
       (is (= "Use a direct require" (get-in rule [:rule/enforcement :message])))
-      (is (= :major (:rule/severity rule)) "a blocking rule is at least :major")
+      (is (= :high (:rule/severity rule)) "a blocking rule is at least :high")
       (is (= :content-scan (get-in rule [:rule/detection :type])))
       (is (= requiring-resolve-pattern (get-in rule [:rule/detection :pattern])))))
   (testing "an unrecognized action falls back to the alwaysApply default, not garbage"
@@ -455,9 +455,9 @@
       (is (boolean? (:success? result))))))
 
 (deftest mdc->rule-constant-fields-test
-  (testing "non-alwaysApply severity is :minor"
+  (testing "non-alwaysApply severity is :low"
     (let [rule (:rule (sut/mdc->rule "x.mdc" "---\ndewey: \"001\"\n---\nBody"))]
-      (is (= :minor (:rule/severity rule)))))
+      (is (= :low (:rule/severity rule)))))
 
   (testing "detection is always {:type :custom}"
     (let [rule (:rule (sut/mdc->rule "x.mdc" "---\ndewey: \"001\"\n---\nBody"))]

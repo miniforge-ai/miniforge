@@ -25,6 +25,7 @@
 
    Based on policy-pack.spec"
   (:require
+   [ai.miniforge.schema.interface :as shared]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -32,12 +33,14 @@
 ;; Enums and base types
 
 (def rule-severities
-  "Rule severity levels, ordered from most to least severe."
-  [:critical :major :minor :info])
+  "Rule severity levels, ordered from most to least severe. Aliases the shared
+   canonical `schema/severities` — a rule's severity is the same axis as a
+   runtime violation's, so one scale (see schema.core)."
+  shared/severities)
 
 (def RuleSeverity
-  "Schema for rule severity enum."
-  (into [:enum] rule-severities))
+  "Schema for rule severity enum — the shared canonical `schema/Severity`."
+  shared/Severity)
 
 (def enforcement-actions
   "Enforcement actions, ordered from strictest to most lenient."

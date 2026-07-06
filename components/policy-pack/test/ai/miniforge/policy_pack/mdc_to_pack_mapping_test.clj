@@ -152,7 +152,7 @@
         description (derive-description dewey title)
         always-apply (get frontmatter "alwaysApply")
         globs       (get frontmatter "globs")
-        severity    (if always-apply :major :minor)
+        severity    (if always-apply :high :low)
         trimmed-body (when body (str/trim body))
         knowledge   (when (and trimmed-body (not (str/blank? trimmed-body)))
                       trimmed-body)]
@@ -439,11 +439,11 @@
 ;; ===========================================================================
 
 (deftest constant-fields-test
-  (testing "Non-alwaysApply severity is :minor"
+  (testing "Non-alwaysApply severity is :low"
     (let [rule (compile-rule {:filepath "test.mdc"
                               :frontmatter {"dewey" "001"}
                               :body "content"})]
-      (is (= :minor (:rule/severity rule)))))
+      (is (= :low (:rule/severity rule)))))
 
   (testing "Detection is always {:type :custom}"
     (let [rule (compile-rule {:filepath "test.mdc"
@@ -572,8 +572,8 @@
       (is (= "Engineering standard (001): Stratified Design — enforce one-way dependencies and clear data flow"
              (:rule/description rule))))
 
-    (testing ":rule/severity is :major (alwaysApply: true)"
-      (is (= :major (:rule/severity rule))))
+    (testing ":rule/severity is :high (alwaysApply: true)"
+      (is (= :high (:rule/severity rule))))
 
     (testing ":rule/category preserves dewey string"
       (is (= "001" (:rule/category rule))))
@@ -915,7 +915,7 @@
       (is (keyword? (:rule/id rule)))
       (is (string? (:rule/title rule)))
       (is (string? (:rule/description rule)))
-      (is (#{:critical :major :minor :info} (:rule/severity rule)))
+      (is (#{:critical :high :medium :low :info} (:rule/severity rule)))
       (is (string? (:rule/category rule)))
 
       ;; Applicability

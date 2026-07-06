@@ -83,7 +83,7 @@
   {:rule/id          :tf-aws/require-vpc
    :rule/title       "Require VPC Placement"
    :rule/description "Ensures compute and database resources include a vpc_id or subnet_id reference. Resources outside a VPC lack network-level isolation."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "500"
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
@@ -97,7 +97,7 @@
   {:rule/id          :tf-aws/approved-instance-types
    :rule/title       "Approved Instance Types Only"
    :rule/description "Detects EC2 instance types outside the approved list. Unapproved instance types may violate cost or compliance constraints."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "500"
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}

@@ -76,7 +76,7 @@
   {:rule/id          :scope/enforce-knowledge-scope
    :rule/title       "Enforce Knowledge Scope"
    :rule/description "Validates that agents only access policy packs and knowledge bases granted to the current task. Prevents cross-task information leakage and unauthorized pack consumption."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:phases #{:plan :implement}}
    :rule/detection   {:type :custom}
@@ -87,7 +87,7 @@
   {:rule/id          :scope/enforce-timeout
    :rule/title       "Enforce Execution Timeout"
    :rule/description "Monitors agent execution time against the task's declared timeout. Runaway agents that exceed their time budget must be halted to prevent resource exhaustion and cost overruns."
-   :rule/severity    :major
+   :rule/severity    :high
    :rule/category    "001"
    :rule/applies-to  {:phases #{:implement}}
    :rule/detection   {:type :custom}

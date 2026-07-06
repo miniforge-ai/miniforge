@@ -100,7 +100,7 @@
                         :pack/rules [{:rule/id :test-rule
                                      :rule/title \"Test Rule\"
                                      :rule/description \"A test rule\"
-                                     :rule/severity :major
+                                     :rule/severity :high
                                      :rule/category \"800\"
                                      :rule/applies-to {}
                                      :rule/detection {:type :content-scan
@@ -160,7 +160,7 @@
             "{:rule/id :test-rule
               :rule/title \"Test Rule\"
               :rule/description \"Loaded from directory\"
-              :rule/severity :minor
+              :rule/severity :low
               :rule/category \"800\"
               :rule/applies-to {}
               :rule/detection {:type :content-scan :pattern \"test\"}
@@ -187,7 +187,7 @@
               :pack/rules [{:rule/id :same-id
                            :rule/title \"Inline Version\"
                            :rule/description \"From inline\"
-                           :rule/severity :minor
+                           :rule/severity :low
                            :rule/category \"800\"
                            :rule/applies-to {}
                            :rule/detection {:type :content-scan :pattern \"inline\"}
@@ -200,7 +200,7 @@
             "{:rule/id :same-id
               :rule/title \"Directory Version\"
               :rule/description \"From directory\"
-              :rule/severity :major
+              :rule/severity :high
               :rule/category \"800\"
               :rule/applies-to {}
               :rule/detection {:type :content-scan :pattern \"directory\"}
@@ -213,7 +213,7 @@
         (is (= 1 (count rules)))
         ;; Directory version should win
         (is (= "Directory Version" (:rule/title rule)))
-        (is (= :major (:rule/severity rule)))))))
+        (is (= :high (:rule/severity rule)))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Auto-detect and discovery tests

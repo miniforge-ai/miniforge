@@ -165,7 +165,7 @@
 (deftest compile-rule-check-content-violation-test
   (testing "a content-scan rule compiles to an N4 check-fn that reports violations"
     (let [rule     {:rule/id :no-duplicate-ns
-                    :rule/severity :major
+                    :rule/severity :high
                     :rule/detection {:type :content-scan
                                      :pattern "duplicate namespace"}
                     :rule/enforcement {:message "Duplicate namespace"}}
@@ -177,13 +177,13 @@
       (is (= :content-scan (:detector compiled)))
       (is (false? (:passed? result)))
       (is (= :no-duplicate-ns (get-in result [:metadata :rule/id])))
-      (is (= :major (get-in result [:violations 0 :severity])))
+      (is (= :high (get-in result [:violations 0 :severity])))
       (is (= :no-duplicate-ns (get-in result [:violations 0 :rule-id]))))))
 
 (deftest compile-rule-check-content-clean-test
   (testing "a clean artifact returns :passed? true and no violations"
     (let [rule     {:rule/id :no-duplicate-ns
-                    :rule/severity :major
+                    :rule/severity :high
                     :rule/detection {:type :content-scan
                                      :pattern "duplicate namespace"}}
           compiled (sut/compile-rule-check rule)
@@ -232,7 +232,7 @@
 (deftest compile-rule-check-semantic-test
   (testing "a custom heuristic rule with no custom fn compiles to semantic check"
     (let [rule       {:rule/id :heuristic-review
-                      :rule/severity :minor
+                      :rule/severity :low
                       :rule/detection {:type :custom}
                       :rule/enforcement {:message "Heuristic review failed"}}
           context    {:semantic-analyze-fn semantic-violation-analyze
@@ -250,7 +250,7 @@
 (deftest compile-rule-check-semantic-missing-wiring-fails-test
   (testing "compiled semantic checks fail loud instead of silently passing"
     (let [rule     {:rule/id :heuristic-review
-                    :rule/severity :minor
+                    :rule/severity :low
                     :rule/detection {:type :custom}}
           compiled (sut/compile-rule-check rule)
           result   ((:check-fn compiled)
@@ -284,7 +284,7 @@
 (deftest compiled-mechanical-check-pure-test
   (testing "a deterministic compiled check returns equal results for identical inputs"
     (let [rule     {:rule/id :no-token
-                    :rule/severity :major
+                    :rule/severity :high
                     :rule/detection {:type :content-scan
                                      :pattern "TOKEN"}}
           compiled (sut/compile-rule-check rule)

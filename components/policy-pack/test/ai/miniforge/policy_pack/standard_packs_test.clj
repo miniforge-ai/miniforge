@@ -86,7 +86,7 @@
         (doseq [rule (:pack/rules pack)]
           (is (keyword? (:rule/id rule)) (str "Rule in " file " has keyword :rule/id"))
           (is (string? (:rule/title rule)) (str "Rule " (:rule/id rule) " has title"))
-          (is (#{:critical :major :minor :info} (:rule/severity rule))
+          (is (#{:critical :high :medium :low :info} (:rule/severity rule))
               (str "Rule " (:rule/id rule) " has valid severity"))
           (is (map? (:rule/detection rule)) (str "Rule " (:rule/id rule) " has detection"))
           (is (map? (:rule/enforcement rule)) (str "Rule " (:rule/id rule) " has enforcement")))))))
