@@ -220,7 +220,7 @@
 (deftest violation-conversion-test
   (testing "Converts violation to error"
     (let [violation {:rule {:rule/id :test-rule
-                            :rule/severity :major
+                            :rule/severity :high
                             :rule/enforcement {:action :hard-halt
                                                :message "Error!"
                                                :remediation "Fix it"}}
@@ -230,16 +230,16 @@
           error (detection/violation->error violation)]
       (is (= :test-rule (:code error)))
       (is (= "Error!" (:message error)))
-      (is (= :major (:severity error)))
+      (is (= :high (:severity error)))
       (is (= "Fix it" (:remediation error)))))
 
   (testing "Converts violation to warning"
     (let [violation {:rule {:rule/id :test-rule
-                            :rule/severity :minor}
+                            :rule/severity :low}
                      :violation {:message "Warning"}}
           warning (detection/violation->warning violation)]
       (is (= :test-rule (:code warning)))
-      (is (= :minor (:severity warning))))))
+      (is (= :low (:severity warning))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Capability detection tests
@@ -258,14 +258,14 @@
     (capability/register-capability!
      ::stub-lint {:meta {:tool :stub} :check stub-lint-check})
     (let [rule     {:rule/id :no-lint-errors
-                    :rule/severity :major
+                    :rule/severity :high
                     :rule/detection {:type :capability :capability ::stub-lint}}
           artifact {:artifact/content "(defn x [] BADLINT)"
                     :artifact/path "core.clj"}
           result   (detection/detect-capability rule artifact {})]
       (is (some? result))
       (is (= :no-lint-errors (:rule-id result)))
-      (is (= :major (:severity result)) "severity is preserved onto the violation")
+      (is (= :high (:severity result)) "severity is preserved onto the violation")
       (is (= :lint (:capability result)) "check's own violation fields pass through"))))
 
 (deftest detect-capability-clean-test
@@ -273,7 +273,7 @@
     (capability/register-capability!
      ::stub-lint-clean {:meta {:tool :stub} :check stub-lint-check})
     (let [rule     {:rule/id :no-lint-errors
-                    :rule/severity :major
+                    :rule/severity :high
                     :rule/detection {:type :capability :capability ::stub-lint-clean}}
           artifact {:artifact/content "(defn x [] 42)" :artifact/path "core.clj"}]
       (is (nil? (detection/detect-capability rule artifact {}))))))
@@ -294,12 +294,12 @@
     (capability/register-capability!
      ::stub-dispatch {:meta {:tool :stub} :check stub-lint-check})
     (let [rule     {:rule/id :dispatched
-                    :rule/severity :minor
+                    :rule/severity :low
                     :rule/detection {:type :capability :capability ::stub-dispatch}}
           artifact {:artifact/content "BADLINT" :artifact/path "core.clj"}
           result   (detection/detect-violation rule artifact {})]
       (is (= :dispatched (:rule-id result)))
-      (is (= :minor (:severity result))))))
+      (is (= :low (:severity result))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Semantic (LLM-as-judge) detection tests

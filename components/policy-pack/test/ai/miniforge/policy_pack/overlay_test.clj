@@ -60,8 +60,8 @@
     overrides    (assoc :pack/overrides overrides)
     taxonomy-ref (assoc :pack/taxonomy-ref taxonomy-ref)))
 
-(def base-rule-a (make-rule :test/rule-a :minor))
-(def base-rule-b (make-rule :test/rule-b :major))
+(def base-rule-a (make-rule :test/rule-a :low))
+(def base-rule-b (make-rule :test/rule-b :high))
 (def base-pack (make-pack "base" [base-rule-a base-rule-b]
                            :taxonomy-ref {:taxonomy/id :miniforge/dewey
                                           :taxonomy/min-version "1.0.0"}))
@@ -187,8 +187,8 @@
 
 (deftest filter-applicable-rules-respects-enabled-test
   (testing "disabled rules are excluded by filter-applicable-rules"
-    (let [enabled-rule  (make-rule :test/enabled :minor)
-          disabled-rule (assoc (make-rule :test/disabled :minor) :rule/enabled? false)
+    (let [enabled-rule  (make-rule :test/enabled :low)
+          disabled-rule (assoc (make-rule :test/disabled :low) :rule/enabled? false)
           rules         [enabled-rule disabled-rule]
           context       {:artifact {:artifact/path "foo.clj"}
                          :phase    :implement}
@@ -197,7 +197,7 @@
       (is (= :test/enabled (:rule/id (first result))))))
 
   (testing "rules without :rule/enabled? default to enabled"
-    (let [rules   [(make-rule :test/implicit-enabled :minor)]
+    (let [rules   [(make-rule :test/implicit-enabled :low)]
           context {:artifact {:artifact/path "foo.clj"} :phase :implement}
           result  (core/filter-applicable-rules rules context)]
       (is (= 1 (count result))))))

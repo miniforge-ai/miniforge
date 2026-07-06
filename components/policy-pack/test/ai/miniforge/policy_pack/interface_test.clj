@@ -30,7 +30,7 @@
     (let [rule {:rule/id :test-rule
                 :rule/title "Test Rule"
                 :rule/description "A test rule"
-                :rule/severity :major
+                :rule/severity :high
                 :rule/category "800"
                 :rule/applies-to {}
                 :rule/detection {:type :content-scan
@@ -48,7 +48,7 @@
     (let [rule {:rule/id :test
                 :rule/title "Test"
                 :rule/description "Desc"
-                :rule/severity :minor
+                :rule/severity :low
                 :rule/category "800"
                 :rule/applies-to {}
                 :rule/detection {:type :content-scan}
@@ -179,7 +179,7 @@
     (let [rule {:rule/id :test
                 :rule/title "Test"
                 :rule/description "Desc"
-                :rule/severity :minor
+                :rule/severity :low
                 :rule/category "800"
                 :rule/applies-to {}
                 :rule/detection {:type :content-scan}
@@ -198,12 +198,12 @@
                 :no-todos
                 "No TODOs"
                 "Forbid TODO comments"
-                :minor
+                :low
                 "800"
                 (pp/content-scan-detection "TODO")
                 (pp/warn-enforcement "Found TODO"))]
       (is (= :no-todos (:rule/id rule)))
-      (is (= :minor (:rule/severity rule)))
+      (is (= :low (:rule/severity rule)))
       (is (= :content-scan (get-in rule [:rule/detection :type])))
       (is (= :warn (get-in rule [:rule/enforcement :action])))))
 
@@ -212,7 +212,7 @@
                 :test
                 "Test"
                 "Test rule"
-                :major
+                :high
                 "300"
                 (pp/diff-analysis-detection "^-")
                 (pp/halt-enforcement "Violation!" {:remediation "Fix it"})
@@ -267,7 +267,7 @@
     (let [pack (pp/create-pack "test" "Test" "Test pack" "author"
                                :rules
                                [(pp/create-rule :no-todos "No TODOs" "Desc"
-                                                :minor "800"
+                                                :low "800"
                                                 (pp/content-scan-detection "TODO")
                                                 (pp/warn-enforcement "Found TODO"))])
           result (pp/check-artifact pack
@@ -296,7 +296,7 @@
     (let [pack (pp/create-pack "test" "Test" "Test pack" "author"
                                :rules
                                [(pp/create-rule :no-todos "No TODOs" "Desc"
-                                                :minor "800"
+                                                :low "800"
                                                 (pp/content-scan-detection "TODO")
                                                 (pp/warn-enforcement "Found TODO"))])
           result (pp/check-artifact pack
@@ -311,13 +311,13 @@
     (let [pack1 (pp/create-pack "pack1" "Pack 1" "First" "author"
                                 :rules
                                 [(pp/create-rule :no-todos "No TODOs" "Desc"
-                                                 :minor "800"
+                                                 :low "800"
                                                  (pp/content-scan-detection "TODO")
                                                  (pp/warn-enforcement "Found TODO"))])
           pack2 (pp/create-pack "pack2" "Pack 2" "Second" "author"
                                 :rules
                                 [(pp/create-rule :no-fixmes "No FIXMEs" "Desc"
-                                                 :minor "800"
+                                                 :low "800"
                                                  (pp/content-scan-detection "FIXME")
                                                  (pp/warn-enforcement "Found FIXME"))])
           result (pp/check-artifact [pack1 pack2]
@@ -331,21 +331,21 @@
 (deftest resolve-rules-test
   (testing "Later rules override earlier ones"
     (let [rule1 {:rule/id :test
-                 :rule/severity :minor
+                 :rule/severity :low
                  :rule/enforcement {:action :warn :message "Warn"}}
           rule2 {:rule/id :test
-                 :rule/severity :major
+                 :rule/severity :high
                  :rule/enforcement {:action :hard-halt :message "Halt"}}
           resolved (pp/resolve-rules [rule1 rule2])]
       (is (= 1 (count resolved)))
       ;; Severity escalates to higher
-      (is (= :major (:rule/severity (first resolved))))
+      (is (= :high (:rule/severity (first resolved))))
       ;; Enforcement escalates to stricter
       (is (= :hard-halt (get-in (first resolved) [:rule/enforcement :action])))))
 
   (testing "Different rule IDs are preserved"
-    (let [rule1 {:rule/id :rule-a :rule/severity :minor}
-          rule2 {:rule/id :rule-b :rule/severity :major}
+    (let [rule1 {:rule/id :rule-a :rule/severity :low}
+          rule2 {:rule/id :rule-b :rule/severity :high}
           resolved (pp/resolve-rules [rule1 rule2])]
       (is (= 2 (count resolved))))))
 
