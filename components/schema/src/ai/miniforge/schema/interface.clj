@@ -165,6 +165,35 @@
    `:completed`, `:failed`, `:cancelled`)."
   core/workflow-statuses)
 
+(def severities
+  "Canonical severity levels, most to least severe
+   (`:critical :high :medium :low :info`). One source of truth for rule,
+   violation, attention, and display severity."
+  core/severities)
+
+(def Severity
+  "Malli enum schema for a canonical severity level."
+  core/Severity)
+
+(def severity-order
+  "Map from severity keyword to rank (0 = most severe), derived from
+   `severities`."
+  core/severity-order)
+
+(def normalize-severity
+  "Coerce a legacy severity (`:major` → `:high`, `:minor` → `:low`) to the
+   canonical enum; canonical/other values pass through unchanged."
+  core/normalize-severity)
+
+(def compare-severity
+  "Compare two severities: negative when the first is more severe, positive when
+   less, 0 when equal."
+  core/compare-severity)
+
+(def more-severe
+  "Return the more severe of two severities."
+  core/more-severe)
+
 (def log-levels
   "Vector of log severity keywords, most to least verbose (`:trace`, `:debug`,
    `:info`, `:warn`, `:error`, `:fatal`)."

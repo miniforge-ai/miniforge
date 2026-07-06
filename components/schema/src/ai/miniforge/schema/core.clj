@@ -48,6 +48,42 @@
 (def workflow-statuses
   [:pending :running :paused :completed :failed :cancelled])
 
+(def severities
+  "Canonical severity levels, most to least severe. The single source of truth
+   for how-bad-is-it across the codebase: rule severity (policy-pack), runtime
+   violation/attention severity (supervisory, evidence-bundle), and any display
+   or rollup. A violation's severity is the severity of the rule it violates, so
+   one scale — not a per-producer vocabulary. Legacy `:major`/`:minor` map to
+   `:high`/`:low` via `normalize-severity`."
+  [:critical :high :medium :low :info])
+
+(def severity-order
+  "Rank per severity, 0 = most severe. Derived from `severities` so the order
+   table cannot drift from the enum."
+  (zipmap severities (range)))
+
+(defn normalize-severity
+  "Coerce a legacy severity keyword to the canonical enum: `:major` → `:high`,
+   `:minor` → `:low`; every canonical value (and anything else) is returned
+   unchanged. Lets a producer or reader tolerate a pre-migration value."
+  [severity]
+  (case severity
+    :major :high
+    :minor :low
+    severity))
+
+(defn compare-severity
+  "Compare two severities. Negative when `a` is more severe than `b`, positive
+   when less, 0 when equal. Unknown severities sort last."
+  [a b]
+  (- (get severity-order a 99)
+     (get severity-order b 99)))
+
+(defn more-severe
+  "Return the more severe of two severities."
+  [a b]
+  (if (neg? (compare-severity a b)) a b))
+
 (def registry
   "Malli registry for base schema types."
   {;; Identifiers
@@ -80,10 +116,17 @@
    :workflow/phase (into [:enum] workflow-phases)
    :workflow/status (into [:enum] workflow-statuses)
 
+   ;; Severity (canonical, shared across policy + supervisory + display)
+   :severity (into [:enum] severities)
+
    ;; Common types
    :common/timestamp inst?
    :common/non-neg-int [:int {:min 0}]
    :common/pos-number [:double {:min 0.0}]})
+
+(def Severity
+  "Malli enum for a canonical severity level (see `severities`)."
+  (into [:enum] severities))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composite schemas
