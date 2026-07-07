@@ -30,6 +30,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.loop.interface.protocols.gate :as p]
+   [ai.miniforge.loop.messages :as messages]
    [ai.miniforge.logging.interface :as log]
    [clojure.string]))
 
@@ -88,7 +89,7 @@
            :gate/anomaly (anomaly/sub-anomaly
                           :invalid-input
                           :anomalies.gate/validation-failed
-                          (str "Gate " (name gate-id) " (" (name gate-type) ") failed")
+                          (messages/t :gate/failed {:gate-id (name gate-id) :gate-type (name gate-type)})
                           {:gate/id gate-id
                            :gate/type gate-type
                            :gate/errors errors})}
@@ -172,12 +173,12 @@
                          ;; Check for println (common debug leftover)
                          (re-find #"\(println\s" content)
                          (conj (make-error :debug-println
-                                           "Debug println found in code"))
+                                           (messages/t :gate/debug-println)))
 
                          ;; Check for unused :require
                          (re-find #":as\s+_\]" content)
                          (conj (make-error :unused-require
-                                           "Unused namespace alias found")))]
+                                           (messages/t :gate/unused-require))))]
           (if (and fail-on-warning? (seq warnings))
             (fail-result id :lint warnings
                          :duration-ms (clock/elapsed-since start))
@@ -236,7 +237,7 @@
                            :duration-ms (clock/elapsed-since start))
               (fail-result id :test
                            (or (:errors result)
-                               [(make-error :test-failed "Test execution failed")])
+                               [(make-error :test-failed (messages/t :gate/test-failed))])
                            :duration-ms (clock/elapsed-since start))))
           (catch Exception e
             (fail-result id :test
@@ -244,7 +245,7 @@
                          :duration-ms (clock/elapsed-since start))))
         ;; No test function provided, pass by default
         (pass-result id :test
-                     :warnings [(make-error :no-test-fn "No test function configured")]
+                     :warnings [(make-error :no-test-fn (messages/t :gate/no-test-fn))]
                      :duration-ms (clock/elapsed-since start)))))
 
   (gate-id [_this] id)
@@ -286,7 +287,7 @@
                                  (or (re-find #"(?i)(api[_-]?key|secret|password)\s*=\s*['\"][^'\"]+['\"]" content)
                                      (re-find #"(?i)(bearer|token)\s+[a-zA-Z0-9]{20,}" content)))
                           (conj acc (make-error :hardcoded-secret
-                                                "Possible hardcoded secret detected"))
+                                                (messages/t :gate/hardcoded-secret)))
                           acc)
 
                         ;; No TODO comments in production code
@@ -294,7 +295,7 @@
                         (if (and (string? content)
                                  (re-find #"(?i)\b(TODO|FIXME|HACK|XXX)\b" content))
                           (conj acc (make-error :todo-found
-                                                "TODO/FIXME comment found in code"))
+                                                (messages/t :gate/todo-found)))
                           acc)
 
                         ;; Require docstrings
@@ -303,7 +304,7 @@
                                  (#{:code} artifact-type)
                                  (re-find #"\(defn\s+\S+\s+\[" content))
                           (conj acc (make-error :missing-docstring
-                                                "Public function missing docstring"))
+                                                (messages/t :gate/missing-docstring)))
                           acc)
 
                         ;; Unknown policy, ignore
@@ -390,7 +391,7 @@
     (catch Exception e
       (fail-result (gate-id gate) (gate-type gate)
                    [(make-error :gate-execution-error
-                                (str "Gate execution failed: " (.getMessage e)))]))))
+                                (messages/t :gate/execution-failed {:error (.getMessage e)}))]))))
 
 (defn run-gates
   "Run multiple gates against an artifact.
@@ -407,7 +408,7 @@
   (let [logger (:logger context)]
     (when logger
       (log/debug logger :loop :inner/validation-passed
-                 {:message "Starting gate validation"
+                 {:message (messages/t :gate/starting-validation)
                   :data {:gate-count (count gates)}}))
     (loop [remaining gates
            results []

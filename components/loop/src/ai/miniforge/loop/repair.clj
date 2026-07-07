@@ -83,7 +83,7 @@
           max-tokens (:max-tokens config 4000)]
       (when logger
         (log/info logger :loop :inner/repair-attempted
-                  {:message "Attempting LLM repair"
+                  {:message (messages/t :repair/attempting-llm)
                    :data {:strategy :llm-fix
                           :error-count (count errors)
                           :error-codes (mapv :code errors)}}))
@@ -97,11 +97,11 @@
               (repair-success :llm-fix (:artifact result)
                               :tokens-used (:tokens-used result)
                               :duration-ms duration
-                              :message "LLM successfully repaired artifact")
+                              :message (messages/t :repair/llm-success))
               (repair-failure :llm-fix (get result :errors errors)
                               :tokens-used (:tokens-used result)
                               :duration-ms duration
-                              :message "LLM repair attempt failed")))
+                              :message (messages/t :repair/llm-failed))))
           (catch Exception e
             (repair-failure :llm-fix
                             [{:code :repair-exception
@@ -110,7 +110,7 @@
         ;; No repair function provided
         (repair-failure :llm-fix
                         [{:code :no-repair-fn
-                          :message "No repair function provided in context"}]
+                          :message (messages/t :repair/no-repair-fn)}]
                         :duration-ms (- (System/currentTimeMillis) start))))))
 
 (defn llm-fix-strategy
@@ -134,7 +134,7 @@
           delay-ms (:delay-ms config 1000)]
       (when logger
         (log/info logger :loop :inner/repair-attempted
-                  {:message "Attempting retry"
+                  {:message (messages/t :repair/attempting-retry)
                    :data {:strategy :retry
                           :delay-ms delay-ms}}))
       ;; Simple retry: wait and return the same artifact for re-validation
@@ -142,7 +142,7 @@
       ;; Retry doesn't modify the artifact, just allows re-running
       (repair-success :retry artifact
                       :duration-ms (- (System/currentTimeMillis) start)
-                      :message "Retry delay completed"))))
+                      :message (messages/t :repair/retry-completed)))))
 
 (defn retry-strategy
   "Create a simple retry strategy.
@@ -163,7 +163,7 @@
           logger (:logger context)]
       (when logger
         (log/warn logger :loop :inner/escalated
-                  {:message "Escalating to outer loop"
+                  {:message (messages/t :repair/escalating)
                    :data {:error-count (count errors)
                           :error-codes (mapv :code errors)}}))
       ;; Escalation signals that the inner loop cannot handle this
@@ -173,7 +173,7 @@
        :errors errors
        :strategy :escalate
        :duration-ms (- (System/currentTimeMillis) start)
-       :message "Escalating to outer loop for resolution"})))
+       :message (messages/t :repair/escalating-resolution)})))
 
 (defn escalate-strategy
   "Create an escalation strategy.
@@ -264,7 +264,7 @@
   (let [logger (:logger context)]
     (when logger
       (log/debug logger :loop :inner/repair-attempted
-                 {:message "Starting repair orchestration"
+                 {:message (messages/t :repair/starting-orchestration)
                   :data {:strategy-count (count strategies)
                          :max-attempts max-attempts}}))
     (loop [remaining-strategies strategies

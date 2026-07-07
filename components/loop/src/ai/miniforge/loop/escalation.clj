@@ -50,8 +50,8 @@
                              (:anomaly/category anomaly)))
         code (or (when classification (name classification))
                  (when-let [c (:code err)] (name c)))]
-    (str "  " (inc idx) ". " msg
-         (when code (str " [" code "]")))))
+    (str (messages/t :escalation/error-line-prefix {:n (inc idx)}) msg
+         (when code (messages/t :escalation/error-code-tag {:code code})))))
 
 (defn format-error-context
   "Format error context for user display.
@@ -74,7 +74,7 @@
                          (subs content 0 (min 200 (count content)))
                          (pr-str content))]
            (str "  " preview
-                (when (> (count (str content)) 200) "...")))
+                (when (> (count (str content)) 200) (messages/t :escalation/truncation-ellipsis))))
          (str "  " (messages/t :escalation/no-content)))))
 
 (defn format-escalation-prompt
@@ -213,12 +213,13 @@
             updated-episode (decision/update-episode episode resolved-checkpoint)]
         (escalated-result result resolved-checkpoint updated-episode))
       ;; No escalation function, default to abort
-      (let [result {:action :abort
-                    :reason "No escalation function provided"}
+      (let [no-fn-msg (messages/t :escalation/no-escalation-fn)
+            result {:action :abort
+                    :reason no-fn-msg}
             resolved-checkpoint (decision/resolve-checkpoint checkpoint
                                                              (result->response result))
             updated-episode (decision/update-episode episode resolved-checkpoint)]
-        (abort-escalation "No escalation function provided"
+        (abort-escalation no-fn-msg
                           resolved-checkpoint
                           updated-episode)))))
 
