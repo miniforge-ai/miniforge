@@ -16,6 +16,33 @@
   :repair/max-attempts-exceeded   "Maximum repair attempts exceeded"
   :repair/strategies-exhausted    "All repair strategies exhausted"
   :repair/escalated               "Repair escalated to outer loop"
+  :repair/attempting-llm          "Attempting LLM repair"
+  :repair/llm-success             "LLM successfully repaired artifact"
+  :repair/llm-failed              "LLM repair attempt failed"
+  :repair/no-repair-fn            "No repair function provided in context"
+  :repair/attempting-retry        "Attempting retry"
+  :repair/retry-completed         "Retry delay completed"
+  :repair/escalating              "Escalating to outer loop"
+  :repair/escalating-resolution   "Escalating to outer loop for resolution"
+  :repair/starting-orchestration  "Starting repair orchestration"
+
+  ;; Escalation (cont.)
+  :escalation/truncation-ellipsis "..."
+  :escalation/no-escalation-fn    "No escalation function provided"
+  :escalation/error-line-prefix   "  {n}. "
+  :escalation/error-code-tag      " [{code}]"
+
+  ;; Gate validation diagnostics
+  :gate/failed                    "Gate {gate-id} ({gate-type}) failed"
+  :gate/execution-failed          "Gate execution failed: {error}"
+  :gate/starting-validation       "Starting gate validation"
+  :gate/debug-println             "Debug println found in code"
+  :gate/unused-require            "Unused namespace alias found"
+  :gate/test-failed               "Test execution failed"
+  :gate/no-test-fn                "No test function configured"
+  :gate/hardcoded-secret          "Possible hardcoded secret detected"
+  :gate/todo-found                "TODO/FIXME comment found in code"
+  :gate/missing-docstring         "Public function missing docstring"
 
   ;; Inner loop lifecycle
   :inner/invalid-transition       "Invalid state transition"
