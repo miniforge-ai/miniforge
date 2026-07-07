@@ -436,9 +436,10 @@
                                              manifest-entries)}})
       (let [categories (into #{} (keep :zettel/type) zettels)]
         (log/info logger :knowledge :knowledge/rules-injected
-                  {:message (str (count manifest-entries) " rules from "
-                                 (count categories) " categories for agent :"
-                                 (name agent-role))
+                  {:message (messages/t :store/rules-injected
+                                        {:count (count manifest-entries)
+                                         :categories (count categories)
+                                         :agent (name agent-role)})
                    :data {:agent-role     agent-role
                           :rule-count     (count manifest-entries)
                           :categories     (vec (sort-by name categories))
@@ -456,11 +457,11 @@
 (defn format-zettel-for-prompt
   "Format a single zettel as a compact markdown block for LLM context."
   [zettel]
-  (str "### " (:zettel/title zettel)
+  (str (messages/t :store/zettel-heading {:title (:zettel/title zettel)})
        (when-let [dewey (:zettel/dewey zettel)]
-         (str " [" dewey "]"))
+         (messages/t :store/zettel-dewey-tag {:dewey dewey}))
        (when (= :learning (:zettel/type zettel))
-         " (learning)")
+         (messages/t :store/learning-suffix))
        "\n"
        (:zettel/content zettel)
        "\n"))

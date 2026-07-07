@@ -119,7 +119,7 @@
                      :links (when related-to
                               [{:target related-to
                                 :type :extends
-                                :rationale "Learned during implementation related to this rule"}])
+                                :rationale (messages/t :learning/implementation-rationale)}])
                      :confidence 0.7}))
 
 (defn capture-meta-loop-learning
@@ -270,7 +270,7 @@
                                    :tags [:pattern]
                                    :text-search (name tag)})]
         (when (empty? existing)
-          (let [learning-list (str/join "\n" (map #(str "- " (:title %)) learnings))]
+          (let [learning-list (str/join "\n" (map #(str (messages/t :learning/bullet-prefix) (:title %)) learnings))]
             (capture-meta-loop-learning
              knowledge-store
              {:title (messages/t :pattern/title {:tag (name tag) :count count})

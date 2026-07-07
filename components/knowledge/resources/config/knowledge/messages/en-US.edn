@@ -20,4 +20,33 @@
   :trust/circular-dependency        "Circular dependency detected: {path}"
   :trust/path-separator             " -> "
   :trust/missing-dependency         "Missing dependency: {pack-id}"
-  :trust/tainted-in-instruction-chain "Pack {pack-id} has :authority/instruction but transitively includes tainted content from {found-id}"}}
+  :trust/tainted-in-instruction-chain "Pack {pack-id} has :authority/instruction but transitively includes tainted content from {found-id}"
+
+  ;; Learning capture (cont.)
+  :learning/implementation-rationale "Learned during implementation related to this rule"
+  :learning/bullet-prefix            "- "
+
+  ;; Pack promotion justification templates
+  :promotion/safety-scan-passed     "passed knowledge-safety scans with no violations"
+  :promotion/manual-review-approved "manual review approved by trusted administrator"
+  :promotion/signature-verified     "verified signature from trusted key"
+  :promotion/policy-compliance      "meets all policy compliance requirements"
+  :promotion/automated-validation   "passed automated validation and security checks"
+  :promotion/generic                "promoted via {template}"
+  :promotion/with-details           "{base} ({details})"
+
+  ;; Pack promotion validation diagnostics
+  :promotion/invalid-path           "Invalid promotion path: {from} -> {to}"
+  :promotion/justification-required "promotion-justification is required and cannot be empty"
+  :promotion/pack-id-string         "pack/id must be a string"
+
+  ;; Loader diagnostics
+  :loader/error-loading             "Error loading {file}: {error}"
+
+  ;; Store diagnostics
+  :store/rules-injected             "{count} rules from {categories} categories for agent :{agent}"
+  :store/learning-suffix            " (learning)"
+
+  ;; Zettel prompt formatting
+  :store/zettel-heading             "### {title}"
+  :store/zettel-dewey-tag           " [{dewey}]"}}

@@ -27,6 +27,7 @@
    - Layer 1: File loading operations
    - Layer 2: Orchestration (initialize function)"
   (:require
+   [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.store :as store]
    [ai.miniforge.knowledge.yaml :as yaml]
    [clojure.java.io :as io]
@@ -112,7 +113,7 @@
        :zettel/metadata (or frontmatter {})})
 
     (catch Exception e
-      (println "Error loading" (.getName file) ":" (.getMessage e))
+      (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
       nil)))
 
 (defn load-markdown-file
@@ -148,7 +149,7 @@
        :zettel/metadata {}})
 
     (catch Exception e
-      (println "Error loading" (.getName file) ":" (.getMessage e))
+      (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
       nil)))
 
 (defn load-files-from-directory
