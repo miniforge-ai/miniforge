@@ -75,13 +75,16 @@
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
-                      ;; 0.0.0.0/0 anywhere in a (ipv6_)cidr_blocks list — not
-                      ;; only as the sole element — plus IPv6 any (::/0). The
-                      ;; old single-element pattern missed both.
-                      :pattern "(?:cidr_blocks|ipv6_cidr_blocks)\\s*=\\s*\\[[^\\]]*(?:0\\.0\\.0\\.0/0|::/0)"}
+                      ;; Match the quoted open-CIDR value itself (0.0.0.0/0 or
+                      ;; the IPv6 any ::/0). Because content-scan matches
+                      ;; per-line, this catches both single-line lists and the
+                      ;; common multi-line list form (the CIDR on its own line),
+                      ;; where the old single-element pattern was a false
+                      ;; negative. Quoting keeps it off prose mentions.
+                      :pattern "[\"'](?:0\\.0\\.0\\.0/0|::/0)[\"']"}
    :rule/enforcement {:action :hard-halt
-                      :message "Security group allows ingress from 0.0.0.0/0. Restrict CIDR blocks to known IP ranges."
-                      :remediation "Replace 0.0.0.0/0 with specific CIDR ranges for your network."}}
+                      :message "Security group allows ingress from 0.0.0.0/0 or ::/0. Restrict CIDR blocks to known IP ranges."
+                      :remediation "Replace 0.0.0.0/0 (or ::/0) with specific CIDR ranges for your network."}}
 
   {:rule/id          :tf-aws/require-vpc
    :rule/title       "Require VPC Placement"

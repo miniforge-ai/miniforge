@@ -11,16 +11,26 @@ Branch: `fix/ingress-detection`
 ## Summary
 
 Finding-7 false-negative fix. `tf-aws/no-open-ingress` matched `0.0.0.0/0` only
-as the *sole* list element, so `cidr_blocks = ["10.0.0.0/8", "0.0.0.0/0"]` and
-IPv6 any (`ipv6_cidr_blocks = ["::/0"]`) slipped through. The pattern now matches
-`0.0.0.0/0` or `::/0` anywhere in a `(ipv6_)cidr_blocks` list.
+as the *sole* `cidr_blocks` element. It now matches the quoted open-CIDR value
+(`0.0.0.0/0` or IPv6 any `::/0`) directly, so it catches multi-CIDR lists, IPv6,
+and — because `content-scan` matches per-line — the common multi-line list form
+where the CIDR sits on its own line. The enforcement message now names `::/0`.
+
+## Engine note
+
+`detect-content-scan` matches each line independently (`find-matches` splits on
+lines). Matching the quoted value works with that; a context-anchored pattern
+(`cidr_blocks = [ … 0.0.0.0/0`) would have been a false negative for multi-line
+lists. The same per-line limitation affects other multi-line patterns (e.g.
+`k8s/require-resource-limits`'s `resources:\n  limits:`) and is noted in
+`docs/detection-quality-audit-2026-07-06.md` as a detector-engine follow-up.
 
 ## Test plan
 
-- New `no-open-ingress-detection-test`: sole element, multi-CIDR, and IPv6 fire;
-  restricted CIDRs do not.
-- `standard-packs`: 8 tests, 388 assertions, 0 failures.
+- `no-open-ingress-detection-test`: single-line, multi-line, and IPv6 fire;
+  restricted CIDRs and unquoted prose mentions do not.
+- `standard-packs`: 8 tests, 0 failures.
 
 ## Related
 
-- Governance audit Finding 7 (`docs/detection-quality-audit-2026-07-06.md`).
+- Governance audit Finding 7.
