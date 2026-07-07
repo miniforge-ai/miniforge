@@ -171,7 +171,7 @@
                              :explanation "golden synthetic factor"}]}
    :pr/policy {:policy/overall :fail
                :policy/packs-applied ["golden-pack"]
-               :policy/summary {:critical 0 :major 1 :minor 0 :info 0 :total 1}
+               :policy/summary {:critical 0 :high 1 :medium 0 :low 0 :info 0 :total 1}
                :policy/violations [{:rule-id :golden/rule-001
                                     :severity :medium
                                     :message "Golden synthetic violation"

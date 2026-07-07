@@ -459,7 +459,7 @@
 (def ^:private sample-policy
   {:policy/overall       :pass
    :policy/packs-applied ["core"]
-   :policy/summary       {:critical 0 :major 0 :minor 0 :info 0 :total 0}
+   :policy/summary       {:critical 0 :high 0 :medium 0 :low 0 :info 0 :total 0}
    :policy/violations    []})
 
 (deftest pr-scored-merges-into-existing-pr
