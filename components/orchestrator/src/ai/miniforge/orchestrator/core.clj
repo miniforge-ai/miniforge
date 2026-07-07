@@ -128,9 +128,9 @@
 (defn format-zettel-for-context
   "Format a zettel for inclusion in agent context."
   [zettel]
-  (str "### " (:zettel/title zettel)
+  (str (messages/t :knowledge/zettel-heading {:title (:zettel/title zettel)})
        (when-let [dewey (:zettel/dewey zettel)]
-         (str " [" dewey "]"))
+         (messages/t :knowledge/zettel-dewey-tag {:dewey dewey}))
        "\n"
        (:zettel/content zettel)
        "\n"))

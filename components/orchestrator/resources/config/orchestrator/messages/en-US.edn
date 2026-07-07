@@ -3,6 +3,8 @@
   :knowledge/header         "## Relevant Knowledge for {role}\n\n"
   :knowledge/preamble       "The following rules and learnings apply to your task:\n\n"
   :knowledge/separator      "\n---\n\n"
+  :knowledge/zettel-heading "### {title}"
+  :knowledge/zettel-dewey-tag " [{dewey}]"
 
   ;; Task routing
   :route/reason             "Task type {task-type} maps to {agent-role}"
