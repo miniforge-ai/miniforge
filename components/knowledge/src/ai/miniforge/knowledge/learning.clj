@@ -270,7 +270,8 @@
                                    :tags [:pattern]
                                    :text-search (name tag)})]
         (when (empty? existing)
-          (let [learning-list (str/join "\n" (map #(str (messages/t :learning/bullet-prefix) (:title %)) learnings))]
+          (let [bullet (messages/t :learning/bullet-prefix)
+                learning-list (str/join "\n" (map #(str bullet (:title %)) learnings))]
             (capture-meta-loop-learning
              knowledge-store
              {:title (messages/t :pattern/title {:tag (name tag) :count count})
