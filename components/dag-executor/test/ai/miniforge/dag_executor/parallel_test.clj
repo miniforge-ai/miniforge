@@ -217,6 +217,39 @@
       (is (result/err? ret))
       (is (= :lock-not-found (-> ret :error :code))))))
 
+(deftest acquire-file-locks!-concurrent-exclusion-test
+  ;; Exactly one winner when N threads race for the same file.  With the old
+  ;; read-then-swap! shape the conflict check ran outside the CAS, so two
+  ;; threads could both read an empty slot and both commit — this test would
+  ;; have been flaky (often 2+ winners).  The CAS retry loop makes it exact.
+  (testing "Exactly one thread wins when N callers race for the same file"
+    (let [pool    (sut/create-lock-pool)
+          n       20
+          file    "src/shared.clj"
+          results (atom [])
+          latch   (java.util.concurrent.CountDownLatch. n)
+          start   (java.util.concurrent.CountDownLatch. 1)
+          threads (doall
+                   (for [_ (range n)]
+                     (let [hid (random-uuid)]
+                       (doto (Thread. (fn []
+                                        (.countDown latch)
+                                        (.await start)
+                                        (swap! results conj
+                                               (sut/acquire-file-locks!
+                                                pool hid [file] no-logger))))
+                         .start))))]
+      (.await latch)
+      (.countDown start)
+      (doseq [t threads] (.join t 2000))
+      (let [oks    (filter result/ok? @results)
+            errors (filter result/err? @results)]
+        (is (= 1 (count oks))
+            "Exactly one thread must win the exclusive lock")
+        (is (= (dec n) (count errors))
+            "All other threads must see :lock-conflict")
+        (is (every? #(= :lock-conflict (-> % :error :code)) errors))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; acquire-worktree! / release-worktree!
 

@@ -149,40 +149,47 @@
 
 (defn acquire-file-locks!
   "Acquire locks on specific files.
-   Returns error if any files are already locked by another holder."
+   Returns error if any files are already locked by another holder.
+
+   The conflict check and the write are fused into a compare-and-set! retry
+   loop so no two threads can both see an empty slot and both commit — the
+   naive read-then-swap! pattern has a TOCTOU race when two callers read the
+   same snapshot concurrently."
   [lock-pool holder-id files logger]
-  (let [file-set (set files)
-        current-locks (:file-locks @lock-pool)
-        conflicts (->> current-locks
-                       (filter (fn [[other-holder other-files]]
-                                 (and (not= other-holder holder-id)
-                                      (files-overlap? file-set other-files))))
-                       (into {}))]
-    (if (seq conflicts)
-      (do
-        (when logger
-          (log/warn logger :dag-executor :lock/conflict
-                    {:message "File lock conflict"
-                     :data {:holder-id holder-id
-                            :requested-files files
-                            :conflicts conflicts}}))
-        (result/err :lock-conflict
-                    "Files already locked by another task"
-                    {:holder-id holder-id
-                     :conflicts conflicts}))
-      (let [lock (create-lock :exclusive-files holder-id :files files)]
-        ;; Nested under :exclusive-files so repo-write/worktree locks held by
-        ;; the same holder are not clobbered.
-        (swap! lock-pool
-               (fn [pool]
-                 (-> pool
-                     (assoc-in [:locks holder-id :exclusive-files] lock)
-                     (assoc-in [:file-locks holder-id] file-set))))
-        (when logger
-          (log/info logger :dag-executor :lock/acquired
-                    {:message "File locks acquired"
-                     :data {:holder-id holder-id :files files}}))
-        (result/ok lock)))))
+  (let [file-set (set files)]
+    (loop []
+      (let [pool         @lock-pool
+            conflicts    (->> (:file-locks pool)
+                              (filter (fn [[other-holder other-files]]
+                                        (and (not= other-holder holder-id)
+                                             (files-overlap? file-set other-files))))
+                              (into {}))]
+        (if (seq conflicts)
+          (do
+            (when logger
+              (log/warn logger :dag-executor :lock/conflict
+                        {:message "File lock conflict"
+                         :data {:holder-id holder-id
+                                :requested-files files
+                                :conflicts conflicts}}))
+            (result/err :lock-conflict
+                        "Files already locked by another task"
+                        {:holder-id holder-id
+                         :conflicts conflicts}))
+          ;; Nested under :exclusive-files so repo-write/worktree locks held by
+          ;; the same holder are not clobbered.
+          (let [lock     (create-lock :exclusive-files holder-id :files files)
+                new-pool (-> pool
+                             (assoc-in [:locks holder-id :exclusive-files] lock)
+                             (assoc-in [:file-locks holder-id] file-set))]
+            (if (compare-and-set! lock-pool pool new-pool)
+              (do
+                (when logger
+                  (log/info logger :dag-executor :lock/acquired
+                            {:message "File locks acquired"
+                             :data {:holder-id holder-id :files files}}))
+                (result/ok lock))
+              (recur))))))))
 
 (defn release-file-locks!
   "Release file locks for a holder."
