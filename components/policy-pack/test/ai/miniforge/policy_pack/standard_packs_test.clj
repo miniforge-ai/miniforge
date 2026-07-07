@@ -139,3 +139,35 @@
                  "password_field: user_name_column"
                  "(def x 42)"]]
         (is (not (fires? s)) (str "should NOT fire: " s))))))
+
+;; Finding 7: no-inline-anon-fns missed the reader `#(...)` form; no-latest-tag
+;; missed untagged images (implicitly :latest) and false-fired on :latest-*.
+
+(defn- pack-rule [file id]
+  (->> (load-pack-resource file) :pack/rules (filter #(= id (:rule/id %))) first))
+
+(deftest no-inline-anon-fns-detection-test
+  (let [rule (pack-rule "foundations-1.0.0.pack.edn" :foundations/no-inline-anon-fns)
+        fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
+    (is (some? rule))
+    (is (fires? "(map (fn [x] (inc x)) coll)") "explicit (fn [..])")
+    (is (fires? "(map #(inc %) coll)") "reader #(..) — the missed form")
+    (is (not (fires? "(map inc coll)")) "named fn is fine")
+    (is (not (fires? "(filter even? coll)")) "named predicate is fine")))
+
+(deftest no-latest-tag-detection-test
+  (let [rule (pack-rule "kubernetes-1.0.0.pack.edn" :k8s/no-latest-tag)
+        fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
+    (is (some? rule))
+    (testing "explicit :latest and untagged images fire"
+      (is (fires? "image: nginx:latest"))
+      (is (fires? "image: \"nginx:latest\""))
+      (is (fires? "image: nginx") "untagged is implicitly :latest")
+      (is (fires? "image: myreg:5000/app") "registry-port but untagged"))
+    (testing "pinned tags, digests, and :latest-* do not fire"
+      (is (not (fires? "image: nginx:1.2.3")))
+      (is (not (fires? "image: app@sha256:abcdef123")))
+      (is (not (fires? "image: nginx:latest@sha256:abcdef123"))
+          "tag+digest is pinned by the digest")
+      (is (not (fires? "image: nginx:latest.stable")) "latest.stable is a pinned tag")
+      (is (not (fires? "image: nginx:latest-stable")) "latest-stable is a pinned tag"))))
