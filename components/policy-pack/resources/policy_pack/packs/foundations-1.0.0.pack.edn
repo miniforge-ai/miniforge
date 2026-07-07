@@ -70,7 +70,7 @@
                        "xox[baprs]-[0-9A-Za-z-]{10,}"
                        "AIza[0-9A-Za-z_-]{35}"
                        "-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
-                       "(?i)(password|passphrase|secret|api[._-]?key|access[._-]?token|token)\\s*:\\s*[A-Za-z0-9+/=_-]{16,}\\b"]}
+                       "(?i)(password|passphrase|secret|api[._-]?key|access[._-]?token|token)\\s*[:=]\\s*[A-Za-z0-9+/=_-]{16,}(?![\\w(])"]}
    :rule/remediation {:strategy :manual
                       :auto-fixable-default true
                       :exclude-contexts
