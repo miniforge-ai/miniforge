@@ -26,6 +26,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.tool.messages :as messages]
    [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -71,7 +72,7 @@
     (if (empty? missing)
       {:valid? true}
       {:valid? false
-       :errors (mapv #(str "Missing required parameter: " (name %)) missing)})))
+       :errors (mapv #(messages/t :tool/missing-parameter {:param (name %)}) missing)})))
 
 (defn build-tool-definition
   "Build a tool definition map from parts."
@@ -87,7 +88,7 @@
 (defn tool-summary
   "Create a brief summary of a tool for display."
   [tool]
-  (str (:tool/name tool) " - " (:tool/description tool)))
+  (messages/t :tool/summary {:name (:tool/name tool) :description (:tool/description tool)}))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tool protocol and registry
@@ -141,16 +142,16 @@
                      (catch Exception e
                        (let [ex-msg (or (ex-message e) (.getName (class e)))]
                          {:success false
-                          :error {:type "execution_error"
+                          :error {:type :execution-error
                                   :message ex-msg}
                           :anomaly (anomaly/exception-anomaly :fault ex-msg e)})))
                    {:success false
-                    :error {:type "validation_error"
+                    :error {:type :validation-error
                             :errors (:errors validation)}
                     :anomaly (anomaly/anomaly
                               :invalid-input
-                              (str "Tool parameter validation failed: "
-                                   (first (:errors validation)))
+                              (messages/t :tool/validation-failed
+                                          {:error (first (:errors validation))})
                               {})})
           end-ms (System/currentTimeMillis)
           invocation (tracking/build-invocation id params start-ms end-ms result)]
@@ -210,7 +211,7 @@
   [{:keys [id name description parameters handler metadata]
     :or {parameters {} metadata {}}}]
   (when-not (valid-tool-id? id)
-    (throw (ex-info "Tool ID must be a namespaced keyword"
+    (throw (ex-info (messages/t :tool/id-must-be-keyword)
                     {:id id})))
   (->FunctionTool id
                   (or name (clojure.core/name id))
@@ -234,13 +235,11 @@
   [registry tool-id params context]
   (if-let [tool (get-tool registry tool-id)]
     (execute tool params context)
-    {:success false
-     :error {:type "not_found"
-             :message (str "Tool not found: " tool-id)}
-     :anomaly (anomaly/anomaly
-               :not-found
-               (str "Tool not found: " tool-id)
-               {})}))
+    (let [not-found-msg (messages/t :tool/not-found {:tool-id tool-id})]
+      {:success false
+       :error {:type :not-found
+               :message not-found-msg}
+       :anomaly (anomaly/anomaly :not-found not-found-msg {})})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -269,6 +268,6 @@
 
   ;; Validation failure
   (execute-tool registry :tools/echo {} {})
-  ;; => {:success false, :error {:type "validation_error", ...}}
+  ;; => {:success false, :error {:type :validation-error, ...}}
 
   :leave-this-here)

@@ -172,7 +172,7 @@
                     :handler (constantly nil)})
           result (tool/execute my-tool {} {})]
       (is (not (tool/success? result)))
-      (is (= "validation_error" (get-in (tool/get-error result) [:type])))))
+      (is (= :validation-error (get-in (tool/get-error result) [:type])))))
 
   (testing "returns execution error on exception"
     (let [bad-tool (tool/create-tool
@@ -180,7 +180,7 @@
                      :handler throwing-handler})
           result (tool/execute bad-tool {} {})]
       (is (not (tool/success? result)))
-      (is (= "execution_error" (get-in (tool/get-error result) [:type]))))))
+      (is (= :execution-error (get-in (tool/get-error result) [:type]))))))
 
 (deftest execute-by-id-test
   (testing "executes tool by id from registry"
@@ -197,7 +197,7 @@
     (let [registry (tool/create-registry)
           result (tool/execute-by-id registry :test/unknown {} {})]
       (is (not (tool/success? result)))
-      (is (= "not_found" (get-in (tool/get-error result) [:type]))))))
+      (is (= :not-found (get-in (tool/get-error result) [:type]))))))
 
 ;; Invocation tracking tests
 
@@ -228,7 +228,7 @@
           _result (tool/execute my-tool {} context)
           [invocation] (tool/tool-invocations context)]
       (is (= :test/track-error (:tool/id invocation)))
-      (is (= "validation_error" (get-in invocation [:tool/error :type]))))))
+      (is (= :validation-error (get-in invocation [:tool/error :type]))))))
 
 ;; Protocol method tests (N1 conformance)
 
