@@ -24,7 +24,8 @@
    The dependency graph tracks which tasks depend on other tasks.
    A task can only start when all its dependencies are completed."
   (:require
-   [ai.miniforge.logging.interface :as log]))
+   [ai.miniforge.logging.interface :as log]
+   [ai.miniforge.task.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Pure graph algorithms
@@ -150,7 +151,7 @@
        (do
          (when logger
            (log/warn logger :agent :task/cycle-detected
-                     {:message "Dependency would create cycle"
+                     {:message (messages/t :task/dependency-cycle)
                       :data {:parent-id parent-id
                              :child-id child-id}}))
          false)
@@ -161,7 +162,7 @@
                             (update-in [:reverse child-id] (fnil conj #{}) parent-id))))
          (when logger
            (log/debug logger :agent :task/dependency-added
-                      {:message "Dependency added"
+                      {:message (messages/t :task/dependency-added)
                        :data {:parent-id parent-id
                               :child-id child-id}}))
          true)))))
@@ -176,7 +177,7 @@
                       (update-in [:reverse child-id] disj parent-id))))
    (when logger
      (log/debug logger :agent :task/dependency-removed
-                {:message "Dependency removed"
+                {:message (messages/t :task/dependency-removed)
                  :data {:parent-id parent-id
                         :child-id child-id}}))
    true))
