@@ -171,3 +171,18 @@
           "tag+digest is pinned by the digest")
       (is (not (fires? "image: nginx:latest.stable")) "latest.stable is a pinned tag")
       (is (not (fires? "image: nginx:latest-stable")) "latest-stable is a pinned tag"))))
+
+;; Finding 7: no-open-ingress matched only 0.0.0.0/0 as the sole list element,
+;; missing multi-CIDR lists and IPv6 any (::/0).
+
+(deftest no-open-ingress-detection-test
+  (let [rule (pack-rule "terraform-aws-1.0.0.pack.edn" :tf-aws/no-open-ingress)
+        fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
+    (is (some? rule))
+    (testing "open ingress fires anywhere in the list, incl. IPv6"
+      (is (fires? "cidr_blocks = [\"0.0.0.0/0\"]"))
+      (is (fires? "cidr_blocks = [\"10.0.0.0/8\", \"0.0.0.0/0\"]") "not only the sole element")
+      (is (fires? "ipv6_cidr_blocks = [\"::/0\"]") "IPv6 any"))
+    (testing "restricted CIDRs do not fire"
+      (is (not (fires? "cidr_blocks = [\"10.0.0.0/8\"]")))
+      (is (not (fires? "cidr_blocks = [\"192.168.1.0/24\"]"))))))

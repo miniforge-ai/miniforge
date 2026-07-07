@@ -75,7 +75,10 @@
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
-                      :pattern "cidr_blocks\\s*=\\s*\\[\"0\\.0\\.0\\.0/0\"\\]"}
+                      ;; 0.0.0.0/0 anywhere in a (ipv6_)cidr_blocks list — not
+                      ;; only as the sole element — plus IPv6 any (::/0). The
+                      ;; old single-element pattern missed both.
+                      :pattern "(?:cidr_blocks|ipv6_cidr_blocks)\\s*=\\s*\\[[^\\]]*(?:0\\.0\\.0\\.0/0|::/0)"}
    :rule/enforcement {:action :hard-halt
                       :message "Security group allows ingress from 0.0.0.0/0. Restrict CIDR blocks to known IP ranges."
                       :remediation "Replace 0.0.0.0/0 with specific CIDR ranges for your network."}}
