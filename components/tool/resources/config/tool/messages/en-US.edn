@@ -1,0 +1,9 @@
+{:tool/messages
+ {;; Tool display / summary
+  :tool/summary            "{name} - {description}"
+
+  ;; Validation + execution diagnostics
+  :tool/missing-parameter  "Missing required parameter: {param}"
+  :tool/validation-failed  "Tool parameter validation failed: {error}"
+  :tool/id-must-be-keyword "Tool ID must be a namespaced keyword"
+  :tool/not-found          "Tool not found: {tool-id}"}}
