@@ -72,6 +72,39 @@
       (is (clojure.string/includes? (:context match) "line2"))
       (is (clojure.string/includes? (:context match) "line4")))))
 
+;; :mode :negative — absence of the pattern is the violation (a required
+;; pattern, e.g. a copyright header or a k8s resource limit). Regression: the
+;; detector previously ignored :mode and always flagged presence, so every
+;; negative-mode rule (require-*, header-copyright) ran inverted.
+
+(deftest content-scan-negative-mode-test
+  (let [require-header {:rule/id :require-header
+                        :rule/detection {:type :content-scan
+                                         :pattern "Christopher Lester"
+                                         :mode :negative}
+                        :rule/enforcement {:action :hard-halt
+                                           :message "Missing copyright header"}}]
+    (testing "negative mode: pattern PRESENT → no violation (requirement met)"
+      (is (nil? (detection/detect-content-scan
+                 require-header
+                 {:artifact/content "Copyright Christopher Lester" :artifact/path "a.clj"}
+                 {}))))
+
+    (testing "negative mode: pattern ABSENT → violation (requirement unmet)"
+      (let [result (detection/detect-content-scan
+                    require-header
+                    {:artifact/content "no header here" :artifact/path "a.clj"}
+                    {})]
+        (is (some? result))
+        (is (= :require-header (:rule-id result)))))
+
+    (testing "positive mode (default) is unaffected: presence is the violation"
+      (let [pos {:rule/id :no-todo
+                 :rule/detection {:type :content-scan :pattern "TODO"}
+                 :rule/enforcement {:action :warn :message "TODO"}}]
+        (is (some? (detection/detect-content-scan pos {:artifact/content "x TODO"} {})))
+        (is (nil? (detection/detect-content-scan pos {:artifact/content "clean"} {})))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff analysis detection tests
 

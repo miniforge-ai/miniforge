@@ -106,20 +106,32 @@
    - artifact - Artifact with :artifact/content
    - context - Execution context (unused for content-scan)
 
+   Honors `:rule/detection :mode`:
+   - `:positive` (default) — a pattern MATCH is a violation.
+   - `:negative` — the ABSENCE of any pattern match is a violation (the rule
+     requires the pattern to be present, e.g. a copyright header or a k8s
+     resource limit). Applicability (file-globs, phases) scopes which artifacts
+     a negative rule can flag, so a missing pattern only fires on relevant files.
+
    Returns:
    - Violation map if detected, nil otherwise"
   [rule artifact _context]
   (let [detection (:rule/detection rule)
         content (:artifact/content artifact)
         patterns (extract-patterns detection)
-        context-lines (:context-lines detection 2)]
+        context-lines (:context-lines detection 2)
+        mode (:mode detection :positive)
+        violation (fn [matches]
+                    {:type :content-scan
+                     :rule-id (:rule/id rule)
+                     :matches (vec matches)
+                     :artifact-path (:artifact/path artifact)
+                     :message (get-in rule [:rule/enforcement :message])})]
     (when (and content (seq patterns))
-      (when-let [matches (any-pattern-matches? patterns content context-lines)]
-        {:type :content-scan
-         :rule-id (:rule/id rule)
-         :matches matches
-         :artifact-path (:artifact/path artifact)
-         :message (get-in rule [:rule/enforcement :message])}))))
+      (let [matches (any-pattern-matches? patterns content context-lines)]
+        (if (= :negative mode)
+          (when-not matches (violation nil))
+          (when matches (violation matches)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Diff analysis detection
