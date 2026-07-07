@@ -27,5 +27,8 @@
   :degradation/dependency-recovered "Dependency health recovered"
   :degradation/budget-recovered     "Error budgets recovered"
   :degradation/nominal-restored     "Nominal mode restored"
+  :degradation/critical-budget-exhausted "Critical error budget exhausted"
+  :degradation/critical-budget-low  "Critical error budget below 25%"
+  :degradation/operator-exit-reason "{principal}: {justification}"
   :safe-mode/entered    "Safe-mode entered: {trigger}"
   :safe-mode/exited     "Safe-mode exited after {duration}ms: {justification}"}}
