@@ -167,4 +167,7 @@
     (testing "pinned tags, digests, and :latest-* do not fire"
       (is (not (fires? "image: nginx:1.2.3")))
       (is (not (fires? "image: app@sha256:abcdef123")))
+      (is (not (fires? "image: nginx:latest@sha256:abcdef123"))
+          "tag+digest is pinned by the digest")
+      (is (not (fires? "image: nginx:latest.stable")) "latest.stable is a pinned tag")
       (is (not (fires? "image: nginx:latest-stable")) "latest-stable is a pinned tag"))))
