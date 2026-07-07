@@ -171,3 +171,20 @@
           "tag+digest is pinned by the digest")
       (is (not (fires? "image: nginx:latest.stable")) "latest.stable is a pinned tag")
       (is (not (fires? "image: nginx:latest-stable")) "latest-stable is a pinned tag"))))
+
+;; Finding 7: no-open-ingress matched only 0.0.0.0/0 as the sole list element,
+;; missing multi-CIDR lists and IPv6 any (::/0).
+
+(deftest no-open-ingress-detection-test
+  (let [rule (pack-rule "terraform-aws-1.0.0.pack.edn" :tf-aws/no-open-ingress)
+        fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
+    (is (some? rule))
+    (testing "open ingress fires single-line, multi-line, and IPv6"
+      (is (fires? "cidr_blocks = [\"0.0.0.0/0\"]"))
+      (is (fires? "cidr_blocks = [\"10.0.0.0/8\", \"0.0.0.0/0\"]") "not only the sole element")
+      (is (fires? "cidr_blocks = [\n  \"0.0.0.0/0\",\n]") "multi-line list (per-line engine)")
+      (is (fires? "ipv6_cidr_blocks = [\n  \"::/0\",\n]") "IPv6 any, multi-line"))
+    (testing "restricted CIDRs and prose mentions do not fire"
+      (is (not (fires? "cidr_blocks = [\"10.0.0.0/8\"]")))
+      (is (not (fires? "cidr_blocks = [\"192.168.1.0/24\"]")))
+      (is (not (fires? "description = \"never allow 0.0.0.0/0 here\"")) "unquoted prose mention"))))

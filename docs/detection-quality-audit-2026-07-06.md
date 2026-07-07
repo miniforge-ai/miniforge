@@ -83,3 +83,16 @@ rule silently routed to the judge).
 2. `no-latest-tag` untagged-image FN; `no-inline-anon-fns` `#(...)` FN.
 3. `no-open-ingress` multi-CIDR + IPv6; `approved-instance-types` as data.
 4. A per-custom-rule registration/signature sweep.
+
+## Engine limitation (discovered during the follow-ups)
+
+`detect-content-scan` matches each line independently (`find-matches` splits on
+`\n` and `re-find`s per line). Any pattern that must span lines silently fails:
+
+- `k8s/require-resource-limits`'s `resources:\n\s+limits:` cannot match (the two
+  keys are on different lines) — a standing false negative.
+- Multi-line Terraform lists need the matched token on a single line (handled in
+  `no-open-ingress` by matching the quoted CIDR value directly).
+
+Follow-up: give `detect-content-scan` an opt-in whole-content match mode (or a
+multi-line flag per rule) so genuinely multi-line requirements can be expressed.
