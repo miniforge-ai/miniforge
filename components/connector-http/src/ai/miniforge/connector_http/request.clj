@@ -68,7 +68,7 @@
   (let [request-failed (:request-failed msgs)]
     (case (classify-error status)
       :rate-limited (schema/failure :body (:rate-limited msgs)                      {:error-type :rate-limited})
-      :server-error (schema/failure :body (request-failed status "server error")    {:error-type :transient})
+      :server-error (schema/failure :body (request-failed status (:server-error msgs)) {:error-type :transient})
       :client-error (schema/failure :body (request-failed status (:body resp))      {:error-type :permanent}))))
 
 ;;------------------------------------------------------------------------------ Layer 2
