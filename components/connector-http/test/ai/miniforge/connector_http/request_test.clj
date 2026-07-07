@@ -29,6 +29,7 @@
 
 (def ^:private error-msgs
   {:rate-limited   "Rate limited"
+   :server-error   "server error"
    :request-failed (fn [s e] (str "Failed " s ": " e))})
 
 ;;------------------------------------------------------------------------------ Layer 1
@@ -91,9 +92,10 @@
       (is (false? (:success? result)))
       (is (= :permanent (:error-type result)))))
 
-  (testing "server error calls :request-failed fn with 'server error' string"
+  (testing "server error calls :request-failed fn with the caller's :server-error label"
     (let [calls (atom [])
           msgs  {:rate-limited   ""
+                 :server-error   "server error"
                  :request-failed (fn [s e] (swap! calls conj {:status s :error e}) "")}]
       (request/error-response 503 {:body "gateway timeout"} msgs)
       (is (= 1 (count @calls)))

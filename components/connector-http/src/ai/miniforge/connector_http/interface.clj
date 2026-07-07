@@ -85,8 +85,9 @@
   request/do-request)
 (def error-response
   "(fn [status resp msgs] failure): build a schema/failure from a non-success,
-   non-304 response. msgs map: {:rate-limited string :request-failed (fn [status
-   err-str] string)}. The :error-type in failure metadata is :rate-limited (429),
+   non-304 response. msgs map: {:rate-limited string :server-error string
+   :request-failed (fn [status err-str] string)} — callers supply their own
+   localized labels. The :error-type in failure metadata is :rate-limited (429),
    :transient (5xx), or :permanent (other 4xx)."
   request/error-response)
 (def next-url
