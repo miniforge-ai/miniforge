@@ -100,12 +100,25 @@
   "Like `any-pattern-matches?` but matches each pattern against the WHOLE content
    rather than line-by-line, for rules whose pattern must span lines (e.g. a k8s
    `resources:` block followed by `limits:`). Returns a one-element matches vec
-   on the first hit, or nil."
+   (with the match's `:line`/`:column` and a bounded `:context` — never the whole
+   file, to avoid payload bloat and leaking unrelated content) on the first hit,
+   or nil."
   [patterns content]
   (some (fn [p]
           (when-let [pat (ensure-pattern p)]
-            (when-let [m (re-find pat content)]
-              [{:match (if (string? m) m (first m)) :line 1 :context content}])))
+            (let [matcher (re-matcher pat content)]
+              (when (.find matcher)
+                (let [start     (.start matcher)
+                      match-str (.group matcher)
+                      before    (subs content 0 start)
+                      last-nl   (str/last-index-of before "\n")
+                      match-cap (if (> (count match-str) 200)
+                                  (str (subs match-str 0 200) "…")
+                                  match-str)]
+                  [{:match   match-str
+                    :line    (inc (count (re-seq #"\n" before)))
+                    :column  (inc (- start (if last-nl (inc last-nl) 0)))
+                    :context match-cap}])))))
         patterns))
 
 (defn detect-content-scan

@@ -139,7 +139,12 @@
    - :context-lines - Lines of context to include
    - :custom-fn - Symbol for custom detection function
    - :capability - Keyword naming a registered mechanical-check capability
-     (used with :type :capability; resolved via the capability registry)"
+     (used with :type :capability; resolved via the capability registry)
+   - :mode - :positive (default; a match is a violation) or :negative
+     (the ABSENCE of a match is a violation, e.g. a required header)
+   - :multiline? - when true, match patterns against the whole content instead
+     of line-by-line (for patterns that span lines)
+   - :email-pattern - secondary regex (e.g. a copyright-header email check)"
   [:map
    [:type DetectionType]
    [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
