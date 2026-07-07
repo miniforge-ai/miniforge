@@ -232,7 +232,9 @@
    :rule/applies-to  {:file-globs ["**/*.clj" "**/*.cljc"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
-                      :pattern "(?:map|keep|filter|mapcat|remove|reduce)\\s+\\(fn\\s+\\["}
+                      ;; Both explicit `(fn [...])` and the reader `#(...)` — the
+                      ;; latter is the more common inline anon fn and was missed.
+                      :pattern "(?:map|keep|filter|mapcat|remove|reduce|some|every\\?|sort-by|group-by)\\s+(?:\\(fn\\s+\\[|#\\()"}
    :rule/remediation {:strategy :manual
                       :auto-fixable-default false}
    :rule/enforcement {:action :audit
