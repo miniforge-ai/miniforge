@@ -192,14 +192,14 @@
       any-critical-exhausted?
       (transition-signal :safe-mode
                          :emergency-stop
-                         "Critical error budget exhausted"
+                         (messages/t :degradation/critical-budget-exhausted)
                          {:safe-mode-trigger :error-budget
-                          :safe-mode-details "Critical error budget exhausted"})
+                          :safe-mode-details (messages/t :degradation/critical-budget-exhausted)})
 
       any-critical-low?
       (transition-signal :degraded
                          :budget-critical
-                         "Critical error budget below 25%"))))
+                         (messages/t :degradation/critical-budget-low)))))
 
 (defn- stronger-signal
   [left right]
@@ -344,7 +344,8 @@
       (let [new-mode (transition! manager
                                   (transition-signal :nominal
                                                      :operator-exit
-                                                     (str principal ": " justification)))]
+                                                     (messages/t :degradation/operator-exit-reason
+                                                                 {:principal principal :justification justification})))]
         (when-let [stream (:event-stream manager)]
           (stream/publish! stream
                            (events/safe-mode-exited stream principal justification 0 0)))
