@@ -78,7 +78,7 @@
                       {:error-type :rate-limited})
 
       (<= 500 status 599)
-      (schema/failure :body (msg/t :http/request-failed {:status status :error "server error"})
+      (schema/failure :body (msg/t :http/request-failed {:status status :error (msg/t :http/server-error)})
                       {:error-type :transient})
 
       :else

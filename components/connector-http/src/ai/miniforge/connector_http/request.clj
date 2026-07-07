@@ -26,6 +26,7 @@
    Layer 1: Response builders
    Layer 2: Request execution and post-request helpers"
   (:require [ai.miniforge.connector-http.etag :as etag]
+            [ai.miniforge.connector-http.messages :as msg]
             [ai.miniforge.connector-http.pagination :as page]
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]
@@ -68,7 +69,7 @@
   (let [request-failed (:request-failed msgs)]
     (case (classify-error status)
       :rate-limited (schema/failure :body (:rate-limited msgs)                      {:error-type :rate-limited})
-      :server-error (schema/failure :body (request-failed status "server error")    {:error-type :transient})
+      :server-error (schema/failure :body (request-failed status (msg/t :http/server-error)) {:error-type :transient})
       :client-error (schema/failure :body (request-failed status (:body resp))      {:error-type :permanent}))))
 
 ;;------------------------------------------------------------------------------ Layer 2

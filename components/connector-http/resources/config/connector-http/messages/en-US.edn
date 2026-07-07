@@ -28,6 +28,7 @@
 
   ;; Extract
   :http/request-failed     "HTTP request failed: {status} {error}"
+  :http/server-error       "server error"
   :http/timeout            "HTTP request timed out for {url}"
   :http/rate-limited       "Rate limited by server (429)"
 
