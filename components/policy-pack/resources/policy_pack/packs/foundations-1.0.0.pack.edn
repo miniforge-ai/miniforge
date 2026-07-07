@@ -58,7 +58,19 @@
                                     "**/*.env.example" "**/*.sh"]
                        :phases #{:implement :review}}
    :rule/detection   {:type :content-scan
-                      :pattern "(?i)(password|secret|api[._-]?key|token)\\s*[:=]\\s*[\"'][^\"']{8,}"}
+                      ;; Keyword-quoted assignments PLUS high-confidence
+                      ;; provider key shapes (caught regardless of a keyword)
+                      ;; PLUS a conservative unquoted case (16+ token-ish chars,
+                      ;; so config words like `password: required` don't match).
+                      :patterns
+                      ["(?i)(password|passphrase|secret|client[._-]?secret|api[._-]?key|access[._-]?token|auth[._-]?token|private[._-]?key|credential|token)\\s*[:=]\\s*[\"'][^\"']{8,}"
+                       "AKIA[0-9A-Z]{16}"
+                       "gh[pousr]_[0-9A-Za-z]{36,}"
+                       "sk-[0-9A-Za-z]{20,}"
+                       "xox[baprs]-[0-9A-Za-z-]{10,}"
+                       "AIza[0-9A-Za-z_-]{35}"
+                       "-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----"
+                       "(?i)(password|passphrase|secret|api[._-]?key|access[._-]?token|token)\\s*:\\s*[A-Za-z0-9+/=_-]{16,}\\b"]}
    :rule/remediation {:strategy :manual
                       :auto-fixable-default true
                       :exclude-contexts
