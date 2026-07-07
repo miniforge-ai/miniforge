@@ -27,7 +27,8 @@
   (:require
    [clojure.test :refer [deftest testing is]]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [ai.miniforge.policy-pack.detection :as detection]))
 
 (def ^:private pack-specs
   "Expected pack metadata for each reference pack."
@@ -99,3 +100,42 @@
                                (count (:pack/rules pack)))))
                      (reduce + 0))]
       (is (>= total 53) (str "Expected at least 53 rules, got " total)))))
+
+;; Finding 7: no-hardcoded-secrets FP/FN. The original single regex was an FN
+;; sieve (missed provider key shapes, unquoted values) and an FP generator.
+;; Pin the improved patterns: high-confidence provider shapes + keyword-quoted
+;; + a conservative unquoted case fire; env refs, config words, and comments do
+;; not.
+
+(defn- secrets-rule []
+  (->> (load-pack-resource "foundations-1.0.0.pack.edn")
+       :pack/rules
+       (filter #(= :foundations/no-hardcoded-secrets (:rule/id %)))
+       first))
+
+(deftest no-hardcoded-secrets-detection-test
+  (let [rule (secrets-rule)
+        fires? (fn [s] (boolean (detection/detect-content-scan
+                                 rule {:artifact/content s :artifact/path "x.clj"} {})))]
+    (is (some? rule) "foundations pack must expose :foundations/no-hardcoded-secrets")
+    (testing "real secrets fire (incl. provider key shapes with no keyword)"
+      (doseq [s ["password = \"hunter2xyz\""
+                 "AKIAIOSFODNN7EXAMPLE"
+                 "ghp_1234567890123456789012345678901234ab"
+                 "ghs_1234567890123456789012345678901234ab"
+                 "sk-abcdefghijklmnopqrstuvwxyz123456"
+                 "-----BEGIN RSA PRIVATE KEY-----"
+                 "password: aGVsbG8gd29ybGRzZWNyZXQ="
+                 "SECRET=aGVsbG8gd29ybGRzZWNyZXQ="
+                 "api_key: \"abcdefgh12345678\""
+                 "client_secret = \"s3cr3tvalue99\""]]
+        (is (fires? s) (str "should fire: " s))))
+    (testing "non-secrets do not fire (env refs, function calls, config, comments)"
+      (doseq [s ["password = env(\"SECRET\")"
+                 "password: required"
+                 "let token = getToken()"
+                 "apikey = getApiKeyFromVault()"
+                 "# password: use a secrets manager"
+                 "password_field: user_name_column"
+                 "(def x 42)"]]
+        (is (not (fires? s)) (str "should NOT fire: " s))))))
