@@ -38,6 +38,7 @@
    [ai.miniforge.dag-executor.workspace :as workspace]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.dag-executor.protocols.impl.runtime.images :as images]
    [ai.miniforge.dag-executor.protocols.impl.runtime.process :as runtime-process]
@@ -64,7 +65,7 @@
 (defn- acquire-failed-result
   [throwable]
   (result/err :acquire-failed
-              (or (ex-message throwable) "OCI runtime acquire failed")
+              (or (ex-message throwable) (messages/t :oci/acquire-failed))
               (cond-> {:surface :acquire-environment!
                        :exception-class (.getName (class throwable))}
                 (ex-data throwable) (assoc :exception-data (ex-data throwable)))))
@@ -106,11 +107,9 @@
         (do
           (future-cancel fut)
           (binding [*out* *err*]
-            (println (str "[oci-cli] acquire-environment! deadline " timeout-ms
-                          "ms exceeded; cancelling runtime subprocess.")))
+            (println (messages/t :oci/acquire-deadline {:ms timeout-ms})))
           (result/err :timeout
-                      (str "OCI runtime acquire-environment! exceeded "
-                           timeout-ms "ms — likely a stuck daemon or image pull")
+                      (messages/t :oci/acquire-timeout {:ms timeout-ms})
                       {:timeout-ms timeout-ms
                        :surface :acquire-environment!}))
 
@@ -178,7 +177,7 @@
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
-          {:exit 130 :err (or (ex-message e) "Runtime command interrupted") :out ""})))
+          {:exit 130 :err (or (ex-message e) (messages/t :oci/command-interrupted)) :out ""})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
@@ -208,7 +207,7 @@
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
           {:exit 130
-           :err (or (ex-message e) "Runtime command interrupted")
+           :err (or (ex-message e) (messages/t :oci/command-interrupted))
            :out ""
            :out-bytes (byte-array 0)
            :err-bytes (byte-array 0)})))
@@ -638,7 +637,7 @@
    - :sanitize? — sanitize tokens in error messages (default false)"
   [descriptor container-id workdir
    & {:keys [error-on-failure? error-prefix sanitize?]
-      :or {error-on-failure? false error-prefix "Command failed" sanitize? false}}]
+      :or {error-on-failure? false error-prefix (messages/t :oci/command-failed) sanitize? false}}]
   (fn [cmd]
     (let [r (exec-in-container descriptor container-id cmd {:workdir workdir})]
       (if (and error-on-failure?
@@ -648,8 +647,9 @@
                          (sanitize-token (or (get-in r [:data :stderr]) ""))
                          (or (get-in r [:data :stderr]) ""))]
           (result/err :container-command-failed
-                      (str error-prefix ": " safe-cmd
-                           (when (seq stderr) (str "\n" stderr)))
+                      (messages/t :oci/command-failed-detail
+                                  {:prefix error-prefix :command safe-cmd
+                                   :stderr (if (seq stderr) (str "\n" stderr) "")})
                       {:cmd safe-cmd
                        :stderr stderr
                        :exit (get-in r [:data :exit-code])}))
@@ -715,7 +715,7 @@
                       repo-url)
           exec!  (container-exec-fn descriptor container-name "/"
                                     :error-on-failure? true
-                                    :error-prefix "Workspace bootstrap failed"
+                                    :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
           clone-cmd (str "git clone --branch " branch " --single-branch "
                          clone-url " " workdir)

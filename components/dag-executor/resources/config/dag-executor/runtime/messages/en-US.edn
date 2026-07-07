@@ -3,4 +3,13 @@
   "Unknown runtime kind: {kind}. Known kinds: {known}."
 
   :descriptor/unsupported-kind
-  "Runtime kind {kind} is not yet supported. Supported runtimes: {supported}."}}
+  "Runtime kind {kind} is not yet supported. Supported runtimes: {supported}."
+
+  ;; OCI runtime adapter diagnostics
+  :oci/acquire-failed        "OCI runtime acquire failed"
+  :oci/acquire-deadline      "[oci-cli] acquire-environment! deadline {ms}ms exceeded; cancelling runtime subprocess."
+  :oci/acquire-timeout       "OCI runtime acquire-environment! exceeded {ms}ms — likely a stuck daemon or image pull"
+  :oci/command-interrupted   "Runtime command interrupted"
+  :oci/command-failed        "Command failed"
+  :oci/command-failed-detail "{prefix}: {command}{stderr}"
+  :oci/bootstrap-failed      "Workspace bootstrap failed"}}
