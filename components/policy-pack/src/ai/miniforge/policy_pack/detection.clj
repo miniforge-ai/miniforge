@@ -96,6 +96,18 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Content scan detection
 
+(defn any-pattern-matches-multiline?
+  "Like `any-pattern-matches?` but matches each pattern against the WHOLE content
+   rather than line-by-line, for rules whose pattern must span lines (e.g. a k8s
+   `resources:` block followed by `limits:`). Returns a one-element matches vec
+   on the first hit, or nil."
+  [patterns content]
+  (some (fn [p]
+          (when-let [pat (ensure-pattern p)]
+            (when-let [m (re-find pat content)]
+              [{:match (if (string? m) m (first m)) :line 1 :context content}])))
+        patterns))
+
 (defn detect-content-scan
   "Detect violations by scanning artifact content.
 
@@ -113,6 +125,11 @@
      resource limit). Applicability (file-globs, phases) scopes which artifacts
      a negative rule can flag, so a missing pattern only fires on relevant files.
 
+   Honors `:rule/detection :multiline?`: when true the patterns are matched
+   against the whole content instead of line-by-line, so a pattern that spans
+   lines (`resources:\\n  limits:`) can match. Line-oriented patterns keep the
+   default per-line behavior.
+
    Returns:
    - Violation map if detected, nil otherwise"
   [rule artifact _context]
@@ -128,7 +145,9 @@
                      :artifact-path (:artifact/path artifact)
                      :message (get-in rule [:rule/enforcement :message])})]
     (when (and content (seq patterns))
-      (let [matches (any-pattern-matches? patterns content context-lines)]
+      (let [matches (if (:multiline? detection)
+                      (any-pattern-matches-multiline? patterns content)
+                      (any-pattern-matches? patterns content context-lines))]
         (if (= :negative mode)
           (when-not matches (violation nil))
           (when matches (violation matches)))))))

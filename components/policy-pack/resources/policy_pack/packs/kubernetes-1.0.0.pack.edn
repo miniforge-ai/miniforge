@@ -74,9 +74,14 @@
                                     "**/manifests/**/*.yaml" "**/manifests/**/*.yml"
                                     "**/helm/**/*.yaml" "**/helm/**/*.yml"]
                        :phases #{:implement :review}}
-   :rule/detection   {:type    :content-scan
-                      :mode    :negative
-                      :pattern "resources:\\s*\\n\\s+limits:"}
+   :rule/detection   {:type       :content-scan
+                      :mode       :negative
+                      ;; The pattern spans two lines, so it must match against
+                      ;; the whole manifest, not line-by-line — otherwise it
+                      ;; never matches and the negative rule fires on EVERY
+                      ;; manifest, including compliant ones.
+                      :multiline? true
+                      :pattern    "resources:\\s*\\n\\s+limits:"}
    :rule/enforcement {:action :require-approval
                       :message "Container is missing resource limits. All containers must declare CPU and memory limits."
                       :remediation "Add a resources.limits block specifying cpu and memory limits."}}

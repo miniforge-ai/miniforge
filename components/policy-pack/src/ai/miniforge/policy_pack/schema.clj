@@ -148,6 +148,7 @@
    [:custom-fn {:optional true} symbol?]
    [:capability {:optional true} keyword?]
    [:mode {:optional true} DetectionMode]
+   [:multiline? {:optional true} boolean?]
    [:email-pattern {:optional true} string?]])
 
 (def RuleEnforcementConfig

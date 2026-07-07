@@ -188,3 +188,17 @@
       (is (not (fires? "cidr_blocks = [\"10.0.0.0/8\"]")))
       (is (not (fires? "cidr_blocks = [\"192.168.1.0/24\"]")))
       (is (not (fires? "description = \"never allow 0.0.0.0/0 here\"")) "unquoted prose mention"))))
+
+;; Finding 7: content-scan matches per-line, so require-resource-limits's
+;; two-line pattern never matched and (negative mode) fired on EVERY manifest.
+;; :multiline? makes it match whole-content.
+
+(deftest require-resource-limits-multiline-test
+  (let [rule (pack-rule "kubernetes-1.0.0.pack.edn" :k8s/require-resource-limits)
+        fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
+    (is (some? rule))
+    (is (true? (get-in rule [:rule/detection :multiline?])))
+    (is (not (fires? "spec:\n  containers:\n  - name: app\n    resources:\n      limits:\n        cpu: 500m"))
+        "a manifest WITH resource limits must pass (was firing pre-fix)")
+    (is (fires? "spec:\n  containers:\n  - name: app")
+        "a manifest WITHOUT resource limits fires")))
