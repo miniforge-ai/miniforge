@@ -68,8 +68,8 @@
                       :remediation "Add an encryption_configuration block using AWS KMS or AES-256."}}
 
   {:rule/id          :tf-aws/no-open-ingress
-   :rule/title       "No Open Ingress (0.0.0.0/0)"
-   :rule/description "Detects security group rules that allow ingress from 0.0.0.0/0. Open ingress exposes services to the public internet."
+   :rule/title       "No Open Ingress (0.0.0.0/0 or ::/0)"
+   :rule/description "Detects security group rules that allow ingress from 0.0.0.0/0 (IPv4 any) or ::/0 (IPv6 any). Open ingress exposes services to the public internet."
    :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:file-globs ["**/*.tf"]
@@ -80,8 +80,9 @@
                       ;; per-line, this catches both single-line lists and the
                       ;; common multi-line list form (the CIDR on its own line),
                       ;; where the old single-element pattern was a false
-                      ;; negative. Quoting keeps it off prose mentions.
-                      :pattern "[\"'](?:0\\.0\\.0\\.0/0|::/0)[\"']"}
+                      ;; negative. HCL strings are double-quoted, so requiring
+                      ;; `"…"` keeps it off prose/comment mentions.
+                      :pattern "\"(?:0\\.0\\.0\\.0/0|::/0)\""}
    :rule/enforcement {:action :hard-halt
                       :message "Security group allows ingress from 0.0.0.0/0 or ::/0. Restrict CIDR blocks to known IP ranges."
                       :remediation "Replace 0.0.0.0/0 (or ::/0) with specific CIDR ranges for your network."}}
