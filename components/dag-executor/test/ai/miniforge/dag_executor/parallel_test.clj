@@ -229,19 +229,24 @@
           results (atom [])
           latch   (java.util.concurrent.CountDownLatch. n)
           start   (java.util.concurrent.CountDownLatch. 1)
+          sec     java.util.concurrent.TimeUnit/SECONDS
           threads (doall
                    (for [_ (range n)]
                      (let [hid (random-uuid)]
                        (doto (Thread. (fn []
                                         (.countDown latch)
-                                        (.await start)
+                                        ;; 5s timeout: start fires immediately after all
+                                        ;; threads check in, so this should be sub-ms.
+                                        (.await start 5 sec)
                                         (swap! results conj
                                                (sut/acquire-file-locks!
                                                 pool hid [file] no-logger))))
                          .start))))]
-      (.await latch)
+      (is (.await latch 5 sec) "All threads must check in within 5s")
       (.countDown start)
       (doseq [t threads] (.join t 2000))
+      (is (every? #(not (.isAlive %)) threads)
+          "All threads must finish within 2s of the start signal")
       (let [oks    (filter result/ok? @results)
             errors (filter result/err? @results)]
         (is (= 1 (count oks))
