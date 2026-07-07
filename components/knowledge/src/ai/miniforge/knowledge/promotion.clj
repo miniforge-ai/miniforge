@@ -18,33 +18,26 @@
 
 (ns ai.miniforge.knowledge.promotion
   "Pack promotion with trust level elevation and justification tracking.
-   Implements N6 §2.1 pack promotion evidence requirements.")
+   Implements N6 §2.1 pack promotion evidence requirements."
+  (:require [ai.miniforge.knowledge.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Promotion Justification Examples
 
-(def justification-templates
-  "Standard justification templates for pack promotions."
-  {:safety-scan-passed
-   "passed knowledge-safety scans with no violations"
-
-   :manual-review-approved
-   "manual review approved by trusted administrator"
-
-   :signature-verified
-   "verified signature from trusted key"
-
-   :policy-compliance
-   "meets all policy compliance requirements"
-
-   :automated-validation
-   "passed automated validation and security checks"})
+(def justification-template-keys
+  "Standard justification template keys for pack promotions. The display text
+   for each lives in the message catalog under :promotion/<key>."
+  #{:safety-scan-passed
+    :manual-review-approved
+    :signature-verified
+    :policy-compliance
+    :automated-validation})
 
 (defn format-justification
   "Format a promotion justification with optional details.
 
    Arguments:
-   - template-key - Keyword referencing justification-templates
+   - template-key - Keyword in justification-template-keys (text from the catalog)
    - details      - (optional) Additional context string
 
    Returns formatted justification string.
@@ -56,10 +49,11 @@
      (format-justification :safety-scan-passed \"3 scans completed\")
      => \"passed knowledge-safety scans with no violations (3 scans completed)\""
   [template-key & [details]]
-  (let [base (get justification-templates template-key
-                  (str "promoted via " (name template-key)))]
+  (let [base (if (contains? justification-template-keys template-key)
+               (messages/t (keyword "promotion" (name template-key)))
+               (messages/t :promotion/generic {:template (name template-key)}))]
     (if details
-      (str base " (" details ")")
+      (messages/t :promotion/with-details {:base base :details details})
       base)))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -148,15 +142,15 @@
   (let [errors (cond-> []
                  (not (valid-promotion? (:from-trust promotion-record)
                                         (:to-trust promotion-record)))
-                 (conj (str "Invalid promotion path: "
-                            (:from-trust promotion-record) " -> "
-                            (:to-trust promotion-record)))
+                 (conj (messages/t :promotion/invalid-path
+                                   {:from (:from-trust promotion-record)
+                                    :to (:to-trust promotion-record)}))
 
                  (not (seq (:promotion-justification promotion-record)))
-                 (conj "promotion-justification is required and cannot be empty")
+                 (conj (messages/t :promotion/justification-required))
 
                  (not (string? (:pack/id promotion-record)))
-                 (conj "pack/id must be a string"))]
+                 (conj (messages/t :promotion/pack-id-string)))]
     {:valid? (empty? errors)
      :errors errors}))
 
