@@ -366,11 +366,15 @@
    [:waived? {:optional true} boolean?]])
 
 (def PolicyCounts
-  "Violation-severity histogram per N5-delta-2 §2.3."
+  "Violation-severity histogram per N5-delta-2 §2.3, keyed by the canonical
+   5-level severity scale (`:critical/:high/:medium/:low/:info`) so it aligns
+   with `:violation/severity`, plus `:total`. The per-severity counts sum to
+   `:total`."
   [:map
    [:critical :common/non-neg-int]
-   [:major    :common/non-neg-int]
-   [:minor    :common/non-neg-int]
+   [:high     :common/non-neg-int]
+   [:medium   :common/non-neg-int]
+   [:low      :common/non-neg-int]
    [:info     :common/non-neg-int]
    [:total    :common/non-neg-int]])
 
