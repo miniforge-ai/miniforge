@@ -10,4 +10,9 @@
   :task/failed "Task failed"
   :task/blocked "Task blocked"
   :task/unblocked "Task unblocked"
-  :task/decomposed "Task decomposed into sub-tasks"}}
+  :task/decomposed "Task decomposed into sub-tasks"
+
+  ;; Dependency-graph diagnostics
+  :task/dependency-cycle "Dependency would create cycle"
+  :task/dependency-added "Dependency added"
+  :task/dependency-removed "Dependency removed"}}
