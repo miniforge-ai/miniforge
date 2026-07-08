@@ -391,12 +391,29 @@ depending on ambient namespace loading or raw var resolution."}
       (<= (.getRequiredArity f) arity)
       (catch Throwable _ false))))
 
+(defn- reflectable-invoke?
+  "True when `f`'s class declares any `invoke` method. JVM functions do; SCI
+   functions under babashka do not, so arity reflection is blind there."
+  [f]
+  (boolean (some #(= "invoke" (.getName ^java.lang.reflect.Method %))
+                 (.getDeclaredMethods (class f)))))
+
 (defn- detector-predicate?
-  "True when `f` is a custom detector predicate with a supported 2-arity shape."
+  "True when `f` is a custom detector fn. On the JVM its 2-arity shape is verified
+   by reflection; under babashka/SCI (whose fn classes expose no reflectable
+   `invoke` methods, or where reflection is unavailable) arity cannot be
+   introspected, so any `fn?` is accepted rather than rejecting a valid detector
+   we cannot check — this lets detector namespaces register at LOAD time on both
+   runtimes, instead of deferring registration to first use."
   [f]
   (and (fn? f)
-       (or (declared-method? "invoke" 2 f)
-           (variadic-accepts-arity? 2 f))))
+       (try
+         (or (declared-method? "invoke" 2 f)
+             (variadic-accepts-arity? 2 f)
+             (not (reflectable-invoke? f)))
+         ;; Reflection/introspection failure (e.g. babashka) → accept the fn.
+         ;; Catch Exception, not Throwable, so JVM Errors are not masked.
+         (catch Exception _ true))))
 
 (defn register-custom-fn!
   "Register `f` as the detector implementation for `custom-fn-sym`.

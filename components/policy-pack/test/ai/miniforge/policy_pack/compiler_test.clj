@@ -108,8 +108,10 @@
               :custom-fn resolvable-custom-fn-sym}}))))
   (testing "a :custom rule with no :custom-fn binds to :semantic (always available)"
     (is (= :semantic (sut/resolve-detector {:rule/detection {:type :custom}}))))
-  (testing "a :custom rule with an unresolvable :custom-fn binds to :semantic"
-    (is (= :semantic
+  (testing "a :custom rule that DECLARES an unresolvable :custom-fn is :none —
+            fail-loud, not silently routed to the judge (a broken registration
+            is a defect, mirroring the unregistered-:capability case below)"
+    (is (= :none
            (sut/resolve-detector
             {:rule/detection {:type :custom :custom-fn 'no.such.ns/missing}})))))
 
@@ -142,6 +144,15 @@
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= [:doomed] (get-in result [:anomaly/data :unbindable-rule-ids]))))))
+
+(deftest compile-pack-broken-custom-fn-fails-loud-test
+  (testing "a :custom rule declaring an unresolvable :custom-fn is unbindable —
+            the compiler names it instead of silently routing it to the judge"
+    (let [pack   {:pack/rules [{:rule/id :broken
+                                :rule/detection {:type :custom :custom-fn 'no.such.ns/missing}}]}
+          result (sut/compile-pack pack)]
+      (is (anomaly/anomaly? result))
+      (is (= [:broken] (get-in result [:anomaly/data :unbindable-rule-ids]))))))
 
 (deftest compile-pack-skips-disabled-rules-test
   (testing "a DISABLED unbindable rule does not fail compilation"

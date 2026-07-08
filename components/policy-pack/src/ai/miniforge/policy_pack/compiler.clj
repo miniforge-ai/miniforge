@@ -34,9 +34,10 @@
      (mechanical capabilities are injected by the gate layer at load), else
      it is :none (unbindable — correct fail-loud);
    - a :custom rule with a resolvable :custom-fn binds to :custom;
-   - a :custom rule with no resolvable :custom-fn binds to :semantic (the
-     LLM-as-judge, always an available mechanism per N4-delta's :heuristic
-     class);
+   - a :custom rule that DECLARES a :custom-fn which does not resolve is :none
+     (unbindable — fail-loud; a broken registration, not a judge rule);
+   - a :custom rule with NO :custom-fn binds to :semantic (the LLM-as-judge,
+     always an available mechanism per N4-delta's :heuristic class);
    - anything else is :none.
 
    All public fns return data: a failed compilation yields an :invalid-input
@@ -67,7 +68,9 @@
    or `:none` when the rule binds to no available mechanism.
 
    - :capability binds only if its `:capability` keyword is registered.
-   - :custom binds to :custom when its `:custom-fn` resolves, else :semantic.
+   - :custom binds to :custom when its `:custom-fn` resolves; to :none when a
+     `:custom-fn` is declared but unresolvable (fail-loud); to :semantic when no
+     `:custom-fn` is declared.
    - An unknown/missing detection type is :none."
   [rule]
   (let [detection-type (get-in rule [:rule/detection :type])]
@@ -82,9 +85,15 @@
           :none))
 
       (= :custom detection-type)
-      (if (detection/custom-fn-resolvable? rule)
-        :custom
-        :semantic)
+      (cond
+        (detection/custom-fn-resolvable? rule) :custom
+        ;; A rule that DECLARES a :custom-fn symbol which does not resolve is a
+        ;; broken registration (the detector namespace never registered it), not
+        ;; an intentional judge rule. Bind to :none so the compiler fails loud
+        ;; (`compile-rule-check` returns an :invalid-input anomaly) instead of
+        ;; silently routing it to the LLM judge — the failure mode from #1381.
+        (get-in rule [:rule/detection :custom-fn]) :none
+        :else :semantic)
 
       :else
       :none)))
