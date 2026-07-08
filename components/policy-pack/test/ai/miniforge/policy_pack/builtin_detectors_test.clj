@@ -44,6 +44,7 @@
       (is (not (fires? rule "instance_type = \"t3.micro\"")) "approved family passes")
       (is (fires? rule "instance_type = \"p4d.24xlarge\"") "unapproved family fires")
       (is (fires? rule "instance_type = \"t3\"") "dotless/placeholder literal is not a family and fires")
+      (is (fires? rule "instance_type = \"\"") "empty placeholder literal fires")
       (is (not (fires? rule "instance_type = var.size")) "variable ref is not evaluated"))
     (testing "a misconfigured :approved-families fails loud (not a silent char-set)"
       (let [bad (assoc-in rule [:rule/detection :detector-config :approved-families] "t3")

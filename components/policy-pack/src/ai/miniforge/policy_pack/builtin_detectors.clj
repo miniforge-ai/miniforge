@@ -47,11 +47,13 @@
 
 (defn- instance-type-literals
   "String literals assigned to instance_type in Terraform content, e.g.
-   `instance_type = \"t3.micro\"` -> \"t3.micro\". Variable references
-   (`instance_type = var.x`) carry no literal and are not evaluated here — the
-   same limitation the prior regex had."
+   `instance_type = \"t3.micro\"` -> \"t3.micro\". The capture is `*`, not `+`, so
+   an empty literal (`instance_type = \"\"`) is captured (and later flagged as a
+   non-family) rather than ignored. Variable references (`instance_type = var.x`)
+   carry no literal and are not evaluated here — the same limitation the prior
+   regex had."
   [content]
-  (map second (re-seq #"instance_type\s*=\s*\"([^\"]+)\"" (str content))))
+  (map second (re-seq #"instance_type\s*=\s*\"([^\"]*)\"" (str content))))
 
 (defn- approved?
   "True when `literal` has a `family.size` shape whose family is approved. A
