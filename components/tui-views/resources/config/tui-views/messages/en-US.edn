@@ -1,0 +1,19 @@
+{:tui-views/messages
+ {;; PR risk indicators
+  :risk/low         "LOW"
+  :risk/medium      "MED"
+  :risk/high        "HIGH"
+  :risk/unevaluated "?"
+  :risk/none        "---"
+
+  ;; PR fleet view
+  :fleet/readiness-pct " {pct}%"
+  :pr/untitled         "Untitled"
+  :fleet/title         " MINIFORGE │ PR Fleet"
+  :fleet/empty         "  No PRs tracked. Use :add-repo to add repositories."
+  :fleet/col-title     "PR Title"
+  :fleet/col-repo      "Repository"
+  :fleet/col-readiness "Readiness"
+  :fleet/col-risk      "Risk"
+  :fleet/footer        " j/k:navigate  Enter:detail  r:sync  b:kanban  ::cmd  q:quit"
+  :fleet/flash-prefix  "  │ "}}
