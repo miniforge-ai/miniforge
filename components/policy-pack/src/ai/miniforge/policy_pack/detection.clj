@@ -449,10 +449,15 @@ depending on ambient namespace loading or raw var resolution."}
   "Run an already-resolved custom fn against `artifact`/`context`, adapting
    the result (or a thrown exception) into a violation map, or nil on pass.
    The fn is resolved once by the caller, so neither `detect-custom` nor the
-   dispatcher resolves twice."
+   dispatcher resolves twice.
+
+   The rule is threaded into `context` under `:policy-pack/rule` so a detector
+   can read its own `:rule/detection :detector-config` (data-driven policy) and
+   enforcement message — parity with the by-type detectors, which receive the
+   rule directly."
   [f rule artifact context]
   (try
-    (when-let [result (f artifact context)]
+    (when-let [result (f artifact (assoc context :policy-pack/rule rule))]
       (assoc result
              :type :custom
              :rule-id (:rule/id rule)))
