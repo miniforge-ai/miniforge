@@ -45,22 +45,12 @@
     (when-let [res (io/resource deployment-safety-pack-resource)]
       (edn/read-string (slurp res)))))
 
-(declare register-detectors!)
-
-(def ^:private detectors-registered
-  "Registers the deployment custom detectors exactly once, lazily. Registration
-   is NOT a namespace load-time side effect on purpose: register-custom-fn!
-   validates detector arity via JVM reflection, which throws under babashka/SCI
-   (the GraalVM-compat load check). Deref happens at gate time on the JVM."
-  (delay (register-detectors!)))
-
 (defn deployment-policy-packs
   "The policy packs the provision gate evaluates — the shipped deployment-safety
    pack. Empty when the pack resource is absent, in which case the :policy-pack
-   gate fails closed (no deploy without deployment policy). Ensures the custom
-   detectors are registered before the pack is evaluated."
+   gate fails closed (no deploy without deployment policy). The custom detectors
+   are registered at namespace load (see the bottom of this file)."
   []
-  @detectors-registered
   (if-let [pack @deployment-safety-pack] [pack] []))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -153,8 +143,7 @@
   (or (:artifact/content artifact) artifact))
 
 (defn- register-detectors!
-  "Register the deployment custom detectors. Invoked once via
-   `detectors-registered`, not at load time (see that delay's docstring)."
+  "Register the deployment custom detectors with the policy-pack registry."
   []
   (pp/register-custom-fn!
    'ai.miniforge.phase-deployment.policy/check-resource-count
@@ -162,6 +151,11 @@
   (pp/register-custom-fn!
    'ai.miniforge.phase-deployment.policy/check-gke-node-limit
    (fn [artifact ctx] (check-gke-node-limit (preview-content artifact) ctx))))
+
+;; Register at load: `register-custom-fn!` is now babashka-tolerant (see
+;; policy-pack detector-predicate?), so these bind reliably before any pack
+;; evaluation instead of being deferred to first use.
+(register-detectors!)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
