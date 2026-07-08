@@ -23,7 +23,6 @@
    The rule reaches the detector via `:policy-pack/rule` in context (threaded in
    by `detection/run-resolved-custom`)."
   (:require
-   [clojure.string :as str]
    [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -35,9 +34,16 @@
   ["t3" "t4g" "m5" "m6i" "c5" "c6i" "r5" "r6i"])
 
 (defn- approved-families
+  "The approved-family set for this rule. A configured `:approved-families` must
+   be a sequential collection of strings; anything else is a misconfigured pack
+   and throws (surfaced as a :custom-error by `run-resolved-custom`) rather than
+   silently coercing — e.g. a bare string would `set` into a char-set."
   [context]
-  (set (or (get-in context [:policy-pack/rule :rule/detection :detector-config :approved-families])
-           default-approved-instance-families)))
+  (let [configured (get-in context [:policy-pack/rule :rule/detection :detector-config :approved-families])]
+    (when (and configured (not (and (sequential? configured) (every? string? configured))))
+      (throw (ex-info "approved-families must be a sequential collection of strings"
+                      {:approved-families configured})))
+    (set (or configured default-approved-instance-families))))
 
 (defn- instance-type-literals
   "String literals assigned to instance_type in Terraform content, e.g.
@@ -47,13 +53,21 @@
   [content]
   (map second (re-seq #"instance_type\s*=\s*\"([^\"]+)\"" (str content))))
 
+(defn- approved?
+  "True when `literal` has a `family.size` shape whose family is approved. A
+   dotless/placeholder literal (\"t3\", \"\") has no family and is never approved
+   — matching the prior regex, which required a `family.` prefix."
+  [approved-set literal]
+  (boolean (when-let [[_ fam] (re-matches #"([^.]+)\..+" literal)]
+             (contains? approved-set fam))))
+
 (defn check-approved-instance-types
-  "Flag EC2 `instance_type` literals whose family is not in the approved set. The
-   approved families come from the rule's `:detector-config :approved-families`
-   (data), falling back to `default-approved-instance-families`."
+  "Flag EC2 `instance_type` literals whose family is not approved. The approved
+   families come from the rule's `:detector-config :approved-families` (data),
+   falling back to `default-approved-instance-families`."
   [artifact context]
   (let [approved  (approved-families context)
-        offenders (remove #(contains? approved (first (str/split % #"\.")))
+        offenders (remove #(approved? approved %)
                           (instance-type-literals (:artifact/content artifact)))]
     (when (seq offenders)
       {:matches  (vec offenders)

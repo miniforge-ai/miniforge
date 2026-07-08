@@ -43,7 +43,12 @@
     (testing "instance_type literals are checked against the approved families"
       (is (not (fires? rule "instance_type = \"t3.micro\"")) "approved family passes")
       (is (fires? rule "instance_type = \"p4d.24xlarge\"") "unapproved family fires")
+      (is (fires? rule "instance_type = \"t3\"") "dotless/placeholder literal is not a family and fires")
       (is (not (fires? rule "instance_type = var.size")) "variable ref is not evaluated"))
+    (testing "a misconfigured :approved-families fails loud (not a silent char-set)"
+      (let [bad (assoc-in rule [:rule/detection :detector-config :approved-families] "t3")
+            v   (detection/detect-custom bad {:artifact/content "instance_type = \"t3.micro\""} {})]
+        (is (= :custom-error (:type v)) "surfaces as a custom-error, not a bogus pass/fail")))
     (testing "the approved families are DATA in :detector-config, not a regex —
               changing the list changes the outcome"
       (let [p4d-only (assoc-in rule [:rule/detection :detector-config :approved-families] ["p4d"])]
