@@ -68,7 +68,9 @@
    or `:none` when the rule binds to no available mechanism.
 
    - :capability binds only if its `:capability` keyword is registered.
-   - :custom binds to :custom when its `:custom-fn` resolves, else :semantic.
+   - :custom binds to :custom when its `:custom-fn` resolves; to :none when a
+     `:custom-fn` is declared but unresolvable (fail-loud); to :semantic when no
+     `:custom-fn` is declared.
    - An unknown/missing detection type is :none."
   [rule]
   (let [detection-type (get-in rule [:rule/detection :type])]

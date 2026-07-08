@@ -11,8 +11,8 @@ Branch: `fix/custom-detector-fail-closed`
 ## Summary
 
 A `:custom` rule that declares a `:custom-fn` symbol which does not resolve used
-to bind silently to `:semantic` (the LLM judge) — indistinguishable from a rule
-that intentionally has no detector. That is the #1381 failure mode as a class: a
+to bind — silently — to `:semantic` (the LLM judge), indistinguishable from a
+rule that intentionally has no detector. That is the #1381 failure mode as a class: a
 broken registration silently degrades to the judge instead of failing loud.
 `resolve-detector` now binds such a rule to `:none`, so `compile-pack` names it
 as unbindable (an `:invalid-input` anomaly) — mirroring the existing

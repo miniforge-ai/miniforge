@@ -399,12 +399,12 @@ depending on ambient namespace loading or raw var resolution."}
                  (.getDeclaredMethods (class f)))))
 
 (defn- detector-predicate?
-  "True when `f` is a custom detector fn with a 2-arity shape. Arity is verified
-   by JVM reflection; under babashka/SCI (whose fn classes expose no reflectable
-   `invoke` methods, or where reflection is unavailable) we cannot introspect, so
-   accept any fn rather than reject a valid detector — this lets detector
-   namespaces register at LOAD time on both runtimes, instead of deferring
-   registration to first use."
+  "True when `f` is a custom detector fn. On the JVM its 2-arity shape is verified
+   by reflection; under babashka/SCI (whose fn classes expose no reflectable
+   `invoke` methods, or where reflection is unavailable) arity cannot be
+   introspected, so any `fn?` is accepted rather than rejecting a valid detector
+   we cannot check — this lets detector namespaces register at LOAD time on both
+   runtimes, instead of deferring registration to first use."
   [f]
   (and (fn? f)
        (try
