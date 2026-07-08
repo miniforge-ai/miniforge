@@ -24,33 +24,41 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
+(defn- status-label
+  "Render a status keyword for display: the status's own name, or a localized
+   'unknown' label when the status is absent."
+  [status]
+  (if status (name status) (msg/t :detail/status-unknown)))
+
 (defn render-title-bar [pr [cols rows]]
   (layout/text [cols rows]
-    (str " MINIFORGE │ "
-         (get pr :pr/title "PR Detail"))
+    (str (msg/t :detail/title-prefix)
+         (get pr :pr/title (msg/t :detail/title-fallback)))
     {:fg palette/status-info :bold? true}))
 
 (defn render-info-panel [pr [cols rows]]
   (layout/box [cols rows]
-    {:title "PR Info" :border :single :fg :default
+    {:title (msg/t :detail/panel-title) :border :single :fg :default
      :content-fn
      (fn [[ic ir]]
-       (let [lines [(str "  Title:     " (get pr :pr/title "—"))
-                    (str "  Repo:      " (get pr :pr/repo "—"))
-                    (str "  Readiness: " (int (* 100 (get pr :pr/readiness 0))) "%")
-                    (str "  Risk:      " (name (get pr :pr/risk :unknown)))
-                    (str "  CI:        " (name (get pr :pr/ci-status :unknown)))
-                    (str "  Author:    " (get pr :pr/author "—"))]]
+       (let [none (msg/t :detail/value-none)
+             lines [(msg/t :detail/line-title {:value (get pr :pr/title none)})
+                    (msg/t :detail/line-repo {:value (get pr :pr/repo none)})
+                    (msg/t :detail/line-readiness {:pct (int (* 100 (get pr :pr/readiness 0)))})
+                    (msg/t :detail/line-risk {:value (status-label (:pr/risk pr))})
+                    (msg/t :detail/line-ci {:value (status-label (:pr/ci-status pr))})
+                    (msg/t :detail/line-author {:value (get pr :pr/author none)})]]
          (layout/text [ic ir] (str/join "\n" lines))))}))
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]
-    " Esc:back  Tab:pane  e:evidence  /:search  q:quit"
+    (msg/t :detail/footer)
     {:fg :default}))
 
 (defn render

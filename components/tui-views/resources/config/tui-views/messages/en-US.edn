@@ -16,4 +16,18 @@
   :fleet/col-readiness "Readiness"
   :fleet/col-risk      "Risk"
   :fleet/footer        " j/k:navigate  Enter:detail  r:sync  b:kanban  ::cmd  q:quit"
-  :fleet/flash-prefix  "  │ "}}
+  :fleet/flash-prefix  "  │ "
+
+  ;; PR detail view
+  :detail/title-prefix   " MINIFORGE │ "
+  :detail/title-fallback "PR Detail"
+  :detail/panel-title    "PR Info"
+  :detail/value-none     "—"
+  :detail/line-title     "  Title:     {value}"
+  :detail/line-repo      "  Repo:      {value}"
+  :detail/line-readiness "  Readiness: {pct}%"
+  :detail/line-risk      "  Risk:      {value}"
+  :detail/line-ci        "  CI:        {value}"
+  :detail/line-author    "  Author:    {value}"
+  :detail/footer         " Esc:back  Tab:pane  e:evidence  /:search  q:quit"
+  :detail/status-unknown "unknown"}}
