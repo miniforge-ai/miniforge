@@ -23,6 +23,7 @@
    CI status, and repo information."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.update.navigation :as nav]))
 
@@ -31,11 +32,11 @@
 
 (defn risk-indicator [risk]
   (case risk
-    :low    "LOW"
-    :medium "MED"
-    :high        "HIGH"
-    :unevaluated "?"
-    "---"))
+    :low         (msg/t :risk/low)
+    :medium      (msg/t :risk/medium)
+    :high        (msg/t :risk/high)
+    :unevaluated (msg/t :risk/unevaluated)
+    (msg/t :risk/none)))
 
 (defn readiness-bar [readiness cols]
   (let [pct (int (* (or readiness 0) 100))
@@ -43,16 +44,16 @@
         filled (int (* bar-width (or readiness 0)))]
     (str (apply str (repeat filled "█"))
          (apply str (repeat (- bar-width filled) "░"))
-         " " pct "%")))
+         (msg/t :fleet/readiness-pct {:pct pct}))))
 
 (defn format-pr-row [pr cols]
-  {:title (get pr :pr/title "Untitled")
+  {:title (get pr :pr/title (msg/t :pr/untitled))
    :repo  (get pr :pr/repo "")
    :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
    :risk (risk-indicator (:pr/risk pr))})
 
 (defn render-title-bar [[cols rows]]
-  (layout/text [cols rows] " MINIFORGE │ PR Fleet"
+  (layout/text [cols rows] (msg/t :fleet/title)
                {:fg palette/status-info :bold? true}))
 
 (defn auto-scroll-offset
@@ -65,24 +66,24 @@
 
 (defn render-table [pr-items selected [cols rows]]
   (if (empty? pr-items)
-    (layout/text [cols rows] "  No PRs tracked. Use :add-repo to add repositories."
+    (layout/text [cols rows] (msg/t :fleet/empty)
                  {:fg :default})
     (let [title-width (max 10 (- cols 60))
           visible-count (max 0 (- rows 2))
           offset (auto-scroll-offset selected visible-count)]
       (layout/table [cols rows]
-        {:columns [{:key :title :header "PR Title" :width title-width}
-                   {:key :repo :header "Repository" :width 25}
-                   {:key :readiness :header "Readiness" :width 18}
-                   {:key :risk :header "Risk" :width 6}]
+        {:columns [{:key :title :header (msg/t :fleet/col-title) :width title-width}
+                   {:key :repo :header (msg/t :fleet/col-repo) :width 25}
+                   {:key :readiness :header (msg/t :fleet/col-readiness) :width 18}
+                   {:key :risk :header (msg/t :fleet/col-risk) :width 6}]
          :data (mapv #(format-pr-row % cols) pr-items)
          :selected-row selected
          :offset offset}))))
 
 (defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
-    (str " j/k:navigate  Enter:detail  r:sync  b:kanban  ::cmd  q:quit"
-         (when flash-message (str "  │ " flash-message)))
+    (str (msg/t :fleet/footer)
+         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
     {:fg :default}))
 
 (defn render
