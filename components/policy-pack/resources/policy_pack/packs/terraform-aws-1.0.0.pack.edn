@@ -108,8 +108,11 @@
    :rule/category    "500"
    :rule/applies-to  {:file-globs ["**/*.tf"]
                        :phases #{:implement :review}}
-   :rule/detection   {:type :content-scan
-                      :pattern "instance_type\\s*=\\s*\"(?!t3\\.|t4g\\.|m5\\.|m6i\\.|c5\\.|c6i\\.|r5\\.|r6i\\.)"}
+   ;; The approved families are DATA in :detector-config — not baked into a
+   ;; regex — read by the builtin check-approved-instance-types detector.
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.policy-pack.builtin-detectors/check-approved-instance-types
+                      :detector-config {:approved-families ["t3" "t4g" "m5" "m6i" "c5" "c6i" "r5" "r6i"]}}
    :rule/enforcement {:action :require-approval
                       :message "Instance type is not in the approved list (t3, t4g, m5, m6i, c5, c6i, r5, r6i families)."
                       :remediation "Use an instance type from the approved families: t3, t4g, m5, m6i, c5, c6i, r5, r6i."}}]

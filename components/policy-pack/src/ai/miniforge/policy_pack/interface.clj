@@ -31,6 +31,10 @@
    [ai.miniforge.policy-pack.interface.mapping :as mapping]
    [ai.miniforge.policy-pack.interface.prompt-template :as prompt-template]
    [ai.miniforge.policy-pack.detection :as detection]
+   ;; Loaded for its side effect: registers the built-in :custom detectors so
+   ;; the fail-closed resolver (compiler/resolve-detector) sees them whenever a
+   ;; pack is compiled through this boundary.
+   [ai.miniforge.policy-pack.builtin-detectors]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]
    [ai.miniforge.policy-pack.software-factory :as software-factory]))
 

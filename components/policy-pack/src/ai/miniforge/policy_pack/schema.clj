@@ -144,7 +144,10 @@
      (the ABSENCE of a match is a violation, e.g. a required header)
    - :multiline? - when true, match patterns against the whole content instead
      of line-by-line (for patterns that span lines)
-   - :email-pattern - secondary regex (e.g. a copyright-header email check)"
+   - :email-pattern - secondary regex (e.g. a copyright-header email check)
+   - :detector-config - a data map of policy parameters for a :custom detector
+     (e.g. an approved-values list), so the policy stays data instead of being
+     baked into a regex. The detector reads it via :policy-pack/rule in context."
   [:map
    [:type DetectionType]
    [:pattern {:optional true} [:or string? [:fn {:error/message "should be a regex pattern"} #(instance? java.util.regex.Pattern %)]]]
@@ -154,6 +157,7 @@
    [:capability {:optional true} keyword?]
    [:mode {:optional true} DetectionMode]
    [:multiline? {:optional true} boolean?]
+   [:detector-config {:optional true} [:map-of keyword? any?]]
    [:email-pattern {:optional true} string?]])
 
 (def RuleEnforcementConfig
