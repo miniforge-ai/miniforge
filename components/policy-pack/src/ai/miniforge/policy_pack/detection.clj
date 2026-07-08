@@ -411,7 +411,9 @@ depending on ambient namespace loading or raw var resolution."}
          (or (declared-method? "invoke" 2 f)
              (variadic-accepts-arity? 2 f)
              (not (reflectable-invoke? f)))
-         (catch Throwable _ true))))
+         ;; Reflection/introspection failure (e.g. babashka) → accept the fn.
+         ;; Catch Exception, not Throwable, so JVM Errors are not masked.
+         (catch Exception _ true))))
 
 (defn register-custom-fn!
   "Register `f` as the detector implementation for `custom-fn-sym`.
