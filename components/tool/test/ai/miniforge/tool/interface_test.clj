@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.tool.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
+            [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.tool.interface :as tool]
             [ai.miniforge.event-stream.interface :as es]))
 
@@ -55,10 +56,12 @@
       (is (some? tool))
       (is (= :test/simple (tool/tool-id tool)))))
 
-  (testing "throws on non-namespaced id"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (tool/create-tool {:id :no-namespace
-                                    :handler (constantly :ok)})))))
+  (testing "returns anomaly on non-namespaced id"
+    (let [result (tool/create-tool {:id :no-namespace
+                                    :handler (constantly :ok)})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :no-namespace (get-in result [:anomaly/data :id]))))))
 
 (deftest tool-info-test
   (testing "returns tool information"

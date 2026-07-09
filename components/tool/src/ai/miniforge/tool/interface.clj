@@ -53,6 +53,9 @@
    - :handler     - (fn [params context] -> result)
    - :metadata    - Optional metadata map
 
+   Returns a tool on success, or an `:invalid-input` anomaly when `:id` is not
+   a namespaced keyword.
+
    Example:
      (create-tool
        {:id :tools/greet

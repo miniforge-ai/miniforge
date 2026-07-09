@@ -207,18 +207,22 @@
    - :description - What the tool does
    - :parameters  - Map of param specs {:param {:type :string :required true}}
    - :handler     - (fn [params context] -> result)
-   - :metadata    - Optional metadata map"
+   - :metadata    - Optional metadata map
+
+   Returns a tool on success, or an `:invalid-input` anomaly when `:id` is not
+   a namespaced keyword."
   [{:keys [id name description parameters handler metadata]
     :or {parameters {} metadata {}}}]
-  (when-not (valid-tool-id? id)
-    (throw (ex-info (messages/t :tool/id-must-be-keyword)
-                    {:id id})))
-  (->FunctionTool id
-                  (or name (clojure.core/name id))
-                  description
-                  parameters
-                  handler
-                  metadata))
+  (if-not (valid-tool-id? id)
+    (anomaly/anomaly :invalid-input
+                     (messages/t :tool/id-must-be-keyword)
+                     {:id id})
+    (->FunctionTool id
+                    (or name (clojure.core/name id))
+                    description
+                    parameters
+                    handler
+                    metadata)))
 
 (defn create-registry
   "Create a new tool registry.
