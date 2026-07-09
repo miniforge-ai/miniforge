@@ -1,0 +1,23 @@
+(ns eval.seed.status-view
+  (:require [eval.seed.messages :as messages]))
+
+(defn classify-result
+  "Classify a status into a result map that callers dispatch on."
+  [status]
+  (if (= :missing status)
+    {:type "not_found"}
+    {:type "ok"}))
+
+(defn render-status-line
+  "Render a status line for the item."
+  [item]
+  (str (messages/t :status/label)
+       (if-let [s (:status item)]
+         (name s)
+         (messages/t :status/unknown))))
+
+(defn assert-config!
+  "Check that `config` is a map before use, throwing when it is not."
+  [config]
+  (when-not (map? config)
+    (throw (IllegalArgumentException. "config must be a map"))))
