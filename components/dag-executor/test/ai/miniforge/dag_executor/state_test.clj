@@ -117,7 +117,8 @@
                           (.countDown ready-latch)
                           (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
                           (state/transition-task! run-atom task-id :failed nil))
-            _           (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+            _           (is (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                            "both futures must reach the barrier within 5s")
             _           (.countDown start-latch)
             r1          (deref f1 5000 ::timeout)
             r2          (deref f2 5000 ::timeout)
@@ -334,6 +335,20 @@
       (is (= :completed (get-in @run-atom [:run/tasks task-id :task/status])))
       (is (contains? (:run/completed @run-atom) task-id))
       (is (= :completed (state/compute-run-status @run-atom))))))
+
+(deftest mark-failed!-test
+  (testing "mark-failed! stores :task/error, sets status to :failed, and updates run failure set"
+    (let [task-id    (random-uuid)
+          task       (state/create-task-state task-id #{} :state-profile :kernel)
+          run        (state/create-run-state (random-uuid) {task-id task} :state-profile :kernel)
+          run-atom   (state/create-run-atom run)
+          error-info {:reason :test-error :message "something went wrong"}]
+      (is (result/ok? (state/transition-task! run-atom task-id :ready nil)))
+      (is (result/ok? (state/transition-task! run-atom task-id :running nil)))
+      (is (result/ok? (state/mark-failed! run-atom task-id error-info nil)))
+      (is (= :failed (get-in @run-atom [:run/tasks task-id :task/status])))
+      (is (= error-info (get-in @run-atom [:run/tasks task-id :task/error])))
+      (is (contains? (:run/failed @run-atom) task-id)))))
 
 (deftest explicit-provider-construction-test
   (testing "run construction uses the supplied provider for keyword profiles"
