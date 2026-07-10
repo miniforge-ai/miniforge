@@ -484,7 +484,7 @@
                           {:message "Invalid task transition"
                            :data {:task-id task-id
                                   :error (:error tr)}}))
-              tr))))))))
+              tr)))))))
 
 (defn mark-merged!
   "Atomically mark a task as merged in a run atom."
