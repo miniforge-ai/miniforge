@@ -481,7 +481,7 @@
           (result/ok new-state))
         (do
           (when logger
-            (if (= :task-not-found (:error tr))
+            (if (= :task-not-found (get-in tr [:error :code]))
               (log/warn logger :dag-executor :task/not-found
                         {:message "Task not found"
                          :data {:task-id task-id}})
