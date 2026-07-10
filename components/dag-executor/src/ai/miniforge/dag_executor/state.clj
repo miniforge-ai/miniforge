@@ -481,10 +481,14 @@
           (result/ok new-state))
         (do
           (when logger
-            (log/warn logger :dag-executor :task/transition-failed
-                      {:message "Invalid task transition"
-                       :data {:task-id task-id
-                              :error (:error tr)}}))
+            (if (= :task-not-found (:error tr))
+              (log/warn logger :dag-executor :task/not-found
+                        {:message "Task not found"
+                         :data {:task-id task-id}})
+              (log/warn logger :dag-executor :task/transition-failed
+                        {:message "Invalid task transition"
+                         :data {:task-id task-id
+                                :error (:error tr)}})))
           tr)))))
 
 (defn mark-merged!
