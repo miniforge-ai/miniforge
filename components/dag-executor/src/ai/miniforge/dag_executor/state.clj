@@ -460,13 +460,20 @@
       (let [tr-result (volatile! nil)
             new-state (swap! run-atom
                              (fn [current-state]
-                               (let [live-task    (get-in current-state [:run/tasks task-id])
-                                     actual-from  (:task/status live-task)
-                                     tr           (transition-task live-task new-status)]
-                                 (vreset! tr-result {:tr tr :from actual-from})
-                                 (if (result/ok? tr)
-                                   (update-run-task current-state task-id (constantly (:data tr)))
-                                   current-state))))]
+                               (let [live-task (get-in current-state [:run/tasks task-id])]
+                                 (if-not live-task
+                                   (do (vreset! tr-result
+                                                {:tr   (result/err :task-not-found
+                                                                   (str "Task " task-id " not found in run")
+                                                                   {:task-id task-id})
+                                                 :from nil})
+                                       current-state)
+                                   (let [actual-from (:task/status live-task)
+                                         tr          (transition-task live-task new-status)]
+                                     (vreset! tr-result {:tr tr :from actual-from})
+                                     (if (result/ok? tr)
+                                       (update-run-task current-state task-id (constantly (:data tr)))
+                                       current-state))))))]
         (let [{:keys [tr from]} @tr-result]
           (if (result/ok? tr)
             (do
@@ -500,14 +507,20 @@
           (let [tr-result (volatile! nil)
                 new-state (swap! run-atom
                                  (fn [current-state]
-                                   (let [live-task (get-in current-state [:run/tasks task-id])
-                                         tr        (transition-task live-task :merged)]
-                                     (vreset! tr-result tr)
-                                     (if (result/ok? tr)
-                                       (-> current-state
-                                           (update-run-task task-id (constantly (:data tr)))
-                                           (mark-task-merged task-id))
-                                       current-state))))]
+                                   (let [live-task (get-in current-state [:run/tasks task-id])]
+                                     (if-not live-task
+                                       (do (vreset! tr-result
+                                                    (result/err :task-not-found
+                                                                (str "Task " task-id " not found")
+                                                                {:task-id task-id}))
+                                           current-state)
+                                       (let [tr (transition-task live-task :merged)]
+                                         (vreset! tr-result tr)
+                                         (if (result/ok? tr)
+                                           (-> current-state
+                                               (update-run-task task-id (constantly (:data tr)))
+                                               (mark-task-merged task-id))
+                                           current-state))))))]
             (let [tr @tr-result]
               (if (result/ok? tr)
                 (do
@@ -534,14 +547,20 @@
       (let [tr-result (volatile! nil)
             new-state (swap! run-atom
                              (fn [current-state]
-                               (let [live-task (get-in current-state [:run/tasks task-id])
-                                     tr        (transition-task live-task success-status)]
-                                 (vreset! tr-result tr)
-                                 (if (result/ok? tr)
-                                   (-> current-state
-                                       (update-run-task task-id (constantly (:data tr)))
-                                       (mark-task-completed task-id))
-                                   current-state))))]
+                               (let [live-task (get-in current-state [:run/tasks task-id])]
+                                 (if-not live-task
+                                   (do (vreset! tr-result
+                                                (result/err :task-not-found
+                                                            (str "Task " task-id " not found")
+                                                            {:task-id task-id}))
+                                       current-state)
+                                   (let [tr (transition-task live-task success-status)]
+                                     (vreset! tr-result tr)
+                                     (if (result/ok? tr)
+                                       (-> current-state
+                                           (update-run-task task-id (constantly (:data tr)))
+                                           (mark-task-completed task-id))
+                                       current-state))))))]
         (let [tr @tr-result]
           (if (result/ok? tr)
             (do
@@ -565,17 +584,23 @@
       (let [tr-result (volatile! nil)
             new-state (swap! run-atom
                              (fn [current-state]
-                               (let [live-task (get-in current-state [:run/tasks task-id])
-                                     tr        (transition-task live-task :failed)]
-                                 (vreset! tr-result tr)
-                                 (if (result/ok? tr)
-                                   (-> current-state
-                                       (update-run-task task-id
-                                                        (fn [_t]
-                                                          (-> (:data tr)
-                                                              (assoc :task/error error-info))))
-                                       (mark-task-failed task-id))
-                                   current-state))))]
+                               (let [live-task (get-in current-state [:run/tasks task-id])]
+                                 (if-not live-task
+                                   (do (vreset! tr-result
+                                                (result/err :task-not-found
+                                                            (str "Task " task-id " not found")
+                                                            {:task-id task-id}))
+                                       current-state)
+                                   (let [tr (transition-task live-task :failed)]
+                                     (vreset! tr-result tr)
+                                     (if (result/ok? tr)
+                                       (-> current-state
+                                           (update-run-task task-id
+                                                            (fn [_t]
+                                                              (-> (:data tr)
+                                                                  (assoc :task/error error-info))))
+                                           (mark-task-failed task-id))
+                                       current-state))))))]
         (let [tr @tr-result]
           (if (result/ok? tr)
             (do

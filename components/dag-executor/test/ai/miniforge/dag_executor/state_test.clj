@@ -99,14 +99,14 @@
           task    (state/create-task-state task-id #{})
           run     (state/create-run-state (random-uuid) {task-id task})
           run-atom (state/create-run-atom run)
-          ;; advance the task to :implementing — valid source for terminal transitions
+          ;; advance the task to :running — valid source for terminal transitions
           _       (state/transition-task! run-atom task-id :ready nil)
-          _       (state/transition-task! run-atom task-id :implementing nil)
+          _       (state/transition-task! run-atom task-id :running nil)
           ;; latch ensures both futures attempt their swap! at the same moment
           latch   (java.util.concurrent.CountDownLatch. 1)
-          f1      (future (.await latch)
+          f1      (future (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
                           (state/transition-task! run-atom task-id :completed nil))
-          f2      (future (.await latch)
+          f2      (future (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
                           (state/transition-task! run-atom task-id :failed nil))
           _       (.countDown latch)
           r1      @f1
