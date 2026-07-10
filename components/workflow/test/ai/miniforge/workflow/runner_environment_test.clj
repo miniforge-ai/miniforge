@@ -17,8 +17,7 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.runner-environment-test
-  "Regression tests for runner-environment's base-sha capture and
-   phase-boundary persistence guard behavior."
+  "Regression tests for runner-environment's base-sha capture and phase-boundary persistence guard behavior."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
