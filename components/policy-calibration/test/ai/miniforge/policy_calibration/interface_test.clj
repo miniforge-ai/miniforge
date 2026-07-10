@@ -123,18 +123,81 @@
       (is (not (:gate-ready? score))))))
 
 (deftest aggregate-consensus-test
-  (testing "gate-ready only if EVERY run passes; a flip is unstable and not ready"
+  (testing "gate-ready iff a strict majority of runs pass; :stable? reports unanimity"
     (let [ready {:clean-fp 0 :recall 1.0 :evaluated? true :failed 0 :gate-ready? true :fp-cases [] :fn-cases []}
           fail  {:clean-fp 1 :recall 1.0 :evaluated? true :failed 0 :gate-ready? false
                  :fp-cases [{:fixture "c.clj" :judge-said "x"}] :fn-cases []}]
       (let [a (sut/aggregate [ready ready ready] 3 1)]
-        (is (:gate-ready? a))
-        (is (:stable? a)))
+        (is (:gate-ready? a) "all runs pass -> gate-ready")
+        (is (:stable? a) "unanimous -> stable")
+        (is (= 3 (:pass-runs a))))
       (let [a (sut/aggregate [ready fail ready] 3 1)]
-        (is (not (:gate-ready? a)) "one failing run -> not gate-ready")
-        (is (not (:stable? a)) "verdict flipped across runs -> unstable")
+        (is (:gate-ready? a) "one anomalous run of three -> still a majority, gate-ready")
+        (is (not (:stable? a)) "verdict flipped across runs -> not stable (visible for audit)")
         (is (= [true false true] (:run-verdicts a)))
-        (is (= 1 (:clean-fp-max a)))))))
+        (is (= 2 (:pass-runs a)))
+        (is (= 1 (:clean-fp-max a))))
+      (let [a (sut/aggregate [ready fail fail] 3 1)]
+        (is (not (:gate-ready? a)) "fails a majority of runs -> not gate-ready")
+        (is (not (:stable? a)))
+        (is (= 1 (:pass-runs a))))
+      (let [a (sut/aggregate [fail fail fail] 3 1)]
+        (is (not (:gate-ready? a)) "all runs fail -> not gate-ready")
+        (is (:stable? a) "unanimous failure is stable"))))
+  (testing "a fully-failed run (no OK cells) is EXCLUDED from consensus, not counted as a fail"
+    (let [ready   {:clean-fp 0 :recall 1.0 :evaluated? true :failed 0 :gate-ready? true :fp-cases [] :fn-cases []}
+          fail    {:clean-fp 1 :recall 1.0 :evaluated? true :failed 0 :gate-ready? false
+                   :fp-cases [{:fixture "c.clj" :judge-said "x"}] :fn-cases []}
+          ;; a rate-limited run: every cell errored -> evaluated? nil, and its
+          ;; default recall=1.0 / fp=0 must NOT masquerade as a clean pass
+          crashed {:clean-fp 0 :recall 1.0 :evaluated? nil :failed 60 :gate-ready? nil :fp-cases [] :fn-cases []}]
+      (let [a (sut/aggregate [ready ready crashed] 3 1)]
+        (is (:gate-ready? a) "two clean runs + one crash -> majority of evaluated, gate-ready")
+        (is (= 2 (:evaluated-runs a)))
+        (is (= 2 (:pass-runs a)))
+        (is (not (:inconclusive? a))))
+      (let [a (sut/aggregate [ready fail crashed] 3 1)]
+        (is (not (:gate-ready? a)) "1 pass, 1 fail among 2 evaluated -> no majority")
+        (is (= 2 (:evaluated-runs a)))
+        (is (= 1 (:clean-fp-max a)) "fp summarized over evaluated runs only"))
+      (let [a (sut/aggregate [ready crashed crashed] 3 1)]
+        (is (not (:gate-ready? a)) "too few evaluated runs -> cannot certify by attrition")
+        (is (:inconclusive? a))
+        (is (= 1 (:evaluated-runs a))))
+      (let [a (sut/aggregate [crashed crashed crashed] 3 1)]
+        (is (not (:gate-ready? a)) "all runs crashed -> not gate-ready")
+        (is (:inconclusive? a))
+        (is (= 0 (:evaluated-runs a)))
+        (is (not (:stable? a)) "no evaluated runs -> not stable (an inconclusive record is not stable)")))))
+
+(deftest score-rule-trial-majority-denoises-test
+  (testing "a single stray trial does not decide a cell; the majority vote does"
+    (let [rule     {:rule/id :r/x}
+          fixtures [{:rel "clean.clj" :seeded #{}} {:rel "viol.clj" :seeded #{:r/x}}]
+          ;; clean fixture: one stray fire in three trials -> minority -> NOT an FP
+          cells    {["clean.clj" 0] (sut/cell-success #{:r/x} {:r/x "stray fire"})
+                    ["clean.clj" 1] (sut/cell-success #{} {})
+                    ["clean.clj" 2] (sut/cell-success #{} {})
+                    ;; violation fixture: caught in two of three trials -> majority catch
+                    ["viol.clj" 0]  (sut/cell-success #{:r/x} {:r/x "caught"})
+                    ["viol.clj" 1]  (sut/cell-success #{} {})
+                    ["viol.clj" 2]  (sut/cell-success #{:r/x} {:r/x "caught"})}
+          score    (sut/score-rule rule fixtures 3 bar (cell-at cells))]
+      (is (= 0 (:clean-fp score)) "1-of-3 stray fire on a clean fixture is denoised, not an FP")
+      (is (= 1.0 (:recall score)) "2-of-3 catches count as caught")
+      (is (:gate-ready? score))))
+  (testing "a majority-fire on a clean fixture IS an FP"
+    (let [rule     {:rule/id :r/x}
+          fixtures [{:rel "clean.clj" :seeded #{}} {:rel "viol.clj" :seeded #{:r/x}}]
+          cells    {["clean.clj" 0] (sut/cell-success #{:r/x} {:r/x "fire a"})
+                    ["clean.clj" 1] (sut/cell-success #{:r/x} {:r/x "fire b"})
+                    ["clean.clj" 2] (sut/cell-success #{} {})
+                    ["viol.clj" 0]  (sut/cell-success #{:r/x} {:r/x "caught"})
+                    ["viol.clj" 1]  (sut/cell-success #{:r/x} {:r/x "caught"})
+                    ["viol.clj" 2]  (sut/cell-success #{:r/x} {:r/x "caught"})}
+          score    (sut/score-rule rule fixtures 3 bar (cell-at cells))]
+      (is (= 1 (:clean-fp score)) "2-of-3 fires on a clean fixture is a real FP")
+      (is (not (:gate-ready? score))))))
 
 (deftest calibrate-end-to-end-test
   (testing "calibrate produces per-rule verdicts from an injected judge (no LLM)"

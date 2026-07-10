@@ -25,12 +25,17 @@
 
 ;; ---- scoring + aggregation ----
 (def score-rule
-  "Score one rule against a single run's cells.
+  "Score one rule against a single run's cells; each fixture's verdict is the
+   majority vote across its OK trials.
    (score-rule rule fixtures trials gate-bar cell-at) -> per-run score map."
   core/score-rule)
 (def aggregate
-  "Combine per-run scores into a stable consensus verdict.
-   (aggregate per-run runs trials) -> verdict map (gate-ready? only if every run passes)."
+  "Combine per-run scores into a consensus verdict.
+   (aggregate per-run runs trials) -> verdict map. gate-ready? iff a strict
+   majority of the EVALUATED runs pass AND a strict majority of the configured
+   runs actually evaluated (crashed/no-cell runs are excluded, not counted as
+   failures); otherwise :inconclusive?. :stable? reports unanimity among the
+   evaluated runs."
   core/aggregate)
 
 ;; ---- top-level ----
