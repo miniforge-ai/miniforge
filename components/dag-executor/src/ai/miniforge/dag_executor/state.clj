@@ -457,25 +457,25 @@
       (result/err :task-not-found
                   (str "Task " task-id " not found in run")
                   {:task-id task-id})
-      (let [from-status (:task/status task-state)
-            tr-result   (volatile! nil)]
+      (let [tr-result (volatile! nil)]
         (swap! run-atom
                (fn [current-state]
-                 (let [live-task (get-in current-state [:run/tasks task-id])
-                       tr        (transition-task live-task new-status)]
-                   (vreset! tr-result tr)
+                 (let [live-task    (get-in current-state [:run/tasks task-id])
+                       actual-from  (:task/status live-task)
+                       tr           (transition-task live-task new-status)]
+                   (vreset! tr-result {:tr tr :from actual-from})
                    (if (result/ok? tr)
                      (update-run-task current-state task-id (constantly (:data tr)))
                      current-state))))
-        (let [tr @tr-result]
+        (let [{:keys [tr from]} @tr-result]
           (if (result/ok? tr)
             (do
-              (emit-task-state-event! @run-atom task-id from-status new-status)
+              (emit-task-state-event! @run-atom task-id from new-status)
               (when logger
                 (log/info logger :dag-executor :task/transitioned
                           {:message "Task status changed"
                            :data {:task-id task-id
-                                  :from from-status
+                                  :from from
                                   :to new-status}}))
               (result/ok @run-atom))
             (do
@@ -484,7 +484,7 @@
                           {:message "Invalid task transition"
                            :data {:task-id task-id
                                   :error (:error tr)}}))
-              tr))))))
+              tr))))))))
 
 (defn mark-merged!
   "Atomically mark a task as merged in a run atom."
