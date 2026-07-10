@@ -93,6 +93,31 @@
       (is (result/ok? result))
       (is (= :ready (get-in @run-atom [:run/tasks task-id :task/status]))))))
 
+(deftest transition-task!-concurrent-terminal-transitions-test
+  (testing "exactly one of two concurrent terminal transitions wins; atom state is consistent"
+    (let [task-id (random-uuid)
+          task    (state/create-task-state task-id #{})
+          run     (state/create-run-state (random-uuid) {task-id task})
+          run-atom (state/create-run-atom run)
+          ;; advance the task to :implementing — valid source for terminal transitions
+          _       (state/transition-task! run-atom task-id :ready nil)
+          _       (state/transition-task! run-atom task-id :implementing nil)
+          ;; latch ensures both futures attempt their swap! at the same moment
+          latch   (java.util.concurrent.CountDownLatch. 1)
+          f1      (future (.await latch)
+                          (state/transition-task! run-atom task-id :completed nil))
+          f2      (future (.await latch)
+                          (state/transition-task! run-atom task-id :failed nil))
+          _       (.countDown latch)
+          r1      @f1
+          r2      @f2
+          final   (get-in @run-atom [:run/tasks task-id :task/status])]
+      (is (contains? #{:completed :failed} final)
+          "final status must be a valid terminal state")
+      (is (or (and (result/ok? r1) (result/err? r2))
+              (and (result/err? r1) (result/ok? r2)))
+          "exactly one concurrent transition should succeed; the other must error"))))
+
 ;; ============================================================================
 ;; Query tests
 ;; ============================================================================
