@@ -488,7 +488,7 @@
                :description
                "Engineering standard (011): Layered Architecture (the Dependency Rule) — module dependencies point inward only; pure core; ports & adapters"}
         #:rule{:title
-               "Localization — every emitted string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale",
+               "Localization — every emitted prose string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale",
                :agent-behavior
                "1. Every **prose** string literal in code that gets emitted is a violation —\n2. When adding a new emitted **prose** string, decide locale by audience: any user (operator dashboard included) will see it → user locale; logs, metric descriptions, observability-bound anomaly text, and internal tags → system locale.\n3. Add the key to the matching catalog file FIRST, then reference it.",
                :enforcement
@@ -505,7 +505,7 @@
                :detection {:type :custom},
                :category "050",
                :description
-               "Engineering standard (050): Localization — every emitted string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale"}
+               "Engineering standard (050): Localization — every emitted prose string flows through a catalog; user-facing strings into a user locale (en-US, etc.), developer-facing strings into the system locale"}
         #:rule{:title
                "Named constants — no magic numbers or magic strings in code, always extract to a well-named def with a docstring that explains intent",
                :agent-behavior
