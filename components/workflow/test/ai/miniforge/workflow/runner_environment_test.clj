@@ -17,13 +17,8 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.runner-environment-test
-  "Tests for runner-environment — specifically the M1 base-sha
-   capture path that future label-action watchers consume.
-
-   This file appears in the artifact-warning-suppression PR because
-   `build-env-record` was touched in surrounding context (`:base-sha`
-   capture pre-dates this PR). These are additive regression tests only;
-   no behavior changes were made to runner-environment.clj itself."
+  "Regression tests for runner-environment's base-sha capture and
+   phase-boundary persistence guard behavior."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
