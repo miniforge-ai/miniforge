@@ -569,6 +569,10 @@
                 {:execution/executor :stub
                  :execution/mode :local
                  :execution/environment-id "env-1"
+                 ;; a real local run archives a worktree — carry its path so the
+                 ;; persist runs (worktree-less local persistence is a no-op guard
+                 ;; against committing the host CWD)
+                 :execution/worktree-path "/tmp/local-worktree"
                  :execution/environment-metadata {:base-branch "feat/foo"}
                  :event-stream :stub-stream
                  :execution/id #uuid "00000000-0000-0000-0000-000000000001"}

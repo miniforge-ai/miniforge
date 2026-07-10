@@ -326,9 +326,17 @@
    destroying work on failure."
   [context phase-ctx]
   (when-let [executor (get context :execution/executor)]
-    (let [env-id (get context :execution/environment-id)
-          phase  (boundary-phase phase-ctx)]
-      (when env-id
+    (let [env-id  (get context :execution/environment-id)
+          mode    (get context :execution/mode)
+          workdir (get context :execution/worktree-path)
+          phase   (boundary-phase phase-ctx)]
+      ;; Governed mode pushes to a remote via the capsule, so it persists with or
+      ;; without a host worktree. LOCAL mode archives a git bundle of the
+      ;; worktree — with NO worktree-path there is nothing to archive and the git
+      ;; tier falls back to the process CWD, committing the HOST repo. That is
+      ;; what let a caller that drove run-pipeline without a sandbox leak a real
+      ;; commit into the live worktree. So local persistence requires a worktree.
+      (when (and env-id (or (= :governed mode) workdir))
         (try
           (let [result (dag/persist-workspace! executor env-id
                                                (persist-opts context phase env-id))
