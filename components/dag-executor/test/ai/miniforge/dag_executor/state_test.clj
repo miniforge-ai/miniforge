@@ -111,14 +111,21 @@
             start-latch (java.util.concurrent.CountDownLatch. 1)
             f1          (future
                           (.countDown ready-latch)
-                          (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                          (when-not (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                            (throw (ex-info "timed out waiting for start latch"
+                                            {:transition :completed})))
                           (state/transition-task! run-atom task-id :completed nil))
             f2          (future
                           (.countDown ready-latch)
-                          (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                          (when-not (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                            (throw (ex-info "timed out waiting for start latch"
+                                            {:transition :failed})))
                           (state/transition-task! run-atom task-id :failed nil))
-            _           (is (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                            "both futures must reach the barrier within 5s")
+            ready?      (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+            _           (is ready? "both futures must reach the barrier within 5s")
+            _           (when-not ready?
+                          (throw (ex-info "timed out waiting for futures to reach barrier"
+                                          {:task-id task-id})))
             _           (.countDown start-latch)
             r1          (deref f1 5000 ::timeout)
             r2          (deref f2 5000 ::timeout)
@@ -345,7 +352,12 @@
           error-info {:reason :test-error :message "something went wrong"}]
       (is (result/ok? (state/transition-task! run-atom task-id :ready nil)))
       (is (result/ok? (state/transition-task! run-atom task-id :running nil)))
-      (is (result/ok? (state/mark-failed! run-atom task-id error-info nil)))
+      (let [fail-result    (state/mark-failed! run-atom task-id error-info nil)
+            returned-state (:data fail-result)]
+        (is (result/ok? fail-result))
+        (is (= :failed (get-in returned-state [:run/tasks task-id :task/status])))
+        (is (= error-info (get-in returned-state [:run/tasks task-id :task/error])))
+        (is (contains? (:run/failed returned-state) task-id)))
       (is (= :failed (get-in @run-atom [:run/tasks task-id :task/status])))
       (is (= error-info (get-in @run-atom [:run/tasks task-id :task/error])))
       (is (contains? (:run/failed @run-atom) task-id)))))
