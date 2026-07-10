@@ -26,7 +26,8 @@
    Layer 0: Governance state derivation (§4).
    Layer 1: Monitor zone projection builders (§5).
    Layer 2: Attention derivation rules (§5)."
-  )
+  (:require
+   [ai.miniforge.tui-views.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; PR Governance state derivation — N5-delta §4
@@ -201,7 +202,8 @@
         :when (= :failed (:status wf))]
     {:attention/id          (random-uuid)
      :attention/severity    :critical
-     :attention/summary     (str "Workflow failed: " (or (:name wf) (str (:id wf))))
+     :attention/summary     (msg/t :attention/workflow-failed
+                                    {:name (or (:name wf) (str (:id wf)))})
      :attention/source-type :workflow
      :attention/source-id   (:id wf)
      :attention/created-at  (:last-updated wf)}))
@@ -213,7 +215,8 @@
         :when (:pr/monitor-budget-exhausted? pr)]
     {:attention/id          (random-uuid)
      :attention/severity    :critical
-     :attention/summary     (str "Budget exhausted: " (:pr/repo pr) "#" (:pr/number pr))
+     :attention/summary     (msg/t :attention/budget-exhausted
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
      :attention/source-type :pr-monitor
      :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
      :attention/created-at  nil}))
@@ -225,7 +228,8 @@
         :when (:pr/monitor-budget-warning? pr)]
     {:attention/id          (random-uuid)
      :attention/severity    :warning
-     :attention/summary     (str "Budget warning: " (:pr/repo pr) "#" (:pr/number pr))
+     :attention/summary     (msg/t :attention/budget-warning
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
      :attention/source-type :pr-monitor
      :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
      :attention/created-at  nil}))
@@ -237,7 +241,8 @@
         :when (:pr/monitor-escalated? pr)]
     {:attention/id          (random-uuid)
      :attention/severity    :critical
-     :attention/summary     (str "Escalated: " (:pr/repo pr) "#" (:pr/number pr))
+     :attention/summary     (msg/t :attention/escalated
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
      :attention/source-type :pr-monitor
      :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
      :attention/created-at  nil}))

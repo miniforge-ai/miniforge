@@ -33,6 +33,7 @@
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project :as project]
    [ai.miniforge.tui-views.views.tab-bar :as tab-bar]))
@@ -129,7 +130,7 @@
                         true (into (resolve-columns columns cols sel-w)))]
     (if (empty? data)
       (layout/text [cols rows]
-                   (or empty-msg "  No data available.")
+                   (or empty-msg (msg/t :table/empty-default))
                    {:fg (if empty-msg palette/status-info (get theme :fg :default))})
       (let [visible-count (max 0 (- rows 2))
             sel (or selected 0)
@@ -237,7 +238,7 @@
     :widget/tree   (render-tree-widget model theme size node)
     :widget/kanban (render-kanban-widget model theme size node)
     ;; Fallback
-    (layout/text size "Unknown node type")))
+    (layout/text size (msg/t :node/unknown-type))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Top-level screen rendering
@@ -261,7 +262,7 @@
           (let [text (if-let [text-fn-kw (:text-fn title-bar)]
                        (let [ctx-fn (project/get-context text-fn-kw)]
                          (ctx-fn model))
-                       "MINIFORGE")]
+                       (msg/t :title/app-default))]
             (layout/text [c r] text
               {:fg (get theme :header palette/status-info) :bold? true}))
 

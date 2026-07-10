@@ -25,6 +25,7 @@
   (:require
    [ai.miniforge.tui-engine.interface :as engine]
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.interpret :as interpret]
    [ai.miniforge.tui-views.view.overlays :as overlays]))
@@ -37,7 +38,7 @@
   [model theme size]
   (if-let [spec (interpret/get-screen-spec (:view model))]
     (interpret/render-screen model theme size spec)
-    (layout/text size "Unknown view")))
+    (layout/text size (msg/t :view/unknown-view))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Theme post-processing
@@ -66,7 +67,7 @@
    model -> [cols rows] -> cell-buffer"
   [model [cols rows]]
   (if (< rows 4)
-    (layout/text [cols rows] "Terminal too small" {:fg palette/status-fail})
+    (layout/text [cols rows] (msg/t :view/terminal-too-small) {:fg palette/status-fail})
     (let [theme (engine/get-theme (:theme model))
           model (assoc model :resolved-theme theme)
           cmd-active? (not= :normal (:mode model))
