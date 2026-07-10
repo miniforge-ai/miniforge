@@ -96,23 +96,32 @@
 (deftest transition-task!-concurrent-terminal-transitions-test
   (testing "exactly one of two concurrent terminal transitions wins; atom state is consistent"
     (dotimes [_ 100]
-      (let [task-id  (random-uuid)
-            task     (state/create-task-state task-id #{})
-            run      (state/create-run-state (random-uuid) {task-id task})
-            run-atom (state/create-run-atom run)
-            ;; advance the task to :running — valid source for terminal transitions
-            _        (state/transition-task! run-atom task-id :ready nil)
-            _        (state/transition-task! run-atom task-id :running nil)
-            ;; latch ensures both futures attempt their swap! at the same moment
-            latch    (java.util.concurrent.CountDownLatch. 1)
-            f1       (future (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                             (state/transition-task! run-atom task-id :completed nil))
-            f2       (future (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                             (state/transition-task! run-atom task-id :failed nil))
-            _        (.countDown latch)
-            r1       (deref f1 5000 ::timeout)
-            r2       (deref f2 5000 ::timeout)
-            final    (get-in @run-atom [:run/tasks task-id :task/status])]
+      (let [task-id     (random-uuid)
+            task        (state/create-task-state task-id #{})
+            run         (state/create-run-state (random-uuid) {task-id task})
+            run-atom    (state/create-run-atom run)
+            ;; assert setup so failures point at the precondition, not the race
+            _           (is (result/ok? (state/transition-task! run-atom task-id :ready nil))
+                            "setup: :pending → :ready must succeed")
+            _           (is (result/ok? (state/transition-task! run-atom task-id :running nil))
+                            "setup: :ready → :running must succeed")
+            ;; two-phase barrier: both futures signal ready before the main thread
+            ;; releases them, guaranteeing they are parked at start-latch simultaneously
+            ready-latch (java.util.concurrent.CountDownLatch. 2)
+            start-latch (java.util.concurrent.CountDownLatch. 1)
+            f1          (future
+                          (.countDown ready-latch)
+                          (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                          (state/transition-task! run-atom task-id :completed nil))
+            f2          (future
+                          (.countDown ready-latch)
+                          (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+                          (state/transition-task! run-atom task-id :failed nil))
+            _           (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+            _           (.countDown start-latch)
+            r1          (deref f1 5000 ::timeout)
+            r2          (deref f2 5000 ::timeout)
+            final       (get-in @run-atom [:run/tasks task-id :task/status])]
         (is (not= ::timeout r1) "future 1 timed out waiting for terminal transition")
         (is (not= ::timeout r2) "future 2 timed out waiting for terminal transition")
         (is (contains? #{:completed :failed} final)
