@@ -17,17 +17,12 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.workflow.runner-environment-test
-  "Tests for runner-environment — specifically the M1 base-sha
-   capture path that future label-action watchers consume.
-
-   This file appears in the artifact-warning-suppression PR because
-   `build-env-record` was touched in surrounding context (`:base-sha`
-   capture pre-dates this PR). These are additive regression tests only;
-   no behavior changes were made to runner-environment.clj itself."
+  "Regression tests for runner-environment's base-sha capture and phase-boundary persistence guard behavior."
   (:require [clojure.java.io :as io]
             [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.dag-executor.result :as result]
             [ai.miniforge.workflow.runner-environment :as env]))
 
@@ -114,3 +109,27 @@
               ":base-sha must be absent (not nil) when HEAD can't be read"))
         (finally
           (.delete (io/file non-git-dir)))))))
+
+(deftest persist-at-phase-boundary-guards-on-worktree-test
+  (testing "an executor + env-id but NO :execution/worktree-path -> the persist
+            never runs; it must not fall back to committing the process CWD (the
+            leak that let a sandboxless run-pipeline commit into the live repo)"
+    (let [calls (atom 0)]
+      (with-redefs [dag/persist-workspace!
+                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+        (let [outcome (env/persist-workspace-at-phase-boundary!
+                       {:execution/executor ::stub-executor
+                        :execution/environment-id (random-uuid)}
+                       {})]
+          (is (nil? outcome) "no worktree -> no persist -> nil")
+          (is (zero? @calls) "persist-workspace! is never invoked without a worktree")))))
+  (testing "a configured worktree-path DOES run the persist"
+    (let [calls (atom 0)]
+      (with-redefs [dag/persist-workspace!
+                    (fn [& _] (swap! calls inc) (result/ok {:persisted? false}))]
+        (env/persist-workspace-at-phase-boundary!
+         {:execution/executor ::stub-executor
+          :execution/environment-id (random-uuid)
+          :execution/worktree-path "/tmp/sandbox-worktree"}
+         {})
+        (is (= 1 @calls) "persist runs when a worktree is configured")))))
