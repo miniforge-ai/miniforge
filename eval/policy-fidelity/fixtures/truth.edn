@@ -95,4 +95,4 @@
 
   "seed/status_view.clj"
   {:violates #{}
-   :notes "localization NON-prose specificity: exercises all three localization exemptions — a machine dispatch tag (:type \"not_found\" matched by callers), a (name status) dynamic-enum render (no string literal; label + fallback ARE localized via messages/t), and a programmer-error IllegalArgumentException guard (005-blessed, developer-only). A faithful judge with the sharpened rule flags NOTHING for localization (or 005/named-constants)."}}}
+   :notes "localization NON-prose specificity: exercises all three localization exemptions — a machine dispatch tag (:type \"not_found\" matched by callers), a (name s) dynamic-enum render (no string literal; label + fallback ARE localized via messages/t), and a programmer-error IllegalArgumentException guard (exceptions-as-data 005-blessed, developer-only). A faithful judge with the sharpened rule flags NOTHING for localization (nor :std/named-constants for the \"not_found\" dispatch tag)."}}}
