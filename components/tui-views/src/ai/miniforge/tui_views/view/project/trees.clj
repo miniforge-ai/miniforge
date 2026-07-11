@@ -24,6 +24,7 @@
    Layer 1: Composite tree builders that assemble node sequences."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
@@ -87,10 +88,12 @@
 (defn factor-label
   "Format a readiness/risk factor for display."
   [{:keys [factor weight score contribution]}]
-  (str (name factor) ": "
-       (int (* 100 (or score 0))) "%"
-       " (w=" (int (* 100 (or weight 0))) "%"
-       (when contribution (str ", c=" (format "%.2f" (double contribution))))
+  (str (msg/t :readiness/factor-label
+              {:factor  (name factor)
+               :score   (int (* 100 (or score 0)))
+               :weight  (int (* 100 (or weight 0)))})
+       (when contribution (msg/t :readiness/factor-contribution
+                                 {:contribution (format "%.2f" (double contribution))}))
        ")"))
 
 (defn ci-check-node
@@ -104,18 +107,22 @@
   "Build CI status header + individual check nodes."
   [ci-status ci-checks]
   (let [ci-fg (case ci-status :passed status-pass :failed status-fail status-warning)]
-    (into [(tree-node (str "CI: " (case ci-status
-                                    :passed "\u2713 passed" :failed "\u2718 failed"
-                                    :running "\u25cb running" "\u25cb pending"))
+    (into [(tree-node (msg/t :ci/status
+                             {:status (case ci-status
+                                        :passed  (msg/t :ci/passed)
+                                        :failed  (msg/t :ci/failed)
+                                        :running (msg/t :ci/running)
+                                        (msg/t :ci/pending))})
                       1 true ci-fg)]
           (mapv ci-check-node ci-checks))))
 
 (defn behind-main-node
   "Build the behind-main indicator node."
   [behind? merge-st]
-  (tree-node (str "Behind main: " (if behind?
-                                    (str "yes (" (if merge-st (name merge-st) "BEHIND") ")")
-                                    "no"))
+  (tree-node (if behind?
+               (msg/t :readiness/behind-main-yes
+                      {:state (if merge-st (name merge-st) (msg/t :readiness/behind-main-fallback))})
+               (msg/t :readiness/behind-main-no))
              1 false (if behind? status-fail status-pass)))
 
 (defn review-node
@@ -123,12 +130,12 @@
   [pr-status]
   (let [[review-label review-fg]
         (case pr-status
-          :approved           ["\u2713 approved"           status-pass]
-          :changes-requested  ["\u25d0 changes requested"  status-fail]
-          :reviewing          ["\u25cb review required"    status-warning]
-          :draft              ["\u25d1 draft"              nil]
-                              ["\u25cb pending"            status-warning])]
-    (tree-node (str "Review: " review-label) 1 false review-fg)))
+          :approved           [(msg/t :review/approved)           status-pass]
+          :changes-requested  [(msg/t :review/changes-requested)  status-fail]
+          :reviewing          [(msg/t :review/reviewing)          status-warning]
+          :draft              [(msg/t :review/draft)              nil]
+                              [(msg/t :review/pending)            status-warning])]
+    (tree-node (msg/t :review/label {:status review-label}) 1 false review-fg)))
 
 (defn gates-section-nodes
   "Build gate status header + individual gate nodes."
@@ -136,20 +143,21 @@
   (if (seq gates)
     (let [passed (count (filter :gate/passed? gates))
           all?   (= passed (count gates))]
-      (into [(tree-node (str "Gates: " passed "/" (count gates) " passed")
+      (into [(tree-node (msg/t :gates/summary {:passed passed :total (count gates)})
                         1 true (if all? status-pass status-warning))]
             (mapv #(tree-node (str (if (:gate/passed? %) "\u2713 " "\u2718 ")
                                    (name (:gate/id %)))
                               2 false (if (:gate/passed? %) status-pass status-fail))
                   gates)))
-    [(tree-node "Gates: none" 1)]))
+    [(tree-node (msg/t :gates/none) 1)]))
 
 (defn risk-factor-label
   "Format a risk factor for display."
   [{:keys [factor explanation weight score]}]
   (str (name factor) ": " (or explanation "")
        (when weight
-         (str " (w=" (int (* 100 weight)) "%, s=" (int (* 100 (or score 0))) "%)"))))
+         (msg/t :risk/factor-weight
+                {:weight (int (* 100 weight)) :score (int (* 100 (or score 0)))}))))
 
 (defn risk-factor-detail-nodes
   "Build expandable detail nodes for a risk factor."
@@ -157,37 +165,37 @@
   (case factor
     :change-size
     (let [{:keys [additions deletions total]} (if (map? value) value {})]
-      (cond-> [(tree-node (str "Change size: " (or total "?") " lines"
-                                (when (and total (> total 500)) " (large)"))
+      (cond-> [(tree-node (str (msg/t :risk/change-size {:total (or total "?")})
+                                (when (and total (> total 500)) (msg/t :risk/change-size-large)))
                            1 true)]
         (and additions deletions)
         (conj (tree-node (str "+" additions " / -" deletions) 2))))
 
     :dependency-fanout
-    [(tree-node (str "Fanout: " (or value 0) " downstream PRs") 1)]
+    [(tree-node (msg/t :risk/fanout {:count (or value 0)}) 1)]
 
     :test-coverage-delta
-    [(tree-node (str "Coverage: " (when (and value (pos? value)) "+")
-                      (or value "?") "% delta")
+    [(tree-node (msg/t :risk/coverage-delta
+                       {:sign (if (and value (pos? value)) "+" "") :value (or value "?")})
                 1)]
 
     :author-experience
     (let [{:keys [total-commits recent-commits]} (if (map? value) value {})]
-      [(tree-node (str "Author: " (or total-commits "?") " commits, "
-                        (or recent-commits "?") " recent")
+      [(tree-node (msg/t :risk/author-experience
+                         {:total (or total-commits "?") :recent (or recent-commits "?")})
                   1)])
 
     :review-staleness
-    [(tree-node (str "Last review: " (or value "?") "h ago") 1)]
+    [(tree-node (msg/t :risk/review-staleness {:hours (or value "?")}) 1)]
 
     :complexity-delta
-    [(tree-node (str "Complexity delta: " (if (and value (pos? value)) "+" "")
-                      (or value "?"))
+    [(tree-node (msg/t :risk/complexity-delta
+                       {:sign (if (and value (pos? value)) "+" "") :value (or value "?")})
                 1)]
 
     :critical-files
     (let [{:keys [critical-files count]} (if (map? value) value {})]
-      (into [(tree-node (str "Critical files: " (or count 0) " modified") 1 true)]
+      (into [(tree-node (msg/t :risk/critical-files {:count (or count 0)}) 1 true)]
             (mapv #(tree-node (str "  " %) 2) (or critical-files []))))
 
     ;; Default: show explanation
@@ -195,9 +203,9 @@
 
 (defn severity-prefix [severity]
   (case severity
-    :critical "\u2718 CRIT " :high "\u2718 HIGH "
-    :medium   "\u26a0 MEDM " :low  "\u26a0 LOW  "
-    :info     "\u2139 INFO " "\u26a0 "))
+    :critical (msg/t :violation/severity-critical) :high (msg/t :violation/severity-high)
+    :medium   (msg/t :violation/severity-medium)   :low  (msg/t :violation/severity-low)
+    :info     (msg/t :violation/severity-info) "\u26a0 "))
 
 (defn severity-color [severity]
   (case severity
@@ -211,7 +219,7 @@
   [pack]
   (if (map? pack)
     (cond-> []
-      (:version pack)     (conj (tree-node (str "  Version: " (:version pack)) 3))
+      (:version pack)     (conj (tree-node (msg/t :policy/pack-version {:version (:version pack)}) 3))
       (:description pack) (conj (tree-node (str "  " (:description pack)) 3)))
     []))
 
@@ -220,7 +228,7 @@
    Each pack is expandable if it has version or description detail."
   [packs]
   (when (seq packs)
-    (into [(tree-node (str "Packs applied (" (count packs) "):") 1 true)]
+    (into [(tree-node (msg/t :policy/packs-applied {:count (count packs)}) 1 true)]
           (mapcat (fn [pack]
                     (let [pack-name (if (map? pack) (or (:name pack) (str pack)) (str pack))
                           details   (pack-detail-nodes pack)
@@ -234,13 +242,13 @@
   [summary]
   (when summary
     (let [parts (cond-> []
-                  (pos? (:critical summary 0)) (conj (str (:critical summary) " critical"))
-                  (pos? (:high summary 0))     (conj (str (:high summary) " high"))
-                  (pos? (:medium summary 0))   (conj (str (:medium summary) " medium"))
-                  (pos? (:low summary 0))      (conj (str (:low summary) " low"))
-                  (pos? (:info summary 0))     (conj (str (:info summary) " info")))]
+                  (pos? (:critical summary 0)) (conj (msg/t :violation/count-critical {:count (:critical summary)}))
+                  (pos? (:high summary 0))     (conj (msg/t :violation/count-high {:count (:high summary)}))
+                  (pos? (:medium summary 0))   (conj (msg/t :violation/count-medium {:count (:medium summary)}))
+                  (pos? (:low summary 0))      (conj (msg/t :violation/count-low {:count (:low summary)}))
+                  (pos? (:info summary 0))     (conj (msg/t :violation/count-info {:count (:info summary)})))]
       (when (seq parts)
-        [(tree-node (str "Summary: " (str/join ", " parts)) 1)]))))
+        [(tree-node (msg/t :violation/summary {:parts (str/join ", " parts)}) 1)]))))
 
 (defn violation-detail-nodes
   "Build detail child nodes for a single violation at depth 3."
@@ -250,13 +258,15 @@
         det-type  (:detection-type v)
         matches   (:matches v [])]
     (cond-> []
-      artifact (conj (tree-node (str "  File: " artifact) 3))
-      rule-id  (conj (tree-node (str "  Rule: " (if (keyword? rule-id) (str rule-id) (str rule-id))) 3))
-      det-type (conj (tree-node (str "  Type: " (name det-type)) 3))
+      artifact (conj (tree-node (msg/t :violation/file {:path artifact}) 3))
+      rule-id  (conj (tree-node (msg/t :violation/rule {:rule (str rule-id)}) 3))
+      det-type (conj (tree-node (msg/t :violation/type {:type (name det-type)}) 3))
       (seq matches)
       (into (mapv (fn [m]
-                    (tree-node (str "  L" (:line m "?") ":" (:column m "?")
-                                    " " (or (:context m) (:text m) ""))
+                    (tree-node (msg/t :violation/match-location
+                                      {:line   (:line m "?")
+                                       :column (:column m "?")
+                                       :text   (or (:context m) (:text m) "")})
                                3))
                   matches)))))
 
@@ -266,13 +276,13 @@
    rule ID, detection type, and match locations."
   [violations]
   (when (seq violations)
-    (into [(tree-node (str "Violations (" (count violations) "):") 1 true)]
+    (into [(tree-node (msg/t :violation/header {:count (count violations)}) 1 true)]
           (mapcat (fn [v]
                     (let [details (violation-detail-nodes v)
                           expandable? (seq details)]
                       (into [(tree-node (str (severity-prefix (:severity v))
                                              (or (:message v) (name (get v :rule-id "")))
-                                             (when (:auto-fixable? v) " [auto-fix]"))
+                                             (when (:auto-fixable? v) (msg/t :violation/auto-fix)))
                                         2 (boolean expandable?) (severity-color (:severity v)))]
                             details)))
                   violations))))
@@ -282,9 +292,9 @@
         violations (:evaluation/violations policy [])
         packs      (:evaluation/packs-applied policy [])
         passed?    (:evaluation/passed? policy)]
-    (into [(tree-node (str "Policy: "
-                           (if passed? "\u2714 passed" "\u2718 FAILED")
-                           " (" (:total summary 0) " violations)")
+    (into [(tree-node (msg/t :policy/tree-header
+                             {:status (if passed? (msg/t :policy/passed) (msg/t :policy/failed))
+                              :count  (:total summary 0)})
                       0 true (if passed? status-pass status-fail))]
           (concat
            (packs-applied-nodes packs)
@@ -295,7 +305,7 @@
   (let [passed (count (filter :gate/passed? gates))
         total  (count gates)
         all?   (= passed total)]
-    (into [(tree-node (str "Gates (" passed "/" total " passed):")
+    (into [(tree-node (msg/t :gates/tree-header {:passed passed :total total})
                       0 true (if all? status-pass status-warning))]
           (mapcat (fn [g]
                     (let [has-msg? (seq (:gate/message g))]
@@ -310,21 +320,21 @@
 (defn intent-nodes
   "Build intent section nodes for evidence tree."
   [evidence]
-  [{:label "Intent" :depth 0 :expandable? true}
+  [{:label (msg/t :evidence/intent) :depth 0 :expandable? true}
    {:label (or (get-in evidence [:intent :description])
-               "No intent data available")
+               (msg/t :evidence/no-intent))
     :depth 1 :expandable? false}])
 
 (defn phase-nodes
   "Build phase section nodes for evidence tree."
   [phases]
-  (into [{:label "Phases" :depth 0 :expandable? true}]
+  (into [{:label (msg/t :evidence/phases) :depth 0 :expandable? true}]
         (mapv (fn [{:keys [phase status]}]
                 {:label (str (name phase)
                              (case status
-                               :running  " ● running"
-                               :success  " ✓ passed"
-                               :failed   " ✗ failed"
+                               :running  (msg/t :phase/running)
+                               :success  (msg/t :phase/passed)
+                               :failed   (msg/t :phase/failed)
                                ""))
                  :depth 1 :expandable? false})
               phases)))
@@ -332,19 +342,20 @@
 (defn validation-nodes
   "Build validation section nodes for evidence tree."
   [evidence]
-  [{:label "Validation" :depth 0 :expandable? true}
+  [{:label (msg/t :evidence/validation) :depth 0 :expandable? true}
    {:label (if (get-in evidence [:validation :passed?])
-             "✓ All gates passed"
-             (str "✗ " (count (get-in evidence [:validation :errors] [])) " error(s)"))
+             (msg/t :evidence/all-gates-passed)
+             (msg/t :evidence/error-count
+                    {:count (count (get-in evidence [:validation :errors] []))}))
     :depth 1 :expandable? false}])
 
 (defn policy-evidence-nodes
   "Build policy section nodes for evidence tree."
   [evidence]
-  [{:label "Policy" :depth 0 :expandable? true}
+  [{:label (msg/t :evidence/policy) :depth 0 :expandable? true}
    {:label (if (get-in evidence [:policy :compliant?])
-             "✓ Policy compliant"
-             "✗ Policy violations detected")
+             (msg/t :evidence/policy-compliant)
+             (msg/t :evidence/policy-violations))
     :depth 1 :expandable? false}])
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -371,18 +382,19 @@
         ready?    (:readiness/ready? readiness)
         recommend (when pr (helpers/derive-recommendation pr))]
     (into
-     (cond-> [(tree-node (str "Readiness: " (int (* 100 score)) "%"
-                               (when ready? " \u2714 ready"))
+     (cond-> [(tree-node (str (msg/t :readiness/score {:score (int (* 100 score))})
+                               (when ready? (msg/t :readiness/ready-suffix)))
                           0 true (if ready? status-pass status-warning))]
        recommend
-       (conj (tree-node (str "Recommend: " (:label recommend) " \u2014 " (:reason recommend))
+       (conj (tree-node (msg/t :readiness/recommend
+                              {:label (:label recommend) :reason (:reason recommend)})
                          0 false (recommend-action-color (:action recommend)))))
      (concat
       (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
       [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
       [(review-node (:pr/status pr))]
       (when (seq (get pr :pr/depends-on []))
-        [(tree-node (str "Dependent PRs: " (count (get pr :pr/depends-on))) 1 true)])
+        [(tree-node (msg/t :readiness/dependent-prs {:count (count (get pr :pr/depends-on))}) 1 true)])
       (gates-section-nodes (get pr :pr/gate-results []))))))
 
 (defn project-risk-tree
@@ -400,14 +412,14 @@
     (concat
       ;; Provenance indicator
       (when wf-id
-        [(tree-node "Miniforge-sourced PR" 0 false status-info)])
+        [(tree-node (msg/t :risk/miniforge-sourced) 0 false status-info)])
       ;; Agent risk assessment (if available)
       (when agent-r
-        [(tree-node (str "Agent risk: " (name (:level agent-r)))
+        [(tree-node (msg/t :risk/agent-risk {:level (name (:level agent-r))})
                     0 true (risk-level-color (:level agent-r)))
          (tree-node (str "  " (:reason agent-r)) 1)])
       ;; Mechanical risk with factors
-      [(tree-node (str "Mechanical risk: " (name level)
+      [(tree-node (str (msg/t :risk/mechanical-risk {:level (name level)})
                        (when score (str " (" (format "%.2f" (double score)) ")")))
                   0 true (risk-level-color level))]
       (mapcat risk-factor-detail-nodes factors))))
@@ -419,8 +431,8 @@
     (cond
       policy      (policy-tree policy)
       (seq gates) (gates-tree gates)
-      :else       [(tree-node "Policy not yet evaluated" 0)
-                   (tree-node "Use :review to evaluate policy packs" 1)])))
+      :else       [(tree-node (msg/t :policy/not-evaluated) 0)
+                   (tree-node (msg/t :policy/evaluate-hint) 1)])))
 
 (defn project-pr-summary
   "Build summary tree nodes for the PR detail top pane.
@@ -442,34 +454,38 @@
     (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
                         0 false status-info)
              (tree-node (str "  " (:pr/title pr "")) 0)
-             (tree-node (str "Branch: " (or branch "?")
+             (tree-node (str (msg/t :readiness/branch {:branch (or branch "?")})
                              (when-let [author (:pr/author pr)]
-                               (when (seq author) (str " by " author))))
+                               (when (seq author) (msg/t :readiness/branch-author {:author author}))))
                         0)
-             (tree-node (str "State: " (helpers/pr-state-label (:pr/status pr))
-                             " │ Status: " (helpers/readiness-indicator r-state))
+             (tree-node (msg/t :readiness/state-status
+                               {:state     (helpers/pr-state-label (:pr/status pr))
+                                :indicator (helpers/readiness-indicator r-state)})
                         0 false (readiness-state-color r-state))
-             (tree-node (str "Risk: " (name risk-lvl)
-                             " │ Score: " (int (* 100 (get readiness :readiness/score 0))) "%"
+             (tree-node (str (msg/t :readiness/risk-score
+                                    {:level (name risk-lvl)
+                                     :score (int (* 100 (get readiness :readiness/score 0)))})
                              (when (pos? total)
-                               (str " │ +" additions "/-" deletions
-                                    (when (pos? files) (str " " files " files")))))
+                               (str (msg/t :readiness/diff-stat {:additions additions :deletions deletions})
+                                    (when (pos? files) (msg/t :readiness/files-count {:files files})))))
                         0 false (risk-level-color risk-lvl))]
       recommend
-      (conj (tree-node (str "Action: " (:label recommend) " — " (:reason recommend))
+      (conj (tree-node (msg/t :readiness/action
+                              {:label (:label recommend) :reason (:reason recommend)})
                        0 false (recommend-action-color (:action recommend))))
       linked-wf
-      (conj (tree-node (str "Workflow: " (:name linked-wf)
-                            " (" (name (get linked-wf :status :unknown)) ")")
+      (conj (tree-node (msg/t :readiness/workflow-linked
+                              {:name   (:name linked-wf)
+                               :status (name (get linked-wf :status :unknown))})
                        0 false status-info))
       (not linked-wf)
-      (conj (tree-node "Workflow: not linked" 0)))))
+      (conj (tree-node (msg/t :readiness/workflow-not-linked) 0)))))
 
 (defn- aggregate-evidence-nodes
   "Build evidence summary nodes across all workflows for the top-level view."
   [workflows]
   (if (empty? workflows)
-    [{:label "No workflows loaded" :depth 0 :expandable? false}]
+    [{:label (msg/t :evidence/no-workflows) :depth 0 :expandable? false}]
     (into []
       (mapcat (fn [wf]
                 (let [gate-results (get wf :gate-results [])
@@ -478,8 +494,8 @@
                       status (:status wf)
                       phase  (:phase wf)
                       gates-str (if (zero? total)
-                                  "no gates recorded"
-                                  (str passed "/" total " gates passed"))
+                                  (msg/t :evidence/no-gates-recorded)
+                                  (msg/t :evidence/gates-passed {:passed passed :total total}))
                       row-fg (case status
                                (:success :completed) status-pass
                                :running              status-info
@@ -518,15 +534,16 @@
         wf-id (:workflow-id detail)
         wf (some #(when (= (:id %) wf-id) %) (:workflows model []))]
     (if (empty? phases)
-      [{:label (str "Workflow " (or (:name wf) (some-> wf-id str (subs 0 8))) " — no phases")
+      [{:label (msg/t :phase/workflow-no-phases
+                      {:name (or (:name wf) (some-> wf-id str (subs 0 8)))})
         :depth 0 :expandable? false}]
       (mapv (fn [{:keys [phase status]}]
               {:label (str (name (or phase "?"))
                            (case status
-                             :running  " ● running"
-                             :success  " ✓ passed"
-                             :failed   " ✗ failed"
-                             :skipped  " – skipped"
+                             :running  (msg/t :phase/running)
+                             :success  (msg/t :phase/passed)
+                             :failed   (msg/t :phase/failed)
+                             :skipped  (msg/t :phase/skipped)
                              ""))
                :depth 0 :expandable? false})
             phases))))
@@ -555,12 +572,12 @@
         panel-cols (or (:_panel-cols model) 60)
         wrap-width (max 20 (- panel-cols 6))]
     (if (empty? messages)
-      [(tree-node "Press c to start a conversation" 0 false status-info)
-       (tree-node "Ask about this PR, request analysis," 1)
-       (tree-node "or take actions." 1)]
+      [(tree-node (msg/t :chat/start-conversation) 0 false status-info)
+       (tree-node (msg/t :chat/start-hint-1) 1)
+       (tree-node (msg/t :chat/start-hint-2) 1)]
       (let [msg-nodes (mapcat
                         (fn [{:keys [role content]}]
-                          (let [prefix (if (= :user role) "You" "Agent")
+                          (let [prefix (if (= :user role) (msg/t :chat/role-you) (msg/t :chat/role-agent))
                                 fg     (if (= :user role) status-info status-pass)
                                 lines  (clean-agent-content content)]
                             (into [(tree-node (str prefix ":") 0 false fg)]
@@ -571,7 +588,7 @@
                         messages)
             action-nodes (when (and (seq actions) (not pending?))
                            (into [(tree-node "" 0)
-                                  (tree-node "Actions (press number to run):" 0 false status-warning)]
+                                  (tree-node (msg/t :chat/actions-header) 0 false status-warning)]
                                  (mapcat
                                    (fn [i {:keys [label description]}]
                                      (let [text (str (inc i) ") " label
@@ -588,7 +605,7 @@
                       0)
             spinner (get ["⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏"]
                          (mod elapsed 10))
-            label   (str spinner " Agent thinking... (" elapsed "s)")]
+            label   (msg/t :chat/agent-thinking {:spinner spinner :elapsed elapsed})]
         (if pending?
           (conj nodes (tree-node label 0 false status-warning))
           nodes)))))
