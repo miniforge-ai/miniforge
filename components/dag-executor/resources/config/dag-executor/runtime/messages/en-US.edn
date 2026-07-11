@@ -12,4 +12,7 @@
   :oci/command-interrupted   "Runtime command interrupted"
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
-  :oci/bootstrap-failed      "Workspace bootstrap failed"}}
+  :oci/bootstrap-failed      "Workspace bootstrap failed"
+
+  ;; State management
+  :state/task-not-found "Task {task-id} not found"}}

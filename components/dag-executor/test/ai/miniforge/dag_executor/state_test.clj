@@ -41,6 +41,121 @@
           result (state/transition-task task :merged)]
       (is (result/err? result)))))
 
+(deftest apply-task-transition-test
+  (testing "returns updated state and ok tr when transition is valid"
+    (let [task-id   (random-uuid)
+          task      (state/create-task-state task-id #{})
+          run       (state/create-run-state (random-uuid) {task-id task})
+          tr-result (volatile! nil)
+          new-state (state/apply-task-transition run task-id :ready tr-result)
+          {:keys [tr from]} @tr-result]
+      (is (result/ok? tr))
+      (is (= :pending from))
+      (is (= :ready (get-in new-state [:run/tasks task-id :task/status])))))
+
+  (testing "returns current state unchanged and error tr for nonexistent task"
+    (let [run       (state/create-run-state (random-uuid) {})
+          tr-result (volatile! nil)
+          new-state (state/apply-task-transition run (random-uuid) :ready tr-result)
+          {:keys [tr from]} @tr-result]
+      (is (result/err? tr))
+      (is (= :task-not-found (get-in tr [:error :code])))
+      (is (nil? from))
+      (is (= run new-state))))
+
+  (testing "returns current state unchanged and error tr for invalid transition"
+    (let [task-id   (random-uuid)
+          task      (state/create-task-state task-id #{})
+          run       (state/create-run-state (random-uuid) {task-id task})
+          tr-result (volatile! nil)
+          new-state (state/apply-task-transition run task-id :completed tr-result)
+          {:keys [tr]} @tr-result]
+      (is (result/err? tr))
+      (is (= run new-state)))))
+
+(def ^:private sf-provider
+  (profiles/build-provider
+   {:default-profile :software-factory
+    :profiles
+    {:software-factory
+     {:profile/id :software-factory
+      :task-statuses [:pending :ready :implementing :merged :failed :skipped]
+      :terminal-statuses [:merged :failed :skipped]
+      :success-terminal-statuses [:merged]
+      :valid-transitions {:pending [:ready] :ready [:implementing]
+                          :implementing [:merged :failed]
+                          :merged [] :failed [] :skipped []}
+      :event-mappings {}}}}))
+
+(deftest apply-merged-transition-test
+  (testing "transitions task to :merged and records result in volatile"
+    (let [task-id   (random-uuid)
+          task      (state/create-task-state task-id #{}
+                                             :state-profile :software-factory
+                                             :state-profile-provider sf-provider)
+          run       (-> (state/create-run-state (random-uuid) {task-id task}
+                                                :state-profile :software-factory
+                                                :state-profile-provider sf-provider)
+                        (assoc-in [:run/tasks task-id :task/status] :implementing))
+          tr-result (volatile! nil)
+          new-state (state/apply-merged-transition run task-id tr-result)
+          tr        @tr-result]
+      (is (result/ok? tr))
+      (is (= :merged (get-in new-state [:run/tasks task-id :task/status])))))
+
+  (testing "returns unchanged state and :task-not-found error for unknown task"
+    (let [run       (state/create-run-state (random-uuid) {})
+          tr-result (volatile! nil)
+          new-state (state/apply-merged-transition run (random-uuid) tr-result)
+          tr        @tr-result]
+      (is (result/err? tr))
+      (is (= :task-not-found (get-in tr [:error :code])))
+      (is (= run new-state)))))
+
+(deftest apply-completed-transition-test
+  (testing "transitions task to the given success status"
+    (let [task-id   (random-uuid)
+          task      (state/create-task-state task-id #{})
+          run       (-> (state/create-run-state (random-uuid) {task-id task})
+                        (assoc-in [:run/tasks task-id :task/status] :running))
+          tr-result (volatile! nil)
+          new-state (state/apply-completed-transition run task-id :completed tr-result)
+          tr        @tr-result]
+      (is (result/ok? tr))
+      (is (= :completed (get-in new-state [:run/tasks task-id :task/status])))))
+
+  (testing "returns unchanged state and :task-not-found error for unknown task"
+    (let [run       (state/create-run-state (random-uuid) {})
+          tr-result (volatile! nil)
+          new-state (state/apply-completed-transition run (random-uuid) :completed tr-result)
+          tr        @tr-result]
+      (is (result/err? tr))
+      (is (= :task-not-found (get-in tr [:error :code])))
+      (is (= run new-state)))))
+
+(deftest apply-failed-transition-test
+  (testing "transitions task to :failed and stores error-info on the task"
+    (let [task-id    (random-uuid)
+          task       (state/create-task-state task-id #{})
+          error-info {:reason :boom}
+          run        (-> (state/create-run-state (random-uuid) {task-id task})
+                         (assoc-in [:run/tasks task-id :task/status] :running))
+          tr-result  (volatile! nil)
+          new-state  (state/apply-failed-transition run task-id error-info tr-result)
+          tr         @tr-result]
+      (is (result/ok? tr))
+      (is (= :failed (get-in new-state [:run/tasks task-id :task/status])))
+      (is (= error-info (get-in new-state [:run/tasks task-id :task/error])))))
+
+  (testing "returns unchanged state and :task-not-found error for unknown task"
+    (let [run       (state/create-run-state (random-uuid) {})
+          tr-result (volatile! nil)
+          new-state (state/apply-failed-transition run (random-uuid) {:reason :x} tr-result)
+          tr        @tr-result]
+      (is (result/err? tr))
+      (is (= :task-not-found (get-in tr [:error :code])))
+      (is (= run new-state)))))
+
 (deftest transition-task!-test
   (testing "atomically transitions task in run state"
     (let [task-id (random-uuid)
