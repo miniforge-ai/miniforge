@@ -19,7 +19,7 @@
 (ns ai.miniforge.dag-executor.state-test
   "Tests for DAG task state management and event emission wiring."
   (:require
-   [clojure.test :refer [deftest is testing]]
+   [clojure.test :refer [are deftest is testing]]
    [ai.miniforge.dag-executor.state-profile :as profiles]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.result :as result]
@@ -93,6 +93,50 @@
     (let [task (state/create-task-state (random-uuid) #{})
           result (state/transition-task task :merged)]
       (is (result/err? result)))))
+
+(deftest state-message-catalog-test
+  (testing "state messages resolve through the shared dag-executor catalog"
+    (let [task-id (random-uuid)]
+      (are [key params expected] (= expected (#'state/t key params))
+        :state/task-not-found
+        {:task-id task-id}
+        (str "Task " task-id " not found")
+
+        :state/task-invalid-transition
+        {:from-status :pending :to-status :merged}
+        "Cannot transition from :pending to :merged"
+
+        :state/log-task-updated
+        {}
+        "Task updated"
+
+        :state/log-transitioned
+        {}
+        "Task status changed"
+
+        :state/log-not-found
+        {}
+        "Task not found"
+
+        :state/log-transition-invalid
+        {}
+        "Invalid task transition"
+
+        :state/log-merged
+        {}
+        "Task merged successfully"
+
+        :state/log-completed
+        {}
+        "Task completed successfully"
+
+        :state/log-failed
+        {}
+        "Task failed"
+
+        :state/log-metrics-updated
+        {}
+        "Run metrics updated"))))
 
 (deftest transition-task!-test
   (testing "atomically transitions task in run state"
