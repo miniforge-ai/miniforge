@@ -46,17 +46,13 @@
   "Sentinel returned by `deref` when a terminal-transition future hangs."
   ::future-timeout)
 
-(defn- state-private
-  [sym]
-  (var-get (ns-resolve 'ai.miniforge.dag-executor.state sym)))
-
 (defn- transition-task-in-run
   [run-state task-id new-status task-update-fn]
-  ((state-private 'transition-task-in-run) run-state task-id new-status task-update-fn))
+  (#'state/transition-task-in-run run-state task-id new-status task-update-fn))
 
 (defn- terminal-transition-in-run
   [run-state task-id new-status mark-run-fn task-update-fn]
-  ((state-private 'terminal-transition-in-run)
+  (#'state/terminal-transition-in-run
    run-state
    task-id
    new-status

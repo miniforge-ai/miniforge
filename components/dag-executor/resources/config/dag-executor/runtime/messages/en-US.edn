@@ -15,7 +15,8 @@
   :oci/bootstrap-failed      "Workspace bootstrap failed"
 
   ;; State management
-  :state/task-not-found "Task {task-id} not found"
+  :state/task-not-found          "Task {task-id} not found"
+  :state/task-invalid-transition "Cannot transition from {from-status} to {to-status}"
 
   ;; State management — log diagnostics (developer-facing)
   :state/log-task-updated       "Task updated"

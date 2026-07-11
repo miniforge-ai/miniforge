@@ -219,7 +219,7 @@
                      (assoc :task/status new-status)
                      (assoc :task/updated-at (java.util.Date.))))
       (result/err :invalid-transition
-                  (t :task/invalid-transition
+                  (t :state/task-invalid-transition
                      {:from-status current-status
                       :to-status new-status})
                   {:from current-status
@@ -437,7 +437,7 @@
                         (update-run-task run-state task-id update-fn)))]
     (when logger
       (log/debug logger :dag-executor :task/updated
-                 {:message (t :log/task-updated)
+                 {:message (t :state/log-task-updated)
                   :data {:task-id task-id
                          :new-status (get-in result [:run/tasks task-id :task/status])}}))
     result))
@@ -445,7 +445,7 @@
 (defn- task-not-found-result
   [task-id]
   (result/err :task-not-found
-              (t :task/not-found {:task-id task-id})
+              (t :state/task-not-found {:task-id task-id})
               {:task-id task-id}))
 
 (defn- task-transition-result->run-state
@@ -554,10 +554,10 @@
   (when logger
     (if (task-not-found-result? transition-result)
       (log/warn logger :dag-executor :task/not-found
-                {:message (t :log/task-not-found)
+                {:message (t :state/log-not-found)
                  :data {:task-id task-id}})
       (log/warn logger :dag-executor :task/transition-failed
-                {:message (t :log/task-transition-failed)
+                {:message (t :state/log-transition-invalid)
                  :data {:task-id task-id
                         :error (:error transition-result)}}))))
 
@@ -565,14 +565,14 @@
   [logger task-id]
   (when logger
     (log/info logger :dag-executor :task/merged
-              {:message (t :log/task-merged)
+              {:message (t :state/log-merged)
                :data {:task-id task-id}})))
 
 (defn- log-task-completed!
   [logger task-id status]
   (when logger
     (log/info logger :dag-executor :task/completed
-              {:message (t :log/task-completed)
+              {:message (t :state/log-completed)
                :data {:task-id task-id
                       :status status}})))
 
@@ -607,7 +607,7 @@
         (emit-task-state-event! run-state task-id from-status to-status)
         (when logger
           (log/info logger :dag-executor :task/transitioned
-                    {:message (t :log/task-status-changed)
+                    {:message (t :state/log-transitioned)
                      :data {:task-id task-id
                             :from from-status
                             :to to-status}}))
@@ -649,7 +649,7 @@
       (do
         (when logger
           (log/warn logger :dag-executor :task/failed
-                    {:message (t :log/task-failed)
+                    {:message (t :state/log-failed)
                      :data {:task-id task-id :error error-info}}))
         (result/ok run-state))
       transition-result)))
@@ -660,7 +660,7 @@
   (swap! run-atom update-run-metrics metric-updates)
   (when logger
     (log/debug logger :dag-executor :metrics/updated
-               {:message (t :log/run-metrics-updated)
+               {:message (t :state/log-metrics-updated)
                 :data metric-updates}))
   @run-atom)
 
