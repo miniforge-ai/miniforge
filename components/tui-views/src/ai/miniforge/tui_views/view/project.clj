@@ -292,13 +292,13 @@
                               (helpers/wrap-text line wrap-width)))
                       lines))))))
 
-(def ^:private browse-sayings
-  (msg/t :repo/browse-sayings))
-
 (defn- browse-loading-message []
-  (let [idx (mod (quot (System/currentTimeMillis) 2000)
-                 (count browse-sayings))]
-    (nth browse-sayings idx)))
+  ;; resolve the catalog vector at call time (not namespace load) to keep
+  ;; require free of catalog I/O
+  (let [sayings (msg/t :repo/browse-sayings)
+        idx (mod (quot (System/currentTimeMillis) 2000)
+                 (count sayings))]
+    (nth sayings idx)))
 
 (defn project-repo-list
   "Project repo manager data for the table widget."
