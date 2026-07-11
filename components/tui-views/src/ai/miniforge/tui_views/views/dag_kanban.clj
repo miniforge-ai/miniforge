@@ -30,6 +30,7 @@
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -39,7 +40,7 @@
   "Column title with item count."
   [label cards]
   (if (seq cards)
-    (str label " (" (count cards) ")")
+    (msg/t :kanban/column-title {:label label :count (count cards)})
     label))
 
 (defn group-tasks-by-status
@@ -59,16 +60,16 @@
         blocked-cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)
         pending-cards (mapv (fn [wf] {:label (:name wf) :status :pending}) pending)
         running-cards (mapv (fn [wf] {:label (:name wf) :status :running}) running)]
-    [{:title (column-title "BLOCKED" blocked-cards)
+    [{:title (column-title (msg/t :kanban/blocked) blocked-cards)
       :color palette/status-fail
       :cards blocked-cards}
-     {:title (column-title "PENDING" pending-cards)
+     {:title (column-title (msg/t :kanban/pending) pending-cards)
       :color palette/status-warning
       :cards pending-cards}
-     {:title (column-title "RUNNING" running-cards)
+     {:title (column-title (msg/t :kanban/running) running-cards)
       :color palette/status-info
       :cards running-cards}
-     {:title (column-title "DONE" done-cards)
+     {:title (column-title (msg/t :kanban/done) done-cards)
       :color palette/status-pass
       :cards done-cards}]))
 
@@ -84,7 +85,7 @@
     (layout/split-v [cols rows] (/ 2.0 rows)
       ;; Title bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ DAG Kanban"
+        (layout/text [c r] (msg/t :kanban/title)
                      {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
@@ -92,14 +93,14 @@
           ;; Kanban board
           (fn [[kc kr]]
             (layout/box [kc kr]
-              {:title "Task Board" :border :single :fg :default
+              {:title (msg/t :kanban/board-title) :border :single :fg :default
                :content-fn
                (fn [[ic ir]]
                  (widget/kanban [ic ir] {:columns columns}))}))
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " 1:workflows  2:detail  3:evidence  4:artifacts  q:quit"
+              (msg/t :kanban/footer)
               {:fg :default})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
