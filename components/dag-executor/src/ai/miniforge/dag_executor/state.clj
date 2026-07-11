@@ -435,7 +435,7 @@
                         (update-run-task run-state task-id update-fn)))]
     (when logger
       (log/debug logger :dag-executor :task/updated
-                 {:message "Task updated"
+                 {:message (t :state/log-task-updated)
                   :data {:task-id task-id
                          :new-status (get-in result [:run/tasks task-id :task/status])}}))
     result))
@@ -486,7 +486,7 @@
           (emit-task-state-event! new-state task-id from new-status)
           (when logger
             (log/info logger :dag-executor :task/transitioned
-                      {:message "Task status changed"
+                      {:message (t :state/log-transitioned)
                        :data {:task-id task-id
                               :from from
                               :to new-status}}))
@@ -495,10 +495,10 @@
           (when logger
             (if (= :task-not-found (get-in tr [:error :code]))
               (log/warn logger :dag-executor :task/not-found
-                        {:message "Task not found"
+                        {:message (t :state/log-not-found)
                          :data {:task-id task-id}})
               (log/warn logger :dag-executor :task/transition-failed
-                        {:message "Invalid task transition"
+                        {:message (t :state/log-transition-invalid)
                          :data {:task-id task-id
                                 :error (:error tr)}})))
           tr)))))
@@ -526,74 +526,56 @@
               (run-updater task-id))
           current-state)))))
 
-(defn- apply-merged-transition
-  "CAS update fn for mark-merged!. Passed directly to swap!."
-  [current-state task-id tr-result]
-  (terminal-transition-swap-fn current-state task-id :merged identity mark-task-merged tr-result))
-
-(defn- apply-completed-transition
-  "CAS update fn for mark-completed!. Passed directly to swap!."
-  [current-state task-id success-status tr-result]
-  (terminal-transition-swap-fn current-state task-id success-status identity mark-task-completed tr-result))
-
-(defn- apply-failed-transition
-  "CAS update fn for mark-failed!. Passed directly to swap!."
-  [current-state task-id error-info tr-result]
-  (terminal-transition-swap-fn current-state task-id :failed
-                               #(assoc % :task/error error-info)
-                               mark-task-failed tr-result))
+(defn- mark-terminal!
+  "Shared body for the terminal mark-*! fns. Atomically transitions `task-id` to
+   `target-status` via `terminal-transition-swap-fn` (with the given task- and
+   run-updaters), then on success invokes the 0-arg `log!` thunk and returns
+   result/ok of the new state; returns the transition error otherwise. Callers
+   supply only what actually differs between the terminal transitions."
+  [run-atom task-id target-status task-updater run-updater log!]
+  (let [tr-result (volatile! nil)
+        new-state (swap! run-atom terminal-transition-swap-fn
+                         task-id target-status task-updater run-updater tr-result)
+        tr        @tr-result]
+    (if (result/ok? tr)
+      (do (when log! (log!))
+          (result/ok new-state))
+      tr)))
 
 (defn mark-merged!
-  "Atomically mark a task as merged in a run atom."
+  "Atomically mark a task as merged in a run atom. Falls back to mark-completed!
+   when the run profile has no :merged status."
   [run-atom task-id logger]
-  (let [profile (resolve-run-profile @run-atom)]
-    (if (contains? (:task-statuses profile) :merged)
-      (let [tr-result (volatile! nil)
-            new-state (swap! run-atom apply-merged-transition task-id tr-result)]
-        (let [tr @tr-result]
-          (if (result/ok? tr)
-            (do
-              (when logger
-                (log/info logger :dag-executor :task/merged
-                          {:message "Task merged successfully"
-                           :data {:task-id task-id}}))
-              (result/ok new-state))
-            tr)))
-      (mark-completed! run-atom task-id logger))))
+  (if (contains? (:task-statuses (resolve-run-profile @run-atom)) :merged)
+    (mark-terminal! run-atom task-id :merged identity mark-task-merged
+                    (when logger
+                      #(log/info logger :dag-executor :task/merged
+                                 {:message (t :state/log-merged)
+                                  :data {:task-id task-id}})))
+    (mark-completed! run-atom task-id logger)))
 
 (defn mark-completed!
   "Atomically mark a task as completed in a run atom using the run profile's
    success terminal state."
   [run-atom task-id logger]
-  (let [profile        (resolve-run-profile @run-atom)
-        success-status (or (first (:success-terminal-statuses profile)) :completed)
-        tr-result      (volatile! nil)
-        new-state      (swap! run-atom apply-completed-transition task-id success-status tr-result)]
-    (let [tr @tr-result]
-      (if (result/ok? tr)
-        (do
-          (when logger
-            (log/info logger :dag-executor :task/completed
-                      {:message "Task completed successfully"
-                       :data {:task-id task-id
-                              :status success-status}}))
-          (result/ok new-state))
-        tr))))
+  (let [success-status (or (first (:success-terminal-statuses (resolve-run-profile @run-atom)))
+                           :completed)]
+    (mark-terminal! run-atom task-id success-status identity mark-task-completed
+                    (when logger
+                      #(log/info logger :dag-executor :task/completed
+                                 {:message (t :state/log-completed)
+                                  :data {:task-id task-id :status success-status}})))))
 
 (defn mark-failed!
-  "Atomically mark a task as failed in a run atom."
+  "Atomically mark a task as failed in a run atom, recording `error-info`."
   [run-atom task-id error-info logger]
-  (let [tr-result (volatile! nil)
-        new-state (swap! run-atom apply-failed-transition task-id error-info tr-result)]
-    (let [tr @tr-result]
-      (if (result/ok? tr)
-        (do
-          (when logger
-            (log/warn logger :dag-executor :task/failed
-                      {:message "Task failed"
-                       :data {:task-id task-id :error error-info}}))
-          (result/ok new-state))
-        tr))))
+  (mark-terminal! run-atom task-id :failed
+                  #(assoc % :task/error error-info)
+                  mark-task-failed
+                  (when logger
+                    #(log/warn logger :dag-executor :task/failed
+                               {:message (t :state/log-failed)
+                                :data {:task-id task-id :error error-info}}))))
 
 (defn update-metrics!
   "Atomically update run metrics."
@@ -601,7 +583,7 @@
   (swap! run-atom update-run-metrics metric-updates)
   (when logger
     (log/debug logger :dag-executor :metrics/updated
-               {:message "Run metrics updated"
+               {:message (t :state/log-metrics-updated)
                 :data metric-updates}))
   @run-atom)
 
