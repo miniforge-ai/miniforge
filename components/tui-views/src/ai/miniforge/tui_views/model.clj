@@ -21,7 +21,8 @@
 
    The model is a plain data map that represents the entire TUI state.
    It is managed by the Elm runtime and updated only through pure
-   update functions.")
+   update functions."
+  (:require [ai.miniforge.tui-views.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Model shape
@@ -173,16 +174,16 @@
   (vec (concat top-level-views detail-views)))
 
 (def view-labels
-  {:monitor          "Monitor"
-   :pr-fleet         "PR Fleet"
-   :workflow-list    "Workflows"
-   :evidence         "Evidence"
-   :artifact-browser "Artifacts"
-   :dag-kanban       "DAG Kanban"
-   :repo-manager     "Repos"
-   :workflow-detail  "Detail"
-   :pr-detail        "PR Detail"
-   :train-view       "Train"})
+  {:monitor          (msg/t :view-label/monitor)
+   :pr-fleet         (msg/t :view-label/pr-fleet)
+   :workflow-list    (msg/t :view-label/workflow-list)
+   :evidence         (msg/t :evidence/title)
+   :artifact-browser (msg/t :artifact/title)
+   :dag-kanban       (msg/t :view-label/dag-kanban)
+   :repo-manager     (msg/t :view-label/repo-manager)
+   :workflow-detail  (msg/t :view-label/workflow-detail)
+   :pr-detail        (msg/t :detail/title-fallback)
+   :train-view       (msg/t :view-label/train-view)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
