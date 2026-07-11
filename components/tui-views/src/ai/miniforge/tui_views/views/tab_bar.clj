@@ -36,7 +36,7 @@
    [cols rows]: available size (typically [cols 2])"
   [model context [cols rows]]
   (let [active-view (:view model)
-        label (get model/view-labels active-view (msg/t :tab/brand-fallback))
+        label (get (model/view-labels) active-view (msg/t :tab/brand-fallback))
         text (str (msg/t :tab/title {:label label})
                   (when (seq context) (msg/t :tab/context {:context context})))]
     (layout/text [cols rows] text {:fg palette/status-info :bold? true})))

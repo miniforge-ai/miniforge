@@ -173,7 +173,10 @@
   "All available views in canonical order."
   (vec (concat top-level-views detail-views)))
 
-(def view-labels
+(defn view-labels
+  "View-keyword -> localized display label. A fn (not a def-map) so the catalog
+   lookups resolve at call time, keeping namespace load free of catalog I/O."
+  []
   {:monitor          (msg/t :view-label/monitor)
    :pr-fleet         (msg/t :view-label/pr-fleet)
    :workflow-list    (msg/t :view-label/workflow-list)

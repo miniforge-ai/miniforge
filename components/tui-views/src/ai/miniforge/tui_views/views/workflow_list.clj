@@ -56,7 +56,10 @@
         :else                              :older))
     :unknown))
 
-(def bucket-labels
+(defn bucket-labels
+  "Age-bucket keyword -> localized label. A fn (not a def-map) so the catalog
+   lookups resolve at call time, keeping namespace load free of catalog I/O."
+  []
   {:today      (msg/t :readiness/bucket-today)
    :yesterday  (msg/t :readiness/bucket-yesterday)
    :this-week  (msg/t :readiness/bucket-this-week)
@@ -76,7 +79,7 @@
           (mapcat (fn [bucket]
                     (let [wfs (get grouped bucket)
                           label (msg/t :wf-list/group-header
-                                       {:label (get bucket-labels bucket)
+                                       {:label (get (bucket-labels) bucket)
                                         :count (count wfs)})]
                       (cons {:type :header :label label :bucket bucket}
                             (map (fn [wf] {:type :row :wf wf}) wfs)))))
