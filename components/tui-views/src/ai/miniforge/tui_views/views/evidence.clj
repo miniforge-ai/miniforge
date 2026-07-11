@@ -28,6 +28,7 @@
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,32 +43,33 @@
     (into []
       (concat
        ;; Intent section
-       [{:label "Intent" :depth 0 :expandable? true}
+       [{:label (msg/t :evidence/intent) :depth 0 :expandable? true}
         {:label (or (get-in evidence [:intent :description])
-                    "No intent data available")
+                    (msg/t :evidence/no-intent))
          :depth 1 :expandable? false}]
        ;; Phases section
-       [{:label "Phases" :depth 0 :expandable? true}]
+       [{:label (msg/t :evidence/phases) :depth 0 :expandable? true}]
        (mapv (fn [{:keys [phase status]}]
                {:label (str (name phase)
                             (case status
-                              :running  " ● running"
-                              :success  " ✓ passed"
-                              :failed   " ✗ failed"
+                              :running  (msg/t :phase/running)
+                              :success  (msg/t :phase/passed)
+                              :failed   (msg/t :phase/failed)
                               ""))
                 :depth 1 :expandable? false})
              phases)
        ;; Validation section
-       [{:label "Validation" :depth 0 :expandable? true}
+       [{:label (msg/t :evidence/validation) :depth 0 :expandable? true}
         {:label (if (get-in evidence [:validation :passed?])
-                  "✓ All gates passed"
-                  (str "✗ " (count (get-in evidence [:validation :errors] [])) " error(s)"))
+                  (msg/t :evidence/all-gates-passed)
+                  (msg/t :evidence/error-count
+                         {:count (count (get-in evidence [:validation :errors] []))}))
          :depth 1 :expandable? false}]
        ;; Policy section
-       [{:label "Policy" :depth 0 :expandable? true}
+       [{:label (msg/t :evidence/policy) :depth 0 :expandable? true}
         {:label (if (get-in evidence [:policy :compliant?])
-                  "✓ Policy compliant"
-                  "✗ Policy violations detected")
+                  (msg/t :evidence/policy-compliant)
+                  (msg/t :evidence/policy-violations))
          :depth 1 :expandable? false}]))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -83,7 +85,7 @@
     (layout/split-v [cols rows] (/ 2.0 rows)
       ;; Title bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ Evidence Bundle"
+        (layout/text [c r] (msg/t :evidence/bundle-title)
                      {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
@@ -91,7 +93,7 @@
           ;; Tree view
           (fn [[tc tr]]
             (layout/box [tc tr]
-              {:title "Evidence" :border :single :fg :default
+              {:title (msg/t :evidence/title) :border :single :fg :default
                :content-fn
                (fn [[ic ir]]
                  (widget/tree [ic ir]
@@ -102,7 +104,7 @@
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " j/k:navigate  Enter:expand  Esc:back  1:workflows  q:quit"
+              (msg/t :evidence/footer)
               {:fg :default})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

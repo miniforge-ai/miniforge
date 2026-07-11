@@ -23,25 +23,28 @@
    with readiness and status."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Rendering helpers
 
 (defn format-pr-row [pr]
-  {:title (get pr :pr/title "Untitled")
-   :readiness (str (int (* 100 (get pr :pr/readiness 0))) "%")
-   :order (str (get pr :pr/merge-order "—"))})
+  {:title (get pr :pr/title (msg/t :pr/untitled))
+   :readiness (msg/t :train/readiness-pct
+                     {:pct (int (* 100 (get pr :pr/readiness 0)))})
+   :order (str (get pr :pr/merge-order (msg/t :detail/value-none)))})
 
 (defn render-title-bar [train [cols rows]]
   (layout/text [cols rows]
-    (str " MINIFORGE │ Train: "
-         (get train :train/name "Release Train"))
+    (msg/t :train/title
+           {:name (get train :train/name (msg/t :train/name-fallback))
+            :progress ""})
     {:fg palette/status-info :bold? true}))
 
 (defn render-table [prs selected [cols rows]]
   (if (empty? prs)
-    (layout/text [cols rows] "  No PRs in this train."
+    (layout/text [cols rows] (msg/t :train/empty)
                  {:fg :default})
     (let [visible-count (max 0 (- rows 2))
           offset (let [sel (or selected 0)]
@@ -49,8 +52,8 @@
                        (inc (- sel visible-count))))]
       (layout/table [cols rows]
         {:columns [{:key :order :header "#" :width 4}
-                   {:key :title :header "PR Title" :width (max 10 (- cols 30))}
-                   {:key :readiness :header "Ready" :width 8}]
+                   {:key :title :header (msg/t :fleet/col-title) :width (max 10 (- cols 30))}
+                   {:key :readiness :header (msg/t :train/col-ready) :width 8}]
          :data (mapv format-pr-row
                  (sort-by :pr/merge-order prs))
          :selected-row selected
@@ -58,7 +61,7 @@
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]
-    " Esc:back  j/k:navigate  space:select  q:quit"
+    (msg/t :train/footer)
     {:fg :default}))
 
 (defn render

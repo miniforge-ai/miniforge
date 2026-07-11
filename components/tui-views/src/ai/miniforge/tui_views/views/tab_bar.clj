@@ -25,6 +25,7 @@
    Layer 0: Pure rendering, depends only on layout and model data."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]))
 
@@ -35,7 +36,7 @@
    [cols rows]: available size (typically [cols 2])"
   [model context [cols rows]]
   (let [active-view (:view model)
-        label (get model/view-labels active-view "MINIFORGE")
-        text (str " MINIFORGE │ " label
-                  (when (seq context) (str " │ " context)))]
+        label (get model/view-labels active-view (msg/t :tab/brand-fallback))
+        text (str (msg/t :tab/title {:label label})
+                  (when (seq context) (msg/t :tab/context {:context context})))]
     (layout/text [cols rows] text {:fg palette/status-info :bold? true})))
