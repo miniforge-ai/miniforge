@@ -33,8 +33,8 @@
 
 (def ^:private t
   (messages/create-translator
-   "config/dag-executor/state/messages/en-US.edn"
-   :dag-executor.state/messages))
+   "config/dag-executor/runtime/messages/en-US.edn"
+   :dag-executor.runtime/messages))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; State schemas and enums
