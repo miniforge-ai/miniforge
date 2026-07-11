@@ -30,6 +30,7 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.msg :as msg]
+   [ai.miniforge.tui-views.messages :as tr]
    [ai.miniforge.tui-views.update :as update]
    [ai.miniforge.tui-views.view :as view]
    [ai.miniforge.tui-views.subscription :as subscription]
@@ -166,7 +167,7 @@
           (and (nil? diff) (nil? detail))
           (msg/decomposition-started pr-id
                                      {:sub-prs []
-                                      :message "Failed to fetch PR diff and details"})
+                                      :message (tr/t :chat/pr-diff-fetch-failed)})
 
           ;; Decomposer omitted from the effect map
           (nil? decompose-fn)
@@ -187,7 +188,7 @@
               (msg/decomposition-started pr-id
                                          {:sub-prs []
                                           :message (or (get-in result [:error :message])
-                                                       "Decomposition failed")})))))
+                                                       (tr/t :chat/decomposition-failed))})))))
       (catch Throwable e
         (msg/decomposition-started pr-id
                                    {:sub-prs []
@@ -200,7 +201,7 @@
     (let [n (long (if (string? number) (Long/parseLong number) number))
           {:keys [diff detail]} (github/fetch-pr-diff-and-detail repo n)]
       (if (and (nil? diff) (nil? detail))
-        (msg/pr-diff-fetched [repo n] nil nil "Failed to fetch PR diff and details")
+        (msg/pr-diff-fetched [repo n] nil nil (tr/t :chat/pr-diff-fetch-failed))
         (msg/pr-diff-fetched [repo n] diff detail nil)))
     (catch Throwable e
       (msg/pr-diff-fetched [repo number] nil nil (.getMessage e)))))
@@ -235,12 +236,12 @@
                    :review
                    (if-let [pr (:pr context)]
                      (handle-review-prs {:prs [pr]})
-                     (msg/chat-action-result {:success? false :message "No PR in context for review"}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-review)}))
 
                    :evaluate
                    (if-let [pr (:pr context)]
                      (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
-                     (msg/chat-action-result {:success? false :message "No PR in context for evaluation"}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-evaluation)}))
 
                    :sync
                    (handle-sync-prs {})
@@ -248,28 +249,28 @@
                    :open
                    (if-let [url (get-in context [:pr :pr/url])]
                      (do (handle-open-url {:url url})
-                         (msg/chat-action-result {:success? true :message (str "Opened " url)}))
-                     (msg/chat-action-result {:success? false :message "No PR URL available"}))
+                         (msg/chat-action-result {:success? true :message (tr/t :chat/opened-url {:url url})}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-url)}))
 
                    :remediate
                    (if-let [pr (:pr context)]
                      (handle-remediate-prs {:prs [pr]})
-                     (msg/chat-action-result {:success? false :message "No PR in context"}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
 
                    :decompose
                    (if-let [pr (:pr context)]
                      (handle-decompose-pr (effect/decompose-pr pr))
-                     (msg/chat-action-result {:success? false :message "No PR in context"}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
 
                    (msg/chat-action-result
                     {:success? false
-                     :message (str "Unknown action: " (name (or action-type :none)))}))]
+                     :message (tr/t :chat/unknown-action {:action (name (or action-type :none))})}))]
         (if (= :msg/side-effect-error (first result))
           (let [payload (second result)
                 message (or (get-in payload [:error :message])
                             (:message payload)
                             (:error payload)
-                            "Action failed")]
+                            (tr/t :flash/action-failed))]
             (msg/chat-action-result {:success? false :message message}))
           result))
     (catch Exception e
@@ -302,41 +303,44 @@
           risk-score                                  (:risk/score risk)
           risk-factors                                (:risk/factors risk)
           ci-str                                      (if (seq checks)
-                                                        (str "CI checks: " (format-check-context checks))
-                                                        (str "CI status: " (name ci-status)))
+                                                        (tr/t :chat/pr-context-ci-checks {:checks (format-check-context checks)})
+                                                        (tr/t :chat/pr-context-ci-status {:status (name ci-status)}))
           total-lines                                 (+ (or additions 0) (or deletions 0))
           provider                                    (if (and repo (str/starts-with? (str repo) "gitlab:"))
                                                         "GitLab" "GitHub")]
-      (str "PR: " repo "#" number " — " title "\n"
-           "Provider: " provider "\n"
-           "Branch: " branch "\n"
-           "Author: " (or author "unknown") "\n"
-           "Status: " (name status) "\n"
+      (str (tr/t :chat/pr-context-header {:repo repo :number number :title title}) "\n"
+           (tr/t :chat/pr-context-provider {:provider provider}) "\n"
+           (tr/t :chat/pr-context-branch {:branch branch}) "\n"
+           (tr/t :chat/pr-context-author {:author (or author "unknown")}) "\n"
+           (tr/t :chat/pr-context-status {:status (name status)}) "\n"
            ci-str "\n"
-           "Behind main: " (if behind-main? "yes" "no") "\n"
+           (tr/t :chat/pr-context-behind-main
+                 {:state (tr/t (if behind-main? :chat/pr-context-yes :chat/pr-context-no))}) "\n"
            (when (pos? total-lines)
-             (str "Change size: +" additions "/-" deletions " (" total-lines " total lines)"
+             (str (tr/t :chat/pr-context-change-size
+                        {:additions additions :deletions deletions :total total-lines})
                   (when (pos? (or changed-files-count 0))
-                    (str ", " changed-files-count " files"))
+                    (tr/t :chat/pr-context-files {:files changed-files-count}))
                   "\n"))
            (when readiness
-             (str "Readiness score: " score
-                  (when ready? " (ready)")
+             (str (tr/t :chat/pr-context-readiness {:score score})
+                  (when ready? (tr/t :chat/pr-context-ready))
                   "\n"))
            (when risk
-             (str "Risk level: " (name risk-level)
+             (str (tr/t :chat/pr-context-risk-level {:level (name risk-level)})
                   (when risk-score
-                    (str " (score: " (format "%.2f" (double risk-score)) ")"))
+                    (tr/t :chat/pr-context-risk-score {:score (format "%.2f" (double risk-score))}))
                   "\n"))
            (when (seq risk-factors)
-             (str "Risk factors:\n"
+             (str (tr/t :chat/pr-context-risk-factors) "\n"
                   (str/join "\n"
-                    (map #(str "  - " (:explanation %)) risk-factors))
+                    (map #(tr/t :chat/pr-context-risk-factor {:explanation (:explanation %)}) risk-factors))
                   "\n"))
            (when policy
-             (str "Policy: " (if passed? "passed" "FAILED")
+             (str (tr/t :chat/pr-context-policy
+                        {:status (tr/t (if passed? :chat/pr-context-policy-passed :chat/pr-context-policy-failed))})
                   (when-let [packs packs-applied]
-                    (str " (packs: " (str/join ", " packs) ")"))
+                    (tr/t :chat/pr-context-packs {:packs (str/join ", " packs)}))
                   "\n"))))))
 
 (defn- build-context-section
@@ -411,10 +415,11 @@
               [clean-content actions] (parse-actions raw-content)]
           (msg/chat-response clean-content actions))
         (msg/chat-response
-         (str "LLM error: " (get-in (llm/get-error result) [:message] "Unknown error"))
+         (tr/t :chat/llm-error
+               {:error (get-in (llm/get-error result) [:message] (tr/t :chat/unknown-error))})
          [])))
     (catch Exception e
-      (msg/chat-response (str "Chat error: " (.getMessage e)) []))))
+      (msg/chat-response (tr/t :chat/error {:error (.getMessage e)}) []))))
 
 ;------------------------------------------------------------------------------ Fleet risk triage
 

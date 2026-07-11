@@ -28,6 +28,7 @@
   (:require
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
@@ -149,16 +150,18 @@
             (cond-> (seq cached-risk) (assoc :agent-risk cached-risk))
             (assoc :last-updated (java.util.Date.))
             (assoc :flash-message
-                   (str "Loaded " (count prs) " PRs from "
-                        (count (distinct (map :pr/repo prs))) " repo(s)"
+                   (str (msg/t :flash/prs-loaded
+                               {:count (count prs)
+                                :repos (count (distinct (map :pr/repo prs)))})
                         (when (pos? cache-hits)
-                          (str " (" cache-hits " cached, " fresh " need eval)"))))))
+                          (msg/t :flash/prs-loaded-cache
+                                 {:cached cache-hits :fresh fresh}))))))
 
       error
-      (assoc model :flash-message (str "PR sync failed: " error))
+      (assoc model :flash-message (msg/t :flash/pr-sync-failed {:error error}))
 
       :else
-      (assoc model :flash-message "No open PRs found in fleet repos"))))
+      (assoc model :flash-message (msg/t :flash/no-open-prs)))))
 
 (defn discover-repos
   "Discover repos from a GitHub org/user and add to fleet config.
