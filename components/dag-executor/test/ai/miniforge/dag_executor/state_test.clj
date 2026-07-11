@@ -244,9 +244,15 @@
             _           (.countDown start-latch)
             r1          (deref f1 5000 ::timeout)
             r2          (deref f2 5000 ::timeout)
+            ;; Cancel stuck futures and fail fast so no threads accumulate
+            _           (when (or (= ::timeout r1) (= ::timeout r2))
+                          (future-cancel f1)
+                          (future-cancel f2)
+                          (throw (ex-info "future timed out waiting for terminal transition"
+                                          {:task-id task-id
+                                           :f1-timeout? (= ::timeout r1)
+                                           :f2-timeout? (= ::timeout r2)})))
             final       (get-in @run-atom [:run/tasks task-id :task/status])]
-        (is (not= ::timeout r1) "future 1 timed out waiting for terminal transition")
-        (is (not= ::timeout r2) "future 2 timed out waiting for terminal transition")
         (is (contains? #{:completed :failed} final)
             "final status must be a valid terminal state")
         (is (or (and (result/ok? r1) (result/err? r2))
