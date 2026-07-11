@@ -23,7 +23,64 @@
    [ai.miniforge.dag-executor.state-profile :as profiles]
    [ai.miniforge.dag-executor.state :as state]
    [ai.miniforge.dag-executor.result :as result]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.event-stream.interface :as es])
+  (:import
+   (java.util.concurrent CountDownLatch TimeUnit)))
+
+(def ^:private concurrent-terminal-transition-attempts
+  "Number of repeated races used to make the terminal-transition regression
+   test sensitive to CAS retry bugs without making the smoke suite expensive."
+  100)
+
+(def ^:private latch-timeout-seconds
+  "Maximum time a concurrency test may wait for a latch before failing fast.
+   Five seconds leaves room for CI scheduling stalls without hiding deadlocks."
+  5)
+
+(def ^:private future-timeout-ms
+  "Maximum time to wait for each terminal-transition future. It should finish
+   immediately after the start latch opens; this bound turns hangs into failures."
+  5000)
+
+(def ^:private future-timeout-result
+  "Sentinel returned by `deref` when a terminal-transition future hangs."
+  ::future-timeout)
+
+(defn- state-private
+  [sym]
+  (var-get (ns-resolve 'ai.miniforge.dag-executor.state sym)))
+
+(defn- transition-task-in-run
+  [run-state task-id new-status task-update-fn]
+  ((state-private 'transition-task-in-run) run-state task-id new-status task-update-fn))
+
+(defn- terminal-transition-in-run
+  [run-state task-id new-status mark-run-fn task-update-fn]
+  ((state-private 'terminal-transition-in-run)
+   run-state
+   task-id
+   new-status
+   mark-run-fn
+   task-update-fn))
+
+(defn- running-run-state
+  [task-id]
+  (let [task         (state/create-task-state task-id #{} :state-profile :kernel)
+        ready-task   (:data (state/transition-task task :ready))
+        running-task (:data (state/transition-task ready-task :running))]
+    (state/create-run-state (random-uuid) {task-id running-task} :state-profile :kernel)))
+
+(defn- await-latch!
+  [latch timeout-data]
+  (when-not (.await latch latch-timeout-seconds TimeUnit/SECONDS)
+    (throw (ex-info "timed out waiting for concurrency test latch" timeout-data))))
+
+(defn- terminal-transition-future
+  [ready-latch start-latch transition transition-fn]
+  (future
+    (.countDown ready-latch)
+    (await-latch! start-latch {:transition transition})
+    (transition-fn)))
 
 ;; ============================================================================
 ;; State transition tests
@@ -41,106 +98,6 @@
           result (state/transition-task task :merged)]
       (is (result/err? result)))))
 
-(deftest apply-task-transition-test
-  (testing "returns updated state and ok tr when transition is valid"
-    (let [task-id   (random-uuid)
-          task      (state/create-task-state task-id #{})
-          run       (state/create-run-state (random-uuid) {task-id task})
-          tr-result (volatile! nil)
-          new-state (#'state/apply-task-transition run task-id :ready tr-result)
-          {:keys [tr from]} @tr-result]
-      (is (result/ok? tr))
-      (is (= :pending from))
-      (is (= :ready (get-in new-state [:run/tasks task-id :task/status])))))
-
-  (testing "returns current state unchanged and error tr for nonexistent task"
-    (let [run       (state/create-run-state (random-uuid) {})
-          tr-result (volatile! nil)
-          new-state (#'state/apply-task-transition run (random-uuid) :ready tr-result)
-          {:keys [tr from]} @tr-result]
-      (is (result/err? tr))
-      (is (= :task-not-found (get-in tr [:error :code])))
-      (is (nil? from))
-      (is (= run new-state))))
-
-  (testing "returns current state unchanged and error tr for invalid transition"
-    (let [task-id   (random-uuid)
-          task      (state/create-task-state task-id #{})
-          run       (state/create-run-state (random-uuid) {task-id task})
-          tr-result (volatile! nil)
-          new-state (#'state/apply-task-transition run task-id :completed tr-result)
-          {:keys [tr]} @tr-result]
-      (is (result/err? tr))
-      (is (= run new-state)))))
-
-(def ^:private sf-provider
-  (profiles/build-provider
-   {:default-profile :software-factory
-    :profiles
-    {:software-factory
-     {:profile/id :software-factory
-      :task-statuses [:pending :ready :implementing :merged :failed :skipped]
-      :terminal-statuses [:merged :failed :skipped]
-      :success-terminal-statuses [:merged]
-      :valid-transitions {:pending [:ready] :ready [:implementing]
-                          :implementing [:merged :failed]
-                          :merged [] :failed [] :skipped []}
-      :event-mappings {}}}}))
-
-(deftest terminal-transition-swap-fn-test
-  ;; The single CAS update fn behind mark-merged!/mark-completed!/mark-failed!.
-  ;; Exercised directly with each terminal transition's
-  ;; (target-status, task-updater, run-updater) triple, so the three public fns
-  ;; only compose it rather than each carrying its own copy.
-  (testing "merged: transitions to :merged and records an ok result"
-    (let [task-id   (random-uuid)
-          task      (state/create-task-state task-id #{}
-                                             :state-profile :software-factory
-                                             :state-profile-provider sf-provider)
-          run       (-> (state/create-run-state (random-uuid) {task-id task}
-                                                :state-profile :software-factory
-                                                :state-profile-provider sf-provider)
-                        (assoc-in [:run/tasks task-id :task/status] :implementing))
-          tr-result (volatile! nil)
-          new-state (#'state/terminal-transition-swap-fn run task-id :merged identity
-                                                         state/mark-task-merged tr-result)]
-      (is (result/ok? @tr-result))
-      (is (= :merged (get-in new-state [:run/tasks task-id :task/status])))))
-
-  (testing "completed: transitions to the given success status"
-    (let [task-id   (random-uuid)
-          task      (state/create-task-state task-id #{})
-          run       (-> (state/create-run-state (random-uuid) {task-id task})
-                        (assoc-in [:run/tasks task-id :task/status] :running))
-          tr-result (volatile! nil)
-          new-state (#'state/terminal-transition-swap-fn run task-id :completed identity
-                                                         state/mark-task-completed tr-result)]
-      (is (result/ok? @tr-result))
-      (is (= :completed (get-in new-state [:run/tasks task-id :task/status])))))
-
-  (testing "failed: transitions to :failed and stores error-info via the task-updater"
-    (let [task-id    (random-uuid)
-          task       (state/create-task-state task-id #{})
-          error-info {:reason :boom}
-          run        (-> (state/create-run-state (random-uuid) {task-id task})
-                         (assoc-in [:run/tasks task-id :task/status] :running))
-          tr-result  (volatile! nil)
-          new-state  (#'state/terminal-transition-swap-fn run task-id :failed
-                                                          #(assoc % :task/error error-info)
-                                                          state/mark-task-failed tr-result)]
-      (is (result/ok? @tr-result))
-      (is (= :failed (get-in new-state [:run/tasks task-id :task/status])))
-      (is (= error-info (get-in new-state [:run/tasks task-id :task/error])))))
-
-  (testing "unknown task: unchanged state and :task-not-found error"
-    (let [run       (state/create-run-state (random-uuid) {})
-          tr-result (volatile! nil)
-          new-state (#'state/terminal-transition-swap-fn run (random-uuid) :completed identity
-                                                         state/mark-task-completed tr-result)]
-      (is (result/err? @tr-result))
-      (is (= :task-not-found (get-in @tr-result [:error :code])))
-      (is (= run new-state)))))
-
 (deftest transition-task!-test
   (testing "atomically transitions task in run state"
     (let [task-id (random-uuid)
@@ -156,6 +113,43 @@
           run-atom (state/create-run-atom run)
           result (state/transition-task! run-atom (random-uuid) :ready nil)]
       (is (result/err? result)))))
+
+(deftest transition-task-in-run-test
+  (testing "pure helper returns updated run state and transition metadata"
+    (let [task-id    (random-uuid)
+          task       (state/create-task-state task-id #{})
+          run        (state/create-run-state (random-uuid) {task-id task})
+          transition (transition-task-in-run run task-id :ready identity)
+          data       (:data transition)]
+      (is (result/ok? transition))
+      (is (= :pending (:from-status data)))
+      (is (= :ready (:to-status data)))
+      (is (= :ready (get-in data [:run-state :run/tasks task-id :task/status])))))
+
+  (testing "pure helper returns task-not-found without mutating run state"
+    (let [task-id    (random-uuid)
+          run        (state/create-run-state (random-uuid) {})
+          transition (transition-task-in-run run task-id :ready identity)]
+      (is (result/err? transition))
+      (is (= :task-not-found (get-in transition [:error :code]))))))
+
+(deftest terminal-transition-in-run-test
+  (testing "terminal helper applies task update and run bucket update"
+    (let [task-id    (random-uuid)
+          error-info {:reason :test-error}
+          run        (running-run-state task-id)
+          transition (terminal-transition-in-run run
+                                                 task-id
+                                                 :failed
+                                                 state/mark-task-failed
+                                                 #(assoc % :task/error error-info))
+          data       (:data transition)]
+      (is (result/ok? transition))
+      (is (= :running (:from-status data)))
+      (is (= :failed (:to-status data)))
+      (is (= :failed (get-in data [:run-state :run/tasks task-id :task/status])))
+      (is (= error-info (get-in data [:run-state :run/tasks task-id :task/error])))
+      (is (contains? (:run/failed (:run-state data)) task-id)))))
 
 ;; ============================================================================
 ;; Event emission wiring tests
@@ -195,7 +189,7 @@
 
 (deftest transition-task!-concurrent-terminal-transitions-test
   (testing "exactly one of two concurrent terminal transitions wins; atom state is consistent"
-    (dotimes [_ 100]
+    (dotimes [_ concurrent-terminal-transition-attempts]
       (let [task-id     (random-uuid)
             task        (state/create-task-state task-id #{})
             run         (state/create-run-state (random-uuid) {task-id task})
@@ -207,36 +201,35 @@
                             "setup: :ready → :running must succeed")
             ;; two-phase barrier: both futures signal ready before the main thread
             ;; releases them, guaranteeing they are parked at start-latch simultaneously
-            ready-latch (java.util.concurrent.CountDownLatch. 2)
-            start-latch (java.util.concurrent.CountDownLatch. 1)
-            f1          (future
-                          (.countDown ready-latch)
-                          (when-not (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                            (throw (ex-info "timed out waiting for start latch"
-                                            {:transition :completed})))
-                          (state/transition-task! run-atom task-id :completed nil))
-            f2          (future
-                          (.countDown ready-latch)
-                          (when-not (.await start-latch 5 java.util.concurrent.TimeUnit/SECONDS)
-                            (throw (ex-info "timed out waiting for start latch"
-                                            {:transition :failed})))
-                          (state/transition-task! run-atom task-id :failed nil))
-            ready?      (.await ready-latch 5 java.util.concurrent.TimeUnit/SECONDS)
+            ready-latch (CountDownLatch. 2)
+            start-latch (CountDownLatch. 1)
+            f1          (terminal-transition-future
+                         ready-latch
+                         start-latch
+                         :completed
+                         #(state/transition-task! run-atom task-id :completed nil))
+            f2          (terminal-transition-future
+                         ready-latch
+                         start-latch
+                         :failed
+                         #(state/transition-task! run-atom task-id :failed nil))
+            ready?      (.await ready-latch latch-timeout-seconds TimeUnit/SECONDS)
             _           (is ready? "both futures must reach the barrier within 5s")
             _           (when-not ready?
                           (throw (ex-info "timed out waiting for futures to reach barrier"
                                           {:task-id task-id})))
             _           (.countDown start-latch)
-            r1          (deref f1 5000 ::timeout)
-            r2          (deref f2 5000 ::timeout)
+            r1          (deref f1 future-timeout-ms future-timeout-result)
+            r2          (deref f2 future-timeout-ms future-timeout-result)
             ;; Cancel stuck futures and fail fast so no threads accumulate
-            _           (when (or (= ::timeout r1) (= ::timeout r2))
+            _           (when (or (= future-timeout-result r1)
+                                  (= future-timeout-result r2))
                           (future-cancel f1)
                           (future-cancel f2)
                           (throw (ex-info "future timed out waiting for terminal transition"
                                           {:task-id task-id
-                                           :f1-timeout? (= ::timeout r1)
-                                           :f2-timeout? (= ::timeout r2)})))
+                                           :f1-timeout? (= future-timeout-result r1)
+                                           :f2-timeout? (= future-timeout-result r2)})))
             final       (get-in @run-atom [:run/tasks task-id :task/status])]
         (is (contains? #{:completed :failed} final)
             "final status must be a valid terminal state")
@@ -455,7 +448,7 @@
           task       (state/create-task-state task-id #{} :state-profile :kernel)
           run        (state/create-run-state (random-uuid) {task-id task} :state-profile :kernel)
           run-atom   (state/create-run-atom run)
-          error-info {:reason :test-error :message "something went wrong"}]
+          error-info {:reason :test-error}]
       (is (result/ok? (state/transition-task! run-atom task-id :ready nil)))
       (is (result/ok? (state/transition-task! run-atom task-id :running nil)))
       (let [fail-result    (state/mark-failed! run-atom task-id error-info nil)

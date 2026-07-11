@@ -1,0 +1,11 @@
+{:dag-executor.state/messages
+ {:task/not-found "Task {task-id} not found"
+  :task/invalid-transition "Cannot transition from {from-status} to {to-status}"
+  :log/task-updated "Task updated"
+  :log/task-status-changed "Task status changed"
+  :log/task-not-found "Task not found"
+  :log/task-transition-failed "Invalid task transition"
+  :log/task-merged "Task merged successfully"
+  :log/task-completed "Task completed successfully"
+  :log/task-failed "Task failed"
+  :log/run-metrics-updated "Run metrics updated"}}
