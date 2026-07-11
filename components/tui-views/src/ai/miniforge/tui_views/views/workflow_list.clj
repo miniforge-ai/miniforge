@@ -28,6 +28,7 @@
    - Temporal grouping (Today, This Week, Older)"
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette])
   (:import
    [java.time LocalDate ZoneId]
@@ -55,13 +56,16 @@
         :else                              :older))
     :unknown))
 
-(def bucket-labels
-  {:today      "Today"
-   :yesterday  "Yesterday"
-   :this-week  "This Week"
-   :this-month "This Month"
-   :older      "Older"
-   :unknown    "Unknown"})
+(defn bucket-labels
+  "Age-bucket keyword -> localized label. A fn (not a def-map) so the catalog
+   lookups resolve at call time, keeping namespace load free of catalog I/O."
+  []
+  {:today      (msg/t :readiness/bucket-today)
+   :yesterday  (msg/t :readiness/bucket-yesterday)
+   :this-week  (msg/t :readiness/bucket-this-week)
+   :this-month (msg/t :readiness/bucket-this-month)
+   :older      (msg/t :readiness/bucket-older)
+   :unknown    (msg/t :readiness/bucket-unknown)})
 
 (def bucket-order [:today :yesterday :this-week :this-month :older :unknown])
 
@@ -74,7 +78,9 @@
     (into []
           (mapcat (fn [bucket]
                     (let [wfs (get grouped bucket)
-                          label (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")]
+                          label (msg/t :wf-list/group-header
+                                       {:label (get (bucket-labels) bucket)
+                                        :count (count wfs)})]
                       (cons {:type :header :label label :bucket bucket}
                             (map (fn [wf] {:type :row :wf wf}) wfs)))))
           buckets)))
@@ -115,7 +121,7 @@
                     (subs msg 0 (min 16 (count msg)))))}))
 
 (defn render-title-bar [[cols rows]]
-  (layout/text [cols rows] " MINIFORGE │ Workflows"
+  (layout/text [cols rows] (msg/t :wf-list/title)
                {:fg palette/status-info :bold? true}))
 
 (defn auto-scroll-offset
@@ -164,7 +170,7 @@
 (defn render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows]
-                 "  No workflows yet.  Start one with:  mf workflow run <spec.edn>"
+                 (msg/t :wf-list/empty)
                  {:fg palette/status-info})
     (let [grouped (group-workflows workflows)
           visible-count (max 0 (- rows 2))
@@ -172,18 +178,18 @@
           offset (auto-scroll-offset mapped-selected visible-count)]
       (layout/table [cols rows]
         {:columns [{:key :status-char :header "  " :width 2}
-                   {:key :name :header "Workflow" :width (max 10 (- cols 50))}
-                   {:key :phase :header "Phase" :width 12}
-                   {:key :progress-str :header "Progress" :width 20}
-                   {:key :agent-msg :header "Agent" :width 16}]
+                   {:key :name :header (msg/t :workflow/default-name) :width (max 10 (- cols 50))}
+                   {:key :phase :header (msg/t :wf-list/col-phase) :width 12}
+                   {:key :progress-str :header (msg/t :wf-list/col-progress) :width 20}
+                   {:key :agent-msg :header (msg/t :wf-list/col-agent) :width 16}]
          :data (mapv #(format-grouped-row % active-chain cols) grouped)
          :selected-row mapped-selected
          :offset offset}))))
 
 (defn render-footer [flash-message [cols rows]]
   (layout/text [cols rows]
-    (str " j/k:nav  Enter:detail  /:search(status:failed)  ::cmd  q:quit"
-         (when flash-message (str "  │ " flash-message)))
+    (str (msg/t :wf-list/footer)
+         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
     {:fg :default}))
 
 (defn render
@@ -202,8 +208,9 @@
         render-header-bar
         (fn [[tc tr]]
           (layout/text [tc tr]
-            (str " MINIFORGE │ Workflows"
-                 (when search-active? (str " [" (count workflows) " matches]")))
+            (str (msg/t :wf-list/title)
+                 (when search-active?
+                   (msg/t :wf-list/search-matches {:count (count workflows)})))
             {:fg palette/status-info :bold? true}))
         render-content-area
         (fn [[c r]]

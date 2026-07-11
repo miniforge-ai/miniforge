@@ -23,6 +23,7 @@
    Supports selection for batch add/remove operations."
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]))
 
@@ -31,8 +32,8 @@
 
 (defn source-label [model]
   (if (= :browse (:repo-manager-source model))
-    "Browse"
-    "Fleet"))
+    (msg/t :repo/source-browse)
+    (msg/t :repo/source-fleet-label)))
 
 (defn format-repo-row [repo selected-ids]
   (let [selected? (contains? (or selected-ids #{}) repo)]
@@ -48,9 +49,9 @@
 (defn render-title-bar [model [cols rows]]
   (let [items (model/repo-manager-items model)
         vnum (view-number)
-        label (str " MINIFORGE │ [Repos (" vnum ")] "
-                   (source-label model) " — "
-                   (count items) " repo(s)")]
+        label (msg/t :repo/manager-bar {:index vnum
+                                        :source (source-label model)
+                                        :count (count items)})]
     (layout/text [cols rows] label
                  {:fg palette/status-info :bold? true})))
 
@@ -64,13 +65,13 @@
 
 (defn render-table [items selected selected-ids [cols rows]]
   (if (empty? items)
-    (layout/text [cols rows] "  No repositories configured. Use :add-repo or b to browse."
+    (layout/text [cols rows] (msg/t :repo/empty)
                  {:fg :default})
     (let [visible-count (max 0 (- rows 2))
           offset (auto-scroll-offset selected visible-count)]
       (layout/table [cols rows]
         {:columns [{:key :marker :header " " :width 2}
-                   {:key :repo :header "Repository" :width (max 10 (- cols 8))}]
+                   {:key :repo :header (msg/t :fleet/col-repo) :width (max 10 (- cols 8))}]
          :data (mapv #(format-repo-row % selected-ids) items)
          :selected-row selected
          :offset offset}))))
@@ -79,8 +80,8 @@
   (let [source (if (= :browse (:repo-manager-source model)) :browse :fleet)]
     (layout/text [cols rows]
       (if (= :browse source)
-        " Enter:add  space:select  f:fleet  Esc:back  q:quit"
-        " b:browse  x:remove  space:select  a:all  /:search  q:quit")
+        (msg/t :repo/footer-browse)
+        (msg/t :repo/footer-fleet))
       {:fg :default})))
 
 (defn render

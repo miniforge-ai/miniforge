@@ -27,6 +27,7 @@
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
    [ai.miniforge.tui-engine.interface.widget :as widget]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -70,8 +71,8 @@
         metrics-str (when (seq metrics-parts)
                       (str " │ " (str/join " " metrics-parts)))]
     (layout/text [cols rows]
-                 (str " MINIFORGE │ "
-                      (get wf :name "Workflow Detail")
+                 (str (msg/t :detail/title-prefix)
+                      (get wf :name (msg/t :workflow/detail-title-fallback))
                       (when-let [phase (:phase wf)]
                         (str " │ " (name phase)))
                       metrics-str)
@@ -79,11 +80,11 @@
 
 (defn render-phase-list [phases [cols rows]]
   (layout/box [cols rows]
-    {:title "Phases" :border :single :fg :default
+    {:title (msg/t :evidence/phases) :border :single :fg :default
      :content-fn
      (fn [[ic ir]]
        (if (empty? phases)
-         (layout/text [ic ir] "  Waiting for phases...")
+         (layout/text [ic ir] (msg/t :workflow/waiting-for-phases))
          (widget/tree [ic ir]
            {:nodes (mapv format-phase-node phases)
             :selected 0})))}))
@@ -91,14 +92,16 @@
 (defn render-agent-output [agent output [cols rows]]
   (layout/box [cols rows]
     {:title (if agent
-              (str (name (:agent agent)) " - " (name (:status agent :idle)))
-              "Agent Output")
+              (msg/t :workflow/agent-status-label
+                     {:agent (name (:agent agent))
+                      :status (name (:status agent :idle))})
+              (msg/t :workflow/agent-output))
      :border :single :fg :default
      :content-fn
      (fn [[ic ir]]
        (let [lines (if (seq output)
                      (str/split-lines output)
-                     ["  Waiting for agent output..."])
+                     [(msg/t :workflow/waiting-for-agent-output)])
              offset (max 0 (- (count lines) ir))]
          (widget/scrollable [ic ir]
            {:lines lines
@@ -107,7 +110,7 @@
 
 (defn render-footer [[cols rows]]
   (layout/text [cols rows]
-    " Esc:back  3:evidence  4:artifacts  5:dag  j/k:scroll  q:quit"
+    (msg/t :workflow/detail-footer)
     {:fg :default}))
 
 (defn render

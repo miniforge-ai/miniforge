@@ -24,39 +24,41 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Help content
 
-(def help-sections
+(defn help-sections
   "Keybinding help content organized by section."
-  [["Navigation"
-    [["j / k / ↓ / ↑" "Move cursor down / up"]
-     ["g / G"          "Jump to top / bottom"]
-     ["h / l"          "Go back / Enter detail"]
-     ["Enter"          "Enter detail or confirm"]
-     ["Tab / Shift-Tab" "Cycle panes or views"]
-     ["1-9"            "Switch to view by number"]]]
-   ["Selection"
-    [["Space"  "Toggle selection"]
-     ["v"      "Enter visual mode"]
-     ["a"      "Select all"]
-     ["c"      "Clear selection"]]]
-   ["Commands"
-    [[":"      "Enter command mode"]
-     ["/"      "Enter search mode"]
-     ["n / N"  "Next / previous search match"]
-     ["Tab"    "Tab-complete command or argument"]]]
-   ["Actions"
-    [["r"      "Refresh / sync"]
-     ["s"      "Sync PRs"]
-     ["b"      "Browse repos / kanban"]
-     ["e"      "Evidence view"]
-     ["o"      "Open browse"]
-     ["x"      "Remove repos"]
-     ["?"      "Toggle this help"]
-     ["q"      "Quit"]]]])
+  []
+  [[(msg/t :help/section-navigation)
+    [["j / k / ↓ / ↑" (msg/t :help/nav-move-cursor)]
+     ["g / G"          (msg/t :help/nav-jump-top-bottom)]
+     ["h / l"          (msg/t :help/nav-back-detail)]
+     ["Enter"          (msg/t :help/nav-enter-detail-confirm)]
+     ["Tab / Shift-Tab" (msg/t :help/nav-cycle-panes-views)]
+     ["1-9"            (msg/t :help/nav-switch-view-number)]]]
+   [(msg/t :help/section-selection)
+    [["Space"  (msg/t :help/sel-toggle)]
+     ["v"      (msg/t :help/sel-visual-mode)]
+     ["a"      (msg/t :help/sel-all)]
+     ["c"      (msg/t :help/sel-clear)]]]
+   [(msg/t :help/section-commands)
+    [[":"      (msg/t :help/cmd-command-mode)]
+     ["/"      (msg/t :help/cmd-search-mode)]
+     ["n / N"  (msg/t :help/cmd-next-prev-match)]
+     ["Tab"    (msg/t :help/cmd-tab-complete)]]]
+   [(msg/t :help/section-actions)
+    [["r"      (msg/t :help/act-refresh-sync)]
+     ["s"      (msg/t :help/act-sync-prs)]
+     ["b"      (msg/t :help/act-browse-kanban)]
+     ["e"      (msg/t :help/act-evidence-view)]
+     ["o"      (msg/t :help/act-open-browse)]
+     ["x"      (msg/t :help/act-remove-repos)]
+     ["?"      (msg/t :help/act-toggle-help)]
+     ["q"      (msg/t :help/act-quit)]]]])
 
 (defn format-help-lines
   "Build flat lines from help sections."
@@ -70,7 +72,7 @@
                  (str "    " (format "%-18s %s" key desc)))
                bindings)
           [""])))
-    help-sections))
+    (help-sections)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Overlay rendering
@@ -83,7 +85,7 @@
         box-w (min (- cols 4) 52)
         box-h (min (- rows 2) (+ (count lines) 2))]
     (layout/box [box-w box-h]
-      {:title "Help — Key Bindings" :border :single
+      {:title (msg/t :help/box-title) :border :single
        :fg palette/status-info
        :content-fn
        (fn [[ic ir]]

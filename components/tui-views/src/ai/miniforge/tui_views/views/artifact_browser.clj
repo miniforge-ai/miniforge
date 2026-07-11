@@ -26,6 +26,7 @@
    - Status"
   (:require
    [ai.miniforge.tui-engine.interface.layout :as layout]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -41,7 +42,7 @@
     (layout/split-v [cols rows] (/ 2.0 rows)
       ;; Title bar
       (fn [[c r]]
-        (layout/text [c r] " MINIFORGE │ Artifact Browser"
+        (layout/text [c r] (msg/t :artifact/browser-title)
                      {:fg palette/status-info :bold? true}))
       ;; Content + footer
       (fn [[c r]]
@@ -50,13 +51,13 @@
           (fn [[tc tr]]
             (if (empty? artifacts)
               (layout/box [tc tr]
-                {:title "Artifacts" :border :single :fg :default
+                {:title (msg/t :artifact/title) :border :single :fg :default
                  :content-fn
                  (fn [[ic ir]]
-                   (layout/text [ic ir] "  No artifacts available yet."
+                   (layout/text [ic ir] (msg/t :artifact/none-yet)
                                 {:fg :default}))})
               (layout/box [tc tr]
-                {:title (str "Artifacts (" (count artifacts) ")")
+                {:title (msg/t :artifact/box-title {:count (count artifacts)})
                  :border :single :fg :default
                  :content-fn
                  (fn [[ic ir]]
@@ -65,13 +66,13 @@
                                   (if (<= (inc sel) visible-count) 0
                                       (inc (- sel visible-count))))]
                      (layout/table [ic ir]
-                       {:columns [{:key :type :header "Type" :width 10}
-                                  {:key :name :header "Name" :width (max 10 (- ic 35))}
-                                  {:key :size :header "Size" :width 8}
-                                  {:key :status :header "Status" :width 8}]
+                       {:columns [{:key :type :header (msg/t :artifact/col-type) :width 10}
+                                  {:key :name :header (msg/t :artifact/col-name) :width (max 10 (- ic 35))}
+                                  {:key :size :header (msg/t :artifact/col-size) :width 8}
+                                  {:key :status :header (msg/t :artifact/col-status) :width 8}]
                         :data (mapv (fn [a]
                                       {:type (some-> (:type a) name)
-                                       :name (or (:name a) (:path a) "unnamed")
+                                       :name (or (:name a) (:path a) (msg/t :artifact/unnamed))
                                        :size (get a :size "-")
                                        :status (some-> (:status a) name)})
                                     artifacts)
@@ -80,7 +81,7 @@
           ;; Footer
           (fn [[fc fr]]
             (layout/text [fc fr]
-              " j/k:navigate  Enter:view  Esc:back  1:workflows  q:quit"
+              (msg/t :artifact/footer)
               {:fg :default})))))))
 
 ;------------------------------------------------------------------------------ Rich Comment

@@ -24,6 +24,7 @@
    Layer 0: Pure functions with no model dependency."
   (:require
    [clojure.string :as str]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.palette :as palette])
   (:import
    [java.text SimpleDateFormat]
@@ -105,19 +106,25 @@
   (let [blockers (:readiness/blockers readiness [])
         types    (set (map :blocker/type blockers))]
     (if (empty? blockers)
-      "ready"
+      (msg/t :readiness/summary-ready)
       (str/join ", "
         (cond-> []
-          (:ci types)           (conj "CI")
-          (:review types)       (conj "review")
-          (:behind-main types)  (conj "rebase")
-          (:changes types)      (conj "changes")
-          (:draft types)        (conj "draft")
-          (:conflicts types)    (conj "conflicts")
-          (:policy types)       (conj "policy"))))))
+          (:ci types)           (conj (msg/t :readiness/blocker-ci))
+          (:review types)       (conj (msg/t :readiness/blocker-review))
+          (:behind-main types)  (conj (msg/t :readiness/blocker-rebase))
+          (:changes types)      (conj (msg/t :readiness/blocker-changes))
+          (:draft types)        (conj (msg/t :readiness/blocker-draft))
+          (:conflicts types)    (conj (msg/t :readiness/blocker-conflicts))
+          (:policy types)       (conj (msg/t :readiness/blocker-policy)))))))
 
 (defn risk-label [level]
-  (case level :critical "CRIT" :high "high" :medium "med" :low "low" :unevaluated "?" "?"))
+  (case level
+    :critical    (msg/t :risk/label-critical)
+    :high        (msg/t :risk/label-high)
+    :medium      (msg/t :risk/label-medium)
+    :low         (msg/t :risk/label-low)
+    :unevaluated (msg/t :risk/label-unevaluated)
+    (msg/t :risk/label-unevaluated)))
 
 ;------------------------------------------------------------------------------ Layer 0c
 ;; Readiness + risk derivation (pure, from provider signals)
@@ -168,23 +175,23 @@
   (cond-> []
     ci-fail?
     (conj {:blocker/type :ci
-           :blocker/message "CI checks failing"
+           :blocker/message (msg/t :readiness/blocker-msg-ci)
            :blocker/source "provider"})
     behind?
     (conj {:blocker/type :behind-main
-           :blocker/message "Branch is behind main"
+           :blocker/message (msg/t :readiness/blocker-msg-behind-main)
            :blocker/source "provider"})
     (#{:open :reviewing :needs-review} status)
     (conj {:blocker/type :review
-           :blocker/message "Needs review approval"
+           :blocker/message (msg/t :readiness/blocker-msg-needs-review)
            :blocker/source "provider"})
     (= :changes-requested status)
     (conj {:blocker/type :review
-           :blocker/message "Reviewer requested changes"
+           :blocker/message (msg/t :readiness/blocker-msg-changes-requested)
            :blocker/source "provider"})
     (= :draft status)
     (conj {:blocker/type :review
-           :blocker/message "PR is in draft"
+           :blocker/message (msg/t :readiness/blocker-msg-draft)
            :blocker/source "author"})))
 
 (def factor-weights
@@ -297,25 +304,27 @@
         factors   (cond-> []
                     (pos? total)
                     (conj {:factor :change-size
-                           :explanation (str total " lines changed (+" additions "/-" deletions ")")
+                           :explanation (msg/t :risk/factor-change-size
+                                               {:total total :additions additions :deletions deletions})
                            :value {:additions additions :deletions deletions :total total}
                            :score (cond (> total 1000) 1.0 (> total 500) 0.75 (> total 200) 0.5 :else 0.2)})
                     (pos? changed-files)
                     (conj {:factor :files-changed
-                           :explanation (str changed-files " files modified")
+                           :explanation (msg/t :risk/factor-files-changed
+                                               {:count changed-files})
                            :value changed-files
                            :score (cond (> changed-files 50) 1.0 (> changed-files 20) 0.75 (> changed-files 10) 0.5 :else 0.2)})
                     ci-fail?
                     (conj {:factor :ci-health
-                           :explanation "CI checks are failing"
+                           :explanation (msg/t :risk/factor-ci-health)
                            :score 0.9})
                     changes?
                     (conj {:factor :review-concerns
-                           :explanation "Reviewer requested changes"
+                           :explanation (msg/t :risk/factor-review-concerns)
                            :score 0.8})
                     (and (not ci-fail?) (not changes?) (zero? total))
                     (conj {:factor :signal-check
-                           :explanation "All available signals nominal"
+                           :explanation (msg/t :risk/factor-signal-check)
                            :score 0.0}))
         ;; Use max-of-factors, not average — one high signal shouldn't be diluted
         score     (if (seq factors)
@@ -368,9 +377,16 @@
     (days-ago-bucket (.between ChronoUnit/DAYS wf-date today))
     :unknown))
 
-(def ^:private bucket-labels
-  {:today "Today" :yesterday "Yesterday" :this-week "This Week"
-   :this-month "This Month" :older "Older" :unknown "Unknown"})
+(defn- bucket-label
+  "User-facing label for a temporal bucket keyword."
+  [bucket]
+  (case bucket
+    :today      (msg/t :readiness/bucket-today)
+    :yesterday  (msg/t :readiness/bucket-yesterday)
+    :this-week  (msg/t :readiness/bucket-this-week)
+    :this-month (msg/t :readiness/bucket-this-month)
+    :older      (msg/t :readiness/bucket-older)
+    (msg/t :readiness/bucket-unknown)))
 
 (def ^:private bucket-order
   [:today :yesterday :this-week :this-month :older :unknown])
@@ -405,7 +421,7 @@
               wfs (get grouped bucket)
               header {:_header? true
                       :status-char ""
-                      :name (str "── " (get bucket-labels bucket) " (" (count wfs) ") ")
+                      :name (str "── " (bucket-label bucket) " (" (count wfs) ") ")
                       :name-fg palette/status-info
                       :phase ""
                       :time ""
@@ -440,34 +456,37 @@
   "Readiness state -> status string with indicator character."
   [state]
   (case state
-    :merged            "✓ merged"
-    :closed            "─ closed"
-    :merge-ready       "✓ merge-ready"
-    :ci-failing        "● ci-failing"
-    :needs-review      "○ needs-review"
-    :changes-requested "◐ changes-req"
-    :behind-main       "◐ behind-main"
-    :draft             "◑ draft"
-    :merge-conflicts   "✗ conflicts"
-    :policy-failing    "✗ policy-fail"
-    :unknown           "? unknown"
-    "? unknown"))
+    :merged            (msg/t :readiness/indicator-merged)
+    :closed            (msg/t :readiness/indicator-closed)
+    :merge-ready       (msg/t :readiness/indicator-merge-ready)
+    :ci-failing        (msg/t :readiness/indicator-ci-failing)
+    :needs-review      (msg/t :readiness/indicator-needs-review)
+    :changes-requested (msg/t :readiness/indicator-changes-requested)
+    :behind-main       (msg/t :readiness/indicator-behind-main)
+    :draft             (msg/t :readiness/indicator-draft)
+    :merge-conflicts   (msg/t :readiness/indicator-merge-conflicts)
+    :policy-failing    (msg/t :readiness/indicator-policy-failing)
+    :unknown           (msg/t :readiness/indicator-unknown)
+    (msg/t :readiness/indicator-unknown)))
 
 (defn recommend
   "Build a recommendation map. Single constructor for all recommendation types."
   [action label reason]
   {:action action :label label :reason reason})
 
-(def labels
-  "Action -> label mapping."
-  {:remediate     "⚡ remediate"
-   :review        "⊙ review"
-   :evaluate      "◇ evaluate"
-   :wait          "◌ wait"
-   :do-not-merge  "✗ do not merge"
-   :decompose     "◇ decompose"
-   :approve       "⊘ approve"
-   :merge         "→ merge"})
+(defn labels
+  "Action keyword -> user-facing label."
+  [action]
+  (case action
+    :remediate    (msg/t :action/remediate)
+    :review       (msg/t :action/review)
+    :evaluate     (msg/t :action/evaluate)
+    :wait         (msg/t :action/wait)
+    :do-not-merge (msg/t :action/do-not-merge)
+    :decompose    (msg/t :action/decompose)
+    :approve      (msg/t :action/approve)
+    :merge        (msg/t :action/merge)
+    nil))
 
 (defn recommend-action
   "Build recommendation for a known action keyword."
@@ -531,41 +550,41 @@
   "Recommendation when policy violations are present."
   [{:keys [auto-fixable?]}]
   (if auto-fixable?
-    (recommend-action :remediate "Auto-fixable policy violations")
-    (recommend-action :review "Policy violations need review")))
+    (recommend-action :remediate (msg/t :recommend/policy-auto-fixable))
+    (recommend-action :review (msg/t :recommend/policy-needs-review))))
 
 (defn- policy-failed-recommendation []
-  (recommend-action :do-not-merge "Policy evaluation failed"))
+  (recommend-action :do-not-merge (msg/t :recommend/policy-failed)))
 
 (defn- policy-unknown-ready-recommendation []
-  (recommend-action :evaluate "Policy not yet evaluated"))
+  (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated)))
 
 (defn- hard-blocker-recommendation
   "Recommendation for hard-blocker states (CI failing, changes requested, etc.)."
   [state]
   (case state
-    :ci-failing        (recommend-action :do-not-merge "CI failing")
-    :changes-requested (recommend-action :do-not-merge "Changes requested by reviewer")
-    :behind-main       (recommend-action :do-not-merge "Branch behind main — rebase required")
-    :draft             (recommend-action :do-not-merge "Draft PR — not ready for merge")
+    :ci-failing        (recommend-action :do-not-merge (msg/t :recommend/ci-failing))
+    :changes-requested (recommend-action :do-not-merge (msg/t :recommend/changes-requested))
+    :behind-main       (recommend-action :do-not-merge (msg/t :recommend/behind-main))
+    :draft             (recommend-action :do-not-merge (msg/t :recommend/draft))
     nil))
 
 (defn- soft-blocker-recommendation
   "Recommendation for soft-blocker states (review needed, large PR)."
   [{:keys [large? state]}]
   (cond
-    (and large? (#{:needs-review :open} state)) (recommend-action :decompose "Large PR — consider splitting")
-    (= :needs-review state)                     (recommend-action :review "Awaiting review")
+    (and large? (#{:needs-review :open} state)) (recommend-action :decompose (msg/t :recommend/large-pr))
+    (= :needs-review state)                     (recommend-action :review (msg/t :recommend/awaiting-review))
     :else                                       nil))
 
 (defn- ready-recommendation
   "Recommendation when the PR is ready — gated by risk and policy."
   [{:keys [risk-level policy-pass? policy-unknown?]}]
   (cond
-    (= :unevaluated risk-level)                  (recommend-action :evaluate "Risk not yet assessed")
-    (#{:medium :high :critical} risk-level)      (recommend-action :approve (str "Ready but " (name risk-level) " risk"))
-    (and (= :low risk-level) (true? policy-pass?)) (recommend-action :merge "All gates green, low risk")
-    policy-unknown?                              (recommend-action :evaluate "Policy not yet evaluated")
+    (= :unevaluated risk-level)                  (recommend-action :evaluate (msg/t :recommend/risk-not-assessed))
+    (#{:medium :high :critical} risk-level)      (recommend-action :approve (msg/t :recommend/ready-elevated-risk {:risk (name risk-level)}))
+    (and (= :low risk-level) (true? policy-pass?)) (recommend-action :merge (msg/t :recommend/all-gates-green))
+    policy-unknown?                              (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated))
     :else                                        nil))
 
 (defn derive-recommendation
@@ -598,7 +617,7 @@
         (hard-blocker-recommendation state)
         (soft-blocker-recommendation signals)
         (when ready?                                       (ready-recommendation signals))
-        (recommend-action :wait "Awaiting signals"))))
+        (recommend-action :wait (msg/t :recommend/awaiting-signals)))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; Enrichment resolution
@@ -616,7 +635,10 @@
 (defn policy-label
   "Policy pass/fail/unknown -> display label."
   [policy]
-  (case (:evaluation/passed? policy) true "pass" false "FAIL" "?"))
+  (case (:evaluation/passed? policy)
+    true  (msg/t :recommend/policy-pass)
+    false (msg/t :recommend/policy-fail)
+    (msg/t :recommend/policy-unknown)))
 
 ;------------------------------------------------------------------------------ Layer 1c
 ;; Workflow-PR linkage helpers
@@ -644,15 +666,15 @@
   "Map normalized PR status keyword to human-readable GitHub-level state."
   [status]
   (case status
-    :closed             "closed"
-    :draft              "draft"
-    :merged             "merged"
-    :open               "open"
-    :approved           "approved"
-    :reviewing          "in review"
-    :changes-requested  "changes req"
-    :merge-ready        "merge ready"
-    (if (nil? status) "—" "open")))
+    :closed             (msg/t :recommend/pr-state-closed)
+    :draft              (msg/t :recommend/pr-state-draft)
+    :merged             (msg/t :recommend/pr-state-merged)
+    :open               (msg/t :recommend/pr-state-open)
+    :approved           (msg/t :recommend/pr-state-approved)
+    :reviewing          (msg/t :recommend/pr-state-reviewing)
+    :changes-requested  (msg/t :recommend/pr-state-changes-requested)
+    :merge-ready        (msg/t :recommend/pr-state-merge-ready)
+    (if (nil? status) "—" (msg/t :recommend/pr-state-open))))
 
 (defn wrap-text
   "Word-wrap a string to fit within max-width characters.

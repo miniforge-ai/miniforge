@@ -35,6 +35,7 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]
@@ -239,7 +240,7 @@
     (mapv (fn [a]
             {:_id [:artifact (.indexOf ^java.util.List artifacts a)]
              :type (some-> (:type a) name)
-             :name (or (:name a) (:path a) "unnamed")
+             :name (or (:name a) (:path a) (msg/t :artifact/unnamed))
              :phase (some-> (:phase a) name)
              :size (get a :size "-")
              :status (some-> (:status a) name)
@@ -256,17 +257,17 @@
         in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
         merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
         done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
-    [{:title "BLOCKED" :color palette/status-fail
+    [{:title (msg/t :kanban/blocked) :color palette/status-fail
       :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title "READY" :color palette/status-warning
+     {:title (msg/t :kanban/ready) :color palette/status-warning
       :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
-     {:title "ACTIVE" :color palette/status-info
+     {:title (msg/t :kanban/active) :color palette/status-info
       :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
-     {:title "IN REVIEW" :color :magenta
+     {:title (msg/t :kanban/in-review) :color :magenta
       :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
-     {:title "MERGING" :color :blue
+     {:title (msg/t :kanban/merging) :color :blue
       :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
-     {:title "DONE" :color palette/status-pass
+     {:title (msg/t :kanban/done) :color palette/status-pass
       :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
 
 (defn project-agent-output
@@ -280,7 +281,7 @@
         panel-cols (get model :_panel-cols 80)
         wrap-width (max 20 (- panel-cols 4))]
     (if (empty? output)
-      [(trees/tree-node "No agent output" 0 false trees/status-info)]
+      [(trees/tree-node (msg/t :agent/no-output) 0 false trees/status-info)]
       (let [agent-name (when agent (name (get agent :agent :agent)))
             header (when agent-name
                      [(trees/tree-node (str "[" agent-name "]") 0 false trees/status-warning)])
@@ -291,22 +292,13 @@
                               (helpers/wrap-text line wrap-width)))
                       lines))))))
 
-(def ^:private browse-sayings
-  ["Rummaging through repos..."
-   "Consulting the git elders..."
-   "Herding repos into a list..."
-   "Asking GitHub nicely..."
-   "Scanning the multiverse of repos..."
-   "Bribing the API rate limiter..."
-   "Polishing repo metadata..."
-   "Untangling git spaghetti..."
-   "Warming up the repo cannon..."
-   "Teaching repos to sit and stay..."])
-
 (defn- browse-loading-message []
-  (let [idx (mod (quot (System/currentTimeMillis) 2000)
-                 (count browse-sayings))]
-    (nth browse-sayings idx)))
+  ;; resolve the catalog vector at call time (not namespace load) to keep
+  ;; require free of catalog I/O
+  (let [sayings (msg/t :repo/browse-sayings)
+        idx (mod (quot (System/currentTimeMillis) 2000)
+                 (count sayings))]
+    (nth sayings idx)))
 
 (defn project-repo-list
   "Project repo manager data for the table widget."
@@ -319,24 +311,28 @@
     (if (= source :browse)
       (if (and loading? (empty? browse-repos))
         ;; Loading: show spinner row with a fun saying
-        [{:_id :loading :name (str "⏳ " (browse-loading-message))
-          :source "" :pr-count "" :status "loading"}]
+        [{:_id :loading :name (msg/t :repo/loading-row {:saying (browse-loading-message)})
+          :source "" :pr-count "" :status (msg/t :repo/status-loading)}]
         ;; Browse mode: show remote repos with fleet membership
         (mapv (fn [repo]
                 {:_id repo
                  :name repo
-                 :source (if (contains? fleet-set repo) "fleet" "remote")
+                 :source (if (contains? fleet-set repo)
+                           (msg/t :repo/source-fleet)
+                           (msg/t :repo/source-remote))
                  :pr-count ""
-                 :status (if (contains? fleet-set repo) "added" "available")})
+                 :status (if (contains? fleet-set repo)
+                           (msg/t :repo/status-added)
+                           (msg/t :repo/status-available))})
               browse-repos))
       ;; Fleet mode: show configured repos (preserve vector order for selection)
       (mapv (fn [repo]
               {:_id repo
                :name repo
-               :source "fleet"
+               :source (msg/t :repo/source-fleet)
                :pr-count (str (count (filter #(= repo (:pr/repo %))
                                              (:pr-items model []))))
-               :status "active"})
+               :status (msg/t :repo/status-active)})
             fleet-vec))))
 
 ;------------------------------------------------------------------------------ Layer 1b
@@ -366,13 +362,13 @@
   [model]
   (let [items (supervisory/attention model)]
     (if (empty? items)
-      [(trees/tree-node "  No active attention items" 0 false trees/status-info)]
+      [(trees/tree-node (msg/t :monitor/no-attention) 0 false trees/status-info)]
       (mapv (fn [item]
               (trees/tree-node
                (str (case (:attention/severity item)
-                      :critical "! CRITICAL  "
-                      :warning  "  WARNING   "
-                      :info     "  INFO      "
+                      :critical (msg/t :monitor/severity-critical)
+                      :warning  (msg/t :monitor/severity-warning)
+                      :info     (msg/t :monitor/severity-info)
                       "  ")
                     (:attention/summary item))
                0 false (severity->color (:attention/severity item))))
@@ -383,7 +379,7 @@
   [model]
   (let [rows (supervisory/workflow-ticker model)]
     (if (empty? rows)
-      [(trees/tree-node "  No active workflows" 0 false trees/status-info)]
+      [(trees/tree-node (msg/t :monitor/no-workflows) 0 false trees/status-info)]
       (vec (mapcat (fn [row]
                      (let [[glyph color] (status->glyph-color (:status row))
                            k             (get row :key "")
@@ -406,13 +402,13 @@
         (supervisory/pr-train-strip model)]
     [(trees/tree-node
       (if train-active?
-        (str "Train:  Active (" train-merged "/" train-total " merged)")
-        "Train:  No active train")
+        (msg/t :monitor/train-active {:merged train-merged :total train-total})
+        (msg/t :monitor/train-none))
       0 false (when train-active? trees/status-info))
-     (trees/tree-node (str "Fleet:  " fleet-open " open") 0)
-     (trees/tree-node (str "        " fleet-ready " ready") 1 false
+     (trees/tree-node (msg/t :monitor/fleet-open {:count fleet-open}) 0)
+     (trees/tree-node (msg/t :monitor/fleet-ready {:count fleet-ready}) 1 false
                       (when (pos? fleet-ready) trees/status-pass))
-     (trees/tree-node (str "        " fleet-monitored " monitored") 1 false
+     (trees/tree-node (msg/t :monitor/fleet-monitored {:count fleet-monitored}) 1 false
                       (when (pos? fleet-monitored) trees/status-info))]))
 
 (defn project-monitor-policy-health
@@ -430,27 +426,28 @@
         {:keys [not-evaluated policy-passing policy-failing waived escalated]}
         governance-counts]
     (vec (concat
-          [(trees/tree-node (str "Pass rate:    " rate-pct) 0 false rate-color)
-           (trees/tree-node (str "Evaluations:  " total-evaluations
-                                 " (" passing-evaluations " passing)") 0)]
+          [(trees/tree-node (msg/t :policy/pass-rate {:pct rate-pct}) 0 false rate-color)
+           (trees/tree-node (msg/t :policy/evaluations
+                                   {:total total-evaluations
+                                    :passing passing-evaluations}) 0)]
           (when (seq viols)
-            (into [(trees/tree-node "Violations:" 0)]
+            (into [(trees/tree-node (msg/t :policy/violations-header) 0)]
                   (mapv (fn [[cat cnt]]
                           (trees/tree-node (str "  " cat ": " cnt) 1 false trees/status-fail))
                         viols)))
           (when (some pos? [policy-passing policy-failing waived escalated not-evaluated])
-            (into [(trees/tree-node "States:" 0)]
+            (into [(trees/tree-node (msg/t :policy/states-header) 0)]
                   (filter some?
                           [(when (pos? policy-passing)
-                             (trees/tree-node (str "  passing:   " policy-passing) 1 false trees/status-pass))
+                             (trees/tree-node (msg/t :policy/state-passing {:count policy-passing}) 1 false trees/status-pass))
                            (when (pos? policy-failing)
-                             (trees/tree-node (str "  failing:   " policy-failing) 1 false trees/status-fail))
+                             (trees/tree-node (msg/t :policy/state-failing {:count policy-failing}) 1 false trees/status-fail))
                            (when (pos? waived)
-                             (trees/tree-node (str "  waived:    " waived) 1 false trees/status-warning))
+                             (trees/tree-node (msg/t :policy/state-waived {:count waived}) 1 false trees/status-warning))
                            (when (pos? escalated)
-                             (trees/tree-node (str "  escalated: " escalated) 1 false trees/status-fail))
+                             (trees/tree-node (msg/t :policy/state-escalated {:count escalated}) 1 false trees/status-fail))
                            (when (pos? not-evaluated)
-                             (trees/tree-node (str "  pending:   " not-evaluated) 1))])))))))
+                             (trees/tree-node (msg/t :policy/state-pending {:count not-evaluated}) 1))])))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Projection registry
@@ -534,65 +531,67 @@
                                      (let [r (or (:pr/readiness pr) (helpers/derive-readiness pr))]
                                        (:readiness/ready? r)))
                                    prs))]
-    (str (str/upper-case (name filter-state))
-         " | Repos: " repo-count
-         " | PRs: " (count prs)
-         " | Ready: " merge-ready)))
+    (msg/t :fleet/summary {:filter (str/upper-case (name filter-state))
+                           :repos repo-count
+                           :prs (count prs)
+                           :ready merge-ready})))
 
 (defn ctx-pr-detail-title [model]
   (let [pr-data (get-in model [:detail :selected-pr])]
-    (str " MINIFORGE │ PR "
-         (when (:pr/repo pr-data) (str (:pr/repo pr-data) " "))
-         "#" (:pr/number pr-data "?")
-         " " (:pr/title pr-data ""))))
+    (msg/t :pr/detail-title
+           {:repo (if (:pr/repo pr-data) (str (:pr/repo pr-data) " ") "")
+            :number (:pr/number pr-data "?")
+            :title (:pr/title pr-data "")})))
 
 (defn ctx-train-title [model]
   (let [train (get-in model [:detail :selected-train])
-        name (get train :train/name "Merge Train")
+        name (get train :train/name (msg/t :train/default-name))
         progress (:train/progress train)]
-    (str " MINIFORGE │ Train: " name
-         (when progress
-           (str " (" (:merged progress 0) "/" (:total progress 0) ")")))))
+    (msg/t :train/title
+           {:name name
+            :progress (if progress
+                        (str " (" (:merged progress 0) "/" (:total progress 0) ")")
+                        "")})))
 
 (defn ctx-evidence-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf-name (some #(when (= (:id %) wf-id) (:name %))
                       (:workflows model))]
-    (or wf-name "Evidence")))
+    (or wf-name (msg/t :evidence/title))))
 
 (defn ctx-artifact-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf-name (some #(when (= (:id %) wf-id) (:name %))
                       (:workflows model))]
-    (or wf-name "Artifacts")))
+    (or wf-name (msg/t :artifact/title))))
 
 (defn ctx-artifact-box-title [model]
   (let [artifacts (get-in model [:detail :artifacts] [])]
-    (str "Artifacts (" (count artifacts) ")")))
+    (msg/t :artifact/box-title {:count (count artifacts)})))
 
 (defn ctx-workflow-detail-title [model]
   (let [wf-id (get-in model [:detail :workflow-id])
         wf (some #(when (= (:id %) wf-id) %) (:workflows model []))
         phase (get-in model [:detail :current-phase])]
-    (str " MINIFORGE │ "
-         (or (:name wf) (some-> wf-id str (subs 0 8)) "Workflow")
-         (when phase (str " │ " (name phase))))))
+    (msg/t :workflow/detail-title
+           {:name (or (:name wf) (some-> wf-id str (subs 0 8)) (msg/t :workflow/default-name))
+            :phase (if phase (str " │ " (name phase)) "")})))
 
 (defn ctx-repo-manager-title [model]
   (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)
         repos (get model :fleet-repos [])]
-    (str "Repos (" (count repos) ") [" (inc idx) "]")))
+    (msg/t :repo/manager-title {:count (count repos) :index (inc idx)})))
 
 (defn ctx-monitor-summary [model]
   (let [attn-count (count (supervisory/attention model))
         sub-status (get model :subscription/status :connected)]
-    (str "Attention: " attn-count
-         " | "
-         (case sub-status
-           :connected    "Live"
-           :stale        "[STALE]"
-           :disconnected "[DISCONNECTED]"
-           (name sub-status)))))
+    (msg/t :monitor/summary
+           {:count attn-count
+            :status (case sub-status
+                      :connected    (msg/t :monitor/sub-live)
+                      :stale        (msg/t :monitor/sub-stale)
+                      :disconnected (msg/t :monitor/sub-disconnected)
+                      (name sub-status))})))
 
 (def contexts
   "Registry of context functions: keyword -> (model -> string).

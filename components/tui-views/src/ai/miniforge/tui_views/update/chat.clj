@@ -27,6 +27,7 @@
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.effect :as effect]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.transition :as transition]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -99,7 +100,7 @@
                            (assoc :context context)
                            (assoc :input-buf "")
                            (assoc :pending? false)))))
-    (transition/flash model "Chat available in PR Fleet or PR Detail views")))
+    (transition/flash model (msg/t :flash/chat-unavailable))))
 
 (defn escape
   "Exit chat mode. Saves thread back to chat-threads."
@@ -162,8 +163,8 @@
           (assoc :side-effect {:type :chat-execute-action
                                :action action
                                :context context})
-          (assoc :flash-message (str "Executing: " (:label action))))
-      (transition/flash model "No action at that index"))))
+          (assoc :flash-message (msg/t :flash/executing-action {:label (:label action)})))
+      (transition/flash model (msg/t :flash/no-action-at-index)))))
 
 (defn scroll-up
   "Scroll the chat panel up by one line."

@@ -29,6 +29,7 @@
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.edn :as edn]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -623,7 +624,7 @@
       (-> model
           (assoc :workflows workflows)
           (assoc :last-updated (java.util.Date.))
-          (assoc :flash-message (str "Loaded " (count workflows) " workflows")))
+          (assoc :flash-message (msg/t :flash/workflows-loaded {:count (count workflows)})))
       model)))
 
 ;------------------------------------------------------------------------------ Layer 2c

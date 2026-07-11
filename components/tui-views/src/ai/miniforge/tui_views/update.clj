@@ -33,6 +33,7 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.tui-views.effect :as effect]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]
    [ai.miniforge.tui-views.update.pane :as pane]
@@ -113,12 +114,12 @@
   [model provider]
   (let [m (reset-repo-manager-state model :browse)]
     (if (:browse-repos-loading? model)
-      (assoc m :flash-message "Browsing remote repos...")
+      (assoc m :flash-message (msg/t :flash/browsing-remote-repos))
       (assoc m
              :side-effect (effect/browse-repos {:source :repo-manager
                                                 :provider provider})
              :browse-repos-loading? true
-             :flash-message (str "Browsing " (name provider) " repos...")))))
+             :flash-message (msg/t :flash/browsing-provider-repos {:provider (name provider)})))))
 
 (defn repo-manager-add-selected
   [model]
@@ -126,7 +127,7 @@
         fleet-set (set (:fleet-repos model))
         new-repos (vec (remove fleet-set all-selected))]
     (if (empty? new-repos)
-      (assoc model :flash-message "No new repositories selected.")
+      (assoc model :flash-message (msg/t :flash/no-new-repos-selected))
       (let [m (reduce (fn [acc repo]
                         (command/execute-command acc (str ":add-repo " repo)))
                       model
@@ -134,16 +135,16 @@
             added (count new-repos)]
         (-> (reset-repo-manager-state m :browse)
             (assoc :side-effect (effect/sync-prs)
-                   :flash-message (str "Added " added " repo(s) to fleet. Syncing PRs...")))))))
+                   :flash-message (msg/t :flash/repos-added {:count added})))))))
 
 (defn repo-manager-request-remove
   [model]
   (let [repos (selected-repos model)]
     (if (empty? repos)
-      (assoc model :flash-message "No configured repository selected.")
+      (assoc model :flash-message (msg/t :flash/no-configured-repo-selected))
       (assoc model :confirm
              {:action :remove-repos
-              :label "Remove Repositories"
+              :label (msg/t :confirm/remove-repositories)
               :ids (set repos)}))))
 
 (defn clear-detail-context
@@ -217,7 +218,7 @@
 (defn handle-train-view [model]
   (if (:active-train-id model)
     (command/execute-command model ":train")
-    (assoc model :flash-message "No active train. Use :create-train NAME")))
+    (assoc model :flash-message (msg/t :flash/no-active-train-create))))
 
 (defn handle-refresh-or-sync [model]
   (if (#{:pr-fleet :repo-manager} (:view model))
@@ -237,7 +238,7 @@
 (defn handle-fleet-view [model]
   (if (in-repo-manager? model)
     (-> (reset-repo-manager-state model :fleet)
-        (assoc :flash-message "Showing configured repositories."))
+        (assoc :flash-message (msg/t :flash/showing-configured-repos)))
     model))
 
 (defn handle-open-browse [model]
@@ -256,8 +257,8 @@
               nil)]
     (if url
       (assoc model :side-effect (effect/open-url url)
-                   :flash-message (str "Opening " url "..."))
-      (assoc model :flash-message "No URL available for this item"))))
+                   :flash-message (msg/t :flash/opening-url {:url url}))
+      (assoc model :flash-message (msg/t :flash/no-url-available)))))
 
 (defn handle-cycle-tab [model]
   (cond
@@ -297,7 +298,7 @@
   (if (in-repo-manager? model)
     (if (= :fleet (repo-manager-source model))
       (repo-manager-request-remove model)
-      (assoc model :flash-message "Switch to fleet (f) to remove repositories."))
+      (assoc model :flash-message (msg/t :flash/switch-to-fleet-to-remove)))
     model))
 
 (defn handle-enter-visual-mode [model]
@@ -548,9 +549,9 @@
             :key/y     (-> model
                            (command/execute-confirmed-action)
                            (assoc :confirm nil))
-            :key/n     (assoc model :confirm nil :flash-message "Cancelled")
-            :key/c     (assoc model :confirm nil :flash-message "Cancelled")
-            :key/escape (assoc model :confirm nil :flash-message "Cancelled")
+            :key/n     (assoc model :confirm nil :flash-message (msg/t :flash/cancelled))
+            :key/c     (assoc model :confirm nil :flash-message (msg/t :flash/cancelled))
+            :key/escape (assoc model :confirm nil :flash-message (msg/t :flash/cancelled))
             model))
         ;; Normal input routing by mode
         (case (:mode model)
@@ -622,8 +623,8 @@
             (update :workflows (fn [wfs] (vec (remove #(= :archived (:status %)) wfs))))
             (assoc :flash-message
                    (if (seq errors)
-                     (str "Archived " archived ", " (count errors) " failed")
-                     (str "Archived " archived " workflow(s) to disk")))))
+                     (msg/t :flash/archived-with-failures {:archived archived :failed (count errors)})
+                     (msg/t :flash/archived-to-disk {:archived archived})))))
 
       ;; Chat messages
       :msg/chat-response         (events/handle-chat-response model payload)
@@ -653,8 +654,8 @@
       ;; Side-effect error
       :msg/side-effect-error
       (cond-> (assoc model :flash-message
-                     (str "Effect error (" (name (get payload :type :unknown)) "): "
-                          (:error payload)))
+                     (msg/t :flash/effect-error {:type (name (get payload :type :unknown))
+                                                 :error (:error payload)}))
         (= :browse-repos (:type payload))
         (assoc :browse-repos-loading? false))
 
