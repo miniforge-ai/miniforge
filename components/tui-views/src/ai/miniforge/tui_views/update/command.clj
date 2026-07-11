@@ -26,6 +26,7 @@
    [clojure.string :as str]
    [ai.miniforge.tui-engine.interface :as engine]
    [ai.miniforge.tui-views.effect :as effect]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.selection :as sel]
    [ai.miniforge.pr-sync.interface :as pr-sync]))
@@ -52,14 +53,14 @@
 (defn cmd-view [model args]
   (if (str/blank? args)
     (assoc model :flash-message
-           (str "Views: " (str/join ", " (map name model/views))))
+           (msg/t :cmd/views {:views (str/join ", " (map name model/views))}))
     (let [view-kw (keyword args)]
       (if (some #{view-kw} model/views)
         (assoc model :view view-kw :selected-idx 0 :scroll-offset 0)
-        (assoc model :flash-message (str "Unknown view: " args))))))
+        (assoc model :flash-message (msg/t :cmd/unknown-view {:view args}))))))
 
 (defn cmd-refresh [model _args]
-  (assoc model :flash-message "Refreshed" :last-updated (java.util.Date.)))
+  (assoc model :flash-message (msg/t :flash/refreshed) :last-updated (java.util.Date.)))
 
 (defn cmd-help [model _args]
   (assoc model :help-visible? true))
@@ -69,15 +70,15 @@
         names-str (str/join ", " (map name available))]
     (if (str/blank? args)
       (assoc model :flash-message
-             (str "Current theme: " (name (:theme model))
-                  " | Available: " names-str))
+             (msg/t :cmd/theme-current {:theme (name (:theme model))
+                                        :available names-str}))
       (let [theme-kw (keyword args)]
         (if (contains? engine/themes theme-kw)
           (assoc model :theme theme-kw
-                 :flash-message (str "Theme: " args))
+                 :flash-message (msg/t :cmd/theme-set {:theme args}))
           (assoc model :flash-message
-                 (str "Unknown theme: " args
-                      " | Available: " names-str)))))))
+                 (msg/t :cmd/unknown-theme {:theme args
+                                            :available names-str})))))))
 
 (def log-levels #{"debug" "info" "warn" "error"})
 
@@ -85,9 +86,9 @@
   (let [level-str (some-> args str/trim str/lower-case)]
     (if (log-levels level-str)
       (do (engine/set-log-level! (keyword level-str))
-          (assoc model :flash-message (str "Log level: " level-str)))
+          (assoc model :flash-message (msg/t :cmd/log-level {:level level-str})))
       (assoc model :flash-message
-             (str "Log levels: " (str/join ", " (sort log-levels)))))))
+             (msg/t :cmd/log-levels {:levels (str/join ", " (sort log-levels))})))))
 
 ;------------------------------------------------------------------------------ Layer 1b
 ;; Fleet management commands
@@ -103,7 +104,7 @@
 
 (defn cmd-add-repo [model args]
   (if (str/blank? args)
-    (assoc model :flash-message "Usage: :add-repo owner/name OR :add-repo gitlab:group/name")
+    (assoc model :flash-message (msg/t :cmd/add-repo-usage))
     (let [result (pr-sync/add-repo! (str/trim args))]
       (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
@@ -111,13 +112,13 @@
               (assoc :side-effect (effect/sync-prs)))
             (assoc :flash-message
                    (if (:added? result)
-                     (str "Added " (:repo result) " to fleet. Syncing PRs...")
-                     (str (:repo result) " already in fleet"))))
-        (assoc model :flash-message (str "Error: " (:error result)))))))
+                     (msg/t :flash/repo-added {:repo (:repo result)})
+                     (msg/t :flash/repo-already-in-fleet {:repo (:repo result)}))))
+        (assoc model :flash-message (msg/t :flash/error {:error (:error result)}))))))
 
 (defn cmd-remove-repo [model args]
   (if (str/blank? args)
-    (assoc model :flash-message "Usage: :remove-repo owner/name")
+    (assoc model :flash-message (msg/t :cmd/remove-repo-usage))
     (let [result (pr-sync/remove-repo! (str/trim args))]
       (if (pr-sync/succeeded? result)
         (-> (with-fleet-repos model (:repos result))
@@ -125,15 +126,15 @@
               (assoc :side-effect (effect/sync-prs)))
             (assoc :flash-message
                    (if (:removed? result)
-                     (str "Removed " (:repo result) " from fleet. Syncing PRs...")
-                     (str (:repo result) " not in fleet"))))
-        (assoc model :flash-message (str "Error: " (:error result)))))))
+                     (msg/t :flash/repo-removed {:repo (:repo result)})
+                     (msg/t :flash/repo-not-in-fleet {:repo (:repo result)}))))
+        (assoc model :flash-message (msg/t :flash/error {:error (:error result)}))))))
 
 (defn cmd-sync [model _args]
   (let [state (get model :pr-filter-state :open)]
     (assoc model
            :side-effect (effect/sync-prs state)
-           :flash-message (str "Syncing " (name state) " PRs..."))))
+           :flash-message (msg/t :flash/syncing-prs {:state (name state)}))))
 
 (def show-states
   #{"open" "merged" "closed" "all"})
@@ -144,22 +145,23 @@
     (assoc model
            :pr-filter-state state
            :side-effect (effect/sync-prs state)
-           :flash-message (str "Loading " (name state) " PRs..."))))
+           :flash-message (msg/t :flash/loading-prs {:state (name state)}))))
 
 (defn cmd-repos [model _args]
   (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
     (if (seq repos)
       (assoc model :flash-message
-             (str "Fleet repos (" (count repos) "): "
-                  (str/join ", " repos)))
-      (assoc model :flash-message "No repos configured. Use :add-repo owner/name"))))
+             (msg/t :cmd/fleet-repos {:count (count repos)
+                                      :repos (str/join ", " repos)}))
+      (assoc model :flash-message (msg/t :cmd/no-repos-configured)))))
 
 (defn cmd-discover [model args]
   (let [owner (when-not (str/blank? args) (str/trim args))]
     (assoc model
            :side-effect (effect/discover-repos owner)
-           :flash-message (str "Discovering repos"
-                               (when owner (str " from " owner)) "..."))))
+           :flash-message (if owner
+                            (msg/t :flash/discovering-repos-from {:owner owner})
+                            (msg/t :flash/discovering-repos)))))
 
 ;------------------------------------------------------------------------------ Layer 1c
 ;; PR selection helper
@@ -177,46 +179,46 @@
   (let [prs (selected-prs model ids)]
     (-> model
         (assoc :side-effect (effect-fn prs)
-               :flash-message (str verb " " (count prs) " PR(s)..."))
+               :flash-message (msg/t :flash/batch-pr-action {:verb verb :count (count prs)}))
         sel/clear-selection)))
 
 ;; Train commands
 
 (defn cmd-create-train [model args]
   (if (str/blank? args)
-    (assoc model :flash-message "Usage: :create-train NAME")
+    (assoc model :flash-message (msg/t :cmd/create-train-usage))
     (assoc model
            :side-effect (effect/create-train (str/trim args))
-           :flash-message (str "Creating train: " (str/trim args) "..."))))
+           :flash-message (msg/t :flash/creating-train {:name (str/trim args)}))))
 
 (defn cmd-add-to-train [model _args]
   (let [ids (sel/effective-ids model)
         train-id (:active-train-id model)]
     (cond
       (nil? train-id)
-      (assoc model :flash-message "No active train. Use :create-train NAME first.")
+      (assoc model :flash-message (msg/t :flash/no-active-train-hint))
 
       (empty? ids)
-      (assoc model :flash-message "No PRs selected. Select PRs with Space first.")
+      (assoc model :flash-message (msg/t :flash/no-prs-selected))
 
       :else
       (let [prs (selected-prs model ids)]
         (assoc model
                :side-effect (effect/add-to-train train-id prs)
-               :flash-message (str "Adding " (count prs) " PR(s) to train..."))))))
+               :flash-message (msg/t :flash/adding-to-train {:count (count prs)}))))))
 
 (defn cmd-merge-next [model _args]
   (let [train-id (:active-train-id model)]
     (if (nil? train-id)
-      (assoc model :flash-message "No active train.")
+      (assoc model :flash-message (msg/t :flash/no-active-train))
       (assoc model
              :side-effect (effect/merge-next train-id)
-             :flash-message "Merging next ready PR..."))))
+             :flash-message (msg/t :flash/merging-next)))))
 
 (defn cmd-train [model _args]
   (let [train-id (:active-train-id model)]
     (if (nil? train-id)
-      (assoc model :flash-message "No active train. Use :create-train NAME first.")
+      (assoc model :flash-message (msg/t :flash/no-active-train-hint))
       (assoc model
              :view :train-view
              :selected-idx 0 :scroll-offset 0
@@ -242,9 +244,9 @@
                :workflows sorted
                :workflow-sort field-str
                :selected-idx 0
-               :flash-message (str "Sorted by " field-str)))
+               :flash-message (msg/t :flash/sorted-by {:field field-str})))
       (assoc model :flash-message
-             (str "Sort by: " (str/join ", " (keys sort-fields)))))))
+             (msg/t :cmd/sort-by {:fields (str/join ", " (keys sort-fields))})))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Batch action handlers (destructive actions prompt for confirmation)
@@ -255,7 +257,7 @@
   (let [ids (sel/effective-ids model)]
     (if (seq ids)
       (assoc model :confirm {:action action :label label :ids ids})
-      (assoc model :flash-message (str "Nothing to " (name action))))))
+      (assoc model :flash-message (msg/t :flash/nothing-to {:action (name action)})))))
 
 (defn cmd-archive [model args]
   (if (= "all-done" (some-> args str/trim))
@@ -265,15 +267,15 @@
                         (map :id)
                         set)]
       (if (seq done-ids)
-        (request-confirmation model :archive "Archive done")
-        (assoc model :flash-message "No completed workflows to archive")))
-    (request-confirmation model :archive "Archive")))
+        (request-confirmation model :archive (msg/t :confirm/archive-done))
+        (assoc model :flash-message (msg/t :flash/no-completed-workflows))))
+    (request-confirmation model :archive (msg/t :confirm/archive))))
 
 (defn cmd-delete [model _args]
-  (request-confirmation model :delete "Delete"))
+  (request-confirmation model :delete (msg/t :confirm/delete)))
 
 (defn cmd-cancel [model _args]
-  (request-confirmation model :cancel "Cancel"))
+  (request-confirmation model :cancel (msg/t :confirm/cancel)))
 
 ;------------------------------------------------------------------------------ Layer 2b
 ;; Workflow control commands (filesystem-backed pause/resume/cancel)
@@ -290,15 +292,15 @@
   (if-let [wf-id (selected-workflow-id model)]
     (assoc model
            :side-effect (effect/control-action :pause wf-id)
-           :flash-message "Pausing workflow...")
-    (assoc model :flash-message "Select a single workflow to pause")))
+           :flash-message (msg/t :flash/pausing-workflow))
+    (assoc model :flash-message (msg/t :flash/select-one-to-pause))))
 
 (defn cmd-resume [model _args]
   (if-let [wf-id (selected-workflow-id model)]
     (assoc model
            :side-effect (effect/control-action :resume wf-id)
-           :flash-message "Resuming workflow...")
-    (assoc model :flash-message "Select a single workflow to resume")))
+           :flash-message (msg/t :flash/resuming-workflow))
+    (assoc model :flash-message (msg/t :flash/select-one-to-resume))))
 
 (defn cmd-rerun [model _args]
   (let [ids (sel/effective-ids model)]
@@ -312,9 +314,9 @@
                               (assoc wf :status :pending :progress 0)
                               wf))
                           wfs)))
-          (assoc :flash-message (str "Rerunning " (count ids) " workflow(s)"))
+          (assoc :flash-message (msg/t :flash/rerunning {:count (count ids)}))
           sel/clear-selection)
-      (assoc model :flash-message "Nothing to rerun"))))
+      (assoc model :flash-message (msg/t :flash/nothing-to-rerun)))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Confirmed action execution
@@ -340,14 +342,14 @@
   ([model ids label new-status pred?]
    (-> model
        (update :workflows set-status-where ids new-status pred?)
-       (assoc :flash-message (str label " " (count ids) " item(s)"))
+       (assoc :flash-message (msg/t :flash/status-updated {:label label :count (count ids)}))
        sel/clear-selection)))
 
 (defn confirm-delete
   [model ids]
   (-> model
       (update :workflows (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
-      (assoc :flash-message (str "Deleted " (count ids) " item(s)")
+      (assoc :flash-message (msg/t :flash/deleted-items {:count (count ids)})
              :selected-idx 0)
       sel/clear-selection))
 
@@ -363,7 +365,9 @@
                        :errors errors}
                       {:repos repos
                        :removed removed
-                       :errors (conj errors (str repo ": " (get r :error "unknown error")))})))
+                       :errors (conj errors (msg/t :flash/repo-error-entry
+                                                   {:repo repo
+                                                    :error (get r :error (msg/t :flash/unknown-error))}))})))
                 {:repos (:fleet-repos model) :removed 0 :errors []}
                 targets)
         next-model (-> (with-fleet-repos model (:repos result))
@@ -374,17 +378,18 @@
                     :flash-message
                     (cond
                       (zero? (count targets))
-                      "No repositories selected for removal."
+                      (msg/t :flash/no-repos-selected-removal)
 
                       (and (pos? removed) (zero? failures))
-                      (str "Removed " removed " repo(s) from fleet. Syncing PRs...")
+                      (msg/t :flash/repos-removed {:count removed})
 
                       (and (zero? removed) (pos? failures))
-                      (str "Failed to remove selected repos: "
-                           (str/join "; " (:errors result)))
+                      (msg/t :flash/repos-remove-failed
+                             {:errors (str/join "; " (:errors result))})
 
                       :else
-                      (str "Removed " removed " repo(s), " failures " failed. Syncing PRs...")))
+                      (msg/t :flash/repos-removed-partial
+                             {:removed removed :failed failures})))
       (pos? removed) (assoc :side-effect (effect/sync-prs)))))
 
 (defn execute-confirmed-action
@@ -394,21 +399,21 @@
   (let [{:keys [action ids]} (:confirm model)]
     (case action
       :delete       (confirm-delete model ids)
-      :archive      (-> (confirm-set-status model ids "Archived" :archived)
+      :archive      (-> (confirm-set-status model ids (msg/t :flash/label-archived) :archived)
                         (assoc :side-effect (effect/archive-workflows ids)))
-      :cancel       (confirm-set-status model ids "Cancelled" :cancelled
+      :cancel       (confirm-set-status model ids (msg/t :flash/label-cancelled) :cancelled
                                         #(= :running (:status %)))
       :remove-repos (confirm-remove-repos model ids)
       ;; Batch PR actions
-      :review    (batch-pr-action model ids "Reviewing" effect/review-prs)
-      :remediate (batch-pr-action model ids "Remediating" effect/remediate-prs)
+      :review    (batch-pr-action model ids (msg/t :flash/verb-reviewing) effect/review-prs)
+      :remediate (batch-pr-action model ids (msg/t :flash/verb-remediating) effect/remediate-prs)
       :decompose (let [pr (first (selected-prs model ids))]
                    (if pr
                      (-> model
                          (assoc :side-effect (effect/decompose-pr pr)
-                                :flash-message (str "Decomposing PR #" (:pr/number pr) "..."))
+                                :flash-message (msg/t :flash/decomposing-pr {:number (:pr/number pr)}))
                          sel/clear-selection)
-                     (assoc model :flash-message "No matching PR found")))
+                     (assoc model :flash-message (msg/t :flash/no-matching-pr))))
       ;; Unknown action -- no-op
       model)))
 
@@ -483,15 +488,15 @@
    "merge-next"    {:handler cmd-merge-next    :help "Merge next ready PR in active train"}
    "train"         {:handler cmd-train         :help "Switch to train view"}
    ;; Batch actions
-   "review"        {:handler (fn [m _] (request-confirmation m :review "Review"))
+   "review"        {:handler (fn [m _] (request-confirmation m :review (msg/t :confirm/review)))
                     :help "Evaluate policy and post review for selected PRs"}
-   "remediate"     {:handler (fn [m _] (request-confirmation m :remediate "Remediate"))
+   "remediate"     {:handler (fn [m _] (request-confirmation m :remediate (msg/t :confirm/remediate)))
                     :help "Auto-fix policy violations for selected PRs"}
    "decompose"     {:handler (fn [m _]
                                (let [ids (sel/effective-ids m)]
                                  (if (not= 1 (count ids))
-                                   (assoc m :flash-message "Decompose requires exactly 1 PR selected.")
-                                   (request-confirmation m :decompose "Decompose"))))
+                                   (assoc m :flash-message (msg/t :flash/decompose-requires-one))
+                                   (request-confirmation m :decompose (msg/t :confirm/decompose)))))
                     :help "Decompose a large PR into sub-PRs"}})
 
 (defn execute-command
@@ -501,7 +506,7 @@
   (let [[cmd-name args] (parse-command cmd-str)]
     (if-let [{:keys [handler]} (get commands cmd-name)]
       (handler model args)
-      (assoc model :flash-message (str "Unknown command: " cmd-name)))))
+      (assoc model :flash-message (msg/t :cmd/unknown-command {:command cmd-name})))))
 
 ;------------------------------------------------------------------------------ Layer 5
 ;; Tab-completion support
