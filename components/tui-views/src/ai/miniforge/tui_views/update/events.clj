@@ -24,6 +24,7 @@
   (:require
    [clojure.string]
    [ai.miniforge.tui-views.effect :as effect]
+   [ai.miniforge.tui-views.messages :as msg]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.persistence :as persistence]
    [ai.miniforge.tui-views.update.filter :as filter]
@@ -153,7 +154,7 @@
   (as-> model m
     (if idx (update-in m [:workflows idx :gate-results] conj payload) m)
     (if (not passed?)
-      (assoc m :flash-message (str "Gate FAILED: " (when gate (name gate))))
+      (assoc m :flash-message (msg/t :flash/gate-failed {:gate (if gate (name gate) "")}))
       m)
     (update-detail-if-active m workflow-id
       (fn [m'] (update-in m' [:detail :evidence :validation :results]
@@ -261,7 +262,7 @@
   (let [agent-kw (or agent :unknown)]
     (-> (handle-agent-status model {:workflow-id workflow-id :agent agent-kw
                                     :status :failed :message nil})
-        (assoc :flash-message (str "Agent " (name agent-kw) " failed")))))
+        (assoc :flash-message (msg/t :flash/agent-failed {:agent (name agent-kw)})))))
 
 (defn handle-agent-output [model {:keys [workflow-id delta]}]
   (-> model
@@ -315,13 +316,15 @@
 
 (defn handle-gate-started [model {:keys [gate]}]
   (-> model
-      (assoc :flash-message (str "Gate running: " (if gate (name gate) "unknown")))
+      (assoc :flash-message (msg/t :flash/gate-running
+                                   {:gate (if gate (name gate) (msg/t :flash/gate-unknown))}))
       with-timestamp))
 
 (defn handle-tool-invoked [model {:keys [workflow-id agent tool]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
         agent-id (or agent :agent)
-        status-message (str "Tool " (if tool (name tool) "unknown") " invoked")]
+        status-message (msg/t :flash/tool-invoked
+                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
     (-> model
         (update-workflow-snapshot idx workflow-id
                                   (persistence/agent-status-event workflow-id agent-id
@@ -332,7 +335,8 @@
 (defn handle-tool-completed [model {:keys [workflow-id agent tool]}]
   (let [idx (find-workflow-idx (:workflows model) workflow-id)
         agent-id (or agent :agent)
-        status-message (str "Tool " (if tool (name tool) "unknown") " completed")]
+        status-message (msg/t :flash/tool-completed
+                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
     (-> model
         (update-workflow-snapshot idx workflow-id
                                   (persistence/agent-status-event workflow-id agent-id
@@ -351,8 +355,8 @@
                             :step-count step-count
                             :current-step nil
                             :status :running})
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " started (" step-count " steps)"))
+      (assoc :flash-message (msg/t :flash/chain-started
+                                   {:chain (name chain-id) :steps step-count}))
       with-timestamp))
 
 (defn handle-chain-step-started
@@ -363,18 +367,19 @@
                 {:step-id step-id
                  :step-index step-index
                  :workflow-id workflow-id})
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " step " (inc step-index) "/"
-                                 (get-in model [:active-chain :step-count])
-                                 ": " (name step-id)))
+      (assoc :flash-message (msg/t :flash/chain-step-started
+                                   {:chain (name chain-id)
+                                    :step (inc step-index)
+                                    :total (get-in model [:active-chain :step-count])
+                                    :step-id (name step-id)}))
       with-timestamp))
 
 (defn handle-chain-step-completed
   "Mark current chain step as completed."
   [model {:keys [chain-id step-index]}]
   (-> model
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " step " (inc step-index) " completed"))
+      (assoc :flash-message (msg/t :flash/chain-step-completed
+                                   {:chain (name chain-id) :step (inc step-index)}))
       with-timestamp))
 
 (defn handle-chain-step-failed
@@ -382,9 +387,10 @@
   [model {:keys [chain-id step-index error]}]
   (-> model
       (assoc-in [:active-chain :status] :failed)
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " step " (inc step-index)
-                                 " FAILED: " error))
+      (assoc :flash-message (msg/t :flash/chain-step-failed
+                                   {:chain (name chain-id)
+                                    :step (inc step-index)
+                                    :error error}))
       with-timestamp))
 
 (defn handle-chain-completed
@@ -392,9 +398,10 @@
   [model {:keys [chain-id duration-ms step-count]}]
   (-> model
       (assoc :active-chain nil)
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " completed — " step-count " steps in "
-                                 duration-ms "ms"))
+      (assoc :flash-message (msg/t :flash/chain-completed
+                                   {:chain (name chain-id)
+                                    :steps step-count
+                                    :duration duration-ms}))
       with-timestamp))
 
 (defn handle-chain-failed
@@ -402,9 +409,10 @@
   [model {:keys [chain-id failed-step error]}]
   (-> model
       (assoc-in [:active-chain :status] :failed)
-      (assoc :flash-message (str "Chain " (name chain-id)
-                                 " FAILED at " (when failed-step (name failed-step))
-                                 ": " error))
+      (assoc :flash-message (msg/t :flash/chain-failed
+                                   {:chain (name chain-id)
+                                    :step (if failed-step (name failed-step) "")
+                                    :error error}))
       with-timestamp))
 
 ;------------------------------------------------------------------------------ Layer 3
@@ -473,14 +481,15 @@
                     (assoc :flash-message
                            (cond
                              error
-                             (str "PR sync failed: " error)
+                             (msg/t :flash/pr-sync-failed {:error error})
 
                              (seq prs)
-                             (str "Synced " (count prs) " PRs from "
-                                  (count (distinct (map :pr/repo prs))) " repo(s)")
+                             (msg/t :flash/prs-synced
+                                    {:count (count prs)
+                                     :repos (count (distinct (map :pr/repo prs)))})
 
                              :else
-                             "No PRs found in fleet repos"))
+                             (msg/t :flash/no-prs-found)))
                     with-timestamp)
         ;; Apply pre-loaded cached agent-risk if model doesn't have any yet
         updated (cond-> updated
@@ -549,14 +558,17 @@
                 model)]
     (-> model
         (assoc :flash-message
-               (if (:evaluation/passed? result)
-                 "Policy: passed"
-                 (str "Policy: "
-                      (if (nil? (:evaluation/passed? result))
-                        (str "error — " (:evaluation/error result "unknown"))
-                        (str "FAILED ("
-                             (count (:evaluation/violations result))
-                             " violation(s))")))))
+               (cond
+                 (:evaluation/passed? result)
+                 (msg/t :flash/policy-passed)
+
+                 (nil? (:evaluation/passed? result))
+                 (msg/t :flash/policy-error
+                        {:error (get result :evaluation/error (msg/t :flash/policy-error-unknown))})
+
+                 :else
+                 (msg/t :flash/policy-failed
+                        {:count (count (:evaluation/violations result))})))
         (assoc :side-effect (effect/cache-policy-result pr-id result (:pr-items model)))
         with-timestamp)))
 
@@ -568,7 +580,8 @@
   [model {:keys [train-id train-name]}]
   (-> model
       (assoc :active-train-id train-id)
-      (assoc :flash-message (str "Train created: " (or train-name "Merge Train")))
+      (assoc :flash-message (msg/t :flash/train-created
+                                   {:name (or train-name (msg/t :train/default-name))}))
       with-timestamp))
 
 (defn handle-prs-added-to-train
@@ -577,14 +590,14 @@
   [model {:keys [train added]}]
   (-> model
       (assoc-in [:detail :selected-train] train)
-      (assoc :flash-message (str "Added " (or added 0) " PR(s) to train"))
+      (assoc :flash-message (msg/t :flash/prs-added-to-train {:count (or added 0)}))
       with-timestamp))
 
 (defn handle-merge-started
   "Handle result of :merge-next side effect."
   [model {:keys [pr-number]}]
   (-> model
-      (assoc :flash-message (str "Merging PR #" pr-number "..."))
+      (assoc :flash-message (msg/t :flash/merge-started {:number pr-number}))
       with-timestamp))
 
 ;------------------------------------------------------------------------------ Layer 3c
@@ -607,7 +620,8 @@
         failed (- (count results) passed)]
     (-> model
         (assoc :pr-items updated-prs)
-        (assoc :flash-message (str "Review complete: " passed " passed, " failed " with violations"))
+        (assoc :flash-message (msg/t :flash/review-completed
+                                     {:passed passed :failed failed}))
         (assoc :side-effects
                (mapv (fn [{:keys [pr-id result]}]
                        (effect/cache-policy-result pr-id result updated-prs))
@@ -618,7 +632,8 @@
   "Handle result of :remediate-prs side effect."
   [model {:keys [fixed failed]}]
   (-> model
-      (assoc :flash-message (str "Remediation: " (or fixed 0) " fixed, " (or failed 0) " failed"))
+      (assoc :flash-message (msg/t :flash/remediation-completed
+                                   {:fixed (or fixed 0) :failed (or failed 0)}))
       with-timestamp))
 
 (defn handle-decomposition-started
@@ -626,8 +641,9 @@
   [model {:keys [pr-id sub-prs message] :as _payload}]
   (-> model
       (assoc :flash-message (or message
-                                (str "Decomposition plan for #" (second pr-id) ": "
-                                     (count (or sub-prs [])) " sub-PRs proposed")))
+                                (msg/t :flash/decomposition-started
+                                       {:number (second pr-id)
+                                        :count (count (or sub-prs []))})))
       with-timestamp))
 
 (defn handle-repos-discovered
@@ -637,11 +653,16 @@
   (if success?
     (assoc model
            :fleet-repos (vec (or repos (:fleet-repos model) []))
-           :flash-message (str "Discovered " discovered " repo(s)"
-                               (when owner (str " from " owner))
-                               " — " added " new. Syncing PRs...")
+           :flash-message (msg/t :flash/repos-discovered
+                                 {:count discovered
+                                  :owner-suffix (if owner
+                                                  (msg/t :flash/from-owner-suffix {:owner owner})
+                                                  "")
+                                  :added added})
            :side-effect (effect/sync-prs))
-    (assoc model :flash-message (str "Discover failed: " (or error "unknown error")))))
+    (assoc model :flash-message
+           (msg/t :flash/discover-failed
+                  {:error (or error (msg/t :flash/unknown-error))}))))
 
 (defn repos-browsed-ok
   "Success path: populate browse-repos cache, reset repo-manager if source
@@ -666,24 +687,33 @@
                       :visual-anchor nil)
                base)]
     (assoc base :flash-message
-           (str "Loaded " (count repo-list) " remote repo(s)"
-                " via " provider-name
-                (when owner (str " from " owner))
-                " — " candidate-count " new candidate(s)"
-                (when (seq warnings*)
-                  (str " | warnings: " (count warnings*)))))))
+           (msg/t :flash/repos-browsed
+                  {:count (count repo-list)
+                   :provider provider-name
+                   :owner-suffix (if owner
+                                   (msg/t :flash/from-owner-suffix {:owner owner})
+                                   "")
+                   :candidates candidate-count
+                   :warnings-suffix (if (seq warnings*)
+                                      (msg/t :flash/warnings-suffix {:count (count warnings*)})
+                                      "")}))))
 
 (defn repos-browsed-err
   "Failure path: clear loading flag and flash error details."
   [model {:keys [error error-source provider]}]
   (assoc model
          :browse-repos-loading? false
-         :flash-message (str "Repo browse failed"
-                             (when error-source (str " (" (name error-source) ")"))
-                             (when provider (str " [" (name provider) "]"))
-                             ": "
-                             (or (some-> error str not-empty)
-                                 "no error details were provided"))))
+         :flash-message (msg/t :flash/repo-browse-failed
+                               {:source-suffix (if error-source
+                                                 (msg/t :flash/error-source-suffix
+                                                        {:source (name error-source)})
+                                                 "")
+                                :provider-suffix (if provider
+                                                   (msg/t :flash/provider-suffix
+                                                          {:provider (name provider)})
+                                                   "")
+                                :error (or (some-> error str not-empty)
+                                           (msg/t :flash/no-error-details))})))
 
 (defn handle-repos-browsed
   "Handle result of a :browse-repos side effect.
@@ -704,7 +734,7 @@
   [model {:keys [content actions workflow-id]}]
   (let [actions-vec (or actions [])
         assistant-msg {:role :assistant
-                       :content (or content "No response")
+                       :content (or content (msg/t :flash/chat-no-response))
                        :timestamp (java.util.Date.)
                        :actions actions-vec
                        :workflow-id workflow-id}
@@ -723,7 +753,10 @@
    Shows result of executing a chat-suggested action."
   [model {:keys [success? message]}]
   (-> model
-      (assoc :flash-message (or message (if success? "Action completed" "Action failed")))
+      (assoc :flash-message (or message
+                                (if success?
+                                  (msg/t :flash/action-completed)
+                                  (msg/t :flash/action-failed))))
       with-timestamp))
 
 (defn handle-fleet-risk-triaged
@@ -732,7 +765,7 @@
   [model {:keys [assessments error]}]
   (if error
     (-> model
-        (assoc :flash-message (str "Risk triage: " error))
+        (assoc :flash-message (msg/t :flash/risk-triage-failed {:error error}))
         with-timestamp)
     (let [risk-map (assessments->risk-map assessments)]
       (-> model
@@ -767,33 +800,44 @@
   [model {:keys [pr-id reason]}]
   (-> model
       (update-pr-by-id pr-id #(dissoc % :pr/monitor-active?))
-      (assoc :flash-message (str "Monitor stopped for PR " pr-id
-                                 (when reason (str ": " reason))))
+      (assoc :flash-message (msg/t :flash/monitor-stopped
+                                   {:pr-id pr-id
+                                    :reason-suffix (if reason
+                                                     (msg/t :flash/reason-suffix {:reason reason})
+                                                     "")}))
       with-timestamp))
 
 (defn handle-pr-monitor-fix-started
   "Flash that a fix cycle has begun for a PR."
   [model {:keys [pr-id attempt]}]
   (-> model
-      (assoc :flash-message (str "Fix started for PR " pr-id
-                                 (when attempt (str " (attempt " attempt ")"))))
+      (assoc :flash-message (msg/t :flash/fix-started
+                                   {:pr-id pr-id
+                                    :attempt-suffix (if attempt
+                                                      (msg/t :flash/attempt-suffix
+                                                             {:attempt attempt})
+                                                      "")}))
       with-timestamp))
 
 (defn handle-pr-monitor-fix-pushed
   "Flash that a fix commit was pushed for a PR."
   [model {:keys [pr-id sha]}]
-  (-> model
-      (assoc :flash-message (str "Fix pushed for PR " pr-id
-                                 (when sha (str " — " (subs (str sha) 0 (min 7 (count (str sha))))))))
-      with-timestamp))
+  (let [short-sha (when sha (subs (str sha) 0 (min 7 (count (str sha)))))]
+    (-> model
+        (assoc :flash-message (msg/t :flash/fix-pushed
+                                     {:pr-id pr-id
+                                      :sha-suffix (if short-sha
+                                                    (msg/t :flash/sha-suffix {:sha short-sha})
+                                                    "")}))
+        with-timestamp)))
 
 (defn handle-pr-monitor-budget-warning
   "Set budget-warning flag on a PR."
   [model {:keys [pr-id remaining total]}]
   (-> model
       (update-pr-by-id pr-id #(assoc % :pr/monitor-budget-warning? true))
-      (assoc :flash-message (str "Budget warning: PR " pr-id
-                                 " — " remaining "/" total " remaining"))
+      (assoc :flash-message (msg/t :flash/budget-warning
+                                   {:pr-id pr-id :remaining remaining :total total}))
       with-timestamp))
 
 (defn handle-pr-monitor-budget-exhausted
@@ -803,7 +847,7 @@
       (update-pr-by-id pr-id #(-> %
                                    (assoc :pr/monitor-budget-exhausted? true)
                                    (dissoc :pr/monitor-active?)))
-      (assoc :flash-message (str "BUDGET EXHAUSTED: PR " pr-id " — monitor stopped"))
+      (assoc :flash-message (msg/t :flash/budget-exhausted {:pr-id pr-id}))
       with-timestamp))
 
 (defn handle-pr-monitor-escalated
@@ -811,15 +855,19 @@
   [model {:keys [pr-id reason]}]
   (let [attn-item {:attention/id          (random-uuid)
                    :attention/severity    :critical
-                   :attention/summary     (str "Escalated: PR " pr-id
-                                               (when reason (str " — " reason)))
+                   :attention/summary     (msg/t :flash/pr-escalated-summary
+                                                 {:pr-id pr-id
+                                                  :reason-suffix (if reason
+                                                                   (msg/t :flash/reason-em-suffix
+                                                                          {:reason reason})
+                                                                   "")})
                    :attention/source-type :pr-monitor
                    :attention/source-id   pr-id
                    :attention/created-at  (java.util.Date.)}]
     (-> model
         (update-pr-by-id pr-id #(assoc % :pr/monitor-escalated? true))
         (update :attention-items (fnil conj []) attn-item)
-        (assoc :flash-message (str "ESCALATED: PR " pr-id))
+        (assoc :flash-message (msg/t :flash/pr-escalated {:pr-id pr-id}))
         with-timestamp)))
 
 ;------------------------------------------------------------------------------ Layer 5b
@@ -857,7 +905,7 @@
   [model {:keys [decision-id data]}]
   (let [attn-item {:attention/id          (random-uuid)
                    :attention/severity    :warning
-                   :attention/summary     (str "Decision pending: " decision-id)
+                   :attention/summary     (msg/t :flash/decision-pending {:decision-id decision-id})
                    :attention/source-type :control-plane
                    :attention/source-id   decision-id
                    :attention/created-at  (java.util.Date.)
