@@ -453,7 +453,7 @@
                                             task-id from-status to-status))))
     (catch Exception _ nil)))
 
-(defn apply-task-transition
+(defn- apply-task-transition
   "CAS update fn for transition-task!. Designed to be passed directly to swap!
    as the update fn — swap! calls it as (f current-state task-id new-status tr-result).
    Writes {:tr result :from prior-status} into tr-result so the caller can inspect
@@ -526,17 +526,17 @@
               (run-updater task-id))
           current-state)))))
 
-(defn apply-merged-transition
+(defn- apply-merged-transition
   "CAS update fn for mark-merged!. Passed directly to swap!."
   [current-state task-id tr-result]
   (terminal-transition-swap-fn current-state task-id :merged identity mark-task-merged tr-result))
 
-(defn apply-completed-transition
+(defn- apply-completed-transition
   "CAS update fn for mark-completed!. Passed directly to swap!."
   [current-state task-id success-status tr-result]
   (terminal-transition-swap-fn current-state task-id success-status identity mark-task-completed tr-result))
 
-(defn apply-failed-transition
+(defn- apply-failed-transition
   "CAS update fn for mark-failed!. Passed directly to swap!."
   [current-state task-id error-info tr-result]
   (terminal-transition-swap-fn current-state task-id :failed

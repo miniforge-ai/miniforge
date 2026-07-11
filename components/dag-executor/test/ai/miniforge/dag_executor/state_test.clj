@@ -47,7 +47,7 @@
           task      (state/create-task-state task-id #{})
           run       (state/create-run-state (random-uuid) {task-id task})
           tr-result (volatile! nil)
-          new-state (state/apply-task-transition run task-id :ready tr-result)
+          new-state (#'state/apply-task-transition run task-id :ready tr-result)
           {:keys [tr from]} @tr-result]
       (is (result/ok? tr))
       (is (= :pending from))
@@ -56,7 +56,7 @@
   (testing "returns current state unchanged and error tr for nonexistent task"
     (let [run       (state/create-run-state (random-uuid) {})
           tr-result (volatile! nil)
-          new-state (state/apply-task-transition run (random-uuid) :ready tr-result)
+          new-state (#'state/apply-task-transition run (random-uuid) :ready tr-result)
           {:keys [tr from]} @tr-result]
       (is (result/err? tr))
       (is (= :task-not-found (get-in tr [:error :code])))
@@ -68,7 +68,7 @@
           task      (state/create-task-state task-id #{})
           run       (state/create-run-state (random-uuid) {task-id task})
           tr-result (volatile! nil)
-          new-state (state/apply-task-transition run task-id :completed tr-result)
+          new-state (#'state/apply-task-transition run task-id :completed tr-result)
           {:keys [tr]} @tr-result]
       (is (result/err? tr))
       (is (= run new-state)))))
@@ -98,7 +98,7 @@
                                                 :state-profile-provider sf-provider)
                         (assoc-in [:run/tasks task-id :task/status] :implementing))
           tr-result (volatile! nil)
-          new-state (state/apply-merged-transition run task-id tr-result)
+          new-state (#'state/apply-merged-transition run task-id tr-result)
           tr        @tr-result]
       (is (result/ok? tr))
       (is (= :merged (get-in new-state [:run/tasks task-id :task/status])))))
@@ -106,7 +106,7 @@
   (testing "returns unchanged state and :task-not-found error for unknown task"
     (let [run       (state/create-run-state (random-uuid) {})
           tr-result (volatile! nil)
-          new-state (state/apply-merged-transition run (random-uuid) tr-result)
+          new-state (#'state/apply-merged-transition run (random-uuid) tr-result)
           tr        @tr-result]
       (is (result/err? tr))
       (is (= :task-not-found (get-in tr [:error :code])))
@@ -119,7 +119,7 @@
           run       (-> (state/create-run-state (random-uuid) {task-id task})
                         (assoc-in [:run/tasks task-id :task/status] :running))
           tr-result (volatile! nil)
-          new-state (state/apply-completed-transition run task-id :completed tr-result)
+          new-state (#'state/apply-completed-transition run task-id :completed tr-result)
           tr        @tr-result]
       (is (result/ok? tr))
       (is (= :completed (get-in new-state [:run/tasks task-id :task/status])))))
@@ -127,7 +127,7 @@
   (testing "returns unchanged state and :task-not-found error for unknown task"
     (let [run       (state/create-run-state (random-uuid) {})
           tr-result (volatile! nil)
-          new-state (state/apply-completed-transition run (random-uuid) :completed tr-result)
+          new-state (#'state/apply-completed-transition run (random-uuid) :completed tr-result)
           tr        @tr-result]
       (is (result/err? tr))
       (is (= :task-not-found (get-in tr [:error :code])))
@@ -141,7 +141,7 @@
           run        (-> (state/create-run-state (random-uuid) {task-id task})
                          (assoc-in [:run/tasks task-id :task/status] :running))
           tr-result  (volatile! nil)
-          new-state  (state/apply-failed-transition run task-id error-info tr-result)
+          new-state  (#'state/apply-failed-transition run task-id error-info tr-result)
           tr         @tr-result]
       (is (result/ok? tr))
       (is (= :failed (get-in new-state [:run/tasks task-id :task/status])))
@@ -150,7 +150,7 @@
   (testing "returns unchanged state and :task-not-found error for unknown task"
     (let [run       (state/create-run-state (random-uuid) {})
           tr-result (volatile! nil)
-          new-state (state/apply-failed-transition run (random-uuid) {:reason :x} tr-result)
+          new-state (#'state/apply-failed-transition run (random-uuid) {:reason :x} tr-result)
           tr        @tr-result]
       (is (result/err? tr))
       (is (= :task-not-found (get-in tr [:error :code])))
