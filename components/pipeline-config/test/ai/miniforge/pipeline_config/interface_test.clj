@@ -337,11 +337,16 @@
 ;; Pipeline discovery tests
 ;; ---------------------------------------------------------------------------
 
+(defn- make-temp-dir
+  "Create a temporary directory using Files/createTempDirectory."
+  [prefix]
+  (.toFile (java.nio.file.Files/createTempDirectory
+            prefix
+            (make-array java.nio.file.attribute.FileAttribute 0))))
+
 (deftest discover-pipelines-valid-test
   (testing "includes pipeline files that have :pipeline/name"
-    (let [dir (java.io.File/createTempFile "pipeline-discovery-valid" nil)]
-      (.delete dir)
-      (.mkdirs dir)
+    (let [dir (make-temp-dir "pipeline-discovery-valid")]
       (try
         (spit (io/file dir "my-pipeline.edn")
               (pr-str {:pipeline/name "My Pipeline" :pipeline/version "1.0.0"}))
@@ -356,9 +361,7 @@
 
 (deftest discover-pipelines-unparseable-edn-test
   (testing "excludes files that are not valid EDN"
-    (let [dir (java.io.File/createTempFile "pipeline-discovery-bad-edn" nil)]
-      (.delete dir)
-      (.mkdirs dir)
+    (let [dir (make-temp-dir "pipeline-discovery-bad-edn")]
       (try
         (spit (io/file dir "broken.edn") "{this is not :valid edn")
         (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
@@ -370,9 +373,7 @@
 
 (deftest discover-pipelines-missing-name-test
   (testing "excludes EDN files that lack :pipeline/name"
-    (let [dir (java.io.File/createTempFile "pipeline-discovery-no-name" nil)]
-      (.delete dir)
-      (.mkdirs dir)
+    (let [dir (make-temp-dir "pipeline-discovery-no-name")]
       (try
         (spit (io/file dir "no-name.edn")
               (pr-str {:pipeline/version "1.0.0" :some/key "value"}))
