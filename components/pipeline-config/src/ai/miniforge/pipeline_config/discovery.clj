@@ -15,7 +15,7 @@
 
 (defn- read-pipeline-header
   "Parse a pipeline EDN file and return a map of :path, :name, and :version.
-   Returns nil when the file cannot be parsed or lacks :pipeline/name."
+   Returns nil when the file cannot be read or parsed, or lacks :pipeline/name."
   [^java.io.File f]
   (try
     (let [content (edn/read-string (slurp f))]
@@ -35,7 +35,7 @@
 (defn discover-pipelines
   "Scan directories for pipeline EDN files.
    Returns schema/success with :pipelines key.
-   Files that cannot be parsed or lack :pipeline/name are excluded."
+   Files that cannot be read or parsed, or that lack :pipeline/name, are excluded."
   [search-paths]
   (let [dirs    (keep #(let [f (io/file %)] (when (.isDirectory f) f)) search-paths)
         files   (mapcat pipeline-files-in-dir dirs)

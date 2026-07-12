@@ -332,3 +332,53 @@
       (is (not (:success? result)))
       (is (nil? (:pipeline result)))
       (is (some? (:anomaly result))))))
+
+;; ---------------------------------------------------------------------------
+;; Pipeline discovery tests
+;; ---------------------------------------------------------------------------
+
+(deftest discover-pipelines-valid-test
+  (testing "includes pipeline files that have :pipeline/name"
+    (let [dir (java.io.File/createTempFile "pipeline-discovery-valid" nil)]
+      (.delete dir)
+      (.mkdirs dir)
+      (try
+        (spit (io/file dir "my-pipeline.edn")
+              (pr-str {:pipeline/name "My Pipeline" :pipeline/version "1.0.0"}))
+        (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
+          (is (:success? result))
+          (is (= 1 (count (:pipelines result))))
+          (is (= "My Pipeline" (:name (first (:pipelines result)))))
+          (is (= "1.0.0" (:version (first (:pipelines result))))))
+        (finally
+          (doseq [f (.listFiles dir)] (.delete f))
+          (.delete dir))))))
+
+(deftest discover-pipelines-unparseable-edn-test
+  (testing "excludes files that are not valid EDN"
+    (let [dir (java.io.File/createTempFile "pipeline-discovery-bad-edn" nil)]
+      (.delete dir)
+      (.mkdirs dir)
+      (try
+        (spit (io/file dir "broken.edn") "{this is not :valid edn")
+        (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
+          (is (:success? result))
+          (is (empty? (:pipelines result))))
+        (finally
+          (doseq [f (.listFiles dir)] (.delete f))
+          (.delete dir))))))
+
+(deftest discover-pipelines-missing-name-test
+  (testing "excludes EDN files that lack :pipeline/name"
+    (let [dir (java.io.File/createTempFile "pipeline-discovery-no-name" nil)]
+      (.delete dir)
+      (.mkdirs dir)
+      (try
+        (spit (io/file dir "no-name.edn")
+              (pr-str {:pipeline/version "1.0.0" :some/key "value"}))
+        (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
+          (is (:success? result))
+          (is (empty? (:pipelines result))))
+        (finally
+          (doseq [f (.listFiles dir)] (.delete f))
+          (.delete dir))))))
