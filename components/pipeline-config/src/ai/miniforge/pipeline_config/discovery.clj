@@ -14,7 +14,7 @@
        (.endsWith (.getName f) ".edn")))
 
 (defn- read-pipeline-header
-  "Read just the name and version from a pipeline EDN file, without full parsing.
+  "Parse a pipeline EDN file and return only the :pipeline/name and :pipeline/version.
    Returns nil when the file cannot be parsed or lacks :pipeline/name."
   [^java.io.File f]
   (try
