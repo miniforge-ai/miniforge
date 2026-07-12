@@ -14,15 +14,17 @@
        (.endsWith (.getName f) ".edn")))
 
 (defn- read-pipeline-header
-  "Read just the name and version from a pipeline EDN file, without full parsing."
+  "Read just the name and version from a pipeline EDN file, without full parsing.
+   Returns nil when the file cannot be parsed or lacks :pipeline/name."
   [^java.io.File f]
   (try
     (let [content (edn/read-string (slurp f))]
-      {:path    (.getAbsolutePath f)
-       :name    (:pipeline/name content)
-       :version (:pipeline/version content)})
+      (when (and (map? content) (:pipeline/name content))
+        {:path    (.getAbsolutePath f)
+         :name    (:pipeline/name content)
+         :version (:pipeline/version content)}))
     (catch Exception _
-      {:path (.getAbsolutePath f) :name nil :version nil})))
+      nil)))
 
 (defn- pipeline-files-in-dir
   "Return pipeline EDN files found under dir."
@@ -32,9 +34,10 @@
 
 (defn discover-pipelines
   "Scan directories for pipeline EDN files.
-   Returns schema/success with :pipelines key."
+   Returns schema/success with :pipelines key.
+   Files that cannot be parsed or lack :pipeline/name are excluded."
   [search-paths]
   (let [dirs    (keep #(let [f (io/file %)] (when (.isDirectory f) f)) search-paths)
         files   (mapcat pipeline-files-in-dir dirs)
-        headers (mapv read-pipeline-header files)]
+        headers (into [] (keep read-pipeline-header files))]
     (schema/success :pipelines headers)))
