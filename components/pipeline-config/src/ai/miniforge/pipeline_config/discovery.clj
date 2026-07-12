@@ -14,7 +14,7 @@
        (.endsWith (.getName f) ".edn")))
 
 (defn- read-pipeline-header
-  "Parse a pipeline EDN file and return only the :pipeline/name and :pipeline/version.
+  "Parse a pipeline EDN file and return a map of :path, :name, and :version.
    Returns nil when the file cannot be parsed or lacks :pipeline/name."
   [^java.io.File f]
   (try
@@ -39,5 +39,5 @@
   [search-paths]
   (let [dirs    (keep #(let [f (io/file %)] (when (.isDirectory f) f)) search-paths)
         files   (mapcat pipeline-files-in-dir dirs)
-        headers (into [] (keep read-pipeline-header files))]
+        headers (into [] (keep read-pipeline-header) files)]
     (schema/success :pipelines headers)))
