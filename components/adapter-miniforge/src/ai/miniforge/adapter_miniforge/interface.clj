@@ -91,9 +91,15 @@
                                            workflow-id
                                            (:decision/id decision-resolution)
                                            (:decision/resolution decision-resolution)
-                                           (:decision/comment decision-resolution))]
-        (es/publish! event-stream event)
-        {:delivered? true})
+                                           (:decision/comment decision-resolution))
+            result (es/publish! event-stream event)]
+        (cond
+          (:rejected? result)
+          {:delivered? false :error (str "stream rejected: " (name (or (:reason result) :unknown)))}
+          (contains? result :anomaly/category)
+          {:delivered? false :error (str "stream anomaly: " (:anomaly/category result))}
+          :else
+          {:delivered? true}))
       (catch Exception e
         {:delivered? false :error (ex-message e)})))
 

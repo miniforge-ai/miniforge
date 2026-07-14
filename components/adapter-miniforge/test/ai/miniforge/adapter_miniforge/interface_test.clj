@@ -171,7 +171,22 @@
                       (fn [& _] (throw (Exception. "stream unavailable")))]
           (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
             (is (false? (:delivered? result)))
-            (is (= "stream unavailable" (:error result)))))))))
+            (is (= "stream unavailable" (:error result))))))
+
+      (testing "returns delivered false when publish! rejects (workflow quiesced)"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:rejected? true :reason :workflow-quiesced})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (string? (:error result)))
+            (is (clojure.string/includes? (:error result) "workflow-quiesced")))))
+
+      (testing "returns delivered false when publish! returns an anomaly"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:anomaly/category :cognitect.anomalies/fault})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (string? (:error result)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — Protocol: send-command
