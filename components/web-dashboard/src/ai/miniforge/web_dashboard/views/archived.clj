@@ -38,25 +38,25 @@
                :else nil)]
     (if date
       (.format (java.text.SimpleDateFormat. "yyyy-MM-dd HH:mm") date)
-      "—")))
+      (msg/t :time/none))))
 
 (defn format-file-size
   "Format bytes to human-readable size."
   [bytes]
   (cond
-    (nil? bytes)              "—"
-    (< bytes 1024)            (str bytes " B")
-    (< bytes (* 1024 1024))   (str (quot bytes 1024) " KB")
-    :else                     (format "%.1f MB" (/ bytes 1024.0 1024.0))))
+    (nil? bytes)              (msg/t :time/none)
+    (< bytes 1024)            (msg/t :archived/size-bytes {:size bytes})
+    (< bytes (* 1024 1024))   (msg/t :archived/size-kb {:size (quot bytes 1024)})
+    :else                     (msg/t :archived/size-mb {:size (format "%.1f" (/ bytes 1024.0 1024.0))})))
 
 (defn status-label
   [status]
   (case status
-    :running   "Running"
-    :completed "Completed"
+    :running   (msg/t :workflow.status/running)
+    :completed (msg/t :workflow.status/completed)
     :failed    (msg/t :status/failed-label)
-    :stale     "Stale"
-    "Unknown"))
+    :stale     (msg/t :workflow.status/stale)
+    (msg/t :workflow.status/unknown)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Fragments
@@ -67,10 +67,10 @@
   (html
    (cond
      loading?
-     [:div.loading-spinner "Scanning archive..."]
+     [:div.loading-spinner (msg/t :archived/scanning)]
 
      (empty? archived-workflows)
-     [:div.empty-state [:p "No archived workflows"]]
+     [:div.empty-state [:p (msg/t :archived/none)]]
 
      :else
      [:div.workflow-card-list
@@ -84,7 +84,7 @@
             [:span.wf-name (:name wf)]
             [:span.wf-badge {:class (str "badge-" (name status))}
              (status-label status)]
-            [:span.wf-phase (or (some-> (:phase wf) name) "—")]
+            [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
             [:span.wf-date (format-date (:started-at wf))]
             [:span.wf-size (format-file-size (:file-size wf))]
             [:span.wf-expand-icon "▸"]]
@@ -93,11 +93,11 @@
              :hx-get (str "/api/archive/" wf-id "/events")
              :hx-trigger "toggle once from:closest details"
              :hx-swap "innerHTML"}
-            [:div.loading-spinner "Loading events..."]]
+            [:div.loading-spinner (msg/t :archived/loading-events)]]
            [:div.workflow-card-actions
             [:button.btn.btn-sm.btn-ghost.btn-danger
              {:hx-post (str "/api/archive/" wf-id "/delete")
-              :hx-confirm "Delete this archived workflow?"
+              :hx-confirm (msg/t :archived/delete-confirm)
               :hx-target (str "#arch-" wf-id)
               :hx-swap "outerHTML"}
              (msg/t :action/delete)]]]))])))
