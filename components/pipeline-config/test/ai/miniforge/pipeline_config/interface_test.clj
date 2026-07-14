@@ -21,7 +21,8 @@
             [clojure.java.io :as io]
             [ai.miniforge.pipeline-config.interface :as pc]
             [ai.miniforge.pipeline-config.env :as env]
-            [ai.miniforge.data-quality.interface :as dq])
+            [ai.miniforge.data-quality.interface :as dq]
+            [ai.miniforge.schema.interface :as schema])
   (:import [java.util UUID]))
 
 ;; ---------------------------------------------------------------------------
@@ -31,14 +32,14 @@
 (deftest load-pipeline-from-classpath-test
   (testing "loads pipeline EDN from classpath resource"
     (let [result (pc/load-pipeline "pipelines/financial-filings-etl.edn")]
-      (is (:success? result))
+      (is (schema/succeeded? result))
       (is (= "Financial Filings ETL" (get-in result [:pipeline :pipeline/name])))
       (is (= 5 (count (get-in result [:pipeline :pipeline/stages])))))))
 
 (deftest load-pipeline-missing-file-test
   (testing "returns schema/failure with anomaly for missing file"
     (let [result (pc/load-pipeline "nonexistent/pipeline.edn")]
-      (is (not (:success? result)))
+      (is (schema/failed? result))
       (is (nil? (:pipeline result)))
       (is (some? (:error result)))
       (is (some? (:anomaly result))))))
@@ -48,7 +49,7 @@
     (let [f (io/file "test-resources/pipelines/financial-filings-etl.edn")]
       (when (.exists f)
         (let [result (pc/load-pipeline (.getAbsolutePath f))]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= "Financial Filings ETL" (get-in result [:pipeline :pipeline/name]))))))))
 
 ;; ---------------------------------------------------------------------------
@@ -315,7 +316,7 @@
                       :rule-registry  (pc/resolve-rules rule-reg)
                       :stage-configs  {"Ingest Filings" {:file/path "/tmp/test.csv"}}})
           result    (pc/load-and-resolve "pipelines/financial-filings-etl.edn" ctx)]
-      (is (:success? result))
+      (is (schema/succeeded? result))
       (is (instance? UUID (get-in result [:pipeline :pipeline/id])))
       (is (= 5 (count (get-in result [:pipeline :pipeline/stages]))))
       ;; Verify connector ref was resolved
@@ -329,7 +330,7 @@
   (testing "returns schema/failure with anomaly for missing pipeline"
     (let [ctx (pc/create-resolution-context {})
           result (pc/load-and-resolve "nonexistent/pipeline.edn" ctx)]
-      (is (not (:success? result)))
+      (is (schema/failed? result))
       (is (nil? (:pipeline result)))
       (is (some? (:anomaly result))))))
 
@@ -351,7 +352,7 @@
         (spit (io/file dir "my-pipeline.edn")
               (pr-str {:pipeline/name "My Pipeline" :pipeline/version "1.0.0"}))
         (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (= 1 (count (:pipelines result))))
           (is (= "My Pipeline" (:name (first (:pipelines result)))))
           (is (= "1.0.0" (:version (first (:pipelines result))))))
@@ -365,7 +366,7 @@
       (try
         (spit (io/file dir "broken.edn") "{this is not :valid edn")
         (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (empty? (:pipelines result))))
         (finally
           (doseq [f (.listFiles dir)] (.delete f))
@@ -378,7 +379,7 @@
         (spit (io/file dir "no-name.edn")
               (pr-str {:pipeline/version "1.0.0" :some/key "value"}))
         (let [result (pc/discover-pipelines [(.getAbsolutePath dir)])]
-          (is (:success? result))
+          (is (schema/succeeded? result))
           (is (empty? (:pipelines result))))
         (finally
           (doseq [f (.listFiles dir)] (.delete f))
