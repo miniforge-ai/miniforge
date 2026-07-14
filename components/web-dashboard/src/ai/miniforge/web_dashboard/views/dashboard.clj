@@ -77,7 +77,8 @@
        [:div.activity-item
         [:span.activity-time
          (if (:timestamp activity)
-           (str (.format (java.text.SimpleDateFormat. (msg/t :time/format))
+           ;; date-format pattern is a machine spec, not translatable prose
+           (str (.format (java.text.SimpleDateFormat. "HH:mm:ss")
                         (:timestamp activity)))
            (msg/t :time/none))]
         [:span.activity-message (:message activity)]

@@ -16,6 +16,7 @@
   "Fleet view (PR train management) components."
   (:require
    [hiccup2.core :refer [html]]
+   [cheshire.core :as json]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.components :as c]
    [ai.miniforge.web-dashboard.messages :as messages])
@@ -261,11 +262,9 @@
        (c/button (messages/t :fleet/btn-review-all)
                  {:variant :ghost
                   ;; build the JS in the view; the catalog carries only the
-                  ;; message (single-quote-escaped so it can't break out of the
-                  ;; alert string literal)
-                  :onclick (str "alert('"
-                                (str/replace (messages/t :fleet/review-all-alert) "'" "\\'")
-                                "')")
+                  ;; message. JSON-encode it into a valid JS string literal so
+                  ;; any characters (quotes, backslashes, newlines) are escaped
+                  :onclick (str "alert(" (json/generate-string (messages/t :fleet/review-all-alert)) ")")
                   :title (messages/t :fleet/btn-review-all-title)})]]
      (sync-status-fragment (:last-sync fleet-state))
      [:div.pane-filter-toolbar

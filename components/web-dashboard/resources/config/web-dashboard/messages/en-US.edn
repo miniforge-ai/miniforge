@@ -91,7 +91,6 @@
 
   ;; workflow — time display
   :time/none                   "—"
-  :time/format                 "HH:mm:ss"
 
   ;; workflow — event metrics
   :metric/outcome-prefix       "outcome "

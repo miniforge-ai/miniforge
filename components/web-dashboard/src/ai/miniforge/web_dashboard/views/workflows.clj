@@ -37,7 +37,8 @@
                               (catch Exception _ nil))
                :else nil)]
     (if date
-      (.format (java.text.SimpleDateFormat. (msg/t :time/format)) date)
+      ;; date-format pattern is a machine spec, not translatable prose
+      (.format (java.text.SimpleDateFormat. "HH:mm:ss") date)
       (msg/t :time/none))))
 
 (defn format-duration-ms
