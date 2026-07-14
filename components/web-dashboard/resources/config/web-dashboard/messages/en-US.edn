@@ -210,7 +210,7 @@
  :fleet/btn-sync-prs-title      "Import open provider PRs into PR trains"
  :fleet/btn-review-all          "Review All PRs"
  :fleet/btn-review-all-title    "Run automated PR review workflows"
- :fleet/btn-review-all-onclick  "alert('PR review: Kick off review workflows for all outstanding PRs')"
+ :fleet/review-all-alert        "PR review: Kick off review workflows for all outstanding PRs"
  :fleet/col-train-name          "Train Name"
  :fleet/col-prs                 "PRs"
  :fleet/col-progress            "Progress"
@@ -286,11 +286,11 @@
  :auth/session-policy-public    "Static assets and health checks remain public; dashboard views require sign-in when auth is enabled."
 
  ;; === evidence.clj ===
- :evidence/completed-at              " completed {timestamp}"
+ :evidence/completed-at              "completed {timestamp}"
  :evidence/view-bundle               "View Bundle"
  :evidence/pending                   "Pending"
  :evidence/pr-count                  "{count} PRs"
- :evidence/evidence-available-suffix " | Evidence available"
+ :evidence/evidence-available        "Evidence available"
  :evidence/none-heading              "No Evidence Bundles Yet"
  :evidence/none-body                 "Evidence bundles appear as workflows complete and publish artifacts."
  :evidence/workflow-section          "Workflow Evidence"

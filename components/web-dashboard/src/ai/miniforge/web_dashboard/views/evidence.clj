@@ -31,7 +31,7 @@
     [:span.evidence-meta
      (status-badge (:status wf))
      (when (:completed-at wf)
-       (msg/t :evidence/completed-at {:timestamp (:completed-at wf)}))]]
+       (str " " (msg/t :evidence/completed-at {:timestamp (:completed-at wf)})))]]
    [:div.evidence-actions
     (if (:has-evidence wf)
       [:button.btn.btn-sm.btn-ghost
@@ -45,7 +45,7 @@
     [:h4 (:train-name train)]
     [:span.evidence-meta
      (str (msg/t :evidence/pr-count {:count (:pr-count train)})
-          (when (:has-evidence train) (msg/t :evidence/evidence-available-suffix)))]]
+          (when (:has-evidence train) (str " | " (msg/t :evidence/evidence-available))))]]
    (when (:has-evidence train)
      [:button.btn.btn-sm.btn-ghost
       {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}

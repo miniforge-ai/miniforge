@@ -260,7 +260,12 @@
                   :title (messages/t :fleet/btn-sync-prs-title)})
        (c/button (messages/t :fleet/btn-review-all)
                  {:variant :ghost
-                  :onclick (messages/t :fleet/btn-review-all-onclick)
+                  ;; build the JS in the view; the catalog carries only the
+                  ;; message (single-quote-escaped so it can't break out of the
+                  ;; alert string literal)
+                  :onclick (str "alert('"
+                                (str/replace (messages/t :fleet/review-all-alert) "'" "\\'")
+                                "')")
                   :title (messages/t :fleet/btn-review-all-title)})]]
      (sync-status-fragment (:last-sync fleet-state))
      [:div.pane-filter-toolbar
