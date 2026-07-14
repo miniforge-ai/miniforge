@@ -81,7 +81,7 @@
 (defn evidence-view
   "Evidence artifacts view."
   [layout state]
-  (layout "Evidence"
+  (layout (msg/t :layout/nav-evidence)
    [:div.evidence-view
     [:div.evidence-header.aggregate-header
      [:div.evidence-title-group
