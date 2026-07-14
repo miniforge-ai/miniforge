@@ -214,7 +214,7 @@
                 {:hx-get "/api/filter-fields?scope=local&pane=task-status"
                  :hx-target "#filter-modal-container"
                  :hx-swap "innerHTML"
-                 :title (msg/t :dag/add-pane-filter-title)}
+                 :title (msg/t :filter/add-pane-title)}
                 (msg/t :action/filter)]]]]]
            [:div.kanban-board
             (for [status [:blocked :ready :running :done]]

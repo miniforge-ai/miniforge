@@ -215,10 +215,8 @@
  :fleet/col-progress            "Progress"
  :fleet/merge-ready-count       "{count} merge-ready"
  :fleet/summary-trains          "{count} trains"
- :fleet/summary-prs             "{count} PRs"
  :fleet/summary-repos-with-prs  "{count} repos with PRs"
  :fleet/summary-configured      "{count} configured"
- :fleet/filter-add-title        "Add pane-local filter"
  :fleet/train-detail-title      "Train: {name}"
  :fleet/btn-merge-next          "Merge Next"
  :fleet/prs-heading             "Pull Requests"
@@ -234,10 +232,7 @@
  :workflow/metric-duration        "Duration: {value}"
  :workflow/metric-cost            "Cost: {value}"
  :workflow/metric-started         "Started: {value}"
- :workflow/panel-phase            "Phase: {phase}"
  :workflow/panel-progress         "Progress: {progress}%"
- :workflow/btn-pause              "Pause"
- :workflow/btn-resume             "Resume"
  :workflow/btn-stop               "Stop"
  :workflow/section-latest-output  "Latest Output"
  :workflow/section-event-timeline "Event Timeline"
@@ -245,11 +240,9 @@
  :workflow/runs-subtitle          "Live execution history and status across active workflows"
  :workflow/count-one              "{count} workflow"
  :workflow/count-many             "{count} workflows"
- :workflow/add-local-filter-title "Add pane-local filter"
  :workflow/archived-heading       "Archived Workflows"
  :workflow/archived-confirm       "Delete archived workflows older than 30 days?"
  :workflow/archived-cleanup       "Clean up (30d+)"
- :workflow/archived-scanning      "Scanning archive..."
  :workflow/detail-title           "Workflow: {name}"
  :workflow/back-link              "← Back to Workflows"
 
@@ -267,9 +260,7 @@
  :dash/workflows-summary-title    "Workflows ({count})"
  :dash/no-workflows-running       "No workflows running"
  :dash/unnamed-workflow           "Unnamed"
- :dash/summary-phase              "Phase: {phase}"
  :dash/fleet-status-title         "Fleet Status ({count} trains)"
- :dash/pr-count                   "{count} PRs"
 
  ;; === auth.clj ===
  :auth/login-title              "Login"
@@ -288,7 +279,6 @@
  :evidence/completed-at              "completed {timestamp}"
  :evidence/view-bundle               "View Bundle"
  :evidence/pending                   "Pending"
- :evidence/pr-count                  "{count} PRs"
  :evidence/evidence-available        "Evidence available"
  :evidence/none-heading              "No Evidence Bundles Yet"
  :evidence/none-body                 "Evidence bundles appear as workflows complete and publish artifacts."
@@ -296,7 +286,6 @@
  :evidence/train-section             "PR Train Evidence"
  :evidence/bundles-heading           "Evidence Bundles"
  :evidence/bundles-subtitle          "Audit trail for workflows and merged PRs"
- :evidence/add-filter-title          "Add pane-local filter"
 
  ;; === dag.clj ===
  :dag/filter-no-values         "No values detected from current data."
@@ -310,7 +299,6 @@
  :dag/scope-all-panes          "Applies to all panes"
  :dag/scope-this-pane          "This pane only"
  :dag/workflow-tasks-heading   "Workflow Tasks"
- :dag/add-pane-filter-title    "Add pane-local filter"
  :dag/filter-by-status-title   "Filter globally by status: {status}"
  :dag/filter-by-repo-title     "Filter globally by repository: {repo}"
  :dag/view-train               "View Train →"
@@ -322,4 +310,8 @@
  :archived/scanning            "Scanning archive..."
  :archived/none                "No archived workflows"
  :archived/loading-events      "Loading events..."
- :archived/delete-confirm      "Delete this archived workflow?"}}
+ :archived/delete-confirm      "Delete this archived workflow?"
+ ;; consolidated shared keys (deduped)
+ :filter/add-pane-title "Add pane-local filter"
+ :pr/count              "{count} PRs"
+ :phase/label           "Phase: {phase}"}}

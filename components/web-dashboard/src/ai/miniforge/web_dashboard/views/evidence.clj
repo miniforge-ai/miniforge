@@ -44,7 +44,7 @@
    [:div.evidence-info
     [:h4 (:train-name train)]
     [:span.evidence-meta
-     (str (msg/t :evidence/pr-count {:count (:pr-count train)})
+     (str (msg/t :pr/count {:count (:pr-count train)})
           (when (:has-evidence train) (str " | " (msg/t :evidence/evidence-available))))]]
    (when (:has-evidence train)
      [:button.btn.btn-sm.btn-ghost
@@ -94,7 +94,7 @@
         {:hx-get "/api/filter-fields?scope=local&pane=evidence"
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
-         :title (msg/t :evidence/add-filter-title)}
+         :title (msg/t :filter/add-pane-title)}
         (msg/t :action/filter)]]]]
     [:div#evidence-content
      {:hx-get "/api/evidence/list"

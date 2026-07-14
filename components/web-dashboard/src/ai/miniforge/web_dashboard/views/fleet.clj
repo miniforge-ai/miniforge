@@ -232,7 +232,7 @@
                     {:count (get-in fleet-state [:summary :active-trains] 0)})]
        [:span.summary-divider "•"]
        [:span.pr-count
-        (messages/t :fleet/summary-prs
+        (messages/t :pr/count
                     {:count (get-in fleet-state [:summary :total-prs] 0)})]
        [:span.summary-divider "•"]
        [:span.repo-count
@@ -274,7 +274,7 @@
         {:hx-get "/api/filter-fields?scope=local&pane=fleet"
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
-         :title (messages/t :fleet/filter-add-title)}
+         :title (messages/t :filter/add-pane-title)}
         (messages/t :action/filter)]]]]
     [:div#trains-section
      {:hx-get "/api/trains"

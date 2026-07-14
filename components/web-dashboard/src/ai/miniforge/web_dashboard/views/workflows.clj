@@ -253,12 +253,12 @@
   [:div.workflow-panel-controls
    [:button.btn.btn-sm
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','pause')")
-     :title (msg/t :workflow/btn-pause)}
-    (msg/t :workflow/btn-pause)]
+     :title (msg/t :cp/btn-pause)}
+    (msg/t :cp/btn-pause)]
    [:button.btn.btn-sm
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','resume')")
-     :title (msg/t :workflow/btn-resume)}
-    (msg/t :workflow/btn-resume)]
+     :title (msg/t :cp/btn-resume)}
+    (msg/t :cp/btn-resume)]
    [:button.btn.btn-sm.btn-danger
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','stop')")
      :title (msg/t :workflow/btn-stop)}
@@ -275,7 +275,7 @@
                                :failed    :error
                                :stale     :warning
                                :neutral)})]
-   [:span.workflow-phase    (msg/t :workflow/panel-phase
+   [:span.workflow-phase    (msg/t :phase/label
                                    {:phase (get workflow :phase (msg/t :time/none))})]
    [:span.workflow-progress (msg/t :workflow/panel-progress
                                    {:progress (get workflow :progress 0)})]
@@ -359,7 +359,7 @@
          {:hx-get "/api/filter-fields?scope=local&pane=workflows"
           :hx-target "#filter-modal-container"
           :hx-swap "innerHTML"
-          :title (msg/t :workflow/add-local-filter-title)}
+          :title (msg/t :filter/add-pane-title)}
          (msg/t :action/filter)]]]]
      ;; Refresh on WebSocket push, skip if any card is expanded (preserves open state)
      [:div#workflows-content
@@ -383,7 +383,7 @@
       {:hx-get "/api/archived-workflows"
        :hx-trigger "load"
        :hx-swap "innerHTML"}
-      [:div.loading-spinner (msg/t :workflow/archived-scanning)]]]]))
+      [:div.loading-spinner (msg/t :archived/scanning)]]]]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Workflow detail view (direct URL fallback)

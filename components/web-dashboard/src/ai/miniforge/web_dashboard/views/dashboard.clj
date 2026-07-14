@@ -103,7 +103,7 @@
             {:class (str "badge-" (name (get wf :status :unknown)))}
             (name (get wf :status :unknown))]]
           [:div.wf-summary-detail
-           [:span.wf-phase (msg/t :dash/summary-phase
+           [:span.wf-phase (msg/t :phase/label
                                   {:phase (get wf :phase (msg/t :time/none))})]
            [:div.wf-progress-bar
             [:div.wf-progress-fill
@@ -119,7 +119,7 @@
      (for [[repo prs] (take 10 (:repos fleet-state))]
        [:div.repo-group
         [:div.repo-name repo]
-        [:div.pr-count (msg/t :dash/pr-count {:count (count prs)})]])]]))
+        [:div.pr-count (msg/t :pr/count {:count (count prs)})]])]]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Main dashboard view
