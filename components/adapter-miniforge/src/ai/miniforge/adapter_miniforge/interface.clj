@@ -83,11 +83,18 @@
     ;; Return current known status.
     {:status (:agent/status agent-record)})
 
-  (deliver-decision [_ _agent-record _decision-resolution]
-    ;; For miniforge native agents, decisions flow through
-    ;; the approval system in event-stream.
-    ;; TODO: Wire to es/submit-approval when control-action integration is ready.
-    {:delivered? true})
+  (deliver-decision [_ agent-record decision-resolution]
+    (try
+      (let [workflow-id (:agent/external-id agent-record)
+            event (es/cp-decision-resolved event-stream
+                                           workflow-id
+                                           (:decision/id decision-resolution)
+                                           (:decision/resolution decision-resolution)
+                                           (:decision/comment decision-resolution))]
+        (es/publish! event-stream event)
+        {:delivered? true})
+      (catch Exception e
+        {:delivered? false :error (ex-message e)})))
 
   (send-command [_ agent-record command]
     (if-let [control-state (:control-state (:agent/metadata agent-record))]
