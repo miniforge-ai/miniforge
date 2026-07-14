@@ -37,7 +37,8 @@
                               (catch Exception _ nil))
                :else nil)]
     (if date
-      (.format (java.text.SimpleDateFormat. (msg/t :time/format)) date)
+      ;; date-format pattern is a machine spec, not translatable prose
+      (.format (java.text.SimpleDateFormat. "HH:mm:ss") date)
       (msg/t :time/none))))
 
 (defn format-duration-ms
@@ -147,7 +148,7 @@
   [events]
   (html
    (if (empty? events)
-     [:div.empty-state [:p "No events yet"]]
+     [:div.empty-state [:p (msg/t :workflow/no-events)]]
      [:div.event-list
       (for [evt (take 200 events)]
         (let [evt-type    (get evt :event/type "unknown")
@@ -226,21 +227,25 @@
      [:div.workflow-card-list (map workflow-card workflows)])))
 
 (defn- workflow-metric-fields
-  "Return a seq of [css-class label value-string] tuples for non-nil metric fields.
+  "Return a seq of [css-class label-text] tuples for non-nil metric fields.
    Used by workflow-panel-meta to render each metric span generically."
   [workflow]
   (cond-> []
     (get-in workflow [:metrics :tokens])
-    (conj [:workflow-tokens "Tokens: " (str (get-in workflow [:metrics :tokens]))])
+    (conj [:workflow-tokens (msg/t :workflow/metric-tokens
+                                   {:value (str (get-in workflow [:metrics :tokens]))})])
 
     (format-duration-ms (get-in workflow [:metrics :duration-ms]))
-    (conj [:workflow-duration "Duration: " (format-duration-ms (get-in workflow [:metrics :duration-ms]))])
+    (conj [:workflow-duration (msg/t :workflow/metric-duration
+                                     {:value (format-duration-ms (get-in workflow [:metrics :duration-ms]))})])
 
     (format-cost (get-in workflow [:metrics :cost-usd]))
-    (conj [:workflow-cost "Cost: " (format-cost (get-in workflow [:metrics :cost-usd]))])
+    (conj [:workflow-cost (msg/t :workflow/metric-cost
+                                 {:value (format-cost (get-in workflow [:metrics :cost-usd]))})])
 
     (:started-at workflow)
-    (conj [:workflow-started "Started: " (format-time (:started-at workflow))])))
+    (conj [:workflow-started (msg/t :workflow/metric-started
+                                    {:value (format-time (:started-at workflow))})])))
 
 (defn- workflow-panel-controls
   "Pause/resume/stop buttons — only rendered for running workflows."
@@ -248,16 +253,16 @@
   [:div.workflow-panel-controls
    [:button.btn.btn-sm
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','pause')")
-     :title "Pause"}
-    "Pause"]
+     :title (msg/t :cp/btn-pause)}
+    (msg/t :cp/btn-pause)]
    [:button.btn.btn-sm
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','resume')")
-     :title "Resume"}
-    "Resume"]
+     :title (msg/t :cp/btn-resume)}
+    (msg/t :cp/btn-resume)]
    [:button.btn.btn-sm.btn-danger
     {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','stop')")
-     :title "Stop"}
-    "Stop"]])
+     :title (msg/t :workflow/btn-stop)}
+    (msg/t :workflow/btn-stop)]])
 
 (defn- workflow-panel-meta
   "Meta row: status badge, phase, progress, and any available metric fields."
@@ -270,13 +275,15 @@
                                :failed    :error
                                :stale     :warning
                                :neutral)})]
-   [:span.workflow-phase    (str "Phase: "    (get workflow :phase (msg/t :time/none)))]
-   [:span.workflow-progress (str "Progress: " (get workflow :progress 0) "%")]
+   [:span.workflow-phase    (msg/t :phase/label
+                                   {:phase (get workflow :phase (msg/t :time/none))})]
+   [:span.workflow-progress (msg/t :workflow/panel-progress
+                                   {:progress (get workflow :progress 0)})]
    (when-let [failure-attribution (:failure-attribution workflow)]
      [:span.workflow-dependency-attribution
       (dependency-summary failure-attribution)])
-   (for [[css-class label value] (workflow-metric-fields workflow)]
-     [:span {:class (name css-class)} (str label value)])])
+   (for [[css-class label-text] (workflow-metric-fields workflow)]
+     [:span {:class (name css-class)} label-text])])
 
 (defn- workflow-dependency-section
   [workflow]
@@ -308,7 +315,7 @@
 
     ;; Streaming output — always rendered so JS can update it in real-time
     [:div.workflow-panel-output
-     [:h4.section-title "Latest Output"]
+     [:h4.section-title (msg/t :workflow/section-latest-output)]
      [:pre.workflow-stream-preview
       {:id (str "wf-streaming-" (:id workflow))}
       (get workflow :latest-output "")]]
@@ -319,7 +326,7 @@
 
     ;; Event timeline
     [:div.workflow-panel-events
-     [:h4.section-title "Event Timeline"]
+     [:h4.section-title (msg/t :workflow/section-event-timeline)]
      [:div {:id               (str "wf-events-" (:id workflow))
             :data-workflow-id (str (:id workflow))
             :hx-get           (str "/api/workflow/" (:id workflow) "/events")
@@ -333,15 +340,18 @@
 (defn workflows-view
   "Workflows list page view."
   [layout workflows]
-  (layout "Workflows"
+  (layout (msg/t :layout/nav-workflows)
    [:div.workflows-page
     [:section.workflows-section
      [:div.workflows-header.aggregate-header
       [:div.workflows-title-group
-       [:h2 "Workflow Runs"]
-       [:p.subtitle "Live execution history and status across active workflows"]
+       [:h2 (msg/t :workflow/runs-heading)]
+       [:p.subtitle (msg/t :workflow/runs-subtitle)]
        [:span.workflows-count
-        (str (count workflows) " " (if (= 1 (count workflows)) "workflow" "workflows"))]]
+        (msg/t (if (= 1 (count workflows))
+                 :workflow/count-one
+                 :workflow/count-many)
+               {:count (count workflows)})]]
       [:div.pane-filter-toolbar
        [:div#filter-chips.filter-chips]
        [:div.filter-actions
@@ -349,7 +359,7 @@
          {:hx-get "/api/filter-fields?scope=local&pane=workflows"
           :hx-target "#filter-modal-container"
           :hx-swap "innerHTML"
-          :title "Add pane-local filter"}
+          :title (msg/t :filter/add-pane-title)}
          (msg/t :action/filter)]]]]
      ;; Refresh on WebSocket push, skip if any card is expanded (preserves open state)
      [:div#workflows-content
@@ -361,19 +371,19 @@
     ;; Archived section — loads in background, static data
     [:section.archived-section
      [:div.archived-header
-      [:h3 "Archived Workflows"]
+      [:h3 (msg/t :workflow/archived-heading)]
       [:button.btn.btn-sm.btn-ghost
        {:hx-post "/api/archive/retention"
         :hx-vals "{\"max_age_days\": 30}"
-        :hx-confirm "Delete archived workflows older than 30 days?"
+        :hx-confirm (msg/t :workflow/archived-confirm)
         :hx-target "#archived-content"
         :hx-swap "innerHTML"}
-       "Clean up (30d+)"]]
+       (msg/t :workflow/archived-cleanup)]]
      [:div#archived-content
       {:hx-get "/api/archived-workflows"
        :hx-trigger "load"
        :hx-swap "innerHTML"}
-      [:div.loading-spinner "Scanning archive..."]]]]))
+      [:div.loading-spinner (msg/t :archived/scanning)]]]]))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Workflow detail view (direct URL fallback)
@@ -383,10 +393,10 @@
   [layout workflow events]
   (if (:error workflow)
     (layout (msg/t :status/error) [:div.error (:error workflow)])
-    (layout (str "Workflow: " (:name workflow))
+    (layout (msg/t :workflow/detail-title {:name (:name workflow)})
      [:div.workflow-detail
       [:div.workflow-header
-       [:a.back-link {:href "/workflows"} "← Back to Workflows"]
+       [:a.back-link {:href "/workflows"} (msg/t :workflow/back-link)]
        [:h2 (:name workflow)]]
       [:div#workflow-detail-panel
        {:data-workflow-id (str (:id workflow))}

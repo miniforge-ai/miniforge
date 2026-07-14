@@ -16,6 +16,7 @@
   "Fleet view (PR train management) components."
   (:require
    [hiccup2.core :refer [html]]
+   [cheshire.core :as json]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.components :as c]
    [ai.miniforge.web-dashboard.messages :as messages])
@@ -130,8 +131,8 @@
   [last-sync]
   (if-not last-sync
     [:div.fleet-sync-status
-     [:span.sync-label "Last Sync"]
-     [:span.sync-message "No sync run yet."]]
+     [:span.sync-label (messages/t :fleet/last-sync-label)]
+     [:span.sync-message (messages/t :fleet/no-sync-yet)]]
     (let [status (:status last-sync)
           variant (case status
                     :success :success
@@ -143,11 +144,11 @@
           ts (format-sync-time (:timestamp last-sync))]
       [:div.fleet-sync-status
        [:div.sync-topline
-        [:span.sync-label "Last Sync"]
+        [:span.sync-label (messages/t :fleet/last-sync-label)]
         (c/badge (name status) {:variant variant})
         (when ts
           [:span.sync-time ts])
-        [:span.sync-counts (str "synced " synced ", failed " failed)]]
+        [:span.sync-counts (messages/t :fleet/sync-counts {:synced synced :failed failed})]]
        (when-let [message (:message last-sync)]
          [:div.sync-message message])
        (when (seq (:failures last-sync))
@@ -165,23 +166,23 @@
    (if (empty? trains)
      [:div.empty-state
       [:div.empty-icon "🚂"]
-      [:h3 "No PR Trains Yet"]
-      [:p "Get started by running a workflow, or let Miniforge discover and coordinate your existing PRs."]
+      [:h3 (messages/t :fleet/no-trains-heading)]
+      [:p (messages/t :fleet/no-trains-body)]
       [:div.empty-actions
-       (c/button "+ Run Workflow" {:variant :primary
+       (c/button (messages/t :fleet/btn-run-workflow) {:variant :primary
                                     :onclick "location.href='/workflows'"})
-       (c/button "Discover + Sync" {:variant :secondary
+       (c/button (messages/t :fleet/btn-discover-sync) {:variant :secondary
                                     :onclick (fleet-action-onclick :discover-sync)})]]
      [:div.train-table
       [:table.fleet-table
        [:thead
         [:tr
-         [:th "Train Name"]
+         [:th (messages/t :fleet/col-train-name)]
          [:th (messages/t :table/status-header)]
-         [:th "PRs"]
-         [:th "Ready"]
-         [:th "Blocked"]
-         [:th "Progress"]]]
+         [:th (messages/t :fleet/col-prs)]
+         [:th (messages/t :readiness/merge-ready)]
+         [:th (messages/t :blocker/fallback-message)]
+         [:th (messages/t :fleet/col-progress)]]]
        [:tbody
         (for [train trains]
           (let [readiness-summary (:train/readiness-summary train)
@@ -199,14 +200,16 @@
              [:td.train-stat
               [:div (count (:train/ready-to-merge train))]
               [:div.train-substat
-               (str (get readiness-summary :merge-ready 0) " merge-ready")]]
+               (messages/t :fleet/merge-ready-count
+                           {:count (get readiness-summary :merge-ready 0)})]]
              [:td.train-stat
               [:div (count (:train/blocking-prs train))]
               (when (seq blocked-details)
                 [:div.train-substat
                  (for [{:keys [pr/number blocking/reasons]} (take 2 blocked-details)]
                    [:div.blocking-line
-                    (str "#" number ": " (or (first reasons) "Blocked"))])])]
+                    (str "#" number ": "
+                         (or (first reasons) (messages/t :blocker/fallback-message)))])])]
              [:td.train-progress
               (c/progress-bar
                (int (* 100 (/ (count (filter #(= :merged (:pr/status %)) (:train/prs train)))
@@ -219,34 +222,50 @@
 (defn fleet-view
   "Fleet management view showing all PR trains."
   [layout fleet-state]
-  (layout "PR Fleet"
+  (layout (messages/t :layout/nav-pr-fleet)
    [:div.fleet-view
     [:div.fleet-header.aggregate-header
      [:div.fleet-title-row
       [:div.fleet-summary
-       [:span.train-count (str (get-in fleet-state [:summary :active-trains] 0) " trains")]
+       [:span.train-count
+        (messages/t :fleet/summary-trains
+                    {:count (get-in fleet-state [:summary :active-trains] 0)})]
        [:span.summary-divider "•"]
-       [:span.pr-count (str (get-in fleet-state [:summary :total-prs] 0) " PRs")]
+       [:span.pr-count
+        (messages/t :pr/count
+                    {:count (get-in fleet-state [:summary :total-prs] 0)})]
        [:span.summary-divider "•"]
-       [:span.repo-count (str (get-in fleet-state [:summary :repos] 0) " repos with PRs")]
+       [:span.repo-count
+        (messages/t :fleet/summary-repos-with-prs
+                    {:count (get-in fleet-state [:summary :repos] 0)})]
        [:span.summary-divider "•"]
-       [:span.repo-count (str (get-in fleet-state [:summary :configured-repos] 0) " configured")]]
+       [:span.repo-count
+        (messages/t :fleet/summary-configured
+                    {:count (get-in fleet-state [:summary :configured-repos] 0)})]]
       [:div.fleet-actions
-       (c/button "+ Run Workflow" {:variant :primary
-                                    :onclick "location.href='/workflows'"
-                                    :title "Execute a defined workflow spec"})
-       (c/button "+ Repo" {:variant :secondary
-                           :onclick (fleet-action-onclick :add-repo)
-                           :title "Add a repository to fleet configuration"})
-       (c/button "Discover Repos" {:variant :secondary
-                                    :onclick (fleet-action-onclick :discover-repos)
-                                    :title "Discover repositories via GitHub CLI"})
-       (c/button "Sync PRs" {:variant :secondary
-                              :onclick (fleet-action-onclick :sync-prs)
-                              :title "Import open provider PRs into PR trains"})
-       (c/button "Review All PRs" {:variant :ghost
-                                    :onclick "alert('PR review: Kick off review workflows for all outstanding PRs')"
-                                    :title "Run automated PR review workflows"})]]
+       (c/button (messages/t :fleet/btn-run-workflow)
+                 {:variant :primary
+                  :onclick "location.href='/workflows'"
+                  :title (messages/t :fleet/btn-run-workflow-title)})
+       (c/button (messages/t :fleet/btn-add-repo)
+                 {:variant :secondary
+                  :onclick (fleet-action-onclick :add-repo)
+                  :title (messages/t :fleet/btn-add-repo-title)})
+       (c/button (messages/t :fleet/btn-discover-repos)
+                 {:variant :secondary
+                  :onclick (fleet-action-onclick :discover-repos)
+                  :title (messages/t :fleet/btn-discover-repos-title)})
+       (c/button (messages/t :fleet/btn-sync-prs)
+                 {:variant :secondary
+                  :onclick (fleet-action-onclick :sync-prs)
+                  :title (messages/t :fleet/btn-sync-prs-title)})
+       (c/button (messages/t :fleet/btn-review-all)
+                 {:variant :ghost
+                  ;; build the JS in the view; the catalog carries only the
+                  ;; message. JSON-encode it into a valid JS string literal so
+                  ;; any characters (quotes, backslashes, newlines) are escaped
+                  :onclick (str "alert(" (json/generate-string (messages/t :fleet/review-all-alert)) ")")
+                  :title (messages/t :fleet/btn-review-all-title)})]]
      (sync-status-fragment (:last-sync fleet-state))
      [:div.pane-filter-toolbar
       [:div#filter-chips.filter-chips]
@@ -255,7 +274,7 @@
         {:hx-get "/api/filter-fields?scope=local&pane=fleet"
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
-         :title "Add pane-local filter"}
+         :title (messages/t :filter/add-pane-title)}
         (messages/t :action/filter)]]]]
     [:div#trains-section
      {:hx-get "/api/trains"
@@ -272,26 +291,28 @@
   [layout train]
   (if (:error train)
     (layout (messages/t :status/error) [:div.error (:error train)])
-    (layout (str "Train: " (:train/name train))
+    (layout (messages/t :fleet/train-detail-title {:name (:train/name train)})
      [:div.train-detail
       [:div.train-detail-header
        [:div.train-info
         [:h2 (:train/name train)]
         [:p.train-description (:train/description train)]]
        [:div.train-actions
-        (c/button "Pause" {:variant :ghost
-                             :onclick (str "fetch('/api/train/action?train-id="
-                                          (:train/id train)
-                                          "&action=pause', {method: 'POST'})")})
-        (c/button "Merge Next" {:variant :primary
-                                  :onclick (str "fetch('/api/train/action?train-id="
-                                               (:train/id train)
-                                               "&action=merge-next', {method: 'POST'})")})]]
+        (c/button (messages/t :cp/btn-pause)
+                  {:variant :ghost
+                   :onclick (str "fetch('/api/train/action?train-id="
+                                 (:train/id train)
+                                 "&action=pause', {method: 'POST'})")})
+        (c/button (messages/t :fleet/btn-merge-next)
+                  {:variant :primary
+                   :onclick (str "fetch('/api/train/action?train-id="
+                                 (:train/id train)
+                                 "&action=merge-next', {method: 'POST'})")})]]
 
       [:div.train-detail-grid
        ;; PR list
        [:section.prs-section
-        [:h3 "Pull Requests"]
+        [:h3 (messages/t :fleet/prs-heading)]
         [:div.pr-list
          (for [pr (sort-by :pr/merge-order (:train/prs train))]
            [:div.pr-card {:class (name (:pr/status pr))}
@@ -301,23 +322,24 @@
              (c/badge (name (:pr/status pr)))]
             [:div.pr-title (:pr/title pr)]
             [:div.pr-details
-             [:span.pr-ci (str "CI: " (name (:pr/ci-status pr)))]
+             [:span.pr-ci (messages/t :fleet/pr-ci {:status (name (:pr/ci-status pr))})]
              (when-let [readiness (:pr/readiness pr)]
                [:span.pr-readiness
-                (str "Readiness: "
-                     (readiness-state-label (:readiness/state readiness))
-                     " ("
-                     (format "%.2f" (double (:readiness/score readiness)))
-                     ")")])
+                (messages/t :fleet/pr-readiness
+                            {:label (readiness-state-label (:readiness/state readiness))
+                             :score (format "%.2f" (double (:readiness/score readiness)))})])
              (when (seq (:pr/depends-on pr))
-               [:span.pr-deps (str "Depends: " (str/join ", " (:pr/depends-on pr)))])
+               [:span.pr-deps
+                (messages/t :fleet/pr-depends
+                            {:deps (str/join ", " (:pr/depends-on pr))})])
              (when (seq (:pr/blocking-reasons pr))
                [:span.pr-blockers
-                (str "Blockers: " (str/join " | " (:pr/blocking-reasons pr)))])]])]]
+                (messages/t :fleet/pr-blockers
+                            {:reasons (str/join " | " (:pr/blocking-reasons pr))})])]])]]
 
        ;; Merge graph
        [:section.graph-section
-        [:h3 "Merge Order"]
+        [:h3 (messages/t :fleet/merge-order-heading)]
         [:div.merge-graph
          (for [[idx pr] (map-indexed vector (sort-by :pr/merge-order (:train/prs train)))]
            [:div.graph-node

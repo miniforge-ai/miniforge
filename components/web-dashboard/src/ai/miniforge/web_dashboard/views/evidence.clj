@@ -31,25 +31,25 @@
     [:span.evidence-meta
      (status-badge (:status wf))
      (when (:completed-at wf)
-       (str " completed " (:completed-at wf)))]]
+       (str " " (msg/t :evidence/completed-at {:timestamp (:completed-at wf)})))]]
    [:div.evidence-actions
     (if (:has-evidence wf)
       [:button.btn.btn-sm.btn-ghost
        {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id wf) "'")}
-       "View Bundle"]
-      [:span.evidence-pending "Pending"])]])
+       (msg/t :evidence/view-bundle)]
+      [:span.evidence-pending (msg/t :evidence/pending)])]])
 
 (defn train-evidence-item [train]
   [:div.evidence-item
    [:div.evidence-info
     [:h4 (:train-name train)]
     [:span.evidence-meta
-     (str (:pr-count train) " PRs"
-          (if (:has-evidence train) " | Evidence available" ""))]]
+     (str (msg/t :pr/count {:count (:pr-count train)})
+          (when (:has-evidence train) (str " | " (msg/t :evidence/evidence-available))))]]
    (when (:has-evidence train)
      [:button.btn.btn-sm.btn-ghost
       {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
-      "View Bundle"])])
+      (msg/t :evidence/view-bundle)])])
 
 (defn evidence-list-fragment
   "Evidence list fragment for htmx updates.
@@ -61,17 +61,17 @@
     (if-not has-items
       [:div.empty-state
        [:div.empty-icon "§"]
-       [:h3 "No Evidence Bundles Yet"]
-       [:p "Evidence bundles appear as workflows complete and publish artifacts."]]
+       [:h3 (msg/t :evidence/none-heading)]
+       [:p (msg/t :evidence/none-body)]]
       [:div.evidence-list
        (when (seq workflows)
          (list
-          [:h3.evidence-section-title "Workflow Evidence"]
+          [:h3.evidence-section-title (msg/t :evidence/workflow-section)]
           (for [wf workflows]
             (workflow-evidence-item wf))))
        (when (seq trains)
          (list
-          [:h3.evidence-section-title "PR Train Evidence"]
+          [:h3.evidence-section-title (msg/t :evidence/train-section)]
           (for [train trains]
             (train-evidence-item train))))])))
 
@@ -81,12 +81,12 @@
 (defn evidence-view
   "Evidence artifacts view."
   [layout state]
-  (layout "Evidence"
+  (layout (msg/t :layout/nav-evidence)
    [:div.evidence-view
     [:div.evidence-header.aggregate-header
      [:div.evidence-title-group
-      [:h2 "Evidence Bundles"]
-      [:p.subtitle "Audit trail for workflows and merged PRs"]]
+      [:h2 (msg/t :evidence/bundles-heading)]
+      [:p.subtitle (msg/t :evidence/bundles-subtitle)]]
      [:div.pane-filter-toolbar
       [:div#filter-chips.filter-chips]
       [:div.filter-actions
@@ -94,7 +94,7 @@
         {:hx-get "/api/filter-fields?scope=local&pane=evidence"
          :hx-target "#filter-modal-container"
          :hx-swap "innerHTML"
-         :title "Add pane-local filter"}
+         :title (msg/t :filter/add-pane-title)}
         (msg/t :action/filter)]]]]
     [:div#evidence-content
      {:hx-get "/api/evidence/list"

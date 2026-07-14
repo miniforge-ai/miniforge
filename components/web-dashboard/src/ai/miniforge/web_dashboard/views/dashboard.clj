@@ -16,7 +16,8 @@
   "Dashboard view components with high information density."
   (:require
    [hiccup2.core :refer [html]]
-   [ai.miniforge.web-dashboard.components :as c]))
+   [ai.miniforge.web-dashboard.components :as c]
+   [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Dashboard fragments
@@ -27,19 +28,19 @@
   (html
    [:div.stats-grid
     (c/stat-card (str (get-in stats [:workflows :running] 0))
-                 "Running Workflows"
+                 (msg/t :dash/stat-running-workflows)
                  {:trend (if (> (get-in stats [:workflows :running] 0) 0) :up :neutral)
                   :href "/workflows"})
     (c/stat-card (str (get-in stats [:workflows :total] 0))
-                 "Total Workflows"
+                 (msg/t :dash/stat-total-workflows)
                  {:trend (if (> (get-in stats [:workflows :completed] 0) 0) :up :neutral)
                   :href "/workflows"})
     (c/stat-card (str (get-in stats [:trains :active]))
-                 "Active Trains"
+                 (msg/t :dash/stat-active-trains)
                  {:trend (if (> (get-in stats [:trains :active]) 0) :up :neutral)
                   :href "/fleet"})
     (c/stat-card (str (get-in stats [:health :critical]))
-                 "Critical Risks"
+                 (msg/t :dash/stat-critical-risks)
                  {:trend (if (> (get-in stats [:health :critical]) 0) :down :neutral)
                   :href "/dag"})]))
 
@@ -48,11 +49,11 @@
   [risk-data]
   (html
    [:div.risk-panel
-    [:h3.section-title "AI Risk Analysis"]
+    [:h3.section-title (msg/t :dash/risk-analysis-title)]
     [:div.risk-summary
-     [:div.risk-badge.risk-high (str (get-in risk-data [:summary :high]) " High")]
-     [:div.risk-badge.risk-medium (str (get-in risk-data [:summary :medium]) " Medium")]
-     [:div.risk-badge.risk-low (str (get-in risk-data [:summary :low]) " Low")]]
+     [:div.risk-badge.risk-high (msg/t :dash/risk-high {:count (get-in risk-data [:summary :high])})]
+     [:div.risk-badge.risk-medium (msg/t :dash/risk-medium {:count (get-in risk-data [:summary :medium])})]
+     [:div.risk-badge.risk-low (msg/t :dash/risk-low {:count (get-in risk-data [:summary :low])})]]
     [:div.risk-list
      (for [risk (take 5 (:risks risk-data))]
        [:div.risk-item {:class (str "risk-" (name (:risk-level risk)))}
@@ -62,22 +63,24 @@
         [:div.risk-factors
          (for [factor (:factors risk)]
            [:span.risk-factor {:class (str "severity-" (name (:severity factor)))}
-            (str (name (:type factor)) ": " (:count factor))])]])]]))
+            (msg/t :dash/risk-factor
+                   {:type (name (:type factor)) :count (:count factor)})])]])]]))
 
 (defn activity-fragment
   "Recent activity fragment for htmx updates."
   [activities]
   (html
    [:div.activity-feed
-    [:h3.section-title "Recent Activity"]
+    [:h3.section-title (msg/t :dash/recent-activity-title)]
     [:div.activity-list
      (for [activity (take 10 activities)]
        [:div.activity-item
         [:span.activity-time
          (if (:timestamp activity)
+           ;; date-format pattern is a machine spec, not translatable prose
            (str (.format (java.text.SimpleDateFormat. "HH:mm:ss")
                         (:timestamp activity)))
-           "—")]
+           (msg/t :time/none))]
         [:span.activity-message (:message activity)]
         [:a.activity-link {:href (str "/train/" (:train-id activity))} "→"]])]]))
 
@@ -86,21 +89,22 @@
   [workflows]
   (html
    [:div.workflow-summary
-    [:h3.section-title (str "Workflows (" (count workflows) ")")]
+    [:h3.section-title (msg/t :dash/workflows-summary-title {:count (count workflows)})]
     (if (empty? workflows)
-      [:div.empty-state [:p "No workflows running"]]
+      [:div.empty-state [:p (msg/t :dash/no-workflows-running)]]
       [:div.workflow-summary-list
        (for [wf (take 5 workflows)]
          [:div.workflow-summary-item
           {:class (str "wf-status-" (name (get wf :status :unknown)))}
           [:div.wf-summary-header
            [:a.wf-summary-name {:href (str "/workflow/" (:id wf))}
-            (get wf :name "Unnamed")]
+            (get wf :name (msg/t :dash/unnamed-workflow))]
            [:span.wf-summary-badge
             {:class (str "badge-" (name (get wf :status :unknown)))}
             (name (get wf :status :unknown))]]
           [:div.wf-summary-detail
-           [:span.wf-phase (str "Phase: " (get wf :phase "—"))]
+           [:span.wf-phase (msg/t :phase/label
+                                  {:phase (get wf :phase (msg/t :time/none))})]
            [:div.wf-progress-bar
             [:div.wf-progress-fill
              {:style (str "width:" (get wf :progress 0) "%")}]]]])])]))
@@ -110,12 +114,12 @@
   [fleet-state]
   (html
    [:div.fleet-grid
-    [:h3.section-title (str "Fleet Status (" (count (:trains fleet-state)) " trains)")]
+    [:h3.section-title (msg/t :dash/fleet-status-title {:count (count (:trains fleet-state))})]
     [:div.repo-groups
      (for [[repo prs] (take 10 (:repos fleet-state))]
        [:div.repo-group
         [:div.repo-name repo]
-        [:div.pr-count (str (count prs) " PRs")]])]]))
+        [:div.pr-count (msg/t :pr/count {:count (count prs)})]])]]))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Main dashboard view
@@ -123,7 +127,7 @@
 (defn dashboard-view
   "Main dashboard view with high information density."
   [layout state]
-  (layout "Dashboard"
+  (layout (msg/t :layout/nav-dashboard)
    [:div.dashboard-grid
     ;; Stats section
     [:section#stats-section.section

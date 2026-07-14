@@ -15,6 +15,7 @@
 (ns ai.miniforge.web-dashboard.views.auth
   "Login view for the web dashboard."
   (:require
+   [ai.miniforge.web-dashboard.messages :as messages]
    [hiccup.page :as page]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -27,24 +28,24 @@
    [:head
     [:meta {:charset "utf-8"}]
     [:meta {:name "viewport" :content "width=device-width, initial-scale=1"}]
-    [:title "Miniforge | Login"]
+    [:title (messages/t :layout/page-title {:title (messages/t :auth/login-title)})]
     [:link {:rel "stylesheet" :href "/css/app.css"}]]
    [:body
     [:div.dashboard
      [:main.main
       [:div.page-header
-       [:h1.page-title "User Login"]]
+       [:h1.page-title (messages/t :auth/page-heading)]]
       [:section.section
        [:div.cp-page
         [:div.cp-header
-         [:h2 "Sign in to the dashboard"]
-         [:p.cp-subtitle "Use a configured dashboard account to continue."]]
+         [:h2 (messages/t :auth/sign-in-heading)]
+         [:p.cp-subtitle (messages/t :auth/sign-in-subtitle)]]
         [:div.cp-two-column
          [:div.cp-column-main
           [:div.cp-section
            (when error
              [:div.empty-state
-              [:h3 "Sign-in failed"]
+              [:h3 (messages/t :auth/sign-in-failed)]
               [:p error]])
            [:form.cp-decision-form {:method "post" :action "/login"}
             [:input {:type "hidden"
@@ -52,18 +53,18 @@
                      :value (or return-to "/")}]
             [:input.cp-input {:type "text"
                               :name "username"
-                              :placeholder "Username"
+                              :placeholder (messages/t :auth/username-placeholder)
                               :value (or username "")
                               :autocomplete "username"
                               :required true}]
             [:input.cp-input {:type "password"
                               :name "password"
-                              :placeholder "Password"
+                              :placeholder (messages/t :auth/password-placeholder)
                               :autocomplete "current-password"
                               :required true}]
-            [:button.btn.btn-sm.btn-primary {:type "submit"} "Sign in"]]]]
+            [:button.btn.btn-sm.btn-primary {:type "submit"} (messages/t :auth/sign-in-button)]]]]
          [:div.cp-column-sidebar
           [:div.cp-section
-           [:h3 "Session policy"]
-           [:p "Dashboard sessions are browser-local and cookie-backed."]
-           [:p "Static assets and health checks remain public; dashboard views require sign-in when auth is enabled."]]]]]]]]]))
+           [:h3 (messages/t :auth/session-policy-heading)]
+           [:p (messages/t :auth/session-policy-cookie)]
+           [:p (messages/t :auth/session-policy-public)]]]]]]]]]))

@@ -79,11 +79,11 @@
         (enum-option filter-id scope value count cloud?)))
     (list
      [:div.filter-option-empty
-      [:span "No values detected from current data."]
+      [:span (msg/t :dag/filter-no-values)]
       [:input.filter-text-input
        {:type "text"
         :class "filter-text-input"
-        :placeholder (str "Set " filter-label "...")
+        :placeholder (msg/t :dag/filter-set-placeholder {:label filter-label})
         :data-filter-id (name filter-id)
         :data-scope scope
         :onchange (str "window.miniforge.filters.setTextFilter('"
@@ -108,7 +108,7 @@
              :data-scope scope
              :onchange (str "window.miniforge.filters.toggleFilter('"
                           (name filter-id) "', true, '" scope "', this.checked);")}]
-    [:span "Yes"]]])
+    [:span (msg/t :value/yes)]]])
 
 (defn text-filter-input
   [filter-id filter-label scope filter-spec]
@@ -118,7 +118,7 @@
     [:input.filter-text-input
      {:type "text"
       :class "filter-text-input"
-      :placeholder (str "Search " filter-label "...")
+      :placeholder (msg/t :dag/filter-search-placeholder {:label filter-label})
       :data-filter-id (name filter-id)
       :data-scope scope
       :onchange (str "window.miniforge.filters.setTextFilter('"
@@ -141,7 +141,7 @@
       :text
       (text-filter-input filter-id filter-label scope filter-spec)
 
-      [:span "Unsupported filter type: " (name filter-type)])))
+      [:span (msg/t :dag/filter-unsupported-type {:type (name filter-type)})])))
 
 (defn filter-section-fragment
   [filter-spec facets scope]
@@ -163,8 +163,8 @@
   [filters facets scope]
   (if (empty? filters)
     [:p.empty-message (if (= scope "global")
-                        "No global filter fields configured."
-                        "No filters available for this pane.")]
+                        (msg/t :dag/filter-no-global-fields)
+                        (msg/t :dag/filter-no-pane-filters))]
     (for [filter-spec filters]
       (filter-section-fragment filter-spec facets scope))))
 
@@ -177,12 +177,12 @@
     [:div.filter-modal-header
      [:h3
       (if (= scope "global")
-        "Global Filters"
-        "Filters")]
+        (msg/t :dag/modal-global-title)
+        (msg/t :dag/modal-title))]
      [:div.scope-badge {:class (if (= scope "global") "scope-badge-global" "scope-badge-local")}
       (if (= scope "global")
-        "Applies to all panes"
-        "This pane only")]
+        (msg/t :dag/scope-all-panes)
+        (msg/t :dag/scope-this-pane))]
      [:button.filter-modal-close
       {:onclick "this.parentElement.parentElement.parentElement.remove()"
        :title (msg/t :action/close)}
@@ -200,11 +200,11 @@
 (defn dag-kanban-view
   "Task status kanban board for workflow visualization."
   [layout state]
-  (layout "Task Status"
+  (layout (msg/t :layout/nav-task-status)
           [:div.kanban-view
            [:div.kanban-header
             [:div.kanban-title-row
-             [:h2 "Workflow Tasks"]
+             [:h2 (msg/t :dag/workflow-tasks-heading)]
              [:div.pane-filter-toolbar
               [:div#filter-chips.filter-chips
                ;; Active filter chips will be added here dynamically via JavaScript
@@ -214,7 +214,7 @@
                 {:hx-get "/api/filter-fields?scope=local&pane=task-status"
                  :hx-target "#filter-modal-container"
                  :hx-swap "innerHTML"
-                 :title "Add pane-local filter"}
+                 :title (msg/t :filter/add-pane-title)}
                 (msg/t :action/filter)]]]]]
            [:div.kanban-board
             (for [status [:blocked :ready :running :done]]
@@ -222,7 +222,7 @@
                [:div.column-header
                 [:h3
                  {:class "column-filter-label"
-                  :title (str "Filter globally by status: " (name status))
+                  :title (msg/t :dag/filter-by-status-title {:status (name status)})
                   :onclick (str "window.miniforge.filters.addFilter('entity-status', ':=', '" (name status) "', 'global');")}
                  (str/upper-case (name status))]
                 [:span.column-count
@@ -235,7 +235,7 @@
                      [:div.card-header
                       [:span.card-id
                        [:button.card-meta-filter
-                        {:title (str "Filter globally by repository: " repo)
+                        {:title (msg/t :dag/filter-by-repo-title {:repo repo})
                          :onclick (str "event.stopPropagation(); window.miniforge.filters.addFilter('repository', ':=', '" repo-js "', 'global');")}
                         repo]
                        (str " #" (:id task))]
@@ -243,4 +243,4 @@
                         [:span.card-deps (str "↓ " (count (:dependencies task)))])]
                      [:div.card-title (:title task)]
                      [:div.card-footer
-                      [:a.card-link {:href (str "/train/" (:train-id task))} "View Train →"]]]))]])]]))
+                      [:a.card-link {:href (str "/train/" (:train-id task))} (msg/t :dag/view-train)]]]))]])]]))
