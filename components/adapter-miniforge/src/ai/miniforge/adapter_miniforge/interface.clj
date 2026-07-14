@@ -85,7 +85,8 @@
 
   (deliver-decision [_ agent-record decision-resolution]
     (try
-      (let [workflow-id (:agent/external-id agent-record)
+      (let [workflow-id (or (get-in agent-record [:agent/metadata :workflow-id])
+                            (:agent/external-id agent-record))
             event (es/cp-decision-resolved event-stream
                                            workflow-id
                                            (:decision/id decision-resolution)

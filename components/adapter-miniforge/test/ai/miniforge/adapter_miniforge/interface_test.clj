@@ -139,7 +139,8 @@
         built-events     (atom [])
         fake-event       {:event/type :control-plane/decision-resolved}
         adapter          (sut/create-adapter :fake-stream)
-        resolution       {:decision/id         "d-1"
+        decision-id      #uuid "00000000-0000-0000-0000-000000000099"
+        resolution       {:decision/id         decision-id
                           :decision/resolution :approve
                           :decision/comment    "looks good"}]
     (with-redefs [es/cp-decision-resolved
@@ -158,10 +159,11 @@
           (let [built (first @built-events)]
             (is (= :fake-stream (:stream built)))
             (is (= "wf-123" (:wf-id built)))
-            (is (= "d-1" (:dec-id built)))
+            (is (= decision-id (:dec-id built)))
             (is (= :approve (:resolution built)))
             (is (= "looks good" (:comment built))))
           (is (= 1 (count @published-events)))
+          (is (= :fake-stream (:stream (first @published-events))))
           (is (= fake-event (:event (first @published-events))))))
 
       (testing "returns delivered false with error message on exception"
