@@ -25,7 +25,10 @@
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
    [ai.miniforge.web-dashboard.state.core :as core]
-   [slingshot.slingshot :refer [try+]]))
+   [slingshot.slingshot :refer [try+]])
+  (:import
+   [java.nio.channels FileChannel]
+   [java.nio.file Paths StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Fleet repository config and provider helpers
@@ -62,6 +65,15 @@
    :behind-main 0.15})
 
 (def readiness-threshold 0.85)
+
+(def ^:private config-lock-timeout-ms
+  "Upper bound (ms) on how long `with-config-lock!` polls for the advisory
+   file lock before giving up."
+  500)
+
+(def ^:private config-lock-poll-ms
+  "Backoff (ms) between `.tryLock` attempts while waiting for the config lock."
+  25)
 
 (def ci-scores
   {:passed 1.0
@@ -167,6 +179,54 @@
   [out err]
   (ensure-message (if (str/blank? err) out err)
                   "Provider command failed. Check authentication and repository access."))
+
+(defn- with-config-lock!
+  "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
+
+   Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
+   (25 ms) increments before giving up.  Returns `(result-failure ...)` when
+   the lock cannot be acquired — the expected no-op for concurrent callers.
+
+   The file at `path` is created if absent so the FileChannel can open before
+   the first write occurs.
+
+   Why advisory locking: the OS provides no blocking tryLock-with-timeout on
+   file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
+   with a bounded deadline — this runs on a worker thread, total wait is
+   capped, and no thread pool is starved."
+  [path thunk]
+  (let [nio-path (Paths/get path (make-array String 0))
+        opts     (into-array StandardOpenOption
+                             [StandardOpenOption/READ
+                              StandardOpenOption/WRITE
+                              StandardOpenOption/CREATE])]
+    (try
+      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
+        (let [deadline (+ (System/currentTimeMillis) config-lock-timeout-ms)]
+          (loop []
+            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
+              ;; FileLock implements AutoCloseable; .close releases the lock.
+              ;; Hinting AutoCloseable keeps the ns loadable under babashka,
+              ;; which does not expose java.nio.channels.FileLock.
+              (try (thunk) (finally (.close lk)))
+              (if (< (System/currentTimeMillis) deadline)
+                (do (Thread/sleep config-lock-poll-ms) (recur))
+                (result-failure "Config file is locked by another process; retry later."
+                                {:path path}))))))
+      (catch InterruptedException _
+        ;; Restore interrupt flag for cooperative-cancellation callers.
+        (.interrupt (Thread/currentThread))
+        (result-failure "Interrupted while waiting for config file lock." {:path path}))
+      (catch Exception e
+        ;; OverlappingFileLockException — same-JVM re-entrant attempt.
+        ;; ClosedChannelException — channel closed concurrently.
+        ;; Both mean the lock is unavailable; surface the expected no-op.
+        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
+                         "java.nio.channels.ClosedChannelException"}
+                       (.getName (class e)))
+          (result-failure "Config file lock unavailable; retry later." {:path path})
+          (result-failure (str "Failed to acquire config file lock: " (.getMessage e))
+                          {:path path}))))))
 
 (defn load-fleet-config
   []
@@ -280,19 +340,21 @@
        {:repo repo*})
 
       :else
-      (let [cfg (load-fleet-config)
-            repos (->> (get-in cfg [:fleet :repos] [])
-                       (map normalize-repo-slug)
-                       (filter valid-repo-slug?)
-                       vec)
-            exists? (some #{repo*} repos)
-            next-repos (if exists? repos (conj repos repo*))
-            next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-        (save-fleet-config! next-cfg)
-        (result-success
-         {:added? (not exists?)
-          :repo repo*
-          :repos (get-in next-cfg [:fleet :repos])})))))
+      (with-config-lock! default-fleet-config-path
+        (fn []
+          (let [cfg (load-fleet-config)
+                repos (->> (get-in cfg [:fleet :repos] [])
+                           (map normalize-repo-slug)
+                           (filter valid-repo-slug?)
+                           vec)
+                exists? (some #{repo*} repos)
+                next-repos (if exists? repos (conj repos repo*))
+                next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
+            (save-fleet-config! next-cfg)
+            (result-success
+             {:added? (not exists?)
+              :repo repo*
+              :repos (get-in next-cfg [:fleet :repos])}))))))
 
 (defn run-gh
   [& args]
@@ -346,22 +408,26 @@
                        (filter valid-repo-slug?)
                        distinct
                        (take limit*)
-                       vec)
-            cfg (load-fleet-config)
-            existing (->> (get-in cfg [:fleet :repos] [])
-                          (map normalize-repo-slug)
-                          (filter valid-repo-slug?)
-                          vec)
-            merged (vec (distinct (concat existing repos)))
-            added (vec (remove (set existing) merged))
-            next-cfg (assoc-in cfg [:fleet :repos] merged)]
-        (save-fleet-config! next-cfg)
-        (result-success
-         {:owner owner*
-          :discovered (count repos)
-          :added (count added)
-          :repos merged
-          :added-repos added})))))
+                       vec)]
+        ;; Hold the advisory lock across the read→merge→write so a concurrent
+        ;; add-configured-repo! cannot overwrite our merged result.
+        (with-config-lock! default-fleet-config-path
+          (fn []
+            (let [cfg (load-fleet-config)
+                  existing (->> (get-in cfg [:fleet :repos] [])
+                                (map normalize-repo-slug)
+                                (filter valid-repo-slug?)
+                                vec)
+                  merged (vec (distinct (concat existing repos)))
+                  added (vec (remove (set existing) merged))
+                  next-cfg (assoc-in cfg [:fleet :repos] merged)]
+              (save-fleet-config! next-cfg)
+              (result-success
+               {:owner owner*
+                :discovered (count repos)
+                :added (count added)
+                :repos merged
+                :added-repos added})))))))
 
 (defn pr-status-from-provider
   [pr]
