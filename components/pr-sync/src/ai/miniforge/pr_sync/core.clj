@@ -172,7 +172,8 @@
               (try
                 (thunk)
                 (catch Exception thunk-e
-                  (result-failure (str "Config update failed: " (ex-msg thunk-e)) {:path path}))
+                  (result-failure (str "Config update failed: " (ex-msg thunk-e))
+                                  {:path path :exception (ex-msg thunk-e)}))
                 (finally (.close lk)))
               (if (< (System/currentTimeMillis) deadline)
                 (do (Thread/sleep config-lock-poll-ms) (recur))

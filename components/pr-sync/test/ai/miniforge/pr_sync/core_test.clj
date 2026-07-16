@@ -340,13 +340,13 @@
 
 (deftest with-config-lock-timeout-test
   (testing "returns lock-failure within timeout when another thread holds the lock"
-    (let [path   (str (System/getProperty "java.io.tmpdir") "/mf-lock-timeout-test-" (System/nanoTime) ".edn")
-          latch  (java.util.concurrent.CountDownLatch. 1)
-          release (java.util.concurrent.CountDownLatch. 1)]
-      (future (#'core/with-config-lock! path
-                (fn []
-                  (.countDown latch)
-                  (.await release))))
+    (let [path    (str (System/getProperty "java.io.tmpdir") "/mf-lock-timeout-test-" (System/nanoTime) ".edn")
+          latch   (java.util.concurrent.CountDownLatch. 1)
+          release (java.util.concurrent.CountDownLatch. 1)
+          holder  (future (#'core/with-config-lock! path
+                            (fn []
+                              (.countDown latch)
+                              (.await release))))]
       (.await latch)
       (try
         (let [start   (System/currentTimeMillis)
@@ -358,6 +358,7 @@
           (is (<= elapsed 1500)))
         (finally
           (.countDown release)
+          (deref holder 2000 nil)
           (.delete (io/file path)))))))
 
 (deftest with-config-lock-thunk-exception-test
