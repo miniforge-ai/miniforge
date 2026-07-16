@@ -155,8 +155,8 @@
 
    Why advisory locking: the OS provides no blocking tryLock-with-timeout on
    file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
-   with a bounded deadline — this runs on a CLI/worker thread, total wait is
-   capped, and no thread pool is starved."
+   with a bounded deadline (≤ 500 ms); callers block for at most one timeout
+   window regardless of calling context."
   [path thunk]
   (let [_        (some-> (io/file path) .getParentFile .mkdirs)
         nio-path (Paths/get path (make-array String 0))
