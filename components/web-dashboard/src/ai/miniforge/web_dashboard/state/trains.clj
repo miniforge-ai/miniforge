@@ -233,7 +233,7 @@
                          "java.nio.channels.ClosedChannelException"}
                        (.getName (class e)))
           (result-failure "Config file lock unavailable; retry later." {:path path})
-          (result-failure (str "Failed to acquire config file lock: " (.getMessage e))
+          (result-failure (str "Failed to acquire config file lock: " (ex-msg e))
                           {:path path}))))))
 
 (defn load-fleet-config
