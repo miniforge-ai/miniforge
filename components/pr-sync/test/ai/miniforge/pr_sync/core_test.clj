@@ -338,6 +338,28 @@
           (.delete subdir)
           (.delete base))))))
 
+(deftest with-config-lock-timeout-test
+  (testing "returns lock-failure within timeout when another thread holds the lock"
+    (let [path   (str (System/getProperty "java.io.tmpdir") "/mf-lock-timeout-test-" (System/nanoTime) ".edn")
+          latch  (java.util.concurrent.CountDownLatch. 1)
+          release (java.util.concurrent.CountDownLatch. 1)]
+      (future (#'core/with-config-lock! path
+                (fn []
+                  (.countDown latch)
+                  (.await release))))
+      (.await latch)
+      (try
+        (let [start   (System/currentTimeMillis)
+              result  (#'core/with-config-lock! path #(throw (Exception. "should not run")))
+              elapsed (- (System/currentTimeMillis) start)]
+          (is (false? (:success? result)))
+          (is (str/includes? (str/lower-case (:error result)) "lock"))
+          ;; Should fail within timeout window (500ms) + generous CI margin.
+          (is (<= elapsed 1500)))
+        (finally
+          (.countDown release)
+          (.delete (io/file path)))))))
+
 (deftest with-config-lock-thunk-exception-test
   (testing "thunk exception reports config update failure, not lock failure"
     (let [path (str (System/getProperty "java.io.tmpdir") "/mf-lock-thunk-test-" (System/nanoTime) ".edn")
