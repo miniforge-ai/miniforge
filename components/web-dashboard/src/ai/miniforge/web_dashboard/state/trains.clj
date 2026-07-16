@@ -195,7 +195,8 @@
    with a bounded deadline — this runs on a worker thread, total wait is
    capped, and no thread pool is starved."
   [path thunk]
-  (let [nio-path (Paths/get path (make-array String 0))
+  (let [_        (some-> (io/file path) .getParentFile .mkdirs)
+        nio-path (Paths/get path (make-array String 0))
         opts     (into-array StandardOpenOption
                              [StandardOpenOption/READ
                               StandardOpenOption/WRITE
@@ -208,7 +209,11 @@
               ;; FileLock implements AutoCloseable; .close releases the lock.
               ;; Hinting AutoCloseable keeps the ns loadable under babashka,
               ;; which does not expose java.nio.channels.FileLock.
-              (try (thunk) (finally (.close lk)))
+              (try
+                (thunk)
+                (catch Exception thunk-e
+                  (result-exception "Config update failed." thunk-e))
+                (finally (.close lk)))
               (if (< (System/currentTimeMillis) deadline)
                 (do (Thread/sleep config-lock-poll-ms) (recur))
                 (result-failure "Config file is locked by another process; retry later."
@@ -427,7 +432,7 @@
                 :discovered (count repos)
                 :added (count added)
                 :repos merged
-                :added-repos added})))))))
+                :added-repos added}))))))))
 
 (defn pr-status-from-provider
   [pr]
