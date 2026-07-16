@@ -420,23 +420,24 @@
                        vec)]
         ;; Hold the advisory lock across the read→merge→write so a concurrent
         ;; add-configured-repo! cannot overwrite our merged result.
-        (with-config-lock! default-fleet-config-path
-          (fn []
-            (let [cfg (load-fleet-config)
-                  existing (->> (get-in cfg [:fleet :repos] [])
-                                (map normalize-repo-slug)
-                                (filter valid-repo-slug?)
-                                vec)
-                  merged (vec (distinct (concat existing repos)))
-                  added (vec (remove (set existing) merged))
-                  next-cfg (assoc-in cfg [:fleet :repos] merged)]
-              (save-fleet-config! next-cfg)
-              (result-success
-               {:owner owner*
-                :discovered (count repos)
-                :added (count added)
-                :repos merged
-                :added-repos added}))))))))
+        (merge {:owner owner*}
+               (with-config-lock! default-fleet-config-path
+                 (fn []
+                   (let [cfg (load-fleet-config)
+                         existing (->> (get-in cfg [:fleet :repos] [])
+                                       (map normalize-repo-slug)
+                                       (filter valid-repo-slug?)
+                                       vec)
+                         merged (vec (distinct (concat existing repos)))
+                         added (vec (remove (set existing) merged))
+                         next-cfg (assoc-in cfg [:fleet :repos] merged)]
+                     (save-fleet-config! next-cfg)
+                     (result-success
+                      {:owner owner*
+                       :discovered (count repos)
+                       :added (count added)
+                       :repos merged
+                       :added-repos added})))))))))
 
 (defn pr-status-from-provider
   [pr]

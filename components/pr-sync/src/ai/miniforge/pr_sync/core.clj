@@ -614,19 +614,20 @@
                          vec)]
           ;; Hold the advisory lock across the read→merge→write so a concurrent
           ;; add-repo! or remove-repo! cannot overwrite our merged result.
-          (with-config-lock! path
-            (fn []
-              (let [cfg (load-fleet-config path)
-                    existing (normalized-repos cfg)
-                    merged (vec (distinct (concat existing repos)))
-                    added (vec (remove (set existing) merged))
-                    next-cfg (assoc-in cfg [:fleet :repos] merged)]
-                (save-fleet-config! next-cfg path)
-                (result-success {:owner owner*
-                                 :discovered (count repos)
-                                 :added (count added)
-                                 :repos merged
-                                 :added-repos added})))))
+          (merge {:owner owner*}
+                 (with-config-lock! path
+                   (fn []
+                     (let [cfg (load-fleet-config path)
+                           existing (normalized-repos cfg)
+                           merged (vec (distinct (concat existing repos)))
+                           added (vec (remove (set existing) merged))
+                           next-cfg (assoc-in cfg [:fleet :repos] merged)]
+                       (save-fleet-config! next-cfg path)
+                       (result-success {:owner owner*
+                                        :discovered (count repos)
+                                        :added (count added)
+                                        :repos merged
+                                        :added-repos added}))))))
         (catch Exception e
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))
