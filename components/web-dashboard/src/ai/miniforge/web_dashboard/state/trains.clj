@@ -186,6 +186,9 @@
    Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
    (25 ms) increments before giving up.  Returns `(result-failure ...)` when
    the lock cannot be acquired — the expected no-op for concurrent callers.
+   Exception: same-JVM re-entrancy (OverlappingFileLockException) and a
+   concurrently closed channel (ClosedChannelException) return a failure
+   immediately without entering the poll loop.
 
    The file at `path` is created if absent so the FileChannel can open before
    the first write occurs.
