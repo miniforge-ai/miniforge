@@ -251,7 +251,8 @@
                     (save-fleet-config! next-cfg path)
                     (result-success {:added? (not (boolean exists?))
                                      :repo repo
-                                     :repos (get-in next-cfg [:fleet :repos])}))))))))
+                                     :repos (get-in next-cfg [:fleet :repos])}))))))))))
+
 
 (defn remove-repo!
   "Remove a repository slug from fleet configuration.
