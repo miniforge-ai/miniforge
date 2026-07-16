@@ -186,7 +186,8 @@
                             (fn []
                               (.countDown latch)
                               (.await release))))]
-      (.await latch)
+      (is (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
+          "lock holder did not acquire lock in time")
       (try
         (let [start   (System/currentTimeMillis)
               result  (#'sut/with-config-lock! path #(throw (Exception. "should not run")))
