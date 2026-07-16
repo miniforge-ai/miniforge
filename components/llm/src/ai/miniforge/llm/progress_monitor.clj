@@ -23,6 +23,36 @@
    changes to detect when an agent is stuck vs actively working."
    )
 
+(def ^:private default-stagnation-threshold-ms
+  "Time without any progress signal before an agent is considered stuck —
+   the adaptive-timeout trip point. 2 minutes: long enough to ride out a slow
+   model turn or a quiet tool call, short enough that a genuinely hung agent
+   is caught before it burns a phase budget."
+  120000)
+
+(def ^:private default-max-total-ms
+  "Hard ceiling on a single monitored run regardless of progress. 10 minutes —
+   a backstop for an agent that keeps emitting just enough to look active but
+   never actually finishes."
+  600000)
+
+(def ^:private default-min-activity-interval-ms
+  "Minimum spacing between counted progress signals; debounces a burst of
+   chunks into one activity tick so rapid streaming doesn't reset the
+   stagnation clock on every token. 5 seconds."
+  5000)
+
+(def ^:private min-substantive-chunk-length
+  "A streamed chunk shorter than this (characters) is treated as
+   non-substantive — a spinner/keepalive blip, not real output — so it does
+   not count as progress."
+  10)
+
+(def ^:private active-window-ms
+  "Recency window for the :is-active? status flag: activity newer than this
+   marks the monitor active. 30 seconds."
+  30000)
+
  (defn create-progress-monitor
    "Create a progress monitor for adaptive timeout.
 
@@ -33,9 +63,9 @@
 
    Returns monitor state atom."
    [{:keys [stagnation-threshold-ms max-total-ms min-activity-interval-ms]
-     :or {stagnation-threshold-ms 120000  ; 2 minutes
-          max-total-ms 600000              ; 10 minutes
-          min-activity-interval-ms 5000}}] ; 5 seconds
+     :or {stagnation-threshold-ms default-stagnation-threshold-ms
+          max-total-ms default-max-total-ms
+          min-activity-interval-ms default-min-activity-interval-ms}}]
    (atom {:started-at (System/currentTimeMillis)
           :last-activity-at (System/currentTimeMillis)
           :last-chunk-content nil
@@ -60,7 +90,7 @@
          is-different? (not= chunk-content last-content)
          is-not-just-thinking? (and chunk-content
                                     (not (re-find #"(?i)^(thinking|analyzing|considering)" chunk-content)))
-         is-substantive? (and chunk-content (> (count chunk-content) 10))
+         is-substantive? (and chunk-content (> (count chunk-content) min-substantive-chunk-length))
          time-since-activity (- now last-activity)
          ;; First chunk always counts as progress (last-content will be nil)
          is-first-chunk? (nil? last-content)
@@ -235,7 +265,7 @@
      :unique-chunks (count unique-chunks)
      :files-written (count file-writes)
      :stagnant-cycles stagnant-cycles
-     :is-active? (< (- now last-activity-at) 30000)})) ; Active if activity in last 30s
+     :is-active? (< (- now last-activity-at) active-window-ms)}))
 
 (comment
   ;; Usage example
