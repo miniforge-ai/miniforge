@@ -345,21 +345,22 @@
        {:repo repo*})
 
       :else
-      (with-config-lock! default-fleet-config-path
-        (fn []
-          (let [cfg (load-fleet-config)
-                repos (->> (get-in cfg [:fleet :repos] [])
-                           (map normalize-repo-slug)
-                           (filter valid-repo-slug?)
-                           vec)
-                exists? (some #{repo*} repos)
-                next-repos (if exists? repos (conj repos repo*))
-                next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-            (save-fleet-config! next-cfg)
-            (result-success
-             {:added? (not exists?)
-              :repo repo*
-              :repos (get-in next-cfg [:fleet :repos])})))))))
+      (merge {:repo repo*}
+             (with-config-lock! default-fleet-config-path
+               (fn []
+                 (let [cfg (load-fleet-config)
+                       repos (->> (get-in cfg [:fleet :repos] [])
+                                  (map normalize-repo-slug)
+                                  (filter valid-repo-slug?)
+                                  vec)
+                       exists? (some #{repo*} repos)
+                       next-repos (if exists? repos (conj repos repo*))
+                       next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
+                   (save-fleet-config! next-cfg)
+                   (result-success
+                    {:added? (not exists?)
+                     :repo repo*
+                     :repos (get-in next-cfg [:fleet :repos])})))))))
 
 (defn run-gh
   [& args]

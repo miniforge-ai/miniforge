@@ -240,17 +240,18 @@
        (result-failure (messages/t :repo/invalid-format) {:repo repo})
 
        :else
-       (with-config-lock! path
-         (fn []
-           (let [cfg (load-fleet-config path)
-                 repos (normalized-repos cfg)
-                 exists? (some #{repo} repos)
-                 next-repos (if exists? repos (conj repos repo))
-                 next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-             (save-fleet-config! next-cfg path)
-             (result-success {:added? (not (boolean exists?))
-                              :repo repo
-                              :repos (get-in next-cfg [:fleet :repos])}))))))))
+       (merge {:repo repo}
+              (with-config-lock! path
+                (fn []
+                  (let [cfg (load-fleet-config path)
+                        repos (normalized-repos cfg)
+                        exists? (some #{repo} repos)
+                        next-repos (if exists? repos (conj repos repo))
+                        next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
+                    (save-fleet-config! next-cfg path)
+                    (result-success {:added? (not (boolean exists?))
+                                     :repo repo
+                                     :repos (get-in next-cfg [:fleet :repos])}))))))))
 
 (defn remove-repo!
   "Remove a repository slug from fleet configuration.
@@ -260,17 +261,18 @@
    (let [repo (normalize-repo-slug repo-slug)]
      (if (str/blank? repo)
        (result-failure (messages/t :repo/required-short) {:repo repo})
-       (with-config-lock! path
-         (fn []
-           (let [cfg (load-fleet-config path)
-                 repos (normalized-repos cfg)
-                 existed? (some #{repo} repos)
-                 next-repos (vec (remove #{repo} repos))
-                 next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
-             (save-fleet-config! next-cfg path)
-             (result-success {:removed? (boolean existed?)
-                              :repo repo
-                              :repos next-repos}))))))))
+       (merge {:repo repo}
+              (with-config-lock! path
+                (fn []
+                  (let [cfg (load-fleet-config path)
+                        repos (normalized-repos cfg)
+                        existed? (some #{repo} repos)
+                        next-repos (vec (remove #{repo} repos))
+                        next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
+                    (save-fleet-config! next-cfg path)
+                    (result-success {:removed? (boolean existed?)
+                                     :repo repo
+                                     :repos next-repos})))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Provider CLI interaction (I/O)
