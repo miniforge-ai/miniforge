@@ -17,11 +17,13 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.llm.progress-monitor
-   "Adaptive timeout monitoring based on actual progress detection.
+  "Adaptive timeout monitoring based on actual progress detection.
 
    Instead of fixed timeouts, monitors streaming activity and file system
-   changes to detect when an agent is stuck vs actively working."
-   )
+   changes to detect when an agent is stuck vs actively working.")
+
+;------------------------------------------------------------------------------ Layer 0
+;; Timeout thresholds and monitor state
 
 (def ^:private default-stagnation-threshold-ms
   "Time without any progress signal before an agent is considered stuck —
@@ -53,13 +55,13 @@
    marks the monitor active. 30 seconds."
   30000)
 
- (defn create-progress-monitor
+(defn create-progress-monitor
    "Create a progress monitor for adaptive timeout.
 
    Options:
-   - :stagnation-threshold-ms - Time without progress before considering stuck (default: 120000 = 2min)
-   - :max-total-ms - Hard limit regardless of progress (default: 600000 = 10min)
-   - :min-activity-interval-ms - Minimum time between progress signals (default: 5000 = 5sec)
+   - :stagnation-threshold-ms - Time without progress before considering stuck (default: default-stagnation-threshold-ms)
+   - :max-total-ms - Hard limit regardless of progress (default: default-max-total-ms)
+   - :min-activity-interval-ms - Minimum time between progress signals (default: default-min-activity-interval-ms)
 
    Returns monitor state atom."
    [{:keys [stagnation-threshold-ms max-total-ms min-activity-interval-ms]
@@ -77,7 +79,7 @@
           :min-activity-interval-ms min-activity-interval-ms
           :stagnant-cycles 0}))
 
- (defn record-chunk!
+(defn record-chunk!
    "Record a streaming chunk as activity.
 
    Returns true if this represents meaningful progress, false if stagnant."
@@ -270,8 +272,8 @@
 (comment
   ;; Usage example
   (def monitor (create-progress-monitor
-                {:stagnation-threshold-ms 120000  ; 2 minutes
-                 :max-total-ms 600000}))           ; 10 minutes
+                {:stagnation-threshold-ms default-stagnation-threshold-ms
+                 :max-total-ms default-max-total-ms}))
 
   ;; Record streaming chunks
   (record-chunk! monitor "Analyzing the requirements...")
