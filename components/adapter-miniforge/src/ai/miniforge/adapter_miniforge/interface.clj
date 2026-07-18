@@ -68,6 +68,37 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Protocol implementation
 
+(defn- delivery-failure
+  "Build the control-plane adapter decision-delivery failure shape."
+  [error]
+  {:delivered? false :error error})
+
+(defn- rejection-reason
+  "Return the event-stream rejection reason, preserving an explicit unknown default."
+  [result]
+  (name (get result :reason :unknown)))
+
+(defn- exception-message
+  "Return a useful exception message even when the throwable has no message."
+  [e]
+  (or (ex-message e)
+      (.getName (class e))))
+
+(defn- publish-result->delivery-result
+  "Translate the event-stream publish result into the adapter delivery contract."
+  [result]
+  (cond
+    (:rejected? result)
+    (delivery-failure (control-plane/t :adapter/stream-rejected
+                                       {:reason (rejection-reason result)}))
+
+    (contains? result :anomaly/category)
+    (delivery-failure (control-plane/t :adapter/stream-anomaly
+                                       {:category (:anomaly/category result)}))
+
+    :else
+    {:delivered? true}))
+
 (defrecord MiniforgeAdapter [event-stream]
   proto/ControlPlaneAdapter
 
@@ -93,15 +124,9 @@
                                            (:decision/resolution decision-resolution)
                                            (:decision/comment decision-resolution))
             result (es/publish! event-stream event)]
-        (cond
-          (:rejected? result)
-          {:delivered? false :error (str "stream rejected: " (name (or (:reason result) :unknown)))}
-          (contains? result :anomaly/category)
-          {:delivered? false :error (str "stream anomaly: " (:anomaly/category result))}
-          :else
-          {:delivered? true}))
+        (publish-result->delivery-result result))
       (catch Exception e
-        {:delivered? false :error (ex-message e)})))
+        (delivery-failure (exception-message e)))))
 
   (send-command [_ agent-record command]
     (if-let [control-state (:control-state (:agent/metadata agent-record))]
