@@ -18,6 +18,7 @@
 
 (ns ai.miniforge.web-dashboard.state.trains-test
   (:require
+   [clojure.java.io :as io]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [cheshire.core :as json]
@@ -175,6 +176,29 @@
     (with-redefs-fn {#'sut/default-fleet-config-path "/nonexistent/path/config.edn"}
       (fn []
         (is (= [] (sut/get-configured-repos state)))))))
+
+(deftest with-config-lock-timeout-test
+  (testing "returns lock-failure within timeout when another thread holds the lock"
+    (let [path    (str (System/getProperty "java.io.tmpdir") "/mf-trains-lock-test-" (System/nanoTime) ".edn")
+          latch   (java.util.concurrent.CountDownLatch. 1)
+          release (java.util.concurrent.CountDownLatch. 1)
+          holder  (future (#'sut/with-config-lock! path
+                            (fn []
+                              (.countDown latch)
+                              (.await release))))]
+      (is (.await latch 5 java.util.concurrent.TimeUnit/SECONDS)
+          "lock holder did not acquire lock in time")
+      (try
+        (let [start   (System/currentTimeMillis)
+              result  (#'sut/with-config-lock! path #(throw (Exception. "should not run")))
+              elapsed (- (System/currentTimeMillis) start)]
+          (is (false? (:success? result)))
+          (is (str/includes? (str/lower-case (:error result)) "lock"))
+          (is (<= elapsed 1500)))
+        (finally
+          (.countDown release)
+          (deref holder 2000 nil)
+          (.delete (io/file path)))))))
 
 ;; ============================================================================
 ;; Layer 0: Provider PR field parsing
