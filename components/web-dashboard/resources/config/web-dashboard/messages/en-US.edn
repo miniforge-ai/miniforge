@@ -18,6 +18,15 @@
   :error-category/network      "Network"
   :error-category/fallback     "Error"
 
+  ;; fleet config errors
+  :repo/required              "Repository is required. Use owner/name."
+  :repo/invalid-format        "Invalid repository format. Expected owner/name."
+  :config-lock/update-failed  "Config update failed."
+  :config-lock/locked         "Config file is locked by another process; retry later."
+  :config-lock/interrupted    "Interrupted while waiting for config file lock."
+  :config-lock/unavailable    "Config file lock unavailable; retry later."
+  :config-lock/acquire-failed "Failed to acquire config file lock: {error}"
+
   ;; blocking-reason-line fallback
   :blocker/fallback-message    "Blocked"
 

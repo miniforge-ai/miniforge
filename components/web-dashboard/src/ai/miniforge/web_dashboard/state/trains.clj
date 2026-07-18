@@ -1,4 +1,8 @@
-;; Copyright 2025 miniforge.ai
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0 (the "License");
 ;; you may not use this file except in compliance with the License.
@@ -17,6 +21,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.config.interface :as config]
+   [ai.miniforge.web-dashboard.messages :as messages]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
@@ -215,16 +220,16 @@
               (try
                 (thunk)
                 (catch Exception thunk-e
-                  (result-exception "Config update failed." thunk-e {:path path}))
+                  (result-exception (messages/t :config-lock/update-failed) thunk-e {:path path}))
                 (finally (.close lk)))
               (if (< (System/currentTimeMillis) deadline)
                 (do (Thread/sleep config-lock-poll-ms) (recur))
-                (result-failure "Config file is locked by another process; retry later."
+                (result-failure (messages/t :config-lock/locked)
                                 {:path path}))))))
       (catch InterruptedException _
         ;; Restore interrupt flag for cooperative-cancellation callers.
         (.interrupt (Thread/currentThread))
-        (result-failure "Interrupted while waiting for config file lock." {:path path}))
+        (result-failure (messages/t :config-lock/interrupted) {:path path}))
       (catch Exception e
         ;; OverlappingFileLockException — same-JVM re-entrant attempt.
         ;; ClosedChannelException — channel closed concurrently.
@@ -232,8 +237,8 @@
         (if (contains? #{"java.nio.channels.OverlappingFileLockException"
                          "java.nio.channels.ClosedChannelException"}
                        (.getName (class e)))
-          (result-failure "Config file lock unavailable; retry later." {:path path})
-          (result-failure (str "Failed to acquire config file lock: " (ex-msg e))
+          (result-failure (messages/t :config-lock/unavailable) {:path path})
+          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
                           {:path path}))))))
 
 (defn load-fleet-config
@@ -339,12 +344,12 @@
     (cond
       (str/blank? repo*)
       (result-failure
-       "Repository is required. Use owner/name."
+       (messages/t :repo/required)
        {:repo repo*})
 
       (not (valid-repo-slug? repo*))
       (result-failure
-       "Invalid repository format. Expected owner/name."
+       (messages/t :repo/invalid-format)
        {:repo repo*})
 
       :else

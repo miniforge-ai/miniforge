@@ -175,17 +175,17 @@
               (try
                 (thunk)
                 (catch Exception thunk-e
-                  (result-failure (str "Config update failed: " (ex-msg thunk-e))
+                  (result-failure (messages/t :config-lock/update-failed {:error (ex-msg thunk-e)})
                                   {:path path :exception (ex-msg thunk-e)}))
                 (finally (.close lk)))
               (if (< (System/currentTimeMillis) deadline)
                 (do (Thread/sleep config-lock-poll-ms) (recur))
-                (result-failure "Config file is locked by another process; retry later."
+                (result-failure (messages/t :config-lock/locked)
                                 {:path path}))))))
       (catch InterruptedException _
         ;; Restore interrupt flag for cooperative-cancellation callers.
         (.interrupt (Thread/currentThread))
-        (result-failure "Interrupted while waiting for config file lock." {:path path}))
+        (result-failure (messages/t :config-lock/interrupted) {:path path}))
       (catch Exception e
         ;; OverlappingFileLockException — same-JVM re-entrant attempt.
         ;; ClosedChannelException — channel closed concurrently.
@@ -193,8 +193,8 @@
         (if (contains? #{"java.nio.channels.OverlappingFileLockException"
                          "java.nio.channels.ClosedChannelException"}
                        (.getName (class e)))
-          (result-failure "Config file lock unavailable; retry later." {:path path})
-          (result-failure (str "Failed to acquire config file lock: " (ex-msg e))
+          (result-failure (messages/t :config-lock/unavailable) {:path path})
+          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
                           {:path path}))))))
 
 (defn load-fleet-config
