@@ -53,6 +53,31 @@
    [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
+;;------------------------------------------------------------------------------ Defaults
+
+(def ^:private default-event-ttl-ms
+  "How long a persisted event file is kept before cleanup prunes it —
+   7 days. Long enough to debug a failed run days later; short enough that
+   the on-disk event log doesn't grow unbounded on a busy fleet."
+  (* 7 24 60 60 1000))
+
+(def ^:private default-fleet-sink-batch-size
+  "Events buffered before the fleet HTTP sink flushes a batch. 10 keeps
+   request overhead low without holding events long enough to lose many on a
+   crash between flushes."
+  10)
+
+(def ^:private default-fleet-sink-flush-interval-ms
+  "Maximum time the fleet HTTP sink holds a partial batch before flushing it
+   regardless of size — bounds delivery latency for low event rates. 5s."
+  5000)
+
+(def ^:private default-fleet-sink-timeout-ms
+  "HTTP request timeout for a fleet-sink batch POST. 10s — generous for a
+   batched upload over a slow link, short enough that a hung endpoint doesn't
+   stall the flush loop indefinitely."
+  10000)
+
 ;;------------------------------------------------------------------------------ Internal helpers
 
 (defn default-events-dir
@@ -240,7 +265,7 @@
 
    Returns: Number of files deleted"
   [& [opts]]
-  (let [ttl-ms (get opts :ttl-ms (* 7 24 60 60 1000))
+  (let [ttl-ms (get opts :ttl-ms default-event-ttl-ms)
         events-dir (or (:events-dir opts) (:base-dir opts) (default-events-dir))
         cutoff (- (System/currentTimeMillis) ttl-ms)]
     (if (.isDirectory events-dir)
@@ -381,9 +406,9 @@
         api-key          (or (:api-key opts)
                              (throw (IllegalArgumentException.
                                       (messages/t :fleet-sink.system/missing-api-key))))
-        batch-size       (:batch-size opts 10)
-        flush-interval-ms (:flush-interval-ms opts 5000)
-        timeout-ms       (:timeout-ms opts 10000)
+        batch-size       (:batch-size opts default-fleet-sink-batch-size)
+        flush-interval-ms (:flush-interval-ms opts default-fleet-sink-flush-interval-ms)
+        timeout-ms       (:timeout-ms opts default-fleet-sink-timeout-ms)
         http-client      (or (:http-client opts) (HttpClient/newHttpClient))
         batch-atom       (atom [])
         last-flush-atom  (atom (System/currentTimeMillis))]
