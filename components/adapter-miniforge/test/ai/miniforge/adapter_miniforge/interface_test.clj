@@ -160,7 +160,7 @@
             (is (= :fake-stream (:stream built)))
             (is (= "wf-123" (:wf-id built)))
             (is (= decision-id (:dec-id built)))
-            (is (= :approve (:resolution built)))
+            (is (= "approve" (:resolution built)))
             (is (= "looks good" (:comment built))))
           (is (= 1 (count @published-events)))
           (is (= :fake-stream (:stream (first @published-events))))

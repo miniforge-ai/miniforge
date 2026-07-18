@@ -118,10 +118,12 @@
     (try
       (let [workflow-id (or (get-in agent-record [:agent/metadata :workflow-id])
                             (:agent/external-id agent-record))
+            resolution  (let [r (:decision/resolution decision-resolution)]
+                          (cond-> r (keyword? r) name))
             event (es/cp-decision-resolved event-stream
                                            workflow-id
                                            (:decision/id decision-resolution)
-                                           (:decision/resolution decision-resolution)
+                                           resolution
                                            (:decision/comment decision-resolution))
             result (es/publish! event-stream event)]
         (publish-result->delivery-result result))
