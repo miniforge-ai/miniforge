@@ -383,6 +383,43 @@
       (is (= {:tag :original}
              (get-in result [:error :data :exception-data]))))))
 
+;; ============================================================================
+;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
+;; ============================================================================
+;;
+;; Covers the 2026-07-18 fix: `execute!`, `release-environment!`, `copy-to!`,
+;; and `copy-from!` now route through bounded waitFor rather than parking
+;; the JVM thread indefinitely if Docker stalls (2026-05-16 dogfood follow-up).
+
+(deftest run-runtime-timed-fires-on-deadline-test
+  (testing "returns exit 124 when the subprocess exceeds the per-op timeout"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor "10")]
+      (is (= 124 (:exit result))
+          "exit 124 mirrors the GNU timeout(1) convention for a killed-by-timeout command")
+      (is (clojure.string/includes? (:err result) "100")
+          "error message includes the timeout-ms so operators can distinguish from a real failure"))))
+
+(deftest run-runtime-process-timed-fires-on-deadline-test
+  (testing "returns exit 124 with empty byte arrays when the subprocess exceeds the timeout"
+    (let [run-timed  (private-fn 'run-runtime-process-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor ["10"])]
+      (is (= 124 (:exit result)))
+      (is (= "" (:out result)))
+      (is (clojure.string/includes? (:err result) "100"))
+      (is (zero? (alength ^bytes (:out-bytes result))))
+      (is (zero? (alength ^bytes (:err-bytes result)))))))
+
+(deftest run-runtime-timed-nil-timeout-is-unbounded-test
+  (testing "nil timeout-ms disables the deadline (backward-compatible with run-runtime)"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/echo"}
+          result     (run-timed nil descriptor "hello")]
+      (is (= 0 (:exit result)))
+      (is (clojure.string/includes? (:out result) "hello")))))
+
 (deftest run-runtime-interrupt-destroys-child-process-test
   (testing "interrupting a runtime call does not wait for the child command to finish"
     (let [descriptor {:runtime/executable "/bin/sleep"}
