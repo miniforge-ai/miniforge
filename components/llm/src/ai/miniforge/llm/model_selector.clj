@@ -54,16 +54,16 @@
    :require-local false})
 
 (def ^:private economical-cost-threshold-usd
-  "Minimum per-task budget ($) at which an :economical-cost model is
+  "Minimum per-task budget ($) at which an :economical model is
    affordable in meets-cost-constraint?."
   0.01)
 
 (def ^:private moderate-cost-threshold-usd
-  "Minimum per-task budget ($) at which a :moderate-cost model is affordable."
+  "Minimum per-task budget ($) at which a :moderate model is affordable."
   0.05)
 
 (def ^:private expensive-cost-threshold-usd
-  "Minimum per-task budget ($) at which an :expensive-cost model is
+  "Minimum per-task budget ($) at which an :expensive model is
    affordable. Equal to the default budget — the default is set to just afford
    an expensive model when the caller is silent."
   default-cost-limit-usd)

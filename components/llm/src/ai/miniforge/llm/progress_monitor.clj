@@ -45,7 +45,7 @@
   5000)
 
 (def ^:private min-substantive-chunk-length
-  "A streamed chunk shorter than this (characters) is treated as
+  "A streamed chunk with this length or fewer characters is treated as
    non-substantive — a spinner/keepalive blip, not real output — so it does
    not count as progress."
   10)
