@@ -66,7 +66,7 @@
   "Minimum per-task budget ($) at which an :expensive-cost model is
    affordable. Equal to the default budget — the default is set to just afford
    an expensive model when the caller is silent."
-  0.10)
+  default-cost-limit-usd)
 
 (def ^:private cost-optimized-default-limit-usd
   "Fallback per-task budget ($) for the cost-optimized selection strategy when
@@ -103,10 +103,12 @@
    from `llm/model-selector.edn :default-config` if present, else the
    code-side `default-config-fallback`. Realized via `delay` so the
    resource read happens once per process."
-  (delay (get @model-selector-config :default-config default-config-fallback)))
+  (delay (or (:default-config @model-selector-config)
+             default-config-fallback)))
 
 (def ^:private provider-env-vars
-  (delay (get @model-selector-config :provider-env-vars fallback-provider-env-vars)))
+  (delay (or (:provider-env-vars @model-selector-config)
+             fallback-provider-env-vars)))
 
 (def get-env-var
   "Wraps System/getenv; rebind in tests to inject env state without mutating
@@ -250,7 +252,7 @@
     :provider :anthropic
     :backend :claude
     :task-type :execution-focused
-    :confidence <classification-confidence>
+    :confidence 0.9
     :strategy :automatic
     :rationale \"...\"
     :fallback-used false}"
