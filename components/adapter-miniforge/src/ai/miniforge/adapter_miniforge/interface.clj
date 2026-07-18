@@ -94,7 +94,9 @@
 
     (contains? result :anomaly/category)
     (delivery-failure (control-plane/t :adapter/stream-anomaly
-                                       {:category (:anomaly/category result)}))
+                                       {:category (:anomaly/category result)
+                                        :message  (when-let [m (:anomaly/message result)]
+                                                    (str " — " m))}))
 
     :else
     {:delivered? true}))

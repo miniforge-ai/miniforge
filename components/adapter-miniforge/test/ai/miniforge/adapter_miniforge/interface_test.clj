@@ -187,6 +187,15 @@
           (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
             (is (false? (:delivered? result)))
             (is (= "Stream reported decision delivery anomaly: :cognitect.anomalies/fault"
+                   (:error result))))))
+
+      (testing "includes anomaly message when present"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:anomaly/category :cognitect.anomalies/fault
+                                             :anomaly/message  "event-stream unavailable"})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (= "Stream reported decision delivery anomaly: :cognitect.anomalies/fault — event-stream unavailable"
                    (:error result)))))))))
 
 ;; ---------------------------------------------------------------------------
