@@ -1,4 +1,8 @@
-<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # refactor: exceptions-as-data cleanup of cli base
 
 ## Overview
@@ -81,7 +85,7 @@ Refactor / per-component cleanup tier.
 ## Testing Plan
 
 - New `anomaly.*` tests: 7 tests covering both fns' escalation paths
-  + happy-path returns.
+  - happy-path returns.
 - CI to confirm full cli suite still green.
 
 ## Deployment Plan
