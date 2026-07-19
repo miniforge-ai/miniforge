@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 # Event-stream replay, retention, and quiesce (BD-2)
 
 Status: **draft v4**, opened 2026-05-07, revised three times 2026-05-07

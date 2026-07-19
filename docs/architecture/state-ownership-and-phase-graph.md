@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 # State Ownership and the Phase Graph
 
 Status: design note / direction (2026-05-27)

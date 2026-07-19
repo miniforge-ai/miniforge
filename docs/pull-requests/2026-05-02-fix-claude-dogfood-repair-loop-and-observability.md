@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 ## Summary
 
 This PR packages the next set of Claude dogfood fixes from the `behavioral-verification-monitor` run on `main`.

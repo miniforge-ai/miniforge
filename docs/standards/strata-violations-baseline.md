@@ -1,3 +1,4 @@
+<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
 # Stratified-Design Violations — Baseline (2026-05-01, revised)
 
 Audit of `components/**/src` and `bases/**/src` for within-namespace
