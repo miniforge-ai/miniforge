@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # Fix: Submit MCP tool schema (Anthropic 400) + honest phase outcome display
 
 ## Overview
@@ -21,7 +26,7 @@ on the same theme: the system was lying to the operator.
    `^[a-zA-Z0-9_.-]{1,64}$`, so every implementer invocation that
    loaded the tool produced:
 
-   ```
+   ```text
    API Error: 400 tools.12.custom.input_schema.properties:
    Property keys should match pattern '^[a-zA-Z0-9_.-]{1,64}$'
    ```
@@ -95,7 +100,8 @@ on the same theme: the system was lying to the operator.
 ## Testing Plan
 
 - `bases/mcp-context-server` focused tests:
-  ```
+
+  ```bash
   clojure -A:test:dev -M -e "(require 'clojure.test
     '[ai.miniforge.mcp-context-server.tools-test]
     '[ai.miniforge.mcp-context-server.context-cache-test])
@@ -103,9 +109,11 @@ on the same theme: the system was lying to the operator.
       'ai.miniforge.mcp-context-server.tools-test
       'ai.miniforge.mcp-context-server.context-cache-test)"
   ```
+
   → 27 tests, 69 assertions, 0 failures.
 - `bases/cli` display tests:
-  ```
+
+  ```bash
   clojure -A:test:dev -M -e "(require 'clojure.test
     '[ai.miniforge.cli.workflow-runner.display-output-test]
     '[ai.miniforge.cli.main-test])
@@ -113,6 +121,7 @@ on the same theme: the system was lying to the operator.
       'ai.miniforge.cli.workflow-runner.display-output-test
       'ai.miniforge.cli.main-test)"
   ```
+
   → 51 tests, 130 assertions, 0 failures.
 - `bb pre-commit` — to be run on the committed branch before merge.
 
