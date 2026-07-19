@@ -771,10 +771,11 @@
                        {:usage (token-usage (:prompt_eval_count body)
                                             (:eval_count body))})
           (llm-error :anomalies/unavailable "api_error"
-                     (get body :error "Unknown API error"))))
+                     (get body :error (msg/t :http-provider.system/unknown-api-error)))))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
-                   (str "Failed to parse response: " (.getMessage e)))))))
+                   (msg/t :http-provider.system/parse-failed
+                          {:reason (.getMessage e)}))))))
 
 ;------------------------------------------------------------------------------ Direct provider requests
 ;; Request/response shaping for the API-key HTTP backends
@@ -880,13 +881,15 @@
           (let [{:keys [content usage]} (extract-fn body)]
             (if (str/blank? content)
               (llm-error :anomalies.agent/llm-error "empty_success_output"
-                         "Provider returned 200 with no generated text")
+                         (msg/t :http-provider.system/no-generated-text))
               (llm-success content {:usage usage})))
           (llm-error :anomalies/unavailable "api_error"
-                     (get-in body [:error :message] "Unknown API error"))))
+                     (get-in body [:error :message]
+                             (msg/t :http-provider.system/unknown-api-error)))))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
-                   (str "Failed to parse response: " (.getMessage e)))))))
+                   (msg/t :http-provider.system/parse-failed
+                          {:reason (.getMessage e)}))))))
 
 (defn- extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
@@ -950,19 +953,20 @@
     (cond
       (nil? provider-entry)
       (llm-error :anomalies/unsupported "unsupported_backend"
-                 (str "HTTP backend not implemented for: " provider))
+                 (msg/t :http-provider.system/unsupported-backend
+                        {:provider provider}))
 
       (and api-key-env (str/blank? (str api-key)))
       (llm-error :anomalies/incorrect "missing_api_key"
-                 (str provider " backend needs an API key — pass :api-key in "
-                      "the client config or set " api-key-env))
+                 (msg/t :http-provider.system/missing-api-key
+                        {:provider provider :env-var api-key-env}))
 
       ;; Fail closed before any request rather than formatting a nil
       ;; model into the URL (Gemini) or body (Anthropic/OpenAI).
       (and requires-model? (str/blank? (str (:model request))))
       (llm-error :anomalies/incorrect "missing_model"
-                 (str provider " backend needs a model — pass :model in the "
-                      "client config or request"))
+                 (msg/t :http-provider.system/missing-model
+                        {:provider provider}))
 
       :else
       (parse-fn (http-post-request (request-endpoint backend-config request)
@@ -988,7 +992,8 @@
         result)
       (catch Exception e
         (llm-error :anomalies/fault "stream_error"
-                   (str "Streaming failed: " (.getMessage e)))))))
+                   (msg/t :http-provider.system/stream-failed
+                          {:reason (.getMessage e)}))))))
 
 (defn rate-limited?
   "Detect Claude CLI rate limit messages in content.
