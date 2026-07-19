@@ -187,12 +187,12 @@
 
 (deftest run-tests-aborts-hung-process-within-timeout-test
   (testing "run-tests! must destroy a hung test process when :timeout-ms elapses"
-    (let [t0      (System/nanoTime)
+    (let [t0      (System/currentTimeMillis)
           ;; sleep 600 = a process that would block run-tests! indefinitely.
           ;; Before the fix this assertion timed out the entire test run;
           ;; after the fix the deadline destroys the child within ~1s.
           result  (verify/run-tests! "/tmp" :test-cmd "sleep 600" :timeout-ms 750)
-          elapsed (quot (- (System/nanoTime) t0) 1000000)]
+          elapsed (- (System/currentTimeMillis) t0)]
       (is (false? (:passed? result))
           "a destroyed test process must produce a failed result")
       (is (true? (:timed-out? result))
@@ -268,10 +268,10 @@
         ;; a fixed sleep misread as a leak (flaked on main + PR CI,
         ;; 2026-07-18/19). The deadline only spends fully when the tree
         ;; genuinely leaks — the 2h sleep this test exists to catch.
-        (let [deadline (+ (System/nanoTime) (* 5000 1000000))]
+        (let [deadline (+ (System/currentTimeMillis) 5000)]
           (loop []
             (when (and (seq (descendant-sleeps))
-                       (< (System/nanoTime) deadline))
+                       (< (System/currentTimeMillis) deadline))
               (Thread/sleep 100)
               (recur))))
         (let [orphans (descendant-sleeps)]

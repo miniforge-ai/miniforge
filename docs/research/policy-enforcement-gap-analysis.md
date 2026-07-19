@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # Policy enforcement gap analysis + program
 
 Status: draft 2026-06-18. Drives a multi-wave program. The trust boundary:

@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 ## Summary
 
 This PR fixes the Claude dogfood regression where planner exploration could start from the execution worktree instead of
