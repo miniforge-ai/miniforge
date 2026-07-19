@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # plan-from-agent-dag-wiring
 
 **Spec:** `work/plan-from-agent-dag-wiring.spec.edn`
@@ -90,7 +95,7 @@ Registered all three DAG events in `event_type_registry.clj`:
 
 ## Tests
 
-```
+```text
 # New tests
 7 tests, 10 assertions — 0 failures, 0 errors
 

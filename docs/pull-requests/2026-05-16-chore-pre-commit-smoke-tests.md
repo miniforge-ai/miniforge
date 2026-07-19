@@ -1,3 +1,8 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 ## Overview
 
 Replaces `bb test` (stable-derived sweep) in the `bb pre-commit` chain

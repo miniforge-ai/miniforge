@@ -1,14 +1,25 @@
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # refactor: exceptions-as-data cleanup of workflow (loader side)
 
 ## Overview
 
-Finishes the `workflow` component's exceptions-as-data cleanup. Migrates every loader-side `:cleanup-needed` throw site (9 of 9 per `work/exception-cleanup-inventory.md`) to a single anomaly-returning API. Boundary throws live only at the call sites that need to escalate to slingshot, inlined per the kill-the-deprecation pattern from PR #777.
+Finishes the `workflow` component's exceptions-as-data cleanup. Migrates every loader-side `:cleanup-needed` throw site
+(9 of 9 per `work/exception-cleanup-inventory.md`) to a single anomaly-returning API. Boundary throws live only at the
+call sites that need to escalate to slingshot, inlined per the kill-the-deprecation pattern from PR #777.
 
-Pairs with the runtime-side cleanup (PR #769 → PR #777). Together they retire the workflow component's full `:cleanup-needed` row in the inventory.
+Pairs with the runtime-side cleanup (PR #769 → PR #777). Together they retire the workflow component's full
+`:cleanup-needed` row in the inventory.
 
 ## Motivation
 
-Per the inventory, `workflow` was the second-highest-density cleanup target after `repo-dag`. The runtime side landed in two PRs (#769 introduced anomaly variants, #777 killed the deprecated throwers). This PR mirrors that final shape directly — anomaly-returning helpers as the canonical API; throws inlined at boundary call sites — and applies it to the loader / registry / schemas surface in one PR rather than two.
+Per the inventory, `workflow` was the second-highest-density cleanup target after `repo-dag`. The runtime side landed in
+two PRs (#769 introduced anomaly variants, #777 killed the deprecated throwers). This PR mirrors that final shape
+directly — anomaly-returning helpers as the canonical API; throws inlined at boundary call sites — and applies it to the
+loader / registry / schemas surface in one PR rather than two.
 
 ## Base Branch
 
@@ -35,7 +46,8 @@ Refactor / per-component cleanup tier. Workflow loader namespaces only; runtime 
 
 - `load-from-resource` returns `nil` | workflow | `:fault` anomaly on parse failure (was: `response/throw-anomaly!` of `:anomalies/fault`)
 - `validate-and-cache-workflow` returns result map | `:invalid-input` anomaly on validator failure (was: throw)
-- `load-workflow` becomes the single boundary site that inlines `response/throw-anomaly!` for source faults, validation failures, and the missing-everywhere not-found case
+- `load-workflow` becomes the single boundary site that inlines `response/throw-anomaly!` for source faults, validation
+  failures, and the missing-everywhere not-found case
 
 `components/workflow/src/ai/miniforge/workflow/chain_loader.clj`:
 
@@ -58,7 +70,10 @@ Refactor / per-component cleanup tier. Workflow loader namespaces only; runtime 
 
 `components/workflow/test/ai/miniforge/workflow/anomaly/`:
 
-- Decomposed coverage, one file per scope: `load-from-resource-test`, `validate-and-cache-workflow-test`, `try-load-chain-test`, `load-workflow-from-resource-test`, `workflow-characteristics-test`, `register-workflow-test`, `validate-checkpoint-data-test`. Each covers anomaly happy / anomaly failure / boundary-escalation through the throwing entry point.
+- Decomposed coverage, one file per scope: `load-from-resource-test`, `validate-and-cache-workflow-test`,
+  `try-load-chain-test`, `load-workflow-from-resource-test`, `workflow-characteristics-test`, `register-workflow-test`,
+  `validate-checkpoint-data-test`. Each covers anomaly happy / anomaly failure / boundary-escalation through the
+  throwing entry point.
 
 ## Per-site classification
 
@@ -95,7 +110,8 @@ ai.miniforge.workflow.registry/register-workflow!           ; throws :anomalies/
 ai.miniforge.workflow.schemas/validate-checkpoint-data!     ; throws ex-info
 ```
 
-No deprecated throwers retained. The boundary helpers preserve the same slingshot `:anomaly/category` shapes external callers above the component depend on (CLI / MCP / orchestrator).
+No deprecated throwers retained. The boundary helpers preserve the same slingshot `:anomaly/category` shapes external
+callers above the component depend on (CLI / MCP / orchestrator).
 
 ## Strata Affected
 
@@ -117,14 +133,23 @@ No deprecated throwers retained. The boundary helpers preserve the same slingsho
 
 ## Deployment Plan
 
-No migration required for external callers. The boundary entry points (`load-workflow`, `load-chain`, `workflow-characteristics`, `register-workflow!`, `validate-checkpoint-data!`) preserve the same thrown ex-info shapes that legacy `try+` callers above the workflow component expect.
+No migration required for external callers. The boundary entry points (`load-workflow`, `load-chain`,
+`workflow-characteristics`, `register-workflow!`, `validate-checkpoint-data!`) preserve the same thrown ex-info shapes
+that legacy `try+` callers above the workflow component expect.
 
-New code can opt into the anomaly-returning helpers directly (e.g. `try-load-chain` for callers that want to branch on `:not-found` as data without try+ machinery). Discovery paths (`discover-workflows-from-resources`) now degrade gracefully: a single broken resource no longer aborts the whole sequence.
+New code can opt into the anomaly-returning helpers directly (e.g. `try-load-chain` for callers that want to branch on
+`:not-found` as data without try+ machinery). Discovery paths (`discover-workflows-from-resources`) now degrade
+gracefully: a single broken resource no longer aborts the whole sequence.
 
 ## Notes / Surprises
 
-- **Discovery resilience improvement.** `discover-workflows-from-resources` previously aborted the entire sequence the moment any single resource failed to read. With `load-workflow-from-resource` now anomaly-returning, the discovery sequence filters anomalies out — one bad EDN no longer hides every other workflow. Behavior change is intentional and consistent with how a registry should behave; flagged here for visibility.
-- **`some` / boolean schema gap.** While migrating, the agent observed a place where a `(some pred coll)` result is fed into a malli schema that expected boolean. This is a pre-existing pattern, not introduced by this PR; flagged as a follow-up hygiene item.
+- **Discovery resilience improvement.** `discover-workflows-from-resources` previously aborted the entire sequence the
+  moment any single resource failed to read. With `load-workflow-from-resource` now anomaly-returning, the discovery
+  sequence filters anomalies out — one bad EDN no longer hides every other workflow. Behavior change is intentional and
+  consistent with how a registry should behave; flagged here for visibility.
+- **`some` / boolean schema gap.** While migrating, the agent observed a place where a `(some pred coll)` result is fed
+  into a malli schema that expected boolean. This is a pre-existing pattern, not introduced by this PR; flagged as a
+  follow-up hygiene item.
 - **Commit-budget gate.** Same friction as PR #758 / #769 / #777. Override path used per established precedent.
 
 ## Related Issues/PRs
