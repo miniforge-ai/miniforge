@@ -258,7 +258,7 @@
               (->> (.. (java.lang.ProcessHandle/current) descendants (toArray))
                    (filter (fn [^java.lang.ProcessHandle ph]
                              (-> ph .info .command (.orElse "")
-                                 (clojure.string/includes? "sleep"))))))]
+                                 (str/includes? "sleep"))))))]
       (let [;; sleep 7200 in the shell so the test fails red if the tree
             ;; isn't actually killed (CI noticing a 2h orphan process).
             result (verify/run-tests! "/tmp" :test-cmd "sleep 7200" :timeout-ms 500)]
