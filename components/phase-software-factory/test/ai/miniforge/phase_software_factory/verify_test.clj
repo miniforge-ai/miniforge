@@ -268,10 +268,10 @@
         ;; a fixed sleep misread as a leak (flaked on main + PR CI,
         ;; 2026-07-18/19). The deadline only spends fully when the tree
         ;; genuinely leaks — the 2h sleep this test exists to catch.
-        (let [deadline (+ (System/currentTimeMillis) 5000)]
+        (let [deadline (+ (System/nanoTime) (* 5000 1000000))]
           (loop []
             (when (and (seq (descendant-sleeps))
-                       (< (System/currentTimeMillis) deadline))
+                       (< (System/nanoTime) deadline))
               (Thread/sleep 100)
               (recur))))
         (let [orphans (descendant-sleeps)]
