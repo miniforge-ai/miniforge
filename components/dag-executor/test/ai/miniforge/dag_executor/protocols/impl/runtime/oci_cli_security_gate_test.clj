@@ -88,15 +88,49 @@
       (is (result/ok? r))
       (is (= :pass (get-in r [:data :security/decision]))))))
 
-(deftest gate-ok-carries-resolved-digest-test
-  (testing "a passing gate returns the resolved digest for the launch to use"
-    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)]
+(deftest gate-ok-carries-launch-plan-test
+  (testing "a passing gate returns the checked launch plan for the launch to use"
+    (let [r    (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)
+          plan (get-in r [:data :launch-plan])]
       (is (result/ok? r))
-      (is (= valid-digest (get-in r [:data :image-digest]))))))
+      (is (= valid-digest (:image-digest plan)))
+      (is (= :untrusted (:trust-level plan)))
+      (is (= ["sleep" "infinity"] (:command plan))))))
 
-(deftest acquire-launches-from-resolved-digest-test
-  (testing "acquire-environment! creates the container from the gate's resolved
-            digest, not the mutable tag it was configured with"
+(deftest build-launch-plan-defaults-test
+  (testing "a minimal env-config yields the untrusted keep-alive plan with no
+            invented optional fields"
+    (let [plan (oci-cli/build-launch-plan valid-digest {:workdir "/workspace"})]
+      (is (= {:image-digest valid-digest
+              :command      ["sleep" "infinity"]
+              :mounts       []
+              :env          {}
+              :trust-level  :untrusted}
+             plan)))))
+
+(deftest build-launch-plan-passes-optional-fields-through-test
+  (testing "optional plan fields thread from env-config when present"
+    (let [plan (oci-cli/build-launch-plan
+                valid-digest
+                {:mounts          [{:host-path "/workspace" :container-path "/w" :read-only? false}]
+                 :env             {:A "1"}
+                 :trust-level     :trusted
+                 :time-limit-ms   60000
+                 :memory-limit-mb 1024
+                 :network-profile :none
+                 :secrets-refs    ["ref-1"]})]
+      (is (= :trusted (:trust-level plan)))
+      (is (= 60000 (:time-limit-ms plan)))
+      (is (= 1024 (:memory-limit-mb plan)))
+      (is (= :none (:network-profile plan)))
+      (is (= ["ref-1"] (:secrets-refs plan)))
+      (is (= [{:host-path "/workspace" :container-path "/w" :read-only? false}]
+             (:mounts plan))))))
+
+(deftest acquire-launches-from-checked-plan-test
+  (testing "acquire-environment! creates the container from the gate-checked
+            plan: its digest as the image reference, the plan as the
+            :execution-plan"
     (let [launched (atom nil)
           executor (oci-cli/map->OciCliExecutor
                     {:config     {}
@@ -105,11 +139,16 @@
                      :network    nil})]
       (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
                     oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
-                    oci-cli/create-container       (fn [_ container-name image _ & _]
-                                                     (reset! launched image)
+                    oci-cli/create-container       (fn [_d container-name image _workdir
+                                                        _env _resources _network
+                                                        & {:keys [execution-plan]}]
+                                                     (reset! launched {:image image
+                                                                       :plan  execution-plan})
                                                      (result/ok {:container-id "c1"
                                                                  :container-name container-name}))
                     oci-cli/container-image-digest (fn [_ _] valid-digest)]
         (let [r (proto/acquire-environment! executor "abcd1234efgh" {:workdir "/workspace"})]
           (is (result/ok? r))
-          (is (= valid-digest @launched)))))))
+          (is (= valid-digest (:image @launched)))
+          (is (= valid-digest (get-in @launched [:plan :image-digest])))
+          (is (= :untrusted (get-in @launched [:plan :trust-level]))))))))

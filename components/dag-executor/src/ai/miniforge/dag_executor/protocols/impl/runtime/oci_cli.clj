@@ -435,10 +435,11 @@
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
-        ;; When an execution plan is present its network-profile drives the
-        ;; network arg; fall back to the plain `network` string otherwise.
-        network-args  (if (some? execution-plan)
-                        [] ; network handled inside build-security-args
+        ;; A plan :network-profile drives networking (via build-security-args);
+        ;; a plan WITHOUT one falls back to the legacy `network` string rather
+        ;; than silently dropping it.
+        network-args  (if (:network-profile execution-plan)
+                        []
                         (when network ["--network" network]))
         ;; N11 §2.2: Set runtime stop-timeout from execution plan time limit
         stop-timeout  (when-let [ms (get-in execution-plan [:time-limit-ms])]
@@ -454,7 +455,7 @@
                               mount-args
                               env-args
                               resource-args
-                              [image "sleep" "infinity"])
+                              (into [image] (get execution-plan :command ["sleep" "infinity"])))
         result        (apply run-runtime descriptor cmd-args)]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
@@ -842,10 +843,32 @@
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
 ;; ============================================================================
 
+(defn build-launch-plan
+  "Assemble the execution plan for a pending launch from what the launch site
+   actually knows: the resolved image digest, the caller's mounts / env /
+   trust level from env-config, and the capsule's keep-alive command. Optional
+   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
+   pass through only when env-config carries them — absent fields stay absent
+   rather than being filled with guesses.
+
+   This one plan is both what `check-plan-security` inspects and what
+   `create-container` receives as :execution-plan, so the plan the gate
+   checked is the plan that runs."
+  [image-digest env-config]
+  (cond-> {:image-digest image-digest
+           :command      ["sleep" "infinity"]
+           :mounts       (get env-config :mounts [])
+           :env          (get env-config :env {})
+           :trust-level  (get env-config :trust-level :untrusted)}
+    (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+    (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+    (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+    (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))
+
 (defn security-gate-check
   "Run the capsule-isolation security gate for a pending launch. Resolves the
    image's content-addressed digest via `digest-fn` (injected for testing),
-   synthesizes the plan the gate inspects (pinned digest + host mounts), and
+   builds the launch plan the gate inspects via `build-launch-plan`, and
    applies `plan-security/check-plan-security`. The host-path allowlist is the
    sandbox workdir (the only host path a well-formed plan mounts today).
 
@@ -855,13 +878,12 @@
    with the findings on a hard-stop. A nil digest fails closed (hard-stop),
    since a plan with no pinned digest cannot satisfy require-image-digest-pin.
 
-   A passing result also carries the resolved `:image-digest`;
-   `acquire-environment!` launches the container from that immutable ID rather
-   than the mutable tag, so the image that runs is the image the gate checked."
+   A passing result also carries the checked `:launch-plan`;
+   `acquire-environment!` creates the container FROM that plan — its digest as
+   the immutable image reference, the plan itself as create-container's
+   :execution-plan."
   [descriptor image env-config digest-fn]
-  (let [digest          (digest-fn descriptor image)
-        plan            {:image-digest digest
-                         :mounts       (get env-config :mounts [])}
+  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)]
@@ -869,7 +891,7 @@
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
-      (result/ok (assoc (:output decision) :image-digest digest)))))
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
@@ -916,15 +938,18 @@
             (let [container-name (str container-name-prefix
                                       (subs (str task-id) 0 container-name-uuid-slice))
                   workdir (get env-config :workdir default-workdir)
-                  ;; Launch from the gate's resolved digest, not the mutable
-                  ;; tag — the image that runs is the image the gate checked.
+                  ;; Launch FROM the gate-checked plan: its digest as the
+                  ;; immutable image reference, the plan itself as the
+                  ;; execution plan — what runs is what was checked.
+                  launch-plan (get-in gate-result [:data :launch-plan])
                   create-result (create-container descriptor
                                                   container-name
-                                                  (get-in gate-result [:data :image-digest])
+                                                  (:image-digest launch-plan)
                                                   workdir
                                                   (:env env-config)
                                                   (:resources env-config)
-                                                  network)]
+                                                  network
+                                                  :execution-plan launch-plan)]
               (if (result/ok? create-result)
                 ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
                 (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]

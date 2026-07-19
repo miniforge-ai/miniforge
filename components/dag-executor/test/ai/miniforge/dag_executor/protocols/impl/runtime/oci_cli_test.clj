@@ -159,6 +159,54 @@
                                          "nonexistent/image:never"))))))
 
 ;; ============================================================================
+;; create-container — execution-plan interactions
+;; ============================================================================
+
+(deftest create-container-plan-without-profile-keeps-legacy-network-test
+  (testing "an execution-plan WITHOUT :network-profile does not drop the
+            legacy network argument"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []})
+        (let [args @captured]
+          (is (some #{"--network"} args))
+          (is (some #{"bridge"} args)))))))
+
+(deftest create-container-plan-network-profile-overrides-legacy-test
+  (testing "an execution-plan WITH :network-profile drops the legacy network
+            argument (profile drives networking via build-security-args)"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :network-profile :none})
+        (let [args @captured]
+          (is (not (some #{"--network"} args)))
+          (is (some #{"--network=none"} args)))))))
+
+(deftest create-container-runs-plan-command-test
+  (testing "the container command comes from the plan's :command, defaulting
+            to the keep-alive when absent"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :command ["bb" "run" "task"]})
+        (is (= ["bb" "run" "task"] (subvec @captured (- (count @captured) 3))))
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil)
+        (is (= ["sleep" "infinity"] (subvec @captured (- (count @captured) 2))))))))
+
+;; ============================================================================
 ;; container-image-digest
 ;; ============================================================================
 
