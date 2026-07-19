@@ -827,7 +827,7 @@
    category `:anomalies/unavailable` is reconstituted explicitly for
    `llm-error` so downstream classification stays identical."
   [response]
-  ;; If response is already a canonical anomaly map, pass it through
+  ;; If response is already a canonical anomaly map, re-wrap it as :anomalies/unavailable so downstream classification stays identical
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
     (try+
