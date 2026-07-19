@@ -931,9 +931,10 @@
       endpoint)))
 
 (defn- parse-provider-response
-  "Shared response handling for the direct provider backends: anomaly
-   pass-through from the transport layer, JSON parse, HTTP status
-   check, then provider-specific extraction. `extract-fn` takes the
+  "Shared response handling for the direct provider backends: a
+   transport-layer anomaly converts to the canonical http_error
+   failure; otherwise JSON parse, HTTP status check, then
+   provider-specific extraction. `extract-fn` takes the
    parsed body and returns `{:content string :usage usage-map}`.
 
    A blank `:content` on a 200 is surfaced as an error — every caller
