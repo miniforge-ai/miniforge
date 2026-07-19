@@ -17,7 +17,9 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.workflow-runner.sandbox
-  "Docker sandbox setup for isolated workflow execution.
+  "Container sandbox setup for isolated workflow execution. Runtime-agnostic:
+   the host's container runtime is auto-selected (Podman first, Docker
+   second), with MINIFORGE_RUNTIME as the explicit override.
 
    Stratification (intra-namespace):
    Layer 0 — `sandbox-release-fn`, `git-remote-url`, `infer-branch`
@@ -28,6 +30,7 @@
   (:require
    [clojure.string :as str]
    [babashka.process :as p]
+   [ai.miniforge.cli.runtime-env :as runtime-env]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.dag-executor.interface :as dag]))
 
@@ -73,7 +76,8 @@
 ;; Layer 0 (`infer-branch`).
 
 (defn prepare-sandbox [spec enriched-spec]
-  (let [prep-result (dag/prepare-docker-executor! {:image-type :clojure})]
+  (let [prep-result (dag/prepare-runtime-executor!
+                     (runtime-env/selection-config {:image-type :clojure}))]
     (if-not (dag/ok? prep-result)
       prep-result
       (let [executor (:executor (dag/unwrap prep-result))
