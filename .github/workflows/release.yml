@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g., 2026.01.20.1)'
+        description: 'Version to release (DateVer: YYYY.MM.DD.N)'
         required: true
         type: string
 
@@ -114,7 +114,8 @@ jobs:
       - name: Install deps.clj shim (Windows)
         shell: pwsh
         run: |
-          $depsVersion = "1.12.4.1618"
+          $toolVersions = Get-Content ".github/tool-versions.json" | ConvertFrom-Json
+          $depsVersion = $toolVersions.'deps-clj'
           $depsDir = "$env:USERPROFILE\.deps-clj"
           New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
           Invoke-WebRequest `

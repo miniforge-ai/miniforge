@@ -225,36 +225,19 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
-      # Two missing pieces on windows-latest after setup-clojure runs:
+      # One missing piece on windows-latest after setup-clojure runs:
       #
-      #   1. polylith — has no scoop manifest in any standard bucket
-      #      (scoop-clojure, Main, Extras), so download the official
-      #      uberjar and shim. Pinned to deps.edn :poly alias version.
-      #
-      #   2. clojure as a binary — setup-clojure on Windows installs
+      #   clojure as a binary — setup-clojure on Windows installs
       #      clojure as a PowerShell module, not clojure.exe. babashka's
       #      p/process invokes via Java ProcessBuilder which does not
       #      resolve PowerShell modules, so `bb test:integration`
       #      (which shells out to `clojure`) fails. Drop deps.clj as
       #      clojure.exe to provide a real binary clojure on PATH.
-      - name: Install polylith CLI + deps.clj (Windows)
+      - name: Install deps.clj shim (Windows)
         shell: pwsh
         run: |
-          # 1. Polylith uberjar + poly.cmd shim
-          $polyVersion = "0.2.21"
-          $polyDir = "$env:USERPROFILE\.poly"
-          New-Item -ItemType Directory -Force -Path $polyDir | Out-Null
-          Invoke-WebRequest `
-            -Uri "https://github.com/polyfy/polylith/releases/download/v${polyVersion}/poly-${polyVersion}.jar" `
-            -OutFile "$polyDir\poly.jar"
-          @"
-          @echo off
-          java -jar "%USERPROFILE%\.poly\poly.jar" %*
-          "@ | Out-File -Encoding ascii "$polyDir\poly.cmd"
-          "$polyDir" >> $env:GITHUB_PATH
-
-          # 2. deps.clj as clojure.exe / clj.exe
-          $depsVersion = "1.12.4.1618"
+          $toolVersions = Get-Content ".github/tool-versions.json" | ConvertFrom-Json
+          $depsVersion = $toolVersions.'deps-clj'
           $depsDir = "$env:USERPROFILE\.deps-clj"
           New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
           Invoke-WebRequest `
@@ -266,7 +249,6 @@ jobs:
           Copy-Item "$depsDir\deps.exe" "$depsDir\clj.exe"
           "$depsDir" >> $env:GITHUB_PATH
 
-          Write-Host "poly installed at $polyDir\poly.cmd"
           Write-Host "clojure/clj installed at $depsDir (via deps.clj $depsVersion)"
 
       - name: Platform check
