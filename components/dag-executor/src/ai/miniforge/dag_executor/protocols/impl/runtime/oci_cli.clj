@@ -469,8 +469,9 @@
                           env-args
                           [container-id]
                           cmd-args)
+        timeout-ms (or (:timeout-ms opts) default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
-        result (apply run-runtime-timed default-exec-timeout-ms descriptor full-args)]
+        result (apply run-runtime-timed timeout-ms descriptor full-args)]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)

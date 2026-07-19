@@ -187,12 +187,12 @@
 
 (deftest run-tests-aborts-hung-process-within-timeout-test
   (testing "run-tests! must destroy a hung test process when :timeout-ms elapses"
-    (let [t0      (System/currentTimeMillis)
+    (let [t0      (System/nanoTime)
           ;; sleep 600 = a process that would block run-tests! indefinitely.
           ;; Before the fix this assertion timed out the entire test run;
           ;; after the fix the deadline destroys the child within ~1s.
           result  (verify/run-tests! "/tmp" :test-cmd "sleep 600" :timeout-ms 750)
-          elapsed (- (System/currentTimeMillis) t0)]
+          elapsed (quot (- (System/nanoTime) t0) 1000000)]
       (is (false? (:passed? result))
           "a destroyed test process must produce a failed result")
       (is (true? (:timed-out? result))
