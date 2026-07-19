@@ -1,4 +1,8 @@
-<!--\n  Title: Miniforge.ai\n  Author: Christopher Lester (christopher@miniforge.ai)\n  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n-->
+<!--
+  Title: Miniforge.ai
+  Author: Christopher Lester (christopher@miniforge.ai)
+  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
+-->
 # Design RFC — Automation Edge Correlator
 
 - **Status:** Draft
@@ -65,7 +69,7 @@ not as a subsystem of supervisory-state. Two reasons:
 
 Component layout:
 
-```
+```text
 components/automation-edge-correlator/
 ├── deps.edn
 ├── src/ai/miniforge/automation_edge_correlator/
@@ -106,7 +110,7 @@ sibling task to this RFC — either land in the same PR or in a follow-on.
 
 ## Edge lifecycle + status state machine
 
-```
+```text
                            ┌─────────────┐
        trigger observed    │             │   handler workflow completes
        ────────────────►   │  :observed  │   ──────────────────────────►  :handled
