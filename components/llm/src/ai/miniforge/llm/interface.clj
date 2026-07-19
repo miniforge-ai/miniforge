@@ -50,17 +50,24 @@
 ;; Client creation
 
 (defn create-client
-  "Create a new LLM client using a CLI backend.
+  "Create a new LLM client.
 
    Options:
-   - :backend - Backend keyword (:opencode, :codex, :claude, :cursor, :echo) - default :codex
+   - :backend - Backend keyword - default :codex. CLI backends:
+                :opencode, :codex, :claude, :cursor, :echo. HTTP
+                backends: :ollama, :anthropic-api, :openai-api,
+                :gemini-api.
+   - :model   - Optional model id passed through to the backend
+   - :api-key - Optional API key for the direct HTTP providers;
+                falls back to the backend's :api-key-env variable
    - :logger  - Optional logger for request/response logging
 
    Example:
      (create-client)                    ; uses codex CLI
      (create-client {:backend :opencode}) ; uses OpenCode CLI
      (create-client {:backend :cursor}) ; uses cursor CLI
-     (create-client {:backend :claude :logger my-logger})"
+     (create-client {:backend :claude :logger my-logger})
+     (create-client {:backend :anthropic-api :model \"claude-opus-4-8\"})"
   ([] (records/create-client))
   ([opts] (records/create-client opts)))
 
