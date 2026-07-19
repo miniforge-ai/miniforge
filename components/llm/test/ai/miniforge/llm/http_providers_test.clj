@@ -192,19 +192,41 @@
       (is (= "missing_api_key" (get-in result [:error :type])))
       (is (= :invalid-input (get-in result [:anomaly :anomaly/type]))))))
 
+(defn- provider-error
+  "Run an anthropic-api request against a canned non-200 response and
+   return the parsed result."
+  [status body]
+  (:result (capture-http {:status status :body (json/generate-string body)}
+                         #(impl/http-complete (backend-config :anthropic-api)
+                                              {:prompt "q" :model "m"}
+                                              {:api-key test-api-key}))))
+
 (deftest provider-error-responses-test
-  (testing "non-200 surfaces the provider's error message"
+  (testing "429 classifies as rate-limited, preserving status + provider message"
+    (let [result (provider-error 429 {:error {:type "rate_limit_error"
+                                              :message "slow down"}})]
+      (is (not (:success result)))
+      (is (= "api_error" (get-in result [:error :type])))
+      (is (= "Provider returned HTTP 429: slow down"
+             (get-in result [:error :message])))
+      (is (= :anomalies.agent/rate-limited
+             (get-in result [:anomaly :anomaly/subtype])))))
+  (testing "403 classifies as forbidden — not a parse error, not generic"
+    (let [result (provider-error 403 {:error {:message "key disabled"}})]
+      (is (= :unauthorized (get-in result [:anomaly :anomaly/type])))
+      (is (= "Provider returned HTTP 403: key disabled"
+             (get-in result [:error :message])))))
+  (testing "5xx classifies as unavailable"
+    (let [result (provider-error 503 {:error {:message "overloaded"}})]
+      (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
+  (testing "a non-JSON body on a non-200 stays a status error, not a parse error"
     (let [{:keys [result]}
-          (capture-http {:status 429
-                         :body (json/generate-string
-                                {:error {:type "rate_limit_error"
-                                         :message "slow down"}})}
+          (capture-http {:status 502 :body "<html>bad gateway</html>"}
                         #(impl/http-complete (backend-config :anthropic-api)
                                              {:prompt "q" :model "m"}
                                              {:api-key test-api-key}))]
-      (is (not (:success result)))
       (is (= "api_error" (get-in result [:error :type])))
-      (is (= "slow down" (get-in result [:error :message])))))
+      (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
   (testing "200 with no generated text fails instead of passing empty content"
     (let [{:keys [result]}
           (capture-http (http-200 {:content [] :usage {}})

@@ -32,9 +32,10 @@
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [try+]])
+   [slingshot.slingshot :refer [throw+ try+]])
   (:import
    [java.io ByteArrayInputStream]
+   [java.net HttpURLConnection]
    [java.util.concurrent LinkedBlockingQueue TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -138,21 +139,24 @@
    :anomalies/unsupported        :unsupported
    :anomalies/timeout            :timeout
    :anomalies/incorrect          :invalid-input
+   :anomalies/forbidden          :unauthorized
+   :anomalies/not-found          :not-found
    :anomalies.agent/llm-error    :fault
    :anomalies.agent/rate-limited :unavailable})
 
 (def ^:private generic-standard-categories
   "Subset of the cognitect-standard categories (per the runbook
    `Generic standard (no subtype)` table) that this brick emits — these
-   five map 1:1 to a type and carry no `:anomaly/subtype`. The runbook's
-   full set is eight; the other three (`:anomalies/not-found`,
-   `:anomalies/forbidden`, `:anomalies/conflict`) are not produced by
+   seven map 1:1 to a type and carry no `:anomaly/subtype`. The runbook's
+   full set is eight; only `:anomalies/conflict` is not produced by
    `llm-error` in this brick today."
   #{:anomalies/fault
     :anomalies/unavailable
     :anomalies/unsupported
     :anomalies/timeout
-    :anomalies/incorrect})
+    :anomalies/incorrect
+    :anomalies/forbidden
+    :anomalies/not-found})
 
 (defn- ->canonical-anomaly
   "Build a canonical anomaly map from the brick's legacy category
@@ -752,6 +756,68 @@
     (number? input-tokens)  (assoc :input-tokens input-tokens)
     (number? output-tokens) (assoc :output-tokens output-tokens)))
 
+(defn- extraction
+  "The `{:content :usage}` shape `parse-provider-response` expects from
+   every extractor — built in one place so the extractors stay pure
+   field mappings."
+  [content input-tokens output-tokens]
+  {:content content
+   :usage (token-usage input-tokens output-tokens)})
+
+(def ^:private http-too-many-requests
+  "HTTP 429. `java.net.HttpURLConnection` predates RFC 6585 and has no
+   constant for it; the other status literals in this namespace come
+   from that class."
+  429)
+
+(defn- http-status->category
+  "Map a non-OK provider HTTP status to the brick's legacy anomaly
+   category, so a 403 classifies as forbidden and a 429 as rate-limited
+   instead of everything collapsing into a generic api_error."
+  [status]
+  (cond
+    (or (= status HttpURLConnection/HTTP_UNAUTHORIZED)
+        (= status HttpURLConnection/HTTP_FORBIDDEN))  :anomalies/forbidden
+    (= status HttpURLConnection/HTTP_NOT_FOUND)       :anomalies/not-found
+    (= status http-too-many-requests)                 :anomalies.agent/rate-limited
+    (< status HttpURLConnection/HTTP_INTERNAL_ERROR)  :anomalies/incorrect
+    :else                                             :anomalies/unavailable))
+
+(defn- parse-body-or-throw
+  "Parse a response body as JSON. A malformed body on a NON-OK response
+   is not a parse error — the provider signalled failure and the status
+   is the signal — so that case throws the typed provider-http-error
+   instead of surfacing as :anomalies/fault."
+  [{:keys [status body]}]
+  (try
+    (json/parse-string body true)
+    (catch Exception e
+      (if (= HttpURLConnection/HTTP_OK status)
+        (throw e)
+        (throw+ {:type ::provider-http-error
+                 :status status
+                 :message (ex-message e)})))))
+
+(defn- throw-provider-http-error!
+  "Throw the typed non-OK provider error carrying the status and the
+   provider's own message when it sent one."
+  [{:keys [status]} provider-message]
+  (throw+ {:type ::provider-http-error
+           :status status
+           :message provider-message}))
+
+(defn- provider-http-error->llm-error
+  "Build the canonical failure for a non-OK provider response: the
+   category classifies by status class, and the message preserves the
+   status alongside the provider's own error text."
+  [{:keys [status message]}]
+  (llm-error (http-status->category status)
+             "api_error"
+             (msg/t :http-provider.system/api-error
+                    {:status status
+                     :message (or message
+                                  (msg/t :http-provider.system/unknown-api-error))})))
+
 (defn parse-ollama-response
   "Parse Ollama API response.
 
@@ -764,14 +830,16 @@
   ;; If response is already a canonical anomaly map, pass it through
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try
-      (let [body (json/parse-string (:body response) true)]
-        (if (= 200 (:status response))
-          (llm-success (get-in body [:message :content] "")
-                       {:usage (token-usage (:prompt_eval_count body)
-                                            (:eval_count body))})
-          (llm-error :anomalies/unavailable "api_error"
-                     (get body :error (msg/t :http-provider.system/unknown-api-error)))))
+    (try+
+      (let [body (parse-body-or-throw response)]
+        (when-not (= HttpURLConnection/HTTP_OK (:status response))
+          (throw-provider-http-error! response
+                                      (get body :error)))
+        (llm-success (get-in body [:message :content] "")
+                     {:usage (token-usage (:prompt_eval_count body)
+                                          (:eval_count body))}))
+      (catch [:type ::provider-http-error] e
+        (provider-http-error->llm-error e))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
                    (msg/t :http-provider.system/parse-failed
@@ -875,17 +943,18 @@
   [extract-fn response]
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try
-      (let [body (json/parse-string (:body response) true)]
-        (if (= 200 (:status response))
-          (let [{:keys [content usage]} (extract-fn body)]
-            (if (str/blank? content)
-              (llm-error :anomalies.agent/llm-error "empty_success_output"
-                         (msg/t :http-provider.system/no-generated-text))
-              (llm-success content {:usage usage})))
-          (llm-error :anomalies/unavailable "api_error"
-                     (get-in body [:error :message]
-                             (msg/t :http-provider.system/unknown-api-error)))))
+    (try+
+      (let [body (parse-body-or-throw response)]
+        (when-not (= HttpURLConnection/HTTP_OK (:status response))
+          (throw-provider-http-error! response
+                                      (get-in body [:error :message])))
+        (let [{:keys [content usage]} (extract-fn body)]
+          (if (str/blank? content)
+            (llm-error :anomalies.agent/llm-error "empty_success_output"
+                       (msg/t :http-provider.system/no-generated-text))
+            (llm-success content {:usage usage}))))
+      (catch [:type ::provider-http-error] e
+        (provider-http-error->llm-error e))
       (catch Exception e
         (llm-error :anomalies/fault "parse_error"
                    (msg/t :http-provider.system/parse-failed
@@ -895,28 +964,28 @@
   "Text + usage from an Anthropic Messages response: join the `text`
    content blocks (tool-use and thinking blocks carry no answer text)."
   [body]
-  {:content (->> (:content body)
-                 (keep (fn [block] (when (= "text" (:type block)) (:text block))))
-                 (str/join))
-   :usage (token-usage (get-in body [:usage :input_tokens])
-                       (get-in body [:usage :output_tokens]))})
+  (extraction (->> (:content body)
+                   (keep (fn [block] (when (= "text" (:type block)) (:text block))))
+                   (str/join))
+              (get-in body [:usage :input_tokens])
+              (get-in body [:usage :output_tokens])))
 
 (defn- extract-openai
   "Text + usage from an OpenAI Chat Completions response."
   [body]
-  {:content (get-in body [:choices 0 :message :content])
-   :usage (token-usage (get-in body [:usage :prompt_tokens])
-                       (get-in body [:usage :completion_tokens]))})
+  (extraction (get-in body [:choices 0 :message :content])
+              (get-in body [:usage :prompt_tokens])
+              (get-in body [:usage :completion_tokens])))
 
 (defn- extract-gemini
   "Text + usage from a Gemini generateContent response: join the text
    parts of the first candidate."
   [body]
-  {:content (->> (get-in body [:candidates 0 :content :parts])
-                 (keep :text)
-                 (str/join))
-   :usage (token-usage (get-in body [:usageMetadata :promptTokenCount])
-                       (get-in body [:usageMetadata :candidatesTokenCount]))})
+  (extraction (->> (get-in body [:candidates 0 :content :parts])
+                   (keep :text)
+                   (str/join))
+              (get-in body [:usageMetadata :promptTokenCount])
+              (get-in body [:usageMetadata :candidatesTokenCount])))
 
 (def ^:private http-providers
   "Wire-shape registry for the HTTP backends: request-body builder +
@@ -942,9 +1011,10 @@
    Two families share this path: the local, credential-free Ollama
    endpoint, and the direct API-key providers (:anthropic-api /
    :openai-api / :gemini-api) for builds where CLI-agent backends are
-   unavailable. `config` is the client config; `:api-key` and `:model`
-   are read from it (the caller has already merged the config model
-   into `request`)."
+   unavailable. `config` is the client config — only `:api-key` is
+   read from it here; the caller (`complete-impl` /
+   `complete-stream-impl`) has already merged the config `:model` into
+   `request`, which is where this fn and the body builders read it."
   [backend-config request config]
   (let [{:keys [provider api-key-env]} backend-config
         {:keys [body-fn parse-fn requires-model?] :as provider-entry}
@@ -1606,7 +1676,7 @@
       (log/debug logger :system :agent/response-received
                  {:data {:response-length (count (:content response))}})
       (log/error logger :system :agent/task-failed
-                 {:message "CLI command failed"
+                 {:message (msg/t :backend.system/request-failed)
                   :data (:error response)}))))
 
 (defn complete-impl [client request]

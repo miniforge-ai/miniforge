@@ -36,6 +36,12 @@
   :http-provider.system/unknown-api-error
   "Unknown API error"
 
+  :http-provider.system/api-error
+  "Provider returned HTTP {status}: {message}"
+
+  :backend.system/request-failed
+  "LLM backend request failed"
+
   :http-provider.system/parse-failed
   "Failed to parse response: {reason}"
 
