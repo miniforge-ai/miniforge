@@ -114,7 +114,7 @@ jobs:
       - name: Install deps.clj shim (Windows)
         shell: pwsh
         run: |
-          $toolVersions = Get-Content ".github/tool-versions.json" | ConvertFrom-Json
+          $toolVersions = Get-Content -Raw ".github/tool-versions.json" | ConvertFrom-Json
           $depsVersion = $toolVersions.'deps-clj'
           $depsDir = "$env:USERPROFILE\.deps-clj"
           New-Item -ItemType Directory -Force -Path $depsDir | Out-Null
