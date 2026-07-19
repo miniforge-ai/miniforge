@@ -49,12 +49,17 @@
 ;; Probe — single-kind helper used by both explicit and auto paths
 
 (defn- probe-kind!
-  "Build a descriptor for `kind` and run the runtime-info probe. Returns
-   {:kind :descriptor :probe-result} so callers can surface every part
-   (the descriptor for the chosen runtime, the probe-result for the
-   doctor's per-kind report)."
-  [kind]
-  (let [d            (descriptor/make-descriptor {:runtime-kind kind})
+  "Build a descriptor for `kind` from `config` and run the runtime-info
+   probe. Returns {:kind :descriptor :probe-result} so callers can surface
+   every part (the descriptor for the chosen runtime, the probe-result for
+   the doctor's per-kind report).
+
+   The explicit-selection path passes the caller's full config so overrides
+   like :executable reach the probe; the auto-probe path passes {} — an
+   :executable override is per-kind and has no meaning when several kinds
+   are being tried."
+  [config kind]
+  (let [d            (descriptor/make-descriptor (assoc config :runtime-kind kind))
         probe-result (descriptor/runtime-info d)]
     {:kind         kind
      :descriptor   d
@@ -76,13 +81,13 @@
 (defn- select-explicit
   "Resolve an explicit :runtime-kind. Fails loudly when the named runtime
    is unsupported or when its probe fails — never falls back."
-  [kind]
+  [config kind]
   (if-not (registry/supported? kind)
     (result/err :runtime/explicit-unsupported
                 (str "Runtime kind " kind " is not supported.")
                 {:kind      kind
                  :supported (registry/supported-kinds)})
-    (let [{:keys [descriptor probe-result]} (probe-kind! kind)]
+    (let [{:keys [descriptor probe-result]} (probe-kind! config kind)]
       (if (:available? probe-result)
         (result/ok {:descriptor      descriptor
                     :kind            kind
@@ -104,7 +109,7 @@
    Returns {:probed [...] :winner {...|nil}} where :winner is the first
    summary with :available? true plus the descriptor."
   []
-  (let [probes  (mapv probe-kind! (supported-probe-order))
+  (let [probes  (mapv #(probe-kind! {} %) (supported-probe-order))
         probed  (mapv probe-summary probes)
         winner  (some (fn [{:keys [probe-result] :as p}]
                         (when (:available? probe-result) p))
@@ -144,5 +149,5 @@
    data, not strings, so the doctor and the CLI can localize."
   [config]
   (if-let [kind (:runtime-kind config)]
-    (select-explicit kind)
+    (select-explicit config kind)
     (select-auto)))

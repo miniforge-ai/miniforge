@@ -521,9 +521,17 @@
   "Clone a repository and checkout a branch in the environment."
   executor/clone-and-checkout!)
 
+(def prepare-runtime-executor!
+  "Create an OCI-CLI executor on the selected container runtime (explicit
+   :runtime-kind, else auto-probe — Podman first) with images ensured to
+   exist. Returns {:executor OciCliExecutor :image-result Result
+   :runtime <selection summary>} or error Result."
+  executor/prepare-runtime-executor!)
+
 (def prepare-docker-executor!
-  "Create a Docker executor with images ensured to exist.
-   Returns {:executor DockerExecutor :image-result Result} or error Result."
+  "Create a Docker executor with images ensured to exist. Docker-explicit
+   variant of `prepare-runtime-executor!`; product paths should prefer that.
+   Returns {:executor OciCliExecutor :image-result Result} or error Result."
   executor/prepare-docker-executor!)
 
 (def ensure-image!
