@@ -842,7 +842,7 @@
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
 
-(defn resolve-api-key
+(defn- resolve-api-key
   "Resolve the API key for a direct provider backend: an explicit
    `:api-key` in the client config wins; otherwise the backend's
    `:api-key-env` environment variable. The env path is how the
@@ -917,17 +917,21 @@
 
 (def ^:private http-providers
   "Wire-shape registry for the HTTP backends: request-body builder +
-   response parser per provider string. `http-complete` dispatches
-   here; a provider missing from this map is an unsupported HTTP
-   backend."
+   response parser per provider string, plus `:requires-model?` for
+   the APIs that embed the model in the body or URL and have no
+   default. `http-complete` dispatches here; a provider missing from
+   this map is an unsupported HTTP backend."
   {"Ollama"    {:body-fn ollama-request-body
                 :parse-fn parse-ollama-response}
    "Anthropic" {:body-fn anthropic-request-body
-                :parse-fn (partial parse-provider-response extract-anthropic)}
+                :parse-fn (partial parse-provider-response extract-anthropic)
+                :requires-model? true}
    "OpenAI"    {:body-fn openai-request-body
-                :parse-fn (partial parse-provider-response extract-openai)}
+                :parse-fn (partial parse-provider-response extract-openai)
+                :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
-                :parse-fn (partial parse-provider-response extract-gemini)}})
+                :parse-fn (partial parse-provider-response extract-gemini)
+                :requires-model? true}})
 
 (defn http-complete
   "Complete request using an HTTP backend.
@@ -936,13 +940,15 @@
    endpoint, and the direct API-key providers (:anthropic-api /
    :openai-api / :gemini-api) for builds where CLI-agent backends are
    unavailable. `config` is the client config; `:api-key` and `:model`
-   are read from it."
+   are read from it (the caller has already merged the config model
+   into `request`)."
   [backend-config request config]
   (let [{:keys [provider api-key-env]} backend-config
-        {:keys [body-fn parse-fn]} (get http-providers provider)
+        {:keys [body-fn parse-fn requires-model?] :as provider-entry}
+        (get http-providers provider)
         api-key (resolve-api-key backend-config config)]
     (cond
-      (nil? body-fn)
+      (nil? provider-entry)
       (llm-error :anomalies/unsupported "unsupported_backend"
                  (str "HTTP backend not implemented for: " provider))
 
@@ -950,6 +956,13 @@
       (llm-error :anomalies/incorrect "missing_api_key"
                  (str provider " backend needs an API key — pass :api-key in "
                       "the client config or set " api-key-env))
+
+      ;; Fail closed before any request rather than formatting a nil
+      ;; model into the URL (Gemini) or body (Anthropic/OpenAI).
+      (and requires-model? (str/blank? (str (:model request))))
+      (llm-error :anomalies/incorrect "missing_model"
+                 (str provider " backend needs a model — pass :model in the "
+                      "client config or request"))
 
       :else
       (parse-fn (http-post-request (request-endpoint backend-config request)

@@ -219,6 +219,23 @@
                                      {})]
       (is (= "unsupported_backend" (get-in result [:error :type]))))))
 
+(deftest missing-model-test
+  (testing "an API provider without a model fails closed before any request"
+    (let [result (impl/http-complete (backend-config :anthropic-api)
+                                     {:prompt "q"}
+                                     {:api-key test-api-key})]
+      (is (not (:success result)))
+      (is (= "missing_model" (get-in result [:error :type])))
+      (is (= :invalid-input (get-in result [:anomaly :anomaly/type])))))
+  (testing "ollama without a model still runs (body builder defaults it)"
+    (let [{:keys [result captured]}
+          (capture-http (http-200 {:message {:content "hi"}})
+                        #(impl/http-complete (backend-config :ollama)
+                                             {:prompt "q"}
+                                             {}))]
+      (is (:success result))
+      (is (string? (get-in captured [:body :model]))))))
+
 (deftest ollama-usage-nil-guard-test
   (testing "missing eval counts produce an empty usage map, not a nil-keyed one"
     (let [result (impl/parse-ollama-response
