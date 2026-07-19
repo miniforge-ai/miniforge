@@ -529,9 +529,11 @@
   executor/prepare-runtime-executor!)
 
 (def prepare-docker-executor!
-  "Create a Docker executor with images ensured to exist. Docker-explicit
-   variant of `prepare-runtime-executor!`; product paths should prefer that.
-   Returns {:executor OciCliExecutor :image-result Result} or error Result."
+  "Create a Docker executor with images ensured to exist. This is the
+   Docker-explicit variant; product paths should prefer the
+   runtime-agnostic `prepare-runtime-executor!` and let selection pick
+   the runtime. Returns {:executor OciCliExecutor :image-result Result}
+   or error Result."
   executor/prepare-docker-executor!)
 
 (def ensure-image!

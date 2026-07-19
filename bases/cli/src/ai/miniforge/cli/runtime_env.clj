@@ -39,8 +39,10 @@
 
 (defn selection-config
   "Build the config map passed to the runtime selector: `base` (or {} when
-   called with no args) with the env override applied on top."
+   called with no args) with the env override applied on top. The env is
+   read once — the predicate and the assoc must see the same value."
   ([] (selection-config {}))
   ([base]
-   (cond-> base
-     (env-runtime-kind) (assoc :runtime-kind (env-runtime-kind)))))
+   (let [kind (env-runtime-kind)]
+     (cond-> base
+       kind (assoc :runtime-kind kind)))))

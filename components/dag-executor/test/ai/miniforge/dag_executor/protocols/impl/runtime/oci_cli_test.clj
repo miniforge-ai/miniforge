@@ -38,6 +38,12 @@
   ([] (descriptor/make-descriptor {}))
   ([opts] (descriptor/make-descriptor opts)))
 
+(defn- podman-descriptor
+  "For tests describing Podman-specific behaviour (bare-hex image IDs),
+   so the setup matches the runtime named in the test."
+  []
+  (descriptor/make-descriptor {:runtime-kind :podman}))
+
 ;; Phase 2: argument-construction tests run against every supported kind so
 ;; a Podman regression in flag shaping shows up at unit-test time.
 (def ^:private supported-kinds-under-test
@@ -172,7 +178,7 @@
                     (fn [_d & _args]
                       {:exit 0 :out (str hex "\n") :err ""})]
         (is (= (str "sha256:" hex)
-               (oci-cli/container-image-digest (docker-descriptor) "my-container")))))))
+               (oci-cli/container-image-digest (podman-descriptor) "my-container")))))))
 
 (deftest image-config-digest-normalizes-podman-bare-hex-test
   (testing "image-config-digest applies the same normalization on image IDs"
@@ -181,7 +187,7 @@
                     (fn [_d & _args]
                       {:exit 0 :out (str hex "\n") :err ""})]
         (is (= (str "sha256:" hex)
-               (oci-cli/image-config-digest (docker-descriptor) "img:tag")))))))
+               (oci-cli/image-config-digest (podman-descriptor) "img:tag")))))))
 
 (deftest image-config-digest-passes-docker-prefixed-form-through-test
   (testing "Docker's already-prefixed sha256:<hex> ID is returned unchanged"
