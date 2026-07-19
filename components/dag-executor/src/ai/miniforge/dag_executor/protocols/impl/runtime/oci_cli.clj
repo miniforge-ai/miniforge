@@ -456,6 +456,16 @@
                             :unknown)})
       (result/ok {:status :unknown :error (:err result)}))))
 
+(defn- normalize-image-id
+  "Normalize a runtime-printed image ID to the `sha256:<64hex>` digest form.
+   Docker prints IDs as `sha256:<hex>`; Podman prints the bare `<hex>`. The
+   digest gate and the evidence record both expect the prefixed form."
+  [id]
+  (when-let [id (some-> id str/trim not-empty)]
+    (if (re-matches #"[a-f0-9]{64}" id)
+      (str "sha256:" id)
+      id)))
+
 (defn container-image-digest
   "Return the SHA256 image digest for a container, or nil on failure."
   [descriptor container-name]
@@ -464,8 +474,7 @@
                                       "inspect" container-name
                                       "--format" "{{.Image}}")]
       (when (zero? (:exit inspect-result))
-        (let [digest (str/trim (:out inspect-result))]
-          (when (seq digest) digest))))
+        (normalize-image-id (:out inspect-result))))
     (catch Exception _ nil)))
 
 (defn image-config-digest
@@ -480,7 +489,7 @@
                               "image" "inspect" image
                               "--format" "{{.Id}}")]
       (when (zero? (:exit result))
-        (some-> (:out result) str/trim not-empty)))
+        (normalize-image-id (:out result))))
     (catch Exception _ nil)))
 
 ;; ============================================================================
@@ -789,8 +798,6 @@
   proto/TaskExecutor
 
   (executor-type [_this]
-    ;; Phase 1: only :docker is supported, so this always returns :docker.
-    ;; Phase 2 will return :podman / :nerdctl as descriptor/kind dictates.
     (descriptor/kind descriptor))
 
   (available? [_this]
@@ -900,7 +907,8 @@
    on the config map.
 
    Config:
-   - :runtime-kind — :docker (default in Phase 1). :podman lands in Phase 2.
+   - :runtime-kind — :docker (default) or :podman. :nerdctl is known but
+                     not yet supported.
    - :executable   — explicit path to the runtime CLI binary
    - :image        — container image for tasks (default from images.edn :default entry)
    - :network      — network name to attach to (legacy; execution-plan
