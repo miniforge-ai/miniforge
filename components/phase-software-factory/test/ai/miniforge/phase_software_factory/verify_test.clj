@@ -250,20 +250,34 @@
     ;; This is what we observed as PID 31181 still alive 30+ min after
     ;; killing the parent. After the fix the descendant tree is walked
     ;; first, so no PID survives.
-    (let [;; sleep 7200 in the shell so the test fails red if the tree
-          ;; isn't actually killed (CI noticing a 2h orphan process).
-          result (verify/run-tests! "/tmp" :test-cmd "sleep 7200" :timeout-ms 500)]
-      (is (true? (:timed-out? result)))
-      ;; Give the OS a beat to reap.
-      (Thread/sleep 250)
-      ;; Walk the JVM's current process descendants — no `sleep 7200` should remain.
-      (let [orphans (->> (.. (java.lang.ProcessHandle/current) descendants (toArray))
-                         (filter (fn [^java.lang.ProcessHandle ph]
-                                   (some-> ph .info .command .get
-                                           (clojure.string/includes? "sleep")))))]
-        (is (empty? orphans)
-            (str "destroy-process-tree! must reap every descendant sleep process; "
-                 "found " (count orphans) " orphan(s)"))))))
+    (letfn [(descendant-sleeps []
+              ;; Walk the JVM's current process descendants for a surviving
+              ;; `sleep`. `.orElse` (not `.get`) — a just-killed zombie can
+              ;; report an empty command Optional, which must read as "not
+              ;; an orphan", not throw.
+              (->> (.. (java.lang.ProcessHandle/current) descendants (toArray))
+                   (filter (fn [^java.lang.ProcessHandle ph]
+                             (-> ph .info .command (.orElse "")
+                                 (clojure.string/includes? "sleep"))))))]
+      (let [;; sleep 7200 in the shell so the test fails red if the tree
+            ;; isn't actually killed (CI noticing a 2h orphan process).
+            result (verify/run-tests! "/tmp" :test-cmd "sleep 7200" :timeout-ms 500)]
+        (is (true? (:timed-out? result)))
+        ;; Bounded wait, not a fixed beat: the kill lands immediately but a
+        ;; loaded CI runner can take >250ms to clear the process table, which
+        ;; a fixed sleep misread as a leak (flaked on main + PR CI,
+        ;; 2026-07-18/19). The deadline only spends fully when the tree
+        ;; genuinely leaks — the 2h sleep this test exists to catch.
+        (let [deadline (+ (System/currentTimeMillis) 5000)]
+          (loop []
+            (when (and (seq (descendant-sleeps))
+                       (< (System/currentTimeMillis) deadline))
+              (Thread/sleep 100)
+              (recur))))
+        (let [orphans (descendant-sleeps)]
+          (is (empty? orphans)
+              (str "destroy-process-tree! must reap every descendant sleep process; "
+                   "found " (count orphans) " orphan(s)")))))))
 
 (deftest run-tests-in-capsule-passes-timeout-to-execute-fn-test
   (testing "run-tests-in-capsule! threads :timeout-ms into execute-fn opts so capsule executors honour it"
