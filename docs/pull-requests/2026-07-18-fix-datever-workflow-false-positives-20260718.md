@@ -40,7 +40,7 @@ does not invoke `poly`.
 
 ## Checklist
 
-- [ ] Preserve the `deps.clj` upstream release pin.
-- [ ] Remove unused Windows Polylith setup.
-- [ ] Clear all four Dewey 730 workflow findings.
-- [ ] Pass local and CI verification.
+- [x] Preserve the `deps.clj` upstream release pin.
+- [x] Remove unused Windows Polylith setup.
+- [x] Clear all four Dewey 730 workflow findings.
+- [x] Pass local pre-commit verification; CI verification runs on the PR.
