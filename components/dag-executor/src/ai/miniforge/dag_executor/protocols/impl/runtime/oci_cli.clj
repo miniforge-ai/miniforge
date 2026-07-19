@@ -242,10 +242,13 @@
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
-          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
-      (when stdin-bytes
-        (with-open [stdin (.getOutputStream process)]
-          (.write stdin ^bytes stdin-bytes)))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
+          stdin-fut  (when stdin-bytes
+                       (let [s (.getOutputStream process)]
+                         (future
+                           (try
+                             (.write s ^bytes stdin-bytes)
+                             (finally (.close s))))))]
       (try
         (let [timed?     (and timeout-ms (pos? timeout-ms))
               completed? (if timed?
@@ -253,6 +256,7 @@
                            (do (.waitFor process) true))]
           (if-not completed?
             (do
+              (when stdin-fut (future-cancel stdin-fut))
               (runtime-process/destroy-process-tree! process)
               (future-cancel stdout-fut)
               (future-cancel stderr-fut)
@@ -271,6 +275,7 @@
                :out       (String. ^bytes stdout-bytes "UTF-8")
                :err       (String. ^bytes stderr-bytes "UTF-8")})))
         (catch InterruptedException e
+          (when stdin-fut (future-cancel stdin-fut))
           (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
