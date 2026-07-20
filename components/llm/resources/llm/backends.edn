@@ -53,6 +53,42 @@
           :models ["codellama" "llama2" "mistral"]
           :probe-endpoint "http://localhost:11434/api/version"}
 
+ ;; Direct API-key HTTPS providers — for builds where CLI-agent
+ ;; backends are unavailable (a sandboxed child process inherits the
+ ;; sandbox, so the user's claude/codex CLI cannot run). :api-key-env
+ ;; names the environment variable consulted when the client config
+ ;; carries no :api-key.
+ :anthropic-api {:cmd "http"
+                 :streaming? false
+                 :description "Claude via Anthropic Messages API"
+                 :provider "Anthropic"
+                 :requires-cli? false
+                 :api-endpoint "https://api.anthropic.com/v1/messages"
+                 :api-key-env "ANTHROPIC_API_KEY"
+                 :probe-endpoint "https://api.anthropic.com/"}
+
+ :openai-api {:cmd "http"
+              :streaming? false
+              :description "GPT via OpenAI Chat Completions API"
+              :provider "OpenAI"
+              :requires-cli? false
+              :api-endpoint "https://api.openai.com/v1/chat/completions"
+              :api-key-env "OPENAI_API_KEY"
+              :probe-endpoint "https://api.openai.com/"}
+
+ ;; Gemini's REST shape embeds the model in the URL path, so
+ ;; :api-endpoint is a format string filled by `request-endpoint`
+ ;; (:model-in-url?).
+ :gemini-api {:cmd "http"
+              :streaming? false
+              :description "Gemini via Google Generative Language API"
+              :provider "Gemini"
+              :requires-cli? false
+              :api-endpoint "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
+              :model-in-url? true
+              :api-key-env "GEMINI_API_KEY"
+              :probe-endpoint "https://generativelanguage.googleapis.com/"}
+
  :cursor {:cmd "agent"
           :streaming? false
           :description "Cursor AI via CLI"
