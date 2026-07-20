@@ -34,6 +34,7 @@
    [ai.miniforge.etl.messages :as msg]
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.etl.runner :as runner]
+   [ai.miniforge.etl.workbench :as workbench]
    [ai.miniforge.schema.interface :as schema]
    [babashka.cli :as cli]
    [cheshire.core :as cheshire]
@@ -91,15 +92,42 @@
 
 (defn- run-cmd
   [m]
-  (let [{:keys [pipeline env out]} (get-opts m)]
+  (let [{:keys [pipeline env out workbench-out source-hash]
+         :as opts} (get-opts m)
+        workbench-option (when workbench-out
+                           (workbench/missing-option opts))]
     (cond
       (nil? pipeline) (do (println (msg/t :run/usage)) (exit! 1))
       (nil? env)      (do (println (msg/t :run/missing-env)) (exit! 1))
+      workbench-option
+      (do (println (msg/t :workbench/missing-option {:option workbench-option}))
+          (println (msg/t :workbench/usage))
+          (exit! 1))
+      (and workbench-out (not (workbench/valid-source-hash? source-hash)))
+      (do (println (msg/t :workbench/invalid-source-hash))
+          (exit! 1))
       :else
-      (let [result (runner/run-pack pipeline env {})]
+      (let [config-result (when workbench-out
+                            (runner/load-run-configuration pipeline env))
+            result        (if (and config-result (schema/failed? config-result))
+                            config-result
+                            (runner/run-pack pipeline env {}))
+            snapshot-result
+            (when workbench-out
+              (if (schema/failed? config-result)
+                (schema/failure :snapshot (:error config-result))
+                (workbench/project result (:run-configuration config-result) opts)))]
         (print-run-summary! result)
         (when out (emit-result! result out))
-        (exit! (if (schema/succeeded? result) 0 1))))))
+        (when snapshot-result
+          (if (schema/succeeded? snapshot-result)
+            (emit-result! (:snapshot snapshot-result) workbench-out)
+            (println (msg/t :workbench/failed {:error (:error snapshot-result)}))))
+        (exit! (if (and (schema/succeeded? result)
+                        (or (nil? snapshot-result)
+                            (schema/succeeded? snapshot-result)))
+                 0
+                 1))))))
 
 (defn- list-cmd
   [m]
@@ -133,6 +161,20 @@
               (when-let [e (:error result)] (println (msg/t :validate/error {:value e})))
               (exit! 1)))))))
 
+(defn- registry-cmd
+  [m]
+  (let [{:keys [out]} (get-opts m)]
+    (cond
+      (nil? out)
+      (do (println (msg/t :registry/usage)) (exit! 1))
+
+      (not (workbench/valid-registry?))
+      (do (println (msg/t :registry/invalid)) (exit! 1))
+
+      :else
+      (do (emit-result! (workbench/state-var-registry) out)
+          (exit! 0)))))
+
 (defn- help-cmd
   [_m]
   (println (msg/t :help/usage))
@@ -140,6 +182,7 @@
   (println (msg/t :help/run))
   (println (msg/t :help/list))
   (println (msg/t :help/validate))
+  (println (msg/t :help/registry))
   (println)
   (println (msg/t :help/connector-types))
   (doseq [t (registry/supported-types)]
@@ -155,5 +198,6 @@
    [{:cmds ["run"]      :fn run-cmd      :args->opts [:pipeline]}
     {:cmds ["list"]     :fn list-cmd     :args->opts [:path]}
     {:cmds ["validate"] :fn validate-cmd :args->opts [:pipeline]}
+    {:cmds ["registry"] :fn registry-cmd}
     {:cmds []           :fn help-cmd}]
    args))

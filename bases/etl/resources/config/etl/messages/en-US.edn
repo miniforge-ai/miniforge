@@ -32,8 +32,16 @@
   :run/wrote              "  wrote: {path}"
 
   ;; -------- Argument validation --------
-  :run/usage              "usage: etl run <pipeline.edn> --env <env.edn> [--out <result.edn|.json>]"
+  :run/usage              "usage: etl run <pipeline.edn> --env <env.edn> [--out <result.edn|.json>] [--workbench-out <snapshot.json> --experiment-id <id> --label <label> --source-hash <sha256:...> [--baseline <snapshot.json>]]"
   :run/missing-env        "etl run: missing --env <env.edn>"
+
+  ;; Workbench adapter emission
+  :workbench/usage        "workbench output requires --experiment-id, --label, and --source-hash; pass --baseline for a candidate run"
+  :workbench/missing-option "etl run: workbench output missing --{option}"
+  :workbench/invalid-source-hash "etl run: --source-hash must be sha256: followed by 64 lowercase hex characters"
+  :workbench/baseline-missing-factors "baseline snapshot has no resolved-run factor inventory"
+  :workbench/source-hash-mismatch "candidate source hash differs from the baseline workload hash"
+  :workbench/failed       "✗ workbench snapshot failed: {error}"
 
   ;; -------- `list` subcommand --------
   :list/discovery-failed  "✗ discovery failed: {error}"
@@ -50,10 +58,15 @@
   :validate/failed        "✗ validation failed"
   :validate/error         "  error: {value}"
 
+  ;; -------- `registry` subcommand --------
+  :registry/usage         "usage: etl registry --out <registry.edn|.json>"
+  :registry/invalid       "✗ shipped ETL state-variable registry is invalid"
+
   ;; -------- `help` subcommand --------
-  :help/usage             "usage: etl {run|list|validate} ..."
-  :help/run               "  run      <pipeline.edn> --env <env.edn> [--out <path>]"
+  :help/usage             "usage: etl {run|list|validate|registry} ..."
+  :help/run               "  run      <pipeline.edn> --env <env.edn> [--out <path>] [--workbench-out <snapshot.json> ...]"
   :help/list              "  list     [<search-path>]"
   :help/validate          "  validate <pipeline.edn> --env <env.edn>"
+  :help/registry          "  registry --out <registry.edn|.json>"
   :help/connector-types   "supported connector types:"
   :help/connector-entry   "  - {value}"}}
