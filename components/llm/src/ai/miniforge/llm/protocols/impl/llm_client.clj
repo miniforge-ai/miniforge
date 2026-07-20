@@ -912,6 +912,11 @@
                  "anthropic-version" (anthropic-api-version)}
     "OpenAI"    {"Content-Type" "application/json"
                  "Authorization" (str "Bearer " api-key)}
+    ;; Compatible servers are usually credential-free; send auth only
+    ;; when a key was actually supplied (vLLM behind a gateway, etc.).
+    "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
+                          (some? api-key)
+                          (assoc "Authorization" (str "Bearer " api-key)))
     "Gemini"    {"Content-Type" "application/json"
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
@@ -929,11 +934,22 @@
   (or (some-> (:api-key config) str str/trim not-empty)
       (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty)))
 
+(defn- resolve-base-url
+  "The endpoint for a backend that supports base-url override: a
+   non-blank client-config `:base-url` wins, then the backend's
+   `:base-url-env` environment variable, then the backend's static
+   `:api-endpoint` default."
+  [backend-config config]
+  (or (some-> (:base-url config) str str/trim not-empty)
+      (some-> (:base-url-env backend-config) System/getenv str str/trim
+              not-empty)
+      (:api-endpoint backend-config)))
+
 (defn- request-endpoint
   "Resolve the request URL. Gemini embeds the model in the URL path
    (`:model-in-url?`); the other providers take it in the body."
-  [backend-config request]
-  (let [endpoint (:api-endpoint backend-config)]
+  [backend-config request config]
+  (let [endpoint (resolve-base-url backend-config config)]
     (if (:model-in-url? backend-config)
       (format endpoint (:model request))
       endpoint)))
@@ -1010,6 +1026,10 @@
    "OpenAI"    {:body-fn openai-request-body
                 :parse-fn (partial parse-provider-response extract-openai)
                 :requires-model? true}
+   "OpenAI-Compatible" {:body-fn openai-request-body
+                        :parse-fn (partial parse-provider-response
+                                           extract-openai)
+                        :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
                 :parse-fn (partial parse-provider-response extract-gemini)
                 :requires-model? true}})
@@ -1048,7 +1068,8 @@
                         {:provider provider}))
 
       :else
-      (parse-fn (http-post-request (request-endpoint backend-config request)
+      (parse-fn (http-post-request (request-endpoint backend-config request
+                                                     config)
                                    (provider-headers provider api-key)
                                    (body-fn request))))))
 

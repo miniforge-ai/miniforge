@@ -76,6 +76,21 @@
               :api-key-env "OPENAI_API_KEY"
               :probe-endpoint "https://api.openai.com/"}
 
+ ;; Generic OpenAI-compatible server (LM Studio, llama.cpp server,
+ ;; vLLM, and any other /v1/chat/completions endpoint). Local servers
+ ;; are typically credential-free, so no :api-key-env — a client
+ ;; :api-key is honored when supplied but never required. The endpoint
+ ;; is the LM Studio default; override per client with :base-url or
+ ;; via :base-url-env.
+ :openai-compat {:cmd "http"
+                 :streaming? false
+                 :description "Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...)"
+                 :provider "OpenAI-Compatible"
+                 :requires-cli? false
+                 :api-endpoint "http://localhost:1234/v1/chat/completions"
+                 :base-url-env "MINIFORGE_OPENAI_COMPAT_BASE_URL"
+                 :probe-endpoint "http://localhost:1234/v1/models"}
+
  ;; Gemini's REST shape embeds the model in the URL path, so
  ;; :api-endpoint is a format string filled by `request-endpoint`
  ;; (:model-in-url?).
