@@ -843,9 +843,14 @@
    (a passing gate may still carry non-blocking :security/warnings — e.g. a
    non-rootless runtime in OSS), or `result/err :security-policy-violation`
    with the findings on a hard-stop. A nil digest fails closed (hard-stop),
-   since a plan with no pinned digest cannot satisfy require-image-digest-pin."
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+
+   A passing result also carries the resolved `:image-digest`;
+   `acquire-environment!` launches the container from that immutable ID rather
+   than the mutable tag, so the image that runs is the image the gate checked."
   [descriptor image env-config digest-fn]
-  (let [plan            {:image-digest (digest-fn descriptor image)
+  (let [digest          (digest-fn descriptor image)
+        plan            {:image-digest digest
                          :mounts       (get env-config :mounts [])}
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
@@ -854,7 +859,7 @@
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
-      (result/ok (:output decision)))))
+      (result/ok (assoc (:output decision) :image-digest digest)))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
@@ -903,9 +908,11 @@
             (let [container-name (str container-name-prefix
                                       (subs (str task-id) 0 container-name-uuid-slice))
                   workdir (get env-config :workdir default-workdir)
+                  ;; Launch from the gate's resolved digest, not the mutable
+                  ;; tag — the image that runs is the image the gate checked.
                   create-result (create-container descriptor
                                                   container-name
-                                                  image
+                                                  (get-in gate-result [:data :image-digest])
                                                   workdir
                                                   (:env env-config)
                                                   (:resources env-config)
