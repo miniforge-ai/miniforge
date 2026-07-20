@@ -1574,11 +1574,10 @@
   "context_overflow")
 
 (defn- usage-token-count
-  "Return a usage token count, treating a missing or nil value as zero."
+  "Return a usage token count, treating a missing, nil, or false value as zero."
   [usage token-key]
-  (if-some [tokens (get usage token-key)]
-    tokens
-    0))
+  (let [tokens (get usage token-key)]
+    (if tokens tokens 0)))
 
 (defn total-input-tokens
   "prompt + cache-creation + cache-read tokens. Summed because a large
