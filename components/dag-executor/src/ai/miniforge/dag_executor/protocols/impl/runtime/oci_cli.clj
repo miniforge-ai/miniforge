@@ -803,7 +803,7 @@
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
-          clone-cmd ["git" "clone" "--branch" branch "--single-branch" "--" clone-url workdir]
+          clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
           result (-> (exec! clone-cmd)
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command

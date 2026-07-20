@@ -31,9 +31,10 @@
 
 (defn- safe-branch?
   "Branch names that start with '-' are parsed by git as options even in arg-vector
-   mode (no shell involved). Reject them before invoking any git subcommand."
+   mode (no shell involved). Reject them before invoking any git subcommand.
+   Non-string values are also invalid — argv elements must be Strings."
   [branch]
-  (not (str/starts-with? branch "-")))
+  (and (string? branch) (not (str/starts-with? branch "-"))))
 
 (defn git-persist!
   "Persist workspace via git commit + push.
@@ -53,7 +54,7 @@
             status-r (exec-fn "git status --porcelain")
             has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
         (if has-changes?
-          (let [_ (exec-fn ["git" "commit" "-m" message])
+          (let [_ (exec-fn ["git" "commit" "-m" (str message)])
                 _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
                 sha-r (exec-fn "git rev-parse HEAD")
                 sha   (str/trim (get-in sha-r [:data :stdout] ""))]
