@@ -133,6 +133,21 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Generate workbench contract token
+        id: workbench-contract-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: miniforge-ai
+          repositories: workbench-contract
+
+      - name: Configure workbench contract access
+        env:
+          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -296,6 +311,21 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Generate workbench contract token
+        id: workbench-contract-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.HOMEBREW_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          owner: miniforge-ai
+          repositories: workbench-contract
+
+      - name: Configure workbench contract access
+        env:
+          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
         uses: actions/setup-java@v4
