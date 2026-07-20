@@ -10,6 +10,8 @@
   :oci/acquire-deadline      "[oci-cli] acquire-environment! deadline {ms}ms exceeded; cancelling runtime subprocess."
   :oci/acquire-timeout       "OCI runtime acquire-environment! exceeded {ms}ms — likely a stuck daemon or image pull"
   :oci/command-interrupted   "Runtime command interrupted"
+  :oci/command-timeout       "Runtime command exceeded {ms}ms deadline — process destroyed"
+  :oci/command-timeout-log   "[oci-cli] runtime command timeout {ms}ms exceeded; destroying process tree."
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"
