@@ -51,6 +51,12 @@
     :checkout-failed (messages/t :pr/policy-respond-checkout-failed {:n (:n error)})
     :fetch-failed    (messages/t :pr/policy-respond-fetch-failed    {:n (:n error)})))
 
+(defn- commit-sha-text
+  "Return a commit SHA when it is a string; otherwise return the display sentinel."
+  [data]
+  (let [commit-sha (get data :commit-sha)]
+    (if (string? commit-sha) commit-sha "—")))
+
 (defn- print-summary!
   [pr-number r]
   (let [d (:data r)
@@ -65,7 +71,7 @@
                   :failed   failed
                   :escalated escalated
                   :skipped  skipped
-                  :commit   (or (:commit-sha d) "—")}))
+                  :commit   (commit-sha-text d)}))
     (doseq [e (:escalated d)]
       (display/print-info
        (messages/t :pr/policy-respond-escalated
