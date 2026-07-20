@@ -39,6 +39,8 @@
            (#'workflow-runner/response-output
             {:content "outer" :exit-code 0 :output {:detail :ok}}))))
   (testing "absent and malformed output preserves only top-level projection fields"
+    (is (= {:content "outer"}
+           (#'workflow-runner/response-output {:content "outer"})))
     (doseq [output [nil false :not-a-map 42 []]]
       (is (= {:content "outer"}
              (#'workflow-runner/response-output
