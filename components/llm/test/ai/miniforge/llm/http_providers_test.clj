@@ -95,6 +95,12 @@
                                              :max-tokens 42})]
       (is (= 42 (:max_tokens body)))
       (is (= "be terse" (:system body)))))
+  (testing "present-but-nil max-tokens falls back to the default — never
+            \"max_tokens\": null on the wire (Anthropic requires it)"
+    (let [body (impl/anthropic-request-body {:prompt "hi"
+                                             :model "m"
+                                             :max-tokens nil})]
+      (is (pos-int? (:max_tokens body)))))
   (testing "explicit messages pass through with only wire keys"
     (let [body (impl/anthropic-request-body
                 {:messages [{:role "user" :content "a" :extra "x"}

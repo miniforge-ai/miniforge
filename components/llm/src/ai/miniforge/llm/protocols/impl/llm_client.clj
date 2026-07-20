@@ -866,11 +866,13 @@
 
 (defn anthropic-request-body
   "Build an Anthropic Messages API request body. `max_tokens` is
-   mandatory on this API, so an absent `:max-tokens` falls back to the
-   configured default."
+   mandatory on this API, so an absent or nil `:max-tokens` falls back
+   to the configured default — callers pass {:max-tokens nil} through
+   chat/complete opts, and a get-with-default would let that nil reach
+   the wire as \"max_tokens\": null (a guaranteed 400)."
   [{:keys [system model] :as request}]
   (cond-> {:model model
-           :max_tokens (get request :max-tokens (default-anthropic-max-tokens))
+           :max_tokens (or (:max-tokens request) (default-anthropic-max-tokens))
            :messages (chat-messages request)}
     system (assoc :system system)))
 
