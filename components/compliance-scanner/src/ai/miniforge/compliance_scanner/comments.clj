@@ -52,6 +52,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Payload construction
 
+(defn- rationale-text
+  "Return a violation rationale when it is a string; otherwise return empty text."
+  [violation]
+  (let [rationale (get violation :rationale)]
+    (if (string? rationale) rationale "")))
+
 (defn violation->payload
   "Build the :comment/payload map for a single classified Violation.
 
@@ -73,7 +79,7 @@
    :violation/severity       (infer-severity violation)
    :violation/auto-fixable?  (boolean (:auto-fixable? violation))
    :violation/suggested-fix  (:suggested violation)
-   :violation/rationale      (or (:rationale violation) "")
+   :violation/rationale      (rationale-text violation)
    :violation/pack-id        (:pack/id pack-info)
    :violation/pack-version   (:pack/version pack-info)})
 

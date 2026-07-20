@@ -58,6 +58,16 @@
       (is (= "1.4.0" (:violation/pack-version p)))
       (is (#{:error :warning :info} (:violation/severity p))))))
 
+(deftest payload-rationale-is-always-text
+  (testing "absent and malformed rationales become empty strings"
+    (doseq [violation [(dissoc auto-fixable-violation :rationale)
+                       (assoc auto-fixable-violation :rationale nil)
+                       (assoc auto-fixable-violation :rationale false)
+                       (assoc auto-fixable-violation :rationale :not-text)
+                       (assoc auto-fixable-violation :rationale 42)]]
+      (is (= "" (:violation/rationale
+                 (comments/violation->payload violation base-pack-info)))))))
+
 (deftest payload-severity-inference
   (testing "auto-fixable + non-critical → :warning"
     (is (= :warning
