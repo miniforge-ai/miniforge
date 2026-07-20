@@ -142,6 +142,12 @@
   (is (sut/valid-registry?))
   (is (= 6 (count (:state_vars (sut/state-var-registry))))))
 
+(deftest export-registry-rejects-missing-out
+  (testing "a bb task called without :out fails loudly rather than writing to \"\""
+    (is (thrown? clojure.lang.ExceptionInfo (sut/export-registry! {})))
+    (is (thrown? clojure.lang.ExceptionInfo (sut/export-registry! {:out nil})))
+    (is (thrown? clojure.lang.ExceptionInfo (sut/export-registry! {:out "  "})))))
+
 (deftest accumulator-projects-expected-table-shape
   (let [events (clean-run-events :gate/failed)
         table  (table-for events)

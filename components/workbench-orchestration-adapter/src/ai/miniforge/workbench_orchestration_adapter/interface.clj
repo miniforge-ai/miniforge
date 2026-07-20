@@ -27,7 +27,8 @@
    [ai.miniforge.workbench-orchestration-adapter.core :as core]
    [cheshire.core :as json]
    [clojure.edn :as edn]
-   [clojure.java.io :as io]))
+   [clojure.java.io :as io]
+   [clojure.string :as str]))
 
 (def ^:private missing-run-message
   "Orchestration workbench projection requires a known workflow run")
@@ -43,6 +44,9 @@
 
 (def ^:private invalid-snapshot-message
   "Orchestration adapter emitted an invalid workbench_snapshot/v1")
+
+(def ^:private missing-out-message
+  "Orchestration registry export requires an :out path")
 
 (def ^:private registry-resource
   "workbench/miniforge-orchestration-state-vars.edn")
@@ -123,5 +127,7 @@
    to the `workbench:orchestration:registry` bb task; the JSON shape
    matches the minibench workbench-contract fixture registry."
   [{:keys [out]}]
+  (when (or (nil? out) (and (string? out) (str/blank? out)))
+    (throw (ex-info missing-out-message {:out out})))
   (spit (str out) (json/generate-string (state-var-registry) {:pretty true}))
   (println "Wrote" (str out)))
