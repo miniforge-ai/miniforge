@@ -74,6 +74,12 @@
           result (render-str (sut/workflow-list-fragment [workflow]))]
       (is (str/includes? result "badge-error"))))
   (testing "absent and malformed severities use the warning badge"
+    (let [workflow {:id "wf-severity"
+                    :name "Severity"
+                    :status :running
+                    :dependency-issues [{}]}
+          result (render-str (sut/workflow-list-fragment [workflow]))]
+      (is (str/includes? result "badge-warning")))
     (doseq [severity [nil false "error" 42 []]
             :let [workflow {:id "wf-severity"
                             :name "Severity"
