@@ -914,14 +914,17 @@
     {"Content-Type" "application/json"}))
 
 (defn- resolve-api-key
-  "Resolve the API key for a direct provider backend: an explicit
+  "Resolve the API key for a direct provider backend: a non-blank
    `:api-key` in the client config wins; otherwise the backend's
-   `:api-key-env` environment variable. The env path is how the
-   sandboxed app delivers a keychain-held key to the workflow process
-   without it ever touching disk."
+   `:api-key-env` environment variable. Blank/whitespace values count
+   as absent on BOTH paths — a config map carrying :api-key \"\" (BYOK
+   setups where the key field exists but is empty) must still fall
+   through to the env var. The env path is how the sandboxed app
+   delivers a keychain-held key to the workflow process without it
+   ever touching disk."
   [backend-config config]
-  (or (:api-key config)
-      (some-> (:api-key-env backend-config) (System/getenv))))
+  (or (some-> (:api-key config) str/trim not-empty)
+      (some-> (:api-key-env backend-config) (System/getenv) str/trim not-empty)))
 
 (defn- request-endpoint
   "Resolve the request URL. Gemini embeds the model in the URL path

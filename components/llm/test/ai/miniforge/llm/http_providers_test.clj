@@ -38,9 +38,10 @@
   "mf-test-api-key")
 
 (def ^:private missing-key-env
-  "Env-var name that must not exist in any test environment — drives
-   the missing-API-key error path."
-  "MF_TEST_NONEXISTENT_API_KEY")
+  "Env-var name driving the missing-API-key error path. Unique per test
+   run (nanotime suffix), so the test never depends on a hard-coded name
+   happening to be unset in the host environment."
+  (str "MF_TEST_NONEXISTENT_API_KEY_" (System/nanoTime)))
 
 (defn- http-200
   "HTTP response fixture with the given body map JSON-encoded."
@@ -196,7 +197,17 @@
     (testing "no config key and no env var fails closed before any request"
       (is (not (:success result)))
       (is (= "missing_api_key" (get-in result [:error :type])))
-      (is (= :invalid-input (get-in result [:anomaly :anomaly/type]))))))
+      (is (= :invalid-input (get-in result [:anomaly :anomaly/type])))))
+  (testing "a blank config :api-key is absent, not present — it falls through
+            to the env var and, with none set, still fails closed"
+    (doseq [blank ["" "   "]]
+      (let [result (impl/http-complete {:provider "Anthropic"
+                                        :api-key-env missing-key-env
+                                        :api-endpoint "http://llm-test.invalid/"}
+                                       {:prompt "q" :model "m"}
+                                       {:api-key blank})]
+        (is (not (:success result)) (pr-str blank))
+        (is (= "missing_api_key" (get-in result [:error :type])))))))
 
 (defn- provider-error
   "Run an anthropic-api request against a canned non-200 response and
