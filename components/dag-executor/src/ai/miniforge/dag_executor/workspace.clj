@@ -33,7 +33,9 @@
   "Persist workspace via git commit + push.
 
    Arguments:
-   - exec-fn: (fn [cmd] -> result-map) — executes a shell command in the environment
+   - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
+              cmd may be a string (passed to sh -c) or a vector (exec'd directly,
+              no shell — preferred for user-supplied values to avoid injection)
    - opts: {:branch string, :message string}
 
    Returns result monad with {:persisted? bool :commit-sha string :branch string}"
@@ -43,8 +45,8 @@
           status-r (exec-fn "git status --porcelain")
           has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
       (if has-changes?
-        (let [_ (exec-fn (str "git commit -m '" message "'"))
-              _ (exec-fn (str "git push origin HEAD:" branch " --force"))
+        (let [_ (exec-fn ["git" "commit" "-m" message])
+              _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
               sha-r (exec-fn "git rev-parse HEAD")
               sha   (str/trim (get-in sha-r [:data :stdout] ""))]
           (result/ok {:persisted? true :commit-sha sha :branch branch}))
@@ -56,14 +58,16 @@
   "Restore workspace via git fetch + checkout.
 
    Arguments:
-   - exec-fn: (fn [cmd] -> result-map) — executes a shell command in the environment
+   - exec-fn: (fn [cmd] -> result-map) — executes a command in the environment;
+              cmd may be a string (passed to sh -c) or a vector (exec'd directly,
+              no shell — preferred for user-supplied values to avoid injection)
    - opts: {:branch string}
 
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
   [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
   (try
-    (let [_ (exec-fn (str "git fetch origin " branch))
-          _ (exec-fn (str "git checkout " branch))
+    (let [_ (exec-fn ["git" "fetch" "origin" branch])
+          _ (exec-fn ["git" "checkout" branch])
           sha-r (exec-fn "git rev-parse HEAD")
           sha   (str/trim (get-in sha-r [:data :stdout] ""))]
       (result/ok {:restored? true :commit-sha sha :branch branch}))

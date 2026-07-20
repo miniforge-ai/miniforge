@@ -31,19 +31,26 @@
   [stdout]
   {:data {:stdout stdout}})
 
+(defn- cmd->str
+  "Normalize a command — string or arg vector — to a single string for matching."
+  [cmd]
+  (if (string? cmd) cmd (str/join " " cmd)))
+
 (defn- recording-exec-fn
-  "Return [exec-fn calls-atom replies-atom]. exec-fn records every command into
-   calls-atom and looks up its reply in replies-map by exact substring match.
+  "Return [exec-fn calls-atom]. exec-fn records every command (normalized to a
+   string) into calls-atom and looks up its reply in replies-map by substring.
+   Accepts both string commands and arg vectors.
    default is the fallback when nothing matches."
   ([replies-map] (recording-exec-fn replies-map (shell-result "")))
   ([replies-map default]
    (let [calls (atom [])]
      [(fn [cmd]
-        (swap! calls conj cmd)
-        (or (some (fn [[needle reply]]
-                    (when (str/includes? cmd needle) reply))
-                  replies-map)
-            default))
+        (let [cmd-str (cmd->str cmd)]
+          (swap! calls conj cmd-str)
+          (or (some (fn [[needle reply]]
+                      (when (str/includes? cmd-str needle) reply))
+                    replies-map)
+              default)))
       calls])))
 
 (def ^:private head-sha "abc123def456")
@@ -83,7 +90,7 @@
       ;; Verify expected commands ran in order.
       (let [cmds @calls]
         (is (some #(str/includes? % "git add -A") cmds))
-        (is (some #(str/includes? % "git commit -m 'phase: implement'") cmds))
+        (is (some #(str/includes? % "git commit -m phase: implement") cmds))
         (is (some #(str/includes? % "git push origin HEAD:feature/bar --force") cmds))))))
 
 (deftest git-persist!-defaults-branch-and-message-test
@@ -92,8 +99,8 @@
                            {"git status"   (shell-result " M file\n")
                             "git rev-parse" (shell-result head-sha)})]
       (sut/git-persist! exec-fn {})
-      (is (some #(str/includes? % "git commit -m 'phase checkpoint'") @calls))
-      (is (some #(str/includes? % "HEAD:task/unknown")                @calls)))))
+      (is (some #(str/includes? % "git commit -m phase checkpoint") @calls))
+      (is (some #(str/includes? % "HEAD:task/unknown")               @calls)))))
 
 (deftest git-persist!-trims-stdout-test
   (testing "stdout from git rev-parse is trimmed before being returned"
