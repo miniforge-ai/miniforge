@@ -122,6 +122,27 @@
    never goes below this."
   5)
 
+(def default-exec-timeout-ms
+  "Ceiling on a single `docker exec` invocation (`execute!`). Five minutes
+   covers long-running agent commands while still bounding a hung pty or
+   container-namespace teardown. Companion follow-up to the 2026-05-16
+   dogfood fix: `acquire-environment!` was bounded by PR #895;
+   `execute!`, `release-environment!`, `copy-to!`, and `copy-from!`
+   are bounded here."
+  300000)
+
+(def default-copy-timeout-ms
+  "Ceiling on a `docker exec`-based file-copy operation (`copy-to!` /
+   `copy-from!`). Two minutes accommodates large workspace transfers
+   while preventing an indefinite hang if Docker stalls mid-pipe."
+  120000)
+
+(def default-release-timeout-ms
+  "Ceiling on container stop + remove during `release-environment!`.
+   Two minutes bounds the stop/rm sequence that can hang on pty orphans
+   or container-namespace teardown."
+  120000)
+
 (def container-name-prefix
   "Prefix for generated container names: <prefix><task-id-slice>."
   "miniforge-task-")
@@ -157,21 +178,40 @@
   [descriptor & args]
   (apply vector (descriptor/executable descriptor) args))
 
-(defn run-runtime
-  "Execute a runtime CLI command and return the result."
-  [descriptor & args]
+(defn- run-runtime-timed
+  "Execute a runtime CLI command with an optional per-subprocess waitFor
+   deadline.
+
+   When `timeout-ms` is nil or <= 0 the call is unbounded (identical to the
+   pre-fix behaviour). On timeout the process tree is destroyed forcibly and
+   {:exit 124 :out \"\" :err <message>} is returned; callers that check
+   `(zero? :exit)` surface this as a command failure without special-casing."
+  [timeout-ms descriptor & args]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
           stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
       (try
-        (let [exit-code (.waitFor process)
-              stdout-bytes @stdout-fut
-              stderr-bytes @stderr-fut]
-          {:exit exit-code
-           :out (String. ^bytes stdout-bytes "UTF-8")
-           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (let [timed?     (and timeout-ms (pos? timeout-ms))
+              completed? (if timed?
+                           (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+                           (do (.waitFor process) true))]
+          (if-not completed?
+            (do
+              (runtime-process/destroy-process-tree! process)
+              (future-cancel stdout-fut)
+              (future-cancel stderr-fut)
+              (binding [*out* *err*]
+                (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
+              {:exit 124
+               :out  ""
+               :err  (messages/t :oci/command-timeout {:ms timeout-ms})})
+            (let [stdout-bytes @stdout-fut
+                  stderr-bytes @stderr-fut]
+              {:exit (.exitValue process)
+               :out  (String. ^bytes stdout-bytes "UTF-8")
+               :err  (String. ^bytes stderr-bytes "UTF-8")})))
         (catch InterruptedException e
           (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
@@ -181,38 +221,79 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn run-runtime-process
-  "Execute a runtime CLI command with optional stdin bytes."
-  [descriptor args & {:keys [stdin-bytes]}]
+(defn run-runtime
+  "Execute a runtime CLI command and return the result.
+   Internal callers that need a bounded deadline use `run-runtime-timed`
+   directly; this public entry point preserves the unbounded signature
+   for backward-compatibility with call sites already covered by an outer
+   `with-acquisition-timeout` guard."
+  [descriptor & args]
+  (apply run-runtime-timed nil descriptor args))
+
+(defn- run-runtime-process-timed
+  "Execute a runtime CLI command with optional stdin bytes and an optional
+   per-subprocess waitFor deadline.
+
+   When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
+   process tree is destroyed forcibly and a result with :exit 124 is returned
+   so callers that check `(zero? :exit)` surface it as a command failure."
+  [timeout-ms descriptor args & {:keys [stdin-bytes]}]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
-          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
-      (when stdin-bytes
-        (with-open [stdin (.getOutputStream process)]
-          (.write stdin ^bytes stdin-bytes)))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
+          stdin-fut  (when stdin-bytes
+                       (let [s (.getOutputStream process)]
+                         (future
+                           (try
+                             (.write s ^bytes stdin-bytes)
+                             (finally (.close s))))))]
       (try
-        (let [exit-code (.waitFor process)
-              stdout-bytes @stdout-fut
-              stderr-bytes @stderr-fut]
-          {:exit exit-code
-           :out-bytes stdout-bytes
-           :err-bytes stderr-bytes
-           :out (String. ^bytes stdout-bytes "UTF-8")
-           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (let [timed?     (and timeout-ms (pos? timeout-ms))
+              completed? (if timed?
+                           (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+                           (do (.waitFor process) true))]
+          (if-not completed?
+            (do
+              (when stdin-fut (future-cancel stdin-fut))
+              (runtime-process/destroy-process-tree! process)
+              (future-cancel stdout-fut)
+              (future-cancel stderr-fut)
+              (binding [*out* *err*]
+                (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
+              {:exit      124
+               :out       ""
+               :out-bytes (byte-array 0)
+               :err       (messages/t :oci/command-timeout {:ms timeout-ms})
+               :err-bytes (byte-array 0)})
+            (let [stdout-bytes @stdout-fut
+                  stderr-bytes @stderr-fut]
+              {:exit      (.exitValue process)
+               :out-bytes stdout-bytes
+               :err-bytes stderr-bytes
+               :out       (String. ^bytes stdout-bytes "UTF-8")
+               :err       (String. ^bytes stderr-bytes "UTF-8")})))
         (catch InterruptedException e
+          (when stdin-fut (future-cancel stdin-fut))
           (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
-          {:exit 130
-           :err (or (ex-message e) (messages/t :oci/command-interrupted))
-           :out ""
+          {:exit      130
+           :err       (or (ex-message e) (messages/t :oci/command-interrupted))
+           :out       ""
            :out-bytes (byte-array 0)
            :err-bytes (byte-array 0)})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
+
+(defn run-runtime-process
+  "Execute a runtime CLI command with optional stdin bytes.
+   Internal callers that need a bounded deadline use `run-runtime-process-timed`
+   directly; this public entry point is unbounded for backward-compatibility."
+  [descriptor args & {:keys [stdin-bytes]}]
+  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes))
 
 (defn shell-quote
   "Single-quote a shell argument."
@@ -393,8 +474,11 @@
                           env-args
                           [container-id]
                           cmd-args)
+        timeout-ms (if (contains? opts :timeout-ms)
+                     (:timeout-ms opts)
+                     default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
-        result (apply run-runtime descriptor full-args)]
+        result (apply run-runtime-timed timeout-ms descriptor full-args)]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -409,9 +493,10 @@
                     (str "mkdir -p " (shell-quote parent) " && "))
         write-cmd (str (or mkdir-cmd "")
                        "cat > " (shell-quote remote-path))
-        result (run-runtime-process descriptor
-                                    ["exec" "-i" container-id "sh" "-c" write-cmd]
-                                    :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
+        result (run-runtime-process-timed default-copy-timeout-ms
+                                         descriptor
+                                         ["exec" "-i" container-id "sh" "-c" write-cmd]
+                                         :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
     (if (zero? (:exit result))
       (result/ok {:copied-bytes (.length source)})
       (result/err :copy-failed (:err result)))))
@@ -419,9 +504,10 @@
 (defn copy-from-container
   "Copy files from container to host."
   [descriptor container-id remote-path local-path]
-  (let [result (run-runtime-process descriptor
-                                    ["exec" container-id "sh" "-c"
-                                     (str "cat " (shell-quote remote-path))])
+  (let [result (run-runtime-process-timed default-copy-timeout-ms
+                                         descriptor
+                                         ["exec" container-id "sh" "-c"
+                                          (str "cat " (shell-quote remote-path))])
         dest (clojure.java.io/file local-path)]
     (if (zero? (:exit result))
       (do
@@ -435,12 +521,12 @@
 (defn stop-container
   "Stop a running container."
   [descriptor container-id timeout]
-  (run-runtime descriptor "stop" "-t" (str timeout) container-id))
+  (run-runtime-timed default-release-timeout-ms descriptor "stop" "-t" (str timeout) container-id))
 
 (defn remove-container
   "Remove a container (force)."
   [descriptor container-id]
-  (let [result (run-runtime descriptor "rm" "-f" container-id)]
+  (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
 (defn inspect-container
@@ -757,9 +843,14 @@
    (a passing gate may still carry non-blocking :security/warnings — e.g. a
    non-rootless runtime in OSS), or `result/err :security-policy-violation`
    with the findings on a hard-stop. A nil digest fails closed (hard-stop),
-   since a plan with no pinned digest cannot satisfy require-image-digest-pin."
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+
+   A passing result also carries the resolved `:image-digest`;
+   `acquire-environment!` launches the container from that immutable ID rather
+   than the mutable tag, so the image that runs is the image the gate checked."
   [descriptor image env-config digest-fn]
-  (let [plan            {:image-digest (digest-fn descriptor image)
+  (let [digest          (digest-fn descriptor image)
+        plan            {:image-digest digest
                          :mounts       (get env-config :mounts [])}
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
@@ -768,24 +859,20 @@
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
-      (result/ok (:output decision)))))
+      (result/ok (assoc (:output decision) :image-digest digest)))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
 ;; ============================================================================
 
 (defrecord OciCliExecutor [config descriptor image network]
-  ;; Timeout-guard asymmetry: only `acquire-environment!` is wrapped in
-  ;; `with-acquisition-timeout`. The other shell-out paths in this
-  ;; record — `available?`, `execute!`, `release-environment!`,
-  ;; `copy-to!`, `copy-from!` — remain unbounded and can hit the same
-  ;; stuck-daemon failure mode. Acquire is wrapped first because it's
-  ;; the long-running step that surfaced in the 2026-05-16 dogfood
-  ;; (image pull + container create). Symmetric wrapping is a follow-up
-  ;; once `run-runtime-process` learns per-subprocess
-  ;; `(.waitFor ms TimeUnit/MILLISECONDS)` + `.destroyForcibly`, which
-  ;; will let the other surfaces fail fast without leaking the worker
-  ;; thread the way the current `future-cancel`-only path does.
+  ;; Per-operation timeout guards (2026-07-18, follow-up to 2026-05-16 dogfood):
+  ;; `acquire-environment!` is bounded by `with-acquisition-timeout` (PR #895).
+  ;; `execute!`, `release-environment!`, `copy-to!`, and `copy-from!` each route
+  ;; through `run-runtime-timed` / `run-runtime-process-timed` which use the
+  ;; bounded `.waitFor(ms, TimeUnit/MILLISECONDS)` + `destroy-process-tree!` path,
+  ;; so a stuck Docker daemon or hung pty causes a clean timeout error instead of
+  ;; parking the JVM thread indefinitely.
   proto/TaskExecutor
 
   (executor-type [_this]
@@ -821,9 +908,11 @@
             (let [container-name (str container-name-prefix
                                       (subs (str task-id) 0 container-name-uuid-slice))
                   workdir (get env-config :workdir default-workdir)
+                  ;; Launch from the gate's resolved digest, not the mutable
+                  ;; tag — the image that runs is the image the gate checked.
                   create-result (create-container descriptor
                                                   container-name
-                                                  image
+                                                  (get-in gate-result [:data :image-digest])
                                                   workdir
                                                   (:env env-config)
                                                   (:resources env-config)

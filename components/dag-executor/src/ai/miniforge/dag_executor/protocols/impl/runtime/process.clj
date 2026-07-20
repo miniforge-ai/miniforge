@@ -50,10 +50,11 @@
     (doseq [^ProcessHandle child descendants]
       (.destroy child))
     (.destroy process)
-    (when-not (.waitFor process graceful-shutdown-ms TimeUnit/MILLISECONDS)
-      (doseq [^ProcessHandle child descendants]
-        (when (.isAlive child)
-          (.destroyForcibly child)))
+    (.waitFor process graceful-shutdown-ms TimeUnit/MILLISECONDS)
+    (doseq [^ProcessHandle child descendants]
+      (when (.isAlive child)
+        (.destroyForcibly child)))
+    (when (.isAlive process)
       (.destroyForcibly process))))
 
 (defn read-stream-future
