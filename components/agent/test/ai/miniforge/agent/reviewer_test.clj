@@ -132,6 +132,25 @@
     :warnings []
     :duration-ms duration-ms}))
 
+(deftest split-review-failure-normalizes-response-map-test
+  (testing "aggregate tokens are added to a valid failed response map"
+    (let [combined (#'reviewer/combine-normalized-review-results
+                    [{:parsed-content nil
+                      :content "failed"
+                      :tokens 3
+                      :response {:success false :error :timeout}}])]
+      (is (= {:success false :error :timeout :tokens 3}
+             (:response combined)))))
+  (testing "absent and malformed failed responses become maps"
+    (doseq [response [nil false :not-a-map 42 []]
+            :let [combined (#'reviewer/combine-normalized-review-results
+                            [{:parsed-content nil
+                              :content "failed"
+                              :tokens 3
+                              :response response}])]]
+      (is (= {:tokens 3} (:response combined))
+          (str "normalized " (pr-str response))))))
+
 (defn- adaptive-timeout-message
   [elapsed-ms]
   (str "Adaptive timeout: Stagnation timeout: no progress for "
