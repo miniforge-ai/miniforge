@@ -29,6 +29,13 @@
 ;; create-worktree: lock and fallback strategy
 ;; ============================================================================
 
+(deftest resolve-branch-sha-rejects-unusable-output-test
+  (testing "successful rev-parse with absent, blank, or malformed stdout remains unresolved"
+    (doseq [output [nil false :not-a-sha 42 " \n"]]
+      (with-redefs [worktree/run-git (fn [& _] {:exit 0 :out output :err ""})]
+        (is (nil? (#'worktree/resolve-branch-sha "/tmp/repo" "main"))
+            (str "ignored " (pr-str output)))))))
+
 (deftest create-worktree-succeeds-on-first-attempt-test
   (testing "returns ok with worktree-path when git worktree add -b succeeds immediately"
     (with-redefs [worktree/run-git     (fn [& _] {:exit 0 :out "" :err ""})
