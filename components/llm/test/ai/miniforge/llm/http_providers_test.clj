@@ -333,6 +333,16 @@
                                              {:api-key test-api-key}))]
       (is (= "api_error" (get-in result [:error :type])))
       (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
+  (testing "a non-JSON body on a 200 returns a parse failure as data"
+    (let [{:keys [result]}
+          (capture-http {:status 200 :body "not-json"}
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "m"}
+                                             {:api-key test-api-key}))]
+      (is (= "parse_error" (get-in result [:error :type])))
+      (is (= :fault (get-in result [:anomaly :anomaly/type])))
+      (is (= :parse-provider-response
+             (get-in result [:anomaly :anomaly/data :operation])))))
   (testing "200 with no generated text fails instead of passing empty content"
     (let [{:keys [result]}
           (capture-http (http-200 {:content [] :usage {}})
@@ -371,6 +381,19 @@
       (is (:success result))
       (is (= {} (:usage result)))
       (is (= 0 (:tokens result))))))
+
+(deftest ollama-response-failures-are-data-test
+  (testing "a non-OK response is classified by status without throwing"
+    (let [result (impl/parse-ollama-response
+                  {:status 503 :body (json/generate-string {:error "overloaded"})})]
+      (is (= "api_error" (get-in result [:error :type])))
+      (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
+  (testing "malformed JSON on a 200 becomes a parse failure with provenance"
+    (let [result (impl/parse-ollama-response {:status 200 :body "not-json"})]
+      (is (= "parse_error" (get-in result [:error :type])))
+      (is (= :fault (get-in result [:anomaly :anomaly/type])))
+      (is (= :parse-provider-response
+             (get-in result [:anomaly :anomaly/data :operation]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Client integration: config threading through complete / complete-stream

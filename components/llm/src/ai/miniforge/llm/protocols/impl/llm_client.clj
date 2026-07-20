@@ -32,7 +32,7 @@
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [throw+ try+]])
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayInputStream]
    [java.net HttpURLConnection]
@@ -187,16 +187,18 @@
    identically). The original `:operation` lives under `:anomaly/data`."
   ([category error-type message]
    (llm-error category error-type message nil))
-  ([category error-type message {:keys [exit-code stderr stdout raw-stdout timeout]}]
+  ([category error-type message
+    {:keys [exit-code stderr stdout raw-stdout timeout failure-anomaly]}]
    (cond-> {:success false
             :error (cond-> {:type error-type :message message}
                      stderr  (assoc :stderr stderr)
                      stdout  (assoc :stdout stdout)
                      raw-stdout (assoc :raw-stdout raw-stdout)
                      timeout (assoc :timeout timeout))
-            :anomaly (->canonical-anomaly
-                      category message
-                      {:operation :llm-complete})}
+            :anomaly (or failure-anomaly
+                         (->canonical-anomaly
+                          category message
+                          {:operation :llm-complete}))}
      (some? exit-code) (assoc :exit-code exit-code))))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -779,6 +781,7 @@
    instead of everything collapsing into a generic api_error."
   [status]
   (cond
+    (not (integer? status))                              :anomalies/unavailable
     (or (= status HttpURLConnection/HTTP_UNAUTHORIZED)
         (= status HttpURLConnection/HTTP_FORBIDDEN))  :anomalies/forbidden
     (= status HttpURLConnection/HTTP_NOT_FOUND)       :anomalies/not-found
@@ -786,28 +789,21 @@
     (< status HttpURLConnection/HTTP_INTERNAL_ERROR)  :anomalies/incorrect
     :else                                             :anomalies/unavailable))
 
-(defn- parse-body-or-throw
-  "Parse a response body as JSON. A malformed body on a NON-OK response
-   is not a parse error — the provider signalled failure and the status
-   is the signal — so that case throws the typed provider-http-error
-   instead of surfacing as :anomalies/fault."
+(defn- parse-response-body
+  "Parse a response body as JSON, returning a canonical fault anomaly when
+   the JSON library throws. Callers retain the HTTP status alongside this
+   value so a non-OK response remains a status failure, not a parse failure."
   [{:keys [status body]}]
-  (try
+  (try+
     (json/parse-string body true)
     (catch Exception e
-      (if (= HttpURLConnection/HTTP_OK status)
-        (throw e)
-        (throw+ {:type ::provider-http-error
-                 :status status
-                 :message (ex-message e)})))))
-
-(defn- throw-provider-http-error!
-  "Throw the typed non-OK provider error carrying the status and the
-   provider's own message when it sent one."
-  [{:keys [status]} provider-message]
-  (throw+ {:type ::provider-http-error
-           :status status
-           :message provider-message}))
+      (anomaly/exception-anomaly
+       :fault
+       (msg/t :http-provider.system/parse-failed
+              {:reason (ex-message e)})
+       {:operation :parse-provider-response
+        :status status}
+       e))))
 
 (defn- provider-http-error->llm-error
   "Build the canonical failure for a non-OK provider response: the
@@ -821,6 +817,15 @@
                      :message (or message
                                   (msg/t :http-provider.system/unknown-api-error))})))
 
+(defn- response-parse-error
+  "Wrap a canonical JSON-parse anomaly in the LLM failure shape without
+   discarding its operation, HTTP status, or exception provenance."
+  [parse-anomaly]
+  (llm-error :anomalies/fault
+             "parse_error"
+             (:anomaly/message parse-anomaly)
+             {:failure-anomaly parse-anomaly}))
+
 (defn parse-ollama-response
   "Parse Ollama API response.
 
@@ -833,20 +838,21 @@
   ;; If response is already a canonical anomaly map, re-wrap it as :anomalies/unavailable so downstream classification stays identical
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try+
-      (let [body (parse-body-or-throw response)]
-        (when-not (= HttpURLConnection/HTTP_OK (:status response))
-          (throw-provider-http-error! response
-                                      (get body :error)))
+    (let [body   (parse-response-body response)
+          status (:status response)]
+      (cond
+        (not= HttpURLConnection/HTTP_OK status)
+        (provider-http-error->llm-error
+         {:status status
+          :message (when-not (anomaly/anomaly? body) (get body :error))})
+
+        (anomaly/anomaly? body)
+        (response-parse-error body)
+
+        :else
         (llm-success (get-in body [:message :content] "")
                      {:usage (token-usage (:prompt_eval_count body)
-                                          (:eval_count body))}))
-      (catch [:type ::provider-http-error] e
-        (provider-http-error->llm-error e))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (msg/t :http-provider.system/parse-failed
-                          {:reason (.getMessage e)}))))))
+                                          (:eval_count body))})))))
 
 ;------------------------------------------------------------------------------ Direct provider requests
 ;; Request/response shaping for the API-key HTTP backends
@@ -970,22 +976,24 @@
   [extract-fn response]
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try+
-      (let [body (parse-body-or-throw response)]
-        (when-not (= HttpURLConnection/HTTP_OK (:status response))
-          (throw-provider-http-error! response
-                                      (get-in body [:error :message])))
+    (let [body   (parse-response-body response)
+          status (:status response)]
+      (cond
+        (not= HttpURLConnection/HTTP_OK status)
+        (provider-http-error->llm-error
+         {:status status
+          :message (when-not (anomaly/anomaly? body)
+                     (get-in body [:error :message]))})
+
+        (anomaly/anomaly? body)
+        (response-parse-error body)
+
+        :else
         (let [{:keys [content usage]} (extract-fn body)]
           (if (str/blank? content)
             (llm-error :anomalies.agent/llm-error "empty_success_output"
                        (msg/t :http-provider.system/no-generated-text))
-            (llm-success content {:usage usage}))))
-      (catch [:type ::provider-http-error] e
-        (provider-http-error->llm-error e))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (msg/t :http-provider.system/parse-failed
-                          {:reason (.getMessage e)}))))))
+            (llm-success content {:usage usage})))))))
 
 (defn- extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
