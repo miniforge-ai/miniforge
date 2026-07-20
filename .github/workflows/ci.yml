@@ -137,8 +137,8 @@ jobs:
         id: workbench-contract-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.MINIFORGE_CI_BOT_APPID }}
+          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
           owner: miniforge-ai
           repositories: workbench-contract
 
@@ -298,8 +298,8 @@ jobs:
         id: workbench-contract-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.HOMEBREW_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.MINIFORGE_CI_BOT_APPID }}
+          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
           owner: miniforge-ai
           repositories: workbench-contract
 
