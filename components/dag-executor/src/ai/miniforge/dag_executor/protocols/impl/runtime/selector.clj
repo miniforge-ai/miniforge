@@ -141,13 +141,27 @@
       :probed           [<per-kind summary>]   ; auto-probe only}
 
    Errors:
-     :runtime/explicit-unsupported   — explicit kind is not :supported?
-     :runtime/explicit-unavailable   — explicit kind probe failed
-     :runtime/none-available         — auto-probe found nothing usable
+     :runtime/explicit-unsupported        — explicit kind is not :supported?
+     :runtime/explicit-unavailable        — explicit kind probe failed
+     :runtime/none-available              — auto-probe found nothing usable
+     :runtime/executable-requires-kind    — :executable/:docker-path override
+                                            given without :runtime-kind
+
+   An executable-path override is only meaningful with an explicit
+   :runtime-kind: auto-probe cannot tell which kind the binary is, so it
+   would probe PATH defaults while the eventual descriptor applies the
+   override — selection and execution could disagree (e.g. a :podman
+   selection wearing a Docker binary). Fail loudly and make the caller
+   disambiguate.
 
    Callers SHOULD render the error data via i18n; this function returns
    data, not strings, so the doctor and the CLI can localize."
   [config]
-  (if-let [kind (:runtime-kind config)]
-    (select-explicit config kind)
-    (select-auto)))
+  (let [kind     (:runtime-kind config)
+        override (or (:executable config) (:docker-path config))]
+    (cond
+      kind     (select-explicit config kind)
+      override (result/err :runtime/executable-requires-kind
+                           "An :executable/:docker-path override requires an explicit :runtime-kind."
+                           {:executable override})
+      :else    (select-auto))))

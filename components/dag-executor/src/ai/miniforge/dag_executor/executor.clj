@@ -210,7 +210,9 @@
       :image - image to use for tasks (default: bundled task-runner image)
       :image-type - which bundled image to ensure (:minimal or :clojure)
       :ensure-image? - whether to build image if missing (default: true)
-      :executable - explicit path to the runtime CLI binary}
+      :executable - explicit path to the runtime CLI binary; requires an
+                    explicit :runtime-kind (auto-probe cannot tell which
+                    kind the binary is — selection fails loudly instead)}
 
    Returns {:executor OciCliExecutor :image-result Result :runtime <summary>}
    or an error Result (runtime selection or image build failure). :runtime

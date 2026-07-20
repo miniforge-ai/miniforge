@@ -559,9 +559,11 @@
       :probed           [<per-kind summary>] (auto-probe only)}
 
    On failure, :error :code is one of:
-     :runtime/explicit-unsupported   (the named kind is not :supported?)
-     :runtime/explicit-unavailable   (named kind probe failed)
-     :runtime/none-available         (auto-probe found nothing)"
+     :runtime/explicit-unsupported     (the named kind is not :supported?)
+     :runtime/explicit-unavailable     (named kind probe failed)
+     :runtime/none-available           (auto-probe found nothing)
+     :runtime/executable-requires-kind (:executable/:docker-path override
+                                        without an explicit :runtime-kind)"
   selector/select-runtime)
 
 (def runtime-probe-order
