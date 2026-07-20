@@ -548,9 +548,10 @@
    digest gate and the evidence record both expect the prefixed form."
   [id]
   (when-let [id (some-> id str/trim not-empty)]
-    (if (re-matches #"[a-f0-9]{64}" id)
-      (str "sha256:" id)
-      id)))
+    (let [id (str/lower-case id)]
+      (if (re-matches #"^[a-f0-9]{64}$" id)
+        (str "sha256:" id)
+        id))))
 
 (defn container-image-digest
   "Return the SHA256 image digest for a container, or nil on failure."
