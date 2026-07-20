@@ -206,6 +206,18 @@
       (is (str/includes? result ":some/unknown-event"))
       (is (str/includes? result "something happened")))))
 
+(deftest non-string-event-messages-render-as-empty-test
+  (testing "phase and generic renderers tolerate missing, nil, false, and malformed messages"
+    (doseq [event-type [:workflow/phase-started :some/unknown-event]
+            message    [nil false :not-a-string 42]
+            :let       [result (sut/render-timeline
+                                [(mk-event event-type 0 :message message)])]]
+      (is (string? result) (str event-type " " (pr-str message)))))
+  (testing "malformed values are omitted rather than stringified"
+    (let [result (sut/render-timeline
+                  [(mk-event :some/unknown-event 0 :message :not-a-string)])]
+      (is (not (str/includes? result "not-a-string"))))))
+
 (deftest events-without-timestamps-handled-gracefully
   (testing "events with nil timestamp render with ?? placeholders but do not throw"
     (let [event  {:event/type     :agent/tool-call-started
