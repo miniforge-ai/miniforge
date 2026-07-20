@@ -120,6 +120,15 @@
       (is (result/err? r))
       (is (= :persist-failed (-> r :error :code))))))
 
+(deftest git-persist!-rejects-leading-dash-branch-test
+  (testing "A branch starting with '-' is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-persist! exec-fn {:branch "--evil"})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; git-restore!
 
@@ -159,3 +168,12 @@
           r (sut/git-restore! boom-exec-fn {:branch "task/x"})]
       (is (result/err? r))
       (is (= :restore-failed (-> r :error :code))))))
+
+(deftest git-restore!-rejects-leading-dash-branch-test
+  (testing "A branch starting with '-' is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-restore! exec-fn {:branch "--evil"})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))

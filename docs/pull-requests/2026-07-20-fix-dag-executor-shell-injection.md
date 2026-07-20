@@ -22,15 +22,19 @@ Changed files:
 
 | File | Change |
 |------|--------|
-| `components/dag-executor/src/…/runtime/oci_cli.clj` | `bootstrap-workspace!` — clone, config, set-url, rev-parse commands → vectors |
-| `components/dag-executor/src/…/workspace.clj` | `git-persist!`, `git-restore!` — commit, push, fetch, checkout → vectors; docstrings updated |
-| `components/dag-executor/test/…/workspace_test.clj` | `recording-exec-fn` normalizes vectors to strings for matching; commit-message assertions updated (no shell quoting) |
+| `components/dag-executor/src/…/runtime/oci_cli.clj` | `bootstrap-workspace!` — clone, config, set-url, rev-parse commands → vectors; `(str branch)` coercion guards argv |
+| `components/dag-executor/src/…/workspace.clj` | `git-persist!`, `git-restore!` — commit, push, fetch, checkout → vectors; `safe-branch?` guards non-string and leading-dash values; `(str message)` coercion |
+| `components/dag-executor/test/…/workspace_test.clj` | `recording-exec-fn` normalizes vectors to strings for matching; commit-message assertions updated; `:invalid-branch` rejection tests added |
+| `components/dag-executor/test/…/oci_cli_test.clj` | Added `cmd-contains?` helper (joins vector args with spaces before substring search); updated four assertions to use it |
 
 ## Testing
 
 - Unit tests in `workspace_test.clj` updated and pass against the new vector
-  API (normalized via `cmd->str` helper in the test fixture).
-- `oci_cli_test.clj` has no direct tests for `bootstrap-workspace!`; no changes
-  needed there.
+  API (normalized via `cmd->str` helper in the test fixture); two new tests
+  verify that `git-persist!` and `git-restore!` reject branches starting with
+  `-` without invoking `exec-fn`.
+- `oci_cli_test.clj` updated: `cmd-contains?` helper normalizes string and
+  vector commands uniformly; four assertions (`git commit`, `git push`,
+  `git fetch`, `git checkout`) updated to use it.
 - `exec-in-container` and `exec-in-pod` both branch on `(string? command)`:
   vectors take the direct exec path, bypassing sh entirely.
