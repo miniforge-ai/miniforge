@@ -922,9 +922,8 @@
    through to the env var. The env path is how the sandboxed app
    delivers a keychain-held key to the workflow process without it
    ever touching disk."
-  [backend-config config]
-  (or (some-> (:api-key config) str/trim not-empty)
-      (some-> (:api-key-env backend-config) (System/getenv) str/trim not-empty)))
+  (or (some-> (:api-key config) str str/trim not-empty)
+      (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty))
 
 (defn- request-endpoint
   "Resolve the request URL. Gemini embeds the model in the URL path
