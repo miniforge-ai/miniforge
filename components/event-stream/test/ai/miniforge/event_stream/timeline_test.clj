@@ -207,14 +207,18 @@
       (is (str/includes? result "something happened")))))
 
 (deftest non-string-event-messages-render-as-empty-test
-  (testing "phase, generic, and tool renderers tolerate a missing message key"
+  (testing "message-bearing renderers tolerate a missing message key"
     (doseq [event-type [:workflow/phase-started
+                        :workflow/completed
+                        :agent/stream-stalled
                         :some/unknown-event
                         :agent/tool-call-started]]
       (is (string? (sut/render-timeline [(mk-event event-type 0)]))
           (str event-type " missing :message"))))
   (testing "non-string messages are omitted rather than stringified"
     (doseq [event-type [:workflow/phase-started
+                        :workflow/completed
+                        :agent/stream-stalled
                         :some/unknown-event
                         :agent/tool-call-started]
             message    [false :not-a-string 42]
@@ -228,7 +232,14 @@
                              :message "safe fallback"
                              :tool/args-digest {:digest/preview 42})])]
       (is (str/includes? result "safe fallback"))
-      (is (not (str/includes? result "42"))))))
+      (is (not (str/includes? result "42")))))
+  (testing "terminal events with malformed messages fall back to the workflow result"
+    (let [result (sut/render-timeline
+                  [(mk-event :workflow/failed 0
+                             :message :not-a-string
+                             :workflow/result :failed)])]
+      (is (str/includes? result ":failed"))
+      (is (not (str/includes? result ":not-a-string"))))))
 
 (deftest events-without-timestamps-handled-gracefully
   (testing "events with nil timestamp render with ?? placeholders but do not throw"

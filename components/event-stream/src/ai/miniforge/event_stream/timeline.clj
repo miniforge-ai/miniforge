@@ -231,7 +231,7 @@
   (let [ts     (format-hms (event-timestamp event))
         phase  (event-phase event)
         marker (messages/t :timeline/terminated-marker)
-        reason (or (:message event)
+        reason (or (not-empty (event-message event))
                    (when-let [r (:workflow/result event)]
                      (str r))
                    "")]
@@ -243,7 +243,8 @@
   (let [ts     (format-hms (event-timestamp event))
         phase  (event-phase event)
         marker (messages/t :timeline/stall-marker)
-        msg    (or (:message event) (messages/t :timeline/stall-default-msg))]
+        msg    (or (not-empty (event-message event))
+                   (messages/t :timeline/stall-default-msg))]
     (format "%s  %s  %s  %s" ts phase marker msg)))
 
 (defn- render-generic
