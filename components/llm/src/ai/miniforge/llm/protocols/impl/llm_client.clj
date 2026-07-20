@@ -935,14 +935,16 @@
       (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty)))
 
 (defn- resolve-base-url
-  "The endpoint for a backend that supports base-url override: a
-   non-blank client-config `:base-url` wins, then the backend's
-   `:base-url-env` environment variable, then the backend's static
-   `:api-endpoint` default."
+  "The endpoint for the request. Only a backend that declares
+   `:base-url-env` supports overrides — there a non-blank client-config
+   `:base-url` wins, then the env variable. Every other backend always
+   uses its static `:api-endpoint`, so a stray client `:base-url` can
+   never redirect a fixed-endpoint provider."
   [backend-config config]
-  (or (some-> (:base-url config) str str/trim not-empty)
-      (some-> (:base-url-env backend-config) System/getenv str str/trim
-              not-empty)
+  (or (when (:base-url-env backend-config)
+        (or (some-> (:base-url config) str str/trim not-empty)
+            (some-> (:base-url-env backend-config) System/getenv str str/trim
+                    not-empty)))
       (:api-endpoint backend-config)))
 
 (defn- request-endpoint

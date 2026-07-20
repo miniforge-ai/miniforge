@@ -252,6 +252,20 @@
              (get (:headers captured) "Authorization")))
       (is (= "http://localhost:8000/v1/chat/completions" (:url captured))))))
 
+(deftest base-url-override-is-scoped-to-declaring-backends-test
+  (testing "a stray :base-url on a fixed-endpoint provider is ignored —
+            only backends declaring :base-url-env support the override"
+    (let [{:keys [captured]}
+          (capture-http (openai-200 "ok")
+                        (fn []
+                          (llm/complete (llm/create-client
+                                         {:backend :openai-api
+                                          :model "m"
+                                          :api-key test-api-key
+                                          :base-url "http://localhost:9999/hijack"})
+                                        {:prompt "hi"})))]
+      (is (= "https://api.openai.com/v1/chat/completions" (:url captured))))))
+
 (deftest openai-compat-requires-model-test
   (testing "no model on client or request fails closed before any request"
     (let [{:keys [result captured]}
