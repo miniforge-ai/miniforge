@@ -172,6 +172,16 @@
         (is (result/err? r))
         (is (= :derive-parent-repo-failed (get-in r [:error :code])))))))
 
+(deftest derive-parent-repo-path-rejects-unusable-output-test
+  (testing "successful git execution without a usable common-dir returns an error"
+    (doseq [output [nil false :not-a-path 42 " \n"]]
+      (with-redefs [worktree/run-git
+                    (fn [& _]
+                      {:exit 0 :out output :err ""})]
+        (let [r (worktree/derive-parent-repo-path "/tmp/my-repo")]
+          (is (result/err? r) (str "rejected " (pr-str output)))
+          (is (= :derive-parent-repo-failed (get-in r [:error :code]))))))))
+
 ;;------------------------------------------------------------------------------ notify-file-written! tests
 
 (deftest notify-file-written!-calls-scratch-commit-with-parent-repo-test
