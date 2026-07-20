@@ -252,7 +252,9 @@
                 baseline snapshot-id run-id]} opts]
     (if-not pack
       (shared/usage-error! :etl/run-usage
-                           "etl run <pack-dir-or-pipeline.edn> --env <env.edn|name> [--out <path>]")
+                           (str "etl run <pack-dir-or-pipeline.edn> --env <env.edn|name> [--out <path>]"
+                                " [--workbench-out <snapshot.json> --experiment-id <id> --label <label>"
+                                " --source-hash <sha256:...> [--baseline <snapshot.json>]]"))
       (try
         (let [[pipeline-path env-path] (resolve-pack-paths pack env)
               args (cond-> ["run" pipeline-path "--env" env-path]

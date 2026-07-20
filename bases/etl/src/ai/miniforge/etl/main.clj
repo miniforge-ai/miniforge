@@ -114,8 +114,17 @@
                             (runner/run-pack pipeline env {}))
             snapshot-result
             (when workbench-out
-              (if (schema/failed? config-result)
+              (cond
+                (schema/failed? config-result)
                 (schema/failure :snapshot (:error config-result))
+
+                ;; A failed run carries no :pipeline-run to project; the
+                ;; generic projection error would bury the real failure,
+                ;; which print-run-summary! already reports. Skip.
+                (schema/failed? result)
+                nil
+
+                :else
                 (workbench/project result (:run-configuration config-result) opts)))]
         (print-run-summary! result)
         (when out (emit-result! result out))
