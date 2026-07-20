@@ -155,8 +155,8 @@
    selection wearing a Docker binary). Fail loudly and make the caller
    disambiguate.
 
-   Callers SHOULD render the error data via i18n; this function returns
-   data, not strings, so the doctor and the CLI can localize."
+   Errors include a human-readable, localized message (via runtime messages);
+   callers should still rely on :code/:data for structured handling.
   [config]
   (let [kind     (:runtime-kind config)
         override (or (:executable config) (:docker-path config))]
