@@ -111,6 +111,27 @@
               {:role "assistant" :content "b"}]
              (:messages body))))))
 
+(deftest ollama-request-body-num-ctx-test
+  (testing ":num-ctx becomes Ollama's options.num_ctx; absent means no options
+            key at all (Ollama then applies its own default)"
+    (let [body (impl/ollama-request-body {:prompt "hi" :model "m" :num-ctx 32768})]
+      (is (= {:num_ctx 32768} (:options body))))
+    (let [body (impl/ollama-request-body {:prompt "hi" :model "m"})]
+      (is (not (contains? body :options))))))
+
+(deftest ollama-num-ctx-threads-from-client-config-test
+  (testing "a client created with :num-ctx sends it on every Ollama request —
+            the silent-truncation guard for long prompts"
+    (let [{:keys [captured]}
+          (capture-http (http-200 {:message {:content "ok"}
+                                   :prompt_eval_count 1 :eval_count 1})
+                        (fn []
+                          (llm/complete (llm/create-client {:backend :ollama
+                                                            :model "m"
+                                                            :num-ctx 65536})
+                                        {:prompt "long surface"})))]
+      (is (= {:num_ctx 65536} (:options (:body captured)))))))
+
 (deftest openai-request-body-test
   (testing "system becomes the leading system-role message"
     (let [body (impl/openai-request-body {:prompt "hi" :model "gpt-x" :system "s"})]
@@ -188,6 +209,74 @@
       (is (= "answer" (:content result)))
       (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
 
+(deftest openai-compat-wiring-test
+  (testing "the generic backend rides the OpenAI wire shape, is
+            credential-free by default (no :api-key-env), and defaults to
+            the LM Studio endpoint"
+    (let [entry (backend-config :openai-compat)]
+      (is (= "http" (:cmd entry)))
+      (is (= "OpenAI-Compatible" (:provider entry)))
+      (is (nil? (:api-key-env entry)) "no env var -> never fails closed on a key")
+      (is (= "http://localhost:1234/v1/chat/completions" (:api-endpoint entry)))
+      (is (= "MINIFORGE_OPENAI_COMPAT_BASE_URL" (:base-url-env entry)))
+      (is (false? (:requires-cli? entry))))))
+
+(deftest openai-compat-keyless-round-trip-test
+  (testing "a keyless local server gets no Authorization header; the OpenAI
+            body/parse shapes are reused"
+    (let [{:keys [result captured]}
+          (capture-http (openai-200 "local answer")
+                        (fn []
+                          (llm/complete (llm/create-client {:backend :openai-compat
+                                                            :model "qwen3-30b-a3b"})
+                                        {:prompt "hi"})))]
+      (is (true? (:success result)))
+      (is (= "local answer" (:content result)))
+      (is (= "http://localhost:1234/v1/chat/completions" (:url captured)))
+      (is (not (contains? (:headers captured) "Authorization")))
+      (is (= "qwen3-30b-a3b" (:model (:body captured)))))))
+
+(deftest openai-compat-key-and-base-url-override-test
+  (testing "a supplied :api-key becomes a bearer header and :base-url wins
+            over the default endpoint"
+    (let [{:keys [captured]}
+          (capture-http (openai-200 "ok")
+                        (fn []
+                          (llm/complete (llm/create-client
+                                         {:backend :openai-compat
+                                          :model "m"
+                                          :api-key test-api-key
+                                          :base-url "http://localhost:8000/v1/chat/completions"})
+                                        {:prompt "hi"})))]
+      (is (= (str "Bearer " test-api-key)
+             (get (:headers captured) "Authorization")))
+      (is (= "http://localhost:8000/v1/chat/completions" (:url captured))))))
+
+(deftest base-url-override-is-scoped-to-declaring-backends-test
+  (testing "a stray :base-url on a fixed-endpoint provider is ignored —
+            only backends declaring :base-url-env support the override"
+    (let [{:keys [captured]}
+          (capture-http (openai-200 "ok")
+                        (fn []
+                          (llm/complete (llm/create-client
+                                         {:backend :openai-api
+                                          :model "m"
+                                          :api-key test-api-key
+                                          :base-url "http://localhost:9999/hijack"})
+                                        {:prompt "hi"})))]
+      (is (= "https://api.openai.com/v1/chat/completions" (:url captured))))))
+
+(deftest openai-compat-requires-model-test
+  (testing "no model on client or request fails closed before any request"
+    (let [{:keys [result captured]}
+          (capture-http (openai-200 "never")
+                        (fn []
+                          (llm/complete (llm/create-client {:backend :openai-compat})
+                                        {:prompt "hi"})))]
+      (is (false? (:success result)))
+      (is (= "missing_model" (get-in result [:error :type])))
+      (is (nil? captured) "failed closed before the transport"))))
+
 (deftest missing-api-key-test
   (let [result (impl/http-complete {:provider "Anthropic"
                                     :api-key-env missing-key-env
@@ -244,6 +333,16 @@
                                              {:api-key test-api-key}))]
       (is (= "api_error" (get-in result [:error :type])))
       (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
+  (testing "a non-JSON body on a 200 returns a parse failure as data"
+    (let [{:keys [result]}
+          (capture-http {:status 200 :body "not-json"}
+                        #(impl/http-complete (backend-config :anthropic-api)
+                                             {:prompt "q" :model "m"}
+                                             {:api-key test-api-key}))]
+      (is (= "parse_error" (get-in result [:error :type])))
+      (is (= :fault (get-in result [:anomaly :anomaly/type])))
+      (is (= :parse-provider-response
+             (get-in result [:anomaly :anomaly/data :operation])))))
   (testing "200 with no generated text fails instead of passing empty content"
     (let [{:keys [result]}
           (capture-http (http-200 {:content [] :usage {}})
@@ -282,6 +381,19 @@
       (is (:success result))
       (is (= {} (:usage result)))
       (is (= 0 (:tokens result))))))
+
+(deftest ollama-response-failures-are-data-test
+  (testing "a non-OK response is classified by status without throwing"
+    (let [result (impl/parse-ollama-response
+                  {:status 503 :body (json/generate-string {:error "overloaded"})})]
+      (is (= "api_error" (get-in result [:error :type])))
+      (is (= :unavailable (get-in result [:anomaly :anomaly/type])))))
+  (testing "malformed JSON on a 200 becomes a parse failure with provenance"
+    (let [result (impl/parse-ollama-response {:status 200 :body "not-json"})]
+      (is (= "parse_error" (get-in result [:error :type])))
+      (is (= :fault (get-in result [:anomaly :anomaly/type])))
+      (is (= :parse-provider-response
+             (get-in result [:anomaly :anomaly/data :operation]))))))
 
 ;------------------------------------------------------------------------------ Layer 3
 ;; Client integration: config threading through complete / complete-stream

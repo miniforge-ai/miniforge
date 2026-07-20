@@ -70,6 +70,8 @@
     (is (= "https://api2.cursor.sh/"    (impl/probe-endpoint-for :cursor)))
     (is (= "http://localhost:11434/api/version"
            (impl/probe-endpoint-for :ollama)))
+    (is (= "http://localhost:1234/v1/models"
+           (impl/probe-endpoint-for :openai-compat)))
     (is (= "https://api.anthropic.com/" (impl/probe-endpoint-for :opencode))
         "OpenCode defaults to Anthropic — the typical provider routing"))
 

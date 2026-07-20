@@ -32,7 +32,7 @@
    [ai.miniforge.llm.network-monitor :as nnm]
    [ai.miniforge.llm.progress-monitor :as pm]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [throw+ try+]])
+   [slingshot.slingshot :refer [try+]])
   (:import
    [java.io ByteArrayInputStream]
    [java.net HttpURLConnection]
@@ -187,16 +187,18 @@
    identically). The original `:operation` lives under `:anomaly/data`."
   ([category error-type message]
    (llm-error category error-type message nil))
-  ([category error-type message {:keys [exit-code stderr stdout raw-stdout timeout]}]
+  ([category error-type message
+    {:keys [exit-code stderr stdout raw-stdout timeout failure-anomaly]}]
    (cond-> {:success false
             :error (cond-> {:type error-type :message message}
                      stderr  (assoc :stderr stderr)
                      stdout  (assoc :stdout stdout)
                      raw-stdout (assoc :raw-stdout raw-stdout)
                      timeout (assoc :timeout timeout))
-            :anomaly (->canonical-anomaly
-                      category message
-                      {:operation :llm-complete})}
+            :anomaly (or failure-anomaly
+                         (->canonical-anomaly
+                          category message
+                          {:operation :llm-complete}))}
      (some? exit-code) (assoc :exit-code exit-code))))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -704,14 +706,17 @@
 ;------------------------------------------------------------------------------ HTTP Backend Support
 
 (defn ollama-request-body
-  "Build Ollama API request body."
-  [{:keys [prompt messages model streaming?]}]
+  "Build Ollama API request body. `:num-ctx` sets Ollama's context-window
+   option — without it Ollama applies its own small default and silently
+   truncates long prompts."
+  [{:keys [prompt messages model streaming? num-ctx]}]
   (let [model (or model "codellama")
         msg-content (or prompt
                         (build-messages-prompt messages))]
-    {:model model
-     :messages [{:role "user" :content msg-content}]
-     :stream (boolean streaming?)}))
+    (cond-> {:model model
+             :messages [{:role "user" :content msg-content}]
+             :stream (boolean streaming?)}
+      num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
 
 (defn- http-failure-anomaly
   "Build the canonical `:unavailable` anomaly that this brick emits for
@@ -776,6 +781,7 @@
    instead of everything collapsing into a generic api_error."
   [status]
   (cond
+    (not (integer? status))                              :anomalies/unavailable
     (or (= status HttpURLConnection/HTTP_UNAUTHORIZED)
         (= status HttpURLConnection/HTTP_FORBIDDEN))  :anomalies/forbidden
     (= status HttpURLConnection/HTTP_NOT_FOUND)       :anomalies/not-found
@@ -783,28 +789,21 @@
     (< status HttpURLConnection/HTTP_INTERNAL_ERROR)  :anomalies/incorrect
     :else                                             :anomalies/unavailable))
 
-(defn- parse-body-or-throw
-  "Parse a response body as JSON. A malformed body on a NON-OK response
-   is not a parse error — the provider signalled failure and the status
-   is the signal — so that case throws the typed provider-http-error
-   instead of surfacing as :anomalies/fault."
+(defn- parse-response-body
+  "Parse a response body as JSON, returning a canonical fault anomaly when
+   the JSON library throws. Callers retain the HTTP status alongside this
+   value so a non-OK response remains a status failure, not a parse failure."
   [{:keys [status body]}]
-  (try
+  (try+
     (json/parse-string body true)
     (catch Exception e
-      (if (= HttpURLConnection/HTTP_OK status)
-        (throw e)
-        (throw+ {:type ::provider-http-error
-                 :status status
-                 :message (ex-message e)})))))
-
-(defn- throw-provider-http-error!
-  "Throw the typed non-OK provider error carrying the status and the
-   provider's own message when it sent one."
-  [{:keys [status]} provider-message]
-  (throw+ {:type ::provider-http-error
-           :status status
-           :message provider-message}))
+      (anomaly/exception-anomaly
+       :fault
+       (msg/t :http-provider.system/parse-failed
+              {:reason (ex-message e)})
+       {:operation :parse-provider-response
+        :status status}
+       e))))
 
 (defn- provider-http-error->llm-error
   "Build the canonical failure for a non-OK provider response: the
@@ -818,6 +817,15 @@
                      :message (or message
                                   (msg/t :http-provider.system/unknown-api-error))})))
 
+(defn- response-parse-error
+  "Wrap a canonical JSON-parse anomaly in the LLM failure shape without
+   discarding its operation, HTTP status, or exception provenance."
+  [parse-anomaly]
+  (llm-error :anomalies/fault
+             "parse_error"
+             (:anomaly/message parse-anomaly)
+             {:failure-anomaly parse-anomaly}))
+
 (defn parse-ollama-response
   "Parse Ollama API response.
 
@@ -830,20 +838,21 @@
   ;; If response is already a canonical anomaly map, re-wrap it as :anomalies/unavailable so downstream classification stays identical
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try+
-      (let [body (parse-body-or-throw response)]
-        (when-not (= HttpURLConnection/HTTP_OK (:status response))
-          (throw-provider-http-error! response
-                                      (get body :error)))
+    (let [body   (parse-response-body response)
+          status (:status response)]
+      (cond
+        (not= HttpURLConnection/HTTP_OK status)
+        (provider-http-error->llm-error
+         {:status status
+          :message (when-not (anomaly/anomaly? body) (get body :error))})
+
+        (anomaly/anomaly? body)
+        (response-parse-error body)
+
+        :else
         (llm-success (get-in body [:message :content] "")
                      {:usage (token-usage (:prompt_eval_count body)
-                                          (:eval_count body))}))
-      (catch [:type ::provider-http-error] e
-        (provider-http-error->llm-error e))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (msg/t :http-provider.system/parse-failed
-                          {:reason (.getMessage e)}))))))
+                                          (:eval_count body))})))))
 
 ;------------------------------------------------------------------------------ Direct provider requests
 ;; Request/response shaping for the API-key HTTP backends
@@ -909,6 +918,11 @@
                  "anthropic-version" (anthropic-api-version)}
     "OpenAI"    {"Content-Type" "application/json"
                  "Authorization" (str "Bearer " api-key)}
+    ;; Compatible servers are usually credential-free; send auth only
+    ;; when a key was actually supplied (vLLM behind a gateway, etc.).
+    "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
+                          (some? api-key)
+                          (assoc "Authorization" (str "Bearer " api-key)))
     "Gemini"    {"Content-Type" "application/json"
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
@@ -926,11 +940,24 @@
   (or (some-> (:api-key config) str str/trim not-empty)
       (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty)))
 
+(defn- resolve-base-url
+  "The endpoint for the request. Only a backend that declares
+   `:base-url-env` supports overrides — there a non-blank client-config
+   `:base-url` wins, then the env variable. Every other backend always
+   uses its static `:api-endpoint`, so a stray client `:base-url` can
+   never redirect a fixed-endpoint provider."
+  [backend-config config]
+  (or (when (:base-url-env backend-config)
+        (or (some-> (:base-url config) str str/trim not-empty)
+            (some-> (:base-url-env backend-config) System/getenv str str/trim
+                    not-empty)))
+      (:api-endpoint backend-config)))
+
 (defn- request-endpoint
   "Resolve the request URL. Gemini embeds the model in the URL path
    (`:model-in-url?`); the other providers take it in the body."
-  [backend-config request]
-  (let [endpoint (:api-endpoint backend-config)]
+  [backend-config request config]
+  (let [endpoint (resolve-base-url backend-config config)]
     (if (:model-in-url? backend-config)
       (format endpoint (:model request))
       endpoint)))
@@ -949,22 +976,24 @@
   [extract-fn response]
   (if (anomaly/anomaly? response)
     (llm-error :anomalies/unavailable "http_error" (:anomaly/message response))
-    (try+
-      (let [body (parse-body-or-throw response)]
-        (when-not (= HttpURLConnection/HTTP_OK (:status response))
-          (throw-provider-http-error! response
-                                      (get-in body [:error :message])))
+    (let [body   (parse-response-body response)
+          status (:status response)]
+      (cond
+        (not= HttpURLConnection/HTTP_OK status)
+        (provider-http-error->llm-error
+         {:status status
+          :message (when-not (anomaly/anomaly? body)
+                     (get-in body [:error :message]))})
+
+        (anomaly/anomaly? body)
+        (response-parse-error body)
+
+        :else
         (let [{:keys [content usage]} (extract-fn body)]
           (if (str/blank? content)
             (llm-error :anomalies.agent/llm-error "empty_success_output"
                        (msg/t :http-provider.system/no-generated-text))
-            (llm-success content {:usage usage}))))
-      (catch [:type ::provider-http-error] e
-        (provider-http-error->llm-error e))
-      (catch Exception e
-        (llm-error :anomalies/fault "parse_error"
-                   (msg/t :http-provider.system/parse-failed
-                          {:reason (.getMessage e)}))))))
+            (llm-success content {:usage usage})))))))
 
 (defn- extract-anthropic
   "Text + usage from an Anthropic Messages response: join the `text`
@@ -1007,6 +1036,10 @@
    "OpenAI"    {:body-fn openai-request-body
                 :parse-fn (partial parse-provider-response extract-openai)
                 :requires-model? true}
+   "OpenAI-Compatible" {:body-fn openai-request-body
+                        :parse-fn (partial parse-provider-response
+                                           extract-openai)
+                        :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
                 :parse-fn (partial parse-provider-response extract-gemini)
                 :requires-model? true}})
@@ -1045,7 +1078,8 @@
                         {:provider provider}))
 
       :else
-      (parse-fn (http-post-request (request-endpoint backend-config request)
+      (parse-fn (http-post-request (request-endpoint backend-config request
+                                                     config)
                                    (provider-headers provider api-key)
                                    (body-fn request))))))
 
@@ -1687,10 +1721,12 @@
 
 (defn complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request model (assoc :model model))]
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
@@ -1849,13 +1885,20 @@
    recover and a retry just re-sends the over-budget prompt). See N12 §4."
   "context_overflow")
 
+(defn- usage-token-count
+  "Return a numeric usage token count, treating missing or malformed values
+   as zero so context accounting remains numeric for upstream payloads."
+  [usage token-key]
+  (let [tokens (get usage token-key)]
+    (if (number? tokens) tokens 0)))
+
 (defn total-input-tokens
   "prompt + cache-creation + cache-read tokens. Summed because a large
    prompt lands mostly under cache-creation, not :input-tokens. See N12 §2."
   [usage]
-  (+ (or (:input-tokens usage) 0)
-     (or (:cache-creation-input-tokens usage) 0)
-     (or (:cache-read-input-tokens usage) 0)))
+  (+ (usage-token-count usage :input-tokens)
+     (usage-token-count usage :cache-creation-input-tokens)
+     (usage-token-count usage :cache-read-input-tokens)))
 
 (defn context-overflow-by-usage?
   "True when total input tokens >= the model's context window — the
@@ -1930,11 +1973,13 @@
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt     (build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request model (assoc :model model))
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -2041,7 +2086,7 @@
 
 (defn complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
@@ -2052,7 +2097,9 @@
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request model (assoc :model model))
+                            (cond-> request
+                              model (assoc :model model)
+                              num-ctx (assoc :num-ctx num-ctx))
                             on-chunk
                             config)
 
