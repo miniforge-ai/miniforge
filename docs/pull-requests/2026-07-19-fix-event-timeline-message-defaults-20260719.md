@@ -18,8 +18,8 @@ must remain safe without relying on `or` for map defaults.
 ## Changes in Detail
 
 - Normalize timeline messages through one string-only extraction helper, including tool-call argument fallback.
-- Preserve empty rendering for missing, nil, and false values while safely omitting malformed values.
-- Add regression coverage across phase-lifecycle and generic renderers.
+- Normalize missing, nil, false, and malformed messages to empty text before applying renderer-specific fallbacks.
+- Add regression coverage across phase-lifecycle, terminal, stall, generic, and tool-call renderers.
 
 ## Testing Plan
 
