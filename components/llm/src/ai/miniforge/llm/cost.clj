@@ -64,10 +64,13 @@
       (catch Exception _ {}))))
 
 (defn- usage-token-count
-  "Return a usage token count, treating a missing, nil, or false value as zero."
+  "Return a usage token count, treating anything non-numeric — missing,
+   nil, false, or a malformed value — as zero. Numeric-or-zero is the
+   contract the summing callers (and estimate-cost's never-throws
+   promise) rely on."
   [usage token-key]
   (let [tokens (get usage token-key)]
-    (if tokens tokens 0)))
+    (if (number? tokens) tokens 0)))
 
 ;; Public API
 
