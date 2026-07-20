@@ -336,21 +336,24 @@ jobs:
 
       - name: Compile all code
         run: |
+          set -o pipefail
           echo "::group::Compiling Code"
           bb compile 2>&1 | tee compile.log
           echo "::endgroup::"
 
       - name: Build CLI
         run: |
+          set -o pipefail
           echo "::group::Building CLI"
           bb build:cli 2>&1 | tee build-cli.log
           echo "::endgroup::"
 
       - name: Test CLI
         run: |
+          set -o pipefail
           echo "::group::Testing CLI"
-          ./dist/miniforge version 2>&1 | tee -a cli-test.log
-          ./dist/miniforge help 2>&1 | tee -a cli-test.log
+          bb dist/miniforge.jar version 2>&1 | tee -a cli-test.log
+          bb dist/miniforge.jar help 2>&1 | tee -a cli-test.log
           echo "::endgroup::"
 
       - name: Upload build logs
@@ -368,5 +371,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: miniforge-cli-${{ github.sha }}
-          path: dist/miniforge
+          path: dist/miniforge.jar
           retention-days: 7
