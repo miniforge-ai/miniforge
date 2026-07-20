@@ -17,6 +17,9 @@ on:
 permissions:
   contents: read
 
+env:
+  MINIFORGE_CI_BOT_APP_ID: "3360143"
+
 jobs:
   structure:
     name: Structure
@@ -137,7 +140,7 @@ jobs:
         id: workbench-contract-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.MINIFORGE_CI_BOT_APPID }}
+          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
           private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
           owner: miniforge-ai
           repositories: workbench-contract
@@ -298,7 +301,7 @@ jobs:
         id: workbench-contract-token
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.MINIFORGE_CI_BOT_APPID }}
+          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
           private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
           owner: miniforge-ai
           repositories: workbench-contract
