@@ -36,7 +36,11 @@
                     :cache-creation-input-tokens 204279
                     :cache-read-input-tokens 0})))
     (is (= 0 (impl/total-input-tokens nil)))
-    (is (= 5 (impl/total-input-tokens {:input-tokens 5})))))
+    (is (= 5 (impl/total-input-tokens {:input-tokens 5})))
+    (is (= 0 (impl/total-input-tokens
+              {:input-tokens nil
+               :cache-creation-input-tokens nil
+               :cache-read-input-tokens nil})))))
 
 (deftest context-overflow-by-usage?-test
   (testing "true once total input tokens reach the model's context window"

@@ -63,6 +63,13 @@
           {})
       (catch Exception _ {}))))
 
+(defn- usage-token-count
+  "Return a usage token count, treating a missing or nil value as zero."
+  [usage token-key]
+  (if-some [tokens (get usage token-key)]
+    tokens
+    0))
+
 ;; Public API
 
 (defn pricing-for-model
@@ -94,8 +101,8 @@
    and cost summing see a consistent type."
   [usage model-id]
   (let [{:keys [input-per-1m output-per-1m]} (pricing-for-model model-id)
-        in-tokens  (or (:input-tokens usage) 0)
-        out-tokens (or (:output-tokens usage) 0)]
+        in-tokens  (usage-token-count usage :input-tokens)
+        out-tokens (usage-token-count usage :output-tokens)]
     (if (and input-per-1m output-per-1m)
       (double (+ (* in-tokens  (/ input-per-1m  tokens-per-million))
                  (* out-tokens (/ output-per-1m tokens-per-million))))

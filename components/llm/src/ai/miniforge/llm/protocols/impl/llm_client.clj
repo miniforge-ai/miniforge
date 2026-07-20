@@ -1573,13 +1573,20 @@
    recover and a retry just re-sends the over-budget prompt). See N12 §4."
   "context_overflow")
 
+(defn- usage-token-count
+  "Return a usage token count, treating a missing or nil value as zero."
+  [usage token-key]
+  (if-some [tokens (get usage token-key)]
+    tokens
+    0))
+
 (defn total-input-tokens
   "prompt + cache-creation + cache-read tokens. Summed because a large
    prompt lands mostly under cache-creation, not :input-tokens. See N12 §2."
   [usage]
-  (+ (or (:input-tokens usage) 0)
-     (or (:cache-creation-input-tokens usage) 0)
-     (or (:cache-read-input-tokens usage) 0)))
+  (+ (usage-token-count usage :input-tokens)
+     (usage-token-count usage :cache-creation-input-tokens)
+     (usage-token-count usage :cache-read-input-tokens)))
 
 (defn context-overflow-by-usage?
   "True when total input tokens >= the model's context window — the

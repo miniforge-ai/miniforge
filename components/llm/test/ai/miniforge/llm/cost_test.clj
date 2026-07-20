@@ -85,10 +85,13 @@
                                   "free-local-model")))))
 
 (deftest estimate-cost-nil-usage-returns-zero-test
-  (testing "nil / empty usage with a priced model still returns 0.0 —
-            zero tokens means zero cost, no surprises."
+  (testing "nil, empty, or explicitly nil usage with a priced model still
+            returns 0.0 — zero tokens means zero cost, no surprises."
     (is (= 0.0 (sut/estimate-cost nil "claude-sonnet-4-6")))
-    (is (= 0.0 (sut/estimate-cost {} "claude-sonnet-4-6")))))
+    (is (= 0.0 (sut/estimate-cost {} "claude-sonnet-4-6")))
+    (is (= 0.0 (sut/estimate-cost {:input-tokens nil
+                                   :output-tokens nil}
+                                  "claude-sonnet-4-6")))))
 
 (deftest estimate-cost-missing-input-or-output-tokens-test
   (testing "Partial usage maps (only :input-tokens, only
