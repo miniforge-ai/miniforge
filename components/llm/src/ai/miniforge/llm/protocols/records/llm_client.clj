@@ -50,6 +50,9 @@
    - :model   - Optional model id passed through to the backend
    - :api-key - Optional API key for the direct HTTP providers;
                 falls back to the backend's :api-key-env variable
+   - :num-ctx - Optional context-window size for the Ollama backend;
+                without it Ollama applies its own small default and
+                silently truncates long prompts
    - :logger  - Optional logger for request/response logging
    - :exec-fn - Optional execution function override (for testing)
 
@@ -60,7 +63,8 @@
      (create-client {:backend :claude :logger my-logger})
      (create-client {:backend :anthropic-api :model \"claude-opus-4-8\"})"
   ([] (create-client {}))
-  ([{:keys [backend logger exec-fn stream-exec-fn model api-key] :or {backend :codex}}]
+  ([{:keys [backend logger exec-fn stream-exec-fn model api-key num-ctx]
+     :or {backend :codex}}]
    (when-not (contains? impl/backends backend)
      (response/throw-anomaly! :anomalies/incorrect
                              (str "Unknown backend: " backend)
@@ -68,7 +72,8 @@
                               :available (keys impl/backends)}))
    (->CLIClient (cond-> {:backend backend}
                   model (assoc :model model)
-                  api-key (assoc :api-key api-key))
+                  api-key (assoc :api-key api-key)
+                  num-ctx (assoc :num-ctx num-ctx))
                 logger
                 ;; Normalize so 1-arity user-supplied exec-fns keep
                 ;; working when the impl invokes 2-arity (the

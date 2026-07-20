@@ -704,14 +704,17 @@
 ;------------------------------------------------------------------------------ HTTP Backend Support
 
 (defn ollama-request-body
-  "Build Ollama API request body."
-  [{:keys [prompt messages model streaming?]}]
+  "Build Ollama API request body. `:num-ctx` sets Ollama's context-window
+   option — without it Ollama applies its own small default and silently
+   truncates long prompts."
+  [{:keys [prompt messages model streaming? num-ctx]}]
   (let [model (or model "codellama")
         msg-content (or prompt
                         (build-messages-prompt messages))]
-    {:model model
-     :messages [{:role "user" :content msg-content}]
-     :stream (boolean streaming?)}))
+    (cond-> {:model model
+             :messages [{:role "user" :content msg-content}]
+             :stream (boolean streaming?)}
+      num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
 
 (defn- http-failure-anomaly
   "Build the canonical `:unavailable` anomaly that this brick emits for
@@ -1687,10 +1690,12 @@
 
 (defn complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request model (assoc :model model))]
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
@@ -1930,11 +1935,13 @@
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt     (build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request model (assoc :model model))
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -2041,7 +2048,7 @@
 
 (defn complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
@@ -2052,7 +2059,9 @@
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request model (assoc :model model))
+                            (cond-> request
+                              model (assoc :model model)
+                              num-ctx (assoc :num-ctx num-ctx))
                             on-chunk
                             config)
 

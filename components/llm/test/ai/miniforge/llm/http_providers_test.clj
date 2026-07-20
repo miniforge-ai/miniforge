@@ -111,6 +111,27 @@
               {:role "assistant" :content "b"}]
              (:messages body))))))
 
+(deftest ollama-request-body-num-ctx-test
+  (testing ":num-ctx becomes Ollama's options.num_ctx; absent means no options
+            key at all (Ollama then applies its own default)"
+    (let [body (impl/ollama-request-body {:prompt "hi" :model "m" :num-ctx 32768})]
+      (is (= {:num_ctx 32768} (:options body))))
+    (let [body (impl/ollama-request-body {:prompt "hi" :model "m"})]
+      (is (not (contains? body :options))))))
+
+(deftest ollama-num-ctx-threads-from-client-config-test
+  (testing "a client created with :num-ctx sends it on every Ollama request —
+            the silent-truncation guard for long prompts"
+    (let [{:keys [captured]}
+          (capture-http (http-200 {:message {:content "ok"}
+                                   :prompt_eval_count 1 :eval_count 1})
+                        (fn []
+                          (llm/complete (llm/create-client {:backend :ollama
+                                                            :model "m"
+                                                            :num-ctx 65536})
+                                        {:prompt "long surface"})))]
+      (is (= {:num_ctx 65536} (:options (:body captured)))))))
+
 (deftest openai-request-body-test
   (testing "system becomes the leading system-role message"
     (let [body (impl/openai-request-body {:prompt "hi" :model "gpt-x" :system "s"})]
