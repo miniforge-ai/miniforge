@@ -19,8 +19,8 @@ rewrite.
 ## Changes in Detail
 
 - Replace five LLM token-count fallback expressions with intent-named helpers that use explicit map lookup.
-- Preserve the established contract that missing, nil, and false token counts mean zero.
-- Add regression coverage for explicit nil and false values in cost estimation and context-window accounting.
+- Treat missing and non-numeric token counts as zero so malformed upstream payloads remain safe.
+- Add regression coverage for nil, false, and truthy non-numeric values in cost estimation and context accounting.
 
 ## Testing Plan
 

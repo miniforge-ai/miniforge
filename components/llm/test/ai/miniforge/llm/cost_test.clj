@@ -94,6 +94,9 @@
                                   "claude-sonnet-4-6")))
     (is (= 0.0 (sut/estimate-cost {:input-tokens false
                                    :output-tokens false}
+                                  "claude-sonnet-4-6")))
+    (is (= 0.0 (sut/estimate-cost {:input-tokens "unknown"
+                                   :output-tokens :unknown}
                                   "claude-sonnet-4-6")))))
 
 (deftest estimate-cost-missing-input-or-output-tokens-test

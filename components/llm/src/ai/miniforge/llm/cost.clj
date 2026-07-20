@@ -64,10 +64,8 @@
       (catch Exception _ {}))))
 
 (defn- usage-token-count
-  "Return a usage token count, treating anything non-numeric — missing,
-   nil, false, or a malformed value — as zero. Numeric-or-zero is the
-   contract the summing callers (and estimate-cost's never-throws
-   promise) rely on."
+  "Return a numeric usage token count, treating missing or malformed values
+   as zero so cost estimation remains total for upstream payloads."
   [usage token-key]
   (let [tokens (get usage token-key)]
     (if (number? tokens) tokens 0)))
