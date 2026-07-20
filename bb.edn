@@ -180,6 +180,15 @@
   ;; Cross-language contract fixtures
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  workbench:orchestration:registry
+  {:doc  "Export the Miniforge orchestration workbench state-variable registry as JSON (args: :out \"<path>\")"
+   :task (let [exit (apply run-clojure-stream!
+                           "-X:dev"
+                           "ai.miniforge.workbench-orchestration-adapter.interface/export-registry!"
+                           *command-line-args*)]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   fixtures:supervisory
   {:doc  "Regenerate the supervisory golden fixtures (contracts/supervisory-entities/golden) consumed by miniforge-control. Run after any supervisory entity schema change, commit the diff, re-vendor downstream."
    :task (let [exit (run-clojure-stream!
