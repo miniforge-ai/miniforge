@@ -704,14 +704,17 @@
 ;------------------------------------------------------------------------------ HTTP Backend Support
 
 (defn ollama-request-body
-  "Build Ollama API request body."
-  [{:keys [prompt messages model streaming?]}]
+  "Build Ollama API request body. `:num-ctx` sets Ollama's context-window
+   option — without it Ollama applies its own small default and silently
+   truncates long prompts."
+  [{:keys [prompt messages model streaming? num-ctx]}]
   (let [model (or model "codellama")
         msg-content (or prompt
                         (build-messages-prompt messages))]
-    {:model model
-     :messages [{:role "user" :content msg-content}]
-     :stream (boolean streaming?)}))
+    (cond-> {:model model
+             :messages [{:role "user" :content msg-content}]
+             :stream (boolean streaming?)}
+      num-ctx (assoc :options {:num_ctx (long num-ctx)}))))
 
 (defn- http-failure-anomaly
   "Build the canonical `:unavailable` anomaly that this brick emits for
@@ -909,6 +912,11 @@
                  "anthropic-version" (anthropic-api-version)}
     "OpenAI"    {"Content-Type" "application/json"
                  "Authorization" (str "Bearer " api-key)}
+    ;; Compatible servers are usually credential-free; send auth only
+    ;; when a key was actually supplied (vLLM behind a gateway, etc.).
+    "OpenAI-Compatible" (cond-> {"Content-Type" "application/json"}
+                          (some? api-key)
+                          (assoc "Authorization" (str "Bearer " api-key)))
     "Gemini"    {"Content-Type" "application/json"
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
@@ -926,11 +934,24 @@
   (or (some-> (:api-key config) str str/trim not-empty)
       (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty)))
 
+(defn- resolve-base-url
+  "The endpoint for the request. Only a backend that declares
+   `:base-url-env` supports overrides — there a non-blank client-config
+   `:base-url` wins, then the env variable. Every other backend always
+   uses its static `:api-endpoint`, so a stray client `:base-url` can
+   never redirect a fixed-endpoint provider."
+  [backend-config config]
+  (or (when (:base-url-env backend-config)
+        (or (some-> (:base-url config) str str/trim not-empty)
+            (some-> (:base-url-env backend-config) System/getenv str str/trim
+                    not-empty)))
+      (:api-endpoint backend-config)))
+
 (defn- request-endpoint
   "Resolve the request URL. Gemini embeds the model in the URL path
    (`:model-in-url?`); the other providers take it in the body."
-  [backend-config request]
-  (let [endpoint (:api-endpoint backend-config)]
+  [backend-config request config]
+  (let [endpoint (resolve-base-url backend-config config)]
     (if (:model-in-url? backend-config)
       (format endpoint (:model request))
       endpoint)))
@@ -1007,6 +1028,10 @@
    "OpenAI"    {:body-fn openai-request-body
                 :parse-fn (partial parse-provider-response extract-openai)
                 :requires-model? true}
+   "OpenAI-Compatible" {:body-fn openai-request-body
+                        :parse-fn (partial parse-provider-response
+                                           extract-openai)
+                        :requires-model? true}
    "Gemini"    {:body-fn gemini-request-body
                 :parse-fn (partial parse-provider-response extract-gemini)
                 :requires-model? true}})
@@ -1045,7 +1070,8 @@
                         {:provider provider}))
 
       :else
-      (parse-fn (http-post-request (request-endpoint backend-config request)
+      (parse-fn (http-post-request (request-endpoint backend-config request
+                                                     config)
                                    (provider-headers provider api-key)
                                    (body-fn request))))))
 
@@ -1687,10 +1713,12 @@
 
 (defn complete-impl [client request]
   (let [{:keys [config logger exec-fn]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [cmd args-fn]} backend-config
-        request-with-model (cond-> request model (assoc :model model))]
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))]
     (log-prompt-sent logger backend (build-request-prompt request))
 
     ;; Handle HTTP backends differently from CLI backends
@@ -1937,11 +1965,13 @@
 (defn handle-streaming [client request on-chunk backend-config progress-monitor]
   (let [{:keys [logger config]} client
         stream-fn (or (:stream-exec-fn client) stream-exec-fn)
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         {:keys [cmd args-fn stream-parser]} backend-config
         prompt     (build-request-prompt request)
         prompt-via (resolve-prompt-via backend-config)
-        request-with-model (cond-> request model (assoc :model model))
+        request-with-model (cond-> request
+                             model (assoc :model model)
+                             num-ctx (assoc :num-ctx num-ctx))
         args     (args-fn (assoc request-with-model
                                  :prompt prompt
                                  :streaming? true
@@ -2048,7 +2078,7 @@
 
 (defn complete-stream-impl [client request on-chunk]
   (let [{:keys [config]} client
-        {:keys [backend model]} config
+        {:keys [backend model num-ctx]} config
         backend-config (get backends backend)
         {:keys [streaming? cmd]} backend-config
         progress-monitor (or (:progress-monitor request)
@@ -2059,7 +2089,9 @@
     ;; Handle HTTP backends
     (if (= cmd "http")
       (http-stream-complete backend-config
-                            (cond-> request model (assoc :model model))
+                            (cond-> request
+                              model (assoc :model model)
+                              num-ctx (assoc :num-ctx num-ctx))
                             on-chunk
                             config)
 
