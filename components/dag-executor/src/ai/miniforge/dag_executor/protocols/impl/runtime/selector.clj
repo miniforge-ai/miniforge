@@ -33,6 +33,7 @@
         contract allows."
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.result :as result]))
 
@@ -84,7 +85,7 @@
   [config kind]
   (if-not (registry/supported? kind)
     (result/err :runtime/explicit-unsupported
-                (str "Runtime kind " kind " is not supported.")
+                (messages/t :selector/explicit-unsupported {:kind kind})
                 {:kind      kind
                  :supported (registry/supported-kinds)})
     (let [{:keys [descriptor probe-result]} (probe-kind! config kind)]
@@ -94,7 +95,7 @@
                     :selection       :explicit
                     :runtime-version (:runtime-version probe-result)})
         (result/err :runtime/explicit-unavailable
-                    (str "Runtime " kind " is configured but unavailable.")
+                    (messages/t :selector/explicit-unavailable {:kind kind})
                     {:kind   kind
                      :reason (:reason probe-result)})))))
 
@@ -127,7 +128,7 @@
                   :runtime-version (:runtime-version (:probe-result winner))
                   :probed          probed})
       (result/err :runtime/none-available
-                  "No OCI-compatible container runtime is available."
+                  (messages/t :selector/none-available)
                   {:probed probed}))))
 
 (defn select-runtime
@@ -162,6 +163,6 @@
     (cond
       kind     (select-explicit config kind)
       override (result/err :runtime/executable-requires-kind
-                           "An :executable/:docker-path override requires an explicit :runtime-kind."
+                           (messages/t :selector/executable-requires-kind)
                            {:executable override})
       :else    (select-auto))))

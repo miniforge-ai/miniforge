@@ -103,6 +103,12 @@
   [k]
   (str (default k :uid) ":" (default k :gid)))
 
+(def ^:private world-writable-sticky-mode
+  "tmpfs mode for scratch mounts on kinds without :tmpfs-uid-gid-options:
+   1777 = world-writable with the sticky bit (/tmp semantics), so the
+   non-root container user can write without uid=/gid= ownership options."
+  "1777")
+
 (defn tmpfs-mount-options
   "Build the comma-separated options string appended to `--tmpfs <path>:`
    from the runtime's defaults. Uses the runtime's :uid / :gid / :tmpfs-size
@@ -118,4 +124,4 @@
         base (str "rw,nosuid,nodev,exec,size=" size)]
     (if (contains? (capabilities k) :tmpfs-uid-gid-options)
       (str base ",uid=" (default k :uid) ",gid=" (default k :gid))
-      (str base ",mode=1777"))))
+      (str base ",mode=" world-writable-sticky-mode))))
