@@ -68,6 +68,16 @@
       (is (= "" (:violation/rationale
                  (comments/violation->payload violation base-pack-info)))))))
 
+(deftest comment-body-uses-normalized-rationale
+  (testing "absent and malformed rationales are omitted from the human-readable body"
+    (doseq [rationale [nil false :not-text 987654321]
+            :let [violation (assoc auto-fixable-violation :rationale rationale)
+                  comment (comments/violation->comment violation base-pack-info)
+                  body (:comment/body comment)]]
+      (is (= "" (get-in comment [:comment/payload :violation/rationale])))
+      (is (not (str/includes? body (pr-str rationale)))
+          (str "did not render " (pr-str rationale))))))
+
 (deftest payload-severity-inference
   (testing "auto-fixable + non-critical → :warning"
     (is (= :warning
