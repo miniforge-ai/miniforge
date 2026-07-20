@@ -90,6 +90,11 @@
   [tool]
   (messages/t :tool/summary {:name (:tool/name tool) :description (:tool/description tool)}))
 
+(defn- searchable-text
+  "Return string metadata as searchable text; ignore absent or malformed values."
+  [value]
+  (if (string? value) value ""))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Tool protocol and registry
 
@@ -195,8 +200,8 @@
            vals
            (filter (fn [tool]
                      (let [info (tool-info tool)]
-                       (or (str/includes? (str/lower-case (or (:name info) "")) q)
-                           (str/includes? (str/lower-case (or (:description info) "")) q)))))))))
+                       (or (str/includes? (str/lower-case (searchable-text (:name info))) q)
+                           (str/includes? (str/lower-case (searchable-text (:description info))) q)))))))))
 
 (defn create-function-tool
   "Create a function-based tool.
