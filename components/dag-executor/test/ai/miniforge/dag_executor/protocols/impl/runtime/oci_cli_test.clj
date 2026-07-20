@@ -29,11 +29,13 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
 
 (defn- cmd-contains?
-  "True if cmd (string or arg vector) contains the substring s."
+  "True if cmd (string or arg vector) contains the substring s.
+   Vector commands are joined with spaces before the check so that
+   multi-word substrings like \"git fetch\" match across elements."
   [cmd s]
-  (if (string? cmd)
-    (clojure.string/includes? cmd s)
-    (some #(clojure.string/includes? % s) cmd)))
+  (clojure.string/includes?
+   (if (string? cmd) cmd (clojure.string/join " " cmd))
+   s))
 
 ;; Private fn accessor helper
 (defn- private-fn [sym]

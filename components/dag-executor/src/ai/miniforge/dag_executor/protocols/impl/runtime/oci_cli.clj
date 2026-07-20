@@ -813,7 +813,7 @@
       (if (result/err? result)
         result
         (let [push-url-result (if token
-                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin"
+                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
                                         (authenticated-https-url https-url token host-kind)])
                                 result)
               sha-r (chain-container-command
