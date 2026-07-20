@@ -84,9 +84,9 @@
                                    :output-tokens 50000}
                                   "free-local-model")))))
 
-(deftest estimate-cost-falsy-usage-returns-zero-test
-  (testing "nil, empty, or explicitly falsy usage with a priced model still
-            returns 0.0 — absent tokens mean zero cost, no surprises."
+(deftest estimate-cost-missing-or-nonnumeric-token-counts-return-zero-test
+  (testing "Missing usage or non-numeric token counts with a priced model
+            return 0.0 — absent tokens mean zero cost, no surprises."
     (is (= 0.0 (sut/estimate-cost nil "claude-sonnet-4-6")))
     (is (= 0.0 (sut/estimate-cost {} "claude-sonnet-4-6")))
     (is (= 0.0 (sut/estimate-cost {:input-tokens nil

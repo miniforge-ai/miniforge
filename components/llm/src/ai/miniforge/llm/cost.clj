@@ -65,7 +65,7 @@
 
 (defn- usage-token-count
   "Return a numeric usage token count, treating missing or malformed values
-   as zero so cost estimation remains total for upstream payloads."
+   as zero so cost estimation remains numeric for upstream payloads."
   [usage token-key]
   (let [tokens (get usage token-key)]
     (if (number? tokens) tokens 0)))
