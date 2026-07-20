@@ -29,6 +29,12 @@
    [ai.miniforge.dag-executor.result :as result]
    [clojure.string :as str]))
 
+(defn- safe-branch?
+  "Branch names that start with '-' are parsed by git as options even in arg-vector
+   mode (no shell involved). Reject them before invoking any git subcommand."
+  [branch]
+  (not (str/starts-with? branch "-")))
+
 (defn git-persist!
   "Persist workspace via git commit + push.
 
@@ -40,19 +46,21 @@
 
    Returns result monad with {:persisted? bool :commit-sha string :branch string}"
   [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
-  (try
-    (let [_ (exec-fn "git add -A")
-          status-r (exec-fn "git status --porcelain")
-          has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
-      (if has-changes?
-        (let [_ (exec-fn ["git" "commit" "-m" message])
-              _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
-              sha-r (exec-fn "git rev-parse HEAD")
-              sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-          (result/ok {:persisted? true :commit-sha sha :branch branch}))
-        (result/ok {:persisted? false :commit-sha nil :no-changes? true})))
-    (catch Exception e
-      (result/err :persist-failed (.getMessage e)))))
+  (if (not (safe-branch? branch))
+    (result/err :invalid-branch (str "Branch name must not start with '-': " branch))
+    (try
+      (let [_ (exec-fn "git add -A")
+            status-r (exec-fn "git status --porcelain")
+            has-changes? (seq (str/trim (get-in status-r [:data :stdout] "")))]
+        (if has-changes?
+          (let [_ (exec-fn ["git" "commit" "-m" message])
+                _ (exec-fn ["git" "push" "origin" (str "HEAD:" branch) "--force"])
+                sha-r (exec-fn "git rev-parse HEAD")
+                sha   (str/trim (get-in sha-r [:data :stdout] ""))]
+            (result/ok {:persisted? true :commit-sha sha :branch branch}))
+          (result/ok {:persisted? false :commit-sha nil :no-changes? true})))
+      (catch Exception e
+        (result/err :persist-failed (.getMessage e))))))
 
 (defn git-restore!
   "Restore workspace via git fetch + checkout.
@@ -65,11 +73,13 @@
 
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
   [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
-  (try
-    (let [_ (exec-fn ["git" "fetch" "origin" branch])
-          _ (exec-fn ["git" "checkout" branch])
-          sha-r (exec-fn "git rev-parse HEAD")
-          sha   (str/trim (get-in sha-r [:data :stdout] ""))]
-      (result/ok {:restored? true :commit-sha sha :branch branch}))
-    (catch Exception e
-      (result/err :restore-failed (.getMessage e)))))
+  (if (not (safe-branch? branch))
+    (result/err :invalid-branch (str "Branch name must not start with '-': " branch))
+    (try
+      (let [_ (exec-fn ["git" "fetch" "origin" branch])
+            _ (exec-fn ["git" "checkout" branch])
+            sha-r (exec-fn "git rev-parse HEAD")
+            sha   (str/trim (get-in sha-r [:data :stdout] ""))]
+        (result/ok {:restored? true :commit-sha sha :branch branch}))
+      (catch Exception e
+        (result/err :restore-failed (.getMessage e))))))

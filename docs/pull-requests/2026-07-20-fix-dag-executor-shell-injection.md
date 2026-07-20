@@ -1,4 +1,4 @@
-# fix(dag-executor): shell-quote branch and workdir in container git commands
+# fix(dag-executor): switch to arg vectors for user-supplied values in container git commands
 
 ## Problem
 
