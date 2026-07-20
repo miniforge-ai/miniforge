@@ -22,6 +22,7 @@
    resolver is injected, so these exercise the gate decision (block / warn /
    review / pass) without a container runtime."
   (:require
+   [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.result :as result]
    [clojure.test :refer [deftest is testing]]))
@@ -86,3 +87,29 @@
           r   (oci-cli/security-gate-check rootless-descriptor "img" env good-digest-fn)]
       (is (result/ok? r))
       (is (= :pass (get-in r [:data :security/decision]))))))
+
+(deftest gate-ok-carries-resolved-digest-test
+  (testing "a passing gate returns the resolved digest for the launch to use"
+    (let [r (oci-cli/security-gate-check rootless-descriptor "img" base-env good-digest-fn)]
+      (is (result/ok? r))
+      (is (= valid-digest (get-in r [:data :image-digest]))))))
+
+(deftest acquire-launches-from-resolved-digest-test
+  (testing "acquire-environment! creates the container from the gate's resolved
+            digest, not the mutable tag it was configured with"
+    (let [launched (atom nil)
+          executor (oci-cli/map->OciCliExecutor
+                    {:config     {}
+                     :descriptor {:runtime/kind :docker :runtime/capabilities #{:rootless}}
+                     :image      "task-runner:latest"
+                     :network    nil})]
+      (with-redefs [oci-cli/image-exists?          (fn [_ _] true)
+                    oci-cli/resolve-image-digest!  (fn [_ _] valid-digest)
+                    oci-cli/create-container       (fn [_ container-name image _ & _]
+                                                     (reset! launched image)
+                                                     (result/ok {:container-id "c1"
+                                                                 :container-name container-name}))
+                    oci-cli/container-image-digest (fn [_ _] valid-digest)]
+        (let [r (proto/acquire-environment! executor "abcd1234efgh" {:workdir "/workspace"})]
+          (is (result/ok? r))
+          (is (= valid-digest @launched)))))))
