@@ -35,6 +35,9 @@
 (def ^:private invalid-change-message
   "Candidate resolved-run configuration must differ from baseline at exactly one non-secret factor")
 
+(def ^:private invalid-baseline-message
+  "ETL workbench baseline factor values must be a map")
+
 (def ^:private invalid-snapshot-message
   "ETL adapter emitted an invalid workbench_snapshot/v1")
 
@@ -81,11 +84,14 @@
     (or (nil? experiment-id) (nil? label))
     (schema/failure :snapshot missing-variant-message)
 
+    (and (some? baseline-factor-values) (not (map? baseline-factor-values)))
+    (schema/failure :snapshot invalid-baseline-message)
+
     :else
     (let [inventory (config/factor-inventory resolved-run-config)
-          changes   (when baseline-factor-values
+          changes   (when (some? baseline-factor-values)
                       (config/factor-diff baseline-factor-values (:values inventory)))]
-      (if (and baseline-factor-values (not= 1 (count changes)))
+      (if (and (some? baseline-factor-values) (not= 1 (count changes)))
         (schema/failure :snapshot invalid-change-message
                         {:change-count (count changes)
                          :changes changes})

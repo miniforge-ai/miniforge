@@ -92,6 +92,16 @@
     (is (= 0.9 (:score quality)))
     (is (= 1 (get-in snapshot [:metadata :resolved_run :redacted_count])))))
 
+(deftest not-applicable-quality-components-match-registry
+  (let [result  (sut/project (update-in successful-result
+                                        [:pipeline-run :pipeline-run/stage-runs]
+                                        #(mapv (fn [stage] (dissoc stage :quality-report)) %))
+                             baseline-config projection-opts)
+        quality (last (:evaluations (:snapshot result)))]
+    (is (= "not_applicable" (:status quality)))
+    (is (= {:passed_records 0.0 :evaluated_records 0.0 :failed_records 0.0}
+           (:score_components quality)))))
+
 (deftest stage-score-includes-unexecuted-configured-stages
   (let [failed-result
         (-> successful-result
@@ -134,6 +144,17 @@
     (is (= 0 (:change-count zero-result)))
     (is (schema/failed? two-result))
     (is (= 2 (:change-count two-result)))))
+
+(deftest malformed-baseline-values-return-failure
+  (let [result (sut/project successful-result baseline-config
+                            (assoc projection-opts :baseline-factor-values "not-a-map"))]
+    (is (schema/failed? result))
+    (is (= "ETL workbench baseline factor values must be a map" (:error result)))))
+
+(deftest added-factor-uses-canonical-missing-value
+  (let [change (first (sut/factor-diff {} {"[:new-factor]" "42"}))]
+    (is (= :ai.miniforge.workbench-etl-adapter.config/missing-factor
+           (edn/read-string (:baseline change))))))
 
 (deftest shipped-pack-factor-counts-are-reproducible
   (testing "current GitHub, GitLab, and risk-data packs have a concrete N"

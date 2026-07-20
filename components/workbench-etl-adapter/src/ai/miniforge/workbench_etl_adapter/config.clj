@@ -34,7 +34,8 @@
 
 (def inventory-schema-version "miniforge_resolved_run_factors/v1")
 
-(def ^:private missing-value "<factor-missing>")
+(def ^:private missing-value
+  (content-hash/canonical-edn ::missing-factor))
 
 (def ^:private secret-key-names
   "Exact configuration-key names whose values must never cross the adapter

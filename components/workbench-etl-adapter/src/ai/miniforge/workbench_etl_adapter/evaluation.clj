@@ -169,7 +169,9 @@
         :status "not_applicable"
         :score 1.0
         :confidence 1.0
-        :components {:reports 0.0}
+        :components {:passed_records 0.0
+                     :evaluated_records 0.0
+                     :failed_records 0.0}
         :gate-effect "none"
         :evaluated-at evaluated-at})
       (let [total  (reduce + (map :report/total reports))
