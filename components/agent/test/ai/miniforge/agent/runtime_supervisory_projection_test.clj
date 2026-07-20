@@ -95,6 +95,17 @@
     (validate [_ _ _] {:valid? true})
     (repair [_ output _ _] output)))
 
+(deftest direct-agent-role-is-always-a-keyword-test
+  (testing "valid roles are preserved"
+    (is (= :reviewer (#'supervisory-bridge/direct-agent-role {:role :reviewer}))))
+  (testing "absent and malformed roles become :agent"
+    (doseq [agent-value [{}
+                         {:role nil}
+                         {:role false}
+                         {:role "reviewer"}
+                         {:role 42}]]
+      (is (= :agent (#'supervisory-bridge/direct-agent-role agent-value))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Projection coverage
 
