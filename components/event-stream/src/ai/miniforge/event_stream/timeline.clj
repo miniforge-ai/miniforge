@@ -148,8 +148,8 @@
    Prefers `:tool/args-digest :digest/preview`, falls back to `:message`."
   [event]
   (let [preview (get-in event [:tool/args-digest :digest/preview])
-        raw     (or preview (:message event) "")]
-    (truncate (str raw) args-preview-length)))
+        raw     (if (string? preview) preview (event-message event))]
+    (truncate raw args-preview-length)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Duration helpers

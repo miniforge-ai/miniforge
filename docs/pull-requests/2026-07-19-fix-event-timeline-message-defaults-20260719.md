@@ -17,7 +17,7 @@ must remain safe without relying on `or` for map defaults.
 
 ## Changes in Detail
 
-- Normalize timeline messages through one string-only extraction helper.
+- Normalize timeline messages through one string-only extraction helper, including tool-call argument fallback.
 - Preserve empty rendering for missing, nil, and false values while safely omitting malformed values.
 - Add regression coverage across phase-lifecycle and generic renderers.
 
