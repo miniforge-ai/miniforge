@@ -1231,8 +1231,7 @@
                     (messages/t :workflow-runner/no-completed-tasks))))
         (run-workflow-from-spec! spec opts)))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Chain-driven execution
+;; ── Chain-driven execution ─────────────────────────────────────────────────
 
 (defn resolve-chain-input
   "Resolve chain input from a spec file path or inline JSON."

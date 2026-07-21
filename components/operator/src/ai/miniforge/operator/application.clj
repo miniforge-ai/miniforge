@@ -97,8 +97,7 @@
   (when-let [failed (advance! stream interv intervention/fail reason)]
     failed))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Mechanisms
+;; ── Mechanisms ─────────────────────────────────────────────────────────────
 
 (defn- control-state-effect!
   "Flip the control-state flag for `verb` and return the readback the
@@ -150,7 +149,7 @@
   (when-let [applied (advance! stream dispatched intervention/apply-result)]
     (advance! stream applied intervention/verify {:verb verb})))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 ;; The applier hook
 
 (defn apply-intervention!
