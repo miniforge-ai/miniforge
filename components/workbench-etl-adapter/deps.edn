@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
 
  :deps {ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/messages     {:local/root "../messages"}
         ai.miniforge/schema       {:local/root "../schema"}
         io.github.miniforge-ai/workbench-contract
         {:git/url "ssh://git@github.com/miniforge-ai/workbench-contract.git"
