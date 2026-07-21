@@ -62,7 +62,9 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io])
   (:import
-   [java.util.concurrent Executors ScheduledExecutorService TimeUnit]))
+   [java.nio.file Files StandardCopyOption]
+   [java.time Instant]
+   [java.util.concurrent Executors ScheduledExecutorService ThreadFactory TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -117,18 +119,22 @@
       empty-cursor)))
 
 (defn- write-cursor!
-  "Persist `cursor` atomically (temp + rename in the same directory) so
-   a crash mid-write can never leave a truncated manifest."
+  "Persist `cursor` atomically: temp file + `Files/move` with
+   `ATOMIC_MOVE` + `REPLACE_EXISTING` in the same directory (the
+   repo-wide atomic-update idiom — see event-stream `archive.clj`
+   `atomic-rename!`), so a crash mid-write can never leave a truncated
+   manifest. `File.renameTo` is not used: it is platform-dependent and
+   commonly refuses to replace an existing target."
   [operator-dir cursor]
   (let [target (cursor-file operator-dir)
         tmp (io/file operator-dir (str cursor-file-name ".tmp"))]
     (io/make-parents target)
     (spit tmp (pr-str cursor) :encoding "UTF-8")
-    (when-not (.renameTo tmp target)
-      ;; Rename across the same directory should always succeed; fall
-      ;; back to a direct write rather than losing the pass's progress.
-      (spit target (pr-str cursor) :encoding "UTF-8")
-      (.delete tmp))))
+    (Files/move (.toPath tmp)
+                (.toPath target)
+                (into-array java.nio.file.CopyOption
+                            [StandardCopyOption/ATOMIC_MOVE
+                             StandardCopyOption/REPLACE_EXISTING]))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; File enumeration + parsing
@@ -147,6 +153,39 @@
            (sort-by (fn [^java.io.File f] (.getName f)))
            vec)
       [])))
+
+(defn- revive-uuid
+  "Parse a UUID-shaped string back to a java.util.UUID. Non-string /
+   unparseable values pass through unchanged."
+  [v]
+  (if (string? v) (or (parse-uuid v) v) v))
+
+(defn- revive-inst
+  "Parse an RFC-3339 string back to a java.util.Date. Non-string /
+   unparseable values pass through unchanged."
+  [v]
+  (if (string? v)
+    (try (java.util.Date/from (Instant/parse v))
+         (catch Exception _e v))
+    v))
+
+(defn- revive-request-event
+  "Restore the typed identity fields `read-event-file`'s tag stripping
+   flattened to strings. Without this, republishing the event would
+   violate the event-stream schema (`:event/id` uuid?, timestamps
+   inst?) and re-serialize without `~u`/`~t` tags — and a string
+   `:workflow/id` would fork per-workflow sequence numbering and
+   quiesce fencing away from the UUID-keyed entries the runner uses."
+  [event]
+  (-> event
+      (update :event/id revive-uuid)
+      (update :intervention/id revive-uuid)
+      (update :event/timestamp revive-inst)
+      (update :intervention/requested-at revive-inst)
+      (update :intervention/updated-at revive-inst)
+      (cond->
+        (contains? event :workflow/id)
+        (update :workflow/id revive-uuid))))
 
 (defn- event->request
   "Extract the InterventionRequest fields from a parsed event map.
@@ -171,10 +210,16 @@
 (defn- intervention-workflow-id
   "The `:workflow/id` to stamp on lifecycle events — present only when
    the intervention targets a workflow, so its audit trail lands in the
-   run's own event directory."
+   run's own event directory. Coerced to a UUID (target ids arrive as
+   strings from the wire); an unparseable id yields nil rather than a
+   string key that would fork sequence numbering / quiesce fencing
+   away from the runner's UUID-keyed entries."
   [interv]
   (when (= :workflow (:intervention/target-type interv))
-    (:intervention/target-id interv)))
+    (let [target-id (:intervention/target-id interv)]
+      (if (uuid? target-id)
+        target-id
+        (some-> target-id str parse-uuid)))))
 
 (defn- publish-state-changed!
   [stream interv]
@@ -253,10 +298,10 @@
         (reduce
          (fn [acc ^java.io.File f]
            (let [file-name (.getName f)
-                 event (es/read-event-file f)
+                 raw (es/read-event-file f)
                  acc (update acc :cursor update :processed-files conj file-name)]
              (cond
-               (nil? event)
+               (nil? raw)
                (do (publish-anomaly! stream file-name
                                      (anomaly/anomaly
                                       :invalid-input
@@ -265,20 +310,24 @@
                                       {:source/file file-name}))
                    (update acc :anomalies inc))
 
-               (not= intervention-requested-event-type (:event/type event))
-               (update acc :skipped inc)
-
-               (contains? (get-in acc [:cursor :processed-intervention-ids])
-                          (:intervention/id event))
+               (not= intervention-requested-event-type (:event/type raw))
                (update acc :skipped inc)
 
                :else
-               (if-let [routed-id (route-intervention! stream apply! event file-name)]
-                 (-> acc
-                     (update :routed inc)
-                     (update :cursor update :processed-intervention-ids
-                             conj routed-id))
-                 (update acc :anomalies inc)))))
+               ;; Revive typed identity fields before dedup + routing so
+               ;; the id compared against the cursor and the map that
+               ;; gets republished are UUID/inst-typed, not the strings
+               ;; tag-stripping left behind.
+               (let [event (revive-request-event raw)]
+                 (if (contains? (get-in acc [:cursor :processed-intervention-ids])
+                                (:intervention/id event))
+                   (update acc :skipped inc)
+                   (if-let [routed-id (route-intervention! stream apply! event file-name)]
+                     (-> acc
+                         (update :routed inc)
+                         (update :cursor update :processed-intervention-ids
+                                 conj routed-id))
+                     (update acc :anomalies inc)))))))
          {:routed 0 :skipped 0 :anomalies 0 :cursor cursor}
          files)]
     (when (seq files)
@@ -290,6 +339,16 @@
 
 (def ^:const default-poll-interval-ms 1000)
 
+(defn- daemon-thread-factory
+  "Named daemon threads for the poller (the repo's background-scheduler
+   idiom — see event-stream `heartbeat.clj`): a consumer that is not
+   stopped on some shutdown path must never keep the JVM alive."
+  ^ThreadFactory []
+  (reify ThreadFactory
+    (newThread [_ runnable]
+      (doto (Thread. ^Runnable runnable "miniforge-operator-consumer")
+        (.setDaemon true)))))
+
 (defn start!
   "Start a background poller running [[consume-pass!]] on a fixed
    delay. Options are those of [[consume-pass!]] plus :interval-ms
@@ -300,7 +359,7 @@
    still runs — a transiently unreadable directory must not kill the
    control path for the rest of the process."
   [{:keys [interval-ms] :as opts}]
-  (let [executor (Executors/newSingleThreadScheduledExecutor)
+  (let [executor (Executors/newSingleThreadScheduledExecutor (daemon-thread-factory))
         task (fn []
                (try
                  (consume-pass! opts)
