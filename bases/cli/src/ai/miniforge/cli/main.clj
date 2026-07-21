@@ -76,6 +76,7 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
@@ -111,9 +112,12 @@
     (str caught)))
 
 (defn- create-pr-train-manager
-  []
+  "Build the PR-train manager bound to `event-stream` so train
+   mutations (add-pr, complete-merge) publish governed events that
+   supervisory-state materializes for the consoles."
+  [event-stream]
   (try+
-    (pr-train/create-manager)
+    (pr-train/create-manager {:event-stream event-stream})
     (catch Object e
       (println (messages/t :web/pr-train-warning
                            {:error (caught-message e (:throwable &throw-context))}))
@@ -136,7 +140,8 @@
                      'start!)]
     (fn [{:keys [port]}]
       (let [event-stream (es/create-event-stream)
-            pr-train-manager (create-pr-train-manager)
+            _ (supervisory/ensure-attached! event-stream)
+            pr-train-manager (create-pr-train-manager event-stream)
             repo-dag-manager (create-repo-dag-manager)]
         (start! {:port port
                  :event-stream event-stream

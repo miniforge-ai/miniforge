@@ -477,16 +477,35 @@
               (cond-> pr-state
                 workflow-id (assoc :pr/workflow-run-id workflow-id)))))
 
+(defn- pr-stub
+  "Minimal schema-complete PR entity, used when a lifecycle event is
+   observed before `:pr/created` (same rationale as [[pr-scored]]'s
+   stub: never lose an observed status because the create event was
+   missed — a later create/upsert fills the richer fields via merge)."
+  [{:pr/keys [repo number]}]
+  {:pr/repo       (or repo "")
+   :pr/number     (or number 0)
+   :pr/url        ""
+   :pr/branch     ""
+   :pr/title      ""
+   :pr/status     :open
+   :pr/merge-order 0
+   :pr/depends-on []
+   :pr/blocks     []
+   :pr/ci-status  :pending})
+
 (defn pr-merged
   [table event]
   (let [k (pr-key event)
         ts (event-instant event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      (get-in table [:prs k])
+      ;; Both key halves must be present: a repo-less event (the
+      ;; pre-envelope bare-map shape) must not mint a [nil n] entity.
+      (and (:pr/repo event) (:pr/number event))
       (update-in [:prs k]
                  (fn [pr]
-                   (cond-> (merge pr
+                   (cond-> (merge (or pr (pr-stub event))
                                   {:pr/status :merged
                                    :pr/merged-at ts})
                      (and workflow-id (nil? (:pr/workflow-run-id pr)))
@@ -497,10 +516,10 @@
   (let [k (pr-key event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      (get-in table [:prs k])
+      (and (:pr/repo event) (:pr/number event))
       (update-in [:prs k]
                  (fn [pr]
-                   (cond-> (assoc pr :pr/status :closed)
+                   (cond-> (assoc (or pr (pr-stub event)) :pr/status :closed)
                      (and workflow-id (nil? (:pr/workflow-run-id pr)))
                      (assoc :pr/workflow-run-id workflow-id)))))))
 

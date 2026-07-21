@@ -26,6 +26,8 @@
    [clojure.java.io :as io]
    [clojure.string :as str]
    [ai.miniforge.coerce.interface :as coerce]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.tui-engine.interface :as tui]
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.effect :as effect]
@@ -525,7 +527,12 @@
    The TUI blocks the calling thread until the user quits (q key)."
   [event-stream & [{:keys [throttle-ms screen load-limit]
                     :or {throttle-ms 1000 load-limit 100}}]]
-  (let [train-mgr (pr-train/create-manager)
+  (let [;; Bind the train manager to the caller's stream (with the
+        ;; supervisory materialized view attached, idempotently) so
+        ;; train mutations publish governed events instead of nothing.
+        _ (when event-stream (supervisory/ensure-attached! event-stream))
+        train-mgr (pr-train/create-manager
+                   (when event-stream {:event-stream event-stream}))
         app (tui/create-app
              {:init   (fn []
                         (persistence-pr/load-all-into-model
@@ -572,7 +579,13 @@
   [& [opts]]
   (when (:debug opts)
     (tui/set-log-level! :debug))
-  (let [train-mgr (pr-train/create-manager)
+  (let [;; Standalone mode has no caller stream: create a governed one
+        ;; (default file sink → ~/.miniforge/events) with supervisory
+        ;; attached, so TUI-driven train merges become durable events
+        ;; the operator console ingests.
+        train-stream (doto (es/create-event-stream)
+                       (supervisory/ensure-attached!))
+        train-mgr (pr-train/create-manager {:event-stream train-stream})
         app (tui/create-app
              {:init   (fn []
                         (-> (model/init-model)

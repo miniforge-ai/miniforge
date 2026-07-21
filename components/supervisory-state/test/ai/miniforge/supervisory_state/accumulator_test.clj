@@ -443,6 +443,36 @@
     (is (some? (:pr/merged-at pr)))
     (is (= wf-id (:pr/workflow-run-id pr)))))
 
+(deftest pr-merged-before-created-stubs-minimal-entry
+  ;; Same rationale as the :pr/scored stub: an observed status must not
+  ;; be lost because the create event was missed (e.g. the console
+  ;; attached mid-stream, or the producer only announces merges).
+  (let [table (acc/apply-event schema/empty-table
+                               (ev :pr/merged
+                                   {:pr/repo "acme/widget"
+                                    :pr/number 43}))
+        pr    (get-in table [:prs ["acme/widget" 43]])]
+    (is (some? pr))
+    (is (= :merged (:pr/status pr)))
+    (is (some? (:pr/merged-at pr)))))
+
+(deftest pr-closed-before-created-stubs-minimal-entry
+  (let [table (acc/apply-event schema/empty-table
+                               (ev :pr/closed
+                                   {:pr/repo "acme/widget"
+                                    :pr/number 44}))
+        pr    (get-in table [:prs ["acme/widget" 44]])]
+    (is (some? pr))
+    (is (= :closed (:pr/status pr)))))
+
+(deftest repo-less-pr-lifecycle-events-mint-nothing
+  ;; The pre-envelope bare-map shape ({:event/type :pr/merged
+  ;; :pr/number n} with no repo) must not create a [nil n] entity.
+  (let [table (-> schema/empty-table
+                  (acc/apply-event (ev :pr/merged {:pr/number 45}))
+                  (acc/apply-event (ev :pr/closed {:pr/number 45})))]
+    (is (empty? (:prs table)))))
+
 ;------------------------------------------------------------------------------ :pr/scored
 
 (def ^:private sample-readiness

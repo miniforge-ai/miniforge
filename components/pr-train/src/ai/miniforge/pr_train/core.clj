@@ -155,6 +155,23 @@
                         (update :train/prs conj pr)
                         state/recompute-train-state)]
         (swap! trains assoc train-id updated)
+        ;; Announce the PR on the governed stream so supervisory-state
+        ;; materializes an entity BEFORE any merge/close event needs to
+        ;; update it — the consoles' Train surface renders from these.
+        (when event-stream
+          (try
+            (es/publish! event-stream
+                         (assoc (es/create-envelope
+                                 event-stream :pr/created nil
+                                 (str "PR #" pr-number " joined train"))
+                                :pr/repo repo
+                                :pr/number pr-number
+                                :pr/url url
+                                :pr/branch branch
+                                :pr/title title
+                                :pr/merge-order merge-order
+                                :train/id train-id))
+            (catch Exception _ nil)))
         updated)))
 
   (remove-pr [_this train-id pr-number]
@@ -252,15 +269,22 @@
       (when-let [updated (state/transition-pr-status train pr-number :merged)]
         (let [final (-> updated
                         state/recompute-train-state
-                        state/auto-transition-train)]
+                        state/auto-transition-train)
+              pr (state/find-pr train pr-number)]
           (swap! trains assoc train-id final)
+          ;; Enveloped (event id + sequence + timestamp) and keyed with
+          ;; :pr/repo — supervisory-state's pr-key needs repo+number, so
+          ;; the previous bare {:event/type :pr/merged :pr/number n} map
+          ;; could never update an entity.
           (when event-stream
             (try
               (es/publish! event-stream
-                           {:event/type :pr/merged
-                            :pr/number pr-number
-                            :train/id train-id
-                            :timestamp (java.util.Date.)})
+                           (assoc (es/create-envelope
+                                   event-stream :pr/merged nil
+                                   (str "PR #" pr-number " merged"))
+                                  :pr/repo (:pr/repo pr)
+                                  :pr/number pr-number
+                                  :train/id train-id))
               (catch Exception _ nil)))
           final))))
 
