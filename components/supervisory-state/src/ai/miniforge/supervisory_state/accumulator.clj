@@ -494,15 +494,25 @@
    :pr/blocks     []
    :pr/ci-status  :pending})
 
+(defn- pr-lifecycle-keyable?
+  "True when the event carries a usable [repo number] entity key: a
+   NON-BLANK repo (the entity schema requires min length 1; a blank
+   string would mint a [\"\" n] entity) and a present number."
+  [event]
+  (and (string? (:pr/repo event))
+       (not (str/blank? (:pr/repo event)))
+       (some? (:pr/number event))))
+
 (defn pr-merged
   [table event]
   (let [k (pr-key event)
         ts (event-instant event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      ;; Both key halves must be present: a repo-less event (the
-      ;; pre-envelope bare-map shape) must not mint a [nil n] entity.
-      (and (:pr/repo event) (:pr/number event))
+      ;; A usable key requires a non-blank repo and a number: repo-less
+      ;; or blank-repo events (the pre-envelope bare-map shape) must
+      ;; not mint [nil n] / ["" n] entities.
+      (pr-lifecycle-keyable? event)
       (update-in [:prs k]
                  (fn [pr]
                    (cond-> (merge (or pr (pr-stub event))
@@ -516,7 +526,7 @@
   (let [k (pr-key event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      (and (:pr/repo event) (:pr/number event))
+      (pr-lifecycle-keyable? event)
       (update-in [:prs k]
                  (fn [pr]
                    (cond-> (assoc (or pr (pr-stub event)) :pr/status :closed)

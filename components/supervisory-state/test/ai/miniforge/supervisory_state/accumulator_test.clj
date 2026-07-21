@@ -467,10 +467,15 @@
 
 (deftest repo-less-pr-lifecycle-events-mint-nothing
   ;; The pre-envelope bare-map shape ({:event/type :pr/merged
-  ;; :pr/number n} with no repo) must not create a [nil n] entity.
+  ;; :pr/number n} with no repo) must not create a [nil n] entity;
+  ;; a BLANK repo violates the entity schema (min length 1) and must
+  ;; not mint ["" n] either.
   (let [table (-> schema/empty-table
                   (acc/apply-event (ev :pr/merged {:pr/number 45}))
-                  (acc/apply-event (ev :pr/closed {:pr/number 45})))]
+                  (acc/apply-event (ev :pr/closed {:pr/number 45}))
+                  (acc/apply-event (ev :pr/merged {:pr/repo "" :pr/number 45}))
+                  (acc/apply-event (ev :pr/closed {:pr/repo "  " :pr/number 45}))
+                  (acc/apply-event (ev :pr/merged {:pr/repo "acme/widget"})))]
     (is (empty? (:prs table)))))
 
 ;------------------------------------------------------------------------------ :pr/scored
