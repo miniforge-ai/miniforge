@@ -20,6 +20,7 @@
   "Public API for the operator (meta-agent) component.
    Manages the meta-loop: observe signals, detect patterns, propose improvements."
   (:require
+   [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.core :as core]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.protocol :as proto]))
@@ -199,6 +200,33 @@
 (def bounded-intervention-vocabulary?
   "Check if a set of intervention types is within the bounded vocabulary."
   intervention/bounded-vocabulary?)
+
+;------------------------------------------------------------------------------ Layer 1b
+;; Operator-event consumer (Phase D D-2)
+
+(def consume-operator-events!
+  "Run one consumption pass over `{events-dir}/operator/`: parse
+   intervention-requested events, validate, route through the
+   lifecycle (auto-approving operator-driven request sources), publish
+   every transition onto the stream, and advance the idempotency
+   cursor. Options: :events-dir, :stream (required), :apply! (the D-3
+   application hook). Returns {:routed n :skipped n :anomalies n}."
+  consumer/consume-pass!)
+
+(def start-operator-consumer!
+  "Start a fixed-delay background poller running the consumer pass.
+   Options are those of [[consume-operator-events!]] plus :interval-ms
+   (default 1000). Returns a handle for [[stop-operator-consumer!]]."
+  consumer/start!)
+
+(def stop-operator-consumer!
+  "Stop a poller started by [[start-operator-consumer!]]. Idempotent."
+  consumer/stop!)
+
+(def auto-approve-request-sources
+  "Request sources whose interventions are auto-approved (the human IS
+   the approver): the operator surfaces, not delegated agents."
+  consumer/auto-approve-request-sources)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Signal observation

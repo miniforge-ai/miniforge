@@ -116,6 +116,13 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def operator-dir
+  "The cross-workflow operator events directory (`{base-dir}/operator/`).
+   Writer side: [[operator-event-file-path]] via the file sink; read
+   side: the operator-event consumer (Phase D D-2). Arities: () defaults
+   base-dir to ~/.miniforge/events; (base-dir)."
+  sinks/operator-dir)
+
 (def serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
    the exact encoding the file sink writes to disk (verbose mode: no
@@ -753,6 +760,14 @@
    become keywords; `~u` / `~t` (UUID / instant) prefixes become the
    stripped string form. Returns the de-prefixed value."
   reader/strip-transit-prefix)
+
+(def read-event-file
+  "Parse one transit-JSON event file into an event map (prefixes
+   stripped: `:event/type` back to a keyword, UUID/instant values as
+   plain strings). Returns the parsed map, or nil when the file cannot
+   be read or parsed — callers that must be loud about malformed files
+   branch on the nil themselves."
+  reader/read-event-file)
 
 (def read-workflow-events
   "Read every `.json` event file under a workflow directory, sorted by

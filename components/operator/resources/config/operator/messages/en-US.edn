@@ -22,4 +22,14 @@
   "Cannot transition from terminal state: {state}"
 
   :intervention/invalid-transition
-  "No intervention transition defined for [{state} {event}]"}}
+  "No intervention transition defined for [{state} {event}]"
+
+  ;; Operator-event consumer (Phase D D-2)
+  :consumer/state-changed
+  "Intervention {type} state changed to {state}"
+
+  :consumer/event-anomaly
+  "Malformed operator event rejected: {file}"
+
+  :consumer/unreadable-event
+  "Unreadable operator event file: {file}"}}
