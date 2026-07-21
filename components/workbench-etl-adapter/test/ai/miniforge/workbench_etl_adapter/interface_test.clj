@@ -164,6 +164,8 @@
 (deftest test-project-emits-shipped-etl-evaluations
   (let [result   (sut/project successful-result baseline-config projection-opts)
         snapshot (:snapshot result)
+        run      (first (:evaluations snapshot))
+        stages   (second (:evaluations snapshot))
         quality  (last (:evaluations snapshot))]
     (is (schema/succeeded? result))
     (is (sut/valid-snapshot? snapshot))
@@ -172,6 +174,10 @@
     (is (= "warn" (:status quality)))
     (is (= (double (/ quality-report-passed quality-report-total))
            (:score quality)))
+    (is (= "pipeline status completed"
+           (get-in run [:evidence_refs 0 :quote])))
+    (is (= ["Ingest status completed" "Validate status completed"]
+           (mapv :quote (:evidence_refs stages))))
     (is (= 1 (get-in snapshot [:metadata :resolved_run :redacted_count])))))
 
 (deftest test-not-applicable-quality-components-match-registry

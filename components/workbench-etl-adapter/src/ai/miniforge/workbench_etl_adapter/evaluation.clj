@@ -98,7 +98,7 @@
   [{:id (str run-completed-id ".pipeline-run." (:pipeline-run/id run))
     :source_role source-role
     :quote (msg/t :evidence/run-status
-                  {:status (:pipeline-run/status run)})
+                  {:status (name (:pipeline-run/status run))})
     :created_at evaluated-at}])
 
 (defn- stage-evidence [stage-runs run-id evaluated-at source-role]
@@ -108,7 +108,7 @@
              :source_role source-role
              :quote (msg/t :evidence/stage-status
                            {:stage (:stage/name stage)
-                            :status (:status stage)})
+                            :status (name (:status stage))})
              :created_at evaluated-at})
           (range)
           stage-runs)
