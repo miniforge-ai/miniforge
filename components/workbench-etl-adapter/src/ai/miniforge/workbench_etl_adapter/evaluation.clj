@@ -101,16 +101,21 @@
                   {:status (:pipeline-run/status run)})
     :created_at evaluated-at}])
 
-(defn- stage-evidence [stage-runs evaluated-at source-role]
-  (mapv (fn [index stage]
-          {:id (str stages-completed-id ".stage." index)
-           :source_role source-role
-           :quote (msg/t :evidence/stage-status
-                         {:stage (:stage/name stage)
-                          :status (:status stage)})
-           :created_at evaluated-at})
-        (range)
-        stage-runs))
+(defn- stage-evidence [stage-runs run-id evaluated-at source-role]
+  (if (seq stage-runs)
+    (mapv (fn [index stage]
+            {:id (str stages-completed-id ".stage." index)
+             :source_role source-role
+             :quote (msg/t :evidence/stage-status
+                           {:stage (:stage/name stage)
+                            :status (:status stage)})
+             :created_at evaluated-at})
+          (range)
+          stage-runs)
+    [{:id (str stages-completed-id ".absent." run-id)
+      :source_role source-role
+      :quote (msg/t :evidence/no-stage-runs)
+      :created_at evaluated-at}]))
 
 (defn- quality-evidence [quality-reports evaluated-at source-role]
   (mapv (fn [index report]
@@ -142,7 +147,7 @@
       :gate-effect (gate-effect definition status)
       :evaluated-at evaluated-at})))
 
-(defn- stages-completed [registry stage-runs configured-stage-count evaluated-at]
+(defn- stages-completed [registry run stage-runs configured-stage-count evaluated-at]
   (let [;; Failed execution stops before skipped stages enter :stage-runs.
         definition (state-var registry stages-completed-id)
         total      (max configured-stage-count (count stage-runs))
@@ -159,7 +164,7 @@
       :components {:completed_stages (double completed)
                    :total_stages (double total)
                    :failed_stages (double failed)}
-      :evidence (stage-evidence stage-runs evaluated-at
+      :evidence (stage-evidence stage-runs (:pipeline-run/id run) evaluated-at
                                 (required-source-role definition))
       :findings (when (not= :pass status)
                   [{:severity (name (if (= :fail status) :error :warn))
@@ -218,5 +223,5 @@
   "Evaluate the three shipped ETL state variables for one pipeline run."
   [registry run stage-runs configured-stage-count evaluated-at]
   [(run-completed registry run evaluated-at)
-   (stages-completed registry stage-runs configured-stage-count evaluated-at)
+   (stages-completed registry run stage-runs configured-stage-count evaluated-at)
    (data-quality registry stage-runs evaluated-at)])

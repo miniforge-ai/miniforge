@@ -19,6 +19,7 @@
 {:workbench-etl-adapter/system
  {:evidence/run-status "pipeline status {status}"
   :evidence/stage-status "{stage} status {status}"
+  :evidence/no-stage-runs "no stage runs recorded; execution stopped before the first stage"
   :evidence/quality-summary "{passed}/{total} records passed"
   :finding/run-incomplete "Pipeline run did not complete"
   :finding/stage-incomplete "One or more pipeline stages did not complete"

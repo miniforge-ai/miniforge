@@ -132,6 +132,19 @@
 (defn- read-edn [path]
   (edn/read-string (slurp path)))
 
+(defn- evidence-requirements-satisfied?
+  [registry evaluation]
+  (let [definition (some #(when (= (:state_var_id evaluation) (:id %)) %)
+                         (:state_vars registry))
+        requirements (:evidence_requirements definition)
+        refs (:evidence_refs evaluation)
+        min-count (get requirements :min_count 0)
+        required-roles (set (:required_refs requirements))
+        observed-roles (set (map :source_role refs))]
+    (and (>= (count refs) min-count)
+         (or (and (empty? refs) (zero? min-count))
+             (every? observed-roles required-roles)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest test-shipped-registry-is-contract-valid
@@ -202,6 +215,41 @@
     (is (= (double (count (get-in three-stage-config
                                   [:pipeline :pipeline/stages])))
            (get-in stages [:score_components :total_stages])))))
+
+(deftest test-empty-stage-runs-emit-honest-absence-evidence
+  (let [result (sut/project (pipeline-result :success? false
+                                             :status :failed
+                                             :stage-runs [])
+                            (resolved-run-config :stages [{:stage/name "Ingest"}])
+                            projection-opts)
+        stages (second (:evaluations (:snapshot result)))
+        evidence-refs (:evidence_refs stages)
+        evidence (first evidence-refs)]
+    (is (schema/succeeded? result))
+    (is (= 1 (count evidence-refs)))
+    (is (= "pipeline-stage-run" (:source_role evidence)))
+    (is (= "no stage runs recorded; execution stopped before the first stage"
+           (:quote evidence)))
+    (is (= (str "miniforge.etl.stages_completed.absent." pipeline-run-id)
+           (:id evidence)))))
+
+(deftest test-reachable-evaluations-satisfy-registry-evidence-requirements
+  (let [registry (sut/state-var-registry)
+        fixtures [[successful-result baseline-config]
+                  [(pipeline-result :success? false :status :failed :stage-runs [])
+                   (resolved-run-config :stages [{:stage/name "Ingest"}])]
+                  [(pipeline-result :stage-runs [])
+                   (resolved-run-config :stages [])]
+                  [(update-in successful-result
+                              [:pipeline-run :pipeline-run/stage-runs]
+                              #(mapv (fn [stage] (dissoc stage :quality-report)) %))
+                   baseline-config]]]
+    (doseq [[pipeline-output run-config] fixtures
+            :let [result (sut/project pipeline-output run-config projection-opts)]
+            evaluation (:evaluations (:snapshot result))]
+      (is (schema/succeeded? result))
+      (is (evidence-requirements-satisfied? registry evaluation)
+          (str (:state_var_id evaluation) " violates its registry evidence requirements")))))
 
 (deftest test-candidate-requires-exactly-one-factor-change
   (let [baseline-values (:values (sut/factor-inventory baseline-config))
