@@ -93,8 +93,7 @@
    :processed-intervention-ids #{}
    :processed-files #{}})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Processed cursor — the idempotency manifest
+;; ── Processed cursor — the idempotency manifest ────────────────────────────
 
 (defn- cursor-file
   ^java.io.File [operator-dir]
@@ -136,8 +135,7 @@
                             [StandardCopyOption/ATOMIC_MOVE
                              StandardCopyOption/REPLACE_EXISTING]))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; File enumeration + parsing
+;; ── File enumeration + parsing ─────────────────────────────────────────────
 
 (defn- list-event-files
   "Event files in `operator-dir`, sorted by filename. Both filename
@@ -204,7 +202,7 @@
     (:intervention/details event)
     (assoc :intervention/details (:intervention/details event))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 1
 ;; Event publication
 
 (defn- intervention-workflow-id
@@ -243,8 +241,7 @@
                                :source/file file-name
                                :anomaly anomaly-data))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Single-event routing
+;; ── Single-event routing ───────────────────────────────────────────────────
 
 (defn- route-intervention!
   "Create → approval-gate → (optional) apply. Returns the intervention
@@ -269,7 +266,7 @@
             (apply! stream gated))
           (:intervention/id created))))))
 
-;------------------------------------------------------------------------------ Layer 5
+;------------------------------------------------------------------------------ Layer 2
 ;; Consumption pass
 
 (defn consume-pass!
@@ -334,8 +331,7 @@
       (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
 
-;------------------------------------------------------------------------------ Layer 6
-;; Polling lifecycle
+;; ── Polling lifecycle ──────────────────────────────────────────────────────
 
 (def ^:const default-poll-interval-ms 1000)
 
