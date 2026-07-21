@@ -38,6 +38,12 @@
   ([] (descriptor/make-descriptor {}))
   ([opts] (descriptor/make-descriptor opts)))
 
+(defn- podman-descriptor
+  "For tests describing Podman-specific behaviour (bare-hex image IDs),
+   so the setup matches the runtime named in the test."
+  []
+  (descriptor/make-descriptor {:runtime-kind :podman}))
+
 ;; Phase 2: argument-construction tests run against every supported kind so
 ;; a Podman regression in flag shaping shows up at unit-test time.
 (def ^:private supported-kinds-under-test
@@ -163,6 +169,34 @@
                     {:exit 0 :out "sha256:abc123def456\n" :err ""})]
       (is (= "sha256:abc123def456"
              (oci-cli/container-image-digest (docker-descriptor) "my-container"))))))
+
+(deftest container-image-digest-normalizes-podman-bare-hex-test
+  (testing "Podman prints the image ID as bare 64-hex; the digest is
+            normalized to the sha256:-prefixed form the gate expects"
+    (let [hex (apply str (repeat 64 \a))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str hex "\n") :err ""})]
+        (is (= (str "sha256:" hex)
+               (oci-cli/container-image-digest (podman-descriptor) "my-container")))))))
+
+(deftest image-config-digest-normalizes-podman-bare-hex-test
+  (testing "image-config-digest applies the same normalization on image IDs"
+    (let [hex (apply str (repeat 64 \a))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str hex "\n") :err ""})]
+        (is (= (str "sha256:" hex)
+               (oci-cli/image-config-digest (podman-descriptor) "img:tag")))))))
+
+(deftest image-config-digest-passes-docker-prefixed-form-through-test
+  (testing "Docker's already-prefixed sha256:<hex> ID is returned unchanged"
+    (let [digest (str "sha256:" (apply str (repeat 64 \b)))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str digest "\n") :err ""})]
+        (is (= digest
+               (oci-cli/image-config-digest (docker-descriptor) "img:tag")))))))
 
 (deftest container-image-digest-returns-nil-on-nonzero-exit-test
   (testing "returns nil when inspect exits non-zero"

@@ -19,29 +19,13 @@
    [clojure.string :as str]
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]
+   [ai.miniforge.cli.runtime-env :as runtime-env]
    [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config sourcing
-
-(def ^:private runtime-env-var
-  "MINIFORGE_RUNTIME environment variable — overrides file config per
-   N11-delta §2.1."
-  "MINIFORGE_RUNTIME")
-
-(defn- env-runtime-kind
-  "Read MINIFORGE_RUNTIME from the environment and coerce to a keyword.
-   Returns nil when unset or blank."
-  []
-  (some-> (System/getenv runtime-env-var) str/trim not-empty keyword))
-
-(defn- selection-config
-  "Build the config map passed to the selector. Today the only source is
-   the env var; file config integration is a separate concern that layers
-   on without changing the selector contract."
-  []
-  (cond-> {}
-    (env-runtime-kind) (assoc :runtime-kind (env-runtime-kind))))
+;; Config sourcing — MINIFORGE_RUNTIME handling lives in the shared
+;; `runtime-env` leaf namespace so the workflow-runner sandbox applies the
+;; same override these commands do.
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Render helpers
@@ -91,7 +75,7 @@
   "Resolve the runtime per N11-delta §3 and print the result. Used both
    from `mf runtime info` and from the doctor."
   [_m]
-  (let [result (dag/select-runtime (selection-config))]
+  (let [result (dag/select-runtime (runtime-env/selection-config))]
     (if (dag/ok? result)
       (print-info-success (:data result))
       (print-info-error (:error result)))))
@@ -116,7 +100,7 @@
    The workflow engine builds its own argv via the OCI-CLI executor; it
    does NOT shell through this command."
   [m]
-  (let [result (dag/select-runtime (selection-config))]
+  (let [result (dag/select-runtime (runtime-env/selection-config))]
     (if (dag/err? result)
       (do (print-info-error (:error result))
           (System/exit 1))
@@ -152,7 +136,7 @@
   "Emit the runtime block of `mf doctor`. Picked up by main.clj's
    doctor-cmd."
   []
-  (let [result (dag/select-runtime (selection-config))]
+  (let [result (dag/select-runtime (runtime-env/selection-config))]
     (if (dag/ok? result)
       (let [data (:data result)]
         (println (format-runtime-line data))
@@ -160,7 +144,7 @@
           (println "  " (messages/t :runtime/doctor-probed-line
                                     {:probed probed-str})))
         (println "  " (messages/t :runtime/doctor-override-hint
-                                  {:env-var runtime-env-var})))
+                                  {:env-var runtime-env/runtime-env-var})))
       (do (print-runtime-error-line (:error result))
           (println "  " (messages/t :runtime/doctor-override-hint
-                                    {:env-var runtime-env-var}))))))
+                                    {:env-var runtime-env/runtime-env-var}))))))

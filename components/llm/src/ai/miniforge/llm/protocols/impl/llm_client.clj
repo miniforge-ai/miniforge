@@ -927,6 +927,13 @@
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
 
+(defn getenv-value
+  "Indirection over `System/getenv` so env-dependent backend resolution
+   (api-key, base-url) is testable via `with-redefs` (kept public like
+   `http-post-request` for exactly that reason)."
+  [k]
+  (System/getenv k))
+
 (defn- resolve-api-key
   "Resolve the API key for a direct provider backend: a non-blank
    `:api-key` in the client config wins; otherwise the backend's
@@ -938,7 +945,7 @@
    ever touching disk."
   [backend-config config]
   (or (some-> (:api-key config) str str/trim not-empty)
-      (some-> (:api-key-env backend-config) System/getenv str str/trim not-empty)))
+      (some-> (:api-key-env backend-config) getenv-value str str/trim not-empty)))
 
 (defn- resolve-base-url
   "The endpoint for the request. Only a backend that declares
@@ -949,7 +956,7 @@
   [backend-config config]
   (or (when (:base-url-env backend-config)
         (or (some-> (:base-url config) str str/trim not-empty)
-            (some-> (:base-url-env backend-config) System/getenv str str/trim
+            (some-> (:base-url-env backend-config) getenv-value str str/trim
                     not-empty)))
       (:api-endpoint backend-config)))
 
@@ -1065,7 +1072,9 @@
                  (msg/t :http-provider.system/unsupported-backend
                         {:provider provider}))
 
-      (and api-key-env (str/blank? (str api-key)))
+      (and api-key-env
+           (not (:optional-api-key? backend-config))
+           (str/blank? (str api-key)))
       (llm-error :anomalies/incorrect "missing_api_key"
                  (msg/t :http-provider.system/missing-api-key
                         {:provider provider :env-var api-key-env}))

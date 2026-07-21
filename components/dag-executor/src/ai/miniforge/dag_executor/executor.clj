@@ -21,7 +21,7 @@
 
    Provides a unified interface for task isolation using:
    - Kubernetes (K8s Jobs)
-   - OCI containers (Docker today; Podman lands in N11-delta Phase 2)
+   - OCI containers (Docker / Podman)
    - Local worktree with semaphores (fallback)
 
    The executor contract abstracts how tasks get isolated environments
@@ -37,6 +37,7 @@
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.selector :as selector]
    [ai.miniforge.dag-executor.protocols.impl.kubernetes :as k8s]
    [ai.miniforge.dag-executor.protocols.impl.worktree :as worktree]))
 
@@ -80,8 +81,8 @@
   "Create an OCI-CLI executor for the runtime kind named on the config.
 
    Config:
-   - :runtime-kind - :docker (default) or :podman (Phase 2). :nerdctl is
-                     known but not yet supported.
+   - :runtime-kind - :docker or :podman. :nerdctl is known but not yet
+                     supported.
    - :executable - explicit path to the runtime CLI binary
    - :image - container image for tasks (default from images.edn :default entry)
    - :network - network to attach to"
@@ -194,38 +195,70 @@
     true
     (assoc :worktree (create-worktree-executor (get config :worktree {})))))
 
+(defn prepare-runtime-executor!
+  "Create an OCI-CLI executor on the selected container runtime, with the
+   required task runner image ensured to exist.
+
+   Runtime selection per N11-delta §3 (`select-runtime`): an explicit
+   :runtime-kind in `config` wins and fails loudly when that runtime is
+   unavailable; otherwise the auto-probe order applies — Podman first,
+   then Docker.
+
+   Arguments:
+   - config: executor config
+     {:runtime-kind - optional explicit runtime kind (:docker | :podman)
+      :image - image to use for tasks (default: bundled task-runner image)
+      :image-type - which bundled image to ensure (:minimal or :clojure)
+      :ensure-image? - whether to build image if missing (default: true)
+      :executable - explicit path to the runtime CLI binary; requires an
+                    explicit :runtime-kind (auto-probe cannot tell which
+                    kind the binary is — selection fails loudly instead)}
+
+   Returns {:executor OciCliExecutor :image-result Result :runtime <summary>}
+   or an error Result (runtime selection or image build failure). :runtime
+   carries the selection summary (:kind :selection :runtime-version, plus
+   :probed on the auto path) for logs and diagnostics."
+  [config]
+  (let [selection (selector/select-runtime config)]
+    (if-not (result/ok? selection)
+      selection
+      (let [kind          (get-in selection [:data :kind])
+            image-type    (get config :image-type :minimal)
+            ensure?       (get config :ensure-image? true)
+            default-image (get-in task-runner-images [image-type :image])
+            image         (or (:image config) default-image)
+            ;; Rebuild the descriptor from the full config + selected kind so
+            ;; image-side operations and the executor see the same runtime
+            ;; configuration (executable overrides included).
+            runtime       (descriptor/make-descriptor
+                           (assoc config :runtime-kind kind))
+            executor      (create-oci-cli-executor
+                           (assoc config :runtime-kind kind :image image))
+            summary       (dissoc (get selection :data) :descriptor)]
+        (if ensure?
+          (let [image-result (ensure-image! runtime image-type)]
+            (if (result/ok? image-result)
+              (result/ok {:executor executor
+                          :image-result image-result
+                          :runtime summary})
+              image-result))
+          (result/ok {:executor executor
+                      :image-result nil
+                      :runtime summary}))))))
+
 (defn prepare-docker-executor!
   "Create a Docker executor with images ensured to exist.
 
-   This is the recommended way to set up Docker execution for deployments.
-   It ensures the required task runner images are built before returning.
+   Docker-explicit variant of `prepare-runtime-executor!`, kept for callers
+   that specifically want Docker. Product paths should prefer
+   `prepare-runtime-executor!`, which selects the host runtime (Podman
+   first). Unlike the pre-selector behavior, this fails when Docker is
+   unavailable instead of deferring the failure to first use.
 
-   Arguments:
-   - config: Docker executor config
-     {:image - image to use for tasks (default: miniforge/task-runner:latest)
-      :image-type - which bundled image to ensure (:minimal or :clojure)
-      :ensure-image? - whether to build image if missing (default: true)
-      :docker-path - path to docker binary (legacy alias for :executable)}
-
-   Returns {:executor OciCliExecutor :image-result Result} or error Result."
+   Arguments/return as `prepare-runtime-executor!`; also accepts
+   {:docker-path - path to docker binary (legacy alias for :executable)}."
   [config]
-  (let [image-type    (get config :image-type :minimal)
-        ensure?       (get config :ensure-image? true)
-        default-image (get-in task-runner-images [image-type :image])
-        image         (or (:image config) default-image)
-        ;; Build a descriptor once so image-side operations and the executor
-        ;; see the same runtime configuration (executable, kind, etc.).
-        runtime       (descriptor/make-descriptor
-                       (assoc config :runtime-kind :docker))]
-    ;; Ensure image exists if requested
-    (if ensure?
-      (let [image-result (ensure-image! runtime image-type)]
-        (if (result/ok? image-result)
-          (result/ok {:executor (create-docker-executor (assoc config :image image))
-                      :image-result image-result})
-          image-result))
-      (result/ok {:executor (create-docker-executor (assoc config :image image))
-                  :image-result nil}))))
+  (prepare-runtime-executor! (assoc config :runtime-kind :docker)))
 
 ;; ============================================================================
 ;; High-level Helpers

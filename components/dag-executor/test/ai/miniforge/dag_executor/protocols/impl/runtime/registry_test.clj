@@ -66,9 +66,13 @@
 
   (testing "Podman matches Docker's OCI surface and adds :rootless"
     (is (contains? (registry/capabilities :podman) :oci-images))
-    (is (contains? (registry/capabilities :podman) :tmpfs-uid-gid-options))
     (is (contains? (registry/capabilities :podman) :rootless))
-    (is (not (contains? (registry/capabilities :docker) :rootless)))))
+    (is (not (contains? (registry/capabilities :docker) :rootless))))
+
+  (testing "Podman does NOT advertise :tmpfs-uid-gid-options — its --tmpfs
+            rejects uid=/gid= as unknown mount options (Podman 5.8)"
+    (is (contains? (registry/capabilities :docker) :tmpfs-uid-gid-options))
+    (is (not (contains? (registry/capabilities :podman) :tmpfs-uid-gid-options)))))
 
 (deftest registry-flag-podman-info-template-test
   (testing "Podman declares its own :info-format-template (Podman info shape)"
@@ -107,14 +111,20 @@
     (is (= "1000:1000" (registry/user-spec :podman)))))
 
 (deftest registry-tmpfs-mount-options-test
-  (testing "tmpfs-mount-options builds the comma-separated string from defaults"
-    (doseq [kind [:docker :podman]]
-      (testing (str "kind " kind)
-        (let [opts (registry/tmpfs-mount-options kind)]
-          (is (clojure.string/includes? opts "size=512m"))
-          (is (clojure.string/includes? opts "uid=1000"))
-          (is (clojure.string/includes? opts "gid=1000"))
-          (is (clojure.string/includes? opts "rw,nosuid,nodev,exec")))))))
+  (testing "Docker gets uid=/gid= ownership options on scratch tmpfs"
+    (let [opts (registry/tmpfs-mount-options :docker)]
+      (is (clojure.string/includes? opts "size=512m"))
+      (is (clojure.string/includes? opts "uid=1000"))
+      (is (clojure.string/includes? opts "gid=1000"))
+      (is (clojure.string/includes? opts "rw,nosuid,nodev,exec"))))
+
+  (testing "Podman (no :tmpfs-uid-gid-options) gets mode=1777 instead so the
+            non-root container user can write to the scratch mounts"
+    (let [opts (registry/tmpfs-mount-options :podman)]
+      (is (clojure.string/includes? opts "size=512m"))
+      (is (clojure.string/includes? opts "mode=1777"))
+      (is (not (clojure.string/includes? opts "uid=")))
+      (is (not (clojure.string/includes? opts "gid="))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

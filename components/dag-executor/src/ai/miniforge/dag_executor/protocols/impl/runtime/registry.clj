@@ -103,13 +103,25 @@
   [k]
   (str (default k :uid) ":" (default k :gid)))
 
+(def ^:private world-writable-sticky-mode
+  "tmpfs mode for scratch mounts on kinds without :tmpfs-uid-gid-options:
+   1777 = world-writable with the sticky bit (/tmp semantics), so the
+   non-root container user can write without uid=/gid= ownership options."
+  "1777")
+
 (defn tmpfs-mount-options
   "Build the comma-separated options string appended to `--tmpfs <path>:`
    from the runtime's defaults. Uses the runtime's :uid / :gid / :tmpfs-size
    so changing one of those defaults flows through the user spec and the
-   tmpfs options together."
+   tmpfs options together.
+
+   uid=/gid= are emitted only for kinds advertising the
+   :tmpfs-uid-gid-options capability. Kinds without it (Podman rejects
+   those options as unknown) get mode=1777 instead, so the non-root
+   container user can still write to the scratch mounts."
   [k]
-  (let [uid  (default k :uid)
-        gid  (default k :gid)
-        size (default k :tmpfs-size)]
-    (str "rw,nosuid,nodev,exec,size=" size ",uid=" uid ",gid=" gid)))
+  (let [size (default k :tmpfs-size)
+        base (str "rw,nosuid,nodev,exec,size=" size)]
+    (if (contains? (capabilities k) :tmpfs-uid-gid-options)
+      (str base ",uid=" (default k :uid) ",gid=" (default k :gid))
+      (str base ",mode=" world-writable-sticky-mode))))
