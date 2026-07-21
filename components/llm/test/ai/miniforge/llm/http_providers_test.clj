@@ -210,13 +210,16 @@
       (is (= {:input-tokens 11 :output-tokens 7} (:usage result))))))
 
 (deftest openai-compat-wiring-test
-  (testing "the generic backend rides the OpenAI wire shape, is
-            credential-free by default (no :api-key-env), and defaults to
+  (testing "the generic backend rides the OpenAI wire shape, carries an
+            OPTIONAL api key (so a key is sent when present but never
+            required — keyless local servers still work), and defaults to
             the LM Studio endpoint"
     (let [entry (backend-config :openai-compat)]
       (is (= "http" (:cmd entry)))
       (is (= "OpenAI-Compatible" (:provider entry)))
-      (is (nil? (:api-key-env entry)) "no env var -> never fails closed on a key")
+      (is (= "MINIFORGE_OPENAI_COMPAT_API_KEY" (:api-key-env entry)))
+      (is (true? (:optional-api-key? entry))
+          "optional -> declaring api-key-env must not fail closed on a missing key")
       (is (= "http://localhost:1234/v1/chat/completions" (:api-endpoint entry)))
       (is (= "MINIFORGE_OPENAI_COMPAT_BASE_URL" (:base-url-env entry)))
       (is (false? (:requires-cli? entry))))))
