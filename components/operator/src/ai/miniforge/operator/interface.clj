@@ -26,7 +26,7 @@
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.protocol :as proto]))
 
-;------------------------------------------------------------------------------ Layer 0
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Protocol re-exports
 
 (def Operator
@@ -80,7 +80,7 @@
    :rejected, :verified, :failed."
   intervention/terminal-states)
 
-;------------------------------------------------------------------------------ Layer 1
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Operator creation
 
 (def create-operator
@@ -113,7 +113,7 @@
    Controls improvement approval policies."
   core/create-governance)
 
-;------------------------------------------------------------------------------ Layer 1a
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Bounded supervisory interventions
 
 (def create-intervention
@@ -202,7 +202,7 @@
   "Check if a set of intervention types is within the bounded vocabulary."
   intervention/bounded-vocabulary?)
 
-;------------------------------------------------------------------------------ Layer 1b
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Operator-event consumer (Phase D D-2)
 
 (def consume-operator-events!
@@ -229,8 +229,7 @@
    the approver): the operator surfaces, not delegated agents."
   consumer/auto-approve-request-sources)
 
-;------------------------------------------------------------------------------ Layer 1c
-;; Intervention application (Phase D D-3)
+;; ── Intervention application (Phase D D-3) ──────────────────────────────────
 
 (def register-live-runner!
   "Register a live runner's control handles for a workflow id so
@@ -251,7 +250,7 @@
    [[start-operator-consumer!]]."
   application/apply-intervention!)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Signal observation
 
 (defn observe-signal
@@ -285,7 +284,7 @@
   [operator query]
   (proto/get-signals operator query))
 
-;------------------------------------------------------------------------------ Layer 3
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Pattern analysis
 
 (defn analyze-patterns
@@ -328,7 +327,7 @@
   [generator patterns context]
   (proto/generate-improvements generator patterns context))
 
-;------------------------------------------------------------------------------ Layer 4
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Improvement management
 
 (defn propose-improvement
@@ -377,7 +376,7 @@
   [operator proposal-id reason]
   (proto/reject-improvement operator proposal-id reason))
 
-;------------------------------------------------------------------------------ Layer 5
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Governance
 
 (defn requires-approval?

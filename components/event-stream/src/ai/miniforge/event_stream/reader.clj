@@ -76,8 +76,7 @@
 
     :else x))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Single-file reader
+;; ── Single-file reader ─────────────────────────────────────────────────────
 
 (defn read-event-file
   "Parse one transit-JSON event file into an event map (transit

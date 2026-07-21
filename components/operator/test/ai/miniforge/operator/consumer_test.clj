@@ -121,6 +121,27 @@
               (is (= 1 (count changes)))
               (is (= :approved (:intervention/state (first changes)))))))))))
 
+(deftest republished-events-carry-typed-identity
+  (testing "tag-stripped strings are revived before republish (schema:
+            :event/id uuid?, timestamps inst?, :workflow/id uuid?)"
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)]
+      (stage-golden! events-dir "pause.transit.json")
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      (let [requested (first (events-of-type
+                              stream consumer/intervention-requested-event-type))
+            change (first (events-of-type
+                           stream consumer/state-changed-event-type))]
+        (is (uuid? (:event/id requested)))
+        (is (uuid? (:intervention/id requested)))
+        (is (uuid? (:workflow/id requested)))
+        (is (inst? (:event/timestamp requested)))
+        (is (inst? (:intervention/requested-at requested)))
+        (is (uuid? (:intervention/id change)))
+        (is (uuid? (:workflow/id change))
+            "workflow-targeted lifecycle events must key sequence
+             numbering by the same UUID the runner uses")))))
+
 ;------------------------------------------------------------------------------ Idempotency
 
 (deftest second-pass-is-a-no-op

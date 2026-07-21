@@ -34,7 +34,7 @@
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
-;------------------------------------------------------------------------------ Layer 0
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
 
 (def create-control-state
@@ -177,7 +177,7 @@
    executor. Returns nil."
   heartbeat/stop-heartbeat!)
 
-;------------------------------------------------------------------------------ Layer 1
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
 
 (def workflow-started
@@ -498,7 +498,7 @@
    :auth/context)."
   events/zettel-promoted)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Listener, control, approval, and callback APIs
 
 (def register-listener!
@@ -640,7 +640,7 @@
    workflow-id, agent-id, optional opts (:print?, :quiet?)."
   callbacks/create-streaming-callback)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Reliability metric event constructors (N3 §3.17)
 
 (def sli-computed
@@ -706,7 +706,7 @@
    add :index/changed-files."
   events/repo-index-coverage-changed)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Meta-loop event constructors
 
 (def meta-loop-cycle-completed
@@ -720,7 +720,7 @@
    (:meta-loop/error, :meta-loop/error-class)."
   events/meta-loop-cycle-failed)
 
-;------------------------------------------------------------------------------ Layer 3
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Observer / knowledge failure event constructors
 
 (def observer-signal-failed
@@ -751,7 +751,7 @@
    before the first tool call so resume-on-kill has a valid session id."
   events/agent-session-captured)
 
-;------------------------------------------------------------------------------ Layer 4
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event-stream reader — replay events from the file-sink layout
 
 (def strip-transit-prefix
@@ -785,7 +785,7 @@
    workflow."
   reader/read-workflow-events-by-id)
 
-;------------------------------------------------------------------------------ Layer 5
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer
 
 (def render-timeline
