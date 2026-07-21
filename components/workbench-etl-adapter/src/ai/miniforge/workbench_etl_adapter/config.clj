@@ -112,18 +112,19 @@
 
    Returns the stable factor map used both for the defensible per-run N and for
    baseline/candidate one-factor checks. `:values` is safe to persist in
-   snapshot metadata; secret values are omitted, not masked."
+  snapshot metadata; secret values are omitted, not masked."
   [resolved-run-config]
-  (let [entries         (leaf-entries [] resolved-run-config)
-        redacted        (filter (comp secret-path? first) entries)
-        visible         (remove (comp secret-path? first) entries)
-        values          (into (sorted-map)
-                              (map (fn [[path value]]
-                                     [(path-id path) (factor-value value)]))
-                              visible)]
+  (let [{:keys [values redacted-count]}
+        (reduce (fn [inventory [path value]]
+                  (if (secret-path? path)
+                    (update inventory :redacted-count inc)
+                    (update inventory :values assoc
+                            (path-id path) (factor-value value))))
+                {:values (sorted-map) :redacted-count 0}
+                (leaf-entries [] resolved-run-config))]
     {:schema_version inventory-schema-version
      :factor_count   (count values)
-     :redacted_count (count redacted)
+     :redacted_count redacted-count
      :config_hash    (str "sha256:" (content-hash/content-hash values))
      :values         values}))
 
