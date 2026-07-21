@@ -134,7 +134,7 @@
   (testing "resolve-and-deliver! emits :control-plane/decision-resolved event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           adapter (make-mock-adapter
@@ -305,7 +305,7 @@
 (deftest run-poll-pass-uses-status-key-test
   (testing "poll pass extracts new-status from :status key in status-update"
     (let [reg (registry/create-registry)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           _agent-rec (registry/register-agent! reg

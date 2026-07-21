@@ -26,7 +26,7 @@
 (deftest complete-merge-emits-pr-merged-event
   (testing "complete-merge publishes :pr/merged event to event-stream"
     ;; Use a real event-stream (no with-redefs — safe under pmap)
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           captured (atom [])
           mgr (train/create-manager {:event-stream stream})]
 

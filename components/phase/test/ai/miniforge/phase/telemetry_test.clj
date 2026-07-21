@@ -29,7 +29,7 @@
 (defn- make-ctx
   "Build a minimal execution context with a fresh event stream."
   []
-  (let [stream (event-stream/create-event-stream)]
+  (let [stream (event-stream/create-event-stream {:sinks []})]
     {:execution/id  (random-uuid)
      :event-stream  stream}))
 
