@@ -162,9 +162,9 @@
 ;; create-container — execution-plan interactions
 ;; ============================================================================
 
-(deftest create-container-plan-without-profile-keeps-legacy-network-test
-  (testing "an execution-plan WITHOUT :network-profile does not drop the
-            legacy network argument"
+(deftest create-container-plan-without-profile-does-not-use-legacy-network-test
+  (testing "an execution plan is authoritative even when it omits
+            :network-profile"
     (let [captured (atom nil)]
       (with-redefs [oci-cli/run-runtime
                     (fn [_d & args]
@@ -173,8 +173,8 @@
         (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
                                   :execution-plan {:image-digest "sha256:x" :mounts []})
         (let [args @captured]
-          (is (some #{"--network"} args))
-          (is (some #{"bridge"} args)))))))
+          (is (not (some #{"--network"} args)))
+          (is (not (some #{"bridge"} args))))))))
 
 (deftest create-container-plan-network-profile-overrides-legacy-test
   (testing "an execution-plan WITH :network-profile drops the legacy network

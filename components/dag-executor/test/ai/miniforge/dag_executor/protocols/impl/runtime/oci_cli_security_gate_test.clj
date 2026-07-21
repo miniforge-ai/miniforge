@@ -22,6 +22,7 @@
    resolver is injected, so these exercise the gate decision (block / warn /
    review / pass) without a container runtime."
   (:require
+   [ai.miniforge.dag-executor.execution-plan :as execution-plan]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]
    [ai.miniforge.dag-executor.result :as result]
@@ -106,7 +107,8 @@
               :mounts       []
               :env          {}
               :trust-level  :untrusted}
-             plan)))))
+             plan))
+      (is (= {:valid? true} (execution-plan/validate-plan plan))))))
 
 (deftest build-launch-plan-passes-optional-fields-through-test
   (testing "optional plan fields thread from env-config when present"

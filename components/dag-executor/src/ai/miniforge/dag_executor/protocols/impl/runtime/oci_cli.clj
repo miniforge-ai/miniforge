@@ -435,11 +435,10 @@
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
-        ;; A plan :network-profile drives networking (via build-security-args);
-        ;; a plan WITHOUT one falls back to the legacy `network` string rather
-        ;; than silently dropping it.
-        network-args  (if (:network-profile execution-plan)
-                        []
+        ;; An execution plan is authoritative for networking. The legacy
+        ;; `network` argument applies only when no plan was supplied.
+        network-args  (if (some? execution-plan)
+                        [] ; network handled inside build-security-args
                         (when network ["--network" network]))
         ;; N11 §2.2: Set runtime stop-timeout from execution plan time limit
         stop-timeout  (when-let [ms (get-in execution-plan [:time-limit-ms])]

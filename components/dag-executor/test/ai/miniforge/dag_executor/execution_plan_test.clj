@@ -71,6 +71,15 @@
                                           :env          {}
                                           :secrets-refs []))))))
 
+(deftest validate-plan-accepts-omitted-optional-runtime-fields-test
+  (testing "Limits, network profile, and secret refs may be absent"
+    (is (= {:valid? true}
+           (sut/validate-plan (dissoc (valid-plan)
+                                      :secrets-refs
+                                      :network-profile
+                                      :time-limit-ms
+                                      :memory-limit-mb))))))
+
 (deftest validate-plan-each-trust-level-and-network-profile-test
   (testing "Every trust-level and network-profile keyword validates"
     (doseq [t sut/trust-levels]
