@@ -34,7 +34,17 @@
    [clojure.string :as str]
    [ai.miniforge.dag-executor.executor :as sut]
    [ai.miniforge.dag-executor.protocols.executor :as proto]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.result :as result]))
+
+(defn- stub-runtime-info
+  "runtime-info stub keyed by runtime kind — {:podman true :docker false ...}.
+   Kinds absent from `availability` probe as unavailable."
+  [availability]
+  (fn [d]
+    (if (get availability (descriptor/kind d))
+      {:available? true :runtime-version "stub"}
+      {:available? false :reason "stubbed unavailable"})))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Test fixtures and factories
@@ -116,27 +126,69 @@
       (is (= #{:kubernetes :docker :worktree} (set (keys reg)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; prepare-docker-executor! — ensure-image? false fast path
+;; prepare-runtime-executor! / prepare-docker-executor!
+;; Runtime probes are stubbed via descriptor/runtime-info so the tests stay
+;; hermetic — no container runtime needed on the test host.
 
 (deftest prepare-docker-executor!-skip-image-ensure-test
   (testing "When :ensure-image? is false, prepare-docker-executor! returns the
             executor without consulting ensure-image! at all"
-    (let [r (sut/prepare-docker-executor! {:ensure-image? false
-                                           :image "miniforge/task-runner:latest"})]
-      (is (result/ok? r))
-      (is (some? (-> r :data :executor)))
-      (is (nil? (-> r :data :image-result))))))
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {:docker true})]
+      (let [r (sut/prepare-docker-executor! {:ensure-image? false
+                                             :image "miniforge/task-runner:latest"})]
+        (is (result/ok? r))
+        (is (some? (-> r :data :executor)))
+        (is (nil? (-> r :data :image-result)))))))
 
 (deftest prepare-docker-executor!-uses-image-type-default-test
   (testing "When :image is omitted, prepare-docker-executor! falls back to the
             :image-type's default in task-runner-images"
-    (let [r (sut/prepare-docker-executor! {:ensure-image? false
-                                           :image-type :clojure})]
-      (is (result/ok? r))
-      ;; The executor record's config should carry the resolved default image.
-      (let [exec (-> r :data :executor)
-            default-image (get-in sut/task-runner-images [:clojure :image])]
-        (is (= default-image (:image (:config exec))))))))
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {:docker true})]
+      (let [r (sut/prepare-docker-executor! {:ensure-image? false
+                                             :image-type :clojure})]
+        (is (result/ok? r))
+        ;; The executor record's config should carry the resolved default image.
+        (let [exec (-> r :data :executor)
+              default-image (get-in sut/task-runner-images [:clojure :image])]
+          (is (= default-image (:image (:config exec)))))))))
+
+(deftest prepare-runtime-executor!-auto-selects-podman-first-test
+  (testing "With no explicit :runtime-kind and both runtimes available, the
+            auto-probe picks Podman and the executor carries that kind"
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {:podman true :docker true})]
+      (let [r (sut/prepare-runtime-executor! {:ensure-image? false})]
+        (is (result/ok? r))
+        (is (= :podman (proto/executor-type (-> r :data :executor))))
+        (is (= :podman (-> r :data :runtime :kind)))
+        (is (= :auto-probe (-> r :data :runtime :selection)))))))
+
+(deftest prepare-runtime-executor!-falls-through-to-docker-test
+  (testing "Podman unavailable -> Docker is selected; Docker stays supported"
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {:docker true})]
+      (let [r (sut/prepare-runtime-executor! {:ensure-image? false})]
+        (is (result/ok? r))
+        (is (= :docker (proto/executor-type (-> r :data :executor))))))))
+
+(deftest prepare-runtime-executor!-selection-error-propagates-test
+  (testing "No runtime available -> the selector's error is returned as-is,
+            no executor is constructed"
+    (with-redefs [descriptor/runtime-info (stub-runtime-info {})]
+      (let [r (sut/prepare-runtime-executor! {:ensure-image? false})]
+        (is (result/err? r))
+        (is (= :runtime/none-available (-> r :error :code)))))))
+
+(deftest prepare-runtime-executor!-ensures-image-on-selected-runtime-test
+  (testing "ensure-image! receives a descriptor of the SELECTED kind, so the
+            image is built/checked with the runtime that will run it"
+    (let [ensured (atom nil)]
+      (with-redefs [descriptor/runtime-info (stub-runtime-info {:podman true})
+                    sut/ensure-image!       (fn [runtime image-type]
+                                              (reset! ensured {:kind (descriptor/kind runtime)
+                                                               :image-type image-type})
+                                              (result/ok {:image "img" :existed? true}))]
+        (let [r (sut/prepare-runtime-executor! {:image-type :clojure})]
+          (is (result/ok? r))
+          (is (= {:kind :podman :image-type :clojure} @ensured)))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; with-environment

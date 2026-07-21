@@ -127,6 +127,32 @@
       (is (contains? (-> result :error :data :supported) :docker))
       (is (contains? (-> result :error :data :supported) :podman)))))
 
+(deftest explicit-kind-probe-sees-executable-override-test
+  (testing "with an explicit kind, the probe descriptor carries the caller's
+            :executable override — selection and execution use one binary"
+    (with-redefs [descriptor/runtime-info
+                  (fn [d]
+                    (if (= "/opt/custom/docker" (descriptor/executable d))
+                      {:available? true :runtime-version "custom"}
+                      {:available? false :reason "probed the wrong binary"}))]
+      (let [result (selector/select-runtime {:runtime-kind :docker
+                                             :executable   "/opt/custom/docker"})]
+        (is (result/ok? result))
+        (is (= "custom" (-> result :data :runtime-version)))))))
+
+(deftest auto-probe-rejects-executable-override-test
+  (testing "an :executable/:docker-path override without :runtime-kind fails
+            loudly — auto-probe cannot tell which kind the binary is, and
+            probing PATH defaults while the descriptor applies the override
+            would let selection and execution disagree"
+    (doseq [config [{:executable "/opt/custom/docker"}
+                    {:docker-path "/opt/custom/docker"}]]
+      ;; Nothing to stub — the guard fires before any probe runs.
+      (let [result (selector/select-runtime config)]
+        (is (result/err? result) (pr-str config))
+        (is (= :runtime/executable-requires-kind (-> result :error :code)))
+        (is (= "/opt/custom/docker" (-> result :error :data :executable)))))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.dag-executor.protocols.impl.runtime.selector-test)

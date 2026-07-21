@@ -521,9 +521,23 @@
   "Clone a repository and checkout a branch in the environment."
   executor/clone-and-checkout!)
 
+(def prepare-runtime-executor!
+  "Create an OCI-CLI executor on the selected container runtime (explicit
+   :runtime-kind, else auto-probe — Podman first). Images are ensured by
+   default; :ensure-image? false skips that step. Returns
+   {:executor OciCliExecutor :image-result Result|nil
+   :runtime <selection summary>} or error Result; :image-result is nil when
+   image preparation is skipped."
+  executor/prepare-runtime-executor!)
+
 (def prepare-docker-executor!
-  "Create a Docker executor with images ensured to exist.
-   Returns {:executor DockerExecutor :image-result Result} or error Result."
+  "Create a Docker executor, ensuring images by default. This is the
+   Docker-explicit variant; :ensure-image? false skips image preparation.
+   Product paths should prefer the
+   runtime-agnostic `prepare-runtime-executor!` and let selection pick
+   the runtime. Returns {:executor OciCliExecutor :image-result Result|nil
+   :runtime <selection summary>} or error Result; :image-result is nil when
+   image preparation is skipped."
   executor/prepare-docker-executor!)
 
 (def ensure-image!
@@ -549,9 +563,11 @@
       :probed           [<per-kind summary>] (auto-probe only)}
 
    On failure, :error :code is one of:
-     :runtime/explicit-unsupported   (the named kind is not :supported?)
-     :runtime/explicit-unavailable   (named kind probe failed)
-     :runtime/none-available         (auto-probe found nothing)"
+     :runtime/explicit-unsupported     (the named kind is not :supported?)
+     :runtime/explicit-unavailable     (named kind probe failed)
+     :runtime/none-available           (auto-probe found nothing)
+     :runtime/executable-requires-kind (:executable/:docker-path override
+                                        without an explicit :runtime-kind)"
   selector/select-runtime)
 
 (def runtime-probe-order
