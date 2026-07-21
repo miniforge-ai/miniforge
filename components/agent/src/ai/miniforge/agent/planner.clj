@@ -203,13 +203,18 @@
    make every prompt look over-budget; `:reserve-clamped?` flags that.
 
    Thin role wrapper over `context-budget/assemble-within-budget`: supplies
-   the planner's full/shed prompt builders and its sheddable-unit count
-   (the eagerly-inlined existing files)."
+   the planner's full/shed prompt builders, its sheddable-unit count
+   (the eagerly-inlined existing files), and the planner's inline cap
+   (`:prompt/max-inline-window-fraction`) — bodies shed to a manifest well
+   before window fit, so a barely-fitting prompt can't stall a turn past
+   the phase timeout."
   [spec-text existing-files effective-system model reserve]
   (context-budget/assemble-within-budget
    {:effective-system effective-system
     :model            model
     :reserve          reserve
+    :max-inline-fraction (get @planner-prompt-data
+                              :prompt/max-inline-window-fraction 0.5)
     :build-full       #(build-user-prompt spec-text existing-files)
     :build-shed       #(build-user-prompt spec-text existing-files
                                           format-existing-files-manifest)
@@ -235,6 +240,7 @@
                     :prompt/reserve (:reserve budget)
                     :prompt/reserve-clamped? (:reserve-clamped? budget)
                     :prompt/effective-window (:effective-window budget)
+                    :prompt/inline-cap (:inline-cap budget)
                     :prompt/shed? (:shed? budget)
                     :prompt/estimated-after-shed (:est-final budget)
                     :prompt/file-count (:file-count budget))))

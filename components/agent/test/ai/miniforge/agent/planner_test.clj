@@ -737,21 +737,23 @@
       ;; ...and keeps the already-satisfied evidence-bundle instructions
       (is (str/includes? (:user-prompt r) ":already-satisfied"))))
 
-  (testing "the reserve fires the shed earlier: a prompt that fits the full
-            window sheds once the reserve drops the effective window below it"
-    ;; This is the 2026-06-07 fix — reserve headroom for the unmeasured CLI
-    ;; baseline. Derive the reserve from the actual estimate so the test
-    ;; doesn't hard-code window/template sizes.
-    (let [files      [(big-file 50000)]
+  (testing "the reserve fires the shed earlier: a prompt under the inline cap
+            sheds once the reserve shrinks the effective window (and with it
+            the cap) below the estimate"
+    ;; 2026-06-07 fix — reserve headroom for the unmeasured CLI baseline.
+    ;; Sizes derive from the returned window/estimate so the test doesn't
+    ;; hard-code template sizes. The planner's 0.5 inline cap applies, so
+    ;; the shed threshold is half the effective window.
+    (let [files      [(big-file 20000)]
           no-reserve (assemble-within-budget "do it" files "system" "codellama-34b" 0)
           window     (:window no-reserve)
           est        (:est-full no-reserve)
-          ;; a reserve that drops the effective window just below the estimate
-          ;; (kept under window/2 so it isn't clamped)
-          reserve    (+ (- window est) 1000)
+          ;; drop the effective window until the cap (0.5 × effective) sits
+          ;; just below the estimate, kept under window/2 so it isn't clamped
+          reserve    (+ (- window (* 2 est)) 1000)
           reserved   (assemble-within-budget "do it" files "system" "codellama-34b" reserve)]
-      (is (false? (:shed? no-reserve)) "fits the full window with no reserve")
-      (is (true? (:shed? reserved)) "reserve pushes it past the effective window")
+      (is (false? (:shed? no-reserve)) "under the inline cap with no reserve")
+      (is (true? (:shed? reserved)) "reserve shrinks the cap below the estimate")
       (is (false? (:reserve-clamped? reserved)))
       (is (= (- window reserve) (:effective-window reserved)))))
 

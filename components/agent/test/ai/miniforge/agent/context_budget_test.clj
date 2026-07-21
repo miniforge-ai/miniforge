@@ -79,6 +79,40 @@
       (is (true? (:shed? r)))
       (is (true? (:over-after-shed? r)))))
 
+  (testing "max-inline-fraction sheds a prompt that FITS the window but exceeds
+            the cap — window fit alone stalls turns past the phase timeout
+            (2026-07-21 dogfood: 99.2%-of-window prompt, killed at 600s)"
+    ;; window 16384, reserve 0 → cap 0.5 ⇒ inline-cap 8192.
+    ;; ~40000 chars ≈ 10000 est tokens: under the window, over the cap.
+    (let [mid (apply str (repeat 40000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly mid)
+                       :build-shed (constantly "manifest")})]
+      (is (= 8192 (:inline-cap r)))
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)) "under the window — not an overflow")
+      (is (= "manifest" (:user-prompt r)))))
+
+  (testing "a prompt under the cap stays fully inlined"
+    (let [small (apply str (repeat 20000 \x))    ; ≈5000 est tokens < 8192 cap
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly small)})]
+      (is (false? (:shed? r)))
+      (is (= small (:user-prompt r)))))
+
+  (testing "over the cap with nothing to shed is sent as-is and is NOT an
+            irreducible overflow — that word is reserved for the window"
+    (let [mid (apply str (repeat 40000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly mid)
+                       :shed-count 0})]
+      (is (false? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= mid (:user-prompt r)))))
+
   (testing "the reserve drops the effective window and fires the shed earlier"
     (let [content    (apply str (repeat 50000 \x))
           no-reserve (assemble {:model "codellama-34b"
