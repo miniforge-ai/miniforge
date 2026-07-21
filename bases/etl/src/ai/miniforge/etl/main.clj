@@ -49,7 +49,7 @@
   1)
 
 (def ^:private usage-exit-code
-  "POSIX status reserved for invocation and help-text errors."
+  "POSIX status reserved for help/usage text output."
   2)
 
 (defn- stringify-instants
