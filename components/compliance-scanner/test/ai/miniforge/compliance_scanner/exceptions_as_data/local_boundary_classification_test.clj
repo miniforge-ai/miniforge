@@ -45,6 +45,16 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
+(deftest malformed-documentation-is-not-boundary-evidence
+  (testing "absent and malformed function documentation is treated as empty text"
+    (doseq [context [{}
+                     {:defn-doc nil}
+                     {:defn-doc false}
+                     {:defn-doc :not-text}
+                     {:defn-doc 42}]]
+      (is (false? (#'exc/local-boundary-wrapper? context))
+          (str "ignored " (pr-str (:defn-doc context)))))))
+
 (deftest throwing-boundary-with-data-equivalent-is-local-boundary
   (testing "response/throw-anomaly! bridges with anomaly-returning equivalents are local boundaries"
     (let [src "(ns ai.miniforge.foo.core

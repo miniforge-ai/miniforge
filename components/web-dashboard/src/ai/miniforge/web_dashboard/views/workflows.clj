@@ -192,7 +192,8 @@
    (when-let [dependency-issues (seq (:dependency-issues wf))]
      (c/badge (msg/t :workflow/dependency-issue-count
                      {:count (count dependency-issues)})
-              {:variant (or (:dependency-severity wf) :warning)}))
+              {:variant (let [severity (get wf :dependency-severity)]
+                          (if (keyword? severity) severity :warning))}))
    [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
    [:div.wf-progress-inline
     [:div.wf-progress-track

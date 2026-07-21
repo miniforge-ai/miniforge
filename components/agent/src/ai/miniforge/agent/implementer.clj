@@ -802,6 +802,12 @@
               (:derived-artifact recovered))
       recovered)))
 
+(defn- normalized-artifact-source
+  "Return a keyword artifact source for telemetry, defaulting malformed values to :none."
+  [normalized]
+  (let [source (get normalized :artifact-source)]
+    (if (keyword? source) source :none)))
+
 (defn- invoke-with-llm
   "Invoke the implementer via the LLM backend."
   [llm-client user-prompt effective-system-prompt config context on-chunk logger
@@ -837,7 +843,7 @@
               {:data (cond-> {:success (llm/success? response)
                               :tokens (:tokens normalized)
                               :streaming? (boolean on-chunk)
-                              :artifact-source (or (:artifact-source normalized) :none)
+                              :artifact-source (normalized-artifact-source normalized)
                               ;; Dir the agent wrote to / collection scanned —
                               ;; surfaces the worktree-path-vs-CWD resolution so
                               ;; a write/scan dir mismatch is diagnosable.
