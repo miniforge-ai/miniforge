@@ -148,6 +148,20 @@
     (is (thrown? clojure.lang.ExceptionInfo (sut/export-registry! {:out nil})))
     (is (thrown? clojure.lang.ExceptionInfo (sut/export-registry! {:out "  "})))))
 
+(deftest export-registry-rejects-invalid-registry
+  (testing "a missing or schema-invalid registry fails loudly before any
+            write — a \"null\" or malformed fixture is never produced"
+    (doseq [broken [nil {:not "a registry"}]]
+      (with-redefs [sut/state-var-registry (fn [] broken)]
+        (let [out (java.io.File/createTempFile "registry-export" ".json")]
+          (.deleteOnExit out)
+          (.delete out)
+          (is (thrown? clojure.lang.ExceptionInfo
+                       (sut/export-registry! {:out (.getPath out)}))
+              (pr-str broken))
+          (is (not (.exists out))
+              "no fixture file may be written for an invalid registry"))))))
+
 (deftest accumulator-projects-expected-table-shape
   (let [events (clean-run-events :gate/failed)
         table  (table-for events)

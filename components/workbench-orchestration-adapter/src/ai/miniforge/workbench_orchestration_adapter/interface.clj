@@ -48,6 +48,9 @@
 (def ^:private missing-out-message
   "Orchestration registry export requires an :out path")
 
+(def ^:private invalid-registry-message
+  "Orchestration registry export requires a registry conforming to the canonical registry schema")
+
 (def ^:private registry-resource
   "workbench/miniforge-orchestration-state-vars.edn")
 
@@ -125,9 +128,20 @@
 (defn export-registry!
   "Write the shipped registry as pretty-printed JSON to `:out`. Companion
    to the `workbench:orchestration:registry` bb task; the JSON shape
-   matches the minibench workbench-contract fixture registry."
+   matches the minibench workbench-contract fixture registry.
+
+   Fails loudly (ex-info) when the shipped registry is missing from the
+   classpath or does not conform to the canonical registry schema — an
+   invalid fixture is never written. The registry is loaded once; the
+   value validated is the value written."
   [{:keys [out]}]
   (when (or (nil? out) (and (string? out) (str/blank? out)))
     (throw (ex-info missing-out-message {:out out})))
-  (spit (str out) (json/generate-string (state-var-registry) {:pretty true}))
-  (println "Wrote" (str out)))
+  (let [registry (state-var-registry)]
+    (when-not (schema/valid? workbench-schema/StateVarRegistry registry)
+      (throw (ex-info invalid-registry-message
+                      {:registry-resource registry-resource
+                       :errors (schema/explain workbench-schema/StateVarRegistry
+                                               registry)})))
+    (spit (str out) (json/generate-string registry {:pretty true}))
+    (println "Wrote" (str out))))
