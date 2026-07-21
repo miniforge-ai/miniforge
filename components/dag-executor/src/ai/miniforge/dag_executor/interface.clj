@@ -535,8 +535,9 @@
    Docker-explicit variant; :ensure-image? false skips image preparation.
    Product paths should prefer the
    runtime-agnostic `prepare-runtime-executor!` and let selection pick
-   the runtime. Returns {:executor OciCliExecutor :image-result Result|nil}
-   or error Result; :image-result is nil when image preparation is skipped."
+   the runtime. Returns {:executor OciCliExecutor :image-result Result|nil
+   :runtime <selection summary>} or error Result; :image-result is nil when
+   image preparation is skipped."
   executor/prepare-docker-executor!)
 
 (def ensure-image!
