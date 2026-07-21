@@ -60,6 +60,11 @@ The product registry is `miniforge-etl-state-vars@2026.07.18.1` and defines:
 - `miniforge.etl.stages_completed`
 - `miniforge.etl.data_quality_pass_rate`
 
+The registry EDN is the single authority for score thresholds and gate effects.
+Evaluation reads those values at projection time; no threshold defaults are
+duplicated in Clojure. The policy hash covers the complete registry value, so a
+policy edit changes provenance even when evaluator formulas do not change.
+
 Every snapshot also stamps workload source hashes, the resolved-config hash,
 factor count, redacted count, product policy hash/version, and evaluator
 hash/version. The full non-secret factor inventory is retained in metadata so
@@ -122,7 +127,8 @@ Agile, and Convergence without inventing a closed global schema.
 
 The implementation is covered by:
 
-- adapter contract, registry, redaction, evaluation, and one-factor tests;
+- adapter contract, registry, redaction, config-driven evaluation, and
+  one-factor tests;
 - executable 75/103/133 shipped-pack count assertions;
 - ETL file-boundary tests, including JSON baseline reloading;
 - an end-to-end local file run for baseline and candidate;

@@ -32,9 +32,12 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Canonical path/value primitives
 
-(def inventory-schema-version "miniforge_resolved_run_factors/v1")
+(def inventory-schema-version
+  "Version of the persisted resolved-run factor inventory shape."
+  "miniforge_resolved_run_factors/v1")
 
 (def ^:private missing-value
+  "Canonical EDN sentinel distinguishing an absent factor from a nil value."
   (content-hash/canonical-edn ::missing-factor))
 
 (def ^:private secret-key-names

@@ -52,6 +52,14 @@
    :label "baseline"
    :source-hashes ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]})
 
+(def ^:private quality-state-var-id
+  "Registry key whose operator thresholds drive record-quality status."
+  "miniforge.etl.data_quality_pass_rate")
+
+(def ^:private quality-policy-override
+  "Test-only policy proving evaluation reads thresholds from registry data."
+  {:pass 0.9 :warn 0.8})
+
 (def ^:private shipped-pack-factor-expectations
   "Reproducible non-secret and redacted factor counts for the ETL packs in
    this repository; these are the defensible N values guarded by the adapter."
@@ -162,6 +170,20 @@
     (is (= "not_applicable" (:status quality)))
     (is (= {:passed_records 0.0 :evaluated_records 0.0 :failed_records 0.0}
            (:score_components quality)))))
+
+(deftest test-evaluation-thresholds-come-from-registry-data
+  (let [registry (update (sut/state-var-registry) :state_vars
+                         (fn [state-vars]
+                           (mapv #(if (= quality-state-var-id (:id %))
+                                    (assoc % :thresholds quality-policy-override)
+                                    %)
+                                 state-vars)))]
+    (with-redefs [sut/state-var-registry (constantly registry)]
+      (let [result  (sut/project successful-result baseline-config projection-opts)
+            quality (last (:evaluations (:snapshot result)))]
+        (is (schema/succeeded? result))
+        (is (= "pass" (:status quality)))
+        (is (= "none" (:gate_effect quality)))))))
 
 (deftest test-stage-score-includes-unexecuted-configured-stages
   (let [failed-result (pipeline-result
