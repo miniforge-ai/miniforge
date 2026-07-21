@@ -63,3 +63,29 @@
                                            :dependency/status :degraded}]}]
           result (render-str (sut/workflow-list-fragment workflows))]
       (is (str/includes? result "1 dependency issue(s)")))))
+
+(deftest workflow-list-fragment-normalizes-dependency-severity
+  (testing "valid keyword severities are preserved"
+    (let [workflow {:id "wf-severity"
+                    :name "Severity"
+                    :status :running
+                    :dependency-severity :error
+                    :dependency-issues [{}]}
+          result (render-str (sut/workflow-list-fragment [workflow]))]
+      (is (str/includes? result "badge-error"))))
+  (testing "absent and malformed severities use the warning badge"
+    (let [workflow {:id "wf-severity"
+                    :name "Severity"
+                    :status :running
+                    :dependency-issues [{}]}
+          result (render-str (sut/workflow-list-fragment [workflow]))]
+      (is (str/includes? result "badge-warning")))
+    (doseq [severity [nil false "error" 42 []]
+            :let [workflow {:id "wf-severity"
+                            :name "Severity"
+                            :status :running
+                            :dependency-severity severity
+                            :dependency-issues [{}]}
+                  result (render-str (sut/workflow-list-fragment [workflow]))]]
+      (is (str/includes? result "badge-warning")
+          (str "normalized " (pr-str severity))))))

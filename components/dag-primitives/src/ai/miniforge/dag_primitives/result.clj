@@ -41,6 +41,12 @@
 ;;------------------------------------------------------------------------------ Layer 1
 ;; Extraction
 
+(defn- unwrap-error-message
+  "Return an error message when it is a string; otherwise return the canonical fallback."
+  [error]
+  (let [message (get error :message)]
+    (if (string? message) message "Unwrap called on error result")))
+
 (defn unwrap-anomaly
   "Extract data from a result. On ok, return the wrapped data; on err,
    return a canonical `:fault` anomaly carrying the error code, message,
@@ -54,7 +60,7 @@
     (:data result)
     (let [error (:error result)]
       (anomaly/anomaly :fault
-                       (or (:message error) "Unwrap called on error result")
+                       (unwrap-error-message error)
                        (cond-> {}
                          (:code error) (assoc :code (:code error))
                          (:data error) (assoc :error-data (:data error)))))))

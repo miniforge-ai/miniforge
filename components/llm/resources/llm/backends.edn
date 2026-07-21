@@ -53,6 +53,57 @@
           :models ["codellama" "llama2" "mistral"]
           :probe-endpoint "http://localhost:11434/api/version"}
 
+ ;; Direct API-key HTTPS providers — for builds where CLI-agent
+ ;; backends are unavailable (a sandboxed child process inherits the
+ ;; sandbox, so the user's claude/codex CLI cannot run). :api-key-env
+ ;; names the environment variable consulted when the client config
+ ;; carries no :api-key.
+ :anthropic-api {:cmd "http"
+                 :streaming? false
+                 :description "Claude via Anthropic Messages API"
+                 :provider "Anthropic"
+                 :requires-cli? false
+                 :api-endpoint "https://api.anthropic.com/v1/messages"
+                 :api-key-env "ANTHROPIC_API_KEY"
+                 :probe-endpoint "https://api.anthropic.com/"}
+
+ :openai-api {:cmd "http"
+              :streaming? false
+              :description "GPT via OpenAI Chat Completions API"
+              :provider "OpenAI"
+              :requires-cli? false
+              :api-endpoint "https://api.openai.com/v1/chat/completions"
+              :api-key-env "OPENAI_API_KEY"
+              :probe-endpoint "https://api.openai.com/"}
+
+ ;; Generic OpenAI-compatible server (LM Studio, llama.cpp server,
+ ;; vLLM, and any other /v1/chat/completions endpoint). Local servers
+ ;; are typically credential-free, so no :api-key-env — a client
+ ;; :api-key is honored when supplied but never required. The endpoint
+ ;; is the LM Studio default; override per client with :base-url or
+ ;; via :base-url-env.
+ :openai-compat {:cmd "http"
+                 :streaming? false
+                 :description "Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...)"
+                 :provider "OpenAI-Compatible"
+                 :requires-cli? false
+                 :api-endpoint "http://localhost:1234/v1/chat/completions"
+                 :base-url-env "MINIFORGE_OPENAI_COMPAT_BASE_URL"
+                 :probe-endpoint "http://localhost:1234/v1/models"}
+
+ ;; Gemini's REST shape embeds the model in the URL path, so
+ ;; :api-endpoint is a format string filled by `request-endpoint`
+ ;; (:model-in-url?).
+ :gemini-api {:cmd "http"
+              :streaming? false
+              :description "Gemini via Google Generative Language API"
+              :provider "Gemini"
+              :requires-cli? false
+              :api-endpoint "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
+              :model-in-url? true
+              :api-key-env "GEMINI_API_KEY"
+              :probe-endpoint "https://generativelanguage.googleapis.com/"}
+
  :cursor {:cmd "agent"
           :streaming? false
           :description "Cursor AI via CLI"

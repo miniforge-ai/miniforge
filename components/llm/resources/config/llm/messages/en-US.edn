@@ -29,6 +29,34 @@
   :rate-limit-test.system/waf-claim
   "WAF-based rate limiting on mobile auth endpoints remained in progress."
 
+  ;; System-locale diagnostics for the direct HTTP provider backends.
+  :http-provider.system/no-generated-text
+  "Provider returned 200 with no generated text"
+
+  :http-provider.system/unknown-api-error
+  "Unknown API error"
+
+  :http-provider.system/api-error
+  "Provider returned HTTP {status}: {message}"
+
+  :backend.system/request-failed
+  "LLM backend request failed"
+
+  :http-provider.system/parse-failed
+  "Failed to parse response: {reason}"
+
+  :http-provider.system/stream-failed
+  "Streaming failed: {reason}"
+
+  :http-provider.system/unsupported-backend
+  "HTTP backend not implemented for: {provider}"
+
+  :http-provider.system/missing-api-key
+  "{provider} backend needs an API key - pass :api-key in the client config or set {env-var}"
+
+  :http-provider.system/missing-model
+  "{provider} backend needs a model - pass :model in the client config or request"
+
   :rate-limit-test.system/waf-snippet
   "WAF-based rate limiting on mobile auth endpoints remains in progress"
 

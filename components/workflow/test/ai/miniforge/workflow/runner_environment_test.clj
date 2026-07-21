@@ -88,6 +88,20 @@
           (is (= "main" (get-in record [:environment-metadata :base-branch]))
               "pre-existing metadata fields must survive the merge"))))))
 
+(deftest normalized-environment-metadata-is-always-a-map-test
+  (testing "valid metadata maps are preserved"
+    (is (= {:base-branch "main"}
+           (#'env/normalized-environment-metadata
+            {:metadata {:base-branch "main"}}))))
+  (testing "absent and malformed metadata becomes an empty map"
+    (doseq [env-value [{}
+                       {:metadata nil}
+                       {:metadata false}
+                       {:metadata :not-a-map}
+                       {:metadata 42}
+                       {:metadata []}]]
+      (is (= {} (#'env/normalized-environment-metadata env-value))))))
+
 (deftest build-env-record-omits-base-sha-when-no-git-test
   (testing "non-git worktree → :base-sha absent, no crash"
     (let [non-git-dir (str (System/getProperty "java.io.tmpdir") "/m1-no-git-"

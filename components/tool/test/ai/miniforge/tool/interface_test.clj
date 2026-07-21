@@ -144,7 +144,28 @@
 
   (testing "returns empty for no matches"
     (let [registry (tool/create-registry)]
-      (is (empty? (tool/find-tools registry "nonexistent"))))))
+      (is (empty? (tool/find-tools registry "nonexistent")))))
+
+  (testing "ignores non-string names and descriptions"
+    (doseq [value [nil false :malformed-metadata-token 42]
+            :let [registry (tool/create-registry)
+                  malformed-tool (tool/create-tool
+                                  {:id :test/malformed
+                                   :name value
+                                   :description value
+                                   :handler (constantly nil)})]]
+      (tool/register! registry malformed-tool)
+      (is (empty? (tool/find-tools registry "definitely-absent"))
+          (str "search tolerates " (pr-str value))))
+    (let [registry (tool/create-registry)
+          malformed-tool (tool/create-tool
+                          {:id :test/malformed
+                           :name :malformed-metadata-token
+                           :description :malformed-metadata-token
+                           :handler (constantly nil)})]
+      (tool/register! registry malformed-tool)
+      (is (empty? (tool/find-tools registry "malformed-metadata-token"))
+          "malformed metadata is not stringified into searchable text"))))
 
 ;; Execution tests
 
