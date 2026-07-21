@@ -167,7 +167,7 @@
         (is (some #(and (vector? %) (cmd-has? % "git fetch origin feature/restore")) cmds)
             "fetch must be an arg vector, not a shell string")
         (is (some #(and (vector? %) (cmd-has? % "git checkout feature/restore")) cmds)
-            "checkout must be an arg vector, not a shell string"))))
+            "checkout must be an arg vector, not a shell string")))))
 
 (deftest git-restore!-defaults-branch-test
   (testing "Missing :branch defaults to 'task/unknown'"
