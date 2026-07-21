@@ -129,14 +129,46 @@
                 " status " (name (:workflow-run/status run)))
     :created_at evaluated-at}])
 
-(defn- transition-evidence [run pairs evaluated-at]
-  (mapv (fn [index [from to]]
-          {:id (str "miniforge.workflow.transition." (:workflow-run/id run) "." index)
-           :source_role "workflow-phase-history"
-           :quote (str (name from) " -> " (name to))
-           :created_at evaluated-at})
-        (range)
-        pairs))
+(defn- absence-evidence
+  "An honest evidence ref for an observed ABSENCE. A registry
+   `required_refs` role must be represented even when the collection it is
+   derived from is empty - otherwise the evaluation violates its own
+   `evidence_requirements` (the workbench kernel's evidence validator
+   matches `required_refs` against `source_role`). The quote states the
+   absence the evaluator actually judged on; it never asserts a positive
+   fact that was not observed."
+  [{:keys [scope-id source-role quote evaluated-at]}]
+  [{:id (str "miniforge.absent." source-role "." scope-id)
+    :source_role source-role
+    :quote quote
+    :created_at evaluated-at}])
+
+(defn- or-absence
+  "`refs` when non-empty, otherwise a single honest absence ref."
+  [refs absence]
+  (if (seq refs) (vec refs) (absence-evidence absence)))
+
+(defn- phase-history-evidence
+  "One ref per observed transition. A resolved run can legally have fewer
+   than two observed phases - failed/cancelled are lifecycle-terminal from
+   any phase (N2 §2.3) - so with no transition pairs this emits a single
+   honest ref describing the observed history instead of nothing."
+  [run observed pairs evaluated-at]
+  (or-absence
+   (mapv (fn [index [from to]]
+           {:id (str "miniforge.workflow.transition." (:workflow-run/id run) "." index)
+            :source_role "workflow-phase-history"
+            :quote (str (name from) " -> " (name to))
+            :created_at evaluated-at})
+         (range)
+         pairs)
+   {:scope-id (:workflow-run/id run)
+    :source-role "workflow-phase-history"
+    :quote (if (seq observed)
+             (str "single observed phase " (name (first observed))
+                  ", no transitions")
+             "no phase-started events observed")
+    :evaluated-at evaluated-at}))
 
 (defn- table-run-evidence [runs evaluated-at]
   (mapv (fn [run]
@@ -246,7 +278,7 @@
                    :terminal_phase_legal (if terminal-legal? 1.0 0.0)
                    :observed_transitions (double (count pairs))}
       :evidence (into (run-evidence run evaluated-at)
-                      (transition-evidence run pairs evaluated-at))
+                      (phase-history-evidence run observed pairs evaluated-at))
       :findings (cond-> []
                   (seq illegal)         (conj (finding "error" illegal-transition-message))
                   (not terminal-legal?) (conj (finding "error" terminal-phase-message)))
@@ -295,7 +327,11 @@
                    :blocking_evaluations (double (- (count criticals)
                                                     (count unblocked)))
                    :unblocked_evaluations (double (count unblocked))}
-      :evidence (policy-eval-evidence evals evaluated-at)
+      :evidence (or-absence (policy-eval-evidence evals evaluated-at)
+                            {:scope-id (:workflow-run/id run)
+                             :source-role "policy-evaluation"
+                             :quote "no policy evaluations recorded for this run"
+                             :evaluated-at evaluated-at})
       :findings (when-not ok?
                   [(finding "error" unblocked-critical-message)])
       :gate-effect (gate-effect status "blocks_transition")
@@ -317,6 +353,11 @@
         :score 1.0
         :confidence 1.0
         :components components
+        :evidence (absence-evidence
+                   {:scope-id (:workflow-run/id run)
+                    :source-role "policy-evaluation"
+                    :quote "run never traversed :verify; policy evaluation out of scope"
+                    :evaluated-at evaluated-at})
         :gate-effect "none"
         :evaluated-at evaluated-at})
       (let [ok?    (pos? (count evals))
@@ -328,7 +369,11 @@
           :score (if ok? 1.0 0.0)
           :confidence 1.0
           :components components
-          :evidence (policy-eval-evidence evals evaluated-at)
+          :evidence (or-absence (policy-eval-evidence evals evaluated-at)
+                                {:scope-id (:workflow-run/id run)
+                                 :source-role "policy-evaluation"
+                                 :quote "run traversed :verify with no policy evaluation recorded"
+                                 :evaluated-at evaluated-at})
           :findings (when-not ok?
                       [(finding "error" missing-evaluation-message)])
           :gate-effect (gate-effect status "marks_low_confidence")
@@ -347,6 +392,11 @@
         :score 1.0
         :confidence 1.0
         :components {:actioned_items 0.0 :total_items 0.0 :open_items 0.0}
+        :evidence (absence-evidence
+                   {:scope-id (:workflow-run/id run)
+                    :source-role "attention-item"
+                    :quote "no attention items derived for this run"
+                    :evaluated-at evaluated-at})
         :gate-effect "none"
         :evaluated-at evaluated-at})
       (let [score  (ratio actioned (count items))
@@ -385,6 +435,16 @@
         :confidence 1.0
         :components {:resolved_decisions 0.0 :total_decisions 0.0
                      :settled_interventions 0.0 :total_interventions 0.0}
+        :evidence (into (absence-evidence
+                         {:scope-id (:workflow-run/id run)
+                          :source-role "decision-card"
+                          :quote "no decision cards raised for this run"
+                          :evaluated-at evaluated-at})
+                        (absence-evidence
+                         {:scope-id (:workflow-run/id run)
+                          :source-role "intervention-request"
+                          :quote "no intervention requests raised for this run"
+                          :evaluated-at evaluated-at}))
         :gate-effect "none"
         :evaluated-at evaluated-at})
       (let [score  (ratio (+ resolved settled) total)
@@ -399,8 +459,16 @@
                        :total_decisions (double (count decisions))
                        :settled_interventions (double settled)
                        :total_interventions (double (count interventions))}
-          :evidence (into (decision-evidence decisions evaluated-at)
-                          (intervention-evidence interventions evaluated-at))
+          :evidence (into (or-absence (decision-evidence decisions evaluated-at)
+                                      {:scope-id (:workflow-run/id run)
+                                       :source-role "decision-card"
+                                       :quote "no decision cards raised for this run"
+                                       :evaluated-at evaluated-at})
+                          (or-absence (intervention-evidence interventions evaluated-at)
+                                      {:scope-id (:workflow-run/id run)
+                                       :source-role "intervention-request"
+                                       :quote "no intervention requests raised for this run"
+                                       :evaluated-at evaluated-at}))
           :findings (rate-findings status pending-queue-message)
           :gate-effect (gate-effect status "marks_low_confidence")
           :evaluated-at evaluated-at})))))

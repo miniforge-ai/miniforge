@@ -263,6 +263,77 @@
         (is (= "not_applicable" (:status evaluation)) state-var-id)
         (is (= "none" (:gate_effect evaluation)) state-var-id)))))
 
+(def ^:private failed-at-spec-events
+  "A run that fails at :spec — lifecycle-terminal from any phase per N2
+   §2.3, so it IS resolved and projectable, with a single observed phase
+   and therefore zero transition pairs."
+  (concat [(started-event illegal-run-id)]
+          (phase-events illegal-run-id [:spec])
+          [{:event/type :workflow/failed
+            :workflow/id illegal-run-id
+            :workflow/error "spec rejected"
+            :event/timestamp t-end}]))
+
+(defn- required-roles [state-var-id]
+  (->> (:state_vars (sut/state-var-registry))
+       (filter #(= state-var-id (:id %)))
+       first
+       :evidence_requirements
+       :required_refs
+       set))
+
+(defn- evidence-requirement-violations
+  "Mirror of the workbench kernel's evidence validator: every declared
+   `required_refs` role must be matched by at least one evidence ref's
+   `source_role`, and no evaluation may carry zero refs."
+  [snapshot]
+  (for [evaluation (:evaluations snapshot)
+        :let [roles   (set (map :source_role (:evidence_refs evaluation)))
+              missing (remove roles (required-roles (:state_var_id evaluation)))]
+        :when (or (empty? (:evidence_refs evaluation)) (seq missing))]
+    [(:state_var_id evaluation) (vec missing)]))
+
+(deftest every-evaluation-satisfies-its-registry-evidence-requirements
+  (testing "no evaluation may violate its own evidence_requirements — the
+            adapter must never emit what the kernel's evidence validator
+            would reject, in ANY reachable table shape"
+    (doseq [[label events run-id]
+            [["clean run"          (clean-run-events :gate/failed) clean-run-id]
+             ["passed gate"        (clean-run-events :gate/passed) clean-run-id]
+             ["illegal transition" illegal-run-events              illegal-run-id]
+             ["failed at spec"     failed-at-spec-events           illegal-run-id]
+             ["verify, no policy"  (concat [(started-event illegal-run-id)]
+                                           (phase-events illegal-run-id legal-phases)
+                                           [{:event/type :workflow/completed
+                                             :workflow/id illegal-run-id
+                                             :event/timestamp t-end}])
+              illegal-run-id]]]
+      (let [table    (table-for events)
+            snapshot (:snapshot (sut/project table run-id (opts-for events run-id)))]
+        (is (sut/valid-snapshot? snapshot) label)
+        (is (empty? (evidence-requirement-violations snapshot))
+            (str label ": " (pr-str (evidence-requirement-violations snapshot))))))))
+
+(deftest resolved-run-without-transitions-still-carries-phase-history-evidence
+  (testing "a run that fails at :spec has zero transition pairs, but
+            machine_authoritative declares a workflow-phase-history
+            required_ref — an honest absence ref satisfies it"
+    (let [events   failed-at-spec-events
+          table    (table-for events)
+          run      (get-in table [:workflows illegal-run-id])
+          result   (sut/project table illegal-run-id (opts-for events illegal-run-id))
+          snapshot (:snapshot result)
+          machine  (evaluation-by-id snapshot "miniforge.workflow.machine_authoritative")
+          roles    (set (map :source_role (:evidence_refs machine)))]
+      (is (= :failed (:workflow-run/status run)))
+      (is (sut/resolved? run) "failed is lifecycle-terminal per N2 §2.3")
+      (is (schema/succeeded? result))
+      (is (contains? roles "workflow-phase-history"))
+      (is (contains? roles "workflow-run"))
+      (is (= 0.0 (get-in machine [:score_components :observed_transitions])))
+      (testing "a failed run is not held to the :done terminal projection"
+        (is (= "pass" (:status machine)))))))
+
 (deftest projection-requires-variant-and-transitions
   (let [events (clean-run-events :gate/failed)
         table  (table-for events)
