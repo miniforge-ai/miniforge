@@ -30,7 +30,12 @@
    [clojure.edn :as edn]
    [clojure.string :as str]))
 
-(def ^:private sha256-pattern #"^sha256:[0-9a-f]{64}$")
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^:private sha256-pattern
+  "Canonical source digest: algorithm prefix plus the full 256-bit lowercase
+   hexadecimal payload."
+  #"^sha256:[0-9a-f]{64}$")
 
 (defn missing-option
   "Return the first required workbench option absent from `opts`, or nil."
@@ -73,6 +78,8 @@
                                         ["metadata" "resolved_run" "factors"]
                                         [:metadata :resolved_run :factors]))
        :source-hashes (get snapshot (if json? "source_hashes" :source_hashes))})))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn project
   "Project `result` using the current resolved-run config and optional prior

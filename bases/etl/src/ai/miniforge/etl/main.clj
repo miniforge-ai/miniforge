@@ -21,14 +21,8 @@
    Babashka CLI because the concrete source connectors depend on hato
    and Apache POI, which aren't BB-compatible.
 
-   Stratification (intra-namespace):
-   Layer 0 — helpers with no in-namespace deps. Mix of pure and
-             side-effecting (`stringify-instants` is pure;
-             `print-run-summary!` and `exit!` write to stdout / exit).
-   Layer 1 — `emit-result!` (composes `stringify-instants`).
-   Layer 2 — subcommand handlers (compose Layer 1).
-   Layer 3 — `-main` (inlines the dispatch table to keep this file at
-             4 strata)."
+   The entry point and subcommand handlers share the top stratum; serialization
+   and value-normalization remain below them."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.etl.messages :as msg]
@@ -45,6 +39,18 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; No in-namespace dependencies.
+
+(def ^:private successful-exit-code
+  "POSIX status returned after a command completes successfully."
+  0)
+
+(def ^:private failed-exit-code
+  "POSIX status returned when a command cannot complete."
+  1)
+
+(def ^:private usage-exit-code
+  "POSIX status reserved for invocation and help-text errors."
+  2)
 
 (defn- stringify-instants
   "Walk `v` converting every `java.time.Instant` to its ISO-8601 string
@@ -68,7 +74,7 @@
           (when-let [error (:error result)]
             (println (msg/t :run/error {:value error})))))))
 
-(defn- exit! [code] (System/exit (or code 0)))
+(defn- exit! [code] (System/exit (or code successful-exit-code)))
 
 (defn- get-opts [m] (if (contains? m :opts) (:opts m) m))
 
@@ -97,15 +103,15 @@
         workbench-option (when workbench-out
                            (workbench/missing-option opts))]
     (cond
-      (nil? pipeline) (do (println (msg/t :run/usage)) (exit! 1))
-      (nil? env)      (do (println (msg/t :run/missing-env)) (exit! 1))
+      (nil? pipeline) (do (println (msg/t :run/usage)) (exit! failed-exit-code))
+      (nil? env)      (do (println (msg/t :run/missing-env)) (exit! failed-exit-code))
       workbench-option
       (do (println (msg/t :workbench/missing-option {:option workbench-option}))
           (println (msg/t :workbench/usage))
-          (exit! 1))
+          (exit! failed-exit-code))
       (and workbench-out (not (workbench/valid-source-hash? source-hash)))
       (do (println (msg/t :workbench/invalid-source-hash))
-          (exit! 1))
+          (exit! failed-exit-code))
       :else
       (let [config-result (when workbench-out
                             (runner/load-run-configuration pipeline env))
@@ -135,15 +141,16 @@
         (exit! (if (and (schema/succeeded? result)
                         (or (nil? snapshot-result)
                             (schema/succeeded? snapshot-result)))
-                 0
-                 1))))))
+                 successful-exit-code
+                 failed-exit-code))))))
 
 (defn- list-cmd
   [m]
   (let [path   (:path (get-opts m) ".")
         result (runner/list-pipelines [path])]
     (if (schema/failed? result)
-      (do (println (msg/t :list/discovery-failed {:error (:error result)})) (exit! 1))
+      (do (println (msg/t :list/discovery-failed {:error (:error result)}))
+          (exit! failed-exit-code))
       (let [pipelines (filter :name (:pipelines result))]
         (println (msg/t :list/header {:count (count pipelines) :path path}))
         (doseq [p pipelines]
@@ -151,38 +158,39 @@
                           {:path    (:path p)
                            :name    (or (some->> (:name p)    (#(msg/t :list/entry-name    {:value %}))) "")
                            :version (or (some->> (:version p) (#(msg/t :list/entry-version {:value %}))) "")})))
-        (exit! 0)))))
+        (exit! successful-exit-code)))))
 
 (defn- validate-cmd
   [m]
   (let [{:keys [pipeline env]} (get-opts m)]
     (cond
-      (nil? pipeline) (do (println (msg/t :validate/usage)) (exit! 1))
-      (nil? env)      (do (println (msg/t :validate/missing-env)) (exit! 1))
+      (nil? pipeline) (do (println (msg/t :validate/usage)) (exit! failed-exit-code))
+      (nil? env)      (do (println (msg/t :validate/missing-env))
+                          (exit! failed-exit-code))
       :else
       (let [result (runner/validate-pack pipeline env)]
         (if (schema/succeeded? result)
           (do (println (msg/t :validate/ok))
               (println (msg/t :validate/stages
                               {:value (count (:pipeline/stages (:pipeline result)))}))
-              (exit! 0))
+              (exit! successful-exit-code))
           (do (println (msg/t :validate/failed))
               (when-let [e (:error result)] (println (msg/t :validate/error {:value e})))
-              (exit! 1)))))))
+              (exit! failed-exit-code)))))))
 
 (defn- registry-cmd
   [m]
   (let [{:keys [out]} (get-opts m)]
     (cond
       (nil? out)
-      (do (println (msg/t :registry/usage)) (exit! 1))
+      (do (println (msg/t :registry/usage)) (exit! failed-exit-code))
 
       (not (workbench/valid-registry?))
-      (do (println (msg/t :registry/invalid)) (exit! 1))
+      (do (println (msg/t :registry/invalid)) (exit! failed-exit-code))
 
       :else
       (do (emit-result! (workbench/state-var-registry) out)
-          (exit! 0)))))
+          (exit! successful-exit-code)))))
 
 (defn- help-cmd
   [_m]
@@ -196,10 +204,7 @@
   (println (msg/t :help/connector-types))
   (doseq [t (registry/supported-types)]
     (println (msg/t :help/connector-entry {:value t})))
-  (exit! 2))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Entry point — composes Layer 2.
+  (exit! usage-exit-code))
 
 (defn -main
   [& args]

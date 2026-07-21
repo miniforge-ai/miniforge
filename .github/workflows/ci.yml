@@ -18,6 +18,8 @@ permissions:
   contents: read
 
 env:
+  # Public identifier for the read-only Miniforge CI GitHub App; credentials
+  # remain in MINIFORGE_CI_BOT_KEY.
   MINIFORGE_CI_BOT_APP_ID: "3360143"
 
 jobs:
