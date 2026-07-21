@@ -176,7 +176,11 @@
   (when (= :workflow (:intervention/target-type interv))
     (:intervention/target-id interv)))
 
-(defn- publish-state-changed!
+(defn publish-state-changed!
+  "Publish a `:supervisory/intervention-state-changed` event for
+   `interv`. The single canonical emitter for lifecycle transitions —
+   the application layer (D-3) publishes through here too, so every
+   transition carries the same envelope shape."
   [stream interv]
   (let [envelope (es/create-envelope
                   stream

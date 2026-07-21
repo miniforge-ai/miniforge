@@ -20,6 +20,7 @@
   "Public API for the operator (meta-agent) component.
    Manages the meta-loop: observe signals, detect patterns, propose improvements."
   (:require
+   [ai.miniforge.operator.application :as application]
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.core :as core]
    [ai.miniforge.operator.intervention :as intervention]
@@ -227,6 +228,28 @@
   "Request sources whose interventions are auto-approved (the human IS
    the approver): the operator surfaces, not delegated agents."
   consumer/auto-approve-request-sources)
+
+;------------------------------------------------------------------------------ Layer 1c
+;; Intervention application (Phase D D-3)
+
+(def register-live-runner!
+  "Register a live runner's control handles for a workflow id so
+   interventions can act on it. `handles`: {:control-state <atom>,
+   :degradation-manager <optional>}."
+  application/register-runner!)
+
+(def deregister-live-runner!
+  "Remove a workflow id from the live-runner registry. Idempotent."
+  application/deregister-runner!)
+
+(def apply-intervention!
+  "The D-3 `:apply!` hook: apply one approved intervention to its live
+   runner (control-state flags / no-effect verbs / safe-mode), advance
+   the lifecycle approved→dispatched→applied→verified (or →failed with
+   a typed reason such as :no-live-runner), publishing every
+   transition. Pass as `:apply!` to [[consume-operator-events!]] /
+   [[start-operator-consumer!]]."
+  application/apply-intervention!)
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Signal observation

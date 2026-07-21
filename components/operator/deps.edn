@@ -7,6 +7,7 @@
         ai.miniforge/llm {:local/root "../llm"}
         ai.miniforge/workflow {:local/root "../workflow"}
         ai.miniforge/anomaly {:local/root "../anomaly"}
-        ai.miniforge/event-stream {:local/root "../event-stream"}}
+        ai.miniforge/event-stream {:local/root "../event-stream"}
+        ai.miniforge/reliability {:local/root "../reliability"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

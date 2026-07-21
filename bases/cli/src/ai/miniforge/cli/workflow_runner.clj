@@ -27,6 +27,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
@@ -1115,6 +1116,16 @@
           ;; Control state for dashboard commands (pause/resume/stop)
           control-state (es/create-control-state)
           command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
+          ;; Phase D: governed control path. Register this runner so
+          ;; operator-directory interventions can act on it, and start
+          ;; the operator-event consumer with the D-3 applier. Runs
+          ;; alongside the legacy `.edn` dashboard poller until D-4
+          ;; deletes it.
+          _ (operator/register-live-runner! workflow-id
+                                            {:control-state control-state})
+          operator-consumer (operator/start-operator-consumer!
+                             {:stream event-stream
+                              :apply! operator/apply-intervention!})
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
@@ -1167,6 +1178,8 @@
           (finally
             (progress-cleanup)
             (when command-poller-cleanup (command-poller-cleanup))
+            (operator/stop-operator-consumer! operator-consumer)
+            (operator/deregister-live-runner! workflow-id)
             ;; Schedule deferred GC for this workflow's scratch ref — in finally
             ;; so it fires on both normal completion and exception exit paths.
             (enqueue-workflow-gc-best-effort! workflow-id)))))
