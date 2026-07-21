@@ -68,7 +68,8 @@
       (let [data (result/unwrap r)]
         (is (false? (:persisted? data)))
         (is (true?  (:no-changes? data)))
-        (is (nil?   (:commit-sha data))))
+        (is (nil?   (:commit-sha data)))
+        (is (= "task/foo" (:branch data))))
       ;; git add was attempted, but commit/push were not.
       (is (some #(str/includes? % "git add -A")        @calls))
       (is (some #(str/includes? % "git status")        @calls))

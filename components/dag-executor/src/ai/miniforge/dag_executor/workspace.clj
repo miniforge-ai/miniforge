@@ -48,7 +48,7 @@
    Returns result monad with {:persisted? bool :commit-sha string :branch string}"
   [exec-fn {:keys [branch message] :or {branch "task/unknown" message "phase checkpoint"}}]
   (if (not (safe-branch? branch))
-    (result/err :invalid-branch (str "Branch name must not start with '-': " branch))
+    (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
       (let [_ (exec-fn "git add -A")
             status-r (exec-fn "git status --porcelain")
@@ -59,7 +59,7 @@
                 sha-r (exec-fn "git rev-parse HEAD")
                 sha   (str/trim (get-in sha-r [:data :stdout] ""))]
             (result/ok {:persisted? true :commit-sha sha :branch branch}))
-          (result/ok {:persisted? false :commit-sha nil :no-changes? true})))
+          (result/ok {:persisted? false :commit-sha nil :no-changes? true :branch branch})))
       (catch Exception e
         (result/err :persist-failed (.getMessage e))))))
 
@@ -75,7 +75,7 @@
    Returns result monad with {:restored? bool :commit-sha string :branch string}"
   [exec-fn {:keys [branch] :or {branch "task/unknown"}}]
   (if (not (safe-branch? branch))
-    (result/err :invalid-branch (str "Branch name must not start with '-': " branch))
+    (result/err :invalid-branch (str "Branch must be a non-empty string not starting with '-': " (pr-str branch)))
     (try
       (let [_ (exec-fn ["git" "fetch" "origin" branch])
             _ (exec-fn ["git" "checkout" branch])
