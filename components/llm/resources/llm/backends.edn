@@ -76,18 +76,14 @@
               :api-key-env "OPENAI_API_KEY"
               :probe-endpoint "https://api.openai.com/"}
 
- ;; Generic OpenAI-compatible server (LM Studio, llama.cpp server,
- ;; vLLM, and any other /v1/chat/completions endpoint). Local servers
- ;; are typically credential-free, so no :api-key-env — a client
- ;; :api-key is honored when supplied but never required. The endpoint
- ;; is the LM Studio default; override per client with :base-url or
- ;; via :base-url-env.
  ;; Any OpenAI-compatible /v1/chat/completions endpoint: local keyless
  ;; servers (LM Studio, llama.cpp, vLLM) AND keyed aggregators
- ;; (OpenRouter, an OpenAI/Together key). :optional-api-key? true means a
- ;; key is SENT when resolved (client :api-key, else the env var) but is
- ;; NOT required — so a local keyless server and a keyed OpenRouter host
- ;; both work through this one backend. For OpenRouter, set
+ ;; (OpenRouter, a hosted OpenAI/Together key). :optional-api-key? true
+ ;; means a key is SENT when resolved (client :api-key, else the env var)
+ ;; but is NOT required — so a local keyless server and a keyed OpenRouter
+ ;; host both work through this one backend, and the endpoint (LM Studio
+ ;; default) is overridable per client via :base-url or :base-url-env.
+ ;; For OpenRouter, set
  ;; MINIFORGE_OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1/chat/completions
  ;; and MINIFORGE_OPENAI_COMPAT_API_KEY=<key>.
  :openai-compat {:cmd "http"

@@ -927,9 +927,10 @@
                  "x-goog-api-key" api-key}
     {"Content-Type" "application/json"}))
 
-(defn- getenv-value
+(defn getenv-value
   "Indirection over `System/getenv` so env-dependent backend resolution
-   (api-key, base-url) is testable via `with-redefs`."
+   (api-key, base-url) is testable via `with-redefs` (kept public like
+   `http-post-request` for exactly that reason)."
   [k]
   (System/getenv k))
 

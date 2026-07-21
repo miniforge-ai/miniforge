@@ -284,9 +284,10 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "keyless ok")
                         (fn []
-                          (llm/complete (llm/create-client {:backend :openai-compat
-                                                            :model "m"})
-                                        {:prompt "hi"})))]
+                          (with-redefs [impl/getenv-value (constantly nil)]
+                            (llm/complete (llm/create-client {:backend :openai-compat
+                                                              :model "m"})
+                                          {:prompt "hi"}))))]
       (is (true? (:success result)) "no key -> still succeeds (keyless)")
       (is (not (contains? (:headers captured) "Authorization"))
           "no Authorization header when no key is resolved"))))
