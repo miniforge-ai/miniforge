@@ -130,6 +130,15 @@
       (is (= :invalid-branch (-> r :error :code)))
       (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))
 
+(deftest git-persist!-rejects-empty-branch-test
+  (testing "An empty string branch is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-persist! exec-fn {:branch ""})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; git-restore!
 
@@ -178,3 +187,12 @@
       (is (result/err? r))
       (is (= :invalid-branch (-> r :error :code)))
       (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))
+
+(deftest git-restore!-rejects-empty-branch-test
+  (testing "An empty string branch is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-restore! exec-fn {:branch ""})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))

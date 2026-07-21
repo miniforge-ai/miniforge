@@ -34,7 +34,7 @@
    mode (no shell involved). Reject them before invoking any git subcommand.
    Non-string values are also invalid — argv elements must be Strings."
   [branch]
-  (and (string? branch) (not (str/starts-with? branch "-"))))
+  (and (string? branch) (seq branch) (not (str/starts-with? branch "-"))))
 
 (defn git-persist!
   "Persist workspace via git commit + push.
