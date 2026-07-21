@@ -255,7 +255,9 @@
       spec-id (assoc-in [:specs spec-id] entity))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; WorkflowRun handlers
+;; Entity handlers — one section per family
+
+;; ── WorkflowRun handlers ───────────────────────────────────────────────────
 
 (defn workflow-started
   [table {:workflow/keys [id] :as event}]
@@ -399,8 +401,7 @@
       (-> (ensure-workflow workflow-id ts)
           (assoc-in [:workflows workflow-id :workflow-run/updated-at] ts)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; AgentSession handlers
+;; ── AgentSession handlers ──────────────────────────────────────────────────
 
 (defn cp-agent-registered
   [table {:cp/keys [agent-id vendor agent-name external-id capabilities] :as event}]
@@ -452,8 +453,7 @@
                  {:agent/status         (coarse-agent-status type)
                   :agent/last-heartbeat ts}))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PrFleetEntry handlers
+;; ── PrFleetEntry handlers ──────────────────────────────────────────────────
 
 (defn- pr-key
   [event]
@@ -567,8 +567,7 @@
                    (assoc :pr/workflow-run-id workflow-id))]
     (assoc-in table [:prs k] scored)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; TaskNode handlers (N5-δ3 §2.3, §3.3)
+;; ── TaskNode handlers (N5-δ3 §2.3, §3.3) ───────────────────────────────────
 
 (def task-kanban-mapping-resource
   "Classpath location of the EDN mapping from :task/status to the closed
@@ -651,8 +650,7 @@
     (cond-> table
       task-id (assoc-in [:tasks task-id] merged))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PolicyEvaluation handlers
+;; ── PolicyEvaluation handlers ──────────────────────────────────────────────
 
 (defn- normalize-violation
   [v]
@@ -690,8 +688,7 @@
   (let [eval (policy-evaluation event false)]
     (assoc-in table [:policy-evals (:policy-eval/id eval)] eval)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Snapshot-event handlers — applied during startup replay.
+;; ── Snapshot-event handlers — applied during startup replay ────────────────
 ;; A `:supervisory/*-upserted` event carries the canonical entity in
 ;; :supervisory/entity; we trust it as the baseline state.
 
@@ -737,8 +734,7 @@
     (cond-> table
       entity (assoc-in [:tasks (:task/id entity)] entity))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; DecisionCard handlers (N5-δ3 §2.4, §3.4)
+;; ── DecisionCard handlers (N5-δ3 §2.4, §3.4) ───────────────────────────────
 
 (defn cp-decision-created
   "Handler for `:control-plane/decision-created` — creates a pending
@@ -800,8 +796,7 @@
     (cond-> table
       entity (assoc-in [:decisions (:decision/id entity)] entity))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; InterventionRequest handlers
+;; ── InterventionRequest handlers ───────────────────────────────────────────
 
 (defn- intervention-stub
   [event]
@@ -960,7 +955,7 @@
     (cond-> table
       updated (assoc-in [:dependencies dependency-id] updated))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
 (def handlers

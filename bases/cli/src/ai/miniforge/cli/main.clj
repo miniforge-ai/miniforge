@@ -85,6 +85,9 @@
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
 
+;------------------------------------------------------------------------------ Layer 0
+;; Composition seams (optional web/TUI providers) and pure helpers
+
 (defn- optional-composition-var
   "Resolve a provider whose entire component is optional for this CLI product.
    This is the CLI's only late-binding boundary: miniforge-core loads this
@@ -179,8 +182,7 @@
    'ai.miniforge.tui-views.interface/start-fleet-tui!
    start-fleet-tui!))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Constants and pure helpers
+;; ── Constants and pure helpers ──────────────────────────────────────────────
 
 (def version-info
   {:name (app-config/binary-name)

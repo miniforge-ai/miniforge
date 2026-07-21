@@ -409,8 +409,7 @@
   ([opts]
    (->InMemoryPRTrainManager (atom {}) (atom {}) (:event-stream opts))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Utility functions for working with trains
+;; ── Utility functions for working with trains ───────────────────────────────
 
 (defn list-trains
   "List all trains in a manager.
