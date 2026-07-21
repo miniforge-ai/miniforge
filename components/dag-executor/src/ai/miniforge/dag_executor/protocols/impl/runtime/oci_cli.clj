@@ -821,7 +821,7 @@
                      #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok (cond-> {:base-branch branch}
+              (result/ok (cond-> {:base-branch (str branch)}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))

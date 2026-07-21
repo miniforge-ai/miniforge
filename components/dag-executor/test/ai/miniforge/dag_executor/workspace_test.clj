@@ -101,7 +101,7 @@
         (is (some #(and (vector? %) (cmd-has? % "git commit -m phase: implement")) cmds)
             "commit must be an arg vector, not a shell string")
         (is (some #(and (vector? %) (cmd-has? % "git push origin HEAD:feature/bar --force")) cmds)
-            "push must be an arg vector, not a shell string"))))
+            "push must be an arg vector, not a shell string")))))
 
 (deftest git-persist!-defaults-branch-and-message-test
   (testing "Missing :branch and :message use 'task/unknown' and 'phase checkpoint'"
