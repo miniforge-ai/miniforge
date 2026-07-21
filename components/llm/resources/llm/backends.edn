@@ -82,13 +82,23 @@
  ;; :api-key is honored when supplied but never required. The endpoint
  ;; is the LM Studio default; override per client with :base-url or
  ;; via :base-url-env.
+ ;; Any OpenAI-compatible /v1/chat/completions endpoint: local keyless
+ ;; servers (LM Studio, llama.cpp, vLLM) AND keyed aggregators
+ ;; (OpenRouter, an OpenAI/Together key). :optional-api-key? true means a
+ ;; key is SENT when resolved (client :api-key, else the env var) but is
+ ;; NOT required — so a local keyless server and a keyed OpenRouter host
+ ;; both work through this one backend. For OpenRouter, set
+ ;; MINIFORGE_OPENAI_COMPAT_BASE_URL=https://openrouter.ai/api/v1/chat/completions
+ ;; and MINIFORGE_OPENAI_COMPAT_API_KEY=<key>.
  :openai-compat {:cmd "http"
                  :streaming? false
-                 :description "Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, ...)"
+                 :description "Any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, OpenRouter, ...)"
                  :provider "OpenAI-Compatible"
                  :requires-cli? false
                  :api-endpoint "http://localhost:1234/v1/chat/completions"
                  :base-url-env "MINIFORGE_OPENAI_COMPAT_BASE_URL"
+                 :api-key-env "MINIFORGE_OPENAI_COMPAT_API_KEY"
+                 :optional-api-key? true
                  :probe-endpoint "http://localhost:1234/v1/models"}
 
  ;; Gemini's REST shape embeds the model in the URL path, so

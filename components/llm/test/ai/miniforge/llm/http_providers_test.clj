@@ -277,6 +277,35 @@
       (is (= "missing_model" (get-in result [:error :type])))
       (is (nil? captured) "failed closed before the transport"))))
 
+(deftest openai-compat-api-key-is-optional-not-fail-closed-test
+  (testing "openai-compat declares :api-key-env but :optional-api-key? true, so
+            a missing key does NOT fail closed (a local keyless server works) —
+            unlike the cloud providers which do fail closed"
+    (let [{:keys [result captured]}
+          (capture-http (openai-200 "keyless ok")
+                        (fn []
+                          (llm/complete (llm/create-client {:backend :openai-compat
+                                                            :model "m"})
+                                        {:prompt "hi"})))]
+      (is (true? (:success result)) "no key -> still succeeds (keyless)")
+      (is (not (contains? (:headers captured) "Authorization"))
+          "no Authorization header when no key is resolved"))))
+
+(deftest openai-compat-resolves-api-key-from-env-test
+  (testing "with no client :api-key, the key resolves from the backend's
+            :api-key-env (the OpenRouter path) and becomes a bearer header"
+    (let [env-var (get (backend-config :openai-compat) :api-key-env)
+          {:keys [captured]}
+          (capture-http (openai-200 "keyed ok")
+                        (fn []
+                          (with-redefs [impl/getenv-value
+                                        (fn [k] (when (= k env-var) test-api-key))]
+                            (llm/complete (llm/create-client {:backend :openai-compat
+                                                              :model "m"})
+                                          {:prompt "hi"}))))]
+      (is (= (str "Bearer " test-api-key)
+             (get (:headers captured) "Authorization"))))))
+
 (deftest missing-api-key-test
   (let [result (impl/http-complete {:provider "Anthropic"
                                     :api-key-env missing-key-env
