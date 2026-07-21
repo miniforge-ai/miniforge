@@ -523,17 +523,20 @@
 
 (def prepare-runtime-executor!
   "Create an OCI-CLI executor on the selected container runtime (explicit
-   :runtime-kind, else auto-probe — Podman first) with images ensured to
-   exist. Returns {:executor OciCliExecutor :image-result Result
-   :runtime <selection summary>} or error Result."
+   :runtime-kind, else auto-probe — Podman first). Images are ensured by
+   default; :ensure-image? false skips that step. Returns
+   {:executor OciCliExecutor :image-result Result|nil
+   :runtime <selection summary>} or error Result; :image-result is nil when
+   image preparation is skipped."
   executor/prepare-runtime-executor!)
 
 (def prepare-docker-executor!
-  "Create a Docker executor with images ensured to exist. This is the
-   Docker-explicit variant; product paths should prefer the
+  "Create a Docker executor, ensuring images by default. This is the
+   Docker-explicit variant; :ensure-image? false skips image preparation.
+   Product paths should prefer the
    runtime-agnostic `prepare-runtime-executor!` and let selection pick
-   the runtime. Returns {:executor OciCliExecutor :image-result Result}
-   or error Result."
+   the runtime. Returns {:executor OciCliExecutor :image-result Result|nil}
+   or error Result; :image-result is nil when image preparation is skipped."
   executor/prepare-docker-executor!)
 
 (def ensure-image!
