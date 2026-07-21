@@ -419,12 +419,14 @@
 (defn create-container
   "Create and start a container.
 
-   execution-plan (optional) is a map conforming to
-   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema.  When
-   provided its :memory-limit-mb and :network-profile values take
-   precedence over the legacy `network` argument for those concerns.
-   All containers receive the standard security-hardening flags via
-   `build-security-args`.
+   When execution-plan is present, it is authoritative for plan-owned launch
+   settings: security flags, runtime filesystems, mounts, networking, time
+   limit, and command. Absent plan fields do not fall back to the legacy
+   `network` argument; a partial plan therefore means no explicit network
+   flag and uses the default keep-alive command when :command is absent.
+   Production launch plans conform to
+   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema, while this
+   compatibility boundary also accepts partial plan maps.
 
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
