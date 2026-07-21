@@ -58,3 +58,11 @@
       (is (anomaly/anomaly? result))
       (is (string? (:anomaly/message result)))
       (is (seq (:anomaly/message result))))))
+
+(deftest unwrap-anomaly-normalizes-malformed-messages
+  (testing "nil, false, and non-string messages use the canonical fallback"
+    (doseq [message [nil false :not-text 42 []]
+            :let [result (dp/unwrap-anomaly
+                          {:ok? false :error {:code :unknown :message message}})]]
+      (is (= "Unwrap called on error result" (:anomaly/message result))
+          (str "normalized " (pr-str message))))))

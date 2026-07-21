@@ -106,6 +106,12 @@
         (when (zero? exit) (str/trim out)))
       (catch Exception _ nil))))
 
+(defn- normalized-environment-metadata
+  "Return acquired environment metadata when it is a map; otherwise return an empty map."
+  [env]
+  (let [metadata (get env :metadata)]
+    (if (map? metadata) metadata {})))
+
 (defn build-env-record
   "Acquire environment from executor and build the result map.
 
@@ -121,7 +127,7 @@
       (let [env       (result-unwrap env-result)
             workdir   (:workdir env)
             base-sha  (read-head-sha workdir)
-            metadata  (cond-> (or (:metadata env) {})
+            metadata  (cond-> (normalized-environment-metadata env)
                         base-sha (assoc :base-sha base-sha))]
         {:executor             executor
          :environment-id       (:environment-id env)

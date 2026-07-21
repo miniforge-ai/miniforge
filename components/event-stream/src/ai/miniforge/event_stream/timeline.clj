@@ -124,6 +124,12 @@
 (defn- event-type [event]
   (:event/type event))
 
+(defn- event-message
+  "Return the renderable event message, or an empty string when absent or malformed."
+  [event]
+  (let [message (get event :message)]
+    (if (string? message) message "")))
+
 (defn- truncate
   "Truncate string `s` to at most `n` characters, appending the
    localized `:timeline/truncation-suffix` if cut."
@@ -142,8 +148,8 @@
    Prefers `:tool/args-digest :digest/preview`, falls back to `:message`."
   [event]
   (let [preview (get-in event [:tool/args-digest :digest/preview])
-        raw     (or preview (:message event) "")]
-    (truncate (str raw) args-preview-length)))
+        raw     (if (string? preview) preview (event-message event))]
+    (truncate raw args-preview-length)))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Duration helpers
@@ -213,7 +219,7 @@
                    :workflow/phase-completed (messages/t :timeline/phase-suffix-completed)
                    (name ev-type))
         marker   (messages/t :timeline/phase-marker {:suffix suffix})
-        msg      (or (:message event) "")]
+        msg      (event-message event)]
     (if (seq msg)
       (format "%s  %s  %s  %s" ts phase marker msg)
       (format "%s  %s  %s" ts phase marker))))
@@ -225,7 +231,7 @@
   (let [ts     (format-hms (event-timestamp event))
         phase  (event-phase event)
         marker (messages/t :timeline/terminated-marker)
-        reason (or (:message event)
+        reason (or (not-empty (event-message event))
                    (when-let [r (:workflow/result event)]
                      (str r))
                    "")]
@@ -237,7 +243,8 @@
   (let [ts     (format-hms (event-timestamp event))
         phase  (event-phase event)
         marker (messages/t :timeline/stall-marker)
-        msg    (or (:message event) (messages/t :timeline/stall-default-msg))]
+        msg    (or (not-empty (event-message event))
+                   (messages/t :timeline/stall-default-msg))]
     (format "%s  %s  %s  %s" ts phase marker msg)))
 
 (defn- render-generic
@@ -246,7 +253,7 @@
   (let [ts       (format-hms (event-timestamp event))
         phase    (event-phase event)
         ev-type  (or (event-type event) (messages/t :timeline/unknown-event-type))
-        msg      (or (:message event) "")]
+        msg      (event-message event)]
     (format "%s  %s  %s  %s" ts phase (str ev-type) (truncate msg args-preview-length))))
 
 (defn- render-event

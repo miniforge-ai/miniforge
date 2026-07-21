@@ -256,6 +256,12 @@
   [review]
   (str "```clojure\n" (pr-str review) "\n```"))
 
+(defn- normalized-response
+  "Return the failed session response when it is a map; otherwise return an empty map."
+  [failed]
+  (let [response (get failed :response)]
+    (if (map? response) response {})))
+
 (defn- combine-normalized-review-results
   "Combine split reviewer calls into one normalized result. Any split session
    that fails to parse or times out keeps the combined result failed; only an
@@ -271,7 +277,7 @@
              :content joined-content
              :tokens tokens
              :cost-usd cost-usd
-             :response (cond-> (assoc (or (:response failed) {})
+             :response (cond-> (assoc (normalized-response failed)
                                       :tokens tokens)
                          cost-usd (assoc :cost-usd cost-usd)))
       (let [review (combine-parsed-reviews (mapv :parsed-content normalized-results))
