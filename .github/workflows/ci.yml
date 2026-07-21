@@ -354,8 +354,8 @@ jobs:
         run: |
           set -o pipefail
           echo "::group::Testing CLI"
-          bb dist/miniforge.jar version 2>&1 | tee -a cli-test.log
-          bb dist/miniforge.jar help 2>&1 | tee -a cli-test.log
+          bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version 2>&1 | tee -a cli-test.log
+          bb --jar dist/miniforge.jar -m ai.miniforge.cli.main help 2>&1 | tee -a cli-test.log
           echo "::endgroup::"
 
       - name: Upload build logs
