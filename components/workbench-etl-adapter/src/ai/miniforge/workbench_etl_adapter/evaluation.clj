@@ -45,22 +45,6 @@
   "Version of the code formulas that turn ETL results into evaluations."
   "miniforge-etl-workbench-adapter/1.0.0")
 
-(def ^:private policy-version
-  "Version of the initial in-code ETL evaluation policy."
-  "miniforge-etl-evaluation-policy/1.0.0")
-
-(def ^:private stage-warn-threshold
-  "Minimum scheduled-stage completion rate that avoids a failing status."
-  0.8)
-
-(def ^:private quality-pass-threshold
-  "Record acceptance rate required for a passing quality status."
-  0.98)
-
-(def ^:private quality-warn-threshold
-  "Minimum record acceptance rate that avoids a failing quality status."
-  0.9)
-
 (def ^:private evaluator-definition
   "Stable formula identity hashed independently from operator policy."
   {:evaluators
@@ -72,33 +56,20 @@
   "Digest of the formula identities implemented by this evaluator version."
   (str "sha256:" (content-hash/content-hash evaluator-definition)))
 
-(def ^:private policy-definition
-  "Threshold inputs hashed to identify the in-code evaluation policy."
-  {:stage-warn-threshold stage-warn-threshold
-   :quality-pass-threshold quality-pass-threshold
-   :quality-warn-threshold quality-warn-threshold})
+(defn- state-var [registry state-var-id]
+  (some #(when (= state-var-id (:id %)) %) (:state_vars registry)))
 
-(def ^:private policy-hash
-  "Digest used to distinguish changes to the in-code policy thresholds."
-  (str "sha256:" (content-hash/content-hash policy-definition)))
-
-(defn- status-for-stage-rate [score]
+(defn- status-for-score [score thresholds]
   (cond
-    (= 1.0 score) :pass
-    (>= score stage-warn-threshold) :warn
+    (>= score (:pass thresholds)) :pass
+    (and (:warn thresholds) (>= score (:warn thresholds))) :warn
     :else :fail))
 
-(defn- status-for-quality-rate [score]
-  (cond
-    (>= score quality-pass-threshold) :pass
-    (>= score quality-warn-threshold) :warn
-    :else :fail))
+(defn- gate-effect [state-var status]
+  (get-in state-var [:gate_effects status] (name :none)))
 
-(defn- gate-effect [status failure-effect]
-  (cond
-    (= :pass status) (name :none)
-    (= :warn status) (name :marks_low_confidence)
-    :else failure-effect))
+(defn- required-source-role [state-var]
+  (first (get-in state-var [:evidence_requirements :required_refs])))
 
 (defn- ratio [numerator denominator]
   (if (zero? denominator)
@@ -123,17 +94,17 @@
     (some? value)      (assoc :value value)
     (some? components) (assoc :score_components components)))
 
-(defn- run-evidence [run evaluated-at]
+(defn- run-evidence [run evaluated-at source-role]
   [{:id (str run-completed-id ".pipeline-run." (:pipeline-run/id run))
-    :source_role (name :pipeline-run)
+    :source_role source-role
     :quote (msg/t :evidence/run-status
                   {:status (:pipeline-run/status run)})
     :created_at evaluated-at}])
 
-(defn- stage-evidence [stage-runs evaluated-at]
+(defn- stage-evidence [stage-runs evaluated-at source-role]
   (mapv (fn [index stage]
           {:id (str stages-completed-id ".stage." index)
-           :source_role (name :pipeline-stage-run)
+           :source_role source-role
            :quote (msg/t :evidence/stage-status
                          {:stage (:stage/name stage)
                           :status (:status stage)})
@@ -141,10 +112,10 @@
         (range)
         stage-runs))
 
-(defn- quality-evidence [quality-reports evaluated-at]
+(defn- quality-evidence [quality-reports evaluated-at source-role]
   (mapv (fn [index report]
           {:id (str data-quality-pass-rate-id ".quality-report." index)
-           :source_role (name :data-quality-report)
+           :source_role source-role
            :quote (msg/t :evidence/quality-summary
                          {:passed (:report/passed report)
                           :total (:report/total report)})
@@ -152,10 +123,11 @@
         (range)
         quality-reports))
 
-(defn- run-completed [run evaluated-at]
-  (let [completed? (= :completed (:pipeline-run/status run))
+(defn- run-completed [registry run evaluated-at]
+  (let [definition (state-var registry run-completed-id)
+        completed? (= :completed (:pipeline-run/status run))
         score      (if completed? 1.0 0.0)
-        status     (if completed? :pass :fail)]
+        status     (status-for-score score (:thresholds definition))]
     (evaluation
      {:state-var-id run-completed-id
       :status status
@@ -163,20 +135,21 @@
       :score score
       :confidence 1.0
       :components {:completed score}
-      :evidence (run-evidence run evaluated-at)
+      :evidence (run-evidence run evaluated-at (required-source-role definition))
       :findings (when-not completed?
                   [{:severity (name :error)
                     :message (msg/t :finding/run-incomplete)}])
-      :gate-effect (gate-effect status (name :blocks_release))
+      :gate-effect (gate-effect definition status)
       :evaluated-at evaluated-at})))
 
-(defn- stages-completed [stage-runs configured-stage-count evaluated-at]
+(defn- stages-completed [registry stage-runs configured-stage-count evaluated-at]
   (let [;; Failed execution stops before skipped stages enter :stage-runs.
-        total     (max configured-stage-count (count stage-runs))
-        completed (count (filter #(= :completed (:status %)) stage-runs))
-        failed    (count (filter #(= :failed (:status %)) stage-runs))
-        score     (ratio completed total)
-        status    (status-for-stage-rate score)]
+        definition (state-var registry stages-completed-id)
+        total      (max configured-stage-count (count stage-runs))
+        completed  (count (filter #(= :completed (:status %)) stage-runs))
+        failed     (count (filter #(= :failed (:status %)) stage-runs))
+        score      (ratio completed total)
+        status     (status-for-score score (:thresholds definition))]
     (evaluation
      {:state-var-id stages-completed-id
       :status status
@@ -186,15 +159,17 @@
       :components {:completed_stages (double completed)
                    :total_stages (double total)
                    :failed_stages (double failed)}
-      :evidence (stage-evidence stage-runs evaluated-at)
+      :evidence (stage-evidence stage-runs evaluated-at
+                                (required-source-role definition))
       :findings (when (not= :pass status)
                   [{:severity (name (if (= :fail status) :error :warn))
                     :message (msg/t :finding/stage-incomplete)}])
-      :gate-effect (gate-effect status (name :blocks_release))
+      :gate-effect (gate-effect definition status)
       :evaluated-at evaluated-at})))
 
-(defn- data-quality [stage-runs evaluated-at]
-  (let [reports (->> stage-runs (keep :quality-report) vec)]
+(defn- data-quality [registry stage-runs evaluated-at]
+  (let [definition (state-var registry data-quality-pass-rate-id)
+        reports    (->> stage-runs (keep :quality-report) vec)]
     (if (empty? reports)
       (evaluation
        {:state-var-id data-quality-pass-rate-id
@@ -210,7 +185,7 @@
             passed (reduce + (map :report/passed reports))
             failed (reduce + (map :report/failed reports))
             score  (ratio passed total)
-            status (status-for-quality-rate score)]
+            status (status-for-score score (:thresholds definition))]
         (evaluation
          {:state-var-id data-quality-pass-rate-id
           :status status
@@ -220,11 +195,12 @@
           :components {:passed_records (double passed)
                        :evaluated_records (double total)
                        :failed_records (double failed)}
-          :evidence (quality-evidence reports evaluated-at)
+          :evidence (quality-evidence reports evaluated-at
+                                      (required-source-role definition))
           :findings (when (not= :pass status)
                       [{:severity (name (if (= :fail status) :error :warn))
                         :message (msg/t :finding/quality-failed)}])
-          :gate-effect (gate-effect status (name :blocks_publish))
+          :gate-effect (gate-effect definition status)
           :evaluated-at evaluated-at})))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -232,15 +208,15 @@
 
 (defn provenance
   "Return stable evaluator and policy provenance for snapshot metadata."
-  []
-  {:policy_hash policy-hash
-   :policy_version policy-version
+  [registry]
+  {:policy_hash (str "sha256:" (content-hash/content-hash registry))
+   :policy_version (:version registry)
    :evaluator_hash evaluator-hash
    :evaluator_version evaluator-version})
 
 (defn evaluations
   "Evaluate the three shipped ETL state variables for one pipeline run."
-  [run stage-runs configured-stage-count evaluated-at]
-  [(run-completed run evaluated-at)
-   (stages-completed stage-runs configured-stage-count evaluated-at)
-   (data-quality stage-runs evaluated-at)])
+  [registry run stage-runs configured-stage-count evaluated-at]
+  [(run-completed registry run evaluated-at)
+   (stages-completed registry stage-runs configured-stage-count evaluated-at)
+   (data-quality registry stage-runs evaluated-at)])

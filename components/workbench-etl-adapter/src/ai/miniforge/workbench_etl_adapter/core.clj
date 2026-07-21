@@ -21,12 +21,14 @@
   (:require
    [ai.miniforge.workbench-etl-adapter.evaluation :as evaluation]))
 
-(def registry-id "miniforge-etl-state-vars")
-(def registry-version "2026.07.18.1")
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private product "miniforge")
-(def ^:private snapshot-schema-version "workbench_snapshot/v1")
+(def ^:private snapshot-schema-version
+  "Canonical wire-contract version emitted by this adapter."
+  "workbench_snapshot/v1")
+
 (def ^:private signature-stub
+  "Unsigned contract placeholder required until product snapshot signing lands."
   {:algorithm "sha256"
    :digest "0000000000000000000000000000000000000000000000000000000000000000"
    :canonicalization "json-c14n/1"})
@@ -45,12 +47,14 @@
      :label label
      :workflow {:id (:pipeline/name pipeline)
                 :version (:pipeline/version pipeline)}
-     :method "etl"
+     :method (name :etl)
      :axes (factor-axes inventory changed-factor)}))
+
+;------------------------------------------------------------------------------ Layer 1
 
 (defn snapshot
   "Project a pipeline result and resolved-run inventory into a snapshot."
-  [result resolved-run-config inventory changed-factor
+  [registry result resolved-run-config inventory changed-factor
    {:keys [experiment-id label snapshot-id run-id source-hashes]}]
   (let [run          (:pipeline-run result)
         stage-runs   (vec (:pipeline-run/stage-runs run))
@@ -64,12 +68,13 @@
      {:schema_version snapshot-schema-version
       :snapshot_id snapshot-id
       :generated_at evaluated-at
-      :product product
+      :product (:product registry)
       :run_id run-id
       :variant (variant resolved-run-config inventory changed-factor
                         experiment-id label)
-      :registry_ref {:registry_id registry-id :version registry-version}
-      :evaluations (evaluation/evaluations run stage-runs
+      :registry_ref {:registry_id (:registry_id registry)
+                     :version (:version registry)}
+      :evaluations (evaluation/evaluations registry run stage-runs
                                            configured-stage-count evaluated-at)
       :entities
       {:miniforge.etl_run
@@ -82,9 +87,9 @@
         :factor_count (:factor_count inventory)
         :redacted_count (:redacted_count inventory)}}
       :metadata
-      {:provenance (evaluation/provenance)
+      {:provenance (evaluation/provenance registry)
        :resolved_run {:schema_version (:schema_version inventory)
-                      :domain "etl"
+                      :domain (name :etl)
                       :configuration_hash (:config_hash inventory)
                       :factor_count (:factor_count inventory)
                       :redacted_count (:redacted_count inventory)

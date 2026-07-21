@@ -23,25 +23,12 @@
    [ai.miniforge.workbench-contract.schema :as workbench-schema]
    [ai.miniforge.workbench-etl-adapter.config :as config]
    [ai.miniforge.workbench-etl-adapter.core :as core]
+   [ai.miniforge.workbench-etl-adapter.messages :as msg]
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-(def ^:private missing-run-message
-  "ETL workbench projection requires a pipeline-run result")
-
-(def ^:private missing-variant-message
-  "ETL workbench projection requires experiment-id and label")
-
-(def ^:private invalid-change-message
-  "Candidate resolved-run configuration must differ from baseline at exactly one non-secret factor")
-
-(def ^:private invalid-baseline-message
-  "ETL workbench baseline factor values must be a map")
-
-(def ^:private invalid-snapshot-message
-  "ETL adapter emitted an invalid workbench_snapshot/v1")
-
 (def ^:private registry-resource
+  "Classpath location of the adapter's single evaluation-policy authority."
   "workbench/miniforge-etl-state-vars.edn")
 
 (defn factor-inventory
@@ -79,26 +66,33 @@
    {:keys [experiment-id label baseline-factor-values] :as opts}]
   (cond
     (not (map? (:pipeline-run result)))
-    (schema/failure :snapshot missing-run-message)
+    (schema/failure :snapshot (msg/t :failure/missing-run))
 
     (or (nil? experiment-id) (nil? label))
-    (schema/failure :snapshot missing-variant-message)
+    (schema/failure :snapshot (msg/t :failure/missing-variant))
 
     (and (some? baseline-factor-values) (not (map? baseline-factor-values)))
-    (schema/failure :snapshot invalid-baseline-message)
+    (schema/failure :snapshot (msg/t :failure/invalid-baseline))
 
     :else
-    (let [inventory (config/factor-inventory resolved-run-config)
+    (let [registry  (state-var-registry)
+          inventory (config/factor-inventory resolved-run-config)
           changes   (when (some? baseline-factor-values)
                       (config/factor-diff baseline-factor-values (:values inventory)))]
-      (if (and (some? baseline-factor-values) (not= 1 (count changes)))
-        (schema/failure :snapshot invalid-change-message
+      (cond
+        (not (schema/valid? workbench-schema/StateVarRegistry registry))
+        (schema/failure :snapshot (msg/t :failure/invalid-registry))
+
+        (and (some? baseline-factor-values) (not= 1 (count changes)))
+        (schema/failure :snapshot (msg/t :failure/invalid-change)
                         {:change-count (count changes)
                          :changes changes})
-        (let [snapshot (core/snapshot result resolved-run-config inventory
+
+        :else
+        (let [snapshot (core/snapshot registry result resolved-run-config inventory
                                       (first changes) opts)]
           (if (valid-snapshot? snapshot)
             (schema/success :snapshot snapshot)
-            (schema/failure :snapshot invalid-snapshot-message
+            (schema/failure :snapshot (msg/t :failure/invalid-snapshot)
                             {:errors (schema/explain workbench-schema/WorkbenchSnapshot
                                                      snapshot)})))))))
