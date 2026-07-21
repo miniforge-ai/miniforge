@@ -24,38 +24,95 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
-(def ^:private completed-at "2026-07-18T12:00:00Z")
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private successful-result
-  {:success? true
-   :pipeline-run
-   {:pipeline-run/id #uuid "00000000-0000-0000-0000-000000000001"
-    :pipeline-run/status :completed
-    :pipeline-run/created-at completed-at
-    :pipeline-run/completed-at completed-at
-    :pipeline-run/stage-runs
-    [{:stage/name "Ingest" :status :completed}
-     {:stage/name "Validate" :status :completed
-      :quality-report {:report/pack-id :test
-                       :report/total 10
-                       :report/passed 9
-                       :report/failed 1}}]}})
+(def ^:private completed-at
+  "Stable fixture instant shared by generated snapshot timestamps."
+  "2026-07-18T12:00:00Z")
 
-(def ^:private baseline-config
-  {:pipeline {:pipeline/name "Fixture"
-              :pipeline/version "1.0.0"
-              :pipeline/mode :full-refresh
-              :pipeline/stages []}
-   :environment {:env/name "test"
-                 :env/connectors {:conn/source {:connector/type :file}}
-                 :env/stages {"Ingest" {:file/path "fixture.json"
-                                        :file/format :json
-                                        :auth/credential-id "must-not-leak"}}}})
+(def ^:private pipeline-run-id
+  "Stable run identity used by evidence and snapshot fixtures."
+  #uuid "00000000-0000-0000-0000-000000000001")
+
+(def ^:private pipeline-version
+  "Fixture workflow version required by the snapshot contract."
+  "1.0.0")
+
+(def ^:private quality-report-total
+  "Record population used to exercise a non-perfect quality score."
+  10)
+
+(def ^:private quality-report-passed
+  "Accepted fixture records, chosen to land on the shipped warning threshold."
+  9)
 
 (def ^:private projection-opts
+  "Minimum provenance required for a baseline workbench projection."
   {:experiment-id "etl.fixture"
    :label "baseline"
    :source-hashes ["sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]})
+
+(def ^:private shipped-pack-factor-expectations
+  "Reproducible non-secret and redacted factor counts for the ETL packs in
+   this repository; these are the defensible N values guarded by the adapter."
+  [{:pipeline "packs/data-foundry/github-data/pipelines/github-extract.edn"
+    :environment "packs/data-foundry/github-data/envs/local.edn"
+    :factor-count 75
+    :redacted-count 5}
+   {:pipeline "packs/data-foundry/gitlab-data/pipelines/gitlab-extract.edn"
+    :environment "packs/data-foundry/gitlab-data/envs/local.edn"
+    :factor-count 103
+    :redacted-count 8}
+   {:pipeline "packs/data-foundry/risk-data/pipelines/fred-risk-data.edn"
+    :environment "packs/data-foundry/risk-data/envs/fred-local.edn"
+    :factor-count 133
+   :redacted-count 2}])
+
+(defn- quality-report []
+  {:report/pack-id :test
+   :report/total quality-report-total
+   :report/passed quality-report-passed
+   :report/failed (- quality-report-total quality-report-passed)})
+
+(defn- stage-run
+  [stage-name status & {:as extra}]
+  (merge {:stage/name stage-name :status status} extra))
+
+(defn- pipeline-result
+  [& {:keys [success? status stage-runs]
+      :or {success? true
+           status :completed
+           stage-runs [(stage-run "Ingest" :completed)
+                       (stage-run "Validate" :completed
+                                  :quality-report (quality-report))]}}]
+  {:success? success?
+   :pipeline-run
+   {:pipeline-run/id pipeline-run-id
+    :pipeline-run/status status
+    :pipeline-run/created-at completed-at
+    :pipeline-run/completed-at completed-at
+    :pipeline-run/stage-runs stage-runs}})
+
+(defn- resolved-run-config
+  [& {:keys [mode stages file-format]
+      :or {mode :full-refresh stages [] file-format :json}}]
+  {:pipeline {:pipeline/name "Fixture"
+              :pipeline/version pipeline-version
+              :pipeline/mode mode
+              :pipeline/stages stages}
+   :environment {:env/name "test"
+                 :env/connectors {:conn/source {:connector/type :file}}
+                 :env/stages {"Ingest" {:file/path "fixture.json"
+                                        :file/format file-format
+                                        :auth/credential-id "must-not-leak"}}}})
+
+(def ^:private successful-result
+  "Completed ETL fixture with one record-level quality report."
+  (pipeline-result))
+
+(def ^:private baseline-config
+  "Resolved-run fixture containing one credential-bearing leaf."
+  (resolved-run-config))
 
 (defn- repo-root []
   (loop [dir (.getAbsoluteFile (io/file "."))]
@@ -67,10 +124,12 @@
 (defn- read-edn [path]
   (edn/read-string (slurp path)))
 
-(deftest shipped-registry-is-contract-valid
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest test-shipped-registry-is-contract-valid
   (is (sut/valid-registry?)))
 
-(deftest inventory-redacts-credentials
+(deftest test-inventory-redacts-credentials
   (let [inventory (sut/factor-inventory baseline-config)
         header-inventory
         (sut/factor-inventory
@@ -81,18 +140,20 @@
     (is (= 1 (:redacted_count header-inventory)))
     (is (empty? (:values header-inventory)))))
 
-(deftest project-emits-three-valid-etl-evaluations
+(deftest test-project-emits-shipped-etl-evaluations
   (let [result   (sut/project successful-result baseline-config projection-opts)
         snapshot (:snapshot result)
         quality  (last (:evaluations snapshot))]
     (is (schema/succeeded? result))
     (is (sut/valid-snapshot? snapshot))
-    (is (= 3 (count (:evaluations snapshot))))
+    (is (= (count (:state_vars (sut/state-var-registry)))
+           (count (:evaluations snapshot))))
     (is (= "warn" (:status quality)))
-    (is (= 0.9 (:score quality)))
+    (is (= (double (/ quality-report-passed quality-report-total))
+           (:score quality)))
     (is (= 1 (get-in snapshot [:metadata :resolved_run :redacted_count])))))
 
-(deftest not-applicable-quality-components-match-registry
+(deftest test-not-applicable-quality-components-match-registry
   (let [result  (sut/project (update-in successful-result
                                         [:pipeline-run :pipeline-run/stage-runs]
                                         #(mapv (fn [stage] (dissoc stage :quality-report)) %))
@@ -102,26 +163,25 @@
     (is (= {:passed_records 0.0 :evaluated_records 0.0 :failed_records 0.0}
            (:score_components quality)))))
 
-(deftest stage-score-includes-unexecuted-configured-stages
-  (let [failed-result
-        (-> successful-result
-            (assoc :success? false)
-            (assoc-in [:pipeline-run :pipeline-run/status] :failed)
-            (assoc-in [:pipeline-run :pipeline-run/stage-runs]
-                      [{:stage/name "Ingest" :status :completed}
-                       {:stage/name "Transform" :status :failed}]))
-        three-stage-config
-        (assoc-in baseline-config [:pipeline :pipeline/stages]
-                  [{:stage/name "Ingest"}
-                   {:stage/name "Transform"}
-                   {:stage/name "Publish"}])
+(deftest test-stage-score-includes-unexecuted-configured-stages
+  (let [failed-result (pipeline-result
+                       :success? false
+                       :status :failed
+                       :stage-runs [(stage-run "Ingest" :completed)
+                                    (stage-run "Transform" :failed)])
+        configured-stages [{:stage/name "Ingest"}
+                           {:stage/name "Transform"}
+                           {:stage/name "Publish"}]
+        three-stage-config (resolved-run-config :stages configured-stages)
         result (sut/project failed-result three-stage-config projection-opts)
         stages (second (:evaluations (:snapshot result)))]
     (is (schema/succeeded? result))
     (is (= (/ 1.0 3.0) (:score stages)))
-    (is (= 3.0 (get-in stages [:score_components :total_stages])))))
+    (is (= (double (count (get-in three-stage-config
+                                  [:pipeline :pipeline/stages])))
+           (get-in stages [:score_components :total_stages])))))
 
-(deftest candidate-requires-exactly-one-factor-change
+(deftest test-candidate-requires-exactly-one-factor-change
   (let [baseline-values (:values (sut/factor-inventory baseline-config))
         one-change      (assoc-in baseline-config
                                   [:environment :env/stages "Ingest" :file/format]
@@ -145,29 +205,24 @@
     (is (schema/failed? two-result))
     (is (= 2 (:change-count two-result)))))
 
-(deftest malformed-baseline-values-return-failure
+(deftest test-malformed-baseline-values-return-failure
   (let [result (sut/project successful-result baseline-config
                             (assoc projection-opts :baseline-factor-values "not-a-map"))]
     (is (schema/failed? result))
     (is (= "ETL workbench baseline factor values must be a map" (:error result)))))
 
-(deftest added-factor-uses-canonical-missing-value
-  (let [change (first (sut/factor-diff {} {"[:new-factor]" "42"}))]
+(deftest test-added-factor-uses-canonical-missing-value
+  (let [change (first (sut/factor-diff {} {"[:new-factor]" "true"}))]
     (is (= :ai.miniforge.workbench-etl-adapter.config/missing-factor
            (edn/read-string (:baseline change))))))
 
-(deftest shipped-pack-factor-counts-are-reproducible
-  (testing "current GitHub, GitLab, and risk-data packs have a concrete N"
+(deftest ^:integration test-shipped-pack-factor-counts-are-reproducible
+  (testing "given shipped ETL packs → concrete factor inventories remain stable"
     (let [root (repo-root)]
-      (doseq [[pipeline env expected-factors expected-redacted]
-              [["packs/data-foundry/github-data/pipelines/github-extract.edn"
-                "packs/data-foundry/github-data/envs/local.edn" 75 5]
-               ["packs/data-foundry/gitlab-data/pipelines/gitlab-extract.edn"
-                "packs/data-foundry/gitlab-data/envs/local.edn" 103 8]
-               ["packs/data-foundry/risk-data/pipelines/fred-risk-data.edn"
-                "packs/data-foundry/risk-data/envs/fred-local.edn" 133 2]]]
+      (doseq [{:keys [pipeline environment factor-count redacted-count]}
+              shipped-pack-factor-expectations]
         (let [config {:pipeline (read-edn (io/file root pipeline))
-                      :environment (read-edn (io/file root env))}
+                      :environment (read-edn (io/file root environment))}
               inventory (sut/factor-inventory config)]
-          (is (= expected-factors (:factor_count inventory)) pipeline)
-          (is (= expected-redacted (:redacted_count inventory)) env))))))
+          (is (= factor-count (:factor_count inventory)) pipeline)
+          (is (= redacted-count (:redacted_count inventory)) environment))))))
