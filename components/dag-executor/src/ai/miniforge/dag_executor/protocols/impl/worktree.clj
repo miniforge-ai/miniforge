@@ -174,6 +174,12 @@
   [path]
   (.mkdirs (File. ^String path)))
 
+(defn- command-output
+  "Return command stdout when it is a string; otherwise return empty text."
+  [result]
+  (let [output (get result :out)]
+    (if (string? output) output "")))
+
 ;; ============================================================================
 ;; Git Operations
 ;; ============================================================================
@@ -218,7 +224,7 @@
   [repo-path branch]
   (let [r (run-git "-C" repo-path "rev-parse" branch)]
     (when (zero? (:exit r))
-      (let [sha (str/trim (or (:out r) ""))]
+      (let [sha (str/trim (command-output r))]
         (when (seq sha) sha)))))
 
 (defn create-worktree
@@ -689,18 +695,22 @@
   [worktree-path]
   (let [r (run-git "-C" worktree-path "rev-parse" "--git-common-dir")]
     (if (zero? (:exit r))
-      (let [git-common-str  (str/trim (or (:out r) ""))
-            ;; --git-common-dir may return a relative path; resolve against
-            ;; the worktree's CWD so we get the correct absolute path even
-            ;; when the worktree lives far from the parent repo.
-            git-common-file (let [f (File. ^String git-common-str)]
-                              (if (.isAbsolute f)
-                                f
-                                (File. ^String worktree-path ^String git-common-str)))
-            abs-git-common  (.getAbsolutePath git-common-file)
-            parent-repo     (.getAbsolutePath
-                             (.getParentFile (File. ^String abs-git-common)))]
-        (result/ok {:parent-repo-path parent-repo}))
+      (let [git-common-str (str/trim (command-output r))]
+        (if (seq git-common-str)
+          (let [;; --git-common-dir may return a relative path; resolve against
+                ;; the worktree's CWD so we get the correct absolute path even
+                ;; when the worktree lives far from the parent repo.
+                git-common-file (let [f (File. ^String git-common-str)]
+                                  (if (.isAbsolute f)
+                                    f
+                                    (File. ^String worktree-path ^String git-common-str)))
+                abs-git-common  (.getAbsolutePath git-common-file)
+                parent-repo     (.getAbsolutePath
+                                 (.getParentFile (File. ^String abs-git-common)))]
+            (result/ok {:parent-repo-path parent-repo}))
+          (result/err :derive-parent-repo-failed
+                      "git rev-parse --git-common-dir returned no usable path"
+                      {:worktree-path worktree-path})))
       (result/err :derive-parent-repo-failed
                   (str "git rev-parse --git-common-dir failed: " (:err r))
                   {:worktree-path worktree-path

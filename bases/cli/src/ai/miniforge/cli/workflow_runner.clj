@@ -404,8 +404,9 @@
 
 (defn- response-output
   [response]
-  (merge (select-keys response [:content :exit-code :version])
-         (or (:output response) {})))
+  (let [output (get response :output)]
+    (merge (select-keys response [:content :exit-code :version])
+           (if (map? output) output {}))))
 
 (defn- response-succeeded?
   [response]
