@@ -230,9 +230,10 @@
     (let [{:keys [result captured]}
           (capture-http (openai-200 "local answer")
                         (fn []
-                          (llm/complete (llm/create-client {:backend :openai-compat
-                                                            :model "qwen3-30b-a3b"})
-                                        {:prompt "hi"})))]
+                          (with-redefs [impl/getenv-value (constantly nil)]
+                            (llm/complete (llm/create-client {:backend :openai-compat
+                                                              :model "qwen3-30b-a3b"})
+                                          {:prompt "hi"}))))]
       (is (true? (:success result)))
       (is (= "local answer" (:content result)))
       (is (= "http://localhost:1234/v1/chat/completions" (:url captured)))
