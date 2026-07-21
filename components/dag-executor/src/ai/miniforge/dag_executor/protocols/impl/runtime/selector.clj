@@ -156,7 +156,7 @@
    disambiguate.
 
    Errors include a human-readable, localized message (via runtime messages);
-   callers should still rely on :code/:data for structured handling.
+   callers should still rely on :code/:data for structured handling."
   [config]
   (let [kind     (:runtime-kind config)
         override (or (:executable config) (:docker-path config))]
