@@ -720,6 +720,17 @@
       (is (false? (:shed? r)))
       (is (str/includes? (:user-prompt r) "big.clj"))))
 
+  (testing "an older prompt resource without an inline cap preserves window-fit behavior"
+    (let [prompt-data @(var-get #'planner/planner-prompt-data)]
+      (with-redefs-fn
+        {#'planner/planner-prompt-data
+         (delay (dissoc prompt-data :prompt/max-inline-window-fraction))}
+        #(let [r (assemble-within-budget "do the thing" [(big-file 40000)]
+                                         "system" "codellama-34b" 0)]
+           (is (< (:est-full r) (:effective-window r)))
+           (is (= (:effective-window r) (:inline-cap r)))
+           (is (false? (:shed? r)))))))
+
   (testing "files that blow the window shed to a manifest: bodies drop, the
             path + context_read hint stay, and the prompt now fits"
     ;; ~300k chars of file content >> 16384 tokens; spec+system alone fits

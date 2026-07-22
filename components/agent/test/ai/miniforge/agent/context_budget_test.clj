@@ -82,16 +82,25 @@
   (testing "max-inline-fraction sheds a prompt that FITS the window but exceeds
             the cap — window fit alone stalls turns past the phase timeout
             (2026-07-21 dogfood: 99.2%-of-window prompt, killed at 600s)"
-    ;; window 16384, reserve 0 → cap 0.5 ⇒ inline-cap 8192.
-    ;; ~40000 chars ≈ 10000 est tokens: under the window, over the cap.
+    ;; ~40000 chars ≈ 10000 est tokens: under the window, over its 0.5 cap.
     (let [mid (apply str (repeat 40000 \x))
           r (assemble {:model "codellama-34b"
                        :max-inline-fraction 0.5
                        :build-full (constantly mid)
                        :build-shed (constantly "manifest")})]
-      (is (= 8192 (:inline-cap r)))
+      (is (= (long (* 0.5 (:effective-window r))) (:inline-cap r)))
       (is (true? (:shed? r)))
       (is (false? (:over-after-shed? r)) "under the window — not an overflow")
+      (is (= "manifest" (:user-prompt r)))))
+
+  (testing "max-inline-fraction is clamped so bad config cannot exceed the window"
+    (let [big (apply str (repeat 300000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 2.0
+                       :build-full (constantly big)
+                       :build-shed (constantly "manifest")})]
+      (is (= (:effective-window r) (:inline-cap r)))
+      (is (true? (:shed? r)))
       (is (= "manifest" (:user-prompt r)))))
 
   (testing "a prompt under the cap stays fully inlined"

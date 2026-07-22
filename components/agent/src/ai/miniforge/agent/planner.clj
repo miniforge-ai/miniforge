@@ -185,14 +185,16 @@
 
 (defn- assemble-within-budget
   "Assemble the planner user-prompt within the model's context window
-   (N12 §5). If the prompt would overflow, shed the eagerly-inlined file
-   bodies down to a manifest (paths only) — the bodies stay reachable via
-   the context MCP cache (seeded separately in invoke-planner-session), so
-   the agent keeps a query surface, and the section's already-satisfied
-   evidence-bundle instructions are preserved. Returns
+   (N12 §5). If the prompt reaches the configured inline cap or overflows
+   the window, shed the eagerly-inlined file bodies down to a manifest
+   (paths only) — the bodies stay reachable via the context MCP cache
+   (seeded separately in invoke-planner-session), so the agent keeps a query
+   surface, and the section's already-satisfied evidence-bundle instructions
+   are preserved. Returns
    {:user-prompt :shed? :over-after-shed? :window :reserve :effective-window
-    :est-full :est-final :file-count}; :over-after-shed? marks an
-    irreducible overflow.
+    :reserve-clamped? :inline-cap :est-full :est-final :file-count};
+   :over-after-shed? marks an irreducible WINDOW overflow, not merely an
+   inline-cap crossing.
 
    `reserve` is headroom kept below the real window: the estimate covers
    only miniforge's assembled prompt, while the agent CLI adds its own
@@ -214,7 +216,7 @@
     :model            model
     :reserve          reserve
     :max-inline-fraction (get @planner-prompt-data
-                              :prompt/max-inline-window-fraction 0.5)
+                              :prompt/max-inline-window-fraction 1.0)
     :build-full       #(build-user-prompt spec-text existing-files)
     :build-shed       #(build-user-prompt spec-text existing-files
                                           format-existing-files-manifest)
