@@ -78,6 +78,13 @@
 
 (defn- get-opts [m] (if (contains? m :opts) (:opts m) m))
 
+(defn- projectable-run?
+  "Whether a runner result carries enough execution state for a snapshot.
+   Stage failures retain :pipeline-run and remain projectable; failures before
+   execution begins do not."
+  [result]
+  (some? (:pipeline-run result)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Composes Layer 0.
 
@@ -124,10 +131,10 @@
                 (schema/failed? config-result)
                 (schema/failure :snapshot (:error config-result))
 
-                ;; A failed run carries no :pipeline-run to project; the
-                ;; generic projection error would bury the real failure,
-                ;; which print-run-summary! already reports. Skip.
-                (schema/failed? result)
+                ;; Input/setup failures have no execution state to project.
+                ;; Stage failures retain :pipeline-run and must emit their
+                ;; failure-state evaluations.
+                (not (projectable-run? result))
                 nil
 
                 :else
