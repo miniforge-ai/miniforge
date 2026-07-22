@@ -813,27 +813,25 @@
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
-          clone-cmd (str "git clone --branch " branch " --single-branch "
-                         clone-url " " workdir)
+          clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
           result (-> (exec! clone-cmd)
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
-                      #(exec! (str "git -C " workdir
-                                   " config user.email 'miniforge@miniforge.ai'")))
+                      #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
                      (chain-container-command
-                      #(exec! (str "git -C " workdir " config user.name 'miniforge'"))))]
+                      #(exec! ["git" "-C" workdir "config" "user.name" "miniforge"])))]
       (if (result/err? result)
         result
         (let [push-url-result (if token
-                                (exec! (str "git -C " workdir " remote set-url --push origin "
-                                            (authenticated-https-url https-url token host-kind)))
+                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
+                                        (authenticated-https-url https-url token host-kind)])
                                 result)
               sha-r (chain-container-command
                      push-url-result
-                     #(exec! (str "git -C " workdir " rev-parse HEAD")))]
+                     #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok (cond-> {:base-branch branch}
+              (result/ok (cond-> {:base-branch (str branch)}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))

@@ -34,7 +34,7 @@
    :alert/threshold {:threshold-ms 10}})
 
 (deftest subscriber-publishes-alert-event
-  (let [stream (es/create-event-stream)
+  (let [stream (es/create-event-stream {:sinks []})
         wf-id (random-uuid)
         handle (sut/start-alert-subscriber! stream wf-id [phase-rule])]
     (es/publish! stream (heartbeat (random-uuid) 99))
@@ -52,7 +52,7 @@
                             (es/get-events stream)))))))
 
 (deftest no-op-when-rules-empty
-  (let [stream (es/create-event-stream)
+  (let [stream (es/create-event-stream {:sinks []})
         handle (sut/start-alert-subscriber! stream "wf" [])]
     (is (:noop? handle))
     (es/publish! stream (heartbeat (random-uuid) 99))

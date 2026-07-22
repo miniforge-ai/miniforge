@@ -145,7 +145,7 @@
 (deftest run-poll-pass-status-change-event-values-test
   (testing "poll emits state-changed with correct old and new status values"
     (let [reg (registry/create-registry)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           _agent-rec (registry/register-agent! reg
@@ -251,7 +251,7 @@
   (testing "decision-created event contains agent-id and summary"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           agent-rec (register-running-agent! reg
