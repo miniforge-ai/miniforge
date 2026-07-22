@@ -87,6 +87,8 @@
                        "components/repo-dag/src"
                        "components/event-stream/src"
                        "components/supervisory-state/src"
+                       "components/workbench-orchestration-adapter/src"
+                       "components/workbench-orchestration-adapter/resources"
                        "components/automation-edge-correlator/src"
                        "components/pr-scoring/src"
                        "components/workflow-resume/src"
@@ -251,6 +253,7 @@
                      ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                      ai.miniforge/event-stream {:local/root "components/event-stream"}
                      ai.miniforge/supervisory-state {:local/root "components/supervisory-state"}
+                     ai.miniforge/workbench-orchestration-adapter {:local/root "components/workbench-orchestration-adapter"}
                      ai.miniforge/automation-edge-correlator {:local/root "components/automation-edge-correlator"}
                      ai.miniforge/pr-scoring {:local/root "components/pr-scoring"}
                      ai.miniforge/workflow-resume {:local/root "components/workflow-resume"}
@@ -376,6 +379,7 @@
                        "components/repo-dag/test"
                        "components/event-stream/test"
                        "components/supervisory-state/test"
+                       "components/workbench-orchestration-adapter/test"
                        "components/automation-edge-correlator/test"
                        "components/pr-scoring/test"
                        "components/workflow-resume/test"
@@ -505,6 +509,7 @@
                       ai.miniforge/repo-dag {:local/root "components/repo-dag"}
                       ai.miniforge/event-stream {:local/root "components/event-stream"}
                       ai.miniforge/supervisory-state {:local/root "components/supervisory-state"}
+                      ai.miniforge/workbench-orchestration-adapter {:local/root "components/workbench-orchestration-adapter"}
                       ai.miniforge/automation-edge-correlator {:local/root "components/automation-edge-correlator"}
                       ai.miniforge/pr-scoring {:local/root "components/pr-scoring"}
                       ai.miniforge/workflow-resume {:local/root "components/workflow-resume"}
