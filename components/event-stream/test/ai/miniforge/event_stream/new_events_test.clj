@@ -32,7 +32,7 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.schema :as schema]))
 
-(defn- stream [] (es/create-event-stream))
+(defn- stream [] (es/create-event-stream {:sinks []}))
 
 (def ^:private sample-args-digest
   (es/digest-content {:file "/tmp/input.clj"}))
