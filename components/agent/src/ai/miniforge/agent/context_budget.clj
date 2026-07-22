@@ -79,10 +79,13 @@
         ;; treated as 0 — never crash prompt assembly, and never let a
         ;; negative value INFLATE the effective window above the real one
         ;; (which would wave genuinely overflowing prompts through).
+        ;; Extreme-but-numeric values (BigInt > Long/MAX) saturate at a
+        ;; ceiling far above any window instead of throwing on the cast;
+        ;; the window/2 clamp below governs the actual effect either way.
         sane-reserve (if (and (number? reserve)
                               (Double/isFinite (double reserve))
                               (not (neg? (double reserve))))
-                       (long reserve)
+                       (long (min (double reserve) 1e15))
                        0)
         eff-reserve (when window (min sane-reserve (quot window 2)))
         clamped?    (boolean (and window (> sane-reserve eff-reserve)))

@@ -166,5 +166,13 @@
         (is (false? (:reserve-clamped? r)) (pr-str invalid))
         (is (false? (:shed? r)) (pr-str invalid)))))
 
+  (testing "an extreme-but-numeric reserve (BigInt > Long/MAX) saturates
+            instead of throwing on the long cast; the window/2 clamp governs"
+    (let [r (assemble {:model "codellama-34b"
+                       :reserve (*' 2 Long/MAX_VALUE)})]
+      (is (true? (:reserve-clamped? r)))
+      (is (pos? (:effective-window r)))
+      (is (false? (:shed? r)))))
+
   (testing ":file-count echoes the supplied shed-count"
     (is (= 7 (:file-count (assemble {:model "codellama-34b" :shed-count 7}))))))
