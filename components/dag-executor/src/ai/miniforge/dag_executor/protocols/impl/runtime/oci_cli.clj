@@ -345,14 +345,16 @@
   "Build resource limit arguments.
    Merges provided resources with the runtime's per-kind defaults from the
    registry."
-  [descriptor resources]
-  (let [merged (merge (runtime-default-resources descriptor) resources)]
-    (cond-> []
-      (:memory merged)
-      (into ["--memory" (:memory merged)])
+  ([descriptor resources]
+   (build-resource-args descriptor resources {}))
+  ([descriptor resources {:keys [omit-memory?]}]
+   (let [merged (merge (runtime-default-resources descriptor) resources)]
+     (cond-> []
+       (and (not omit-memory?) (:memory merged))
+       (into ["--memory" (:memory merged)])
 
-      (:cpu merged)
-      (into ["--cpus" (str (:cpu merged))]))))
+       (:cpu merged)
+       (into ["--cpus" (str (:cpu merged))])))))
 
 (defn build-security-args
   "Build security-hardening runtime args from an optional execution plan map.
@@ -432,7 +434,9 @@
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
   (let [env-args      (build-env-args env-map)
-        resource-args (build-resource-args descriptor resources)
+        resource-args (build-resource-args
+                       descriptor resources
+                       {:omit-memory? (some? (:memory-limit-mb execution-plan))})
         security-args (build-security-args descriptor execution-plan)
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)

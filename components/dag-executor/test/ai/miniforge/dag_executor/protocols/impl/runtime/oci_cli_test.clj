@@ -191,6 +191,20 @@
           (is (not (some #{"--network"} args)))
           (is (some #{"--network=none"} args)))))))
 
+(deftest create-container-plan-memory-replaces-registry-default-test
+  (testing "a plan memory limit emits one authoritative --memory argument"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x"
+                                                   :mounts []
+                                                   :memory-limit-mb 768})
+        (is (= 1 (count (filter #{"--memory"} @captured))))
+        (is (some #{"768m"} @captured))))))
+
 (deftest create-container-runs-plan-command-test
   (testing "the container command comes from the plan's :command, defaulting
             to the keep-alive when absent"
