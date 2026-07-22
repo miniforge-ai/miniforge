@@ -59,10 +59,20 @@
   ([result watchdog-state]
    (let [error-code    (get-in result [:error :data :code])
          error-type    (get-in result [:error :data :type])
+         ;; The standard adaptive-timeout taxonomy rides the timeout
+         ;; envelope: [:error :data :timeout :type] (result-boundary
+         ;; error-response shape) or [:timeout :type] (unwrapped). Read
+         ;; both keyword paths directly — the full string-tolerant cascade
+         ;; lives in agent result-boundary, but this ns is Layer-0
+         ;; dependency-free and the in-process result maps here carry
+         ;; keywords. :error-code stays as a compat arm.
+         timeout-type  (or (get-in result [:error :data :timeout :type])
+                           (get-in result [:timeout :type]))
          gap-ms        (get watchdog-state :stall/gap-duration-ms)
          stalled?      (or (boolean (:stalled? watchdog-state))
                            (and (number? gap-ms) (pos? gap-ms)))
          stream-idle?  (or (boolean (:stream-idle? watchdog-state))
+                           (= :stream-idle timeout-type)
                            (= :stream-idle error-code))
          rate-limited? (boolean (:rate-limited? watchdog-state))]
      (cond

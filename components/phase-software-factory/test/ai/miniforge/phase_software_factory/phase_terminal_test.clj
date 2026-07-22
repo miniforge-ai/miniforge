@@ -109,18 +109,30 @@
     (let [result {:status :error}]
       (is (= :normal (reason result {:stream-idle? nil}))))))
 
-(deftest stream-idle-by-error-code
-  (testing ":stream-idle error code in result produces :stream-idle-timeout"
+(deftest stream-idle-by-result-marker
+  (testing "the PRODUCTION shape — [:error :data :timeout :type] :stream-idle
+            (result-boundary error-response envelope) — produces
+            :stream-idle-timeout"
     (let [result {:status :error
-                  :error  {:data {:code :stream-idle}
-                            :message "LLM output stream idle"}}
+                  :error  {:data {:timeout {:type :stream-idle}}
+                           :message "LLM output stream idle"}}
           out    (sut/derive-termination-reason result)]
       (is (= :stream-idle-timeout (:phase/termination-reason out)))
       (is (true? (:phase/stream-idle-detected out)))))
 
-  (testing ":stream-idle error code triggers even with no watchdog state"
+  (testing "the unwrapped envelope — [:timeout :type] :stream-idle"
+    (let [result {:status :error :timeout {:type :stream-idle}}]
+      (is (= :stream-idle-timeout (reason result)))))
+
+  (testing "the legacy :code marker stays supported (compat arm)"
     (let [result {:status :error :error {:data {:code :stream-idle}}}]
-      (is (= :stream-idle-timeout (reason result))))))
+      (is (= :stream-idle-timeout (reason result)))))
+
+  (testing "a non-stream-idle timeout type does NOT classify as stream-idle"
+    (let [result {:status :error
+                  :error  {:data {:timeout {:type :network-drop}}}}]
+      (is (not= :stream-idle-timeout (:phase/termination-reason
+                                      (sut/derive-termination-reason result)))))))
 
 (deftest stream-idle-priority
   (testing "stall takes precedence over stream-idle"
