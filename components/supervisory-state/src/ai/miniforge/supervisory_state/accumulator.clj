@@ -483,8 +483,8 @@
    stub: never lose an observed status because the create event was
    missed — a later create/upsert fills the richer fields via merge)."
   [{:pr/keys [repo number]}]
-  {:pr/repo       (or repo "")
-   :pr/number     (or number 0)
+  {:pr/repo       repo
+   :pr/number     number
    :pr/url        ""
    :pr/branch     ""
    :pr/title      ""

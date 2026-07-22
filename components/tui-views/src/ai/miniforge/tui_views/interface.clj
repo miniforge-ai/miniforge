@@ -531,8 +531,9 @@
         ;; supervisory materialized view attached, idempotently) so
         ;; train mutations publish governed events instead of nothing.
         _ (when event-stream (supervisory/ensure-attached! event-stream))
-        train-mgr (pr-train/create-manager
-                   (when event-stream {:event-stream event-stream}))
+        train-mgr (if event-stream
+                    (pr-train/create-manager {:event-stream event-stream})
+                    (pr-train/create-manager))
         app (tui/create-app
              {:init   (fn []
                         (persistence-pr/load-all-into-model
@@ -619,7 +620,6 @@
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   ;; Start TUI with event stream
-  (require '[ai.miniforge.event-stream.interface :as es])
   (def stream (es/create-event-stream))
   (def app (future (start-tui! stream)))
 
