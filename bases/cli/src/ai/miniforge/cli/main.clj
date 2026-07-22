@@ -488,6 +488,7 @@
 (defn etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
 (defn etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
 (defn etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
+(defn etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (get-opts m)))
 
 (defn hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
@@ -818,7 +819,8 @@
    {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
    {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
    {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
-   {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}])
+   {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}
+   {:cmds ["etl" "registry"]  :fn etl-registry-cmd}])
 
 (defn- handle-unknown-command
   "Print help for an unrecognized CLI command."

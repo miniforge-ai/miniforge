@@ -68,7 +68,7 @@
 
 (deftest event-emitted-with-failure-on-inner-error
   (testing "phase-completed event reports :failure when inner result errored"
-    (let [stream (event-stream/create-event-stream)
+    (let [stream (event-stream/create-event-stream {:sinks []})
           ctx {:execution/id (random-uuid)}
           phase-result {:name :plan :status :completed
                         :result {:status :error

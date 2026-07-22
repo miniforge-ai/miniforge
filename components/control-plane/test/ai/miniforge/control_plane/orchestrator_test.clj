@@ -44,7 +44,7 @@
   "Create a minimal event stream that captures published events."
   []
   (let [events-atom (atom [])]
-    {:stream (stream/create-event-stream)
+    {:stream (stream/create-event-stream {:sinks []})
      :published events-atom}))
 
 (def ^:private default-wait-timeout-ms 2000)
@@ -126,7 +126,7 @@
   (testing "respects all provided options"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           adapter (make-mock-adapter {})
           discovered-atom (atom nil)
           unreachable-atom (atom nil)
@@ -276,7 +276,7 @@
 (deftest run-discovery-pass-with-event-stream-test
   (testing "discovery emits agent-registered events when stream is present"
     (let [reg (registry/create-registry)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           agent-info {:agent/external-id "ext-1"
@@ -462,7 +462,7 @@
 (deftest run-poll-pass-with-event-stream-emits-on-status-change-test
   (testing "poll pass emits agent-state-changed event when status changes"
     (let [reg (registry/create-registry)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           _agent-rec (registry/register-agent! reg
@@ -486,7 +486,7 @@
 (deftest run-poll-pass-no-event-when-status-unchanged-test
   (testing "poll pass keeps heartbeats but skips state-changed when status remains the same"
     (let [reg (registry/create-registry)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           _agent-rec (registry/register-agent! reg
@@ -715,7 +715,7 @@
   (testing "submit-decision-from-agent! emits decision-created event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           agent-rec (registry/register-agent! reg
@@ -830,7 +830,7 @@
   (testing "resolve-and-deliver! emits decision-resolved event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           adapter (make-mock-adapter
@@ -972,7 +972,7 @@
   (testing "end-to-end with event stream captures all events"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
-          es (stream/create-event-stream)
+          es (stream/create-event-stream {:sinks []})
           published (atom [])
           _ (stream/subscribe! es :test-sub #(swap! published conj %))
           agent-info {:agent/external-id "ext-e2e-es"

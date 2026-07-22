@@ -28,6 +28,15 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
 
+(defn- cmd-contains?
+  "True if cmd (string or arg vector) contains the substring s.
+   Vector commands are joined with spaces before the check so that
+   multi-word substrings like \"git fetch\" match across elements."
+  [cmd s]
+  (clojure.string/includes?
+   (if (string? cmd) cmd (clojure.string/join " " cmd))
+   s))
+
 ;; Private fn accessor helper
 (defn- private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
@@ -159,6 +168,85 @@
                                          "nonexistent/image:never"))))))
 
 ;; ============================================================================
+;; create-container — execution-plan interactions
+;; ============================================================================
+
+(deftest create-container-plan-without-profile-does-not-use-legacy-network-test
+  (testing "an execution plan is authoritative even when it omits
+            :network-profile"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []})
+        (let [args @captured]
+          (is (not (some #{"--network"} args)))
+          (is (not (some #{"bridge"} args))))))))
+
+(deftest create-container-plan-network-profile-overrides-legacy-test
+  (testing "an execution-plan WITH :network-profile drops the legacy network
+            argument (profile drives networking via build-security-args)"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :network-profile :none})
+        (let [args @captured]
+          (is (not (some #{"--network"} args)))
+          (is (some #{"--network=none"} args)))))))
+
+(deftest create-container-plan-memory-replaces-registry-default-test
+  (testing "a plan memory limit emits one authoritative --memory argument"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x"
+                                                   :mounts []
+                                                   :memory-limit-mb 768})
+        (is (= 1 (count (filter #{"--memory"} @captured))))
+        (is (some #{"768m"} @captured))))))
+
+(deftest create-container-plan-env-replaces-legacy-env-test
+  (testing "plan env is authoritative when present; partial plans retain legacy env"
+    (let [captured (atom nil)
+          run! (fn [plan]
+                 (with-redefs [oci-cli/run-runtime
+                               (fn [_d & args]
+                                 (reset! captured (vec args))
+                                 {:exit 0 :out "cid\n" :err ""})]
+                   (oci-cli/create-container
+                    (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
+                    :execution-plan plan)
+                   @captured))]
+      (let [args (run! {:env {"SOURCE" "plan"}})]
+        (is (some #{"SOURCE=plan"} args))
+        (is (not (some #{"SOURCE=legacy"} args))))
+      (is (some #{"SOURCE=legacy"} (run! {}))))))
+
+(deftest create-container-runs-plan-command-test
+  (testing "the container command comes from the plan's :command, defaulting
+            to the keep-alive when absent"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :command ["bb" "run" "task"]})
+        (is (= ["bb" "run" "task"] (subvec @captured (- (count @captured) 3))))
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil)
+        (is (= ["sleep" "infinity"] (subvec @captured (- (count @captured) 2))))))))
+
+;; ============================================================================
 ;; container-image-digest
 ;; ============================================================================
 
@@ -246,8 +334,8 @@
           (is (true? (get-in result [:data :persisted?])))
           (is (= "abc123" (get-in result [:data :commit-sha])))
           (is (some #(= "git add -A" %) @commands))
-          (is (some #(clojure.string/includes? % "git commit") @commands))
-          (is (some #(clojure.string/includes? % "git push") @commands)))))))
+          (is (some #(cmd-contains? % "git commit") @commands))
+          (is (some #(cmd-contains? % "git push") @commands)))))))
 
 (deftest persist-workspace-no-changes-test
   (testing "persist-workspace! returns {:persisted? false} when no dirty files"
@@ -282,8 +370,8 @@
                                                 :workdir "/workspace"})]
           (is (true? (get-in result [:data :restored?])))
           (is (= "def456" (get-in result [:data :commit-sha])))
-          (is (some #(clojure.string/includes? % "git fetch") @commands))
-          (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
+          (is (some #(cmd-contains? % "git fetch") @commands))
+          (is (some #(cmd-contains? % "git checkout") @commands)))))))
 
 ;; ============================================================================
 ;; create-container --stop-timeout (N11 §2.2)

@@ -345,14 +345,16 @@
   "Build resource limit arguments.
    Merges provided resources with the runtime's per-kind defaults from the
    registry."
-  [descriptor resources]
-  (let [merged (merge (runtime-default-resources descriptor) resources)]
-    (cond-> []
-      (:memory merged)
-      (into ["--memory" (:memory merged)])
+  ([descriptor resources]
+   (build-resource-args descriptor resources {}))
+  ([descriptor resources {:keys [omit-memory?]}]
+   (let [merged (merge (runtime-default-resources descriptor) resources)]
+     (cond-> []
+       (and (not omit-memory?) (:memory merged))
+       (into ["--memory" (:memory merged)])
 
-      (:cpu merged)
-      (into ["--cpus" (str (:cpu merged))]))))
+       (:cpu merged)
+       (into ["--cpus" (str (:cpu merged))])))))
 
 (defn build-security-args
   "Build security-hardening runtime args from an optional execution plan map.
@@ -419,24 +421,32 @@
 (defn create-container
   "Create and start a container.
 
-   execution-plan (optional) is a map conforming to
-   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema.  When
-   provided its :memory-limit-mb and :network-profile values take
-   precedence over the legacy `network` argument for those concerns.
-   All containers receive the standard security-hardening flags via
-   `build-security-args`.
+   When execution-plan is present, it is authoritative for plan-owned launch
+   settings: security flags, runtime filesystems, mounts, networking, time
+   limit, and command. Absent plan fields do not fall back to the legacy
+   `network` argument; a partial plan therefore means no explicit network
+   flag and uses the default keep-alive command when :command is absent.
+   Production launch plans conform to
+   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema, while this
+   compatibility boundary also accepts partial plan maps.
 
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
-  (let [env-args      (build-env-args env-map)
-        resource-args (build-resource-args descriptor resources)
+  (let [effective-env (if (and (some? execution-plan)
+                               (contains? execution-plan :env))
+                        (:env execution-plan)
+                        env-map)
+        env-args      (build-env-args effective-env)
+        resource-args (build-resource-args
+                       descriptor resources
+                       {:omit-memory? (some? (:memory-limit-mb execution-plan))})
         security-args (build-security-args descriptor execution-plan)
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
-        ;; When an execution plan is present its network-profile drives the
-        ;; network arg; fall back to the plain `network` string otherwise.
+        ;; An execution plan is authoritative for networking. The legacy
+        ;; `network` argument applies only when no plan was supplied.
         network-args  (if (some? execution-plan)
                         [] ; network handled inside build-security-args
                         (when network ["--network" network]))
@@ -454,7 +464,7 @@
                               mount-args
                               env-args
                               resource-args
-                              [image "sleep" "infinity"])
+                              (into [image] (get execution-plan :command ["sleep" "infinity"])))
         result        (apply run-runtime descriptor cmd-args)]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
@@ -813,27 +823,25 @@
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
-          clone-cmd (str "git clone --branch " branch " --single-branch "
-                         clone-url " " workdir)
+          clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
           result (-> (exec! clone-cmd)
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
-                      #(exec! (str "git -C " workdir
-                                   " config user.email 'miniforge@miniforge.ai'")))
+                      #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
                      (chain-container-command
-                      #(exec! (str "git -C " workdir " config user.name 'miniforge'"))))]
+                      #(exec! ["git" "-C" workdir "config" "user.name" "miniforge"])))]
       (if (result/err? result)
         result
         (let [push-url-result (if token
-                                (exec! (str "git -C " workdir " remote set-url --push origin "
-                                            (authenticated-https-url https-url token host-kind)))
+                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
+                                        (authenticated-https-url https-url token host-kind)])
                                 result)
               sha-r (chain-container-command
                      push-url-result
-                     #(exec! (str "git -C " workdir " rev-parse HEAD")))]
+                     #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok (cond-> {:base-branch branch}
+              (result/ok (cond-> {:base-branch (str branch)}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))
@@ -842,10 +850,45 @@
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
 ;; ============================================================================
 
+(defn- normalize-plan-env
+  "Normalize an env-config :env map to the string→string shape
+   ExecutionPlanSchema requires: keyword keys via `name`, values via `str`
+   (a numeric port or boolean flag becomes its printed form — the same
+   text the container would see on the wire). The plan is the canonical,
+   schema-conformant record of the launch, so both normalize here — once,
+   at the writer — rather than at every reader."
+  [env]
+  (into {}
+        (map (fn [[k v]] [(name k) (str v)]))
+        env))
+
+(defn build-launch-plan
+  "Assemble the execution plan for a pending launch from what the launch site
+   actually knows: the resolved image digest, the caller's mounts / env /
+   trust level from env-config, and the capsule's keep-alive command. Optional
+   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
+   pass through only when env-config carries them — absent fields stay absent
+   rather than being filled with guesses. The :env keys are normalized to
+   strings so the plan conforms to ExecutionPlanSchema.
+
+   This one plan is both what `check-plan-security` inspects and what
+   `create-container` receives as :execution-plan, so the plan the gate
+   checked is the plan that runs."
+  [image-digest env-config]
+  (cond-> {:image-digest image-digest
+           :command      ["sleep" "infinity"]
+           :mounts       (get env-config :mounts [])
+           :env          (normalize-plan-env (get env-config :env {}))
+           :trust-level  (get env-config :trust-level :untrusted)}
+    (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+    (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+    (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+    (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))
+
 (defn security-gate-check
   "Run the capsule-isolation security gate for a pending launch. Resolves the
    image's content-addressed digest via `digest-fn` (injected for testing),
-   synthesizes the plan the gate inspects (pinned digest + host mounts), and
+   builds the launch plan the gate inspects via `build-launch-plan`, and
    applies `plan-security/check-plan-security`. The host-path allowlist is the
    sandbox workdir (the only host path a well-formed plan mounts today).
 
@@ -855,13 +898,12 @@
    with the findings on a hard-stop. A nil digest fails closed (hard-stop),
    since a plan with no pinned digest cannot satisfy require-image-digest-pin.
 
-   A passing result also carries the resolved `:image-digest`;
-   `acquire-environment!` launches the container from that immutable ID rather
-   than the mutable tag, so the image that runs is the image the gate checked."
+   A passing result also carries the checked `:launch-plan`;
+   `acquire-environment!` creates the container FROM that plan — its digest as
+   the immutable image reference, the plan itself as create-container's
+   :execution-plan."
   [descriptor image env-config digest-fn]
-  (let [digest          (digest-fn descriptor image)
-        plan            {:image-digest digest
-                         :mounts       (get env-config :mounts [])}
+  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)]
@@ -869,7 +911,7 @@
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
-      (result/ok (assoc (:output decision) :image-digest digest)))))
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
@@ -916,15 +958,18 @@
             (let [container-name (str container-name-prefix
                                       (subs (str task-id) 0 container-name-uuid-slice))
                   workdir (get env-config :workdir default-workdir)
-                  ;; Launch from the gate's resolved digest, not the mutable
-                  ;; tag — the image that runs is the image the gate checked.
+                  ;; Launch FROM the gate-checked plan: its digest as the
+                  ;; immutable image reference, the plan itself as the
+                  ;; execution plan — what runs is what was checked.
+                  launch-plan (get-in gate-result [:data :launch-plan])
                   create-result (create-container descriptor
                                                   container-name
-                                                  (get-in gate-result [:data :image-digest])
+                                                  (:image-digest launch-plan)
                                                   workdir
                                                   (:env env-config)
                                                   (:resources env-config)
-                                                  network)]
+                                                  network
+                                                  :execution-plan launch-plan)]
               (if (result/ok? create-result)
                 ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
                 (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]

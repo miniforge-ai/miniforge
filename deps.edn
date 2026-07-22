@@ -141,6 +141,8 @@
                        "bases/cli/src"
                        "bases/cli/resources"
                        "bases/etl/src"
+                       "components/workbench-etl-adapter/src"
+                       "components/workbench-etl-adapter/resources"
                        "components/connector-linter/src"
                        "components/connector-linter/resources"
                        "components/semantic-analyzer/src"
@@ -286,6 +288,7 @@
                      ai.miniforge/workflow-chain-deployment {:local/root "components/workflow-chain-deployment"}
                      ai.miniforge/cli {:local/root "bases/cli"}
                      ai.miniforge/etl {:local/root "bases/etl"}
+                     ai.miniforge/workbench-etl-adapter {:local/root "components/workbench-etl-adapter"}
                      ai.miniforge/semantic-analyzer {:local/root "components/semantic-analyzer"}
                      ;; Data Foundry components
                      ai.miniforge.data-foundry/connector {:local/root "components/connector"}
@@ -415,6 +418,8 @@
                        "components/semantic-analyzer/test"
                        "bases/cli/test"
                        "bases/etl/test"
+                       "components/workbench-etl-adapter/test"
+                       "components/workbench-etl-adapter/resources"
                        "bases/lsp-mcp-bridge/test"
                        "bases/lsp-mcp-bridge/resources"
                        ;; Data Foundry tests

@@ -36,7 +36,7 @@
 
 (deftest test-emit-inter-agent-event-with-stream
   (testing "emit-inter-agent-event! publishes to a real event stream"
-    (let [stream      (event-stream/create-event-stream)
+    (let [stream      (event-stream/create-event-stream {:sinks []})
           workflow-id (random-uuid)
           result      (msg-impl/emit-inter-agent-event!
                         stream workflow-id :implementer :planner :clarification-request
@@ -59,7 +59,7 @@
 
 (deftest test-send-message-emits-events-with-stream
   (testing "send-message-impl emits sent+received events when stream is present"
-    (let [stream  (event-stream/create-event-stream)
+    (let [stream  (event-stream/create-event-stream {:sinks []})
           router  (agent/create-message-router)
           messaging (agent/create-agent-messaging
                       :implementer test-implementer-id test-workflow-id router stream)
