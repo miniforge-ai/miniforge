@@ -557,31 +557,22 @@
                     gate-result (gates/make-review-decision gate-feedbacks config)
                     counts (gates/calculate-gate-counts gate-feedbacks)
                     timeout-failure-message (llm-response/backend-failure-message response llm-review)
-                    timeout-only-review? (llm-response/timeout-only-review? llm-review gate-result)
-                    ;; `timeout-only-review?` only fires when the LLM
-                    ;; parsed a `:rejected` whose `:review/blocking-
-                    ;; issues` are all timeout-shaped — it cannot fire
-                    ;; when the LLM call itself errored, because
-                    ;; `llm-review` is nil and every condition in the
-                    ;; predicate reads from it. The 2026-06-05 dogfood
-                    ;; (workflow adhoc-944448986) reviewer stream-idle'd
-                    ;; at 360s with no parsed response; the framework
-                    ;; promoted the timeout text into `:review/blocking-
-                    ;; issues` via the parse-failed branch and synthesized
-                    ;; a false `:rejected`. The boundary-level check below
-                    ;; covers that path so a real infra timeout takes the
-                    ;; `timeout-only-error-result` exit instead of
-                    ;; masquerading as a code-review rejection.
-                    ;;
-                    ;; ANY adaptive LLM timeout (stream-idle / stagnation /
-                    ;; hard-limit) means the reviewer produced no verdict — route
-                    ;; to the backend-timeout (infra) path, not a synthesized
-                    ;; :rejected. The 2026-06-05 fix only covered :stream-idle; a
-                    ;; 2026-06-14 dogfood (rn-03) stagnation-timed-out and was
-                    ;; promoted into a false :rejected via the parse-failed
-                    ;; branch, redirecting implement to "fix" a non-rejection.
+                    ;; Two timeout paths, checked at their own layers:
+                    ;; (a) boundary — the LLM call errored/stream-idled before
+                    ;;     producing parseable content (nil llm-review, the
+                    ;;     2026-06-05 dogfood pathology): `backend-timeout-error?`
+                    ;;     on the normalized result.
+                    ;; (b) review-shaped — a parsed :rejected whose blocking
+                    ;;     issues are ALL timeout text: 2-arg
+                    ;;     `timeout-only-review?`.
+                    ;; Either way the reviewer produced no real verdict — route
+                    ;; to the backend-timeout (infra) path, not a synthesised
+                    ;; :rejected. `backend-adaptive-timeout?` stays a separate
+                    ;; log field so operators can tell the layers apart.
                     backend-adaptive-timeout? (result-boundary/backend-timeout-error? normalized)
-                    backend-timeout? (or timeout-only-review? backend-adaptive-timeout?)
+                    timeout-only-review? (or backend-adaptive-timeout?
+                                             (llm-response/timeout-only-review? llm-review gate-result))
+                    backend-timeout? timeout-only-review?
                     ;; "initial" = the first-call decision/issues fed into the
                     ;; enumeration validator. Named to contrast with
                     ;; `recovered-review` below; these are already normalized,

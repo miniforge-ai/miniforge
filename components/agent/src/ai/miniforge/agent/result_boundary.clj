@@ -75,7 +75,7 @@
   [{:keys [structured-artifact parsed-content derived-artifact]}]
   (or structured-artifact parsed-content derived-artifact))
 
-;------------------------------------------------------------------------------ LLM-timeout classification
+;------------------------------------------------------------------------------ LLM-timeout classification (normalized boundary)
 ;;
 ;; `llm-client/timeout-result` packs an adaptive-timeout reason into the
 ;; LLM-error's `:timeout` field. The `:type` keyword inside that field is
@@ -149,6 +149,88 @@
    `stream-idle-error?`, which catches only one of the three types."
   [normalized]
   (boolean (adaptive-timeout-types (llm-timeout-type normalized))))
+
+;------------------------------------------------------------------------------ Phase-result-level timeout classification
+;;
+;; `stream-idle-error?` / `network-drop-error?` / `backend-timeout-error?` read
+;; the NORMALIZED BOUNDARY (output of `normalize-llm-result`). The predicates
+;; below read PHASE RESULT MAPS — the fully-assembled result returned by a role's
+;; invoke-fn (e.g. what `timeout-only-error-result` and `build-review-result`
+;; return). Phase-software-factory holds the phase result, not the intermediate
+;; normalized map; it needs these predicates to branch on infra-timeout results
+;; without reaching into role internals.
+;;
+;; Lesson from the 2026-06-05 dogfood shape mismatch: `timeout-only-review?`
+;; read the PARSED review map, which was nil when the LLM call itself errored —
+;; so it never fired on the most common stream-idle path. The same shape drift
+;; is prevented here by reading the phase result's structured error paths, not
+;; any parsed payload.
+
+(defn- result-timeout-type
+  "Extract the canonical timeout-type keyword from a phase result map using
+   a three-path cascade (most-to-least specific):
+
+   1. `[:error :data :timeout :type]` — primary path: `result-boundary/error-response`
+      merges the LLM-client's llm-error (including its `:timeout` envelope) into
+      `[:error :data]`; this is the standard production shape for any role that
+      calls `error-response` / `timeout-only-error-result`.
+   2. `[:timeout :type]` — secondary: direct on the result map for alternate error
+      shapes that skip the `:error/:data` wrapper.
+   3. Message-channel type marker: the same `:timeout/:type` paths as strings (from
+      JSON/transit round-trips where keywords serialise to strings), followed by
+      the top-level `:error :type` / `:type` field, each checked for known
+      timeout-taxonomy substrings.
+
+   Returns the canonical keyword (`:stream-idle`, `:network-drop`, `:stagnation`,
+   `:hard-limit`) or nil when no marker is present."
+  [result]
+  (let [kw-if   (fn [v] (when (keyword? v) v))
+        str->kw (fn [v]
+                  (when (string? v)
+                    (cond
+                      (str/includes? v "stream-idle")  :stream-idle
+                      (str/includes? v "network-drop") :network-drop
+                      (str/includes? v "stagnation")   :stagnation
+                      (str/includes? v "hard-limit")   :hard-limit)))
+        path1 (get-in result [:error :data :timeout :type])
+        path2 (get-in result [:timeout :type])]
+    (or (kw-if path1)
+        (kw-if path2)
+        (str->kw path1)
+        (str->kw path2)
+        (str->kw (get-in result [:error :type]))
+        (str->kw (get-in result [:type])))))
+
+(defn stream-idle-in-result?
+  "True when a phase result map (output of a role's invoke-fn, NOT a normalized
+   boundary) carries a stream-idle indicator.
+
+   Uses the three-path cascade in `result-timeout-type`:
+   `[:error :data :timeout :type]` → `[:timeout :type]` → message-channel
+   string marker containing 'stream-idle'.
+
+   Distinct from `stream-idle-error?`, which reads the normalized boundary
+   (result of `normalize-llm-result`). Use this predicate when the consumer
+   holds the fully-assembled phase result — e.g. phase-software-factory
+   inspecting a reviewer or implementer result for infra-timeout routing —
+   not the intermediate normalized map.
+
+   Symmetric twin of `network-drop-in-result?`. Both predicates use the same
+   three-path cascade to prevent the shape drift that caused the 2026-06-05
+   `timeout-only-review?` mis-classification."
+  [result]
+  (= :stream-idle (result-timeout-type result)))
+
+(defn network-drop-in-result?
+  "True when a phase result map carries a network-drop indicator.
+
+   Symmetric twin of `stream-idle-in-result?` — same three-path cascade,
+   checks for `:network-drop` type. Callers should route to the auto-resumer
+   (PR-C) rather than the backend-timeout retry path."
+  [result]
+  (= :network-drop (result-timeout-type result)))
+
+;------------------------------------------------------------------------------ Error / usability helpers
 
 (defn error-response
   "Build a failure response that preserves the backend error shape plus
