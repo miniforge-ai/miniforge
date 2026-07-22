@@ -118,13 +118,17 @@
   "Build the PR-train manager bound to `event-stream` so train
    mutations (add-pr, complete-merge) publish governed events that
    supervisory-state materializes for the consoles."
-  [event-stream]
-  (try+
-    (pr-train/create-manager {:event-stream event-stream})
-    (catch Object e
-      (println (messages/t :web/pr-train-warning
-                           {:error (caught-message e (:throwable &throw-context))}))
-      nil)))
+  ([]
+   (create-pr-train-manager nil))
+  ([event-stream]
+   (try+
+     (if event-stream
+       (pr-train/create-manager {:event-stream event-stream})
+       (pr-train/create-manager))
+     (catch Object e
+       (println (messages/t :web/pr-train-warning
+                            {:error (caught-message e (:throwable &throw-context))}))
+       nil))))
 
 (defn- create-repo-dag-manager
   []
