@@ -78,7 +78,10 @@
         eff-reserve (when window (min reserve (quot window 2)))
         clamped?    (boolean (and window (> reserve eff-reserve)))
         effective   (when window (- window eff-reserve))
-        inline-fraction (-> max-inline-fraction (max 0.0) (min 1.0))
+        inline-fraction (if (and (number? max-inline-fraction)
+                                 (Double/isFinite (double max-inline-fraction)))
+                          (-> (double max-inline-fraction) (max 0.0) (min 1.0))
+                          1.0)
         inline-cap  (when effective (long (* effective inline-fraction)))
         est         (fn [user] (:estimated-input-tokens
                                 (llm/prompt-size-telemetry effective-system user)))

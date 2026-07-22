@@ -103,6 +103,13 @@
       (is (true? (:shed? r)))
       (is (= "manifest" (:user-prompt r)))))
 
+  (testing "invalid inline fractions fall back to the full effective window"
+    (doseq [invalid ["half" ##NaN ##Inf ##-Inf]]
+      (let [r (assemble {:model "codellama-34b"
+                         :max-inline-fraction invalid})]
+        (is (= (:effective-window r) (:inline-cap r)) (pr-str invalid))
+        (is (false? (:shed? r)) (pr-str invalid)))))
+
   (testing "a prompt under the cap stays fully inlined"
     (let [small (apply str (repeat 20000 \x))    ; ≈5000 est tokens < 8192 cap
           r (assemble {:model "codellama-34b"
