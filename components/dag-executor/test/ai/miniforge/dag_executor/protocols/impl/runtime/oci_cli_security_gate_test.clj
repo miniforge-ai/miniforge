@@ -128,6 +128,10 @@
       (is (= ["ref-1"] (:secrets-refs plan)))
       (is (= {"A" "1"} (:env plan))
           "env keys normalize to the schema's string->string shape")
+      (is (= {"PORT" "8080" "DEBUG" "true"}
+             (:env (oci-cli/build-launch-plan valid-digest
+                                              {:env {:PORT 8080 :DEBUG true}})))
+          "non-string env values stringify to their wire form")
       (is (= [{:host-path "/workspace" :container-path "/w" :read-only? false}]
              (:mounts plan)))
       (is (= {:valid? true} (execution-plan/validate-plan plan))

@@ -852,12 +852,14 @@
 
 (defn- normalize-plan-env
   "Normalize an env-config :env map to the string→string shape
-   ExecutionPlanSchema requires. Callers pass keyword keys ({:GH_TOKEN ...});
-   the plan is the canonical, schema-conformant record of the launch, so keys
-   normalize here — once, at the writer — rather than at every reader."
+   ExecutionPlanSchema requires: keyword keys via `name`, values via `str`
+   (a numeric port or boolean flag becomes its printed form — the same
+   text the container would see on the wire). The plan is the canonical,
+   schema-conformant record of the launch, so both normalize here — once,
+   at the writer — rather than at every reader."
   [env]
   (into {}
-        (map (fn [[k v]] [(name k) v]))
+        (map (fn [[k v]] [(name k) (str v)]))
         env))
 
 (defn build-launch-plan
