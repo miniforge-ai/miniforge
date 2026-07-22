@@ -218,13 +218,31 @@
 
 ;------------------------------------------------------------------------------ Context operations
 
+(defn- opts-run-id
+  "Adopt the caller's run identity when opts carry one. The CLI announces a
+   run id and publishes lifecycle events under it BEFORE the pipeline
+   starts; minting a second UUID here forks the run's identity — in the
+   2026-07-21 dogfood the phase/agent events landed under the pipeline's
+   id, the lifecycle events under the CLI's, and the staleness watchdog
+   false-fired on the half without heartbeats. Accepts a uuid or a
+   uuid-shaped string; anything else returns nil (fresh uuid fallback), so
+   non-uuid session labels never break event routing."
+  [opts]
+  (let [wid (:workflow-id opts)]
+    (cond
+      (uuid? wid)   wid
+      (string? wid) (parse-uuid wid)
+      :else         nil)))
+
 (defn create-context
   "Create initial execution context.
 
    Arguments:
    - workflow: Workflow configuration
    - input: Input data for the workflow
-   - opts: Execution options (including :llm-backend, :artifact-store, callbacks)
+   - opts: Execution options (including :llm-backend, :artifact-store,
+           callbacks, and optionally :workflow-id — the caller's run id,
+           adopted as :execution/id so one run has one identity)
 
    Returns execution context map with FSM state initialized."
   [workflow input opts]
@@ -234,7 +252,7 @@
         checkpoint-root (checkpoint-store/resolve-checkpoint-root opts)]
     (sync-machine-projections
      (merge
-      {:execution/id (random-uuid)
+      {:execution/id (or (opts-run-id opts) (random-uuid))
        :execution/workflow workflow
        :execution/workflow-id (:workflow/id workflow)
        :execution/workflow-version (:workflow/version workflow)
