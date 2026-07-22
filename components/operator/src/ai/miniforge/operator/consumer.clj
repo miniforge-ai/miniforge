@@ -187,6 +187,15 @@
         (contains? event :workflow/id)
         (update :workflow/id revive-uuid))))
 
+(defn- valid-request-identities?
+  "True when request identity fields have their governed runtime types."
+  [event]
+  (and (or (nil? (:event/id event))
+           (uuid? (:event/id event)))
+       (uuid? (:intervention/id event))
+       (or (nil? (:workflow/id event))
+           (uuid? (:workflow/id event)))))
+
 (defn- event->request
   "Extract the InterventionRequest fields from a parsed event map.
    Only the request-identity fields are trusted from the wire; state
@@ -254,12 +263,25 @@
     (if (anomaly/anomaly? created)
       (do (publish-anomaly! stream file-name created)
           nil)
-      (do
-        ;; Republish the original request event into the governed
-        ;; stream: it enters the in-memory log, the file sink's audit
-        ;; trail, and the supervisory-state accumulator in one motion.
-        (es/publish! stream event)
-        (let [gate (if (contains? auto-approve-request-sources
+      ;; Republish the original request event into the governed stream with a
+      ;; freshly allocated sequence number while preserving source identity.
+      (let [workflow-id (or (intervention-workflow-id created)
+                              (:workflow/id event))
+              envelope (es/create-envelope stream
+                                           intervention-requested-event-type
+                                           workflow-id
+                                           (or (:message event) ""))
+              governed-event (merge envelope event
+                                      {:event/id (or (:event/id event)
+                                                     (:event/id envelope))
+                                       :event/timestamp
+                                       (or (:event/timestamp event)
+                                           (:event/timestamp envelope))
+                                       :event/sequence-number
+                                       (:event/sequence-number envelope)
+                                       :workflow/id workflow-id})
+              _ (es/publish! stream governed-event)
+              gate (if (contains? auto-approve-request-sources
                                   (:intervention/request-source created))
                      (intervention/approve created)
                      (intervention/start-approval created))
@@ -277,7 +299,7 @@
               (publish-state-changed! stream gated)
               (when (and apply! (= :approved (:intervention/state gated)))
                 (apply! stream gated))
-              (:intervention/id created))))))))
+              (:intervention/id created)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Consumption pass
@@ -329,9 +351,22 @@
                ;; gets republished are UUID/inst-typed, not the strings
                ;; tag-stripping left behind.
                (let [event (revive-request-event raw)]
-                 (if (contains? (get-in acc [:cursor :processed-intervention-ids])
-                                (:intervention/id event))
+                 (cond
+                   (not (valid-request-identities? event))
+                   (do
+                     (publish-anomaly!
+                      stream file-name
+                      (anomaly/anomaly
+                       :invalid-input
+                       (messages/t :consumer/invalid-identity {:file file-name})
+                       {:source/file file-name}))
+                     (update acc :anomalies inc))
+
+                   (contains? (get-in acc [:cursor :processed-intervention-ids])
+                              (:intervention/id event))
                    (update acc :skipped inc)
+
+                   :else
                    (if-let [routed-id (route-intervention! stream apply! event file-name)]
                      (-> acc
                          (update :routed inc)

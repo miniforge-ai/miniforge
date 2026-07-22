@@ -32,4 +32,7 @@
   "Malformed operator event rejected: {file}"
 
   :consumer/unreadable-event
-  "Unreadable operator event file: {file}"}}
+  "Unreadable operator event file: {file}"
+
+  :consumer/invalid-identity
+  "Operator event has invalid identity fields: {file}"}}

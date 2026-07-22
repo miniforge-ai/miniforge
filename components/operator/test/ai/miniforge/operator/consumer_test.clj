@@ -141,7 +141,20 @@
         (is (uuid? (:intervention/id change)))
         (is (uuid? (:workflow/id change))
             "workflow-targeted lifecycle events must key sequence
-             numbering by the same UUID the runner uses")))))
+             numbering by the same UUID the runner uses")
+        (is (< (:event/sequence-number requested)
+               (:event/sequence-number change))
+            "republishing the request advances the workflow sequence")))))
+
+(deftest invalid-request-identities-are-rejected
+  (let [valid {:event/id (random-uuid)
+               :intervention/id (random-uuid)
+               :workflow/id (random-uuid)}]
+    (is (#'consumer/valid-request-identities? valid))
+    (doseq [k [:event/id :intervention/id :workflow/id]]
+      (is (false? (#'consumer/valid-request-identities?
+                   (assoc valid k "not-a-uuid")))
+          (name k)))))
 
 ;------------------------------------------------------------------------------ Idempotency
 
