@@ -56,3 +56,16 @@
                           :rule-id :no-todos}]}
              (lint/run-policy-pack-check {:content "SECRET TODO"}
                                          {:policy-packs [:standards]}))))))
+
+(deftest check-lint-fails-closed-when-policy-check-returns-nil
+  (testing "check-lint fails closed when packs are configured but run-policy-pack-check returns nil"
+    (with-redefs [lint/run-policy-pack-check (fn [_artifact _ctx] nil)]
+      (let [result (lint/check-lint {:content "code"} {:policy-packs [:standards]})]
+        (is (false? (:passed? result))
+            "nil pack result with packs configured must fail closed")
+        (is (seq (:errors result))
+            "a failed result must carry at least one error")
+        (is (= :check-error (-> result :errors first :type))
+            "nil-guard errors must use the :check-error type")
+        (is (pos? (-> result :errors first :data :pack-count))
+            "diagnostic data must include pack-count")))))

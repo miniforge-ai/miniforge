@@ -72,11 +72,11 @@
     (catch Exception e
       (log/warn (:logger ctx) :gate :gate/lint-policy-check-error
                 {:message "Policy-pack check threw; lint gate fails closed"
-                 :data    {:exception-message (ex-message e)
+                 :data    {:exception-message (or (ex-message e) (str (type e)))
                            :exception-data    (ex-data e)}})
       {:passed?  false
        :errors   [{:type    :check-error
-                   :message (ex-message e)
+                   :message (or (ex-message e) (str (type e)))
                    :data    (ex-data e)}]
        :warnings []})))
 
@@ -106,7 +106,8 @@
       (seq packs)
       {:passed?  false
        :errors   [{:type    :check-error
-                   :message "Policy-pack check returned nil with packs configured"}]
+                   :message "Policy-pack check returned nil with packs configured"
+                   :data    {:pack-count (count packs)}}]
        :warnings []}
 
       ;; No policy packs — fall back to the basic stub check.
