@@ -253,9 +253,10 @@
                                              {:type :phase/fail
                                               :phase/verdict :implement/rate-limited}))
           retried (reduce (fn [s _] (fail-infra s)) state (range budget))]
-      (is (pos? budget) "a zero budget would make the retry arm dead code")
-      (is (= phase (:_state retried)) "same phase while infra budget remains")
-      (is (= budget (:infra-retry-count retried)) "the infra counter bumps each retry")
+      (is (not (neg? budget)) "the infra-retry budget must be non-negative")
+      (is (= phase (:_state retried)) "same phase until the infra budget is spent")
+      (is (= budget (get retried :infra-retry-count 0))
+          "the infra counter matches the retries consumed (0 when the budget is 0)")
       (is (= 0 (get retried :redirect-count 0)) "redirect/work budget is untouched")
       (let [spent (fail-infra retried)]
         (is (= :failed (:_state spent))

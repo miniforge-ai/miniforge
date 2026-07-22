@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 ;;
-;; Malli schema for :runner/defaults (validated at load time in runner_defaults.clj):
+;; Documented shape for :runner/defaults (not currently validated at load time):
 ;;
 ;;   [:map {:closed false}
 ;;    [:max-phases                     {:optional true} :int]
