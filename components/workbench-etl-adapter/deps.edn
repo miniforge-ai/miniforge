@@ -1,0 +1,11 @@
+{:paths ["src" "resources"]
+
+ :deps {ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/messages     {:local/root "../messages"}
+        ai.miniforge/schema       {:local/root "../schema"}
+        io.github.miniforge-ai/workbench-contract
+        {:git/url "ssh://git@github.com/miniforge-ai/workbench-contract.git"
+         :git/sha "5212f32ed9bdbfbc982e9ff746352c2f190d8e12"
+         :deps/root "bindings/clojure"}}
+
+ :aliases {:test {:extra-paths ["test"]}}}
