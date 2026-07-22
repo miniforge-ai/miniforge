@@ -347,6 +347,7 @@
 ;; ── Polling lifecycle ──────────────────────────────────────────────────────
 
 (def ^:const default-poll-interval-ms 1000)
+(def ^:const initial-poll-delay-ms 0)
 
 (defn- daemon-thread-factory
   "Named daemon threads for the poller (the repo's background-scheduler
@@ -378,7 +379,7 @@
                                    (ex-message e)))))))]
     (.scheduleWithFixedDelay ^ScheduledExecutorService executor
                              ^Runnable task
-                             0
+                             initial-poll-delay-ms
                              (long (or interval-ms default-poll-interval-ms))
                              TimeUnit/MILLISECONDS)
     {:executor executor}))
