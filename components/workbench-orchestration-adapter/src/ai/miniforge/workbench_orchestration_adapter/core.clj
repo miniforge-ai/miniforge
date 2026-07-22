@@ -22,9 +22,6 @@
    [ai.miniforge.workbench-orchestration-adapter.config :as config]
    [ai.miniforge.workbench-orchestration-adapter.evaluation :as evaluation]))
 
-(def registry-id "miniforge-orchestration-state-vars")
-(def registry-version "2026.07.19.1")
-
 (def ^:private product "miniforge")
 (def ^:private snapshot-schema-version "workbench_snapshot/v1")
 (def ^:private signature-stub
@@ -68,7 +65,7 @@
    and defaults to the run's own `:workflow-run/updated-at` - no clock is
    read here (same purity discipline as the ETL adapter)."
   [table run {:keys [experiment-id label snapshot-id run-id generated-at
-                     source-hashes transitions phase-history]}]
+                     source-hashes transitions phase-history registry]}]
   (let [phase-history (vec phase-history)
         run-id        (str (or run-id (:workflow-run/id run)))
         snapshot-id   (str (or snapshot-id (str "wb-" run-id)))
@@ -81,7 +78,10 @@
       :product product
       :run_id run-id
       :variant (variant run experiment-id label)
-      :registry_ref {:registry_id registry-id :version registry-version}
+      ;; Sourced from the loaded registry (validated by the caller), never
+      ;; from constants — snapshots can't drift from the exported registry.
+      :registry_ref {:registry_id (:registry_id registry)
+                     :version (:version registry)}
       :evaluations (evaluation/evaluations {:run run
                                             :table table
                                             :transitions transitions

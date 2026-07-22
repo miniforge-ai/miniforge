@@ -51,6 +51,9 @@
 (def ^:private invalid-registry-message
   "Orchestration registry export requires a registry conforming to the canonical registry schema")
 
+(def ^:private invalid-registry-projection-message
+  "Orchestration workbench projection requires a loadable, schema-valid state-variable registry")
+
 (def ^:private registry-resource
   "workbench/miniforge-orchestration-state-vars.edn")
 
@@ -118,12 +121,22 @@
       (schema/failure :snapshot missing-transitions-message)
 
       :else
-      (let [snapshot (core/snapshot table run opts)]
-        (if (valid-snapshot? snapshot)
-          (schema/success :snapshot snapshot)
-          (schema/failure :snapshot invalid-snapshot-message
-                          {:errors (schema/explain workbench-schema/WorkbenchSnapshot
-                                                   snapshot)}))))))
+      ;; Load the shipped registry ONCE: validate it, then thread the same
+      ;; value into the snapshot so :registry_ref is read from — and can
+      ;; never drift from — the registry a minibench comparison will load.
+      ;; A missing/invalid classpath resource fails projection here rather
+      ;; than emitting a snapshot that references an unloadable registry.
+      (let [registry (state-var-registry)]
+        (if-not (schema/valid? workbench-schema/StateVarRegistry registry)
+          (schema/failure :snapshot invalid-registry-projection-message
+                          {:errors (schema/explain workbench-schema/StateVarRegistry
+                                                   registry)})
+          (let [snapshot (core/snapshot table run (assoc opts :registry registry))]
+            (if (valid-snapshot? snapshot)
+              (schema/success :snapshot snapshot)
+              (schema/failure :snapshot invalid-snapshot-message
+                              {:errors (schema/explain workbench-schema/WorkbenchSnapshot
+                                                       snapshot)}))))))))
 
 (defn export-registry!
   "Write the shipped registry as pretty-printed JSON to `:out`. Companion

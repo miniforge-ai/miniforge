@@ -162,6 +162,30 @@
           (is (not (.exists out))
               "no fixture file may be written for an invalid registry"))))))
 
+(deftest project-fails-when-registry-missing-or-invalid
+  (testing "a broken classpath resource fails PROJECTION — no snapshot may
+            reference a registry a minibench comparison cannot load"
+    (doseq [broken [nil {:not "a registry"}]]
+      (with-redefs [sut/state-var-registry (fn [] broken)]
+        (let [events (clean-run-events :gate/failed)
+              table  (table-for events)
+              result (sut/project table clean-run-id
+                                  (opts-for events clean-run-id))]
+          (is (not (schema/succeeded? result)) (pr-str broken)))))))
+
+(deftest registry-ref-reads-from-the-shipped-registry
+  (testing "snapshot :registry_ref is sourced from the loaded registry, so it
+            cannot drift from what export-registry! writes"
+    (let [events   (clean-run-events :gate/failed)
+          table    (table-for events)
+          registry (sut/state-var-registry)
+          snapshot (:snapshot (sut/project table clean-run-id
+                                           (opts-for events clean-run-id)))]
+      (is (= (:registry_id registry)
+             (get-in snapshot [:registry_ref :registry_id])))
+      (is (= (:version registry)
+             (get-in snapshot [:registry_ref :version]))))))
+
 (deftest accumulator-projects-expected-table-shape
   (let [events (clean-run-events :gate/failed)
         table  (table-for events)
