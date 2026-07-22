@@ -27,6 +27,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
@@ -1141,35 +1142,51 @@
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
-          progress-cleanup (display/start-progress! event-stream quiet)]
-      (when-not quiet
-        (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
-      (dashboard/print-dashboard-status! quiet)
-      (assert-runtime-alignment! spec context)
-      (print-runtime-provenance! quiet context)
-      (run-backend-preflight! quiet llm-client context)
-      (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
-        (try
-          (let [result (execute-with-events {:run-pipeline run-pipeline
-                                             :workflow workflow
-                                             :workflow-input workflow-input
-                                             :context context
-                                             :artifact-store artifact-store
-                                             :event-stream event-stream
-                                             :workflow-id workflow-id
-                                             :sandbox-cleanup sandbox-cleanup
-                                             :opts opts})
-                outcome-status (if (phase/succeeded? result) :completed :failed)]
-            (move-spec-on-completion! provenance result)
-            ;; Trigger meta-loop learning cycle in background
-            (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
-            result)
-          (finally
-            (progress-cleanup)
-            (when command-poller-cleanup (command-poller-cleanup))
-            ;; Schedule deferred GC for this workflow's scratch ref — in finally
-            ;; so it fires on both normal completion and exception exit paths.
-            (enqueue-workflow-gc-best-effort! workflow-id)))))
+          progress-cleanup (display/start-progress! event-stream quiet)
+          ;; Acquire the governed control path last, after every binding that
+          ;; may throw. If consumer startup itself fails, undo registration
+          ;; before propagating the error.
+          operator-consumer
+          (do
+            (operator/register-live-runner! workflow-id
+                                            {:control-state control-state})
+            (try
+              (operator/start-operator-consumer!
+               {:stream event-stream
+                :apply! operator/apply-intervention!})
+              (catch Throwable e
+                (operator/deregister-live-runner! workflow-id)
+                (throw e))))]
+      (try
+        (when-not quiet
+          (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
+        (dashboard/print-dashboard-status! quiet)
+        (assert-runtime-alignment! spec context)
+        (print-runtime-provenance! quiet context)
+        (run-backend-preflight! quiet llm-client context)
+        (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))
+              result (execute-with-events {:run-pipeline run-pipeline
+                                           :workflow workflow
+                                           :workflow-input workflow-input
+                                           :context context
+                                           :artifact-store artifact-store
+                                           :event-stream event-stream
+                                           :workflow-id workflow-id
+                                           :sandbox-cleanup sandbox-cleanup
+                                           :opts opts})
+              outcome-status (if (phase/succeeded? result) :completed :failed)]
+          (move-spec-on-completion! provenance result)
+          ;; Trigger meta-loop learning cycle in background
+          (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+          result)
+        (finally
+          (progress-cleanup)
+          (when command-poller-cleanup (command-poller-cleanup))
+          (operator/stop-operator-consumer! operator-consumer)
+          (operator/deregister-live-runner! workflow-id)
+          ;; Schedule deferred GC for this workflow's scratch ref — in finally
+          ;; so it fires on both normal completion and exception exit paths.
+          (enqueue-workflow-gc-best-effort! workflow-id))))
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet
@@ -1218,8 +1235,7 @@
                     (messages/t :workflow-runner/no-completed-tasks))))
         (run-workflow-from-spec! spec opts)))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Chain-driven execution
+;; ── Chain-driven execution ─────────────────────────────────────────────────
 
 (defn resolve-chain-input
   "Resolve chain input from a spec file path or inline JSON."
