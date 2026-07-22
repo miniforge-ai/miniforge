@@ -713,6 +713,7 @@
    :supervision/tool-use-evaluated :internal
    :supervisory/intervention-requested :confidential
    :supervisory/intervention-state-changed :confidential
+   :operator/intervention-anomaly :confidential
    ;; Automation-edge upserts mirror the same operator-attention shape as
    ;; the other supervisory snapshots; default `:internal` matches the
    ;; sibling `:supervisory/*-upserted` family.
@@ -847,6 +848,20 @@
     [:intervention/approval-required? {:optional true} boolean?]
     [:intervention/requested-at {:optional true} inst?]
     [:intervention/updated-at {:optional true} inst?]
+    [:message string?]]))
+
+(def OperatorInterventionAnomaly
+  "Schema for confidential operator-consumer anomaly events."
+  (with-identity
+   [:map
+    [:event/type [:= :operator/intervention-anomaly]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:source/file string?]
+    [:anomaly map?]
     [:message string?]]))
 
 ;; Routing trigger event schemas (N5-delta-4 §4.2)

@@ -27,6 +27,7 @@
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.consumer :as consumer]
+   [ai.miniforge.operator.intervention :as intervention]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
@@ -189,7 +190,10 @@
            (consumer/consume-pass! {:events-dir events-dir :stream stream})))
     (let [anomalies (events-of-type stream consumer/anomaly-event-type)]
       (is (= 1 (count anomalies)))
-      (is (= "garbage.json" (:source/file (first anomalies)))))
+      (is (= "garbage.json" (:source/file (first anomalies))))
+      (is (= (get-in (first anomalies) [:anomaly :anomaly/message])
+             (:message (first anomalies)))
+          "the envelope surfaces the specific anomaly message"))
     (is (= {:routed 0 :skipped 0 :anomalies 0}
            (consumer/consume-pass! {:events-dir events-dir :stream stream}))
         "an anomalous file is remembered, not re-reported every pass")
@@ -257,6 +261,21 @@
     (is (= 1 (count @applied)))
     (is (= :approved (:intervention/state (first @applied))))
     (is (= :pause (:intervention/type (first @applied))))))
+
+(deftest approval-transition-failure-emits-anomaly
+  (let [events-dir (temp-events-dir)
+        stream (memory-stream)]
+    (stage-golden! events-dir "pause.transit.json")
+    (with-redefs [intervention/approve
+                  (constantly {:success? false
+                               :error :invalid-transition
+                               :message "approval transition rejected"})]
+      (is (= {:routed 0 :skipped 0 :anomalies 1}
+             (consumer/consume-pass! {:events-dir events-dir :stream stream}))))
+    (let [event (first (events-of-type stream consumer/anomaly-event-type))]
+      (is (= "approval transition rejected" (:message event)))
+      (is (= :invalid-transition
+             (get-in event [:anomaly :anomaly/data :error]))))))
 
 (deftest workflow-targeted-state-changes-carry-workflow-id
   (testing "audit trail lands in the run's own event directory"

@@ -110,7 +110,7 @@
   (let [f (cursor-file operator-dir)]
     (if (.exists f)
       (try
-        (let [parsed (edn/read-string (slurp f))]
+        (let [parsed (edn/read-string (slurp f :encoding "UTF-8"))]
           (merge empty-cursor
                  (select-keys parsed [:processed-intervention-ids
                                       :processed-files])))
@@ -238,7 +238,8 @@
                   stream
                   anomaly-event-type
                   nil
-                  (messages/t :consumer/event-anomaly {:file file-name}))]
+                  (or (:anomaly/message anomaly-data)
+                      (messages/t :consumer/event-anomaly {:file file-name})))]
     (es/publish! stream (assoc envelope
                                :source/file file-name
                                :anomaly anomaly-data))))
@@ -263,10 +264,20 @@
                      (intervention/approve created)
                      (intervention/start-approval created))
               gated (:intervention gate)]
-          (publish-state-changed! stream gated)
-          (when (and apply! (= :approved (:intervention/state gated)))
-            (apply! stream gated))
-          (:intervention/id created))))))
+          (if-not (:success? gate)
+            (do
+              (publish-anomaly!
+               stream file-name
+               (anomaly/anomaly :invalid-input
+                                (:message gate)
+                                {:error (:error gate)
+                                 :intervention/id (:intervention/id created)}))
+              nil)
+            (do
+              (publish-state-changed! stream gated)
+              (when (and apply! (= :approved (:intervention/state gated)))
+                (apply! stream gated))
+              (:intervention/id created))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Consumption pass

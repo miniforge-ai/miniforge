@@ -54,3 +54,8 @@
 (deftest agent-message-received-privacy-is-internal
   (testing ":agent/message-received carries routing metadata — :internal"
     (is (= :internal (schema/event-privacy :agent/message-received)))))
+
+(deftest operator-intervention-anomaly-privacy-is-confidential
+  (testing "operator anomalies can carry detailed errors — :confidential"
+    (is (= :confidential
+           (schema/event-privacy :operator/intervention-anomaly)))))
