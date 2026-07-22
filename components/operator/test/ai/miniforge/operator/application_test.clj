@@ -149,17 +149,13 @@
         (is (true? (es/cancelled? cs)))
         (is (= :verified (:intervention/state result)))))))
 
-(deftest pause-on-broken-control-state-fails-contained
-  (testing "a throwing mechanism becomes :failed, never an escaped throw"
-    (let [wid (str (random-uuid))]
-      (application/register-runner! wid {:control-state :not-an-atom})
-      (try
-        (let [stream (memory-stream)
-              result (application/apply-intervention! stream (approved :pause wid))]
-          (is (= :failed (:intervention/state result)))
-          (is (= :application-error (:intervention/reason result))))
-        (finally
-          (application/deregister-runner! wid))))))
+(deftest register-runner-rejects-invalid-control-state
+  (testing "runner wiring fails early instead of becoming an application error"
+    (doseq [handles [{} {:control-state :not-an-atom} :not-a-map]]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"requires an atom :control-state"
+           (application/register-runner! (random-uuid) handles))))))
 
 ;------------------------------------------------------------------------------ No-effect and unwired verbs
 

@@ -64,6 +64,11 @@
    `handles` must carry `:control-state`; `:degradation-manager` is
    optional (safe-mode verbs fail typed when absent)."
   [workflow-id handles]
+  (when-not (and (map? handles)
+                 (instance? clojure.lang.Atom (:control-state handles)))
+    (throw (ex-info "Live runner registration requires an atom :control-state"
+                    {:workflow-id workflow-id
+                     :control-state (:control-state handles)})))
   (swap! live-runners assoc (str workflow-id) handles)
   nil)
 
