@@ -12,6 +12,7 @@
 {:paths []
 
  :deps {ai.miniforge/etl                       {:local/root "../../bases/etl"}
+        ai.miniforge/workbench-etl-adapter     {:local/root "../../components/workbench-etl-adapter"}
         ai.miniforge/pipeline-runner           {:local/root "../../components/pipeline-runner"}
         ai.miniforge/pipeline-config           {:local/root "../../components/pipeline-config"}
         ai.miniforge/pipeline                  {:local/root "../../components/pipeline"}
@@ -44,4 +45,6 @@
         ai.miniforge/schema                    {:local/root "../../components/schema"}}
 
  :aliases
- {:uberjar {:main ai.miniforge.etl.main}}}
+ {:test {:extra-paths ["../../bases/etl/test"
+                       "../../components/workbench-etl-adapter/test"]}
+  :uberjar {:main ai.miniforge.etl.main}}}

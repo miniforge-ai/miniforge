@@ -23,7 +23,7 @@
 
 (deftest create-event-stream-test
   (testing "creates event stream with initial state"
-    (let [stream (es/create-event-stream)]
+    (let [stream (es/create-event-stream {:sinks []})]
       (is (some? stream))
       (is (= [] (es/get-events stream)))
       (is (map? @stream))
@@ -32,7 +32,7 @@
 
 (deftest publish-and-subscribe-test
   (testing "subscribers receive published events"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           received (atom [])]
       ;; Subscribe
@@ -45,7 +45,7 @@
       (is (= :workflow/started (:event/type (first @received))))))
 
   (testing "filtered subscription only receives matching events"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           received (atom [])]
       ;; Subscribe with filter
@@ -61,7 +61,7 @@
       (is (= :workflow/phase-started (:event/type (first @received))))))
 
   (testing "unsubscribe stops event delivery"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           received (atom [])]
       (es/subscribe! stream :test-sub
@@ -74,7 +74,7 @@
 
 (deftest event-envelope-test
   (testing "events have required N3 envelope fields"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/workflow-started stream wf-id)]
       (is (= :workflow/started (:event/type event)))
@@ -86,7 +86,7 @@
       (is (string? (:message event)))))
 
   (testing "sequence numbers increment per workflow"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           e1 (es/workflow-started stream wf-id)
           e2 (es/phase-started stream wf-id :plan)
@@ -96,7 +96,7 @@
       (is (= 2 (:event/sequence-number e3)))))
 
   (testing "different workflows have independent sequences"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id-1 (random-uuid)
           wf-id-2 (random-uuid)
           e1 (es/workflow-started stream wf-id-1)
@@ -108,14 +108,14 @@
 
 (deftest workflow-event-constructors-test
   (testing "workflow-started includes spec when provided"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           spec {:name "test" :version "1.0.0"}
           event (es/workflow-started stream wf-id spec)]
       (is (= spec (:workflow/spec event)))))
 
   (testing "phase-started includes phase and context"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           ctx {:budget {:tokens 10000}}
           event (es/phase-started stream wf-id :implement ctx)]
@@ -123,7 +123,7 @@
       (is (= ctx (:phase/context event)))))
 
   (testing "phase-completed includes outcome and metrics"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           result {:outcome :success :duration-ms 5000}
           event (es/phase-completed stream wf-id :plan result)]
@@ -132,14 +132,14 @@
       (is (= 5000 (:phase/duration-ms event)))))
 
   (testing "workflow-completed includes status and duration"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/workflow-completed stream wf-id :success 120000)]
       (is (= :success (:workflow/status event)))
       (is (= 120000 (:workflow/duration-ms event)))))
 
   (testing "phase-completed includes tokens and cost"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/phase-completed stream wf-id :implement
                                      {:outcome :success :duration-ms 8000
@@ -148,7 +148,7 @@
       (is (= 0.08 (:phase/cost-usd event)))))
 
   (testing "workflow-completed includes tokens and cost via opts"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/workflow-completed stream wf-id :success 120000
                                         {:tokens 5000 :cost-usd 0.25})]
@@ -156,7 +156,7 @@
       (is (= 0.25 (:workflow/cost-usd event)))))
 
   (testing "workflow-failed captures error details"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           error {:message "LLM timeout" :type :timeout}
           event (es/workflow-failed stream wf-id error)]
@@ -166,7 +166,7 @@
 
 (deftest dependency-event-constructors-test
   (testing "dependency health events are exposed on the public interface"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           dependency {:dependency/id :anthropic
                       :dependency/source :external-provider
                       :dependency/kind :provider
@@ -188,7 +188,7 @@
 
 (deftest agent-event-constructors-test
   (testing "agent-chunk captures delta and done status"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (let [chunk (es/agent-chunk stream wf-id :planner "Hello")]
         (is (= :agent/chunk (:event/type chunk)))
@@ -199,7 +199,7 @@
         (is (true? (:chunk/done? done-chunk))))))
 
   (testing "agent-status captures status type"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/agent-status stream wf-id :implementer :generating "Writing code")]
       (is (= :agent/status (:event/type event)))
@@ -209,7 +209,7 @@
 
 (deftest llm-event-constructors-test
   (testing "llm-request captures model and tokens"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/llm-request stream wf-id :planner "claude-sonnet-4" 2400)]
       (is (= :llm/request (:event/type event)))
@@ -219,7 +219,7 @@
       (is (uuid? (:llm/request-id event)))))
 
   (testing "llm-response captures metrics"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           req-id (random-uuid)
           metrics {:completion-tokens 850 :duration-ms 3200}
@@ -231,7 +231,7 @@
 
 (deftest get-events-test
   (testing "get-events returns all events"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (es/publish! stream (es/workflow-started stream wf-id))
       (es/publish! stream (es/phase-started stream wf-id :plan))
@@ -239,7 +239,7 @@
       (is (= 3 (count (es/get-events stream))))))
 
   (testing "get-events filters by workflow-id"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id-1 (random-uuid)
           wf-id-2 (random-uuid)]
       (es/publish! stream (es/workflow-started stream wf-id-1))
@@ -249,7 +249,7 @@
       (is (= 1 (count (es/get-events stream {:workflow-id wf-id-2}))))))
 
   (testing "get-events filters by event-type"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (es/publish! stream (es/workflow-started stream wf-id))
       (es/publish! stream (es/phase-started stream wf-id :plan))
@@ -257,7 +257,7 @@
       (is (= 1 (count (es/get-events stream {:event-type :workflow/started}))))))
 
   (testing "get-events supports offset and limit"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (es/publish! stream (es/workflow-started stream wf-id))
       (es/publish! stream (es/phase-started stream wf-id :plan))
@@ -268,7 +268,7 @@
 
 (deftest get-latest-status-test
   (testing "returns most recent status event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (es/publish! stream (es/agent-status stream wf-id :planner :thinking "First"))
       (es/publish! stream (es/agent-status stream wf-id :planner :generating "Second"))
@@ -277,7 +277,7 @@
         (is (= "Second" (:message latest))))))
 
   (testing "filters by agent-id"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
       (es/publish! stream (es/agent-status stream wf-id :planner :thinking "Plan"))
       (es/publish! stream (es/agent-status stream wf-id :implementer :generating "Impl"))
@@ -288,7 +288,7 @@
 
 (deftest create-streaming-callback-test
   (testing "callback publishes agent-chunk events"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           callback (es/create-streaming-callback stream wf-id :planner)]
       ;; Call the callback
@@ -303,7 +303,7 @@
         (is (true? (:chunk/done? (last chunks)))))))
 
   (testing "callback with print option writes to stdout"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           callback (es/create-streaming-callback stream wf-id :planner {:print? true})
           output (with-out-str
@@ -311,7 +311,7 @@
       (is (= "test" output))))
 
   (testing "tool-use callback prints a visible tool line and publishes structured events"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           callback (es/create-streaming-callback stream wf-id :planner {:print? true})
           output (with-out-str
@@ -325,7 +325,7 @@
       (is (= 1 (count (es/get-events stream {:event-type :agent/tool-call-started}))))))
 
   (testing "tool-result callback publishes a completed event with correlated duration"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           callback (es/create-streaming-callback stream wf-id :planner)]
       (callback {:tool-use true
@@ -347,7 +347,7 @@
 
 (deftest agent-lifecycle-event-constructors-test
   (testing "agent-started creates event with agent-id and optional context"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/agent-started stream wf-id :planner {:budget 10000})]
       (is (= :agent/started (:event/type event)))
@@ -356,7 +356,7 @@
       (is (uuid? (:event/id event)))))
 
   (testing "agent-completed creates event with optional result"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/agent-completed stream wf-id :implementer {:tokens-used 5000})]
       (is (= :agent/completed (:event/type event)))
@@ -364,7 +364,7 @@
       (is (= {:tokens-used 5000} (:agent/result event)))))
 
   (testing "agent-failed creates event with optional error"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/agent-failed stream wf-id :reviewer {:message "timeout"})]
       (is (= :agent/failed (:event/type event)))
@@ -373,14 +373,14 @@
 
 (deftest gate-lifecycle-event-constructors-test
   (testing "gate-started creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/gate-started stream wf-id :lint)]
       (is (= :gate/started (:event/type event)))
       (is (= :lint (:gate/id event)))))
 
   (testing "gate-passed creates event with duration"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/gate-passed stream wf-id :syntax 150)]
       (is (= :gate/passed (:event/type event)))
@@ -388,7 +388,7 @@
       (is (= 150 (:gate/duration-ms event)))))
 
   (testing "gate-failed creates event with violations"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           violations [{:line 10 :message "unused var"}]
           event (es/gate-failed stream wf-id :lint violations)]
@@ -398,7 +398,7 @@
 
 (deftest tool-lifecycle-event-constructors-test
   (testing "tool-invoked creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/tool-invoked stream wf-id :implementer :tools/read-file {:path "src/core.clj"})]
       (is (= :tool/invoked (:event/type event)))
@@ -407,7 +407,7 @@
       (is (= {:path "src/core.clj"} (:tool/params-summary event)))))
 
   (testing "tool-completed creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/tool-completed stream wf-id :implementer :tools/write-file {:success true})]
       (is (= :tool/completed (:event/type event)))
@@ -416,7 +416,7 @@
 
 (deftest milestone-event-constructor-test
   (testing "milestone-reached creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/milestone-reached stream wf-id :tests-passing "All 42 tests pass")]
       (is (= :workflow/milestone-reached (:event/type event)))
@@ -425,7 +425,7 @@
 
 (deftest task-lifecycle-event-constructors-test
   (testing "task-state-changed creates event with from/to states"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           dag-id (random-uuid)
           task-id (random-uuid)
@@ -437,14 +437,14 @@
       (is (= :ready (:task/to-state event)))))
 
   (testing "task-frontier-entered creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/task-frontier-entered stream wf-id (random-uuid) (random-uuid) 3)]
       (is (= :task/frontier-entered (:event/type event)))
       (is (= 3 (:task/frontier-size event)))))
 
   (testing "task-skip-propagated creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           cause (random-uuid)
           event (es/task-skip-propagated stream wf-id (random-uuid) (random-uuid) cause)]
@@ -453,7 +453,7 @@
 
 (deftest inter-agent-message-event-constructors-test
   (testing "inter-agent-message-sent creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/inter-agent-message-sent stream wf-id :planner :implementer :suggestion)]
       (is (= :agent/message-sent (:event/type event)))
@@ -462,7 +462,7 @@
       (is (= :suggestion (:message/type event)))))
 
   (testing "inter-agent-message-received creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           event (es/inter-agent-message-received stream wf-id :planner :implementer)]
       (is (= :agent/message-received (:event/type event)))
@@ -471,7 +471,7 @@
 
 (deftest listener-event-constructors-test
   (testing "listener-attached creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           lid (random-uuid)
           event (es/listener-attached stream wf-id lid :dashboard :observe)]
@@ -481,7 +481,7 @@
       (is (= :observe (:listener/capability event)))))
 
   (testing "listener-detached creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           lid (random-uuid)
           event (es/listener-detached stream wf-id lid "timeout")]
@@ -490,7 +490,7 @@
       (is (= "timeout" (:listener/reason event)))))
 
   (testing "annotation-created creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           lid (random-uuid)
           event (es/annotation-created stream wf-id lid :warning "slow response")]
@@ -501,7 +501,7 @@
 
 (deftest control-action-event-constructors-test
   (testing "control-action-requested creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           aid (random-uuid)
           event (es/control-action-requested stream wf-id aid :pause {:principal "admin"})]
@@ -511,7 +511,7 @@
       (is (= {:principal "admin"} (:action/requester event)))))
 
   (testing "control-action-executed creates event"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
           aid (random-uuid)
           event (es/control-action-executed stream wf-id aid {:status :success})]

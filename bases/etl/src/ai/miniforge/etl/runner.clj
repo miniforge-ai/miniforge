@@ -108,6 +108,26 @@
            (let [{:keys [resolved connectors]} (instantiate+resolve inputs)]
              (pr-run/execute-pipeline resolved connectors context))))))))
 
+(defn load-run-configuration
+  "Load the concrete pipeline/environment pair that controls one ETL run.
+
+   The returned map intentionally precedes generated stage UUIDs and timestamps,
+   which makes it stable enough for factor inventory and baseline/candidate
+   comparison. Environment placeholders are resolved exactly as they are for
+   execution; the workbench adapter redacts credential-bearing paths before
+   any configuration crosses its output boundary."
+  [pipeline-path env-path]
+  (let [loaded (load-inputs pipeline-path env-path)]
+    (if (schema/failed? loaded)
+      loaded
+      (let [inputs  (:inputs loaded)
+            unknown (unsupported-types (pc/extract-connector-types (:env-config inputs)))]
+        (if (seq unknown)
+          (unsupported-types-failure unknown)
+          (schema/success :run-configuration
+                          {:pipeline (:pipeline inputs)
+                           :environment (:env-config inputs)}))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pack-level helpers (pipeline discovery + validation)
 

@@ -1,0 +1,70 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:schema_version "state_var_registry/v1"
+ :registry_id "miniforge-etl-state-vars"
+ :version "2026.07.18.1"
+ :product "miniforge"
+ :state_vars
+ [{:id "miniforge.etl.run_completed"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "etl"
+   :kind "compliance"
+   :description "The resolved ETL pipeline reached its completed terminal status."
+   :value_type "boolean"
+   :thresholds {:pass 1.0 :fail 0.0}
+   :evidence_requirements {:required_refs ["pipeline-run"]
+                           :min_count 1
+                           :must_include_source_role true}
+   :score_components ["completed"]
+   :gate_effects {:fail "blocks_release"}
+   :lifecycle "experimental"
+   :owner "miniforge/data-foundry"}
+
+  {:id "miniforge.etl.stages_completed"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "etl"
+   :kind "sufficiency"
+   :description "The fraction of scheduled ETL stages that completed successfully."
+   :value_type "number"
+   :thresholds {:pass 1.0 :warn 0.8}
+   :evidence_requirements {:required_refs ["pipeline-stage-run"]
+                           :min_count 1
+                           :must_include_source_role true}
+   :score_components ["completed_stages" "total_stages" "failed_stages"]
+   :gate_effects {:warn "marks_low_confidence" :fail "blocks_release"}
+   :lifecycle "experimental"
+   :owner "miniforge/data-foundry"}
+
+  {:id "miniforge.etl.data_quality_pass_rate"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "etl"
+   :kind "quality"
+   :description "The fraction of records accepted by configured data-quality rules."
+   :value_type "number"
+   :thresholds {:pass 0.98 :warn 0.9}
+   :evidence_requirements {:required_refs ["data-quality-report"]
+                           :min_count 0
+                           :must_include_source_role true}
+   :score_components ["passed_records" "evaluated_records" "failed_records"]
+   :gate_effects {:warn "marks_low_confidence" :fail "blocks_publish"}
+   :lifecycle "experimental"
+   :owner "miniforge/data-foundry"}]}
