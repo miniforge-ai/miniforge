@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.tui-views.subscription-test
+(ns ai.miniforge.tui-views.subscription-integration-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.tui-views.subscription :as sub]
