@@ -232,7 +232,7 @@
       (is (= {:routed 0 :skipped 1 :anomalies 0}
              (consumer/consume-pass! {:events-dir events-dir :stream stream})))
       (is (= 1 (count (events-of-type stream consumer/anomaly-event-type)))
-          "a new filename for the same invalid id must not repeat the anomaly"))))
+          "a new filename for the same intervention id must not repeat the anomaly"))))
 
 (deftest foreign-operator-events-are-skipped-quietly
   (testing "meta-loop/train events legitimately share the directory"
