@@ -81,8 +81,8 @@
    [:env             [:map-of :string :string]]
    [:secrets-refs {:optional true} [:vector :string]]
    [:network-profile {:optional true} (into [:enum] network-profiles)]
-   [:time-limit-ms {:optional true} :int]
-   [:memory-limit-mb {:optional true} :int]
+   [:time-limit-ms {:optional true} [:int {:min 1}]]
+   [:memory-limit-mb {:optional true} [:int {:min 1}]]
    [:trust-level     (into [:enum] trust-levels)]])
 
 ;------------------------------------------------------------------------------ Layer 2
