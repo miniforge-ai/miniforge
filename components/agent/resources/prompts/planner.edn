@@ -41,6 +41,14 @@
  ;; <200k so the shed didn't fire, but actual input hit 215k and overflowed.
  :prompt/context-window-reserve-tokens 50000
 
+ ;; Ceiling on eagerly-inlined file bodies as a fraction of the effective
+ ;; window. Window-FIT is not enough: 2026-07-21 dogfood sent a 148,803-token
+ ;; planner prompt that "fit" a 150k effective window by 0.8% — the turn could
+ ;; not finish inside the 600s phase timeout and the phase was killed mid-turn.
+ ;; Above this fraction the bodies shed to a manifest (still reachable via
+ ;; context_read), keeping prompts small enough to complete a turn.
+ :prompt/max-inline-window-fraction 0.5
+
  ;; Submission-retry runs after the main planner turn already produced
  ;; useful prose but failed to land the plan as `.miniforge/plan.edn`.
  ;; Caps and turn budget are tight on purpose: the only legitimate work
