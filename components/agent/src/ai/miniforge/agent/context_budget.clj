@@ -75,8 +75,17 @@
            max-inline-fraction]
     :or   {max-inline-fraction 1.0}}]
   (let [window      (llm/context-window-for-model-id model)
-        eff-reserve (when window (min reserve (quot window 2)))
-        clamped?    (boolean (and window (> reserve eff-reserve)))
+        ;; A misconfigured reserve (nil, non-numeric, NaN/Inf, negative) is
+        ;; treated as 0 — never crash prompt assembly, and never let a
+        ;; negative value INFLATE the effective window above the real one
+        ;; (which would wave genuinely overflowing prompts through).
+        sane-reserve (if (and (number? reserve)
+                              (Double/isFinite (double reserve))
+                              (not (neg? (double reserve))))
+                       (long reserve)
+                       0)
+        eff-reserve (when window (min sane-reserve (quot window 2)))
+        clamped?    (boolean (and window (> sane-reserve eff-reserve)))
         effective   (when window (- window eff-reserve))
         inline-fraction (if (and (number? max-inline-fraction)
                                  (Double/isFinite (double max-inline-fraction)))
@@ -87,7 +96,7 @@
                                 (llm/prompt-size-telemetry effective-system user)))
         full        (build-full)
         est-full    (est full)
-        base        {:window window :reserve reserve :effective-window effective
+        base        {:window window :reserve sane-reserve :effective-window effective
                      :reserve-clamped? clamped? :inline-cap inline-cap
                      :est-full est-full :file-count shed-count}]
     (cond

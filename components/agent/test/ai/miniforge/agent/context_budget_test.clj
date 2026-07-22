@@ -156,5 +156,15 @@
       (is (false? (:shed? r)) "a trivial prompt still fits")
       (is (false? (:over-after-shed? r)))))
 
+  (testing "an invalid reserve (nil, non-numeric, NaN/Inf, negative) is
+            treated as 0 — no crash, and a negative value can never INFLATE
+            the effective window above the real one"
+    (doseq [invalid [nil "50000" ##NaN ##Inf ##-Inf -5000]]
+      (let [r (assemble {:model "codellama-34b" :reserve invalid})]
+        (is (= (:window r) (:effective-window r)) (pr-str invalid))
+        (is (= 0 (:reserve r)) (pr-str invalid))
+        (is (false? (:reserve-clamped? r)) (pr-str invalid))
+        (is (false? (:shed? r)) (pr-str invalid)))))
+
   (testing ":file-count echoes the supplied shed-count"
     (is (= 7 (:file-count (assemble {:model "codellama-34b" :shed-count 7}))))))
