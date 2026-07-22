@@ -850,13 +850,24 @@
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
 ;; ============================================================================
 
+(defn- normalize-plan-env
+  "Normalize an env-config :env map to the string→string shape
+   ExecutionPlanSchema requires. Callers pass keyword keys ({:GH_TOKEN ...});
+   the plan is the canonical, schema-conformant record of the launch, so keys
+   normalize here — once, at the writer — rather than at every reader."
+  [env]
+  (into {}
+        (map (fn [[k v]] [(name k) v]))
+        env))
+
 (defn build-launch-plan
   "Assemble the execution plan for a pending launch from what the launch site
    actually knows: the resolved image digest, the caller's mounts / env /
    trust level from env-config, and the capsule's keep-alive command. Optional
    fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
    pass through only when env-config carries them — absent fields stay absent
-   rather than being filled with guesses.
+   rather than being filled with guesses. The :env keys are normalized to
+   strings so the plan conforms to ExecutionPlanSchema.
 
    This one plan is both what `check-plan-security` inspects and what
    `create-container` receives as :execution-plan, so the plan the gate
@@ -865,7 +876,7 @@
   (cond-> {:image-digest image-digest
            :command      ["sleep" "infinity"]
            :mounts       (get env-config :mounts [])
-           :env          (get env-config :env {})
+           :env          (normalize-plan-env (get env-config :env {}))
            :trust-level  (get env-config :trust-level :untrusted)}
     (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
     (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))

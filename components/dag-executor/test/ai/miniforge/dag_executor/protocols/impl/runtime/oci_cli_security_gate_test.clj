@@ -126,8 +126,12 @@
       (is (= 1024 (:memory-limit-mb plan)))
       (is (= :none (:network-profile plan)))
       (is (= ["ref-1"] (:secrets-refs plan)))
+      (is (= {"A" "1"} (:env plan))
+          "env keys normalize to the schema's string->string shape")
       (is (= [{:host-path "/workspace" :container-path "/w" :read-only? false}]
-             (:mounts plan))))))
+             (:mounts plan)))
+      (is (= {:valid? true} (execution-plan/validate-plan plan))
+          "a fully-threaded launch plan conforms to ExecutionPlanSchema"))))
 
 (deftest acquire-launches-from-checked-plan-test
   (testing "acquire-environment! creates the container from the gate-checked
