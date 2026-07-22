@@ -28,6 +28,15 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
 
+(defn- cmd-contains?
+  "True if cmd (string or arg vector) contains the substring s.
+   Vector commands are joined with spaces before the check so that
+   multi-word substrings like \"git fetch\" match across elements."
+  [cmd s]
+  (clojure.string/includes?
+   (if (string? cmd) cmd (clojure.string/join " " cmd))
+   s))
+
 ;; Private fn accessor helper
 (defn- private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
@@ -246,8 +255,8 @@
           (is (true? (get-in result [:data :persisted?])))
           (is (= "abc123" (get-in result [:data :commit-sha])))
           (is (some #(= "git add -A" %) @commands))
-          (is (some #(clojure.string/includes? % "git commit") @commands))
-          (is (some #(clojure.string/includes? % "git push") @commands)))))))
+          (is (some #(cmd-contains? % "git commit") @commands))
+          (is (some #(cmd-contains? % "git push") @commands)))))))
 
 (deftest persist-workspace-no-changes-test
   (testing "persist-workspace! returns {:persisted? false} when no dirty files"
@@ -282,8 +291,8 @@
                                                 :workdir "/workspace"})]
           (is (true? (get-in result [:data :restored?])))
           (is (= "def456" (get-in result [:data :commit-sha])))
-          (is (some #(clojure.string/includes? % "git fetch") @commands))
-          (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
+          (is (some #(cmd-contains? % "git fetch") @commands))
+          (is (some #(cmd-contains? % "git checkout") @commands)))))))
 
 ;; ============================================================================
 ;; create-container --stop-timeout (N11 §2.2)

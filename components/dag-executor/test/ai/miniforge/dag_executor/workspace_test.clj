@@ -31,19 +31,32 @@
   [stdout]
   {:data {:stdout stdout}})
 
+(defn- cmd->str
+  "Normalize a command — string or arg vector — to a single string for matching."
+  [cmd]
+  (if (string? cmd) cmd (str/join " " cmd)))
+
+(defn- cmd-has?
+  "True if cmd (raw string or vector) contains substring s when normalized."
+  [cmd s]
+  (str/includes? (cmd->str cmd) s))
+
 (defn- recording-exec-fn
-  "Return [exec-fn calls-atom replies-atom]. exec-fn records every command into
-   calls-atom and looks up its reply in replies-map by exact substring match.
-   default is the fallback when nothing matches."
+  "Return [exec-fn calls-atom]. exec-fn records every command in its **raw**
+   form (string or arg vector) into calls-atom, preserving the distinction so
+   tests can assert that user-supplied git commands arrive as vectors (not
+   shell strings). Reply lookup uses the normalized form. default is the
+   fallback when nothing matches."
   ([replies-map] (recording-exec-fn replies-map (shell-result "")))
   ([replies-map default]
    (let [calls (atom [])]
      [(fn [cmd]
-        (swap! calls conj cmd)
-        (or (some (fn [[needle reply]]
-                    (when (str/includes? cmd needle) reply))
-                  replies-map)
-            default))
+        (let [cmd-str (cmd->str cmd)]
+          (swap! calls conj cmd)
+          (or (some (fn [[needle reply]]
+                      (when (str/includes? cmd-str needle) reply))
+                    replies-map)
+              default)))
       calls])))
 
 (def ^:private head-sha "abc123def456")
@@ -61,12 +74,13 @@
       (let [data (result/unwrap r)]
         (is (false? (:persisted? data)))
         (is (true?  (:no-changes? data)))
-        (is (nil?   (:commit-sha data))))
+        (is (nil?   (:commit-sha data)))
+        (is (= "task/foo" (:branch data))))
       ;; git add was attempted, but commit/push were not.
-      (is (some #(str/includes? % "git add -A")        @calls))
-      (is (some #(str/includes? % "git status")        @calls))
-      (is (not (some #(str/includes? % "git commit") @calls)))
-      (is (not (some #(str/includes? % "git push")   @calls))))))
+      (is (some #(cmd-has? % "git add -A") @calls))
+      (is (some #(cmd-has? % "git status") @calls))
+      (is (not (some #(cmd-has? % "git commit") @calls)))
+      (is (not (some #(cmd-has? % "git push")   @calls))))))
 
 (deftest git-persist!-with-changes-commits-and-pushes-test
   (testing "Dirty `git status` ⇒ commit + push + read HEAD sha; ok carries the sha and branch"
@@ -80,11 +94,14 @@
         (is (true? (:persisted? data)))
         (is (= head-sha (:commit-sha data)))
         (is (= "feature/bar" (:branch data))))
-      ;; Verify expected commands ran in order.
+      ;; Verify expected commands ran and that user-supplied values travel via
+      ;; arg vectors (not shell strings) — the security invariant of this PR.
       (let [cmds @calls]
-        (is (some #(str/includes? % "git add -A") cmds))
-        (is (some #(str/includes? % "git commit -m 'phase: implement'") cmds))
-        (is (some #(str/includes? % "git push origin HEAD:feature/bar --force") cmds))))))
+        (is (some #(cmd-has? % "git add -A") cmds))
+        (is (some #(and (vector? %) (cmd-has? % "git commit -m phase: implement")) cmds)
+            "commit must be an arg vector, not a shell string")
+        (is (some #(and (vector? %) (cmd-has? % "git push origin HEAD:feature/bar --force")) cmds)
+            "push must be an arg vector, not a shell string")))))
 
 (deftest git-persist!-defaults-branch-and-message-test
   (testing "Missing :branch and :message use 'task/unknown' and 'phase checkpoint'"
@@ -92,8 +109,8 @@
                            {"git status"   (shell-result " M file\n")
                             "git rev-parse" (shell-result head-sha)})]
       (sut/git-persist! exec-fn {})
-      (is (some #(str/includes? % "git commit -m 'phase checkpoint'") @calls))
-      (is (some #(str/includes? % "HEAD:task/unknown")                @calls)))))
+      (is (some #(cmd-has? % "git commit -m phase checkpoint") @calls))
+      (is (some #(cmd-has? % "HEAD:task/unknown")               @calls)))))
 
 (deftest git-persist!-trims-stdout-test
   (testing "stdout from git rev-parse is trimmed before being returned"
@@ -113,6 +130,24 @@
       (is (result/err? r))
       (is (= :persist-failed (-> r :error :code))))))
 
+(deftest git-persist!-rejects-leading-dash-branch-test
+  (testing "A branch starting with '-' is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-persist! exec-fn {:branch "--evil"})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))
+
+(deftest git-persist!-rejects-empty-branch-test
+  (testing "An empty string branch is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-persist! exec-fn {:branch ""})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; git-restore!
 
@@ -126,18 +161,21 @@
         (is (true? (:restored? data)))
         (is (= head-sha (:commit-sha data)))
         (is (= "feature/restore" (:branch data))))
-      ;; Verify the expected git invocations occurred against the supplied branch.
+      ;; Verify the expected git invocations occurred and that branch is passed
+      ;; via arg vector — the security invariant this PR establishes.
       (let [cmds @calls]
-        (is (some #(str/includes? % "git fetch origin feature/restore") cmds))
-        (is (some #(str/includes? % "git checkout feature/restore")     cmds))))))
+        (is (some #(and (vector? %) (cmd-has? % "git fetch origin feature/restore")) cmds)
+            "fetch must be an arg vector, not a shell string")
+        (is (some #(and (vector? %) (cmd-has? % "git checkout feature/restore")) cmds)
+            "checkout must be an arg vector, not a shell string")))))
 
 (deftest git-restore!-defaults-branch-test
   (testing "Missing :branch defaults to 'task/unknown'"
     (let [[exec-fn calls] (recording-exec-fn
                            {"git rev-parse" (shell-result head-sha)})]
       (sut/git-restore! exec-fn {})
-      (is (some #(str/includes? % "git fetch origin task/unknown") @calls))
-      (is (some #(str/includes? % "git checkout task/unknown")     @calls)))))
+      (is (some #(cmd-has? % "git fetch origin task/unknown") @calls))
+      (is (some #(cmd-has? % "git checkout task/unknown")     @calls)))))
 
 (deftest git-restore!-trims-stdout-test
   (testing "git rev-parse stdout is trimmed before return"
@@ -152,3 +190,21 @@
           r (sut/git-restore! boom-exec-fn {:branch "task/x"})]
       (is (result/err? r))
       (is (= :restore-failed (-> r :error :code))))))
+
+(deftest git-restore!-rejects-leading-dash-branch-test
+  (testing "A branch starting with '-' is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-restore! exec-fn {:branch "--evil"})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an invalid branch"))))
+
+(deftest git-restore!-rejects-empty-branch-test
+  (testing "An empty string branch is rejected before exec-fn is called"
+    (let [exec-called (atom false)
+          exec-fn (fn [_] (reset! exec-called true) (shell-result ""))
+          r (sut/git-restore! exec-fn {:branch ""})]
+      (is (result/err? r))
+      (is (= :invalid-branch (-> r :error :code)))
+      (is (false? @exec-called) "exec-fn must not be invoked for an empty branch"))))

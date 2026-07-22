@@ -277,6 +277,22 @@
    :workflow/pipeline [{:phase runner-test-plan}
                        {:phase runner-test-done}]})
 
+(deftest create-context-adopts-caller-run-id-test
+  (testing "one run, one identity: a :workflow-id in opts becomes
+            :execution/id (uuid or uuid-shaped string), so lifecycle events
+            published by the caller and phase/agent events published by the
+            pipeline land under the same id"
+    (let [wid (random-uuid)]
+      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                    {:task "T"} {:workflow-id wid}))))
+      (is (= wid (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                    {:task "T"} {:workflow-id (str wid)}))))))
+  (testing "a non-uuid session label never breaks event routing — fresh uuid"
+    (let [adopted (:execution/id (ctx/create-context minimal-rollup-test-workflow
+                                                     {:task "T"}
+                                                     {:workflow-id "session-label"}))]
+      (is (uuid? adopted)))))
+
 (deftest apply-dag-success-rolls-dag-metrics-into-execution-test
   (testing "DAG sub-workflow tokens/cost/duration roll into :execution/metrics on success"
     ;; `apply-phase-transition` ignores its `pipeline` arg (see _pipeline in
