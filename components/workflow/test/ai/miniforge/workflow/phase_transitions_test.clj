@@ -33,6 +33,7 @@
    [ai.miniforge.fsm.interface :as fsm]
    [ai.miniforge.workflow.execution :as exec]
    [ai.miniforge.workflow.fsm :as workflow-fsm]
+   [ai.miniforge.workflow.runner-defaults :as runner-defaults]
    ;; loaded for its eager guard/action registration (infra-retry guards)
    [ai.miniforge.workflow.standard-guards-and-actions]))
 
@@ -242,20 +243,22 @@
 (deftest infra-verdict-retries-same-phase-then-terminates
   (testing "infra verdict retries the same phase up to the infra budget, then
             terminates — and never touches the redirect/work budget"
+    ;; The budget is EDN-owned (:max-infra-retries) — derive the loop from
+    ;; the live value instead of pinning it, so a config change moves the
+    ;; test with it rather than driving the machine past :failed.
     (let [{:keys [machine state]} (guarded-phase-machine)
-          phase (:_state state)
+          phase  (:_state state)
+          budget (runner-defaults/max-infra-retries)
           fail-infra (fn [s] (fsm/transition machine s
                                              {:type :phase/fail
                                               :phase/verdict :implement/rate-limited}))
-          s1 (fail-infra state)
-          s2 (fail-infra s1)
-          s3 (fail-infra s2)]
-      (is (= phase (:_state s1)) "1st infra fail retries the same phase, not :failed")
-      (is (= phase (:_state s3)) "still at the phase while infra budget remains")
-      (is (= 3 (:infra-retry-count s3)) "the infra counter bumps each retry")
-      (is (= 0 (get s3 :redirect-count 0)) "redirect/work budget is untouched")
-      (let [s4 (fail-infra s3)]
-        (is (= :failed (:_state s4))
+          retried (reduce (fn [s _] (fail-infra s)) state (range budget))]
+      (is (pos? budget) "a zero budget would make the retry arm dead code")
+      (is (= phase (:_state retried)) "same phase while infra budget remains")
+      (is (= budget (:infra-retry-count retried)) "the infra counter bumps each retry")
+      (is (= 0 (get retried :redirect-count 0)) "redirect/work budget is untouched")
+      (let [spent (fail-infra retried)]
+        (is (= :failed (:_state spent))
             "infra budget exhausted (>= max-infra-retries) → terminal :failed")))))
 
 (deftest non-infra-verdict-does-not-consume-infra-budget
