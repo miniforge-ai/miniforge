@@ -40,7 +40,7 @@
   :workbench/missing-option "etl run: workbench output missing --{option}"
   :workbench/invalid-source-hash "etl run: --source-hash must be sha256: followed by 64 lowercase hex characters"
   :workbench/baseline-missing-factors "baseline snapshot has no resolved-run factor inventory"
-  :workbench/source-hash-mismatch "candidate source hash differs from the baseline workload hash"
+  :workbench/source-hash-mismatch "baseline snapshot workload source hash is missing or does not match the provided --source-hash"
   :workbench/failed       "✗ workbench snapshot failed: {error}"
 
   ;; -------- `list` subcommand --------
