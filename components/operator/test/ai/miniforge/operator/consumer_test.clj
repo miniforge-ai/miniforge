@@ -214,20 +214,25 @@
         "append-only: the consumer never deletes operator events")))
 
 (deftest invalid-intervention-emits-anomaly
-  (testing "parseable event, invalid request (unknown type) → anomaly"
+  (testing "invalid request id is remembered after its first anomaly"
     (let [events-dir (temp-events-dir)
-          stream (memory-stream)]
+          stream (memory-stream)
+          content (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
+                       "\"~:intervention/id\":\"~u00000000-0000-4000-8000-00000000dead\","
+                       "\"~:intervention/type\":\"~:frobnicate\","
+                       "\"~:intervention/target-id\":\"t-1\","
+                       "\"~:intervention/requested-by\":\"op@example.invalid\","
+                       "\"~:intervention/request-source\":\"~:tui\"}")]
       (stage-operator-file!
        events-dir "bad-type.json"
-       (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
-            "\"~:intervention/id\":\"~u00000000-0000-4000-8000-00000000dead\","
-            "\"~:intervention/type\":\"~:frobnicate\","
-            "\"~:intervention/target-id\":\"t-1\","
-            "\"~:intervention/requested-by\":\"op@example.invalid\","
-            "\"~:intervention/request-source\":\"~:tui\"}"))
+       content)
       (is (= {:routed 0 :skipped 0 :anomalies 1}
              (consumer/consume-pass! {:events-dir events-dir :stream stream})))
-      (is (= 1 (count (events-of-type stream consumer/anomaly-event-type)))))))
+      (stage-operator-file! events-dir "bad-type-redelivery.json" content)
+      (is (= {:routed 0 :skipped 1 :anomalies 0}
+             (consumer/consume-pass! {:events-dir events-dir :stream stream})))
+      (is (= 1 (count (events-of-type stream consumer/anomaly-event-type)))
+          "a new filename for the same invalid id must not repeat the anomaly"))))
 
 (deftest foreign-operator-events-are-skipped-quietly
   (testing "meta-loop/train events legitimately share the directory"

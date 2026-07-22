@@ -196,6 +196,10 @@
        (or (nil? (:workflow/id event))
            (uuid? (:workflow/id event)))))
 
+(defn- remember-intervention-id
+  [acc intervention-id]
+  (update acc :cursor update :processed-intervention-ids conj intervention-id))
+
 (defn- event->request
   "Extract the InterventionRequest fields from a parsed event map.
    Only the request-identity fields are trusted from the wire; state
@@ -367,12 +371,12 @@
                    (update acc :skipped inc)
 
                    :else
-                   (if-let [routed-id (route-intervention! stream apply! event file-name)]
-                     (-> acc
-                         (update :routed inc)
-                         (update :cursor update :processed-intervention-ids
-                                 conj routed-id))
-                     (update acc :anomalies inc)))))))
+                   (let [intervention-id (:intervention/id event)
+                         routed-id (route-intervention! stream apply! event file-name)
+                         remembered (remember-intervention-id acc intervention-id)]
+                     (if routed-id
+                       (update remembered :routed inc)
+                       (update remembered :anomalies inc))))))))
          {:routed 0 :skipped 0 :anomalies 0 :cursor cursor}
          files)]
     (when (seq files)
