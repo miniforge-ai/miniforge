@@ -67,8 +67,8 @@
 
 (def ^:private stratum-lint-deps
   "Sha-pinned git coordinate for the stratum-lint Clojure component
-   (bb-native; the linter for the `;---- Layer N` stratified-design
-   headings, miniforge-standards rule 210). Resolved lazily in a
+   (bb-native; the linter for stratified-design separator comments whose
+   heading ends in `Layer N`, miniforge-standards rule 210). Resolved lazily in a
    subprocess via `bb -Sdeps` so plain `bb <task>` invocations — CI
    included — never fetch the sibling repo; only the pre-commit gate
    pays the one-time clone."
@@ -94,6 +94,6 @@
           (when-not (str/blank? out) (println out))
           (when-not (str/blank? err) (binding [*out* *err*] (println err)))
           (when-not (zero? exit)
-            (println "❌ Stratified-design lint failed")
-            (System/exit 1))))
+            (println "❌ Stratified-design lint failed with exit code:" exit)
+            (System/exit exit))))
       (println "✓ No Clojure files to stratum-lint"))))
