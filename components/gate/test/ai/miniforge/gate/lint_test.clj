@@ -21,6 +21,20 @@
             [ai.miniforge.gate.lint :as lint]
             [ai.miniforge.policy-pack.interface :as policy-pack]))
 
+(deftest run-policy-pack-check-fails-closed-on-exception
+  (testing "when check-artifact throws, run-policy-pack-check returns a :check-error failure"
+    (with-redefs [policy-pack/check-artifact
+                  (fn [_packs _artifact _context]
+                    (throw (ex-info "simulated policy check failure" {:code :timeout})))]
+      (let [result (lint/run-policy-pack-check {:content "code"}
+                                               {:policy-packs [:standards]})]
+        (is (false? (:passed? result))
+            "gate must fail closed on exception, not pass")
+        (is (seq (:errors result))
+            "a failure result must carry at least one error")
+        (is (= :check-error (-> result :errors first :type))
+            "exception errors must use the :check-error type")))))
+
 (deftest run-policy-pack-check-preserves-policy-pack-result-shape
   (testing "policy-pack errors and warnings keep their public message/severity keys"
     (with-redefs [policy-pack/check-artifact

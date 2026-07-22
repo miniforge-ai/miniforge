@@ -21,6 +21,7 @@
 
    Checks that code passes linting rules."
   (:require [ai.miniforge.gate.registry :as registry]
+            [ai.miniforge.logging.interface :as log]
             [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -45,7 +46,9 @@
 
 (defn run-policy-pack-check
   "Delegate lint checking to policy-pack when policy packs are configured.
-   Returns nil when no policy packs are configured or when checking fails."
+   Returns nil when no policy packs are configured.
+   Returns a failure result (fail-closed) on any exception — never silently
+   returns nil when a check was attempted."
   [artifact ctx]
   (try
     (let [packs (:policy-packs ctx)]
@@ -66,12 +69,23 @@
                               :severity (:severity v)
                               :rule-id (:code v)})
                            (:warnings result))})))
-    (catch Exception _e nil)))
+    (catch Exception e
+      (log/warn (:logger ctx) :gate :gate/lint-policy-check-error
+                {:message "Policy-pack check threw; lint gate fails closed"
+                 :data    {:exception-message (ex-message e)
+                           :exception-data    (ex-data e)}})
+      {:passed?  false
+       :errors   [{:type    :check-error
+                   :message (ex-message e)
+                   :data    (ex-data e)}]
+       :warnings []})))
 
 (defn check-lint
   "Check lint rules on artifact content.
 
    Delegates to policy-pack when available, falls back to basic checks.
+   Fail-closed: when policy packs are configured but the check returns nil,
+   the gate fails rather than silently passing.
 
    Arguments:
      artifact - Artifact with :content
@@ -80,16 +94,29 @@
    Returns:
      {:passed? bool :errors [] :warnings []}"
   [artifact ctx]
-  (or (run-policy-pack-check artifact ctx)
+  (let [packs       (:policy-packs ctx)
+        pack-result (run-policy-pack-check artifact ctx)]
+    (cond
+      ;; Policy-pack returned a result (pass or fail) — use it directly.
+      (some? pack-result) pack-result
+
+      ;; Packs are configured but run-policy-pack-check returned nil —
+      ;; this should not happen after the exception fix above, but we
+      ;; fail closed here as a second line of defence.
+      (seq packs)
+      {:passed?  false
+       :errors   [{:type    :check-error
+                   :message "Policy-pack check returned nil with packs configured"}]
+       :warnings []}
+
+      ;; No policy packs — fall back to the basic stub check.
+      :else
       (let [content-str (extract-content-str artifact)
-            errors []
-            warnings (check-unused-vars content-str)]
+            errors      []
+            warnings    (check-unused-vars content-str)]
         (if (empty? errors)
-          {:passed? true
-           :warnings warnings}
-          {:passed? false
-           :errors errors
-           :warnings warnings}))))
+          {:passed? true  :warnings warnings}
+          {:passed? false :errors errors :warnings warnings})))))
 
 (defn repair-lint
   "Attempt to repair lint errors.
