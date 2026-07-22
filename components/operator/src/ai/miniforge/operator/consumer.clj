@@ -129,6 +129,8 @@
         tmp (io/file operator-dir (str cursor-file-name ".tmp"))]
     (io/make-parents target)
     (spit tmp (pr-str cursor) :encoding "UTF-8")
+    (with-open [raf (java.io.RandomAccessFile. tmp "rw")]
+      (.force (.getChannel raf) true))
     (Files/move (.toPath tmp)
                 (.toPath target)
                 (into-array java.nio.file.CopyOption
@@ -144,7 +146,7 @@
   [operator-dir]
   (let [^java.io.File d (io/file operator-dir)]
     (if (.isDirectory d)
-      (->> (.listFiles d)
+      (->> (or (.listFiles d) [])
            (filter (fn [^java.io.File f]
                      (and (.isFile f)
                           (.endsWith (.getName f) ".json"))))

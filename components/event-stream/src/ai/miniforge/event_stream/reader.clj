@@ -90,7 +90,8 @@
    silently without the caller seeing it."
   [f]
   (try
-    (strip-transit-prefix (json/parse-string (slurp (io/file f)) false))
+    (strip-transit-prefix
+     (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
     (catch Exception _e nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
