@@ -70,10 +70,10 @@
   [table run {:keys [experiment-id label snapshot-id run-id generated-at
                      source-hashes transitions phase-history]}]
   (let [phase-history (vec phase-history)
-        run-id        (or run-id (str (:workflow-run/id run)))
-        snapshot-id   (or snapshot-id (str "wb-" run-id))
-        generated-at  (or generated-at
-                          (iso-instant (:workflow-run/updated-at run)))]
+        run-id        (str (or run-id (:workflow-run/id run)))
+        snapshot-id   (str (or snapshot-id (str "wb-" run-id)))
+        generated-at  (iso-instant (or generated-at
+                                       (:workflow-run/updated-at run)))]
     (cond->
      {:schema_version snapshot-schema-version
       :snapshot_id snapshot-id

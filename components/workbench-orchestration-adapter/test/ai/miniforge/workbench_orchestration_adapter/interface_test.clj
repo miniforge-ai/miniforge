@@ -196,6 +196,22 @@
         (is (= "completed" (:workflow/status entity)))
         (is (= "done" (:workflow/current-phase entity)))))))
 
+(deftest snapshot-normalizes-native-identity-and-timestamp-overrides
+  (let [table       (table-for (clean-run-events :gate/failed))
+        snapshot-id #uuid "00000000-0000-0000-0000-000000000099"
+        generated-at #inst "2026-07-20T01:02:03Z"
+        result      (sut/project table clean-run-id
+                                 (assoc (opts-for (clean-run-events :gate/failed)
+                                                  clean-run-id)
+                                        :run-id clean-run-id
+                                        :snapshot-id snapshot-id
+                                        :generated-at generated-at))
+        snapshot    (:snapshot result)]
+    (is (schema/succeeded? result))
+    (is (= (str clean-run-id) (:run_id snapshot)))
+    (is (= (str snapshot-id) (:snapshot_id snapshot)))
+    (is (= "2026-07-20T01:02:03Z" (:generated_at snapshot)))))
+
 (deftest illegal-transition-fails-machine-authoritative
   (let [events   illegal-run-events
         table    (table-for events)
