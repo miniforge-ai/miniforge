@@ -255,7 +255,9 @@
       spec-id (assoc-in [:specs spec-id] entity))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; WorkflowRun handlers
+;; Entity handlers — one section per family
+
+;; ── WorkflowRun handlers ───────────────────────────────────────────────────
 
 (defn workflow-started
   [table {:workflow/keys [id] :as event}]
@@ -399,8 +401,7 @@
       (-> (ensure-workflow workflow-id ts)
           (assoc-in [:workflows workflow-id :workflow-run/updated-at] ts)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; AgentSession handlers
+;; ── AgentSession handlers ──────────────────────────────────────────────────
 
 (defn cp-agent-registered
   [table {:cp/keys [agent-id vendor agent-name external-id capabilities] :as event}]
@@ -452,8 +453,7 @@
                  {:agent/status         (coarse-agent-status type)
                   :agent/last-heartbeat ts}))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PrFleetEntry handlers
+;; ── PrFleetEntry handlers ──────────────────────────────────────────────────
 
 (defn- pr-key
   [event]
@@ -477,16 +477,45 @@
               (cond-> pr-state
                 workflow-id (assoc :pr/workflow-run-id workflow-id)))))
 
+(defn- pr-stub
+  "Minimal schema-complete PR entity, used when a lifecycle event is
+   observed before `:pr/created` (same rationale as [[pr-scored]]'s
+   stub: never lose an observed status because the create event was
+   missed — a later create/upsert fills the richer fields via merge)."
+  [{:pr/keys [repo number]}]
+  {:pr/repo       repo
+   :pr/number     number
+   :pr/url        ""
+   :pr/branch     ""
+   :pr/title      ""
+   :pr/status     :open
+   :pr/merge-order 0
+   :pr/depends-on []
+   :pr/blocks     []
+   :pr/ci-status  :pending})
+
+(defn- pr-lifecycle-keyable?
+  "True when the event carries a usable [repo number] entity key: a
+   NON-BLANK repo (the entity schema requires min length 1; a blank
+   string would mint a [\"\" n] entity) and a present number."
+  [event]
+  (and (string? (:pr/repo event))
+       (not (str/blank? (:pr/repo event)))
+       (some? (:pr/number event))))
+
 (defn pr-merged
   [table event]
   (let [k (pr-key event)
         ts (event-instant event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      (get-in table [:prs k])
+      ;; A usable key requires a non-blank repo and a number: repo-less
+      ;; or blank-repo events (the pre-envelope bare-map shape) must
+      ;; not mint [nil n] / ["" n] entities.
+      (pr-lifecycle-keyable? event)
       (update-in [:prs k]
                  (fn [pr]
-                   (cond-> (merge pr
+                   (cond-> (merge (or pr (pr-stub event))
                                   {:pr/status :merged
                                    :pr/merged-at ts})
                      (and workflow-id (nil? (:pr/workflow-run-id pr)))
@@ -497,10 +526,10 @@
   (let [k (pr-key event)
         workflow-id (:workflow/id event)]
     (cond-> table
-      (get-in table [:prs k])
+      (pr-lifecycle-keyable? event)
       (update-in [:prs k]
                  (fn [pr]
-                   (cond-> (assoc pr :pr/status :closed)
+                   (cond-> (assoc (or pr (pr-stub event)) :pr/status :closed)
                      (and workflow-id (nil? (:pr/workflow-run-id pr)))
                      (assoc :pr/workflow-run-id workflow-id)))))))
 
@@ -538,8 +567,7 @@
                    (assoc :pr/workflow-run-id workflow-id))]
     (assoc-in table [:prs k] scored)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; TaskNode handlers (N5-δ3 §2.3, §3.3)
+;; ── TaskNode handlers (N5-δ3 §2.3, §3.3) ───────────────────────────────────
 
 (def task-kanban-mapping-resource
   "Classpath location of the EDN mapping from :task/status to the closed
@@ -622,8 +650,7 @@
     (cond-> table
       task-id (assoc-in [:tasks task-id] merged))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PolicyEvaluation handlers
+;; ── PolicyEvaluation handlers ──────────────────────────────────────────────
 
 (defn- normalize-violation
   [v]
@@ -661,8 +688,7 @@
   (let [eval (policy-evaluation event false)]
     (assoc-in table [:policy-evals (:policy-eval/id eval)] eval)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Snapshot-event handlers — applied during startup replay.
+;; ── Snapshot-event handlers — applied during startup replay ────────────────
 ;; A `:supervisory/*-upserted` event carries the canonical entity in
 ;; :supervisory/entity; we trust it as the baseline state.
 
@@ -708,8 +734,7 @@
     (cond-> table
       entity (assoc-in [:tasks (:task/id entity)] entity))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; DecisionCard handlers (N5-δ3 §2.4, §3.4)
+;; ── DecisionCard handlers (N5-δ3 §2.4, §3.4) ───────────────────────────────
 
 (defn cp-decision-created
   "Handler for `:control-plane/decision-created` — creates a pending
@@ -771,8 +796,7 @@
     (cond-> table
       entity (assoc-in [:decisions (:decision/id entity)] entity))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; InterventionRequest handlers
+;; ── InterventionRequest handlers ───────────────────────────────────────────
 
 (defn- intervention-stub
   [event]
@@ -931,7 +955,7 @@
     (cond-> table
       updated (assoc-in [:dependencies dependency-id] updated))))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 ;; Dispatch table — events not listed are no-ops at the entity-state level
 
 (def handlers

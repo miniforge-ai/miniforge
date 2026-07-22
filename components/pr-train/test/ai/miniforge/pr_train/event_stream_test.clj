@@ -25,7 +25,10 @@
 
 (deftest complete-merge-emits-pr-merged-event
   (testing "complete-merge publishes :pr/merged event to event-stream"
-    ;; Use a real event-stream (no with-redefs — safe under pmap)
+    ;; Real event-stream (no with-redefs — safe under pmap), sinkless:
+    ;; the default file sink writes into the operator's REAL
+    ;; ~/.miniforge/events directory, which polluted it with test
+    ;; events every suite run.
     (let [stream (es/create-event-stream {:sinks []})
           captured (atom [])
           mgr (train/create-manager {:event-stream stream})]
@@ -56,13 +59,36 @@
           (is (some? result) "complete-merge should return updated train")
           (is (= :merged (:pr/status (train/get-pr-from-train mgr train-id 42))))
 
-          ;; Verify event was published
+          ;; Verify event was published, enveloped, and keyed: the
+          ;; supervisory accumulator's pr-key needs repo+number, and a
+          ;; proper envelope gives the event identity + timestamp.
           (is (= 1 (count @captured)) "exactly one :pr/merged event should be published")
           (let [event (first @captured)]
             (is (= :pr/merged (:event/type event)))
+            (is (= "acme/repo" (:pr/repo event)))
             (is (= 42 (:pr/number event)))
             (is (= train-id (:train/id event)))
-            (is (inst? (:timestamp event)))))))))
+            (is (uuid? (:event/id event)))
+            (is (inst? (:event/timestamp event)))))))))
+
+(deftest add-pr-emits-pr-created-event
+  (testing "add-pr announces the PR so an entity exists before merge"
+    (let [stream (es/create-event-stream {:sinks []})
+          captured (atom [])
+          mgr (train/create-manager {:event-stream stream})]
+      (es/subscribe! stream :test-subscriber
+                     (fn [event] (swap! captured conj event))
+                     (fn [event] (= :pr/created (:event/type event))))
+      (let [train-id (train/create-train mgr "Created Test" (random-uuid) nil)]
+        (train/add-pr mgr train-id "acme/repo" 7 "url" "branch" "PR 7")
+        (is (= 1 (count @captured)))
+        (let [event (first @captured)]
+          (is (= "acme/repo" (:pr/repo event)))
+          (is (= 7 (:pr/number event)))
+          (is (= "PR 7" (:pr/title event)))
+          (is (= 1 (:pr/merge-order event)))
+          (is (= train-id (:train/id event)))
+          (is (uuid? (:event/id event))))))))
 
 (deftest complete-merge-without-event-stream
   (testing "complete-merge works normally when no event-stream is configured"
