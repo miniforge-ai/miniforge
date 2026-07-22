@@ -55,6 +55,11 @@
    :requires ([lint])
    :task (lint/clj-all)}
 
+  lint:stratum
+  {:doc  "Stratified-design lint (stratum-lint) over staged Clojure files"
+   :requires ([lint])
+   :task (lint/stratum-staged)}
+
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
    :requires ([fmt])
@@ -195,7 +200,7 @@
 
   pre-commit
   {:doc     "Run pre-commit checks (commit budget, structure, lint, format, smoke tests, graalvm). Full test suite runs in CI."
-   :depends [commit-budget poly:check lint:clj fmt:md test:precommit test:graalvm]
+   :depends [commit-budget poly:check lint:clj lint:stratum fmt:md test:precommit test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
