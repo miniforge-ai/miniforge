@@ -42,6 +42,9 @@
 (def ^:private missing-transitions-message
   "Orchestration workbench projection requires the legal phase-transition map")
 
+(def ^:private missing-phase-history-message
+  "Orchestration workbench projection requires :phase-history (a sequential of observed phases; may be empty)")
+
 (def ^:private invalid-snapshot-message
   "Orchestration adapter emitted an invalid workbench_snapshot/v1")
 
@@ -96,13 +99,18 @@
   "Project one resolved workflow run from `table` into a validated
    workbench snapshot.
 
-   `opts` requires `:experiment-id`, `:label`, and `:transitions` (the
-   legal phase-transition map from the workflow component's interface).
-   `:phase-history` carries the run's observed phases (see
-   [[phase-history]]); `:generated-at`, `:snapshot-id`, `:run-id`, and
-   `:source-hashes` are optional. Unresolved runs are rejected at the
-   boundary. Returns a standard schema success/failure map."
-  [table workflow-run-id {:keys [experiment-id label transitions] :as opts}]
+   `opts` requires `:experiment-id`, `:label`, `:transitions` (the legal
+   phase-transition map from the workflow component's interface), and
+   `:phase-history` — the run's observed phases (see [[phase-history]]),
+   a sequential that MAY be empty but must be supplied explicitly:
+   evaluations key off it (machine-authoritative transition validation,
+   verify traversal), so a silently-omitted history would produce a
+   contract-valid snapshot with wrong evaluations. `:generated-at`,
+   `:snapshot-id`, `:run-id`, and `:source-hashes` are optional.
+   Unresolved runs are rejected at the boundary. Returns a standard
+   schema success/failure map."
+  [table workflow-run-id {:keys [experiment-id label transitions phase-history]
+                          :as opts}]
   (let [run (get-in table [:workflows workflow-run-id])]
     (cond
       (nil? run)
@@ -119,6 +127,10 @@
 
       (not (map? transitions))
       (schema/failure :snapshot missing-transitions-message)
+
+      (not (sequential? phase-history))
+      (schema/failure :snapshot missing-phase-history-message
+                      {:phase-history phase-history})
 
       :else
       ;; Load the shipped registry ONCE: validate it, then thread the same

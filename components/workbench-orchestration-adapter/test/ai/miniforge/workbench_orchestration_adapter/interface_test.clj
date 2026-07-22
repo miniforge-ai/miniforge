@@ -382,4 +382,12 @@
                                      (dissoc opts :experiment-id))))
     (is (schema/failed? (sut/project table clean-run-id
                                      (dissoc opts :transitions))))
+    (is (schema/failed? (sut/project table clean-run-id
+                                     (dissoc opts :phase-history)))
+        "omitted phase-history must fail loudly — evaluations key off it")
+    (is (schema/failed? (sut/project table clean-run-id
+                                     (assoc opts :phase-history :not-a-seq))))
+    (is (schema/succeeded? (sut/project table clean-run-id
+                                        (assoc opts :phase-history [])))
+        "an EXPLICIT empty history is a deliberate caller statement, allowed")
     (is (schema/failed? (sut/project table (random-uuid) opts)))))
