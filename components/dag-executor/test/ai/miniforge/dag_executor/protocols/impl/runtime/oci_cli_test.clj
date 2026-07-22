@@ -214,6 +214,23 @@
         (is (= 1 (count (filter #{"--memory"} @captured))))
         (is (some #{"768m"} @captured))))))
 
+(deftest create-container-plan-env-replaces-legacy-env-test
+  (testing "plan env is authoritative when present; partial plans retain legacy env"
+    (let [captured (atom nil)
+          run! (fn [plan]
+                 (with-redefs [oci-cli/run-runtime
+                               (fn [_d & args]
+                                 (reset! captured (vec args))
+                                 {:exit 0 :out "cid\n" :err ""})]
+                   (oci-cli/create-container
+                    (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
+                    :execution-plan plan)
+                   @captured))]
+      (let [args (run! {:env {"SOURCE" "plan"}})]
+        (is (some #{"SOURCE=plan"} args))
+        (is (not (some #{"SOURCE=legacy"} args))))
+      (is (some #{"SOURCE=legacy"} (run! {}))))))
+
 (deftest create-container-runs-plan-command-test
   (testing "the container command comes from the plan's :command, defaulting
             to the keep-alive when absent"

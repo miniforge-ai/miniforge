@@ -127,9 +127,14 @@
       (is (false? valid?)))))
 
 (deftest validate-plan-rejects-non-int-limits-test
-  (testing ":time-limit-ms and :memory-limit-mb must be ints"
+  (testing ":time-limit-ms and :memory-limit-mb must be positive ints"
     (is (false? (:valid? (sut/validate-plan (valid-plan :time-limit-ms   "60000")))))
-    (is (false? (:valid? (sut/validate-plan (valid-plan :memory-limit-mb 1.5)))))))
+    (is (false? (:valid? (sut/validate-plan (valid-plan :memory-limit-mb 1.5)))))
+    (doseq [invalid [0 -1]]
+      (is (false? (:valid? (sut/validate-plan
+                            (valid-plan :time-limit-ms invalid)))))
+      (is (false? (:valid? (sut/validate-plan
+                            (valid-plan :memory-limit-mb invalid))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; create-execution-plan — round-trip and anomaly paths

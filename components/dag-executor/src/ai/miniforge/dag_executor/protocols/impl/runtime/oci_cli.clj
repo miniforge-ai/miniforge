@@ -433,7 +433,11 @@
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
-  (let [env-args      (build-env-args env-map)
+  (let [effective-env (if (and (some? execution-plan)
+                               (contains? execution-plan :env))
+                        (:env execution-plan)
+                        env-map)
+        env-args      (build-env-args effective-env)
         resource-args (build-resource-args
                        descriptor resources
                        {:omit-memory? (some? (:memory-limit-mb execution-plan))})
