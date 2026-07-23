@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.7.0-draft
-**Date:** 2026-04-23
+**Version:** 0.8.0-draft
+**Date:** 2026-07-23
 **Status:** Living specification during OSS development
 
 ---
@@ -290,6 +290,52 @@ Defines:
 
 ---
 
+### N14 — Shared Deliberation Workspace 🆕
+
+**File:** [normative/N14-shared-deliberation-workspace.md](normative/N14-shared-deliberation-workspace.md)
+**Status:** Draft (Speculative — lifecycle bound to N15 gates, see N14 §0.4)
+**Purpose:** Typed, event-sourced, transactional shared reasoning state for multi-agent deliberation runs — object
+  mutation instead of transcript passing; the substrate for testing whether collective cognition beats matched-compute
+  sampling
+
+Defines:
+
+- Closed object taxonomy (goal/constraint/question/claim/hypothesis/experiment/evidence/plan/decision/artifact-ref/
+  conflict/blocker) with structural statuses, not numeric confidences (§2)
+- Transaction vocabulary with commutative/mergeable/exclusive classes, validation pipeline, and the anti-livelock rule:
+  a challenge must carry evidence or a discriminating experiment (§3)
+- Deterministic projections as an activation's only input (N12-conformant), plus the `cross_visibility: none` ablation
+  switch that makes shared-state value measurable (§4)
+- Stateless activations, seven-role v1 population, operation permission matrix (§5)
+- Structural v0 scheduler (no model-estimated salience) behind a pluggable seam; budgets (§6)
+- Termination: success/budget/quiescence/deadlock closing rules, forced synthesis, dissent-at-close (§7)
+- Capsule-bound artifacts by reference; adoption decisions, never merges (§8, N11)
+- Workspace events on the N3 envelope; closure exports as N6 artifacts (§9)
+- Conformance Stages 0–2 with promotion gated on N15 experiments; demotion to Informative on gate failure (§0.4, §11)
+
+### N15 — Collective-Cognition Evaluation Harness 🆕
+
+**File:** [normative/N15-collective-cognition-benchmark.md](normative/N15-collective-cognition-benchmark.md)
+**Status:** Draft (core protocol); workspace-conditional sections share N14's speculative status (N15 §0.4)
+**Purpose:** Matched-budget evaluation protocol (implemented in minibench) deciding whether multi-agent architectures —
+  N14 in particular — beat test-time-compute baselines; pre-registered gates govern N14 staging
+
+Defines:
+
+- Hypothesis registry H1–H5 separating sampling, diversity, aggregation, collective cognition, and reuse (§2)
+- Condition set C1–C7: single-pass, best-of-N, independent+synthesis, debate, static pipeline, workspace, and the
+  workspace ablation pair (§3)
+- Budget protocol: normalized-cost tiers, cost-quality curves not points, overhead fraction as first-class metric (§4)
+- Replication (k ≥ 3), comparability preconditions, provenance stamping, absence-as-divergence — the 2026-07-02
+  methods-review gaps made normative (§5)
+- Long-horizon task class: sealed contradictions, hidden acceptance tests, multi-constraint, decision-record
+  deliverable (§6)
+- Metrics vector including hypothesis diversity and closed-set failure-category coding (§7)
+- Effect rule (between- vs within-spread), ablation delta, pre-registered manifests, Gates G0/G1, regression gating
+  (§8)
+
+---
+
 ## Informative Documentation (Non-Normative)
 
 These documents provide guidance, examples, and context but do NOT define contractual requirements.
@@ -458,6 +504,11 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.8.0-draft** (2026-07-23) - Added N14 (Shared Deliberation Workspace) and N15 (Collective-Cognition
+  Evaluation Harness). N14 is a speculative spec: conformance binds experimental implementations pre-gate and
+  the spec demotes to Informative as a recorded negative result if N15 Gate G0 fails. N15's core protocol
+  (budget matching, replication, comparability, task class, metrics) is architecture-agnostic and survives any
+  gate outcome; its workspace-conditional sections (C6/C7, ablation delta, G0/G1) share N14's lifecycle
 - **0.7.0-draft** (2026-04-23) - Pack interchange, control surface, and per-workflow streaming
   amendments. **N1**: Pack Signature Format (§2.10.4.1) and Pack Bundle Format (§2.10.6) so signed
   packs and pack archives are portable between OSS implementations; Tool Registry (§2.31) hoists
