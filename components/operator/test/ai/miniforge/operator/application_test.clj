@@ -27,6 +27,7 @@
    [ai.miniforge.operator.application :as application]
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
+   [ai.miniforge.reliability.interface :as reliability]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -84,6 +85,14 @@
        (filter #(= consumer/state-changed-event-type (:event/type %)))
        (mapv :intervention/state)))
 
+(defn- events-of-type
+  [stream event-type]
+  (filterv #(= event-type (:event/type %)) (es/get-events stream)))
+
+(defn- failure-code
+  [interv]
+  (get-in interv [:intervention/details :failure/code]))
+
 (defn- with-runner
   "Register a control-state for a fresh workflow id, run `f`, always
    deregister. Returns [workflow-id control-state result]."
@@ -95,6 +104,16 @@
       [wid cs (f wid cs)]
       (finally
         (application/deregister-runner! wid)))))
+
+(defn- with-degradation-manager
+  [manager f]
+  (let [manager-state (var-get #'application/process-degradation-manager)
+        original @manager-state]
+    (reset! manager-state manager)
+    (try
+      (f)
+      (finally
+        (reset! manager-state original)))))
 
 ;------------------------------------------------------------------------------ Phase D verification bar — request file → paused workflow
 
@@ -127,8 +146,10 @@
     (let [failed (->> (es/get-events stream)
                       (filter #(= :failed (:intervention/state %)))
                       first)]
-      (is (= :no-live-runner (:intervention/reason failed))
-          "the reason keyword travels verbatim — the UI renders it"))))
+      (is (string? (:intervention/reason failed))
+          "the schema-facing reason is localized text")
+      (is (= :no-live-runner (failure-code failed))
+          "the machine-readable failure code remains typed"))))
 
 ;------------------------------------------------------------------------------ Control-state verbs verify by readback
 
@@ -172,16 +193,39 @@
       (let [stream (memory-stream)
             result (application/apply-intervention! stream (approved :retry wid))]
         (is (= :failed (:intervention/state result)))
-        (is (= :not-implemented (:intervention/reason result)))))))
+        (is (= :not-implemented (failure-code result)))))))
 
 (deftest safe-mode-without-manager-fails-typed
-  (with-runner
-    (fn [wid _cs]
+  (with-degradation-manager
+    nil
+    (fn []
       (let [stream (memory-stream)
             result (application/apply-intervention!
-                    stream (approved :force-safe-mode wid))]
+                    stream (approved :force-safe-mode "degradation"))]
         (is (= :failed (:intervention/state result)))
-        (is (= :no-degradation-manager (:intervention/reason result)))))))
+        (is (= :no-degradation-manager (failure-code result)))))))
+
+(deftest safe-mode-verifies-manual-entry-and-exit-by-readback
+  (let [stream (memory-stream)
+        manager (reliability/create-degradation-manager stream)
+        target-id "degradation"]
+    (with-degradation-manager
+      manager
+      (fn []
+        (let [entered (application/apply-intervention!
+                       stream (approved :force-safe-mode target-id))
+              safe-mode-events (events-of-type stream :safe-mode/entered)]
+          (is (= :verified (:intervention/state entered)))
+          (is (= :safe-mode (reliability/degradation-mode manager)))
+          (is (= :manual (:safe-mode/trigger (first safe-mode-events))))
+          (let [exited (application/apply-intervention!
+                        stream (approved :exit-safe-mode target-id))]
+            (is (= :verified (:intervention/state exited)))
+            (is (= :nominal (reliability/degradation-mode manager)))
+            (is (= {:verb :exit-safe-mode
+                    :observed :nominal
+                    :expected :nominal}
+                   (:intervention/outcome exited)))))))))
 
 ;------------------------------------------------------------------------------ Registry
 
@@ -193,3 +237,10 @@
     (application/deregister-runner! wid)
     (application/deregister-runner! wid)
     (is (false? (application/live-runner? wid)))))
+
+(deftest ownership-filter-does-not-hide-invalid-request-types
+  (is (true? (application/live-intervention-target?
+              {:intervention/type :not-in-the-bounded-vocabulary
+               :intervention/target-type :workflow
+               :intervention/target-id (random-uuid)}))
+      "invalid requests must reach lifecycle validation and emit an anomaly"))
