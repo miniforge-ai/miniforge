@@ -54,14 +54,14 @@
   (.toFile (Files/createTempDirectory "operator-application-test"
                                       (make-array FileAttribute 0))))
 
-(defn- stage-golden-pause!
-  [events-dir]
-  (let [target (io/file events-dir "operator" "pause.transit.json")]
+(defn- stage-golden!
+  [events-dir fixture-name]
+  (let [target (io/file events-dir "operator" fixture-name)]
     (io/make-parents target)
     (spit target
           (slurp (io/file (find-workspace-root)
                           "contracts" "operator-events" "golden"
-                          "pause.transit.json")
+                          fixture-name)
                  :encoding "UTF-8")
           :encoding "UTF-8")))
 
@@ -123,7 +123,7 @@
         cs (es/create-control-state)]
     (application/register-runner! golden-pause-target-id {:control-state cs})
     (try
-      (stage-golden-pause! events-dir)
+      (stage-golden! events-dir "pause.transit.json")
       (is (= {:routed 1 :skipped 0 :anomalies 0}
              (consumer/consume-pass! {:events-dir events-dir
                                       :stream stream
@@ -137,7 +137,7 @@
 (deftest no-live-runner-fails-typed
   (let [events-dir (temp-events-dir)
         stream (memory-stream)]
-    (stage-golden-pause! events-dir)
+    (stage-golden! events-dir "pause.transit.json")
     ;; Nothing registered for the fixture's target id.
     (consumer/consume-pass! {:events-dir events-dir
                              :stream stream
@@ -226,6 +226,25 @@
                     :observed :nominal
                     :expected :nominal}
                    (:intervention/outcome exited)))))))))
+
+(deftest injected-safe-mode-file-uses-the-process-degradation-manager
+  (let [events-dir (temp-events-dir)
+        stream (memory-stream)
+        manager (reliability/create-degradation-manager stream)]
+    (with-degradation-manager
+      manager
+      (fn []
+        (stage-golden! events-dir "force-safe-mode.transit.json")
+        (is (= {:routed 1 :skipped 0 :anomalies 0}
+               (consumer/consume-pass! {:events-dir events-dir
+                                        :stream stream
+                                        :apply! application/apply-intervention!})))
+        (is (= :safe-mode (reliability/degradation-mode manager)))
+        (is (= :manual
+               (:safe-mode/trigger
+                (first (events-of-type stream :safe-mode/entered)))))
+        (is (= [:approved :dispatched :applied :verified]
+               (state-trail stream)))))))
 
 ;------------------------------------------------------------------------------ Registry
 
