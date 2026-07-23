@@ -93,7 +93,7 @@ proof sits on H4.
 | C1 | single-pass | One agent, one attempt, full tier budget |
 | C2 | best-of-N | One model, N independent attempts, verifier-selected winner |
 | C3 | independent + synthesis | N heterogeneous agents, independent attempts, one synthesis pass (mixture-of-agents proper) |
-| C4 | sequential debate | k rounds, each agent sees prior prose, judge closes |
+| C4 | sequential debate | r debate rounds (r pinned per manifest), each agent sees prior prose, judge closes |
 | C5 | static pipeline | Fixed role relay (interpreter → proposer → implementer → verifier → synthesizer), transcript handoff, no shared graph |
 | C6 | workspace | N14 deliberation run (stage per experiment manifest) |
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
@@ -126,9 +126,11 @@ strongest single model available to C3/C6 populations.
 - **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group by
   (experiment_id, label) and aggregate per cell: mean/min–max score, majority status,
   within-cell spread. A row is divergent only when stable across replicates.
-- **Comparability preconditions**: `compare` MUST fail or warn on: mixed `experiment_id`,
-  mixed registry version, mixed product, duplicate `state_var_id` within a snapshot, or
-  non-replicate label collisions.
+- **Comparability preconditions**: `compare` MUST fail — rejecting the comparison and
+  naming the offending snapshots — on: mixed `experiment_id`, mixed registry version,
+  mixed product, duplicate `state_var_id` within a snapshot, or non-replicate label
+  collisions. Axes declared as varying in the manifest are exempt. Implementations MAY
+  additionally emit warnings, but a warning is never a substitute for the failure.
 - **Provenance stamping**: every snapshot MUST carry `source_hashes` of task inputs, the
   policy/evaluator version, judge model id + rubric hash, and price-table hash. Uniformity
   within an experiment is a precondition unless the axis is declared as varying.

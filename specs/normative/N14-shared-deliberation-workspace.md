@@ -141,7 +141,10 @@ Status transitions MUST be governed by structural rules, not numeric confidence:
 ### 2.4 Constraint and evidence provenance
 
 - `:hard` constraints MUST originate from the task specification or the user (via OCI).
-  Agent transactions MUST NOT create, modify, or retire `:hard` constraints.
+  Exactly one role — the interpreter — MAY create `:hard` constraints, with source `:spec`
+  and each traceable to the task specification (§5.3); the user creates them via OCI. No
+  agent transaction may modify or retire a `:hard` constraint, and no role other than the
+  interpreter may create one.
 - Agents MAY propose `:soft` constraints.
 - Evidence carries a source class: `:execution` (produced by a verifier-role activation via
   governed tools, referencing an N6 bundle), `:retrieval`, `:user`, or `:agent-analysis`.
@@ -245,7 +248,9 @@ produces at most one transaction, plus capsule artifacts where applicable.
 
 A role is configuration, not code: `{agent binding, static prompt, projection parameters,
 eligible event types, permitted operations, capsule policy}`. A run manifest MUST declare
-its role population. The minimum population for a conforming deliberation run:
+its role population. The seven-role minimum below applies to Stage 1 and later (§11);
+Stage 0 pilots require only proposer, skeptic, and synthesizer. The minimum population
+for a conforming Stage 1+ deliberation run:
 
 - **interpreter** — task spec → goals, `:hard` constraints (from spec), questions
 - **proposer** — hypotheses, plans, soft constraints
