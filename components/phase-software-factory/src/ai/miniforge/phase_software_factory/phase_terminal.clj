@@ -29,10 +29,11 @@
   "Derive the :phase/termination-reason for a phase-completed event.
 
    Checks in priority order:
-     1. Watchdog stall    → :agent-stalled  (+ :stall/gap-duration-ms when present)
-     2. Curator rejection → :curator-rejected
-     3. Tool / infra error → :tool-error
-     4. Default           → :normal
+     1. Watchdog stall     → :agent-stalled  (+ :stall/gap-duration-ms when present)
+     2. Stream-idle        → :stream-idle-timeout  (+ :phase/stream-idle-detected true)
+     3. Curator rejection  → :curator-rejected
+     4. Tool / infra error → :tool-error
+     5. Default            → :normal
 
    Arguments:
      result         — phase result map (from [:phase :result] in context).
@@ -40,6 +41,8 @@
                       phase-local detection; may contain:
                         :stalled?              truthy when supervisor detected a hang
                         :stall/gap-duration-ms gap in ms since the last agent event
+                        :stream-idle?          truthy when the LLM output stream went
+                                               quiet before the phase wall-clock cap
                         :rate-limited?         truthy to force :tool-error classification
 
    Returns a map suitable for merging into a phase-completed event payload:
@@ -47,6 +50,8 @@
      {:phase/termination-reason :normal}
      {:phase/termination-reason :agent-stalled
       :stall/gap-duration-ms    <ms>}
+     {:phase/termination-reason :stream-idle-timeout
+      :phase/stream-idle-detected true}
      {:phase/termination-reason :curator-rejected}
      {:phase/termination-reason :tool-error}"
   ([result]
@@ -54,15 +59,35 @@
   ([result watchdog-state]
    (let [error-code    (get-in result [:error :data :code])
          error-type    (get-in result [:error :data :type])
+         ;; The standard adaptive-timeout taxonomy rides the timeout
+         ;; envelope: [:error :data :timeout :type] (result-boundary
+         ;; error-response shape) or [:timeout :type] (unwrapped). Read
+         ;; both keyword paths directly — the full string-tolerant cascade
+         ;; lives in agent result-boundary, but this ns is Layer-0
+         ;; dependency-free and the in-process result maps here carry
+         ;; keywords. :error-code stays as a compat arm.
+         timeout-type  (or (get-in result [:error :data :timeout :type])
+                           (get-in result [:timeout :type]))
          gap-ms        (get watchdog-state :stall/gap-duration-ms)
          stalled?      (or (boolean (:stalled? watchdog-state))
                            (and (number? gap-ms) (pos? gap-ms)))
+         stream-idle?  (or (boolean (:stream-idle? watchdog-state))
+                           (= :stream-idle timeout-type)
+                           (= :stream-idle error-code))
          rate-limited? (boolean (:rate-limited? watchdog-state))]
      (cond
        ;; Watchdog stall takes precedence — explicit signal from the supervisor
        stalled?
        (cond-> {:phase/termination-reason :agent-stalled}
          gap-ms (assoc :stall/gap-duration-ms gap-ms))
+
+       ;; Stream-idle: the LLM output stream went quiet before the phase cap.
+       ;; Separate from :agent-stalled (no response at all) — here the stream
+       ;; started but then went idle. Emits :phase/stream-idle-detected true as
+       ;; a telemetry tag so consumers can route / alert on idle events.
+       stream-idle?
+       {:phase/termination-reason   :stream-idle-timeout
+        :phase/stream-idle-detected true}
 
        ;; Curator or release executor found nothing to commit/ship
        (or (= :curator/no-files-written error-code)

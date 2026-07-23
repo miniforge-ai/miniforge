@@ -32,7 +32,7 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.schema :as schema]))
 
-(defn- stream [] (es/create-event-stream))
+(defn- stream [] (es/create-event-stream {:sinks []}))
 
 (def ^:private sample-args-digest
   (es/digest-content {:file "/tmp/input.clj"}))
@@ -49,6 +49,15 @@
 (def ^:private heartbeat-event-count 42)
 (def ^:private zero-heartbeat-gap-ms 0)
 (def ^:private zero-heartbeat-event-count 0)
+
+(deftest operator-scoped-pr-created-allows-nil-workflow
+  (let [event (assoc (es/create-envelope (stream) :pr/created nil "PR joined train")
+                     :pr/repo "acme/repo"
+                     :pr/number 7
+                     :pr/url "https://example.test/pull/7"
+                     :pr/branch "feature")]
+    (is (nil? (:workflow/id event)))
+    (is (m/validate schema/PRCreated event))))
 
 ;------------------------------------------------------------------------------ :agent/tool-call-started
 

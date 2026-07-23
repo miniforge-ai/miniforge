@@ -15,11 +15,31 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
+;;
+;; Documented shape for :runner/defaults (not currently validated at load time):
+;;
+;;   [:map {:closed false}
+;;    [:max-phases                     {:optional true} :int]
+;;    [:max-redirects                  {:optional true} :int]
+;;    [:max-infra-retries              {:optional true} :int]
+;;    [:max-consecutive-phase-retries  {:optional true} :int]
+;;    [:max-backoff-ms                 {:optional true} :int]
+;;    [:backoff-base-ms                {:optional true} :int]
+;;    [:pause-poll-interval-ms         {:optional true} :int]
+;;    [:default-workdir                {:optional true} :string]
+;;    [:task-branch-prefix             {:optional true} :string]
+;;    [:default-docker-image           {:optional true} :string]]
 
 {:runner/defaults
  {;; Pipeline execution limits
   :max-phases             50
   :max-redirects          5
+  ;; Infra-retry budget: transient infrastructure verdicts (:phase/timeout,
+  ;; :verify/timeout, rate-limits, backend-died) retry the same phase up to
+  ;; this many times before falling through to terminal. Default 1 retry per
+  ;; phase-LLM call — enough to survive a single flaky provider response
+  ;; without burning more work budget on a genuine failure.
+  :max-infra-retries      1
   :max-consecutive-phase-retries 3
   :max-backoff-ms         30000
   :backoff-base-ms        1000

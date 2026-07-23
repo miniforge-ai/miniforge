@@ -1,0 +1,16 @@
+{:paths ["src" "resources"]
+
+ :deps {ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/schema       {:local/root "../schema"}
+        cheshire/cheshire         {:mvn/version "5.13.0"}
+        io.github.miniforge-ai/workbench-contract
+        {:git/url "ssh://git@github.com/miniforge-ai/workbench-contract.git"
+         :git/sha "5212f32ed9bdbfbc982e9ff746352c2f190d8e12"
+         :deps/root "bindings/clojure"}}
+
+ :aliases {:test {:extra-paths ["test"]
+                  ;; Test fixtures fold synthetic event streams through the
+                  ;; REAL supervisory-state accumulator and pass the REAL
+                  ;; workflow phase-transition map — never hand-rolled shapes.
+                  :extra-deps {ai.miniforge/supervisory-state {:local/root "../supervisory-state"}
+                               ai.miniforge/workflow          {:local/root "../workflow"}}}}}

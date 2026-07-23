@@ -16,7 +16,7 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 
-(ns ai.miniforge.tui-views.subscription-test
+(ns ai.miniforge.tui-views.subscription-integration-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.tui-views.subscription :as sub]
@@ -24,7 +24,7 @@
 
 (deftest translate-workflow-events-test
   (testing "Workflow started translates correctly"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           messages (atom [])
           wf-id (random-uuid)
           cleanup (sub/subscribe-to-stream! stream
@@ -39,7 +39,7 @@
 
 (deftest translate-phase-events-test
   (testing "Phase started translates correctly"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           messages (atom [])
           wf-id (random-uuid)
           cleanup (sub/subscribe-to-stream! stream
@@ -53,7 +53,7 @@
 
 (deftest translate-workflow-done-event-test
   (testing "Workflow completed translates correctly"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           messages (atom [])
           wf-id (random-uuid)
           cleanup (sub/subscribe-to-stream! stream
@@ -67,7 +67,7 @@
 
 (deftest chunk-throttling-test
   (testing "Rapid chunks are coalesced"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           messages (atom [])
           wf-id (random-uuid)
           cleanup (sub/subscribe-to-stream! stream
@@ -85,7 +85,7 @@
 
 (deftest cleanup-unsubscribes-test
   (testing "Cleanup function stops the subscription"
-    (let [stream (es/create-event-stream)
+    (let [stream (es/create-event-stream {:sinks []})
           messages (atom [])
           wf-id (random-uuid)
           cleanup (sub/subscribe-to-stream! stream

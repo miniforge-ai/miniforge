@@ -38,3 +38,8 @@
       (with-redefs [messages/active-locale (constantly :fr)]
         (is (= english-usage
                (messages/t :help/usage {:binary "moteur"})))))))
+
+(deftest etl-usage-messages-exist-test
+  (doseq [message-key [:etl/run-usage :etl/validate-usage :etl/registry-usage]]
+    (is (= "Usage: miniforge etl command"
+           (messages/t message-key {:command "miniforge etl command"})))))

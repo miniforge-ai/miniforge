@@ -28,6 +28,8 @@
     (is (string? (sut/t :run/complete)))
     (is (string? (sut/t :run/failed)))
     (is (string? (sut/t :validate/ok)))
+    (is (string? (sut/t :registry/usage)))
+    (is (string? (sut/t :workbench/usage)))
     (is (string? (sut/t :help/usage)))))
 
 (deftest catalog-interpolates-params-test

@@ -17,6 +17,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # Public identifier for the read-only Miniforge CI GitHub App; credentials
+  # remain in MINIFORGE_CI_BOT_KEY.
+  MINIFORGE_CI_BOT_APP_ID: "3360143"
+
 jobs:
   structure:
     name: Structure
@@ -132,6 +137,21 @@ jobs:
         # to a full Polylith test sweep rather than failing or under-testing.
         with:
           fetch-depth: 0
+
+      - name: Generate workbench contract token
+        id: workbench-contract-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
+          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
+          owner: miniforge-ai
+          repositories: workbench-contract
+
+      - name: Configure workbench contract access
+        env:
+          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
 
       - name: Set up Java
         uses: actions/setup-java@v4
@@ -279,6 +299,21 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Generate workbench contract token
+        id: workbench-contract-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
+          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
+          owner: miniforge-ai
+          repositories: workbench-contract
+
+      - name: Configure workbench contract access
+        env:
+          WORKBENCH_CONTRACT_TOKEN: ${{ steps.workbench-contract-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${WORKBENCH_CONTRACT_TOKEN}@github.com/miniforge-ai/workbench-contract.git".insteadOf "ssh://git@github.com/miniforge-ai/workbench-contract.git"
+
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -303,21 +338,24 @@ jobs:
 
       - name: Compile all code
         run: |
+          set -o pipefail
           echo "::group::Compiling Code"
           bb compile 2>&1 | tee compile.log
           echo "::endgroup::"
 
       - name: Build CLI
         run: |
+          set -o pipefail
           echo "::group::Building CLI"
           bb build:cli 2>&1 | tee build-cli.log
           echo "::endgroup::"
 
       - name: Test CLI
         run: |
+          set -o pipefail
           echo "::group::Testing CLI"
-          ./dist/miniforge version 2>&1 | tee -a cli-test.log
-          ./dist/miniforge help 2>&1 | tee -a cli-test.log
+          bb --jar dist/miniforge.jar -m ai.miniforge.cli.main version 2>&1 | tee -a cli-test.log
+          bb --jar dist/miniforge.jar -m ai.miniforge.cli.main help 2>&1 | tee -a cli-test.log
           echo "::endgroup::"
 
       - name: Upload build logs
@@ -335,5 +373,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: miniforge-cli-${{ github.sha }}
-          path: dist/miniforge
+          path: dist/miniforge.jar
           retention-days: 7

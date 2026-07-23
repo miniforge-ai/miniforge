@@ -76,6 +76,7 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.mcp-context-server.interface :as mcp-context-server]
    [ai.miniforge.pr-train.interface :as pr-train]
    [ai.miniforge.repo-dag.interface :as repo-dag]
@@ -83,6 +84,9 @@
    [ai.miniforge.lsp-mcp-bridge.main :as lsp-bridge]
    [ai.miniforge.lsp-mcp-bridge.tasks :as lsp-tasks]
    [slingshot.slingshot :refer [try+]]))
+
+;------------------------------------------------------------------------------ Layer 0
+;; Composition seams (optional web/TUI providers) and pure helpers
 
 (defn- optional-composition-var
   "Resolve a provider whose entire component is optional for this CLI product.
@@ -111,13 +115,20 @@
     (str caught)))
 
 (defn- create-pr-train-manager
-  []
-  (try+
-    (pr-train/create-manager)
-    (catch Object e
-      (println (messages/t :web/pr-train-warning
-                           {:error (caught-message e (:throwable &throw-context))}))
-      nil)))
+  "Build the PR-train manager bound to `event-stream` so train
+   mutations (add-pr, complete-merge) publish governed events that
+   supervisory-state materializes for the consoles."
+  ([]
+   (create-pr-train-manager nil))
+  ([event-stream]
+   (try+
+     (if event-stream
+       (pr-train/create-manager {:event-stream event-stream})
+       (pr-train/create-manager))
+     (catch Object e
+       (println (messages/t :web/pr-train-warning
+                            {:error (caught-message e (:throwable &throw-context))}))
+       nil))))
 
 (defn- create-repo-dag-manager
   []
@@ -136,7 +147,8 @@
                      'start!)]
     (fn [{:keys [port]}]
       (let [event-stream (es/create-event-stream)
-            pr-train-manager (create-pr-train-manager)
+            _ (supervisory/ensure-attached! event-stream)
+            pr-train-manager (create-pr-train-manager event-stream)
             repo-dag-manager (create-repo-dag-manager)]
         (start! {:port port
                  :event-stream event-stream
@@ -174,8 +186,7 @@
    'ai.miniforge.tui-views.interface/start-fleet-tui!
    start-fleet-tui!))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Constants and pure helpers
+;; ── Constants and pure helpers ──────────────────────────────────────────────
 
 (def version-info
   {:name (app-config/binary-name)
@@ -488,6 +499,7 @@
 (defn etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
 (defn etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
 (defn etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
+(defn etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (get-opts m)))
 
 (defn hook-eval-cmd
   "Evaluate a tool-use request from a Claude PreToolUse hook.
@@ -818,7 +830,8 @@
    {:cmds ["etl" "repo"]      :fn etl-repo-cmd     :args->opts [:url]}
    {:cmds ["etl" "run"]       :fn etl-run-cmd      :args->opts [:pack]}
    {:cmds ["etl" "list"]      :fn etl-list-cmd     :args->opts [:paths]}
-   {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}])
+   {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}
+   {:cmds ["etl" "registry"]  :fn etl-registry-cmd}])
 
 (defn- handle-unknown-command
   "Print help for an unrecognized CLI command."
