@@ -32,6 +32,7 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
+   [java.nio.channels FileChannel]
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]))
 
@@ -85,6 +86,10 @@
 (defn- events-of-type
   [stream event-type]
   (filterv #(= event-type (:event/type %)) (es/get-events stream)))
+
+(defn- reject-every-request?
+  [_event]
+  false)
 
 ;------------------------------------------------------------------------------ Golden contract gate
 
@@ -146,6 +151,32 @@
                (:event/sequence-number change))
             "republishing the request advances the workflow sequence")))))
 
+(deftest governed-republish-uses-server-lifecycle-and-target
+  (testing "client-claimed state, timestamps, and workflow routing are ignored"
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)
+          source (es/read-event-file
+                  (io/file (golden-dir) "pause.transit.json"))
+          forged-workflow-id (random-uuid)
+          forged-time (java.util.Date/from
+                       (java.time.Instant/parse "2000-01-01T00:00:00Z"))
+          forged (assoc source
+                        :workflow/id forged-workflow-id
+                        :intervention/state :verified
+                        :intervention/requested-at forged-time
+                        :intervention/updated-at forged-time)]
+      (stage-operator-file! events-dir "forged.transit.json"
+                            (es/serialize-event forged))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      (let [requested (first (events-of-type
+                              stream consumer/intervention-requested-event-type))]
+        (is (= (parse-uuid (:intervention/target-id source))
+               (:workflow/id requested)))
+        (is (not= forged-workflow-id (:workflow/id requested)))
+        (is (= :proposed (:intervention/state requested)))
+        (is (not= forged-time (:intervention/requested-at requested)))
+        (is (not= forged-time (:intervention/updated-at requested)))))))
+
 (deftest invalid-request-identities-are-rejected
   (let [valid {:event/id (random-uuid)
                :intervention/id (random-uuid)
@@ -193,6 +224,35 @@
              (consumer/consume-pass! {:events-dir events-dir :stream stream-b})))
       (is (empty? (es/get-events stream-b))))))
 
+(deftest unowned-request-is-deferred-without-advancing-cursors
+  (let [events-dir (temp-events-dir)
+        stream (memory-stream)]
+    (stage-golden! events-dir "pause.transit.json")
+    (is (= {:routed 0 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir
+                                    :stream stream
+                                    :accept? reject-every-request?})))
+    (is (empty? (:processed-files
+                 (consumer/read-cursor (es/operator-dir events-dir)))))
+    (is (= {:routed 1 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream})))))
+
+(deftest held-consumer-lock-defers-the-entire-pass
+  (let [events-dir (temp-events-dir)
+        stream (memory-stream)
+        lock-file (io/file events-dir "operator" ".consumer.lock")]
+    (stage-golden! events-dir "pause.transit.json")
+    (with-open [channel (FileChannel/open
+                         (.toPath lock-file)
+                         (into-array java.nio.file.OpenOption
+                                     [java.nio.file.StandardOpenOption/CREATE
+                                      java.nio.file.StandardOpenOption/WRITE]))
+                _lock (.lock channel)]
+      (is (= {:routed 0 :skipped 0 :anomalies 0}
+             (consumer/consume-pass! {:events-dir events-dir :stream stream}))))
+    (is (= {:routed 1 :skipped 0 :anomalies 0}
+           (consumer/consume-pass! {:events-dir events-dir :stream stream})))))
+
 ;------------------------------------------------------------------------------ Malformed input is loud, never silent
 
 (deftest unreadable-file-emits-anomaly-once
@@ -214,7 +274,7 @@
         "append-only: the consumer never deletes operator events")))
 
 (deftest invalid-intervention-emits-anomaly
-  (testing "invalid request id is remembered after its first anomaly"
+  (testing "a valid request id is remembered after request validation fails"
     (let [events-dir (temp-events-dir)
           stream (memory-stream)
           content (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
