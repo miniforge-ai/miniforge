@@ -113,12 +113,23 @@
   [event]
   (if-not (intervention/valid-type? (:intervention/type event))
     true
-    (let [target-type (if-some [declared (:intervention/target-type event)]
-                        declared
-                        (intervention/intervention-target-type
-                         (:intervention/type event)))]
-      (or (not= :workflow target-type)
+    (let [canonical-target-type
+          (intervention/intervention-target-type (:intervention/type event))
+          declared-target-type (:intervention/target-type event)]
+      (or (and declared-target-type
+               (not= canonical-target-type declared-target-type))
+          (not= :workflow canonical-target-type)
           (live-runner? (:intervention/target-id event))))))
+
+(defn live-intervention-stream
+  "Return the registered event stream for a workflow-targeted
+   intervention, or nil for process-global and unowned targets."
+  [event]
+  (when (= :workflow
+           (intervention/intervention-target-type
+            (:intervention/type event)))
+    (:event-stream
+     (get @live-runners (str (:intervention/target-id event))))))
 
 (defn- failure-message
   [reason-code]

@@ -163,6 +163,7 @@
           forged (assoc source
                         :workflow/id forged-workflow-id
                         :intervention/state :verified
+                        :intervention/details {:failure/code :forged}
                         :intervention/requested-at forged-time
                         :intervention/updated-at forged-time)]
       (stage-operator-file! events-dir "forged.transit.json"
@@ -174,8 +175,25 @@
                (:workflow/id requested)))
         (is (not= forged-workflow-id (:workflow/id requested)))
         (is (= :proposed (:intervention/state requested)))
+        (is (nil? (get-in requested
+                          [:intervention/details :failure/code])))
         (is (not= forged-time (:intervention/requested-at requested)))
         (is (not= forged-time (:intervention/updated-at requested)))))))
+
+(deftest workflow-request-routes-to-its-registered-stream
+  (let [events-dir (temp-events-dir)
+        operator-stream (memory-stream)
+        workflow-stream (memory-stream)]
+    (stage-golden! events-dir "pause.transit.json")
+    (is (= {:routed 1 :skipped 0 :anomalies 0}
+           (consumer/consume-pass!
+            {:events-dir events-dir
+             :stream operator-stream
+             :stream-for (constantly workflow-stream)})))
+    (is (empty? (es/get-events operator-stream)))
+    (is (= [consumer/intervention-requested-event-type
+            consumer/state-changed-event-type]
+           (mapv :event/type (es/get-events workflow-stream))))))
 
 (deftest invalid-request-identities-are-rejected
   (let [valid {:event/id (random-uuid)

@@ -249,10 +249,16 @@
 ;------------------------------------------------------------------------------ Registry
 
 (deftest registry-round-trip
-  (let [wid (str (random-uuid))]
+  (let [wid (str (random-uuid))
+        stream (memory-stream)]
     (is (false? (application/live-runner? wid)))
-    (application/register-runner! wid {:control-state (es/create-control-state)})
+    (application/register-runner! wid {:control-state (es/create-control-state)
+                                       :event-stream stream})
     (is (true? (application/live-runner? wid)))
+    (is (identical? stream
+                    (application/live-intervention-stream
+                     {:intervention/type :pause
+                      :intervention/target-id wid})))
     (application/deregister-runner! wid)
     (application/deregister-runner! wid)
     (is (false? (application/live-runner? wid)))))
@@ -262,4 +268,9 @@
               {:intervention/type :not-in-the-bounded-vocabulary
                :intervention/target-type :workflow
                :intervention/target-id (random-uuid)}))
-      "invalid requests must reach lifecycle validation and emit an anomaly"))
+      "unknown types must reach lifecycle validation and emit an anomaly")
+  (is (true? (application/live-intervention-target?
+              {:intervention/type :force-safe-mode
+               :intervention/target-type :workflow
+               :intervention/target-id (random-uuid)}))
+      "mismatched known targets must not be deferred as unowned"))

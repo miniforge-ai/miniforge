@@ -132,12 +132,14 @@
                     (operator/start-operator-consumer!
                      {:stream (:event-stream ctx)
                       :apply! operator/apply-intervention!
-                      :accept? operator/live-intervention-target?}))))))
+                      :accept? operator/live-intervention-target?
+                      :stream-for operator/live-intervention-stream}))))))
 
 (defn- register-workflow-control!
-  [workflow-id control-state]
+  [workflow-id control-state event-stream]
   (let [ctx (get-or-init-meta-loop-ctx!)
-        handles {:control-state control-state}]
+        handles {:control-state control-state
+                 :event-stream event-stream}]
     (operator/register-degradation-manager! (:degradation-manager ctx))
     (operator/register-live-runner! workflow-id handles)
     (try
@@ -1180,7 +1182,9 @@
           ;; Acquire the governed control path last, after every binding that
           ;; may throw. The consumer is process-scoped; this workflow only
           ;; registers its live control handles.
-          _operator-control (register-workflow-control! workflow-id control-state)]
+          _operator-control (register-workflow-control! workflow-id
+                                                        control-state
+                                                        event-stream)]
       (try
         (when-not quiet
           (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))

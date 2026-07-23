@@ -211,8 +211,9 @@
    lifecycle (auto-approving operator-driven request sources), publish
    every transition onto the stream, and advance the idempotency
    cursor. Options: :events-dir, :stream (required), :apply! (the D-3
-   application hook), and :accept? (an ownership predicate that defers
-   unowned requests without advancing the cursor). Returns
+   application hook), :accept? (an ownership predicate that defers
+   unowned requests without advancing the cursor), and :stream-for
+   (a per-request governed-stream router). Returns
    {:routed n :skipped n :anomalies n}."
   consumer/consume-pass!)
 
@@ -252,6 +253,11 @@
    true for process-global targets and for workflow targets registered
    to a live runner in this process."
   application/live-intervention-target?)
+
+(def live-intervention-stream
+  "Return the registered workflow event stream for a workflow-targeted
+   intervention, or nil when the operator stream should be used."
+  application/live-intervention-stream)
 
 (def apply-intervention!
   "The D-3 `:apply!` hook: apply one approved intervention to its live

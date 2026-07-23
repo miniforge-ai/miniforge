@@ -244,7 +244,8 @@
     (assoc :intervention/justification (:intervention/justification event))
 
     (:intervention/details event)
-    (assoc :intervention/details (:intervention/details event))))
+    (assoc :intervention/details
+           (dissoc (:intervention/details event) :failure/code))))
 
 ;------------------------------------------------------------------------------ Layer 1
 ;; Event publication
@@ -338,7 +339,7 @@
 ;; Consumption pass
 
 (defn- consume-operator-dir!
-  [operator-dir stream apply! accept?]
+  [operator-dir stream apply! accept? stream-for]
   (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
                    (remove #(contains? (:processed-files cursor)
@@ -388,7 +389,11 @@
 
                    :else
                    (let [intervention-id (:intervention/id event)
-                         routed-id (route-intervention! stream apply! event file-name)
+                         destination (or (stream-for event) stream)
+                         routed-id (route-intervention! destination
+                                                        apply!
+                                                        event
+                                                        file-name)
                          remembered (remember-intervention-id remembered-file
                                                               intervention-id)]
                      (if routed-id
@@ -413,18 +418,22 @@
    - :accept?    — optional ownership predicate. A false result defers
                    the valid request without advancing either cursor,
                    allowing the owning process to consume it.
+   - :stream-for — optional `(fn [event] stream-or-nil)` router. A
+                   returned stream receives the governed request and
+                   lifecycle; nil falls back to :stream.
 
    The file lock serializes cursor read → effect → cursor write across
    processes. Returns {:routed <n> :skipped <n> :anomalies <n>}.
    Files and accepted intervention ids recorded in the cursor are never
    routed twice across passes and process restarts."
-  [{:keys [events-dir stream apply! accept?]}]
+  [{:keys [events-dir stream apply! accept? stream-for]}]
   (let [operator-dir (if events-dir
                        (es/operator-dir events-dir)
                        (es/operator-dir))
         accept-request? (if-some [predicate accept?]
                           predicate
-                          accept-every-request?)]
+                          accept-every-request?)
+        destination-for (or stream-for (constantly nil))]
     (io/make-parents (consumer-lock-file operator-dir))
     (with-open [channel (FileChannel/open
                          (.toPath (consumer-lock-file operator-dir))
@@ -434,7 +443,11 @@
       (try
         (if-let [file-lock (.tryLock channel)]
           (with-open [_held-lock file-lock]
-            (consume-operator-dir! operator-dir stream apply! accept-request?))
+            (consume-operator-dir! operator-dir
+                                   stream
+                                   apply!
+                                   accept-request?
+                                   destination-for))
           empty-pass-result)
         (catch Exception e
           (if (overlapping-file-lock? e)

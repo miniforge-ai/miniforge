@@ -66,17 +66,22 @@
                       (fn [opts]
                         (swap! starts conj opts)
                         ::consumer-handle)]
-          (#'sut/register-workflow-control! :workflow-a (atom {}))
-          (#'sut/register-workflow-control! :workflow-b (atom {}))
+          (#'sut/register-workflow-control! :workflow-a (atom {}) ::stream-a)
+          (#'sut/register-workflow-control! :workflow-b (atom {}) ::stream-b)
           (is (= 1 (count @starts)))
           (is (= 2 (count @registrations)))
           (is (= [::degradation-manager ::degradation-manager]
                  @degradation-managers))
-          (is (every? #(= #{:control-state} (set (keys (second %))))
+          (is (every? #(= #{:control-state :event-stream}
+                           (set (keys (second %))))
                       @registrations))
+          (is (= [::stream-a ::stream-b]
+                 (mapv #(get-in % [1 :event-stream]) @registrations)))
           (is (= ::operator-stream (:stream (first @starts))))
           (is (identical? operator/live-intervention-target?
-                          (:accept? (first @starts)))))))))
+                          (:accept? (first @starts))))
+          (is (identical? operator/live-intervention-stream
+                          (:stream-for (first @starts)))))))))
 
 (deftest consumer-startup-failure-deregisters-the-runner
   (testing "registration is rolled back before startup failure propagates"
@@ -100,5 +105,6 @@
             (is (thrown-with-msg?
                  clojure.lang.ExceptionInfo
                  #"consumer startup failed"
-                 (#'sut/register-workflow-control! :workflow-a (atom {}))))
+                 (#'sut/register-workflow-control!
+                  :workflow-a (atom {}) ::workflow-stream)))
             (is (= [:workflow-a] @deregistrations))))))))
