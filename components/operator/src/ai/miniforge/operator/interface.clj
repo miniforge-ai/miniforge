@@ -211,7 +211,9 @@
    lifecycle (auto-approving operator-driven request sources), publish
    every transition onto the stream, and advance the idempotency
    cursor. Options: :events-dir, :stream (required), :apply! (the D-3
-   application hook). Returns {:routed n :skipped n :anomalies n}."
+   application hook), and :accept? (an ownership predicate that defers
+   unowned requests without advancing the cursor). Returns
+   {:routed n :skipped n :anomalies n}."
   consumer/consume-pass!)
 
 (def start-operator-consumer!
@@ -233,20 +235,30 @@
 
 (def register-live-runner!
   "Register a live runner's control handles for a workflow id so
-   interventions can act on it. `handles`: {:control-state <atom>,
-   :degradation-manager <optional>}."
+   interventions can act on it. `handles`: {:control-state <atom>}."
   application/register-runner!)
+
+(def register-degradation-manager!
+  "Register the process-scoped degradation manager used by safe-mode
+   interventions."
+  application/register-degradation-manager!)
 
 (def deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
   application/deregister-runner!)
 
+(def live-intervention-target?
+  "Ownership predicate for a process-scoped operator consumer. Returns
+   true for process-global targets and for workflow targets registered
+   to a live runner in this process."
+  application/live-intervention-target?)
+
 (def apply-intervention!
   "The D-3 `:apply!` hook: apply one approved intervention to its live
    runner (control-state flags / no-effect verbs / safe-mode), advance
    the lifecycle approved→dispatched→applied→verified (or →failed with
-   a typed reason such as :no-live-runner), publishing every
-   transition. Pass as `:apply!` to [[consume-operator-events!]] /
+   a localized reason and typed `[:intervention/details :failure/code]`),
+   publishing every transition. Pass as `:apply!` to [[consume-operator-events!]] /
    [[start-operator-consumer!]]."
   application/apply-intervention!)
 

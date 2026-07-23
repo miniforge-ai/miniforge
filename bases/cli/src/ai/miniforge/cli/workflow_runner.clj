@@ -95,22 +95,56 @@
 ;; Meta-loop context — process-scoped, accumulates metrics across workflows
 
 (defonce ^:private meta-loop-ctx
-  ;; Lazily initialized on first workflow completion.
+  ;; Lazily initialized when the first governed workflow starts.
   ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
   (atom nil))
 
-(defn- get-or-init-meta-loop-ctx! []
+(defonce ^:private operator-consumer-handle
+  ;; Exactly one operator-directory consumer per process. Starting one per
+  ;; workflow races the shared on-disk cursor and can publish a target
+  ;; workflow's audit trail through the wrong workflow stream.
+  (atom nil))
+
+(defn- create-meta-loop-ctx!
+  []
+  (let [operator-stream (es/create-event-stream)
+        _supervisor (supervisory/attach! operator-stream)
+        ;; N15-6: route routing-causality through the witness surface.
+        ;; The correlator subscribes to the same stream as
+        ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
+        ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
+        _correlator (correlator/attach! operator-stream)]
+    (agent/create-meta-loop-context operator-stream)))
+
+(defn- get-or-init-meta-loop-ctx!
+  []
   (or @meta-loop-ctx
-      (let [operator-stream (es/create-event-stream)
-            _supervisor (supervisory/attach! operator-stream)
-            ;; N15-6: route routing-causality through the witness surface.
-            ;; The correlator subscribes to the same stream as
-            ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
-            ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
-            _correlator (correlator/attach! operator-stream)
-            ctx (agent/create-meta-loop-context operator-stream)]
-        (reset! meta-loop-ctx ctx)
-        ctx)))
+      (locking meta-loop-ctx
+        (or @meta-loop-ctx
+            (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
+
+(defn- ensure-operator-consumer!
+  [ctx]
+  (or @operator-consumer-handle
+      (locking operator-consumer-handle
+        (or @operator-consumer-handle
+            (reset! operator-consumer-handle
+                    (operator/start-operator-consumer!
+                     {:stream (:event-stream ctx)
+                      :apply! operator/apply-intervention!
+                      :accept? operator/live-intervention-target?}))))))
+
+(defn- register-workflow-control!
+  [workflow-id control-state]
+  (let [ctx (get-or-init-meta-loop-ctx!)
+        handles {:control-state control-state}]
+    (operator/register-degradation-manager! (:degradation-manager ctx))
+    (operator/register-live-runner! workflow-id handles)
+    (try
+      (ensure-operator-consumer! ctx)
+      (catch Throwable e
+        (operator/deregister-live-runner! workflow-id)
+        (throw e)))))
 
 (defn- trigger-meta-loop-after-workflow!
   "Record workflow outcome and run a background meta-loop cycle.
@@ -1144,19 +1178,9 @@
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)
           ;; Acquire the governed control path last, after every binding that
-          ;; may throw. If consumer startup itself fails, undo registration
-          ;; before propagating the error.
-          operator-consumer
-          (do
-            (operator/register-live-runner! workflow-id
-                                            {:control-state control-state})
-            (try
-              (operator/start-operator-consumer!
-               {:stream event-stream
-                :apply! operator/apply-intervention!})
-              (catch Throwable e
-                (operator/deregister-live-runner! workflow-id)
-                (throw e))))]
+          ;; may throw. The consumer is process-scoped; this workflow only
+          ;; registers its live control handles.
+          _operator-control (register-workflow-control! workflow-id control-state)]
       (try
         (when-not quiet
           (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
@@ -1182,7 +1206,6 @@
         (finally
           (progress-cleanup)
           (when command-poller-cleanup (command-poller-cleanup))
-          (operator/stop-operator-consumer! operator-consumer)
           (operator/deregister-live-runner! workflow-id)
           ;; Schedule deferred GC for this workflow's scratch ref — in finally
           ;; so it fires on both normal completion and exception exit paths.
