@@ -316,8 +316,9 @@
   "Apply an approved improvement.
 
    Returns {:success? bool :applied improvement-map} when the proposal is in
-   :proposed state, or nil if the proposal has already been applied or rejected
-   (idempotent no-op — callers must nil-check before destructuring)."
+   :proposed state, or nil if the proposal is not in :proposed state (already
+   :applied, :rejected, or missing) — callers must nil-check before
+   destructuring."
   [operator proposal-id]
   (proto/apply-improvement operator proposal-id))
 

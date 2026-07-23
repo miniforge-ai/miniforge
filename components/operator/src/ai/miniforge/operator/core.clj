@@ -345,10 +345,11 @@
           (let [rule (knowledge/create-zettel
                       (str "auto-rule-" (subs (str proposal-id) 0 8))
                       (:improvement/rationale applied)
+                      (:improvement/rationale applied)
                       :rule
-                      {:tags #{:auto-generated :operator}
-                       :source {:type :operator
-                                :proposal-id proposal-id}})]
+                      :tags #{:auto-generated :operator}
+                      :source {:type :operator
+                               :proposal-id proposal-id})]
             (knowledge/put-zettel knowledge-store rule)))
         (log/info logger :operator :operator/improvement-applied
                   {:data {:improvement-id proposal-id
