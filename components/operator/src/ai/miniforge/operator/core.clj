@@ -328,44 +328,52 @@
            (sort-by :improvement/created-at >))))
 
   (apply-improvement [_this proposal-id]
-    (when-let [proposal (get @proposals proposal-id)]
-      (let [applied-proposal (assoc proposal
-                                    :improvement/status :applied
-                                    :improvement/applied-at (System/currentTimeMillis))]
-        (swap! proposals assoc proposal-id applied-proposal)
-
-        ;; If it's a rule addition, add to knowledge base
-        (when (and (= :rule-addition (:improvement/type proposal))
+    (let [result (atom nil)]
+      (swap! proposals
+             (fn [state]
+               (let [proposal (get state proposal-id)]
+                 (if (= :proposed (:improvement/status proposal))
+                   (let [applied (assoc proposal
+                                        :improvement/status :applied
+                                        :improvement/applied-at (System/currentTimeMillis))]
+                     (reset! result applied)
+                     (assoc state proposal-id applied))
+                   (do (reset! result nil) state)))))
+      (when-let [applied @result]
+        (when (and (= :rule-addition (:improvement/type applied))
                    knowledge-store)
           (let [rule (knowledge/create-zettel
                       (str "auto-rule-" (subs (str proposal-id) 0 8))
-                      (:improvement/rationale proposal)
+                      (:improvement/rationale applied)
                       :rule
                       {:tags #{:auto-generated :operator}
                        :source {:type :operator
                                 :proposal-id proposal-id}})]
             (knowledge/put-zettel knowledge-store rule)))
-
         (log/info logger :operator :operator/improvement-applied
                   {:data {:improvement-id proposal-id
-                          :improvement-type (:improvement/type proposal)}})
-
+                          :improvement-type (:improvement/type applied)}})
         {:success? true
-         :applied applied-proposal})))
+         :applied applied})))
 
   (reject-improvement [_this proposal-id reason]
-    (when-let [proposal (get @proposals proposal-id)]
-      (let [rejected-proposal (assoc proposal
-                                     :improvement/status :rejected
-                                     :improvement/rejected-at (System/currentTimeMillis)
-                                     :improvement/rejection-reason reason)]
-        (swap! proposals assoc proposal-id rejected-proposal)
-
+    (let [result (atom nil)]
+      (swap! proposals
+             (fn [state]
+               (let [proposal (get state proposal-id)]
+                 (if (= :proposed (:improvement/status proposal))
+                   (let [rejected (assoc proposal
+                                         :improvement/status :rejected
+                                         :improvement/rejected-at (System/currentTimeMillis)
+                                         :improvement/rejection-reason reason)]
+                     (reset! result rejected)
+                     (assoc state proposal-id rejected))
+                   (do (reset! result nil) state)))))
+      (when-let [rejected @result]
         (log/info logger :operator :operator/improvement-rejected
                   {:data {:improvement-id proposal-id
                           :reason reason}})
-
-        rejected-proposal))))
+        rejected))))
 
 ;; Implement WorkflowObserver to receive workflow events
 (extend-type SimpleOperator
