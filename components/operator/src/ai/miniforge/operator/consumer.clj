@@ -62,6 +62,7 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io])
   (:import
+   [java.nio.channels FileChannel]
    [java.nio.file Files StandardCopyOption]
    [java.time Instant]
    [java.util.concurrent Executors ScheduledExecutorService ThreadFactory TimeUnit]))
@@ -87,17 +88,25 @@
   #{:tui :native-app})
 
 (def ^:private cursor-file-name ".processed")
+(def ^:private consumer-lock-file-name ".consumer.lock")
 
 (def ^:private empty-cursor
   {:schema-version 1
    :processed-intervention-ids #{}
    :processed-files #{}})
 
+(def ^:private empty-pass-result
+  {:routed 0 :skipped 0 :anomalies 0})
+
 ;; ── Processed cursor — the idempotency manifest ────────────────────────────
 
 (defn- cursor-file
   ^java.io.File [operator-dir]
   (io/file operator-dir cursor-file-name))
+
+(defn- consumer-lock-file
+  ^java.io.File [operator-dir]
+  (io/file operator-dir consumer-lock-file-name))
 
 (defn read-cursor
   "Read the processed cursor from `operator-dir`. A missing or
@@ -200,6 +209,26 @@
   [acc intervention-id]
   (update acc :cursor update :processed-intervention-ids conj intervention-id))
 
+(defn- remember-file
+  [acc file-name]
+  (update acc :cursor update :processed-files conj file-name))
+
+(defn- accept-every-request?
+  [_event]
+  true)
+
+(defn- transition-succeeded?
+  [result]
+  (true? (:success? result)))
+
+(defn- overlapping-file-lock?
+  "Babashka does not expose OverlappingFileLockException as a resolvable
+   catch class, so identify this one contention signal by its JVM class
+   name and rethrow every other exception."
+  [e]
+  (= "java.nio.channels.OverlappingFileLockException"
+     (.getName (class e))))
+
 (defn- event->request
   "Extract the InterventionRequest fields from a parsed event map.
    Only the request-identity fields are trusted from the wire; state
@@ -261,6 +290,18 @@
                                :source/file file-name
                                :anomaly anomaly-data))))
 
+(defn- governed-request-event
+  "Build the governed audit event from the server-created intervention.
+   The wire event contributes only its valid source identity; client-claimed
+   lifecycle state, timestamps, workflow routing, and sequence are ignored."
+  [stream event created]
+  (let [workflow-id (intervention-workflow-id created)
+        envelope (es/intervention-requested stream workflow-id created)]
+    (assoc envelope
+           :event/id (or (:event/id event) (:event/id envelope))
+           :event/timestamp (or (:event/timestamp event)
+                                (:event/timestamp envelope)))))
+
 ;; ── Single-event routing ───────────────────────────────────────────────────
 
 (defn- route-intervention!
@@ -271,30 +312,14 @@
     (if (anomaly/anomaly? created)
       (do (publish-anomaly! stream file-name created)
           nil)
-      ;; Republish the original request event into the governed stream with a
-      ;; freshly allocated sequence number while preserving source identity.
-      (let [workflow-id (or (intervention-workflow-id created)
-                              (:workflow/id event))
-              envelope (es/create-envelope stream
-                                           intervention-requested-event-type
-                                           workflow-id
-                                           (or (:message event) ""))
-              governed-event (merge envelope event
-                                      {:event/id (or (:event/id event)
-                                                     (:event/id envelope))
-                                       :event/timestamp
-                                       (or (:event/timestamp event)
-                                           (:event/timestamp envelope))
-                                       :event/sequence-number
-                                       (:event/sequence-number envelope)
-                                       :workflow/id workflow-id})
-              _ (es/publish! stream governed-event)
-              gate (if (contains? auto-approve-request-sources
-                                  (:intervention/request-source created))
-                     (intervention/approve created)
-                     (intervention/start-approval created))
-              gated (:intervention gate)]
-          (if-not (:success? gate)
+      (let [governed-event (governed-request-event stream event created)
+            _ (es/publish! stream governed-event)
+            gate (if (contains? auto-approve-request-sources
+                                (:intervention/request-source created))
+                   (intervention/approve created)
+                   (intervention/start-approval created))
+            gated (:intervention gate)]
+          (if-not (transition-succeeded? gate)
             (do
               (publish-anomaly!
                stream file-name
@@ -312,25 +337,9 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Consumption pass
 
-(defn consume-pass!
-  "Run one consumption pass over `{events-dir}/operator/`.
-
-   Options:
-   - :events-dir — base events directory (default ~/.miniforge/events)
-   - :stream     — the governed event stream to publish into (required)
-   - :apply!     — optional `(fn [stream intervention])` invoked for
-                   each newly `:approved` intervention (the D-3
-                   application layer). Absent → accepted interventions
-                   stop at `:approved`.
-
-   Returns {:routed <n> :skipped <n> :anomalies <n>} for the pass.
-   Idempotent: files and intervention ids recorded in the cursor are
-   never routed twice, across passes and process restarts."
-  [{:keys [events-dir stream apply!]}]
-  (let [operator-dir (if events-dir
-                       (es/operator-dir events-dir)
-                       (es/operator-dir))
-        cursor (read-cursor operator-dir)
+(defn- consume-operator-dir!
+  [operator-dir stream apply! accept?]
+  (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
                    (remove #(contains? (:processed-files cursor)
                                        (.getName ^java.io.File %))))
@@ -339,7 +348,7 @@
          (fn [acc ^java.io.File f]
            (let [file-name (.getName f)
                  raw (es/read-event-file f)
-                 acc (update acc :cursor update :processed-files conj file-name)]
+                 remembered-file (remember-file acc file-name)]
              (cond
                (nil? raw)
                (do (publish-anomaly! stream file-name
@@ -348,10 +357,10 @@
                                       (messages/t :consumer/unreadable-event
                                                   {:file file-name})
                                       {:source/file file-name}))
-                   (update acc :anomalies inc))
+                   (update remembered-file :anomalies inc))
 
                (not= intervention-requested-event-type (:event/type raw))
-               (update acc :skipped inc)
+               (update remembered-file :skipped inc)
 
                :else
                ;; Revive typed identity fields before dedup + routing so
@@ -368,16 +377,20 @@
                        :invalid-input
                        (messages/t :consumer/invalid-identity {:file file-name})
                        {:source/file file-name}))
-                     (update acc :anomalies inc))
+                     (update remembered-file :anomalies inc))
+
+                   (not (accept? event))
+                   acc
 
                    (contains? (get-in acc [:cursor :processed-intervention-ids])
                               (:intervention/id event))
-                   (update acc :skipped inc)
+                   (update remembered-file :skipped inc)
 
                    :else
                    (let [intervention-id (:intervention/id event)
                          routed-id (route-intervention! stream apply! event file-name)
-                         remembered (remember-intervention-id acc intervention-id)]
+                         remembered (remember-intervention-id remembered-file
+                                                              intervention-id)]
                      (if routed-id
                        (update remembered :routed inc)
                        (update remembered :anomalies inc))))))))
@@ -386,6 +399,47 @@
     (when (seq files)
       (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
+
+(defn consume-pass!
+  "Run one consumption pass over `{events-dir}/operator/`.
+
+   Options:
+   - :events-dir — base events directory (default ~/.miniforge/events)
+   - :stream     — the governed event stream to publish into (required)
+   - :apply!     — optional `(fn [stream intervention])` invoked for
+                   each newly `:approved` intervention (the D-3
+                   application layer). Absent → accepted interventions
+                   stop at `:approved`.
+   - :accept?    — optional ownership predicate. A false result defers
+                   the valid request without advancing either cursor,
+                   allowing the owning process to consume it.
+
+   The file lock serializes cursor read → effect → cursor write across
+   processes. Returns {:routed <n> :skipped <n> :anomalies <n>}.
+   Files and accepted intervention ids recorded in the cursor are never
+   routed twice across passes and process restarts."
+  [{:keys [events-dir stream apply! accept?]}]
+  (let [operator-dir (if events-dir
+                       (es/operator-dir events-dir)
+                       (es/operator-dir))
+        accept-request? (if-some [predicate accept?]
+                          predicate
+                          accept-every-request?)]
+    (io/make-parents (consumer-lock-file operator-dir))
+    (with-open [channel (FileChannel/open
+                         (.toPath (consumer-lock-file operator-dir))
+                         (into-array java.nio.file.OpenOption
+                                     [java.nio.file.StandardOpenOption/CREATE
+                                      java.nio.file.StandardOpenOption/WRITE]))]
+      (try
+        (if-let [file-lock (.tryLock channel)]
+          (with-open [_held-lock file-lock]
+            (consume-operator-dir! operator-dir stream apply! accept-request?))
+          empty-pass-result)
+        (catch Exception e
+          (if (overlapping-file-lock? e)
+            empty-pass-result
+            (throw e)))))))
 
 ;; ── Polling lifecycle ──────────────────────────────────────────────────────
 
