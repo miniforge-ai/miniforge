@@ -49,6 +49,10 @@
                                           "training-capture"
                                           "tui-views"
                                           "web-dashboard"
+                                          ;; Minibench orchestration projection: consumed via the
+                                          ;; component interface + bb task (no CLI wiring yet), so
+                                          ;; static analysis doesn't see the dependency.
+                                          "workbench-orchestration-adapter"
                                           "workflow-chain-deployment"
                                           "workflow-chain-software-factory"
                                           "workflow-compliance-scanner"

@@ -1,0 +1,119 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:schema_version "state_var_registry/v1"
+ :registry_id "miniforge-orchestration-state-vars"
+ :version "2026.07.19.1"
+ :product "miniforge"
+ :state_vars
+ [{:id "miniforge.workflow.machine_authoritative"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "workflow"
+   :kind "integrity"
+   :description "The observed phase history is a path through the single authoritative execution machine and the terminal projection is legal (N2 §2.1-§2.3, §3.1)."
+   :value_type "boolean"
+   :thresholds {:pass 1.0 :fail 0.0}
+   :evidence_requirements {:required_refs ["workflow-run" "workflow-phase-history"]
+                           :min_count 1
+                           :must_include_source_role true}
+   :score_components ["legal_transition_rate" "terminal_phase_legal" "observed_transitions"]
+   :gate_effects {:fail "blocks_transition"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}
+
+  {:id "miniforge.workflow.runs_resolved"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "workflow"
+   :kind "sufficiency"
+   :description "The fraction of workflow runs at the snapshot boundary that reached a terminal lifecycle status - completed, failed, or cancelled per N2 §2.2-§2.3. Dangling runs are excluded from snapshots."
+   :value_type "number"
+   :thresholds {:pass 1.0 :warn 0.8}
+   :evidence_requirements {:required_refs ["workflow-run"]
+                           :min_count 1
+                           :must_include_source_role true}
+   :score_components ["resolved_runs" "total_runs" "dangling_runs"]
+   :gate_effects {:warn "marks_low_confidence" :fail "marks_low_confidence"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}
+
+  {:id "miniforge.gate.critical_violations_block"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "gate"
+   :kind "compliance"
+   :description "Every recorded PolicyEvaluation for the run that carries a critical violation has a blocking failed outcome (N4 §3 gate execution contract, §3.3 violation schema)."
+   :value_type "boolean"
+   :thresholds {:pass 1.0 :fail 0.0}
+   :evidence_requirements {:required_refs ["policy-evaluation"]
+                           :min_count 0
+                           :must_include_source_role true}
+   :score_components ["critical_evaluations" "blocking_evaluations" "unblocked_evaluations"]
+   :gate_effects {:fail "blocks_transition"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}
+
+  {:id "miniforge.policy.evaluations_recorded"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "policy"
+   :kind "presence"
+   :description "A run whose observed phase history traversed the verify phase has at least one recorded PolicyEvaluation (N4 §3 gate execution contract; N2 §2.4 lifecycle events)."
+   :value_type "boolean"
+   :thresholds {:pass 1.0 :fail 0.0}
+   :evidence_requirements {:required_refs ["policy-evaluation"]
+                           :min_count 0
+                           :must_include_source_role true}
+   :score_components ["policy_evaluations" "verify_traversed"]
+   :gate_effects {:fail "marks_low_confidence"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}
+
+  {:id "miniforge.attention.items_actioned"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "attention"
+   :kind "quality"
+   :description "The fraction of AttentionItems derived for the run that are resolved at the snapshot boundary (N5-delta-1 §3.1, §5)."
+   :value_type "number"
+   :thresholds {:pass 1.0 :warn 0.8}
+   :evidence_requirements {:required_refs ["attention-item"]
+                           :min_count 0
+                           :must_include_source_role true}
+   :score_components ["actioned_items" "total_items" "open_items"]
+   :gate_effects {:warn "marks_low_confidence" :fail "marks_low_confidence"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}
+
+  {:id "miniforge.decision.queue_drained"
+   :version "1.0.0"
+   :product "miniforge"
+   :area "decision"
+   :kind "sufficiency"
+   :description "DecisionCards and InterventionRequests bound to the run are resolved or settled at the snapshot boundary (N5-delta-3 §2.4; N5-delta-supervisory-control-plane §3.3)."
+   :value_type "number"
+   :thresholds {:pass 1.0 :warn 0.8}
+   :evidence_requirements {:required_refs ["decision-card" "intervention-request"]
+                           :min_count 0
+                           :must_include_source_role true}
+   :score_components ["resolved_decisions" "total_decisions"
+                      "settled_interventions" "total_interventions"]
+   :gate_effects {:warn "marks_low_confidence" :fail "marks_low_confidence"}
+   :lifecycle "experimental"
+   :owner "miniforge/supervisory-state"}]}

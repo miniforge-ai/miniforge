@@ -60,7 +60,7 @@
                          "ai.miniforge.phase.handoff-test"
                          "ai.miniforge.tool-registry.integration-test"
                          "ai.miniforge.self-healing.backend-health-test"
-                         "ai.miniforge.tui-views.subscription-test"
+                         "ai.miniforge.tui-views.subscription-integration-test"
                          "ai.miniforge.tui-engine.core-test"
                          "ai.miniforge.web-dashboard.interface-test"
                          "ai.miniforge.tui-views.pr-views-test"

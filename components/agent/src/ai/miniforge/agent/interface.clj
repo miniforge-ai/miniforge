@@ -32,6 +32,7 @@
    [ai.miniforge.agent.interface.specialized :as specialized]
    [ai.miniforge.agent.interface.supervision :as supervision]
    [ai.miniforge.agent.interface.watchdog :as watchdog]
+   [ai.miniforge.agent.result-boundary :as result-boundary]
    [ai.miniforge.agent.tool-supervisor :as tool-supervisor]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -718,3 +719,55 @@
   "Return the captured session ID string, or nil if not yet captured.
    See `ai.miniforge.agent.stream-watchdog/get-session-id`."
   watchdog/get-session-id)
+
+;------------------------------------------------------------------------------ Layer 6
+;; Phase-result-level timeout predicates
+;;
+;; `stream-idle-error?` / `network-drop-error?` / `backend-timeout-error?` read
+;; the NORMALIZED boundary (output of `normalize-llm-result`). The predicates
+;; below read PHASE RESULT MAPS — the fully-assembled results returned by a
+;; role's invoke-fn (e.g. what `timeout-only-error-result` and
+;; `build-review-result` return). Phase-software-factory holds the phase result,
+;; not the intermediate normalized map; these predicates let it branch on
+;; infra-timeout results without reaching into role internals.
+;;
+;; Design note — why two levels?
+;; The 2026-06-05 dogfood (adhoc-944448986) showed that predicting timeout from
+;; the PARSED review (`timeout-only-review?`) misses the nil-parse path: when
+;; the LLM errors before producing content there is nothing to parse, so the
+;; parsed-review predicate silently returns false and the framework synthesizes
+;; a false `:rejected`. The phase-result predicates here catch that path at the
+;; role boundary BEFORE any parse attempt, routing infra timeouts to
+;; `timeout-only-error-result` (infra exit) instead of a synthesized rejection.
+
+(def stream-idle-in-result?
+  "True when a phase result map (output of a role's invoke-fn, NOT a
+   normalized boundary) carries a stream-idle indicator.
+
+   Uses a three-path cascade (most-to-least specific):
+   1. `[:error :data :timeout :type]` — primary: standard production shape
+      for any role that calls `error-response` / `timeout-only-error-result`.
+   2. `[:timeout :type]` — secondary: direct on the result map for alternate
+      error shapes that skip the `:error/:data` wrapper.
+   3. Message-channel string markers on `[:error :type]` / `[:type]`
+      containing 'stream-idle' — covers JSON/transit round-trips where
+      keywords serialise to strings.
+
+   Use when the consumer holds the fully-assembled phase result (e.g.
+   phase-software-factory inspecting a reviewer or implementer result for
+   infra-timeout routing). Distinct from `stream-idle-error?`, which reads
+   the normalized boundary (result of `normalize-llm-result`).
+
+   Symmetric twin of `network-drop-in-result?`."
+  result-boundary/stream-idle-in-result?)
+
+(def network-drop-in-result?
+  "True when a phase result map (output of a role's invoke-fn, NOT a
+   normalized boundary) carries a network-drop indicator.
+
+   Same three-path cascade as `stream-idle-in-result?`, checking for
+   `:network-drop` type. Route to the auto-resumer (PR-C) rather than
+   the backend-timeout retry path when this fires.
+
+   Symmetric twin of `stream-idle-in-result?`."
+  result-boundary/network-drop-in-result?)

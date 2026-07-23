@@ -24,7 +24,7 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.interface :as es]))
 
-(defn- stream [] (es/create-event-stream))
+(defn- stream [] (es/create-event-stream {:sinks []}))
 
 (deftest single-tool-call-carries-name
   (testing "single tool name from a Claude-style tool_use block"

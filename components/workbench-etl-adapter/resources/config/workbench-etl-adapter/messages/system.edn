@@ -1,0 +1,32 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+{:workbench-etl-adapter/system
+ {:evidence/run-status "pipeline status {status}"
+  :evidence/stage-status "{stage} status {status}"
+  :evidence/no-stage-runs "no stage runs recorded; execution stopped before the first stage"
+  :evidence/quality-summary "{passed}/{total} records passed"
+  :finding/run-incomplete "Pipeline run did not complete"
+  :finding/stage-incomplete "One or more pipeline stages did not complete"
+  :finding/quality-failed "One or more evaluated records failed data-quality rules"
+  :failure/missing-run "ETL workbench projection requires a pipeline-run result"
+  :failure/missing-variant "ETL workbench projection requires experiment-id and label"
+  :failure/invalid-change "Candidate resolved-run configuration must differ from baseline at exactly one non-secret factor"
+  :failure/invalid-baseline "ETL workbench baseline factor values must be a map"
+  :failure/invalid-snapshot "ETL adapter emitted an invalid workbench_snapshot/v1"
+  :failure/invalid-registry "ETL adapter state-variable registry is invalid"}}

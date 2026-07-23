@@ -62,27 +62,27 @@
    [:read-only?     :boolean]])
 
 (def ExecutionPlanSchema
-  "Schema for a fully-specified execution plan.
+  "Schema for an execution plan.
 
    Fields:
    - :image-digest      Content-addressed container image (sha256:...).
    - :command           Argv vector, e.g. [\"bb\" \"run\" \"task\"].
    - :mounts            Vector of mount maps (see MountSchema).
    - :env               String->string environment variable map.
-   - :secrets-refs      Vector of secret reference identifiers (strings).
-   - :network-profile   One of the network-profiles keywords.
-   - :time-limit-ms     Wall-clock timeout in milliseconds.
-   - :memory-limit-mb   RSS memory ceiling in mebibytes.
+   - :secrets-refs      Optional vector of secret reference identifiers.
+   - :network-profile   Optional network-profiles keyword.
+   - :time-limit-ms     Optional wall-clock timeout in milliseconds.
+   - :memory-limit-mb   Optional RSS memory ceiling in mebibytes.
    - :trust-level       One of the trust-levels keywords."
   [:map
    [:image-digest    :string]
    [:command         [:vector :string]]
    [:mounts          [:vector MountSchema]]
    [:env             [:map-of :string :string]]
-   [:secrets-refs    [:vector :string]]
-   [:network-profile (into [:enum] network-profiles)]
-   [:time-limit-ms   :int]
-   [:memory-limit-mb :int]
+   [:secrets-refs {:optional true} [:vector :string]]
+   [:network-profile {:optional true} (into [:enum] network-profiles)]
+   [:time-limit-ms {:optional true} [:int {:min 1}]]
+   [:memory-limit-mb {:optional true} [:int {:min 1}]]
    [:trust-level     (into [:enum] trust-levels)]])
 
 ;------------------------------------------------------------------------------ Layer 2

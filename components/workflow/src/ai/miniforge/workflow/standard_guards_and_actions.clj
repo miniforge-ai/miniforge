@@ -61,13 +61,18 @@
    backend/stream death, or dropped network. A retry after backoff CAN clear
    these; they are not evidence the work is wrong. Today still terminal (kept
    in `terminal-verdicts`); PR-B routes them to retry-same-phase against a
-   dedicated infra-retry budget instead of the redirect/work budget."
+   dedicated infra-retry budget instead of the redirect/work budget.
+
+   :phase/timeout is included here: it covers FSM-level phase timeouts
+   (stream-idle, wall-clock cap) — transient in the same sense as a
+   backend-timeout, so the infra-retry machinery applies."
   #{:verify/timeout
     :verify/rate-limited
     :implement/rate-limited
     :implement/network-dropped
     :implement/backend-timeout
-    :review/backend-timeout})
+    :review/backend-timeout
+    :phase/timeout})
 
 (def no-op-verdicts
   "EVIDENCE-OF-ABSENCE failures — the work produced nothing actionable, so a
@@ -139,7 +144,10 @@
    dedicated infra budget — not the redirect/work budget. Once the budget is
    spent this returns false and the verdict falls through to
    `verdict-terminal?` → `:failed` (infra verdicts are still in
-   `terminal-verdicts`). Fable §2.4."
+   `terminal-verdicts`). Fable §2.4.
+
+   :phase/timeout verdicts are covered — they land in `infrastructure-verdicts`
+   and thus participate in infra-retry before falling through to terminal."
   [state event]
   (and (contains? infrastructure-verdicts (:phase/verdict event))
        (< (get (fsm/context state) :infra-retry-count 0)

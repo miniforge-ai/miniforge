@@ -66,6 +66,7 @@
         ;; Event streaming and observability
         ai.miniforge/event-stream {:local/root "../../components/event-stream"}
         ai.miniforge/supervisory-state {:local/root "../../components/supervisory-state"}
+        ai.miniforge/workbench-orchestration-adapter {:local/root "../../components/workbench-orchestration-adapter"}
         ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ;; Self-healing: workaround detection, backend health tracking

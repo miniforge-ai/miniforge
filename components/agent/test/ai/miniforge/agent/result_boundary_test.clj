@@ -183,3 +183,53 @@
       (is (= :timeout (get-in result [:error :data :stop-reason])))
       (is (= 3 (get-in result [:error :data :num-turns])))
       (is (= 17 (get-in result [:metrics :tokens]))))))
+
+;; -------------------------------------------------------------------------- phase-result timeout predicates
+;;
+;; `stream-idle-in-result?` / `network-drop-in-result?` read fully-assembled
+;; phase result maps (NOT normalized boundaries) through a three-path
+;; cascade. Pin every supported shape so routing regressions — the
+;; 2026-06-05 `timeout-only-review?` mis-classification was exactly this
+;; kind of shape drift — flip a test instead of a dogfood run.
+
+(deftest in-result-predicates-cover-the-three-path-cascade
+  (testing "path 1 — [:error :data :timeout :type] keyword (production
+            error-response shape)"
+    (is (sut/stream-idle-in-result?
+         {:error {:data {:timeout {:type :stream-idle}}}}))
+    (is (sut/network-drop-in-result?
+         {:error {:data {:timeout {:type :network-drop}}}})))
+
+  (testing "path 2 — [:timeout :type] keyword (unwrapped error shapes)"
+    (is (sut/stream-idle-in-result? {:timeout {:type :stream-idle}}))
+    (is (sut/network-drop-in-result? {:timeout {:type :network-drop}})))
+
+  (testing "path 3 — string markers after JSON/transit round-trips, on the
+            timeout paths and the top-level type fields"
+    (is (sut/stream-idle-in-result?
+         {:error {:data {:timeout {:type "stream-idle"}}}}))
+    (is (sut/stream-idle-in-result? {:timeout {:type "stream-idle-timeout"}}))
+    (is (sut/stream-idle-in-result? {:error {:type "adaptive stream-idle limit"}}))
+    (is (sut/stream-idle-in-result? {:type "stream-idle"}))
+    (is (sut/network-drop-in-result? {:error {:type "network-drop detected"}})))
+
+  (testing "keyword markers outrank string markers when both are present"
+    (is (sut/stream-idle-in-result?
+         {:error {:data {:timeout {:type "network-drop"}}}
+          :timeout {:type :stream-idle}})
+        "a keyword on the secondary path beats a string on the primary"))
+
+  (testing "the twins never both fire on one result"
+    (let [r {:error {:data {:timeout {:type :stream-idle}}}}]
+      (is (sut/stream-idle-in-result? r))
+      (is (not (sut/network-drop-in-result? r)))))
+
+  (testing "negatives — no marker, unrelated markers, non-string/keyword types"
+    (doseq [r [{}
+               {:error {:data {}}}
+               {:timeout {:type :hard-limit}}
+               {:error {:type "rate-limit"}}
+               {:timeout {:type 42}}
+               {:status :failed}]]
+      (is (not (sut/stream-idle-in-result? r)) (pr-str r))
+      (is (not (sut/network-drop-in-result? r)) (pr-str r)))))

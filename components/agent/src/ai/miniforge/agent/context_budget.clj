@@ -59,28 +59,56 @@
    - `:shed-count` — number of sheddable units (e.g. inlined file bodies).
      Zero means nothing to shed, so an over-budget prompt is irreducibly
      over.
+   - `:max-inline-fraction` — ceiling on the eagerly-inlined form as a
+     fraction of the effective window (default 1.0 = shed only on window
+     overflow). Window-FIT alone is a trap: the 2026-07-21 dogfood sent a
+     planner prompt at 99.2% of the effective window — it fit, and the turn
+     could not complete inside the phase timeout. Roles that inline large
+     bodies should cap well below 1.0; the shed keeps the bodies reachable
+     via `context_read`, so shedding early costs a fetch, not information.
 
    Returns {:user-prompt :shed? :over-after-shed? :window :reserve
-            :effective-window :reserve-clamped? :est-full :est-final
-            :file-count}; `:over-after-shed?` marks an irreducible overflow."
-  [{:keys [effective-system model reserve build-full build-shed shed-count]}]
+            :effective-window :reserve-clamped? :inline-cap :est-full
+            :est-final :file-count}; `:over-after-shed?` marks an
+   irreducible overflow of the WINDOW (not of the inline cap)."
+  [{:keys [effective-system model reserve build-full build-shed shed-count
+           max-inline-fraction]
+    :or   {max-inline-fraction 1.0}}]
   (let [window      (llm/context-window-for-model-id model)
-        eff-reserve (when window (min reserve (quot window 2)))
-        clamped?    (boolean (and window (> reserve eff-reserve)))
+        ;; A misconfigured reserve (nil, non-numeric, NaN/Inf, negative) is
+        ;; treated as 0 — never crash prompt assembly, and never let a
+        ;; negative value INFLATE the effective window above the real one
+        ;; (which would wave genuinely overflowing prompts through).
+        ;; Extreme-but-numeric values (BigInt > Long/MAX) saturate at a
+        ;; ceiling far above any window instead of throwing on the cast;
+        ;; the window/2 clamp below governs the actual effect either way.
+        sane-reserve (if (and (number? reserve)
+                              (Double/isFinite (double reserve))
+                              (not (neg? (double reserve))))
+                       (long (min (double reserve) 1e15))
+                       0)
+        eff-reserve (when window (min sane-reserve (quot window 2)))
+        clamped?    (boolean (and window (> sane-reserve eff-reserve)))
         effective   (when window (- window eff-reserve))
+        inline-fraction (if (and (number? max-inline-fraction)
+                                 (Double/isFinite (double max-inline-fraction)))
+                          (-> (double max-inline-fraction) (max 0.0) (min 1.0))
+                          1.0)
+        inline-cap  (when effective (long (* effective inline-fraction)))
         est         (fn [user] (:estimated-input-tokens
                                 (llm/prompt-size-telemetry effective-system user)))
         full        (build-full)
         est-full    (est full)
-        base        {:window window :reserve reserve :effective-window effective
-                     :reserve-clamped? clamped?
+        base        {:window window :reserve sane-reserve :effective-window effective
+                     :reserve-clamped? clamped? :inline-cap inline-cap
                      :est-full est-full :file-count shed-count}]
     (cond
-      (or (nil? effective) (< est-full effective))
+      (or (nil? effective) (< est-full inline-cap))
       (merge base {:user-prompt full :shed? false :over-after-shed? false :est-final est-full})
 
-      (zero? shed-count)                 ; nothing left to shed — irreducibly over
-      (merge base {:user-prompt full :shed? false :over-after-shed? true :est-final est-full})
+      (zero? shed-count)                 ; nothing to shed — over only if past the window
+      (merge base {:user-prompt full :shed? false
+                   :over-after-shed? (>= est-full effective) :est-final est-full})
 
       :else
       (let [shed     (build-shed)

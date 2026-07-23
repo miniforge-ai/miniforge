@@ -36,7 +36,8 @@
              :verify/timeout :verify/rate-limited :release/zero-files
              :implement/rate-limited :implement/empty-diff
              :implement/already-implemented-invalid :implement/network-dropped
-             :review/backend-timeout :implement/backend-timeout}
+             :review/backend-timeout :implement/backend-timeout
+             :phase/timeout}
            sut/terminal-verdicts)
         "pins the exact terminal set so any future change is deliberate")))
 
@@ -50,6 +51,7 @@
   (testing "each terminal verdict classifies into its class"
     (is (= :infrastructure (sut/verdict-class :verify/timeout)))
     (is (= :infrastructure (sut/verdict-class :review/backend-timeout)))
+    (is (= :infrastructure (sut/verdict-class :phase/timeout)))
     (is (= :no-op (sut/verdict-class :implement/empty-diff)))
     (is (= :no-op (sut/verdict-class :release/zero-files)))
     (is (= :work-terminal (sut/verdict-class :stagnated)))
@@ -63,20 +65,32 @@
   (testing "guard still fires for every terminal verdict, not for :work ones"
     (is (true? (sut/verdict-terminal? {} {:phase/verdict :stagnated})))
     (is (true? (sut/verdict-terminal? {} {:phase/verdict :verify/timeout})))
+    (is (true? (sut/verdict-terminal? {} {:phase/verdict :phase/timeout})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict :repair-requested})))
     (is (false? (sut/verdict-terminal? {} {:phase/verdict nil})))))
+
 (deftest verdict-infra-retriable?-test
   (testing "infra verdict + infra budget left → retriable (retry same phase)"
+    ;; max-infra-retries is 1 (from EDN). count 0 < 1 → retriable.
     (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
                                              {:phase/verdict :verify/timeout})))
-    (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 2}
+    (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
                                              {:phase/verdict :implement/rate-limited})))
     (is (true? (sut/verdict-infra-retriable? {:_state :p}
                                              {:phase/verdict :review/backend-timeout}))
-        "absent counter treated as 0"))
-  (testing "infra verdict + budget spent (>= max 3) → not retriable → falls to terminal"
+        "absent counter treated as 0")
+    (is (true? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
+                                             {:phase/verdict :phase/timeout}))
+        "phase/timeout is an infra verdict — retriable when budget allows"))
+  (testing "infra verdict + budget spent (>= max) → not retriable → falls to terminal"
+    ;; max-infra-retries is 1 from EDN; fallback is 3 if EDN absent.
+    ;; count 1 >= 1 (EDN) or count 3 >= 3 (fallback) — both spent.
     (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 3}
-                                              {:phase/verdict :verify/timeout}))))
+                                              {:phase/verdict :verify/timeout}))
+        "count 3 is >= max in both EDN (1) and fallback (3) configurations")
+    (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 3}
+                                              {:phase/verdict :phase/timeout}))
+        "phase/timeout also falls to terminal once budget is spent"))
   (testing "non-infra verdict is never infra-retriable, regardless of budget"
     (is (false? (sut/verdict-infra-retriable? {:_state :p :infra-retry-count 0}
                                               {:phase/verdict :stagnated})))
