@@ -308,13 +308,13 @@
 (defn- route-intervention!
   "Create → approval-gate → (optional) apply. Returns the intervention
    id on success, or nil when the request was rejected as an anomaly."
-  [stream apply! event file-name]
+  [operator-stream destination apply! event file-name]
   (let [created (intervention/create-intervention (event->request event))]
     (if (anomaly/anomaly? created)
-      (do (publish-anomaly! stream file-name created)
+      (do (publish-anomaly! operator-stream file-name created)
           nil)
-      (let [governed-event (governed-request-event stream event created)
-            _ (es/publish! stream governed-event)
+      (let [governed-event (governed-request-event destination event created)
+            _ (es/publish! destination governed-event)
             gate (if (contains? auto-approve-request-sources
                                 (:intervention/request-source created))
                    (intervention/approve created)
@@ -323,16 +323,16 @@
           (if-not (transition-succeeded? gate)
             (do
               (publish-anomaly!
-               stream file-name
+               operator-stream file-name
                (anomaly/anomaly :invalid-input
                                 (:message gate)
                                 {:error (:error gate)
                                  :intervention/id (:intervention/id created)}))
               nil)
             (do
-              (publish-state-changed! stream gated)
+              (publish-state-changed! destination gated)
               (when (and apply! (= :approved (:intervention/state gated)))
-                (apply! stream gated))
+                (apply! destination gated))
               (:intervention/id created)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -390,7 +390,8 @@
                    :else
                    (let [intervention-id (:intervention/id event)
                          destination (or (stream-for event) stream)
-                         routed-id (route-intervention! destination
+                         routed-id (route-intervention! stream
+                                                        destination
                                                         apply!
                                                         event
                                                         file-name)

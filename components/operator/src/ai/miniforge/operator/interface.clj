@@ -236,7 +236,9 @@
 
 (def register-live-runner!
   "Register a live runner's control handles for a workflow id so
-   interventions can act on it. `handles`: {:control-state <atom>}."
+   interventions can act on it. `handles` must include
+   {:control-state <atom>} and should include :event-stream so governed
+   lifecycle events retain the workflow's sequence counter."
   application/register-runner!)
 
 (def register-degradation-manager!

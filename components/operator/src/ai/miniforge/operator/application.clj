@@ -78,7 +78,9 @@
 
 (defn register-runner!
   "Register a live runner's control handles for `workflow-id`.
-   `handles` must carry `:control-state`."
+   `handles` must carry `:control-state`; `:event-stream` enables the
+   process consumer to publish lifecycle events through this workflow's
+   sequence counter."
   [workflow-id handles]
   (when-not (and (map? handles)
                  (instance? clojure.lang.Atom (:control-state handles)))

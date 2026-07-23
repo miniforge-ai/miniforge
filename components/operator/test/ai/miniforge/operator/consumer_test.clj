@@ -195,6 +195,24 @@
             consumer/state-changed-event-type]
            (mapv :event/type (es/get-events workflow-stream))))))
 
+(deftest routed-request-anomalies-stay-on-the-operator-stream
+  (let [events-dir (temp-events-dir)
+        operator-stream (memory-stream)
+        workflow-stream (memory-stream)
+        source (es/read-event-file
+                (io/file (golden-dir) "pause.transit.json"))
+        invalid (assoc source :intervention/target-type :degradation)]
+    (stage-operator-file! events-dir "invalid.transit.json"
+                          (es/serialize-event invalid))
+    (is (= {:routed 0 :skipped 0 :anomalies 1}
+           (consumer/consume-pass!
+            {:events-dir events-dir
+             :stream operator-stream
+             :stream-for (constantly workflow-stream)})))
+    (is (= [consumer/anomaly-event-type]
+           (mapv :event/type (es/get-events operator-stream))))
+    (is (empty? (es/get-events workflow-stream)))))
+
 (deftest invalid-request-identities-are-rejected
   (let [valid {:event/id (random-uuid)
                :intervention/id (random-uuid)
