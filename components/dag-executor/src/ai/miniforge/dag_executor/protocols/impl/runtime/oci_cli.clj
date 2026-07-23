@@ -122,6 +122,27 @@
    never goes below this."
   5)
 
+(def default-exec-timeout-ms
+  "Ceiling on a single `docker exec` invocation (`execute!`). Five minutes
+   covers long-running agent commands while still bounding a hung pty or
+   container-namespace teardown. Companion follow-up to the 2026-05-16
+   dogfood fix: `acquire-environment!` was bounded by PR #895;
+   `execute!`, `release-environment!`, `copy-to!`, and `copy-from!`
+   are bounded here."
+  300000)
+
+(def default-copy-timeout-ms
+  "Ceiling on a `docker exec`-based file-copy operation (`copy-to!` /
+   `copy-from!`). Two minutes accommodates large workspace transfers
+   while preventing an indefinite hang if Docker stalls mid-pipe."
+  120000)
+
+(def default-release-timeout-ms
+  "Ceiling on container stop + remove during `release-environment!`.
+   Two minutes bounds the stop/rm sequence that can hang on pty orphans
+   or container-namespace teardown."
+  120000)
+
 (def container-name-prefix
   "Prefix for generated container names: <prefix><task-id-slice>."
   "miniforge-task-")
@@ -157,21 +178,40 @@
   [descriptor & args]
   (apply vector (descriptor/executable descriptor) args))
 
-(defn run-runtime
-  "Execute a runtime CLI command and return the result."
-  [descriptor & args]
+(defn- run-runtime-timed
+  "Execute a runtime CLI command with an optional per-subprocess waitFor
+   deadline.
+
+   When `timeout-ms` is nil or <= 0 the call is unbounded (identical to the
+   pre-fix behaviour). On timeout the process tree is destroyed forcibly and
+   {:exit 124 :out \"\" :err <message>} is returned; callers that check
+   `(zero? :exit)` surface this as a command failure without special-casing."
+  [timeout-ms descriptor & args]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
           stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
       (try
-        (let [exit-code (.waitFor process)
-              stdout-bytes @stdout-fut
-              stderr-bytes @stderr-fut]
-          {:exit exit-code
-           :out (String. ^bytes stdout-bytes "UTF-8")
-           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (let [timed?     (and timeout-ms (pos? timeout-ms))
+              completed? (if timed?
+                           (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+                           (do (.waitFor process) true))]
+          (if-not completed?
+            (do
+              (runtime-process/destroy-process-tree! process)
+              (future-cancel stdout-fut)
+              (future-cancel stderr-fut)
+              (binding [*out* *err*]
+                (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
+              {:exit 124
+               :out  ""
+               :err  (messages/t :oci/command-timeout {:ms timeout-ms})})
+            (let [stdout-bytes @stdout-fut
+                  stderr-bytes @stderr-fut]
+              {:exit (.exitValue process)
+               :out  (String. ^bytes stdout-bytes "UTF-8")
+               :err  (String. ^bytes stderr-bytes "UTF-8")})))
         (catch InterruptedException e
           (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
@@ -181,38 +221,79 @@
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out ""})))
 
-(defn run-runtime-process
-  "Execute a runtime CLI command with optional stdin bytes."
-  [descriptor args & {:keys [stdin-bytes]}]
+(defn run-runtime
+  "Execute a runtime CLI command and return the result.
+   Internal callers that need a bounded deadline use `run-runtime-timed`
+   directly; this public entry point preserves the unbounded signature
+   for backward-compatibility with call sites already covered by an outer
+   `with-acquisition-timeout` guard."
+  [descriptor & args]
+  (apply run-runtime-timed nil descriptor args))
+
+(defn- run-runtime-process-timed
+  "Execute a runtime CLI command with optional stdin bytes and an optional
+   per-subprocess waitFor deadline.
+
+   When `timeout-ms` is nil or <= 0 the call is unbounded. On timeout the
+   process tree is destroyed forcibly and a result with :exit 124 is returned
+   so callers that check `(zero? :exit)` surface it as a command failure."
+  [timeout-ms descriptor args & {:keys [stdin-bytes]}]
   (try
     (let [pb (ProcessBuilder. (into-array String (apply runtime-cmd descriptor args)))
           process (.start pb)
           stdout-fut (runtime-process/read-stream-future (.getInputStream process))
-          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))]
-      (when stdin-bytes
-        (with-open [stdin (.getOutputStream process)]
-          (.write stdin ^bytes stdin-bytes)))
+          stderr-fut (runtime-process/read-stream-future (.getErrorStream process))
+          stdin-fut  (when stdin-bytes
+                       (let [s (.getOutputStream process)]
+                         (future
+                           (try
+                             (.write s ^bytes stdin-bytes)
+                             (finally (.close s))))))]
       (try
-        (let [exit-code (.waitFor process)
-              stdout-bytes @stdout-fut
-              stderr-bytes @stderr-fut]
-          {:exit exit-code
-           :out-bytes stdout-bytes
-           :err-bytes stderr-bytes
-           :out (String. ^bytes stdout-bytes "UTF-8")
-           :err (String. ^bytes stderr-bytes "UTF-8")})
+        (let [timed?     (and timeout-ms (pos? timeout-ms))
+              completed? (if timed?
+                           (.waitFor process timeout-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+                           (do (.waitFor process) true))]
+          (if-not completed?
+            (do
+              (when stdin-fut (future-cancel stdin-fut))
+              (runtime-process/destroy-process-tree! process)
+              (future-cancel stdout-fut)
+              (future-cancel stderr-fut)
+              (binding [*out* *err*]
+                (println (messages/t :oci/command-timeout-log {:ms timeout-ms})))
+              {:exit      124
+               :out       ""
+               :out-bytes (byte-array 0)
+               :err       (messages/t :oci/command-timeout {:ms timeout-ms})
+               :err-bytes (byte-array 0)})
+            (let [stdout-bytes @stdout-fut
+                  stderr-bytes @stderr-fut]
+              {:exit      (.exitValue process)
+               :out-bytes stdout-bytes
+               :err-bytes stderr-bytes
+               :out       (String. ^bytes stdout-bytes "UTF-8")
+               :err       (String. ^bytes stderr-bytes "UTF-8")})))
         (catch InterruptedException e
+          (when stdin-fut (future-cancel stdin-fut))
           (runtime-process/destroy-process-tree! process)
           (future-cancel stdout-fut)
           (future-cancel stderr-fut)
           (.interrupt (Thread/currentThread))
-          {:exit 130
-           :err (or (ex-message e) (messages/t :oci/command-interrupted))
-           :out ""
+          {:exit      130
+           :err       (or (ex-message e) (messages/t :oci/command-interrupted))
+           :out       ""
            :out-bytes (byte-array 0)
            :err-bytes (byte-array 0)})))
     (catch Exception e
       {:exit 1 :err (.getMessage e) :out "" :out-bytes (byte-array 0) :err-bytes (byte-array 0)})))
+
+(defn run-runtime-process
+  "Execute a runtime CLI command with optional stdin bytes.
+   Internal callers that need a bounded deadline use `run-runtime-process-timed`
+   directly; this public entry point is unbounded for backward-compatibility."
+  [descriptor args & {:keys [stdin-bytes]}]
+  (run-runtime-process-timed nil descriptor args :stdin-bytes stdin-bytes))
 
 (defn shell-quote
   "Single-quote a shell argument."
@@ -264,14 +345,16 @@
   "Build resource limit arguments.
    Merges provided resources with the runtime's per-kind defaults from the
    registry."
-  [descriptor resources]
-  (let [merged (merge (runtime-default-resources descriptor) resources)]
-    (cond-> []
-      (:memory merged)
-      (into ["--memory" (:memory merged)])
+  ([descriptor resources]
+   (build-resource-args descriptor resources {}))
+  ([descriptor resources {:keys [omit-memory?]}]
+   (let [merged (merge (runtime-default-resources descriptor) resources)]
+     (cond-> []
+       (and (not omit-memory?) (:memory merged))
+       (into ["--memory" (:memory merged)])
 
-      (:cpu merged)
-      (into ["--cpus" (str (:cpu merged))]))))
+       (:cpu merged)
+       (into ["--cpus" (str (:cpu merged))])))))
 
 (defn build-security-args
   "Build security-hardening runtime args from an optional execution plan map.
@@ -338,24 +421,32 @@
 (defn create-container
   "Create and start a container.
 
-   execution-plan (optional) is a map conforming to
-   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema.  When
-   provided its :memory-limit-mb and :network-profile values take
-   precedence over the legacy `network` argument for those concerns.
-   All containers receive the standard security-hardening flags via
-   `build-security-args`.
+   When execution-plan is present, it is authoritative for plan-owned launch
+   settings: security flags, runtime filesystems, mounts, networking, time
+   limit, and command. Absent plan fields do not fall back to the legacy
+   `network` argument; a partial plan therefore means no explicit network
+   flag and uses the default keep-alive command when :command is absent.
+   Production launch plans conform to
+   ai.miniforge.dag-executor.execution-plan/ExecutionPlanSchema, while this
+   compatibility boundary also accepts partial plan maps.
 
    Returns {:container-id string :container-name string} on success."
   [descriptor container-name image workdir env-map resources network
    & {:keys [execution-plan]}]
-  (let [env-args      (build-env-args env-map)
-        resource-args (build-resource-args descriptor resources)
+  (let [effective-env (if (and (some? execution-plan)
+                               (contains? execution-plan :env))
+                        (:env execution-plan)
+                        env-map)
+        env-args      (build-env-args effective-env)
+        resource-args (build-resource-args
+                       descriptor resources
+                       {:omit-memory? (some? (:memory-limit-mb execution-plan))})
         security-args (build-security-args descriptor execution-plan)
         runtime-fs-args (build-runtime-fs-args descriptor workdir execution-plan)
         mount-args    (when (some? execution-plan)
                         (build-mount-args execution-plan))
-        ;; When an execution plan is present its network-profile drives the
-        ;; network arg; fall back to the plain `network` string otherwise.
+        ;; An execution plan is authoritative for networking. The legacy
+        ;; `network` argument applies only when no plan was supplied.
         network-args  (if (some? execution-plan)
                         [] ; network handled inside build-security-args
                         (when network ["--network" network]))
@@ -373,7 +464,7 @@
                               mount-args
                               env-args
                               resource-args
-                              [image "sleep" "infinity"])
+                              (into [image] (get execution-plan :command ["sleep" "infinity"])))
         result        (apply run-runtime descriptor cmd-args)]
     (if (zero? (:exit result))
       (result/ok {:container-id (str/trim (:out result))
@@ -393,8 +484,11 @@
                           env-args
                           [container-id]
                           cmd-args)
+        timeout-ms (if (contains? opts :timeout-ms)
+                     (:timeout-ms opts)
+                     default-exec-timeout-ms)
         start-time (System/currentTimeMillis)
-        result (apply run-runtime descriptor full-args)]
+        result (apply run-runtime-timed timeout-ms descriptor full-args)]
     (result/ok {:exit-code (:exit result)
                 :stdout (:out result)
                 :stderr (:err result)
@@ -409,9 +503,10 @@
                     (str "mkdir -p " (shell-quote parent) " && "))
         write-cmd (str (or mkdir-cmd "")
                        "cat > " (shell-quote remote-path))
-        result (run-runtime-process descriptor
-                                    ["exec" "-i" container-id "sh" "-c" write-cmd]
-                                    :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
+        result (run-runtime-process-timed default-copy-timeout-ms
+                                         descriptor
+                                         ["exec" "-i" container-id "sh" "-c" write-cmd]
+                                         :stdin-bytes (java.nio.file.Files/readAllBytes (.toPath source)))]
     (if (zero? (:exit result))
       (result/ok {:copied-bytes (.length source)})
       (result/err :copy-failed (:err result)))))
@@ -419,9 +514,10 @@
 (defn copy-from-container
   "Copy files from container to host."
   [descriptor container-id remote-path local-path]
-  (let [result (run-runtime-process descriptor
-                                    ["exec" container-id "sh" "-c"
-                                     (str "cat " (shell-quote remote-path))])
+  (let [result (run-runtime-process-timed default-copy-timeout-ms
+                                         descriptor
+                                         ["exec" container-id "sh" "-c"
+                                          (str "cat " (shell-quote remote-path))])
         dest (clojure.java.io/file local-path)]
     (if (zero? (:exit result))
       (do
@@ -435,12 +531,12 @@
 (defn stop-container
   "Stop a running container."
   [descriptor container-id timeout]
-  (run-runtime descriptor "stop" "-t" (str timeout) container-id))
+  (run-runtime-timed default-release-timeout-ms descriptor "stop" "-t" (str timeout) container-id))
 
 (defn remove-container
   "Remove a container (force)."
   [descriptor container-id]
-  (let [result (run-runtime descriptor "rm" "-f" container-id)]
+  (let [result (run-runtime-timed default-release-timeout-ms descriptor "rm" "-f" container-id)]
     (result/ok {:released? (zero? (:exit result))})))
 
 (defn inspect-container
@@ -456,6 +552,17 @@
                             :unknown)})
       (result/ok {:status :unknown :error (:err result)}))))
 
+(defn- normalize-image-id
+  "Normalize a runtime-printed image ID to the `sha256:<64hex>` digest form.
+   Docker prints IDs as `sha256:<hex>`; Podman prints the bare `<hex>`. The
+   digest gate and the evidence record both expect the prefixed form."
+  [id]
+  (when-let [id (some-> id str/trim not-empty)]
+    (let [id (str/lower-case id)]
+      (if (re-matches #"^[a-f0-9]{64}$" id)
+        (str "sha256:" id)
+        id))))
+
 (defn container-image-digest
   "Return the SHA256 image digest for a container, or nil on failure."
   [descriptor container-name]
@@ -464,8 +571,7 @@
                                       "inspect" container-name
                                       "--format" "{{.Image}}")]
       (when (zero? (:exit inspect-result))
-        (let [digest (str/trim (:out inspect-result))]
-          (when (seq digest) digest))))
+        (normalize-image-id (:out inspect-result))))
     (catch Exception _ nil)))
 
 (defn image-config-digest
@@ -480,7 +586,7 @@
                               "image" "inspect" image
                               "--format" "{{.Id}}")]
       (when (zero? (:exit result))
-        (some-> (:out result) str/trim not-empty)))
+        (normalize-image-id (:out result))))
     (catch Exception _ nil)))
 
 ;; ============================================================================
@@ -717,27 +823,25 @@
                                     :error-on-failure? true
                                     :error-prefix (messages/t :oci/bootstrap-failed)
                                     :sanitize? true)
-          clone-cmd (str "git clone --branch " branch " --single-branch "
-                         clone-url " " workdir)
+          clone-cmd ["git" "clone" "--branch" (str branch) "--single-branch" "--" clone-url workdir]
           result (-> (exec! clone-cmd)
                      ;; Use --local (not --global) since container rootfs is read-only
                      (chain-container-command
-                      #(exec! (str "git -C " workdir
-                                   " config user.email 'miniforge@miniforge.ai'")))
+                      #(exec! ["git" "-C" workdir "config" "user.email" "miniforge@miniforge.ai"]))
                      (chain-container-command
-                      #(exec! (str "git -C " workdir " config user.name 'miniforge'"))))]
+                      #(exec! ["git" "-C" workdir "config" "user.name" "miniforge"])))]
       (if (result/err? result)
         result
         (let [push-url-result (if token
-                                (exec! (str "git -C " workdir " remote set-url --push origin "
-                                            (authenticated-https-url https-url token host-kind)))
+                                (exec! ["git" "-C" workdir "remote" "set-url" "--push" "origin" "--"
+                                        (authenticated-https-url https-url token host-kind)])
                                 result)
               sha-r (chain-container-command
                      push-url-result
-                     #(exec! (str "git -C " workdir " rev-parse HEAD")))]
+                     #(exec! ["git" "-C" workdir "rev-parse" "HEAD"]))]
           (if (result/ok? sha-r)
             (let [base-sha (str/trim (get-in sha-r [:data :stdout] ""))]
-              (result/ok (cond-> {:base-branch branch}
+              (result/ok (cond-> {:base-branch (str branch)}
                            (seq base-sha) (assoc :base-sha base-sha))))
             sha-r))))
     (result/ok nil)))
@@ -746,10 +850,45 @@
 ;; Capsule security gate — runtime enforcement of the runtime-* policies
 ;; ============================================================================
 
+(defn- normalize-plan-env
+  "Normalize an env-config :env map to the string→string shape
+   ExecutionPlanSchema requires: keyword keys via `name`, values via `str`
+   (a numeric port or boolean flag becomes its printed form — the same
+   text the container would see on the wire). The plan is the canonical,
+   schema-conformant record of the launch, so both normalize here — once,
+   at the writer — rather than at every reader."
+  [env]
+  (into {}
+        (map (fn [[k v]] [(name k) (str v)]))
+        env))
+
+(defn build-launch-plan
+  "Assemble the execution plan for a pending launch from what the launch site
+   actually knows: the resolved image digest, the caller's mounts / env /
+   trust level from env-config, and the capsule's keep-alive command. Optional
+   fields (:time-limit-ms :memory-limit-mb :network-profile :secrets-refs)
+   pass through only when env-config carries them — absent fields stay absent
+   rather than being filled with guesses. The :env keys are normalized to
+   strings so the plan conforms to ExecutionPlanSchema.
+
+   This one plan is both what `check-plan-security` inspects and what
+   `create-container` receives as :execution-plan, so the plan the gate
+   checked is the plan that runs."
+  [image-digest env-config]
+  (cond-> {:image-digest image-digest
+           :command      ["sleep" "infinity"]
+           :mounts       (get env-config :mounts [])
+           :env          (normalize-plan-env (get env-config :env {}))
+           :trust-level  (get env-config :trust-level :untrusted)}
+    (:time-limit-ms env-config)   (assoc :time-limit-ms (:time-limit-ms env-config))
+    (:memory-limit-mb env-config) (assoc :memory-limit-mb (:memory-limit-mb env-config))
+    (:network-profile env-config) (assoc :network-profile (:network-profile env-config))
+    (:secrets-refs env-config)    (assoc :secrets-refs (:secrets-refs env-config))))
+
 (defn security-gate-check
   "Run the capsule-isolation security gate for a pending launch. Resolves the
    image's content-addressed digest via `digest-fn` (injected for testing),
-   synthesizes the plan the gate inspects (pinned digest + host mounts), and
+   builds the launch plan the gate inspects via `build-launch-plan`, and
    applies `plan-security/check-plan-security`. The host-path allowlist is the
    sandbox workdir (the only host path a well-formed plan mounts today).
 
@@ -757,10 +896,14 @@
    (a passing gate may still carry non-blocking :security/warnings — e.g. a
    non-rootless runtime in OSS), or `result/err :security-policy-violation`
    with the findings on a hard-stop. A nil digest fails closed (hard-stop),
-   since a plan with no pinned digest cannot satisfy require-image-digest-pin."
+   since a plan with no pinned digest cannot satisfy require-image-digest-pin.
+
+   A passing result also carries the checked `:launch-plan`;
+   `acquire-environment!` creates the container FROM that plan — its digest as
+   the immutable image reference, the plan itself as create-container's
+   :execution-plan."
   [descriptor image env-config digest-fn]
-  (let [plan            {:image-digest (digest-fn descriptor image)
-                         :mounts       (get env-config :mounts [])}
+  (let [plan            (build-launch-plan (digest-fn descriptor image) env-config)
         security-config {:host-path-allowlist #{(get env-config :workdir default-workdir)}
                          :rootless-action     plan-security/default-rootless-action}
         decision        (plan-security/check-plan-security plan descriptor security-config)]
@@ -768,29 +911,23 @@
       (result/err :security-policy-violation
                   (:anomaly/message decision)
                   {:security/findings (:security/findings decision)})
-      (result/ok (:output decision)))))
+      (result/ok (assoc (:output decision) :launch-plan plan)))))
 
 ;; ============================================================================
 ;; OciCliExecutor Record
 ;; ============================================================================
 
 (defrecord OciCliExecutor [config descriptor image network]
-  ;; Timeout-guard asymmetry: only `acquire-environment!` is wrapped in
-  ;; `with-acquisition-timeout`. The other shell-out paths in this
-  ;; record — `available?`, `execute!`, `release-environment!`,
-  ;; `copy-to!`, `copy-from!` — remain unbounded and can hit the same
-  ;; stuck-daemon failure mode. Acquire is wrapped first because it's
-  ;; the long-running step that surfaced in the 2026-05-16 dogfood
-  ;; (image pull + container create). Symmetric wrapping is a follow-up
-  ;; once `run-runtime-process` learns per-subprocess
-  ;; `(.waitFor ms TimeUnit/MILLISECONDS)` + `.destroyForcibly`, which
-  ;; will let the other surfaces fail fast without leaking the worker
-  ;; thread the way the current `future-cancel`-only path does.
+  ;; Per-operation timeout guards (2026-07-18, follow-up to 2026-05-16 dogfood):
+  ;; `acquire-environment!` is bounded by `with-acquisition-timeout` (PR #895).
+  ;; `execute!`, `release-environment!`, `copy-to!`, and `copy-from!` each route
+  ;; through `run-runtime-timed` / `run-runtime-process-timed` which use the
+  ;; bounded `.waitFor(ms, TimeUnit/MILLISECONDS)` + `destroy-process-tree!` path,
+  ;; so a stuck Docker daemon or hung pty causes a clean timeout error instead of
+  ;; parking the JVM thread indefinitely.
   proto/TaskExecutor
 
   (executor-type [_this]
-    ;; Phase 1: only :docker is supported, so this always returns :docker.
-    ;; Phase 2 will return :podman / :nerdctl as descriptor/kind dictates.
     (descriptor/kind descriptor))
 
   (available? [_this]
@@ -821,13 +958,18 @@
             (let [container-name (str container-name-prefix
                                       (subs (str task-id) 0 container-name-uuid-slice))
                   workdir (get env-config :workdir default-workdir)
+                  ;; Launch FROM the gate-checked plan: its digest as the
+                  ;; immutable image reference, the plan itself as the
+                  ;; execution plan — what runs is what was checked.
+                  launch-plan (get-in gate-result [:data :launch-plan])
                   create-result (create-container descriptor
                                                   container-name
-                                                  image
+                                                  (:image-digest launch-plan)
                                                   workdir
                                                   (:env env-config)
                                                   (:resources env-config)
-                                                  network)]
+                                                  network
+                                                  :execution-plan launch-plan)]
               (if (result/ok? create-result)
                 ;; Bootstrap workspace: clone repo into container if repo-url provided (N11 §4.2)
                 (let [bootstrap-result (bootstrap-workspace! descriptor container-name workdir env-config)]
@@ -900,7 +1042,8 @@
    on the config map.
 
    Config:
-   - :runtime-kind — :docker (default in Phase 1). :podman lands in Phase 2.
+   - :runtime-kind — :docker (default) or :podman. :nerdctl is known but
+                     not yet supported.
    - :executable   — explicit path to the runtime CLI binary
    - :image        — container image for tasks (default from images.edn :default entry)
    - :network      — network name to attach to (legacy; execution-plan

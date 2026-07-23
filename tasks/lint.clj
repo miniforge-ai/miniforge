@@ -64,3 +64,36 @@
     (when-not (zero? exit)
       (println "❌ Linting failed with exit code:" exit)
       (System/exit exit))))
+
+(def ^:private stratum-lint-deps
+  "Sha-pinned git coordinate for the stratum-lint Clojure component
+   (bb-native; the linter for stratified-design separator comments whose
+   heading ends in `Layer N`, miniforge-standards rule 210). Resolved lazily in a
+   subprocess via `bb -Sdeps` so plain `bb <task>` invocations — CI
+   included — never fetch the sibling repo; only the pre-commit gate
+   pays the one-time clone."
+  (pr-str {:deps {'io.github.miniforge-ai/stratum-lint
+                  {:git/sha "7ca43db35c7547fe919069e9d69ef8c5d2810042"
+                   :deps/root "clojure"}}}))
+
+(defn stratum-staged []
+  (let [files (->> (concat (staged-by-ext ".clj")
+                           (staged-by-ext ".cljc"))
+                   (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
+    (if (seq files)
+      (do
+        (println "🔍 Stratum-linting" (count files) "Clojure file(s)...")
+        ;; Exit contract per stratum-lint: 0 clean, 1 findings, 2 usage
+        ;; error. Files without Layer headings are ignored by the
+        ;; linter, so unannotated legacy namespaces pass untouched —
+        ;; enforcement tightens file-by-file as headings appear.
+        (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
+                                            "bb" "-Sdeps" stratum-lint-deps
+                                            "-m" "stratum-lint.interface"
+                                            files)]
+          (when-not (str/blank? out) (println out))
+          (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+          (when-not (zero? exit)
+            (println "❌ Stratified-design lint failed with exit code:" exit)
+            (System/exit exit))))
+      (println "✓ No Clojure files to stratum-lint"))))

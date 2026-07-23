@@ -25,6 +25,7 @@
    (N3 §3.19) for consumers — the Rust control console, native app, and web
    dashboard."
   (:require
+   [ai.miniforge.supervisory-state.accumulator :as accumulator]
    [ai.miniforge.supervisory-state.core :as core]
    [ai.miniforge.supervisory-state.golden-fixtures :as golden-fixtures]
    [ai.miniforge.supervisory-state.schema :as schema]))
@@ -48,6 +49,22 @@
    crate as the cross-language contract test corpus. `clojure -X`
    compatible; see the `fixtures:supervisory` bb task."
   golden-fixtures/write-golden-fixtures!)
+
+(def empty-table
+  "Initial empty EntityTable. Seed value for [[apply-event]] /
+   [[apply-events]] when folding an event sequence without a component."
+  schema/empty-table)
+
+(def apply-event
+  "Pure reducer: apply one event to an EntityTable, returning the (possibly
+   identical) updated table. Unknown event types are ignored at the entity
+   level. Lets consumers (replay tooling, workbench adapters, tests)
+   materialize a table from an event sequence without a live stream."
+  accumulator/apply-event)
+
+(def apply-events
+  "Pure fold of an event sequence into an EntityTable via [[apply-event]]."
+  accumulator/apply-events)
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Schemas (re-exports)

@@ -135,6 +135,7 @@
     (is (= executor/restore-workspace!        sut/restore-workspace!))
     (is (= executor/with-environment          sut/with-environment))
     (is (= executor/clone-and-checkout!       sut/clone-and-checkout!))
+    (is (= executor/prepare-runtime-executor! sut/prepare-runtime-executor!))
     (is (= executor/prepare-docker-executor!  sut/prepare-docker-executor!))
     (is (= executor/ensure-image!             sut/ensure-image!))
     (is (= executor/task-runner-images        sut/task-runner-images))))

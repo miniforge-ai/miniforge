@@ -28,6 +28,15 @@
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
    [ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli :as oci-cli]))
 
+(defn- cmd-contains?
+  "True if cmd (string or arg vector) contains the substring s.
+   Vector commands are joined with spaces before the check so that
+   multi-word substrings like \"git fetch\" match across elements."
+  [cmd s]
+  (clojure.string/includes?
+   (if (string? cmd) cmd (clojure.string/join " " cmd))
+   s))
+
 ;; Private fn accessor helper
 (defn- private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.dag-executor.protocols.impl.runtime.oci-cli sym)))
@@ -37,6 +46,12 @@
 (defn- docker-descriptor
   ([] (descriptor/make-descriptor {}))
   ([opts] (descriptor/make-descriptor opts)))
+
+(defn- podman-descriptor
+  "For tests describing Podman-specific behaviour (bare-hex image IDs),
+   so the setup matches the runtime named in the test."
+  []
+  (descriptor/make-descriptor {:runtime-kind :podman}))
 
 ;; Phase 2: argument-construction tests run against every supported kind so
 ;; a Podman regression in flag shaping shows up at unit-test time.
@@ -153,6 +168,85 @@
                                          "nonexistent/image:never"))))))
 
 ;; ============================================================================
+;; create-container — execution-plan interactions
+;; ============================================================================
+
+(deftest create-container-plan-without-profile-does-not-use-legacy-network-test
+  (testing "an execution plan is authoritative even when it omits
+            :network-profile"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []})
+        (let [args @captured]
+          (is (not (some #{"--network"} args)))
+          (is (not (some #{"bridge"} args))))))))
+
+(deftest create-container-plan-network-profile-overrides-legacy-test
+  (testing "an execution-plan WITH :network-profile drops the legacy network
+            argument (profile drives networking via build-security-args)"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil "bridge"
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :network-profile :none})
+        (let [args @captured]
+          (is (not (some #{"--network"} args)))
+          (is (some #{"--network=none"} args)))))))
+
+(deftest create-container-plan-memory-replaces-registry-default-test
+  (testing "a plan memory limit emits one authoritative --memory argument"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x"
+                                                   :mounts []
+                                                   :memory-limit-mb 768})
+        (is (= 1 (count (filter #{"--memory"} @captured))))
+        (is (some #{"768m"} @captured))))))
+
+(deftest create-container-plan-env-replaces-legacy-env-test
+  (testing "plan env is authoritative when present; partial plans retain legacy env"
+    (let [captured (atom nil)
+          run! (fn [plan]
+                 (with-redefs [oci-cli/run-runtime
+                               (fn [_d & args]
+                                 (reset! captured (vec args))
+                                 {:exit 0 :out "cid\n" :err ""})]
+                   (oci-cli/create-container
+                    (docker-descriptor) "c" "img" "/w" {"SOURCE" "legacy"} nil nil
+                    :execution-plan plan)
+                   @captured))]
+      (let [args (run! {:env {"SOURCE" "plan"}})]
+        (is (some #{"SOURCE=plan"} args))
+        (is (not (some #{"SOURCE=legacy"} args))))
+      (is (some #{"SOURCE=legacy"} (run! {}))))))
+
+(deftest create-container-runs-plan-command-test
+  (testing "the container command comes from the plan's :command, defaulting
+            to the keep-alive when absent"
+    (let [captured (atom nil)]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & args]
+                      (reset! captured (vec args))
+                      {:exit 0 :out "cid\n" :err ""})]
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil
+                                  :execution-plan {:image-digest "sha256:x" :mounts []
+                                                   :command ["bb" "run" "task"]})
+        (is (= ["bb" "run" "task"] (subvec @captured (- (count @captured) 3))))
+        (oci-cli/create-container (docker-descriptor) "c" "img" "/w" {} nil nil)
+        (is (= ["sleep" "infinity"] (subvec @captured (- (count @captured) 2))))))))
+
+;; ============================================================================
 ;; container-image-digest
 ;; ============================================================================
 
@@ -163,6 +257,34 @@
                     {:exit 0 :out "sha256:abc123def456\n" :err ""})]
       (is (= "sha256:abc123def456"
              (oci-cli/container-image-digest (docker-descriptor) "my-container"))))))
+
+(deftest container-image-digest-normalizes-podman-bare-hex-test
+  (testing "Podman prints the image ID as bare 64-hex; the digest is
+            normalized to the sha256:-prefixed form the gate expects"
+    (let [hex (apply str (repeat 64 \a))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str hex "\n") :err ""})]
+        (is (= (str "sha256:" hex)
+               (oci-cli/container-image-digest (podman-descriptor) "my-container")))))))
+
+(deftest image-config-digest-normalizes-podman-bare-hex-test
+  (testing "image-config-digest applies the same normalization on image IDs"
+    (let [hex (apply str (repeat 64 \a))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str hex "\n") :err ""})]
+        (is (= (str "sha256:" hex)
+               (oci-cli/image-config-digest (podman-descriptor) "img:tag")))))))
+
+(deftest image-config-digest-passes-docker-prefixed-form-through-test
+  (testing "Docker's already-prefixed sha256:<hex> ID is returned unchanged"
+    (let [digest (str "sha256:" (apply str (repeat 64 \b)))]
+      (with-redefs [oci-cli/run-runtime
+                    (fn [_d & _args]
+                      {:exit 0 :out (str digest "\n") :err ""})]
+        (is (= digest
+               (oci-cli/image-config-digest (docker-descriptor) "img:tag")))))))
 
 (deftest container-image-digest-returns-nil-on-nonzero-exit-test
   (testing "returns nil when inspect exits non-zero"
@@ -212,8 +334,8 @@
           (is (true? (get-in result [:data :persisted?])))
           (is (= "abc123" (get-in result [:data :commit-sha])))
           (is (some #(= "git add -A" %) @commands))
-          (is (some #(clojure.string/includes? % "git commit") @commands))
-          (is (some #(clojure.string/includes? % "git push") @commands)))))))
+          (is (some #(cmd-contains? % "git commit") @commands))
+          (is (some #(cmd-contains? % "git push") @commands)))))))
 
 (deftest persist-workspace-no-changes-test
   (testing "persist-workspace! returns {:persisted? false} when no dirty files"
@@ -248,8 +370,8 @@
                                                 :workdir "/workspace"})]
           (is (true? (get-in result [:data :restored?])))
           (is (= "def456" (get-in result [:data :commit-sha])))
-          (is (some #(clojure.string/includes? % "git fetch") @commands))
-          (is (some #(clojure.string/includes? % "git checkout") @commands)))))))
+          (is (some #(cmd-contains? % "git fetch") @commands))
+          (is (some #(cmd-contains? % "git checkout") @commands)))))))
 
 ;; ============================================================================
 ;; create-container --stop-timeout (N11 §2.2)
@@ -382,6 +504,43 @@
              (get-in result [:error :data :exception-class])))
       (is (= {:tag :original}
              (get-in result [:error :data :exception-data]))))))
+
+;; ============================================================================
+;; run-runtime-timed / run-runtime-process-timed — per-subprocess deadline
+;; ============================================================================
+;;
+;; Covers the 2026-07-18 fix: `execute!`, `release-environment!`, `copy-to!`,
+;; and `copy-from!` now route through bounded waitFor rather than parking
+;; the JVM thread indefinitely if Docker stalls (2026-05-16 dogfood follow-up).
+
+(deftest run-runtime-timed-fires-on-deadline-test
+  (testing "returns exit 124 when the subprocess exceeds the per-op timeout"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor "10")]
+      (is (= 124 (:exit result))
+          "exit 124 mirrors the GNU timeout(1) convention for a killed-by-timeout command")
+      (is (clojure.string/includes? (:err result) "100")
+          "error message includes the timeout-ms so operators can distinguish from a real failure"))))
+
+(deftest run-runtime-process-timed-fires-on-deadline-test
+  (testing "returns exit 124 with empty byte arrays when the subprocess exceeds the timeout"
+    (let [run-timed  (private-fn 'run-runtime-process-timed)
+          descriptor {:runtime/executable "/bin/sleep"}
+          result     (run-timed 100 descriptor ["10"])]
+      (is (= 124 (:exit result)))
+      (is (= "" (:out result)))
+      (is (clojure.string/includes? (:err result) "100"))
+      (is (zero? (alength ^bytes (:out-bytes result))))
+      (is (zero? (alength ^bytes (:err-bytes result)))))))
+
+(deftest run-runtime-timed-nil-timeout-is-unbounded-test
+  (testing "nil timeout-ms disables the deadline (backward-compatible with run-runtime)"
+    (let [run-timed  (private-fn 'run-runtime-timed)
+          descriptor {:runtime/executable "/bin/echo"}
+          result     (run-timed nil descriptor "hello")]
+      (is (= 0 (:exit result)))
+      (is (clojure.string/includes? (:out result) "hello")))))
 
 (deftest run-runtime-interrupt-destroys-child-process-test
   (testing "interrupting a runtime call does not wait for the child command to finish"

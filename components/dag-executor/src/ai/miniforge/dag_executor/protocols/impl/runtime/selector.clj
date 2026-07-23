@@ -33,6 +33,7 @@
         contract allows."
   (:require
    [ai.miniforge.dag-executor.protocols.impl.runtime.descriptor :as descriptor]
+   [ai.miniforge.dag-executor.protocols.impl.runtime.messages :as messages]
    [ai.miniforge.dag-executor.protocols.impl.runtime.registry :as registry]
    [ai.miniforge.dag-executor.result :as result]))
 
@@ -49,12 +50,17 @@
 ;; Probe — single-kind helper used by both explicit and auto paths
 
 (defn- probe-kind!
-  "Build a descriptor for `kind` and run the runtime-info probe. Returns
-   {:kind :descriptor :probe-result} so callers can surface every part
-   (the descriptor for the chosen runtime, the probe-result for the
-   doctor's per-kind report)."
-  [kind]
-  (let [d            (descriptor/make-descriptor {:runtime-kind kind})
+  "Build a descriptor for `kind` from `config` and run the runtime-info
+   probe. Returns {:kind :descriptor :probe-result} so callers can surface
+   every part (the descriptor for the chosen runtime, the probe-result for
+   the doctor's per-kind report).
+
+   The explicit-selection path passes the caller's full config so overrides
+   like :executable reach the probe; the auto-probe path passes {} — an
+   :executable override is per-kind and has no meaning when several kinds
+   are being tried."
+  [config kind]
+  (let [d            (descriptor/make-descriptor (assoc config :runtime-kind kind))
         probe-result (descriptor/runtime-info d)]
     {:kind         kind
      :descriptor   d
@@ -76,20 +82,20 @@
 (defn- select-explicit
   "Resolve an explicit :runtime-kind. Fails loudly when the named runtime
    is unsupported or when its probe fails — never falls back."
-  [kind]
+  [config kind]
   (if-not (registry/supported? kind)
     (result/err :runtime/explicit-unsupported
-                (str "Runtime kind " kind " is not supported.")
+                (messages/t :selector/explicit-unsupported {:kind kind})
                 {:kind      kind
                  :supported (registry/supported-kinds)})
-    (let [{:keys [descriptor probe-result]} (probe-kind! kind)]
+    (let [{:keys [descriptor probe-result]} (probe-kind! config kind)]
       (if (:available? probe-result)
         (result/ok {:descriptor      descriptor
                     :kind            kind
                     :selection       :explicit
                     :runtime-version (:runtime-version probe-result)})
         (result/err :runtime/explicit-unavailable
-                    (str "Runtime " kind " is configured but unavailable.")
+                    (messages/t :selector/explicit-unavailable {:kind kind})
                     {:kind   kind
                      :reason (:reason probe-result)})))))
 
@@ -104,7 +110,7 @@
    Returns {:probed [...] :winner {...|nil}} where :winner is the first
    summary with :available? true plus the descriptor."
   []
-  (let [probes  (mapv probe-kind! (supported-probe-order))
+  (let [probes  (mapv #(probe-kind! {} %) (supported-probe-order))
         probed  (mapv probe-summary probes)
         winner  (some (fn [{:keys [probe-result] :as p}]
                         (when (:available? probe-result) p))
@@ -122,7 +128,7 @@
                   :runtime-version (:runtime-version (:probe-result winner))
                   :probed          probed})
       (result/err :runtime/none-available
-                  "No OCI-compatible container runtime is available."
+                  (messages/t :selector/none-available)
                   {:probed probed}))))
 
 (defn select-runtime
@@ -136,13 +142,27 @@
       :probed           [<per-kind summary>]   ; auto-probe only}
 
    Errors:
-     :runtime/explicit-unsupported   — explicit kind is not :supported?
-     :runtime/explicit-unavailable   — explicit kind probe failed
-     :runtime/none-available         — auto-probe found nothing usable
+     :runtime/explicit-unsupported        — explicit kind is not :supported?
+     :runtime/explicit-unavailable        — explicit kind probe failed
+     :runtime/none-available              — auto-probe found nothing usable
+     :runtime/executable-requires-kind    — :executable/:docker-path override
+                                            given without :runtime-kind
 
-   Callers SHOULD render the error data via i18n; this function returns
-   data, not strings, so the doctor and the CLI can localize."
+   An executable-path override is only meaningful with an explicit
+   :runtime-kind: auto-probe cannot tell which kind the binary is, so it
+   would probe PATH defaults while the eventual descriptor applies the
+   override — selection and execution could disagree (e.g. a :podman
+   selection wearing a Docker binary). Fail loudly and make the caller
+   disambiguate.
+
+   Errors include a human-readable, localized message (via runtime messages);
+   callers should still rely on :code/:data for structured handling."
   [config]
-  (if-let [kind (:runtime-kind config)]
-    (select-explicit kind)
-    (select-auto)))
+  (let [kind     (:runtime-kind config)
+        override (or (:executable config) (:docker-path config))]
+    (cond
+      kind     (select-explicit config kind)
+      override (result/err :runtime/executable-requires-kind
+                           (messages/t :selector/executable-requires-kind)
+                           {:executable override})
+      :else    (select-auto))))

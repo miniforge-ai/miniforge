@@ -210,6 +210,17 @@
       (is (= :mcp
              (get-in result [:error :data :artifact-source]))))))
 
+(deftest normalized-artifact-source-is-always-a-keyword-test
+  (testing "valid artifact sources are preserved"
+    (is (= :mcp (#'impl/normalized-artifact-source {:artifact-source :mcp}))))
+  (testing "absent and malformed artifact sources become :none"
+    (doseq [normalized [{}
+                        {:artifact-source nil}
+                        {:artifact-source false}
+                        {:artifact-source "mcp"}
+                        {:artifact-source 42}]]
+      (is (= :none (#'impl/normalized-artifact-source normalized))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; extract-language tests
 

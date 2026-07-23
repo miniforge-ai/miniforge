@@ -1,6 +1,14 @@
 {:claude-cli
  {:default-budget-usd "0.10"}
 
+ ;; Direct HTTPS provider backends (:anthropic-api / :openai-api /
+ ;; :gemini-api). Only Anthropic's Messages API REQUIRES max_tokens on
+ ;; every request, so only it carries a default here — OpenAI and
+ ;; Gemini omit the cap unless the caller sets :max-tokens.
+ :http
+ {:anthropic {:api-version "2023-06-01"
+              :default-max-tokens 16000}}
+
  :stream
  {:default-stagnation-threshold-ms 120000
   :default-max-total-ms 600000

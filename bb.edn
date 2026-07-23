@@ -55,6 +55,11 @@
    :requires ([lint])
    :task (lint/clj-all)}
 
+  lint:stratum
+  {:doc  "Stratified-design lint (stratum-lint) over staged Clojure files"
+   :requires ([lint])
+   :task (lint/stratum-staged)}
+
   fmt:md
   {:doc  "Format staged Markdown files (lint --fix)"
    :requires ([fmt])
@@ -180,6 +185,15 @@
   ;; Cross-language contract fixtures
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  workbench:orchestration:registry
+  {:doc  "Export the Miniforge orchestration workbench state-variable registry as JSON (args: :out \"<path>\")"
+   :task (let [exit (apply run-clojure-stream!
+                           "-X:dev"
+                           "ai.miniforge.workbench-orchestration-adapter.interface/export-registry!"
+                           *command-line-args*)]
+           (when-not (zero? exit)
+             (System/exit exit)))}
+
   fixtures:supervisory
   {:doc  "Regenerate the supervisory golden fixtures (contracts/supervisory-entities/golden) consumed by miniforge-control. Run after any supervisory entity schema change, commit the diff, re-vendor downstream."
    :task (let [exit (run-clojure-stream!
@@ -195,7 +209,7 @@
 
   pre-commit
   {:doc     "Run pre-commit checks (commit budget, structure, lint, format, smoke tests, graalvm). Full test suite runs in CI."
-   :depends [commit-budget poly:check lint:clj fmt:md test:precommit test:graalvm]
+   :depends [commit-budget poly:check lint:clj lint:stratum fmt:md test:precommit test:graalvm]
    :task    (println "\n✅ ALL PRE-COMMIT CHECKS PASSED\n")}
 
   ;; ──────────────────────────────────────────────────────────────────────────
@@ -749,6 +763,8 @@
                  "components/evaluation/resources"
                  ;; Keep the Babashka CLI task aligned with deps.edn :dev.
                  "bases/etl/src"
+                 "components/workbench-etl-adapter/src"
+                 "components/workbench-etl-adapter/resources"
                  "components/bb-config/src"
                  "components/bb-data-plane-http/src"
                  "components/bb-dev-tools/src"

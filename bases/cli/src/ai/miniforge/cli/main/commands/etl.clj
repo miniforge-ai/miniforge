@@ -26,6 +26,8 @@
                                          hato/POI which aren't BB-safe.
      - `etl list <search-path>`        — discover pipeline EDN files.
      - `etl validate <pack> --env …`   — load + resolve without running.
+     - `etl registry --out <path>`     — export the Miniforge ETL workbench
+                                         state-variable registry.
 
    The `etl repo` command clones the repository and runs the direct
    repo-analyzer interface. The `etl run|list|validate` commands shell
@@ -236,21 +238,34 @@
   "Execute a Data Foundry ETL pack.
 
    Usage:
-     miniforge etl run <pack-dir-or-pipeline.edn> --env <env.edn|name> [--out <result.edn|.json>]
+     miniforge etl run <pack-dir-or-pipeline.edn> --env <env.edn|name>
+       [--out <result.edn|.json>]
+       [--workbench-out <snapshot.json> --experiment-id <id> --label <label>
+        --source-hash <sha256:...> [--baseline <snapshot.json>]]
 
    When the first arg is a pack directory, the command looks for a single
    `pipelines/*.edn` file and, if `--env` is a bare name, resolves it as
    `<pack>/envs/<name>.edn`. Otherwise both arguments are used as file
    paths directly."
   [opts]
-  (let [{:keys [pack env out]} opts]
+  (let [{:keys [pack env out workbench-out experiment-id label source-hash
+                baseline snapshot-id run-id]} opts]
     (if-not pack
       (shared/usage-error! :etl/run-usage
-                           "etl run <pack-dir-or-pipeline.edn> --env <env.edn|name> [--out <path>]")
+                           (str "etl run <pack-dir-or-pipeline.edn> --env <env.edn|name> [--out <path>]"
+                                " [--workbench-out <snapshot.json> --experiment-id <id> --label <label>"
+                                " --source-hash <sha256:...> [--baseline <snapshot.json>]]"))
       (try
         (let [[pipeline-path env-path] (resolve-pack-paths pack env)
               args (cond-> ["run" pipeline-path "--env" env-path]
-                     out (into ["--out" out]))]
+                     out            (into ["--out" out])
+                     workbench-out  (into ["--workbench-out" workbench-out])
+                     experiment-id  (into ["--experiment-id" experiment-id])
+                     label          (into ["--label" label])
+                     source-hash    (into ["--source-hash" source-hash])
+                     baseline       (into ["--baseline" baseline])
+                     snapshot-id    (into ["--snapshot-id" snapshot-id])
+                     run-id         (into ["--run-id" run-id]))]
           (shared/exit! (shell-etl! args)))
         (catch clojure.lang.ExceptionInfo e
           (display/print-error (ex-message e))
@@ -281,6 +296,14 @@
         (catch clojure.lang.ExceptionInfo e
           (display/print-error (ex-message e))
           (shared/exit! 1))))))
+
+(defn etl-registry-cmd
+  "Export the product-owned ETL state-variable registry as EDN or JSON."
+  [opts]
+  (if-let [out (:out opts)]
+    (shared/exit! (shell-etl! ["registry" "--out" out]))
+    (shared/usage-error! :etl/registry-usage
+                         "etl registry --out <registry.edn|.json>")))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

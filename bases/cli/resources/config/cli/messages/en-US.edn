@@ -309,6 +309,9 @@
 
   ;; ── ETL ───────────────────────────────────────────────────────────────
   :etl/repo-usage "Usage: {command}"
+  :etl/run-usage "Usage: {command}"
+  :etl/validate-usage "Usage: {command}"
+  :etl/registry-usage "Usage: {command}"
   :etl/invalid-url "Invalid repository URL: {url}\nExpected format: https://github.com/org/repo or git@github.com:org/repo"
   :etl/running "Running ETL on repository: {url}"
   :etl/complete "ETL complete."

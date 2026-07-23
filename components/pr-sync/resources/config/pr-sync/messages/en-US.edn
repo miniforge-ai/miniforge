@@ -16,4 +16,11 @@
   :error/default       "Operation failed with no additional error details."
   :error/parse-pr      "Failed to parse PR list for {repo}."
   :error/parse-mr      "Failed to parse merge request list for {repo}."
-  :error/unknown       "Unknown error"}}
+  :error/unknown       "Unknown error"
+
+  ;; Config lock errors
+  :config-lock/update-failed  "Config update failed: {error}"
+  :config-lock/locked         "Config file is locked by another process; retry later."
+  :config-lock/interrupted    "Interrupted while waiting for config file lock."
+  :config-lock/unavailable    "Config file lock unavailable; retry later."
+  :config-lock/acquire-failed "Failed to acquire config file lock: {error}"}}

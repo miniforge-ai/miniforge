@@ -79,6 +79,56 @@
       (is (true? (:shed? r)))
       (is (true? (:over-after-shed? r)))))
 
+  (testing "max-inline-fraction sheds a prompt that FITS the window but exceeds
+            the cap — window fit alone stalls turns past the phase timeout
+            (2026-07-21 dogfood: 99.2%-of-window prompt, killed at 600s)"
+    ;; ~40000 chars ≈ 10000 est tokens: under the window, over its 0.5 cap.
+    (let [mid (apply str (repeat 40000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly mid)
+                       :build-shed (constantly "manifest")})]
+      (is (= (long (* 0.5 (:effective-window r))) (:inline-cap r)))
+      (is (true? (:shed? r)))
+      (is (false? (:over-after-shed? r)) "under the window — not an overflow")
+      (is (= "manifest" (:user-prompt r)))))
+
+  (testing "max-inline-fraction is clamped so bad config cannot exceed the window"
+    (let [big (apply str (repeat 300000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 2.0
+                       :build-full (constantly big)
+                       :build-shed (constantly "manifest")})]
+      (is (= (:effective-window r) (:inline-cap r)))
+      (is (true? (:shed? r)))
+      (is (= "manifest" (:user-prompt r)))))
+
+  (testing "invalid inline fractions fall back to the full effective window"
+    (doseq [invalid ["half" ##NaN ##Inf ##-Inf]]
+      (let [r (assemble {:model "codellama-34b"
+                         :max-inline-fraction invalid})]
+        (is (= (:effective-window r) (:inline-cap r)) (pr-str invalid))
+        (is (false? (:shed? r)) (pr-str invalid)))))
+
+  (testing "a prompt under the cap stays fully inlined"
+    (let [small (apply str (repeat 20000 \x))    ; ≈5000 est tokens < 8192 cap
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly small)})]
+      (is (false? (:shed? r)))
+      (is (= small (:user-prompt r)))))
+
+  (testing "over the cap with nothing to shed is sent as-is and is NOT an
+            irreducible overflow — that word is reserved for the window"
+    (let [mid (apply str (repeat 40000 \x))
+          r (assemble {:model "codellama-34b"
+                       :max-inline-fraction 0.5
+                       :build-full (constantly mid)
+                       :shed-count 0})]
+      (is (false? (:shed? r)))
+      (is (false? (:over-after-shed? r)))
+      (is (= mid (:user-prompt r)))))
+
   (testing "the reserve drops the effective window and fires the shed earlier"
     (let [content    (apply str (repeat 50000 \x))
           no-reserve (assemble {:model "codellama-34b"
@@ -105,6 +155,24 @@
       (is (pos? (:effective-window r)) "effective window is never zeroed")
       (is (false? (:shed? r)) "a trivial prompt still fits")
       (is (false? (:over-after-shed? r)))))
+
+  (testing "an invalid reserve (nil, non-numeric, NaN/Inf, negative) is
+            treated as 0 — no crash, and a negative value can never INFLATE
+            the effective window above the real one"
+    (doseq [invalid [nil "50000" ##NaN ##Inf ##-Inf -5000]]
+      (let [r (assemble {:model "codellama-34b" :reserve invalid})]
+        (is (= (:window r) (:effective-window r)) (pr-str invalid))
+        (is (= 0 (:reserve r)) (pr-str invalid))
+        (is (false? (:reserve-clamped? r)) (pr-str invalid))
+        (is (false? (:shed? r)) (pr-str invalid)))))
+
+  (testing "an extreme-but-numeric reserve (BigInt > Long/MAX) saturates
+            instead of throwing on the long cast; the window/2 clamp governs"
+    (let [r (assemble {:model "codellama-34b"
+                       :reserve (*' 2 Long/MAX_VALUE)})]
+      (is (true? (:reserve-clamped? r)))
+      (is (pos? (:effective-window r)))
+      (is (false? (:shed? r)))))
 
   (testing ":file-count echoes the supplied shed-count"
     (is (= 7 (:file-count (assemble {:model "codellama-34b" :shed-count 7}))))))

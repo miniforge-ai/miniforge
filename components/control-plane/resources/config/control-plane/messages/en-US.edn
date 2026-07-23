@@ -14,6 +14,8 @@
   :adapter/unknown-command      "Unknown command: {command}"
   :adapter/no-pid               "No PID available for this agent"
   :adapter/no-control-state     "No control state available"
+  :adapter/stream-rejected      "Stream rejected decision delivery: {reason}"
+  :adapter/stream-anomaly       "Stream reported decision delivery anomaly: {category}{message}"
 
   ;; vendor display
   :vendor/claude-code "C"

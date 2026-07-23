@@ -68,6 +68,39 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Protocol implementation
 
+(defn- delivery-failure
+  "Build the control-plane adapter decision-delivery failure shape."
+  [error]
+  {:delivered? false :error error})
+
+(defn- rejection-reason
+  "Return the event-stream rejection reason, preserving an explicit unknown default."
+  [result]
+  (name (get result :reason :unknown)))
+
+(defn- exception-message
+  "Return a useful exception message even when the throwable has no message."
+  [e]
+  (or (ex-message e)
+      (.getName (class e))))
+
+(defn- publish-result->delivery-result
+  "Translate the event-stream publish result into the adapter delivery contract."
+  [result]
+  (cond
+    (:rejected? result)
+    (delivery-failure (control-plane/t :adapter/stream-rejected
+                                       {:reason (rejection-reason result)}))
+
+    (contains? result :anomaly/category)
+    (delivery-failure (control-plane/t :adapter/stream-anomaly
+                                       {:category (:anomaly/category result)
+                                        :message  (when-let [m (:anomaly/message result)]
+                                                    (str " — " m))}))
+
+    :else
+    {:delivered? true}))
+
 (defrecord MiniforgeAdapter [event-stream]
   proto/ControlPlaneAdapter
 
@@ -83,11 +116,21 @@
     ;; Return current known status.
     {:status (:agent/status agent-record)})
 
-  (deliver-decision [_ _agent-record _decision-resolution]
-    ;; For miniforge native agents, decisions flow through
-    ;; the approval system in event-stream.
-    ;; TODO: Wire to es/submit-approval when control-action integration is ready.
-    {:delivered? true})
+  (deliver-decision [_ agent-record decision-resolution]
+    (try
+      (let [workflow-id (or (get-in agent-record [:agent/metadata :workflow-id])
+                            (:agent/external-id agent-record))
+            resolution  (let [r (:decision/resolution decision-resolution)]
+                          (cond-> r (keyword? r) name))
+            event (es/cp-decision-resolved event-stream
+                                           workflow-id
+                                           (:decision/id decision-resolution)
+                                           resolution
+                                           (:decision/comment decision-resolution))
+            result (es/publish! event-stream event)]
+        (publish-result->delivery-result result))
+      (catch Exception e
+        (delivery-failure (exception-message e)))))
 
   (send-command [_ agent-record command]
     (if-let [control-state (:control-state (:agent/metadata agent-record))]

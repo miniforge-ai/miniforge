@@ -35,7 +35,10 @@
    [clojure.java.io :as io]
    [clojure.java.shell :as shell]
    [clojure.string :as str]
-   [cheshire.core :as json]))
+   [cheshire.core :as json])
+  (:import
+   [java.nio.channels FileChannel]
+   [java.nio.file Paths StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constants
@@ -48,6 +51,18 @@
 
 (def gitlab-repo-slug-pattern
   #"^gitlab:[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)+$")
+
+(def ^:private config-lock-timeout-ms
+  "Upper bound (ms) on how long `with-config-lock!` polls for the advisory
+   file lock before giving up.  Bounded so a contended lock never stalls a CLI
+   command for more than half a second."
+  500)
+
+(def ^:private config-lock-poll-ms
+  "Backoff (ms) between `.tryLock` attempts while waiting for the config lock.
+   Small relative to `config-lock-timeout-ms` so contention resolves promptly
+   without busy-spinning."
+  25)
 
 ;------------------------------------------------------------------------------ Layer 0b
 ;; Pure helpers
@@ -125,6 +140,63 @@
 ;------------------------------------------------------------------------------ Layer 1
 ;; Fleet config I/O
 
+(defn- with-config-lock!
+  "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
+
+   Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
+   (25 ms) increments before giving up.  Returns `(result-failure ...)` when
+   the lock cannot be acquired — the expected no-op for concurrent callers.
+   Exception: same-JVM re-entrancy (OverlappingFileLockException) and a
+   concurrently closed channel (ClosedChannelException) return a failure
+   immediately without entering the poll loop.
+
+   The file at `path` is created if absent so the FileChannel can open before
+   the first write occurs.
+
+   Why advisory locking: the OS provides no blocking tryLock-with-timeout on
+   file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
+   with a bounded deadline (≤ 500 ms); callers block for at most one timeout
+   window regardless of calling context."
+  [path thunk]
+  (let [_        (some-> (io/file path) .getParentFile .mkdirs)
+        nio-path (Paths/get path (make-array String 0))
+        opts     (into-array StandardOpenOption
+                             [StandardOpenOption/READ
+                              StandardOpenOption/WRITE
+                              StandardOpenOption/CREATE])]
+    (try
+      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
+        (let [deadline (+ (System/currentTimeMillis) config-lock-timeout-ms)]
+          (loop []
+            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
+              ;; FileLock implements AutoCloseable; .close releases the lock.
+              ;; Hinting AutoCloseable keeps the ns loadable under babashka,
+              ;; which does not expose java.nio.channels.FileLock.
+              (try
+                (thunk)
+                (catch Exception thunk-e
+                  (result-failure (messages/t :config-lock/update-failed {:error (ex-msg thunk-e)})
+                                  {:path path :exception (ex-msg thunk-e)}))
+                (finally (.close lk)))
+              (if (< (System/currentTimeMillis) deadline)
+                (do (Thread/sleep config-lock-poll-ms) (recur))
+                (result-failure (messages/t :config-lock/locked)
+                                {:path path}))))))
+      (catch InterruptedException _
+        ;; Restore interrupt flag for cooperative-cancellation callers.
+        (.interrupt (Thread/currentThread))
+        (result-failure (messages/t :config-lock/interrupted) {:path path}))
+      (catch Exception e
+        ;; OverlappingFileLockException — same-JVM re-entrant attempt.
+        ;; ClosedChannelException — channel closed concurrently.
+        ;; Both mean the lock is unavailable; surface the expected :locked no-op.
+        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
+                         "java.nio.channels.ClosedChannelException"}
+                       (.getName (class e)))
+          (result-failure (messages/t :config-lock/unavailable) {:path path})
+          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
+                          {:path path}))))))
+
 (defn load-fleet-config
   "Load fleet configuration from ~/.miniforge/config.edn.
    Returns {:fleet {:repos [...]}} or default empty config."
@@ -171,15 +243,18 @@
        (result-failure (messages/t :repo/invalid-format) {:repo repo})
 
        :else
-       (let [cfg (load-fleet-config path)
-             repos (normalized-repos cfg)
-             exists? (some #{repo} repos)
-             next-repos (if exists? repos (conj repos repo))
-             next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-         (save-fleet-config! next-cfg path)
-         (result-success {:added? (not (boolean exists?))
-                          :repo repo
-                          :repos (get-in next-cfg [:fleet :repos])}))))))
+       (merge {:repo repo}
+              (with-config-lock! path
+                (fn []
+                  (let [cfg (load-fleet-config path)
+                        repos (normalized-repos cfg)
+                        exists? (some #{repo} repos)
+                        next-repos (if exists? repos (conj repos repo))
+                        next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
+                    (save-fleet-config! next-cfg path)
+                    (result-success {:added? (not (boolean exists?))
+                                     :repo repo
+                                     :repos (get-in next-cfg [:fleet :repos])})))))))))
 
 (defn remove-repo!
   "Remove a repository slug from fleet configuration.
@@ -189,15 +264,18 @@
    (let [repo (normalize-repo-slug repo-slug)]
      (if (str/blank? repo)
        (result-failure (messages/t :repo/required-short) {:repo repo})
-       (let [cfg (load-fleet-config path)
-             repos (normalized-repos cfg)
-             existed? (some #{repo} repos)
-             next-repos (vec (remove #{repo} repos))
-             next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
-         (save-fleet-config! next-cfg path)
-         (result-success {:removed? (boolean existed?)
-                          :repo repo
-                          :repos next-repos}))))))
+       (merge {:repo repo}
+              (with-config-lock! path
+                (fn []
+                  (let [cfg (load-fleet-config path)
+                        repos (normalized-repos cfg)
+                        existed? (some #{repo} repos)
+                        next-repos (vec (remove #{repo} repos))
+                        next-cfg (assoc-in cfg [:fleet :repos] next-repos)]
+                    (save-fleet-config! next-cfg path)
+                    (result-success {:removed? (boolean existed?)
+                                     :repo repo
+                                     :repos next-repos})))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Provider CLI interaction (I/O)
@@ -533,18 +611,23 @@
                          (filter valid-repo-slug?)
                          distinct
                          (take limit*)
-                         vec)
-              cfg (load-fleet-config path)
-              existing (normalized-repos cfg)
-              merged (vec (distinct (concat existing repos)))
-              added (vec (remove (set existing) merged))
-              next-cfg (assoc-in cfg [:fleet :repos] merged)]
-          (save-fleet-config! next-cfg path)
-          (result-success {:owner owner*
-                           :discovered (count repos)
-                           :added (count added)
-                           :repos merged
-                           :added-repos added}))
+                         vec)]
+          ;; Hold the advisory lock across the read→merge→write so a concurrent
+          ;; add-repo! or remove-repo! cannot overwrite our merged result.
+          (merge {:owner owner*}
+                 (with-config-lock! path
+                   (fn []
+                     (let [cfg (load-fleet-config path)
+                           existing (normalized-repos cfg)
+                           merged (vec (distinct (concat existing repos)))
+                           added (vec (remove (set existing) merged))
+                           next-cfg (assoc-in cfg [:fleet :repos] merged)]
+                       (save-fleet-config! next-cfg path)
+                       (result-success {:owner owner*
+                                        :discovered (count repos)
+                                        :added (count added)
+                                        :repos merged
+                                        :added-repos added}))))))
         (catch Exception e
           (result-failure "Failed to parse repository list."
                           {:error (ex-msg e)}))))))

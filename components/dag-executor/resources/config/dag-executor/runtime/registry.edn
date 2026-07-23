@@ -43,9 +43,10 @@
 
  :podman  {:executable   "podman"
            :supported?   true
-           ;; Same OCI surface as Docker plus :rootless. Podman's tmpfs
-           ;; mount accepts the same uid=/gid= options Docker does, so the
-           ;; capability set carries through unchanged.
+           ;; Same OCI surface as Docker plus :rootless. Podman's --tmpfs
+           ;; REJECTS the uid=/gid= options Docker accepts ("unknown mount
+           ;; option", observed on Podman 5.8), so :tmpfs-uid-gid-options
+           ;; is absent — scratch tmpfs mounts get mode=1777 instead.
            :capabilities #{:oci-images
                            :run :exec :build
                            :bind-mounts :tmpfs-mounts
@@ -55,7 +56,6 @@
                            :image-digest-pinning
                            :graceful-stop
                            :no-new-privileges :read-only-root :cap-drop-all
-                           :tmpfs-uid-gid-options
                            :rootless}
            ;; Container-process UID/GID stays 1000:1000 — under rootless
            ;; Podman that maps to the host user via subuid/subgid, but the

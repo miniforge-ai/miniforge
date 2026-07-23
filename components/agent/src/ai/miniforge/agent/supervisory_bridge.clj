@@ -90,7 +90,8 @@
 
 (defn- direct-agent-role
   [agent]
-  (or (:role agent) :agent))
+  (let [role (get agent :role)]
+    (if (keyword? role) role :agent)))
 
 (defn- workflow-phase
   [task context]

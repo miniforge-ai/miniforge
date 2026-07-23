@@ -135,10 +135,68 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest deliver-decision-test
-  (let [adapter (sut/create-adapter :fake-stream)]
-    (testing "returns delivered true (stub pending approval wiring)"
-      (let [result (proto/deliver-decision adapter sample-agent-record {:decision/id "d-1"})]
-        (is (true? (:delivered? result)))))))
+  (let [published-events (atom [])
+        built-events     (atom [])
+        fake-event       {:event/type :control-plane/decision-resolved}
+        adapter          (sut/create-adapter :fake-stream)
+        decision-id      #uuid "00000000-0000-0000-0000-000000000099"
+        resolution       {:decision/id         decision-id
+                          :decision/resolution :approve
+                          :decision/comment    "looks good"}]
+    (with-redefs [es/cp-decision-resolved
+                  (fn [stream wf-id dec-id resolution comment]
+                    (swap! built-events conj {:stream stream :wf-id wf-id
+                                             :dec-id dec-id :resolution resolution
+                                             :comment comment})
+                    fake-event)
+                  es/publish!
+                  (fn [stream event]
+                    (swap! published-events conj {:stream stream :event event}))]
+      (testing "publishes cp-decision-resolved event to the event stream"
+        (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+          (is (true? (:delivered? result)))
+          (is (= 1 (count @built-events)))
+          (let [built (first @built-events)]
+            (is (= :fake-stream (:stream built)))
+            (is (= "wf-123" (:wf-id built)))
+            (is (= decision-id (:dec-id built)))
+            (is (= "approve" (:resolution built)))
+            (is (= "looks good" (:comment built))))
+          (is (= 1 (count @published-events)))
+          (is (= :fake-stream (:stream (first @published-events))))
+          (is (= fake-event (:event (first @published-events))))))
+
+      (testing "returns delivered false with error message on exception"
+        (with-redefs [es/cp-decision-resolved
+                      (fn [& _] (throw (Exception. "stream unavailable")))]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (= "stream unavailable" (:error result))))))
+
+      (testing "returns delivered false when publish! rejects (workflow quiesced)"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:rejected? true :reason :workflow-quiesced})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (= "Stream rejected decision delivery: workflow-quiesced"
+                   (:error result))))))
+
+      (testing "returns delivered false when publish! returns an anomaly"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:anomaly/category :cognitect.anomalies/fault})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (= "Stream reported decision delivery anomaly: :cognitect.anomalies/fault"
+                   (:error result))))))
+
+      (testing "includes anomaly message when present"
+        (with-redefs [es/cp-decision-resolved (fn [& _] fake-event)
+                      es/publish! (fn [_ _] {:anomaly/category :cognitect.anomalies/fault
+                                             :anomaly/message  "event-stream unavailable"})]
+          (let [result (proto/deliver-decision adapter sample-agent-record resolution)]
+            (is (false? (:delivered? result)))
+            (is (= "Stream reported decision delivery anomaly: :cognitect.anomalies/fault — event-stream unavailable"
+                   (:error result)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — Protocol: send-command

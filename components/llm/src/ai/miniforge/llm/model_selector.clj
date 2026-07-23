@@ -36,15 +36,50 @@
 ;------------------------------------------------------------------------------ Layer 0
 ;; Constraints and availability
 
+(def ^:private default-cost-limit-usd
+  "Fallback per-task cost limit ($) when neither config nor caller specifies
+   one. Used by `default-config-fallback` and by the selection fns'
+   `(or cost-limit ...)` guards so the unspecified-budget default has a single
+   name. 0.10 comfortably covers a routine Sonnet/Haiku task."
+  0.10)
+
 (def default-config-fallback
   "Hard-coded fallback when `llm/model-selector.edn :default-config` is
    absent. The active value comes from that EDN file per rule 007."
   {:enabled true
    :strategy :automatic ; :automatic | :fixed | :cost-optimized
-   :cost-limit-per-task 0.10
+   :cost-limit-per-task default-cost-limit-usd
    :prefer-speed false
    :allow-downgrade true
    :require-local false})
+
+(def ^:private economical-cost-threshold-usd
+  "Minimum per-task budget ($) at which an :economical model is
+   affordable in meets-cost-constraint?."
+  0.01)
+
+(def ^:private moderate-cost-threshold-usd
+  "Minimum per-task budget ($) at which a :moderate model is affordable."
+  0.05)
+
+(def ^:private expensive-cost-threshold-usd
+  "Minimum per-task budget ($) at which an :expensive model is
+   affordable. Equal to the default budget — the default is set to just afford
+   an expensive model when the caller is silent."
+  default-cost-limit-usd)
+
+(def ^:private cost-optimized-default-limit-usd
+  "Fallback per-task budget ($) for the cost-optimized selection strategy when
+   the caller gives none. Tighter than the general default so cost-optimized
+   selection actually prefers cheaper tiers."
+  0.05)
+
+(def ^:private phase-classification-confidence
+  "Confidence assigned to a task classification derived from the SDLC phase
+   (rather than LLM-inferred). 0.9 — the phase→type mapping is deterministic
+   and near-certain, but a phase can occasionally host atypical work, so not
+   1.0."
+  0.9)
 
 (def ^:private fallback-provider-env-vars
   "Hard-coded fallback when `llm/model-selector.edn :provider-env-vars` is
@@ -106,9 +141,9 @@
     (let [cost-level (get-in model [:capabilities :cost])]
       (case cost-level
         :free true
-        :economical (>= cost-limit 0.01)
-        :moderate (>= cost-limit 0.05)
-        :expensive (>= cost-limit 0.10)
+        :economical (>= cost-limit economical-cost-threshold-usd)
+        :moderate (>= cost-limit moderate-cost-threshold-usd)
+        :expensive (>= cost-limit expensive-cost-threshold-usd)
         true))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -133,7 +168,7 @@
     (or (first (filter (fn [model-key]
                          (and (model-available? model-key)
                               (meets-context-requirement? model-key (or context-size 0))
-                              (meets-cost-constraint? model-key (or cost-limit 0.10))))
+                              (meets-cost-constraint? model-key (or cost-limit default-cost-limit-usd))))
                        all-tiers))
         ;; Fallback to first available if no match
         (first (filter model-available? all-tiers)))))
@@ -151,7 +186,7 @@
     (first (filter (fn [model-key]
                      (and (model-available? model-key)
                           (meets-context-requirement? model-key (or context-size 0))
-                          (meets-cost-constraint? model-key (or cost-limit 0.05))))
+                          (meets-cost-constraint? model-key (or cost-limit cost-optimized-default-limit-usd))))
                    tiers))))
 
 (defn select-by-speed
@@ -177,7 +212,7 @@
     (first (filter (fn [model-key]
                      (and (model-available? model-key)
                           (meets-context-requirement? model-key (or context-size 0))
-                          (meets-cost-constraint? model-key (or cost-limit 0.10))))
+                          (meets-cost-constraint? model-key (or cost-limit default-cost-limit-usd))))
                    sorted-by-speed))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -268,7 +303,7 @@
                                       (:plan :design :architecture) :thinking-heavy
                                       (:validate :format :lint) :simple-validation
                                       :execution-focused)
-                             :confidence 0.9
+                             :confidence phase-classification-confidence
                              :reason (format "Phase-based classification for '%s'" phase)}]
     (select-model task-classification config constraints)))
 

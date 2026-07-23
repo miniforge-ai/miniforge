@@ -30,7 +30,15 @@
      (`review-failure-message`, `backend-failure-message`)
    - Backend-timeout detection (`backend-timeout-issue?`,
      `timeout-only-review?`) — distinguishes a real `:rejected` verdict
-     from the reviewer LLM hitting its own progress-monitor timeout
+     from the reviewer LLM hitting its own progress-monitor timeout.
+     `timeout-only-review?` reads the parsed review map and gate result;
+     the nil-parse path (LLM errored before producing content) is handled
+     by the CALLER (reviewer.clj) ORing this predicate with
+     `result-boundary/backend-timeout-error?` on the NORMALIZED boundary
+     — splitting the two levels prevents the 2026-06-05 dogfood shape
+     drift (adhoc-944448986) where nil `llm-review` caused
+     `timeout-only-review?` to silently return false and synthesize a
+     false `:rejected`.
    - Enumeration-retry validator + recovery (`enumeration-retry?`,
      `well-formed-recovery?`, `recover-review-enumeration`) — re-runs
      the LLM once when a rejection lands without inline blockers"
@@ -112,22 +120,37 @@
                  message))))
 
 (defn timeout-only-review?
-  "True when a parsed review artifact is just reflecting the reviewer
-   backend's own timeout rather than providing actionable code-review
-   findings.
+  "True when the reviewer's outcome reflects the reviewer backend's own
+   timeout rather than actionable code-review findings.
 
-   Conditions (all must hold):
+   Reads the PARSED review map directly; all conditions must hold:
    - LLM decision is a rejection-class verdict
      (`:rejected` / `:changes-requested`)
    - Deterministic gates are otherwise approved
    - `:review/blocking-issues` is present (the LLM enumerated something)
    - `:review/recommendations` and `:review/issues` are both empty
    - Every entry in `:review/blocking-issues` is a timeout-shaped string
-     per `backend-timeout-issue?`"
+     per `backend-timeout-issue?`
+
+   Scope boundary — nil-parse path NOT handled here:
+   When the LLM errors before producing any parseable content, `llm-review`
+   is nil and the checks below silently return false. That path is the
+   exact 2026-06-05 dogfood (adhoc-944448986) pathology where stream-idle
+   text got promoted into `:review/blocking-issues` from the parse-failed
+   branch, synthesising a false `:rejected`. This predicate covers only
+   the review-SHAPED case (a parsed rejection whose blockers are all
+   timeout text); the caller (reviewer.clj) ORs it with
+   `result-boundary/backend-timeout-error?` on the NORMALIZED boundary so
+   nil-parse timeouts route to the backend-timeout (infra) exit, not here.
+
+   Args:
+   - `llm-review`  — parsed review map (nil when LLM errored; the caller's
+                     boundary check covers that path).
+   - `gate-result` — deterministic gate decision map."
   [llm-review gate-result]
-  (let [blocking-issues (vec (:review/blocking-issues llm-review))
-        recommendations (vec (:review/recommendations llm-review))
-        issue-vec (vec (:review/issues llm-review))
+  (let [blocking-issues    (vec (:review/blocking-issues llm-review))
+        recommendations    (vec (:review/recommendations llm-review))
+        issue-vec          (vec (:review/issues llm-review))
         negative-decision? (contains? issues/rejection-decisions
                                       (:review/decision llm-review))]
     (and negative-decision?

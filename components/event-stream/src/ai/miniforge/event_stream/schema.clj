@@ -347,9 +347,9 @@
 (def PRCreated
   "Schema for pr/created event.
 
-   Emitted when a workflow creates a PR that should appear in the
-   supervisory PR fleet. `:workflow/id` is the owning workflow run, which
-   lets downstream consumers correlate the PR back to the run/spec dossier."
+   Emitted when a workflow or operator-owned PR train creates a PR that
+   should appear in the supervisory PR fleet. `:workflow/id` is the owning
+   workflow run when one exists, and nil for operator-scoped train entries."
   (with-identity
    [:map
       [:event/type [:= :pr/created]]
@@ -357,7 +357,7 @@
     [:event/timestamp inst?]
     [:event/version string?]
     [:event/sequence-number int?]
-    [:workflow/id uuid?]
+    [:workflow/id [:maybe uuid?]]
     [:pr/repo string?]
     [:pr/number int?]
     [:pr/url string?]

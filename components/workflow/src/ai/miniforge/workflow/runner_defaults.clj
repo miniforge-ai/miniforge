@@ -18,7 +18,21 @@
 
 (ns ai.miniforge.workflow.runner-defaults
   "Configuration-as-data for the workflow runner.
-   All constants live in config/workflow/runner/defaults.edn."
+   All constants live in config/workflow/runner/defaults.edn.
+
+   Malli schema for :runner/defaults (documented in the EDN file header):
+
+     [:map {:closed false}
+      [:max-phases                     {:optional true} :int]
+      [:max-redirects                  {:optional true} :int]
+      [:max-infra-retries              {:optional true} :int]
+      [:max-consecutive-phase-retries  {:optional true} :int]
+      [:max-backoff-ms                 {:optional true} :int]
+      [:backoff-base-ms                {:optional true} :int]
+      [:pause-poll-interval-ms         {:optional true} :int]
+      [:default-workdir                {:optional true} :string]
+      [:task-branch-prefix             {:optional true} :string]
+      [:default-docker-image           {:optional true} :string]]"
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -34,7 +48,8 @@
 ;; Infra-retry budget (Fable §2.4): transient infrastructure verdicts
 ;; (timeout/rate-limit/backend-died) retry the SAME phase up to this many
 ;; times — a budget DISTINCT from max-redirects, so a flaky provider can't
-;; burn the work/redirect budget.
+;; burn the work/redirect budget. EDN value is 1 (one retry per phase-LLM
+;; call). Fallback of 3 is a safety net when the EDN resource is absent.
 (defn max-infra-retries    [] (get @defaults :max-infra-retries 3))
 (defn max-consecutive-phase-retries
   "Cap on how many times the SAME phase may run in immediately consecutive

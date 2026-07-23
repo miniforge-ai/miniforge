@@ -5,11 +5,19 @@
   :descriptor/unsupported-kind
   "Runtime kind {kind} is not yet supported. Supported runtimes: {supported}."
 
+  ;; Runtime selection (N11-delta §3)
+  :selector/explicit-unsupported      "Runtime kind {kind} is not supported."
+  :selector/explicit-unavailable      "Runtime {kind} is configured but unavailable."
+  :selector/none-available            "No OCI-compatible container runtime is available."
+  :selector/executable-requires-kind  "An :executable/:docker-path override requires an explicit :runtime-kind."
+
   ;; OCI runtime adapter diagnostics
   :oci/acquire-failed        "OCI runtime acquire failed"
   :oci/acquire-deadline      "[oci-cli] acquire-environment! deadline {ms}ms exceeded; cancelling runtime subprocess."
   :oci/acquire-timeout       "OCI runtime acquire-environment! exceeded {ms}ms — likely a stuck daemon or image pull"
   :oci/command-interrupted   "Runtime command interrupted"
+  :oci/command-timeout       "Runtime command exceeded {ms}ms deadline — process destroyed"
+  :oci/command-timeout-log   "[oci-cli] runtime command timeout {ms}ms exceeded; destroying process tree."
   :oci/command-failed        "Command failed"
   :oci/command-failed-detail "{prefix}: {command}{stderr}"
   :oci/bootstrap-failed      "Workspace bootstrap failed"

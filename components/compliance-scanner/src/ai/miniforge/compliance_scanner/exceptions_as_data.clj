@@ -289,12 +289,13 @@
 (defn- local-boundary-wrapper?
   "True when the enclosing defn is a documented local compatibility boundary.
 
-   Whole boundary namespaces are exempt earlier. This narrower classifier
-   covers the post-cleanup shape used inside ordinary component namespaces:
-   a canonical anomaly-returning function plus a retained thrower that bridges
-   old exception callers. Undocumented throwers remain `:cleanup-needed`."
+  Whole boundary namespaces are exempt earlier. This narrower classifier
+  covers the post-cleanup shape used inside ordinary component namespaces:
+  a canonical anomaly-returning function plus a retained thrower that bridges
+  old exception callers. Undocumented throwers remain `:cleanup-needed`."
   [context]
-  (let [doc-text  (str/lower-case (or (:defn-doc context) ""))
+  (let [doc-value (get context :defn-doc)
+        doc-text  (str/lower-case (if (string? doc-value) doc-value ""))
         meta-text (str/lower-case (str/join " " (collect-text (:defn-meta context))))
         evidence  (str doc-text " " meta-text)]
     (boolean
