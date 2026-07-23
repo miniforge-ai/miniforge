@@ -347,7 +347,7 @@
                       (:improvement/rationale applied)
                       (:improvement/rationale applied)
                       :rule
-                      :tags #{:auto-generated :operator}
+                      :tags [:auto-generated :operator]
                       :source {:type :operator
                                :proposal-id proposal-id})]
             (knowledge/put-zettel knowledge-store rule)))
