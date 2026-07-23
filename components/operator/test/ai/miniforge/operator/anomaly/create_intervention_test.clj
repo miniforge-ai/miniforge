@@ -24,6 +24,7 @@
    - unknown intervention type
    - target type cannot be resolved (no caller value, no vocabulary default)
    - resolved target type is not in the recognized set
+   - resolved target type is not supported by the intervention verb
    - missing :intervention/target-id
    - missing :intervention/requested-by or :intervention/request-source
 
@@ -103,6 +104,19 @@
              (:anomaly/message result)))
       (is (= :not-a-real-target
              (get-in result [:anomaly/data :intervention/target-type]))))))
+
+;------------------------------------------------------------------------------ Failure path: target type unsupported by verb
+
+(deftest create-intervention-invalid-input-on-unsupported-target-type
+  (testing "a workflow verb cannot be redirected to another known target type"
+    (let [result (op/create-intervention
+                  (intervention-request :pause (random-uuid)
+                                        :intervention/target-type :attention))]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :workflow
+             (get-in result
+                     [:anomaly/data :intervention/supported-target-type]))))))
 
 ;------------------------------------------------------------------------------ Failure path: missing target-id
 
