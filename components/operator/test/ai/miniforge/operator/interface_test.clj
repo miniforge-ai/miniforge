@@ -20,6 +20,7 @@
   "Tests for the operator (meta-agent) component."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.operator.interface :as op]
    [ai.miniforge.operator.protocol :as proto]))
 
@@ -256,3 +257,24 @@
     (is (contains? op/improvement-types :prompt-change))
     (is (contains? op/improvement-types :rule-addition))
     (is (contains? op/improvement-types :workflow-modification))))
+
+;; ============================================================================
+;; Knowledge store integration tests
+;; ============================================================================
+
+(deftest apply-improvement-writes-rule-exactly-once-test
+  (testing "apply-improvement writes exactly one rule to the knowledge store"
+    (let [k-store  (knowledge/create-store)
+          operator (op/create-operator {:knowledge-store k-store})
+          {:keys [proposal-id]} (op/propose-improvement operator
+                                                         {:type      :rule-addition
+                                                          :target    :knowledge-base
+                                                          :rationale "Prevent syntax errors"})]
+
+      (testing "first apply writes one zettel"
+        (is (:success? (op/apply-improvement operator proposal-id)))
+        (is (= 1 (count (knowledge/list-zettels k-store)))))
+
+      (testing "second apply is a no-op — knowledge store still has exactly one zettel"
+        (is (nil? (op/apply-improvement operator proposal-id)))
+        (is (= 1 (count (knowledge/list-zettels k-store))))))))
