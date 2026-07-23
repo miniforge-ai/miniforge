@@ -76,11 +76,16 @@
 
   (apply-improvement [this proposal-id]
     "Apply an approved improvement.
-     Returns {:success? bool :applied improvement-map}")
+     Returns {:success? bool :applied improvement-map} when the proposal is in
+     :proposed state, or nil if the proposal is not in :proposed state
+     (already :applied, :rejected, or missing) — callers must nil-check.")
 
   (reject-improvement [this proposal-id reason]
     "Reject an improvement proposal.
-     Returns updated proposal."))
+     Returns the updated proposal map (with :improvement/rejection-reason) when
+     the proposal is in :proposed state, or nil if the proposal is not in
+     :proposed state (already :applied, :rejected, or missing) — callers must
+     nil-check."))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detector protocol

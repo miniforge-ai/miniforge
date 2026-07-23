@@ -325,8 +325,9 @@
   "Reject an improvement proposal.
 
    Returns the updated proposal map (with :improvement/rejection-reason) when
-   the proposal is in :proposed state, or nil if the proposal is already
-   :rejected (idempotent no-op — callers must nil-check)."
+   the proposal is in :proposed state, or nil if the proposal is not in
+   :proposed state (already :applied, :rejected, or missing) — callers must
+   nil-check."
   [operator proposal-id reason]
   (proto/reject-improvement operator proposal-id reason))
 
