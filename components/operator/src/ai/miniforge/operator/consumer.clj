@@ -459,7 +459,13 @@
         ;; `.tryLock` itself is permitted under bb; only the release
         ;; methods are blocked. See snowflake.clj for the sibling
         ;; JVM-only-lease case.
-        (if (some? (.tryLock channel))
+        ;;
+        ;; Bind the lock and hold the binding for the whole pass: it makes
+        ;; the acquire-for-the-duration intent explicit and keeps the
+        ;; object referenced until the channel closes. `.tryLock` returns
+        ;; nil when another holder already owns the lock (the same-JVM
+        ;; overlapping case throws instead, caught below).
+        (if-let [_lock (.tryLock channel)]
           (consume-operator-dir! operator-dir
                                  stream
                                  apply!
