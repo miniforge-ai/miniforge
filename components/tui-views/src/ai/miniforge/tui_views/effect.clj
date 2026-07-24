@@ -100,7 +100,9 @@
 
 (defn control-action
   "Create a control action effect to pause/resume/cancel a workflow.
-   The effect handler writes a command file to ~/.miniforge/commands/<workflow-id>/."
+   The effect handler writes a `:supervisory/intervention-requested`
+   event into `{events-dir}/operator/`, where the runner's
+   operator-event consumer picks it up (Phase D D-4)."
   [action-type workflow-id]
   {:type :control-action
    :action action-type

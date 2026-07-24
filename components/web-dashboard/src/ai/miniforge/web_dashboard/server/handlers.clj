@@ -16,7 +16,6 @@
   "HTTP route handlers for views and API endpoints."
   (:require
    [clojure.string :as str]
-   [clojure.java.io :as io]
    [cheshire.core :as json]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.artifact.interface :as artifact]
@@ -123,6 +122,10 @@
 (def ^:private workflow-detail-event-limit
   "Maximum number of events to load per workflow detail view or panel."
   200)
+
+(def default-dashboard-requester
+  "Default requester identity when none is provided in the request body."
+  {:principal "dashboard" :role :operator})
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Filter helpers
@@ -424,35 +427,74 @@
                  [])]
     (responses/html-response (views/workflow-detail-panel workflow events))))
 
-(defn write-command-file!
-  "Atomic write of a command file to ~/.miniforge/commands/<workflow-id>/<timestamp>.edn.
-   Writes to .tmp then renames for atomicity."
-  [workflow-id command]
-  (try
-    (let [commands-dir (io/file (System/getProperty "user.home")
-                                ".miniforge" "commands" (str workflow-id))
-          timestamp (System/currentTimeMillis)
-          target-file (io/file commands-dir (str timestamp ".edn"))
-          tmp-file (io/file commands-dir (str timestamp ".edn.tmp"))
-          command-data {:command (keyword command) :timestamp timestamp}]
-      (.mkdirs commands-dir)
-      (spit tmp-file (pr-str command-data))
-      (.renameTo tmp-file target-file))
-    (catch Exception _
-      ;; Best-effort — fall through to in-memory enqueue
-      nil)))
+(def control-intervention-by-command
+  "The three run controls this console offers, mapped to the
+   intervention verbs the operator channel understands. The legacy
+   command name `stop` is gone with the `.edn` poller: the vocabulary
+   calls the same operation `cancel`. Anything not in this table is
+   rejected at the boundary instead of being written and silently
+   dropped downstream."
+  {"pause" :pause
+   "resume" :resume
+   "cancel" :cancel})
+
+(defn- command-requester
+  "Principal recorded on the intervention. The console has no per-user
+   auth yet, so the request body may name one; otherwise the surface
+   itself is the honest answer."
+  [data]
+  (or (get-in data [:action/requester :principal])
+      (:principal default-dashboard-requester)))
+
+(defn request-workflow-intervention!
+  "Write a `:supervisory/intervention-requested` event into
+   `{events-dir}/operator/` for `workflow-id`. The runner's
+   operator-event consumer routes it through the intervention
+   lifecycle and flips the run's control state; every transition comes
+   back on the event stream the console already renders.
+
+   Returns the written event, or an anomaly when the verb is unknown or
+   the write fails. Nothing is best-effort here: a control the operator
+   pressed either reached the audit stream or reports why not."
+  [workflow-id command requested-by]
+  (if-let [intervention-type (get control-intervention-by-command
+                                  (some-> command name str))]
+    (try
+      (event-stream/request-intervention!
+       {:intervention/type intervention-type
+        :intervention/target-type :workflow
+        :intervention/target-id (str workflow-id)
+        :intervention/requested-by requested-by
+        :intervention/request-source :dashboard})
+      (catch Exception e
+        (make-anomaly :anomalies/fault
+                      (str "Intervention request failed: " (ex-message e))
+                      {:workflow-id workflow-id :command command})))
+    (make-anomaly :anomalies/incorrect
+                  (str "Unknown workflow command: " (pr-str command))
+                  {:workflow-id workflow-id
+                   :supported-commands (vec (sort (keys control-intervention-by-command)))})))
 
 (defn handle-api-workflow-command
-  "API: Enqueue a control command for a workflow."
+  "API: Request a control intervention for a workflow."
   [state workflow-id body]
   (try
     (let [data (json/parse-string body true)
-          command (get data :command "unknown")]
-      ;; Write command file for CLI filesystem polling
-      (write-command-file! workflow-id command)
-      ;; Keep in-memory enqueue for state tracking
-      (state/enqueue-command! state workflow-id command)
-      (responses/json-response {:status "queued" :command command :workflow-id workflow-id}))
+          command (get data :command "unknown")
+          result (request-workflow-intervention! workflow-id
+                                                 command
+                                                 (command-requester data))]
+      (if (anomaly/anomaly? result)
+        (anomaly-http-response result)
+        (do
+          ;; Console-local mirror of what the operator asked for; the
+          ;; authoritative record is the intervention lifecycle.
+          (state/enqueue-command! state workflow-id command)
+          (responses/json-response
+           {:status "requested"
+            :command command
+            :workflow-id workflow-id
+            :intervention-id (str (:intervention/id result))}))))
     (catch Exception e
       (anomaly-http-response
        (make-anomaly :anomalies/incorrect
@@ -597,10 +639,6 @@
 ;------------------------------------------------------------------------------ Layer 3
 ;; Structured control action handler (N8)
 
-(def default-dashboard-requester
-  "Default requester identity when none is provided in the request body."
-  {:principal "dashboard" :role :operator})
-
 (defn build-control-action
   "Build a control action map from parsed request data."
   [data workflow-id]
@@ -612,12 +650,23 @@
     :parameters (:action/parameters data)}))
 
 (defn execute-via-command!
-  "Execution function that bridges control actions to the legacy command system."
+  "Execution function that routes an authorized control action onto the
+   governed operator channel. Throws when the request cannot be written
+   — `execute-control-action!` records the failure rather than letting
+   an unapplied action report success."
   [state workflow-id action]
-  (let [cmd (name (:action/type action))]
-    (write-command-file! workflow-id cmd)
+  (let [cmd (name (:action/type action))
+        result (request-workflow-intervention!
+                workflow-id
+                cmd
+                (get-in action [:action/requester :principal]
+                        (:principal default-dashboard-requester)))]
+    (when (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result) (:anomaly/data result))))
     (state/enqueue-command! state workflow-id cmd)
-    {:command cmd :workflow-id workflow-id}))
+    {:command cmd
+     :workflow-id workflow-id
+     :intervention-id (str (:intervention/id result))}))
 
 (defn execute-authorized-action
   "Execute a control action that has passed authorization."

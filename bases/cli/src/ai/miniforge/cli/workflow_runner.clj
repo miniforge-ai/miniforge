@@ -27,7 +27,6 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.supervisory-state.interface :as supervisory]
-   [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
@@ -38,6 +37,7 @@
    [ai.miniforge.cli.workflow-recommender :as recommender]
    [ai.miniforge.cli.workflow-runner.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
+   [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.workflow-runner.sandbox :as sandbox]
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
@@ -94,67 +94,13 @@
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Meta-loop context — process-scoped, accumulates metrics across workflows
 
-(defonce ^:private meta-loop-ctx
-  ;; Lazily initialized when the first governed workflow starts.
-  ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
-  (atom nil))
-
-(defonce ^:private operator-consumer-handle
-  ;; Exactly one operator-directory consumer per process. Starting one per
-  ;; workflow races the shared on-disk cursor and can publish a target
-  ;; workflow's audit trail through the wrong workflow stream.
-  (atom nil))
-
-(defn- create-meta-loop-ctx!
-  []
-  (let [operator-stream (es/create-event-stream)
-        _supervisor (supervisory/attach! operator-stream)
-        ;; N15-6: route routing-causality through the witness surface.
-        ;; The correlator subscribes to the same stream as
-        ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
-        ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
-        _correlator (correlator/attach! operator-stream)]
-    (agent/create-meta-loop-context operator-stream)))
-
-(defn- get-or-init-meta-loop-ctx!
-  []
-  (or @meta-loop-ctx
-      (locking meta-loop-ctx
-        (or @meta-loop-ctx
-            (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
-
-(defn- ensure-operator-consumer!
-  [ctx]
-  (or @operator-consumer-handle
-      (locking operator-consumer-handle
-        (or @operator-consumer-handle
-            (reset! operator-consumer-handle
-                    (operator/start-operator-consumer!
-                     {:stream (:event-stream ctx)
-                      :apply! operator/apply-intervention!
-                      :accept? operator/live-intervention-target?
-                      :stream-for operator/live-intervention-stream}))))))
-
-(defn- register-workflow-control!
-  [workflow-id control-state event-stream]
-  (let [ctx (get-or-init-meta-loop-ctx!)
-        handles {:control-state control-state
-                 :event-stream event-stream}]
-    (operator/register-degradation-manager! (:degradation-manager ctx))
-    (operator/register-live-runner! workflow-id handles)
-    (try
-      (ensure-operator-consumer! ctx)
-      (catch Throwable e
-        (operator/deregister-live-runner! workflow-id)
-        (throw e)))))
-
 (defn- trigger-meta-loop-after-workflow!
   "Record workflow outcome and run a background meta-loop cycle.
    Failures are swallowed — the meta-loop must never crash the workflow runner."
   [workflow-id status failure-class]
   (future
     (try
-      (let [ctx (get-or-init-meta-loop-ctx!)]
+      (let [ctx (control/meta-loop-context!)]
         (agent/record-workflow-outcome! ctx workflow-id status failure-class)
         (agent/run-cycle-from-context! ctx))
       (catch Exception _e nil))))
@@ -1149,9 +1095,9 @@
           ;; N15-6: see meta-loop attach above for rationale.
           _correlator (correlator/attach! event-stream)
           workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
-          ;; Control state for dashboard commands (pause/resume/stop)
+          ;; Control state the governed operator channel flips for
+          ;; :pause / :resume / :cancel interventions.
           control-state (es/create-control-state)
-          command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
           ;; Create workflow-specific LLM client for execution
           llm-client (context/create-llm-client workflow spec quiet backend-override)
           callbacks (create-phase-callbacks quiet)
@@ -1184,7 +1130,7 @@
         ;; every binding that may throw, so the finally below always runs
         ;; its cleanups even if registration fails. The consumer is
         ;; process-scoped; this workflow only registers its live handles.
-        (register-workflow-control! workflow-id control-state event-stream)
+        (control/register-workflow-control! workflow-id control-state event-stream)
         (when-not quiet
           (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
         (dashboard/print-dashboard-status! quiet)
@@ -1208,8 +1154,7 @@
           result)
         (finally
           (progress-cleanup)
-          (when command-poller-cleanup (command-poller-cleanup))
-          (operator/deregister-live-runner! workflow-id)
+          (control/release-workflow-control! workflow-id)
           ;; Schedule deferred GC for this workflow's scratch ref — in finally
           ;; so it fires on both normal completion and exception exit paths.
           (enqueue-workflow-gc-best-effort! workflow-id))))
@@ -1317,25 +1262,29 @@
             _correlator (correlator/attach! event-stream)
             llm-client (context/create-llm-client nil nil quiet)
             callbacks (create-phase-callbacks quiet)
+            chain-run-id (random-uuid)
+            control-state (es/create-control-state)
             context (context/create-workflow-context {:callbacks callbacks
                                                       :event-stream event-stream
                                                       :llm-client llm-client
                                                       :quiet quiet
-                                                      :workflow-id (random-uuid)
+                                                      :workflow-id chain-run-id
                                                       :workflow-type chain-id
                                                       :workflow-version version
                                                       :spec-title (str "Chain: " (name chain-id))
-                                                      :control-state (es/create-control-state)})
+                                                      :control-state control-state})
             progress-cleanup (display/start-progress! event-stream quiet)]
         (print-chain-header chain-id chain-def quiet)
         (dashboard/print-dashboard-status! quiet)
         (run-backend-preflight! quiet llm-client context)
         (try
+          (control/register-workflow-control! chain-run-id control-state event-stream)
           (let [result (workflow/run-chain chain-def chain-input context)]
             (print-chain-result result quiet)
             result)
           (finally
-            (progress-cleanup))))
+            (progress-cleanup)
+            (control/release-workflow-control! chain-run-id))))
       (catch Exception e
         (when-not quiet
           (println (display/colorize :red (messages/t :workflow-runner/chain-execution-failed {:error (ex-message e)}))))

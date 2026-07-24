@@ -17,20 +17,22 @@
 ;; limitations under the License.
 
 (ns ai.miniforge.cli.workflow-runner.dashboard
-  "Dashboard auto-discovery, filesystem command polling, and status display.
+  "Dashboard auto-discovery and status display.
 
    Architecture: Zero network communication between CLI and dashboard.
    - Events (CLI -> Dashboard): CLI writes to the app-configured events directory via file sink.
      Dashboard tail-follows the files via watcher.
-   - Commands (Dashboard -> CLI): Dashboard writes command files to
-     the app-configured commands directory for the workflow. CLI polls and deletes them."
+   - Commands (Dashboard -> CLI): the dashboard writes
+     `:supervisory/intervention-requested` events into
+     `{events-dir}/operator/`; the runner's operator-event consumer
+     (`workflow-runner.control`) routes them through the intervention
+     lifecycle. The pre-D-4 `.edn` command-file poller that lived here
+     was an ungoverned second channel and has been deleted, not kept
+     alongside."
   (:require
-   [clojure.java.io :as io]
-   [clojure.edn :as edn]
    [cheshire.core :as json]
    [ai.miniforge.cli.app-config :as app-config]
-   [ai.miniforge.cli.workflow-runner.display :as display]
-   [ai.miniforge.event-stream.interface :as es]))
+   [ai.miniforge.cli.workflow-runner.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Auto-discovery
@@ -61,58 +63,6 @@
     (catch Exception _ nil)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Filesystem command polling
-
-(defn start-command-poller!
-  "Start a background thread that polls the app-configured commands directory
-   for .edn command files. Reads command, updates control-state, deletes file.
-   Clears stale commands on startup. Returns a cleanup function."
-  [workflow-id control-state]
-  (let [commands-dir (io/file (app-config/commands-dir workflow-id))
-        running (atom true)
-        ;; Clear stale commands from a previous crashed run
-        _ (when (.exists commands-dir)
-            (doseq [^java.io.File f (.listFiles commands-dir)]
-              (when (.endsWith (.getName f) ".edn")
-                (.delete f))))
-        thread (Thread.
-                (fn []
-                  (while @running
-                    (try
-                      (Thread/sleep 1000)
-                      (when (and @running (.exists commands-dir))
-                        (let [files (->> (.listFiles commands-dir)
-                                         (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
-                                         (sort-by #(.getName ^java.io.File %)))]
-                          (doseq [^java.io.File file files]
-                            (try
-                              (let [content (slurp file)
-                                    data (edn/read-string content)
-                                    command (keyword (:command data))]
-                                (case command
-                                  :pause (do (es/pause! control-state)
-                                             (println "\u23f8  Workflow paused by dashboard"))
-                                  :resume (do (es/resume! control-state)
-                                              (println "\u25b6  Workflow resumed by dashboard"))
-                                  :stop (do (es/cancel! control-state)
-                                            (println "\u23f9  Workflow stopped by dashboard"))
-                                  nil)
-                                (.delete file))
-                              (catch Exception _
-                                ;; Malformed command file — delete and move on
-                                (.delete file))))))
-                      (catch InterruptedException _
-                        (reset! running false))
-                      (catch Exception _
-                        nil)))))]
-    (.setDaemon thread true)
-    (.setName thread (str (app-config/binary-name) "-command-poller"))
-    (.start thread)
-    (fn []
-      (reset! running false)
-      (.interrupt thread))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Status display
 
 (defn print-dashboard-status!

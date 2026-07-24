@@ -30,6 +30,7 @@
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.heartbeat :as heartbeat]
+   [ai.miniforge.event-stream.operator-requests :as operator-requests]
    [ai.miniforge.event-stream.reader :as reader]
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.timeline :as timeline]))
@@ -451,6 +452,20 @@
    many :intervention/* detail fields (from-state, type, target-type,
    target-id, requested-by, justification, outcome, ...)."
   events/intervention-state-changed)
+(def intervention-request-event
+  "Build the :supervisory/intervention-requested event an operator
+   surface writes into the operator directory, or an :invalid-input
+   anomaly when a required field is missing. Required:
+   :intervention/type, :intervention/target-type, :intervention/target-id,
+   :intervention/requested-by, :intervention/request-source. Pure."
+  operator-requests/intervention-request-event)
+(def request-intervention!
+  "Write an intervention request atomically into
+   `{events-dir}/operator/` for the operator-event consumer (Phase D
+   decision 1 — the one control channel). Takes the keys of
+   [[intervention-request-event]] plus optional :events-dir. Returns the
+   written event (with :source/file) or an :invalid-input anomaly."
+  operator-requests/request-intervention!)
 
 ;; PR scoring (N5-delta-2 §4.1)
 (def pr-created

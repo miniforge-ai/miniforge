@@ -242,7 +242,7 @@
  :workflow/metric-cost            "Cost: {value}"
  :workflow/metric-started         "Started: {value}"
  :workflow/panel-progress         "Progress: {progress}%"
- :workflow/btn-stop               "Stop"
+ :workflow/btn-cancel             "Cancel"
  :workflow/section-latest-output  "Latest Output"
  :workflow/section-event-timeline "Event Timeline"
  :workflow/runs-heading           "Workflow Runs"

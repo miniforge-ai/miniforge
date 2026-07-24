@@ -23,8 +23,8 @@
    Wires together the tui-engine (rendering) with domain data (event stream)."
   (:require
    [clojure.java.browse :as browse]
-   [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -49,6 +49,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 ;; Side-effect handlers — each returns [msg-type payload] or nil
+
+(def ^:private fallback-operator-principal
+  "Stamped on interventions when the OS account is unreadable — an
+   explicit placeholder beats a nil actor on the audit stream."
+  "tui")
+
+(defn- operator-principal
+  "Identity stamped on interventions this TUI requests: the OS account
+   driving the session."
+  []
+  (or (System/getProperty "user.name") fallback-operator-principal))
 
 (defn handle-sync-prs [{:keys [state]}]
   (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))
@@ -216,13 +227,31 @@
   (pr-cache/persist-risk-triage! risk-map prs)
   nil)
 
-(defn handle-control-action [{:keys [action workflow-id]}]
-  (let [commands-dir (io/file (System/getProperty "user.home")
-                              ".miniforge" "commands" (str workflow-id))
-        cmd-file (io/file commands-dir (str (System/currentTimeMillis) ".edn"))]
-    (.mkdirs commands-dir)
-    (spit cmd-file (pr-str {:command action :timestamp (java.util.Date.)}))
-    nil))
+(defn handle-control-action
+  "Request a `:pause` / `:resume` / `:cancel` intervention on a workflow.
+
+   Writes a `:supervisory/intervention-requested` event into the
+   operator directory — the one governed control channel (Phase D
+   decision 2). The runner's operator-event consumer picks it up,
+   drives it through the intervention lifecycle, and flips the run's
+   control state; the chips the TUI renders come back off the same
+   stream. A write failure is surfaced as a flash message rather than
+   swallowed: a control gesture that went nowhere must say so."
+  [{:keys [action workflow-id]}]
+  (try
+    (let [result (es/request-intervention!
+                  {:intervention/type action
+                   :intervention/target-type :workflow
+                   :intervention/target-id (str workflow-id)
+                   :intervention/requested-by (operator-principal)
+                   :intervention/request-source :tui})]
+      (when (anomaly/anomaly? result)
+        (msg/side-effect-error
+         (response/error (:anomaly/message result)
+                         {:data {:type :control-action}}))))
+    (catch Exception e
+      (msg/side-effect-error
+       (response/error (.getMessage e) {:data {:type :control-action}})))))
 
 (defn handle-archive-workflows [{:keys [workflow-ids]}]
   (let [result (persistence/archive-workflows! workflow-ids)]

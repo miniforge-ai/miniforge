@@ -25,7 +25,9 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.commands.workflow-commands :as sut]
    [ai.miniforge.cli.worktree :as worktree]
-   [ai.miniforge.dag-executor.interface :as gc-queue]))
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.dag-executor.interface :as gc-queue]
+   [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
 
@@ -113,15 +115,41 @@
         (with-out-str (sut/workflow-cancel-cmd {}))
         (is @exited?)))))
 
-(deftest workflow-cancel-cmd-writes-cancel-file-test
-  (testing "cancel command writes a cancel signal file"
-    (let [commands-dir (str *tmp-dir* "/commands")]
-      (with-redefs [app-config/commands-dir (constantly commands-dir)]
-        (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-456"}))]
+(deftest workflow-cancel-cmd-requests-a-cancel-intervention-test
+  (testing "cancel command writes a governed intervention request"
+    (let [requests (atom [])]
+      (with-redefs [es/request-intervention!
+                    (fn [request]
+                      (swap! requests conj request)
+                      (assoc request :intervention/id (random-uuid)))]
+        (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-456"}))
+              request (first @requests)]
           (is (.contains output "Cancel"))
-          (is (fs/exists? commands-dir))
-          (let [files (fs/list-dir commands-dir)]
-            (is (pos? (count files)))))))))
+          (is (= 1 (count @requests)))
+          ;; The legacy poller verb was `stop`; the intervention
+          ;; vocabulary names the same operation `:cancel`.
+          (is (= :cancel (:intervention/type request)))
+          (is (= :workflow (:intervention/target-type request)))
+          (is (= "wf-456" (:intervention/target-id request)))
+          (is (= :cli (:intervention/request-source request)))
+          (is (string? (:intervention/requested-by request))))))))
+
+(deftest workflow-cancel-cmd-reports-write-failure-test
+  (testing "a failed request is reported, never reported as success"
+    (with-redefs [es/request-intervention!
+                  (fn [_request] (throw (ex-info "disk full" {})))]
+      (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
+        (is (.contains output "disk full"))
+        (is (not (.contains output "Cancel signal sent")))))))
+
+(deftest workflow-cancel-cmd-reports-anomaly-test
+  (testing "an :invalid-input anomaly from the writer surfaces as an error"
+    (with-redefs [es/request-intervention!
+                  (fn [_request]
+                    (anomaly/anomaly :invalid-input "bad request" {}))]
+      (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
+        (is (.contains output "bad request"))
+        (is (not (.contains output "Cancel signal sent")))))))
 
 ;------------------------------------------------------------------------------ gc-scratch-cmd tests
 ;; All git operations are mocked — no shell subprocesses spawned.

@@ -27,6 +27,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -34,6 +35,7 @@
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.dag-executor.interface :as gc-queue]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -42,6 +44,14 @@
 (def ^:private exit-code-error
   "Process exit code signalling command failure (non-zero)."
   1)
+
+(defn- operator-principal
+  "Identity stamped on interventions this CLI requests. The OS account
+   is the only principal the CLI actually knows; naming the binary
+   instead would put an unattributable actor on the audit stream."
+  []
+  (or (System/getProperty "user.name")
+      (app-config/binary-name)))
 
 (defn- read-event-lines
   "Read all non-blank EDN lines from a workflow event file."
@@ -156,28 +166,34 @@
               (println))))))))
 
 (defn workflow-cancel-cmd
-  "Cancel a running workflow by writing a stop command file.
+  "Cancel a running workflow by requesting a `:cancel` intervention.
 
-   The CLI command poller (started with each workflow) reads this file
-   and calls event-stream/cancel! on the control state."
+   Writes a `:supervisory/intervention-requested` event into
+   `{events-dir}/operator/` — the same governed channel the console and
+   the TUI use. The runner's operator-event consumer routes it through
+   the intervention lifecycle and flips the run's control state; every
+   transition is on the audit stream. (Pre-D-4 this wrote an ungoverned
+   `.edn` command file whose legacy verb was `stop`; the intervention
+   vocabulary names the same operation `:cancel`.)"
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
       (shared/usage-error! :workflow-cmd/cancel-usage "workflow cancel <id>")
-      (let [commands-dir (app-config/commands-dir (str id))
-            cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")
-            wf-id-str    (str id)
-            timestamp    (java.util.Date.)
-            cmd-data     {:command "stop"
-                          :workflow-id wf-id-str
-                          :timestamp timestamp}]
-        (try
-          (fs/create-dirs commands-dir)
-          (spit cmd-file (pr-str cmd-data))
-          (display/print-success (messages/t :workflow-cmd/cancel-success {:id id}))
-          (catch Exception e
+      (try
+        (let [result (es/request-intervention!
+                      {:intervention/type :cancel
+                       :intervention/target-type :workflow
+                       :intervention/target-id (str id)
+                       :intervention/requested-by (operator-principal)
+                       :intervention/request-source :cli})]
+          (if (anomaly/anomaly? result)
             (display/print-error (messages/t :workflow-cmd/cancel-failed
-                                            {:error (ex-message e)}))))))))
+                                             {:error (:anomaly/message result)}))
+            (display/print-success (messages/t :workflow-cmd/cancel-success
+                                               {:id id}))))
+        (catch Exception e
+          (display/print-error (messages/t :workflow-cmd/cancel-failed
+                                           {:error (ex-message e)})))))))
 
 (defn workflow-gc-scratch-cmd
   "Scan the scratch-ref GC queue and delete refs older than `max-age-days`.

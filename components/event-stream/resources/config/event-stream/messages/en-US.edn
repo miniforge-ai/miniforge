@@ -6,6 +6,9 @@
   :supervisory/intervention-state-changed
   "Intervention {intervention-id} -> {state}"
 
+  :operator-request/missing-fields
+  "Intervention request is missing required fields: {fields}"
+
   :dependency/health-updated
   "Dependency {dependency-id} health -> {status}"
 

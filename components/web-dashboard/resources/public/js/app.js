@@ -169,21 +169,28 @@ function applyFilters() {
   dispatchRefresh();
 }
 
-// Post workflow command via HTTP (GraalVM-safe, no WebSocket needed)
+// Request a workflow intervention via HTTP (GraalVM-safe, no WebSocket needed).
+// A non-2xx response means the request never reached the operator directory,
+// so it must surface as a failure toast — not as "command sent".
 function postWorkflowCommand(workflowId, command) {
   fetch('/api/workflow/' + workflowId + '/command', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command: command })
   })
-  .then(r => r.json())
+  .then(r => r.json().then(data => {
+    if (!r.ok) {
+      throw new Error((data && data.error && data.error.message) || ('HTTP ' + r.status));
+    }
+    return data;
+  }))
   .then(data => {
     showToast(window.miniforge.t('toast/command-sent', { command }), 'info', 3000);
-    console.log('Command queued:', data);
+    console.log('Intervention requested:', data);
   })
   .catch(err => {
     showToast(window.miniforge.t('toast/command-failed', { error: err.message }), 'error');
-    console.error('Error sending command:', err);
+    console.error('Error requesting intervention:', err);
   });
 }
 
