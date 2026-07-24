@@ -317,14 +317,16 @@ Closure with open challenges records them as dissent on the affected decisions
 ## 8. Artifacts and capsules
 
 - Implementer and verifier activations MUST run in N11 capsules. The capsule bootstrap
-  lineage is the currently adopted artifact chain (the latest `:accepted`
-  artifact-adoption decision), or the task baseline if none.
+  lineage is the currently adopted artifact chain — the `artifact-ref` targeted by the
+  latest `:accepted` adoption decision (defined below) — or the task baseline if none.
 - Artifacts enter the workspace only as `artifact-ref` objects: capsule id, export digest,
   path list, statement of what changed. Never content (§2.2).
 - Parallel implementer activations produce parallel capsules. Reconciliation is an
-  **adoption decision** (exclusive op) selecting one lineage; the engine MUST NOT merge
-  artifact contents. Non-adopted artifacts remain referenced (they are evidence of
-  alternatives considered).
+  **adoption decision**: a `decision` object whose subject is lineage selection, carrying
+  exactly one `resolves` edge to the chosen `artifact-ref` and `supersedes` edges to each
+  rejected alternative. It is created via `propose-decision` and committed via
+  `accept-decision` (exclusive class, §3.3). The engine MUST NOT merge artifact contents.
+  Non-adopted artifacts remain referenced (they are evidence of alternatives considered).
 
 ## 9. Events and evidence
 

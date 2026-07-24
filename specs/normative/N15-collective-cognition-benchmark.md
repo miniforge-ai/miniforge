@@ -60,7 +60,9 @@ ablation pairing, and pre-registered gates under the surviving core protocol.
 
 ## 1. Terminology
 
-- **Condition**: a complete architecture configuration (C1–C7, §3) run against a task.
+- **Condition**: a complete architecture configuration (§3) run against a task. The
+  condition set is open: C1–C5 are the standing controls; C6/C7 are workspace-conditional
+  (§0.4); future architecture claims add their own candidate conditions.
 - **Budget tier**: a pinned resource allowance (normalized cost + wall-clock cap).
 - **Replicate**: an independent run of (condition, task, tier); same variant `label`,
   distinct `run_id`.
@@ -99,12 +101,15 @@ proof sits on H4.
 | C6 | workspace | N14 deliberation run (stage per experiment manifest) |
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
 
-Requirements: every experiment MUST include C1, C2, and C6; C7 MUST be included whenever C6
-is (paired). C2s is REQUIRED in any experiment claiming an H3 result and OPTIONAL otherwise. C5 exists to separate
-"roles + relay" from "shared typed state" — if C6 only
-matches C5, the graph is not earning its overhead. Population pinning: each condition's
-manifest MUST enumerate exact model ids, role bindings, and prompts; C2's model MUST be the
-strongest single model available to C3/C6 populations.
+Requirements: every experiment MUST include C1 and C2 (the compute-scaling controls).
+Experiments evaluating the workspace claim (H4) MUST include C6 and MUST pair C7 with it;
+an experiment evaluating a different candidate architecture substitutes its own condition
+under the same control set (§0.4) and MUST define an analogous ablation pairing. C2s is
+REQUIRED in any experiment claiming an H3 result and OPTIONAL otherwise. C5 exists to
+separate "roles + relay" from "shared typed state" — if C6 only matches C5, the graph is
+not earning its overhead. Population pinning: each condition's manifest MUST enumerate
+exact model ids, role bindings, and prompts; C2's model MUST be the strongest single model
+available to the candidate condition's population.
 
 ## 4. Budget protocol
 
