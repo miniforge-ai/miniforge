@@ -1,0 +1,105 @@
+;; Title: Miniforge.ai
+;; Subtitle: An agentic SDLC / fleet-control platform
+;; Author: Christopher Lester
+;; Line: Founder, Miniforge.ai (project)
+;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
+;;
+;; Licensed under the Apache License, Version 2.0 (the "License");
+;; you may not use this file except in compliance with the License.
+;; You may obtain a copy of the License at
+;;
+;;     http://www.apache.org/licenses/LICENSE-2.0
+;;
+;; Unless required by applicable law or agreed to in writing, software
+;; distributed under the License is distributed on an "AS IS" BASIS,
+;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+;; See the License for the specific language governing permissions and
+;; limitations under the License.
+
+(ns ai.miniforge.operator.mechanism-test
+  "Unit coverage for the pure halves of the D-3b mechanisms: reading the
+   requested phase off the wire, deriving a run's real phase history,
+   and shaping the resume plan. The lifecycle wiring these feed is
+   covered in `application-test`."
+  (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.operator.mechanism :as mechanism]
+   [clojure.test :refer [deftest is testing]]))
+
+;------------------------------------------------------------------------------ Requested phase
+
+(deftest requested-phase-reads-both-detail-shapes
+  (testing "the wire's string key (transit leaves details keys untagged)"
+    (is (= :implement
+           (mechanism/requested-phase
+            {:intervention/details {"phase" "implement"}}))))
+
+  (testing "the in-process keyword shape"
+    (is (= :implement
+           (mechanism/requested-phase
+            {:intervention/details {:phase :implement}}))))
+
+  (testing "absent, blank, and unusable values yield nil, not a phantom phase"
+    (doseq [details [nil {} {"phase" ""} {"phase" "   "} {"phase" 7}]]
+      (is (nil? (mechanism/requested-phase {:intervention/details details}))
+          (str "details " (pr-str details))))))
+
+;------------------------------------------------------------------------------ Phase history
+
+(deftest known-phases-covers-completed-attempted-and-current
+  (let [context {:completed-phases [:explore :plan]
+                 :phase-results {:explore {} :plan {} :implement {}}
+                 :machine-snapshot {:execution/current-phase :verify}}]
+    (is (= #{:explore :plan :implement :verify}
+           (mechanism/known-phases context))
+        "a failed phase has a result without being completed — it still ran")))
+
+(deftest known-phases-tolerates-a-bare-context
+  (is (= #{} (mechanism/known-phases {}))))
+
+(deftest phases-before-truncates-at-the-target
+  (is (= [:explore] (mechanism/phases-before [:explore :plan :implement] :plan)))
+  (is (= [] (mechanism/phases-before [:explore :plan] :explore)))
+  (is (= [:explore :plan] (mechanism/phases-before [:explore :plan] :nowhere))
+      "a phase outside the list truncates nothing — the caller validates first"))
+
+;------------------------------------------------------------------------------ Resume plan
+
+(def ^:private context
+  {:completed-phases [:explore :plan]
+   :phase-results {:explore {:outcome :success}}
+   :machine-snapshot {:execution/current-phase :implement}
+   :workspace-checkpoint {:branch "feat/x"}
+   :completed-dag-tasks #{"task-1"}
+   :completed-dag-artifacts [{:path "a.clj"}]})
+
+(def ^:private workflow-identity
+  {:workflow-type :canonical-sdlc :workflow-version "1.0.0"})
+
+(deftest plain-retry-keeps-the-fsm-snapshot
+  (let [plan (mechanism/resume-plan {:intervention/target-id "wf-1"
+                                     :intervention/requested-by "op@example.invalid"}
+                                    context workflow-identity nil)]
+    (is (= [:explore :plan] (:resume/completed-phases plan)))
+    (is (= {:execution/current-phase :implement} (:resume/machine-snapshot plan)))
+    (is (not (contains? plan :resume/from-phase)))
+    (is (= "wf-1" (:resume/workflow-id plan)))
+    (is (= :canonical-sdlc (:resume/workflow-type plan)))
+    (is (= #{"task-1"} (:resume/completed-dag-tasks plan)))))
+
+(deftest retry-from-phase-rewinds-and-drops-the-snapshot
+  (let [plan (mechanism/resume-plan {:intervention/target-id "wf-1"} context
+                                    workflow-identity :plan)]
+    (is (= :plan (:resume/from-phase plan)))
+    (is (= [:explore] (:resume/completed-phases plan)))
+    (is (nil? (:resume/machine-snapshot plan))
+        "restoring a snapshot parked past the target would ignore the rewind")))
+
+;------------------------------------------------------------------------------ Launcher result
+
+(deftest launched-run-id-accepts-only-a-reported-run
+  (is (= "run-1" (mechanism/launched-run-id {:resume/run-id "run-1"})))
+  (doseq [result [nil {} "run-1"
+                  (anomaly/anomaly :fault "launcher blew up" {})]]
+    (is (nil? (mechanism/launched-run-id result))
+        (str "result " (pr-str result)))))
