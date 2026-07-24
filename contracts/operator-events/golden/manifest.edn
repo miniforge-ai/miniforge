@@ -1,0 +1,2 @@
+{:event-version "1.0.0"
+ :fixture/scenarios [:pause :cancel :retry-from-phase :waive :force-safe-mode :request-human-review]}

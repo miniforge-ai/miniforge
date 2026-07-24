@@ -27,6 +27,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.event-stream.interface.manifest :as es-manifest]
    [ai.miniforge.supervisory-state.interface :as supervisory]
+   [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.workflow.interface.resume :as workflow-resume]
@@ -94,22 +95,58 @@
 ;; Meta-loop context — process-scoped, accumulates metrics across workflows
 
 (defonce ^:private meta-loop-ctx
-  ;; Lazily initialized on first workflow completion.
+  ;; Lazily initialized when the first governed workflow starts.
   ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
   (atom nil))
 
-(defn- get-or-init-meta-loop-ctx! []
+(defonce ^:private operator-consumer-handle
+  ;; Exactly one operator-directory consumer per process. Starting one per
+  ;; workflow races the shared on-disk cursor and can publish a target
+  ;; workflow's audit trail through the wrong workflow stream.
+  (atom nil))
+
+(defn- create-meta-loop-ctx!
+  []
+  (let [operator-stream (es/create-event-stream)
+        _supervisor (supervisory/attach! operator-stream)
+        ;; N15-6: route routing-causality through the witness surface.
+        ;; The correlator subscribes to the same stream as
+        ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
+        ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
+        _correlator (correlator/attach! operator-stream)]
+    (agent/create-meta-loop-context operator-stream)))
+
+(defn- get-or-init-meta-loop-ctx!
+  []
   (or @meta-loop-ctx
-      (let [operator-stream (es/create-event-stream)
-            _supervisor (supervisory/attach! operator-stream)
-            ;; N15-6: route routing-causality through the witness surface.
-            ;; The correlator subscribes to the same stream as
-            ;; supervisory-state and emits `:supervisory/automation-edge-upserted`
-            ;; events; consumers (Rust core, native app) dedup on `:edge/id`.
-            _correlator (correlator/attach! operator-stream)
-            ctx (agent/create-meta-loop-context operator-stream)]
-        (reset! meta-loop-ctx ctx)
-        ctx)))
+      (locking meta-loop-ctx
+        (or @meta-loop-ctx
+            (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
+
+(defn- ensure-operator-consumer!
+  [ctx]
+  (or @operator-consumer-handle
+      (locking operator-consumer-handle
+        (or @operator-consumer-handle
+            (reset! operator-consumer-handle
+                    (operator/start-operator-consumer!
+                     {:stream (:event-stream ctx)
+                      :apply! operator/apply-intervention!
+                      :accept? operator/live-intervention-target?
+                      :stream-for operator/live-intervention-stream}))))))
+
+(defn- register-workflow-control!
+  [workflow-id control-state event-stream]
+  (let [ctx (get-or-init-meta-loop-ctx!)
+        handles {:control-state control-state
+                 :event-stream event-stream}]
+    (operator/register-degradation-manager! (:degradation-manager ctx))
+    (operator/register-live-runner! workflow-id handles)
+    (try
+      (ensure-operator-consumer! ctx)
+      (catch Throwable e
+        (operator/deregister-live-runner! workflow-id)
+        (throw e)))))
 
 (defn- trigger-meta-loop-after-workflow!
   "Record workflow outcome and run a background meta-loop cycle.
@@ -1142,34 +1179,40 @@
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
           progress-cleanup (display/start-progress! event-stream quiet)]
-      (when-not quiet
-        (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
-      (dashboard/print-dashboard-status! quiet)
-      (assert-runtime-alignment! spec context)
-      (print-runtime-provenance! quiet context)
-      (run-backend-preflight! quiet llm-client context)
-      (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))]
-        (try
-          (let [result (execute-with-events {:run-pipeline run-pipeline
-                                             :workflow workflow
-                                             :workflow-input workflow-input
-                                             :context context
-                                             :artifact-store artifact-store
-                                             :event-stream event-stream
-                                             :workflow-id workflow-id
-                                             :sandbox-cleanup sandbox-cleanup
-                                             :opts opts})
-                outcome-status (if (phase/succeeded? result) :completed :failed)]
-            (move-spec-on-completion! provenance result)
-            ;; Trigger meta-loop learning cycle in background
-            (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
-            result)
-          (finally
-            (progress-cleanup)
-            (when command-poller-cleanup (command-poller-cleanup))
-            ;; Schedule deferred GC for this workflow's scratch ref — in finally
-            ;; so it fires on both normal completion and exception exit paths.
-            (enqueue-workflow-gc-best-effort! workflow-id)))))
+      (try
+        ;; Acquire the governed control path first inside the try, after
+        ;; every binding that may throw, so the finally below always runs
+        ;; its cleanups even if registration fails. The consumer is
+        ;; process-scoped; this workflow only registers its live handles.
+        (register-workflow-control! workflow-id control-state event-stream)
+        (when-not quiet
+          (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
+        (dashboard/print-dashboard-status! quiet)
+        (assert-runtime-alignment! spec context)
+        (print-runtime-provenance! quiet context)
+        (run-backend-preflight! quiet llm-client context)
+        (let [provenance (move-spec-to-in-progress! (:spec/provenance enriched-spec))
+              result (execute-with-events {:run-pipeline run-pipeline
+                                           :workflow workflow
+                                           :workflow-input workflow-input
+                                           :context context
+                                           :artifact-store artifact-store
+                                           :event-stream event-stream
+                                           :workflow-id workflow-id
+                                           :sandbox-cleanup sandbox-cleanup
+                                           :opts opts})
+              outcome-status (if (phase/succeeded? result) :completed :failed)]
+          (move-spec-on-completion! provenance result)
+          ;; Trigger meta-loop learning cycle in background
+          (trigger-meta-loop-after-workflow! workflow-id outcome-status nil)
+          result)
+        (finally
+          (progress-cleanup)
+          (when command-poller-cleanup (command-poller-cleanup))
+          (operator/deregister-live-runner! workflow-id)
+          ;; Schedule deferred GC for this workflow's scratch ref — in finally
+          ;; so it fires on both normal completion and exception exit paths.
+          (enqueue-workflow-gc-best-effort! workflow-id))))
     (catch Object _
       (let [e (:throwable &throw-context)]
         (when-not quiet
@@ -1218,8 +1261,7 @@
                     (messages/t :workflow-runner/no-completed-tasks))))
         (run-workflow-from-spec! spec opts)))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Chain-driven execution
+;; ── Chain-driven execution ─────────────────────────────────────────────────
 
 (defn resolve-chain-input
   "Resolve chain input from a spec file path or inline JSON."

@@ -76,6 +76,24 @@
 
     :else x))
 
+;; ── Single-file reader ─────────────────────────────────────────────────────
+
+(defn read-event-file
+  "Parse one transit-JSON event file into an event map (transit
+   prefixes stripped, so `:event/type` comes back as a keyword and
+   UUID/instant values as plain strings).
+
+   Returns the parsed map, or nil when the file cannot be read or
+   parsed. Callers that must be LOUD about malformed files (the
+   operator-event consumer's append-only contract) branch on the nil
+   themselves — unlike [[read-workflow-events]], nothing is dropped
+   silently without the caller seeing it."
+  [f]
+  (try
+    (strip-transit-prefix
+     (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
+    (catch Exception _e nil)))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Directory reader
 

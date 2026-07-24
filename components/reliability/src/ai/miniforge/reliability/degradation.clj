@@ -54,8 +54,8 @@
 
    Transitions:
      :nominal   → :degraded   on :budget-critical
-     :nominal   → :safe-mode  on :emergency-stop
-     :degraded  → :safe-mode  on :budget-exhausted or :emergency-stop
+     :nominal   → :safe-mode  on :emergency-stop or :manual
+     :degraded  → :safe-mode  on :budget-exhausted, :emergency-stop, or :manual
      :degraded  → :nominal    on :budget-recovered
      :safe-mode → :nominal    on :operator-exit (requires justification)"
   (fsm/define-machine
@@ -72,11 +72,13 @@
                       :dependency-unavailable :safe-mode
                       :dependency-operator-action :safe-mode
                       :emergency-stop :safe-mode
+                      :manual :safe-mode
                       :unknown-failures :safe-mode}}
      :degraded  {:on {:budget-exhausted :safe-mode
                       :dependency-unavailable :safe-mode
                       :dependency-operator-action :safe-mode
                       :emergency-stop :safe-mode
+                      :manual :safe-mode
                       :unknown-failures :safe-mode
                       :budget-recovered :nominal}}
      :safe-mode {:on {:operator-exit :nominal}}}}))
@@ -320,6 +322,7 @@
                        :unknown-failures :unknown-failures
                        :dependency-unavailable :dependency-unavailable
                        :dependency-operator-action :dependency-operator-action
+                       :manual :manual
                        :emergency-stop)]
         (transition! manager
                      (transition-signal :safe-mode

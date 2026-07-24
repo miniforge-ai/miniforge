@@ -238,6 +238,15 @@
   ([base-dir workflow-id event]
    (new-event-file-path (live-workflow-dir base-dir workflow-id) event)))
 
+(defn operator-dir
+  "Return the cross-workflow operator events directory under `base-dir`.
+   Writer side is [[operator-event-file-path]]; the operator-event
+   consumer (Phase D D-2) lists this directory on the read side."
+  (^java.io.File []
+   (operator-dir (default-events-dir)))
+  (^java.io.File [base-dir]
+   (io/file base-dir (layout/operator-subdir))))
+
 (defn operator-event-file-path
   "Return a java.io.File for a new event file in the operator subdirectory.
    Used by meta-loop, reliability, and degradation events (no :workflow/id).
