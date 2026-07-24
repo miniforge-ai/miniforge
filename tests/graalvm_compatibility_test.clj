@@ -283,6 +283,31 @@
 ;;
 ;; So: exercise the call path, not just the require.
 
+(defn- consumer-lock-acquirable?
+  "Open a FRESH channel on the operator dir's `.consumer.lock` and try to
+   acquire the lock, releasing by CLOSING THE CHANNEL (never the lock —
+   bb forbids every `sun.nio.ch.FileLockImpl` method). Returns true iff
+   `.tryLock` yields a lock.
+
+   This is the direct check the twice-run pass cannot make on its own: an
+   empty operator dir returns `{:routed 0 …}` whether the pass acquired
+   the lock or bailed because it could not, so a leaked/still-held lock is
+   invisible in the result map. Here a lock the consumer failed to release
+   surfaces as either nil (another holder) or an
+   `OverlappingFileLockException` (same JVM, overlapping region) — both
+   map to false."
+  [operator-dir]
+  (let [lock-file (io/file operator-dir ".consumer.lock")
+        channel (java.nio.channels.FileChannel/open
+                 (.toPath lock-file)
+                 (into-array java.nio.file.OpenOption
+                             [java.nio.file.StandardOpenOption/CREATE
+                              java.nio.file.StandardOpenOption/WRITE]))]
+    (try
+      (some? (.tryLock channel))
+      (catch Exception _ false)
+      (finally (.close channel)))))
+
 (deftest test-operator-consumer-pass-executes-in-babashka
   (testing "consume-operator-events! runs a full pass under Babashka"
     (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
@@ -308,15 +333,23 @@
                     (str "consumer pass must not throw under Babashka: "
                          (::threw result)))
                 (is (map? result) "a completed pass returns a result map")
-                ;; Second pass proves the lock was actually released;
-                ;; a leaked lock would make this one a no-op or throw.
+                ;; Directly prove the pass RELEASED its lock: a fresh
+                ;; acquirer must succeed. An empty-dir result map cannot
+                ;; distinguish a released lock from a leaked one, so this
+                ;; is the assertion that actually guards release.
+                (is (consumer-lock-acquirable? (io/file events-dir "operator"))
+                    "consumer must release its lock so a fresh acquirer succeeds")
+                ;; Second pass is the additional regression check: the
+                ;; release path runs again and still does not throw.
                 (let [again (try
                               (consume! {:events-dir events-dir :stream stream})
                               (catch Exception e
                                 {::threw (ex-message e)}))]
                   (is (nil? (::threw again))
                       (str "second pass must not throw (lock released?): "
-                           (::threw again))))))))))))
+                           (::threw again)))
+                  (is (consumer-lock-acquirable? (io/file events-dir "operator"))
+                      "second pass must also release its lock"))))))))))
 
 ;; ============================================================================
 ;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
