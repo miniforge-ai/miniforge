@@ -180,7 +180,7 @@ closed vocabulary (§3.2). Every operation MUST identify the objects it touches.
 
 | Class | Operations | Concurrency behavior |
 |---|---|---|
-| additive | assert-claim, add-question, attach-evidence, propose-* , register-artifact, challenge, declare-blocked | Commute; commit even on stale basis if touched objects still exist and are non-terminal |
+| additive | assert-claim, add-question, attach-evidence, propose-*, register-artifact, challenge, declare-blocked | Commute; commit even on stale basis if touched objects still exist and are non-terminal |
 | mergeable | refine-claim, revise-plan, answer-question | Commit if touched objects unchanged since basis; otherwise reject with current state returned |
 | exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-goal, add-constraint, retire-question | Commit only against current version of touched objects; single writer wins |
 
@@ -294,7 +294,10 @@ a benchmark axis under N15, not a rewrite.
 ### 6.3 Budgets
 
 A run manifest MUST declare budgets: per-run and per-goal activation counts, cost ceiling,
-and wall-clock ceiling. The scheduler MUST NOT start an activation that a budget forbids.
+and wall-clock ceiling. The manifest MUST additionally reserve a **closure allowance**,
+outside the run budgets, sized for one synthesizer activation. The scheduler MUST NOT
+start an ordinary activation that a budget forbids; the forced-synthesis closure
+activation (§7) is the single exception, drawing only from the closure allowance.
 Every scheduling decision (start, skip, budget-block) MUST be logged as an event with reason.
 
 ## 7. Termination
@@ -304,7 +307,9 @@ A deliberation run MUST close on the first of:
 1. **Success** — all goals terminal (`:accepted`/`:rejected` with decision coverage).
 2. **Budget boundary** — any run-level budget exhausted. The engine MUST then run one final
    synthesizer activation ("forced synthesis") producing the best-available decision record
-   with explicit dissent and open items.
+   with explicit dissent and open items. This activation is funded by the reserved closure
+   allowance (§6.3), not the exhausted run budgets, so the §6.3 prohibition and this
+   requirement never conflict.
 3. **Quiescence** — k consecutive committed transactions produce zero net new open objects
    (default k=3), and no eligible activations remain that could change that.
 4. **Deadlock** — no eligible activations exist for any open goal. The meta-watchdog MUST be

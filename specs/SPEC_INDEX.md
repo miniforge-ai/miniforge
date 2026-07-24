@@ -315,7 +315,7 @@ Defines:
 
 ### N15 — Collective-Cognition Evaluation Harness 🆕
 
-**File:** [normative/N15-collective-cognition-benchmark.md](normative/N15-collective-cognition-benchmark.md)
+**File:** [normative/N15-collective-cognition-harness.md](normative/N15-collective-cognition-harness.md)
 **Status:** Draft (core protocol); workspace-conditional sections share N14's speculative status (N15 §0.4)
 **Purpose:** Matched-budget evaluation protocol (implemented in minibench) deciding whether multi-agent architectures —
   N14 in particular — beat test-time-compute baselines; pre-registered gates govern N14 staging

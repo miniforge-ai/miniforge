@@ -46,7 +46,7 @@ sections (C6/C7, ablation delta, G0/G1) demote with N14.
   projections and ablation switch, roles and permission matrix, structural v0 scheduler, termination rules, capsule
   binding (N11), N3 events, N6 closure exports, OCI surfaces (N8), governed transaction submission (N10), conformance
   Stages 0–2.
-- `specs/normative/N15-collective-cognition-benchmark.md` (new): hypotheses H1–H5, conditions C1–C7, budget tiers and
+- `specs/normative/N15-collective-cognition-harness.md` (new): hypotheses H1–H5, conditions C1–C7, budget tiers and
   cost-quality curves, replication/comparability/provenance requirements (the 2026-07-02 minibench methods-review gaps
   made normative), long-horizon task class, metrics, effect rule, pre-registered Gates G0/G1.
 - `specs/SPEC_INDEX.md`: N14/N15 entries; version 0.7.0-draft → 0.8.0-draft.

@@ -143,9 +143,14 @@ artifact; no condition receives feedback from it at any point.
 
 ## 5. Replication, comparability, provenance
 
-- **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group by
-  (experiment_id, label) and aggregate per cell: mean/min–max score, majority status,
-  within-cell spread. A row is divergent only when stable across replicates.
+- **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group
+  replicates by full cell identity — `experiment_id`, task input `source_hashes`, and the
+  complete variant identity (`workflow` VariantRef, `model`, `method`, and all `axes`
+  including `budget_tier` and `ablation`) — treating `run_id` as the sole replicate
+  distinguisher. `label` is display-only and MUST NOT be a grouping key (existing
+  producers use coarse labels such as "baseline"). Per cell, aggregate: mean/min–max
+  score, majority status, within-cell spread. A row is divergent only when stable across
+  replicates.
 - **Concurrent baselines**: baseline conditions are re-run within each experiment at the
   same (task, tier); historical baseline results MUST NOT substitute (prices, registry,
   and task versions drift, breaking the paired comparison).
