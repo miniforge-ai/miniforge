@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.interface
   "Public API for the compliance-scanner component.
 
@@ -36,94 +35,100 @@
             [ai.miniforge.compliance-scanner.named-constants    :as named-const]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def Violation
+;; Schema re-exports
+(def ^{:stratum 0} Violation
   "Malli schema (a `[:map ...]` vector) for a single detected rule breach.
    Keys: :rule/id (keyword), :rule/category (non-empty string),
    :rule/title (string), :file (string), :line (int), :current (string),
    :suggested (string or nil), :auto-fixable? (boolean), :rationale (string)."
   schema/Violation)
-(def ScanResult
+
+(def ^{:stratum 0} ScanResult
   "Malli schema (a `[:map ...]` vector) for the output of the scan phase.
    Keys: :violations (vector of Violation), :rules-scanned (vector of
    keywords), :files-scanned (int), :scan-duration-ms (int)."
   schema/ScanResult)
-(def PlanTask
+
+(def ^{:stratum 0} PlanTask
   "Malli schema (a `[:map ...]` vector) for one DAG task node in a Plan.
    Keys: :task/id (uuid), :task/deps (set of uuids), :task/file (string),
    :task/rule-id (keyword), :task/violations (vector of Violation)."
   schema/PlanTask)
-(def Plan
+
+(def ^{:stratum 0} Plan
   "Malli schema (a `[:map ...]` vector) for the full remediation plan.
    Keys: :dag-tasks (vector of PlanTask), :work-spec (string),
    :summary (PlanSummary)."
   schema/Plan)
-(def PlanSummary
+
+(def ^{:stratum 0} PlanSummary
   "Malli schema (a `[:map ...]` vector) of aggregate plan counts.
    Keys: :total-violations, :auto-fixable, :needs-review, :files-affected,
    :rules-violated (all ints)."
   schema/PlanSummary)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Factory re-exports
-
-(def ->violation
+(def ^{:stratum 0} ->violation
   "Construct a Violation map from positional args:
    [rule-id rule-category title file line current suggested auto-fixable?
    rationale]. Pure; returns the map."
   factory/->violation)
-(def ->scan-result
+
+(def ^{:stratum 0} ->scan-result
   "Construct a ScanResult map from positional args:
    [violations rules-scanned files-scanned scan-duration-ms]. Pure;
    returns the map."
   factory/->scan-result)
-(def ->plan-summary
+
+(def ^{:stratum 0} ->plan-summary
   "Derive a PlanSummary map from a collection of violations by counting
    totals, auto-fixable, needs-review, distinct files, and distinct rules.
    Pure; returns the map."
   factory/->plan-summary)
-(def ->plan-task
+
+(def ^{:stratum 0} ->plan-task
   "Construct a PlanTask map from positional args:
    [id deps file rule-id violations]. Pure; returns the map."
   factory/->plan-task)
-(def ->plan
+
+(def ^{:stratum 0} ->plan
   "Construct a Plan map from positional args:
    [dag-tasks work-spec summary]. Pure; returns the map."
   factory/->plan)
-(def ->delta-report
+
+(def ^{:stratum 0} ->delta-report
   "Construct a DeltaReport map from positional args:
    [repo-path standards-path scan-timestamp summary violations]. Pure;
    returns the map."
   factory/->delta-report)
-(def DeltaReport
+
+(def ^{:stratum 0} DeltaReport
   "Malli schema (a `[:map ...]` vector) for the delta report written to
    disk. Keys: :repo-path (string), :standards-path (string),
    :scan-timestamp (string), :summary (PlanSummary), :violations (vector
    of Violation)."
   schema/DeltaReport)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Built-in linter re-exports
 ;;
 ;; Standalone Clojure-AST linters that the compliance scanner runs in
 ;; addition to the regex-driven pack rules.
-
-(def exceptions-as-data-rule-id
+(def ^{:stratum 0} exceptions-as-data-rule-id
   "Stable rule id for the exceptions-as-data linter."
   exc-data/rule-id)
 
-(defn scan-exceptions-as-data
+(defn ^{:stratum 0} scan-exceptions-as-data
   "Run the exceptions-as-data linter against `repo-root`. Returns a map
    with `:violations`, `:files-scanned`, `:counts`, and `:rule/id`."
   [repo-root]
   (exc-data/scan-repo repo-root))
 
-(def named-constants-rule-id
+(def ^{:stratum 0} named-constants-rule-id
   "Stable rule id for the named-constants locator."
   named-const/rule-id)
 
-(defn scan-named-constants
+(defn ^{:stratum 0} scan-named-constants
   "Locate magic NUMERIC literals against `repo-root` (Dewey 006). Deterministic,
    LLM-free MEASUREMENT: returns `:violations` (each with `:file`, `:line`,
    `:column`, `:current` (the literal token), `:kind` `:magic-numeric`, and
@@ -135,10 +140,8 @@
   [repo-root]
   (named-const/scan-repo repo-root))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Phase entry points
-
-(defn scan
+(defn ^{:stratum 0} scan
   "Scan a repo for violations across all configured rules.
 
    Arguments:
@@ -150,7 +153,7 @@
   [repo-path standards-path opts]
   (scan/scan-repo repo-path standards-path opts))
 
-(defn classify
+(defn ^{:stratum 0} classify
   "Add :auto-fixable? and :rationale to each violation.
 
    Arguments:
@@ -160,7 +163,7 @@
   [violations]
   (classify/classify-violations violations))
 
-(defn plan
+(defn ^{:stratum 0} plan
   "Generate DAG task defs and markdown work spec from classified violations.
 
    Arguments:
@@ -171,7 +174,7 @@
   [violations repo-path]
   (plan/plan violations repo-path))
 
-(defn write-report!
+(defn ^{:stratum 0} write-report!
   "Write EDN delta report to .miniforge/compliance-report.edn.
 
    Arguments:
@@ -182,7 +185,7 @@
   [delta-report repo-path]
   (report/write-report! delta-report repo-path))
 
-(defn write-work-spec!
+(defn ^{:stratum 0} write-work-spec!
   "Write markdown work spec to docs/compliance/YYYY-MM-DD-compliance-delta.md.
 
    Arguments:
@@ -193,7 +196,37 @@
   [work-spec repo-path]
   (report/write-work-spec! work-spec repo-path))
 
-(defn write-delta-report!
+(defn ^{:stratum 0} execute!
+  "Apply all auto-fixable violations and create one PR per rule.
+
+   Arguments:
+   - plan      - Plan map with :dag-tasks (from the plan phase)
+   - repo-path - string path to the repo/worktree root
+
+   Returns map with :prs (vector of per-rule results), :violations-fixed, :files-changed."
+  [plan repo-path]
+  (execute/execute! plan repo-path))
+
+;; PR-scoped review entry point (N13 §2.2)
+(def ^{:stratum 0} violation->comment
+  "Render a single classified Violation to a PR review comment per
+   N13 §2.3."
+  comments/violation->comment)
+
+(def ^{:stratum 0} violations->comments
+  "Render a vector of classified Violations to a vector of PR review
+   comment records per N13 §2.3."
+  comments/violations->comments)
+
+(def ^{:stratum 0} extract-comment-payload
+  "Recover the embedded `:comment/payload` map from a comment body.
+   Used by the Comment Response Agent to parse posted policy
+   violations."
+  comments/extract-payload)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} write-delta-report!
   "Build and write EDN delta report from classified violations and plan.
 
    Arguments:
@@ -209,37 +242,7 @@
                                              (:summary plan) classified)]
     (write-report! delta-report repo-path)))
 
-(defn execute!
-  "Apply all auto-fixable violations and create one PR per rule.
-
-   Arguments:
-   - plan      - Plan map with :dag-tasks (from the plan phase)
-   - repo-path - string path to the repo/worktree root
-
-   Returns map with :prs (vector of per-rule results), :violations-fixed, :files-changed."
-  [plan repo-path]
-  (execute/execute! plan repo-path))
-
-;------------------------------------------------------------------------------ Layer 1
-;; PR-scoped review entry point (N13 §2.2)
-
-(def violation->comment
-  "Render a single classified Violation to a PR review comment per
-   N13 §2.3."
-  comments/violation->comment)
-
-(def violations->comments
-  "Render a vector of classified Violations to a vector of PR review
-   comment records per N13 §2.3."
-  comments/violations->comments)
-
-(def extract-comment-payload
-  "Recover the embedded `:comment/payload` map from a comment body.
-   Used by the Comment Response Agent to parse posted policy
-   violations."
-  comments/extract-payload)
-
-(defn pr-review
+(defn ^{:stratum 1} pr-review
   "PR-scoped read-only standards review per N13 §2.2.
 
    Runs scan with `:since base-ref` (incremental + diff-analysis modes),
@@ -301,10 +304,8 @@
                              :files-affected (count (distinct (mapv :file classified)))
                              :rules-violated (count (distinct (mapv :rule/id classified)))}}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Convenience orchestrator
-
-(defn compliance-run!
+(defn ^{:stratum 1} compliance-run!
   "Convenience: scan → classify → plan → write-report! → write-work-spec!
 
    Arguments:

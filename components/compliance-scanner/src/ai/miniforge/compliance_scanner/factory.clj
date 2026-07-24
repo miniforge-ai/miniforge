@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.factory
   "Factory functions for compliance-scanner domain maps.
 
@@ -25,9 +24,9 @@
    Layer 0 — pure data construction, no I/O or side effects.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Violation
 
-(defn ->violation
+;; Violation
+(defn ^{:stratum 0} ->violation
   [rule-id rule-category title file line current suggested auto-fixable? rationale]
   {:rule/id       rule-id
    :rule/category rule-category
@@ -39,20 +38,16 @@
    :auto-fixable? auto-fixable?
    :rationale     rationale})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; ScanResult
-
-(defn ->scan-result
+(defn ^{:stratum 0} ->scan-result
   [violations rules-scanned files-scanned scan-duration-ms]
   {:violations       violations
    :rules-scanned    rules-scanned
    :files-scanned    files-scanned
    :scan-duration-ms scan-duration-ms})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; PlanSummary
-
-(defn ->plan-summary
+(defn ^{:stratum 0} ->plan-summary
   [violations]
   (let [auto-fixable (filter :auto-fixable? violations)
         needs-review (remove :auto-fixable? violations)
@@ -64,10 +59,8 @@
      :files-affected   files
      :rules-violated   rules}))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; PlanTask
-
-(defn ->plan-task
+(defn ^{:stratum 0} ->plan-task
   [id deps file rule-id violations]
   {:task/id         id
    :task/deps       deps
@@ -75,19 +68,15 @@
    :task/rule-id    rule-id
    :task/violations violations})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Plan
-
-(defn ->plan
+(defn ^{:stratum 0} ->plan
   [dag-tasks work-spec summary]
   {:dag-tasks dag-tasks
    :work-spec work-spec
    :summary   summary})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; DeltaReport
-
-(defn ->delta-report
+(defn ^{:stratum 0} ->delta-report
   [repo-path standards-path scan-timestamp summary violations]
   {:repo-path      repo-path
    :standards-path standards-path

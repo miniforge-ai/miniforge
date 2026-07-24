@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.end-to-end-test
   "End-to-end: run the linter against a small synthetic fixture tree and
    assert the expected hit count and category split."
@@ -24,13 +23,15 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(defn- write!
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} write!
   [^java.io.File root rel content]
   (let [f (io/file root rel)]
     (io/make-parents f)
     (spit f content)))
 
-(defn- with-fixture
+(defn- ^{:stratum 0} with-fixture
   [f]
   (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
                             (str "exc-e2e-" (random-uuid)))
@@ -39,7 +40,9 @@
          (finally (doseq [^java.io.File ff (reverse (file-seq root))]
                     (.delete ff))))))
 
-(deftest synthetic-tree-yields-expected-counts
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} synthetic-tree-yields-expected-counts
   (with-fixture
    (fn [root]
      ;; 1) Non-boundary cleanup-needed site

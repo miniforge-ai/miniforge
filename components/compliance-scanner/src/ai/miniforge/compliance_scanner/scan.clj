@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.scan
   "Scan phase: load files, run detection, return violations.
 
@@ -34,9 +33,9 @@
   (:import [java.nio.file FileSystems Paths]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Per-file detection helpers
 
-(defn- header-present?
+;; Per-file detection helpers
+(defn- ^{:stratum 0} header-present?
   "Return true if the first 10 lines of content contain both
    the name pattern and the email pattern."
   [content name-pattern email-pattern]
@@ -46,13 +45,13 @@
     (and (re-find name-pattern first-10)
          (re-find email-pattern first-10))))
 
-(defn- pattern-present?
+(defn- ^{:stratum 0} pattern-present?
   "Return true if pattern appears anywhere in content.
    Generic negative-mode check (not header-specific)."
   [content pattern]
   (boolean (re-find pattern content)))
 
-(defn- positive-matches
+(defn- ^{:stratum 0} positive-matches
   "Find all lines in content matching pattern.
    Returns seq of {:line int :text string :match string}."
   [pattern content]
@@ -64,72 +63,9 @@
                          :match (if (string? m) m (first m))})))
        (filter :match)))
 
-(defn- violations-for-positive-rule
-  "Scan a single file with a positive-match rule (pattern = violation).
-   Returns vector of Violation maps (without :auto-fixable? / :rationale —
-   those are added by classify)."
-  [rule-cfg file-path content]
-  (let [rule-id  (get rule-cfg :rule/id)
-        rule-cat (get rule-cfg :rule/category)
-        title    (get rule-cfg :title)
-        pattern  (get rule-cfg :pattern)
-        suggest  (get rule-cfg :suggest-fn)
-        matches  (positive-matches pattern content)]
-    (mapv (fn [{:keys [line match]}]
-            (factory/->violation
-             rule-id
-             rule-cat
-             title
-             file-path
-             line
-             match
-             (suggest match)
-             false          ; classify phase fills this in
-             ""))           ; classify phase fills this in
-          matches)))
-
-(defn- violations-for-negative-rule
-  "Scan a single file with a negative-match rule (absence of pattern = violation).
-   Returns a vector of 0 or 1 Violation maps."
-  [rule-cfg file-path content]
-  (let [rule-id  (get rule-cfg :rule/id)
-        rule-cat (get rule-cfg :rule/category)
-        title    (get rule-cfg :title)
-        pattern  (get rule-cfg :pattern)
-        suggest  (get rule-cfg :suggest-fn)
-        ep       (get rule-cfg :email-pattern)
-        present? (if ep
-                   (header-present? content pattern ep)
-                   (pattern-present? content pattern))
-        absence-msg (if ep
-                      (msg/t :scan/missing-header)
-                      (str "(missing: " title ")"))]
-    (if present?
-      []
-      [(factory/->violation
-        rule-id
-        rule-cat
-        title
-        file-path
-        1
-        absence-msg
-        (suggest nil)
-        false
-        "")])))
-
-(defn- scan-file
-  "Dispatch to the appropriate scanner for a rule config.
-   Returns vector of raw (pre-classify) Violation maps."
-  [rule-cfg file-path content]
-  (case (get rule-cfg :detect-mode :positive)
-    :positive (violations-for-positive-rule rule-cfg file-path content)
-    :negative (violations-for-negative-rule rule-cfg file-path content)
-    []))
-
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Pack-driven detection config
-
-(defn- globs->file-pred
+(defn- ^{:stratum 0} globs->file-pred
   "Convert a vector of glob patterns into a file-path predicate function.
    Uses java.nio.file.PathMatcher for standard glob matching."
   [globs]
@@ -139,7 +75,7 @@
       (let [p (Paths/get path (into-array String []))]
         (boolean (some #(.matches ^java.nio.file.PathMatcher % p) matchers))))))
 
-(defn- build-suggest-fn
+(defn- ^{:stratum 0} build-suggest-fn
   "Build a suggest function from pack detection and remediation config.
    Uses str/replace-first with $1/$2/$3 group references for mechanical fixes."
   [detection remediation]
@@ -158,34 +94,11 @@
       :else
       (constantly nil))))
 
-(defn- pack-rule->detection-config
-  "Convert a compiled pack rule into the detection config format used by scan-file.
-   Returns nil for rules without :content-scan detection."
-  [rule]
-  (let [detection   (get rule :rule/detection)
-        remediation (get rule :rule/remediation)
-        globs       (get-in rule [:rule/applies-to :file-globs])]
-    (when (= :content-scan (get detection :type))
-      (cond->
-        {:rule/id       (get rule :rule/id)
-         :rule/category (get rule :rule/category)
-         :title         (get rule :rule/title)
-         :pattern       (re-pattern (get detection :pattern))
-         :file-pred     (globs->file-pred (or globs ["**/*"]))
-         :suggest-fn    (build-suggest-fn detection remediation)
-         :detect-mode   (get detection :mode :positive)}
-
-        (get detection :email-pattern)
-        (assoc :email-pattern (re-pattern (get detection :email-pattern)))
-
-        remediation
-        (assoc :remediation remediation)))))
-
-(def ^:private scannable-types
+(def ^{:stratum 0} ^:private scannable-types
   "Detection types the compliance scanner can process."
   #{:content-scan :diff-analysis :plan-output})
 
-(def ^:private category-dewey-ranges
+(def ^{:stratum 0} ^:private category-dewey-ranges
   "Category keyword name to Dewey code range [lo hi].
    Static data — no runtime dependency on taxonomy component."
   {"foundations"   [0 99]
@@ -199,65 +112,7 @@
    "project"       [800 899]
    "meta"          [900 999]})
 
-(defn- category-matches?
-  "Check if a rule's Dewey category falls in a category selector's range.
-   Uses static range lookup — no cross-layer dependency."
-  [rule cat-kw]
-  (let [cat-name (name cat-kw)
-        rule-cat (:rule/category rule)]
-    (or (= cat-name rule-cat)
-        (when-let [[lo hi] (get category-dewey-ranges cat-name)]
-          (try
-            (let [code (Integer/parseInt (str rule-cat))]
-              (and (<= lo code) (<= code hi)))
-            (catch Exception _ false))))))
-
-(defn- rule-matches-selector?
-  "Check if a rule matches a selector element (keyword — rule ID or category ID)."
-  [rule selector-kw]
-  (or (= selector-kw (:rule/id rule))
-      (category-matches? rule selector-kw)))
-
-(defn- filter-pack-rules
-  "Filter compiled pack rules by the :rules option.
-
-   Supported selectors:
-   - :all / :always-apply — all rules with scannable detection types
-   - keyword — single rule ID match
-   - set of keywords — matches rule IDs OR category IDs
-     e.g. #{:std/clojure :mf.cat/workflows}
-
-   Only rules with scannable detection types (content-scan, diff-analysis,
-   plan-output) pass through."
-  [pack-rules opts]
-  (let [raw       (get opts :rules :always-apply)
-        requested (if (string? raw) (keyword (subs raw 1)) raw)
-        scannable (filter #(contains? scannable-types
-                                      (get-in % [:rule/detection :type]))
-                          pack-rules)]
-    (cond
-      (contains? #{:all :always-apply} requested) scannable
-      (keyword? requested)  (filter #(= requested (:rule/id %)) scannable)
-      (set? requested)      (filter (fn [rule]
-                                      (some #(rule-matches-selector? rule %) requested))
-                                    scannable)
-      :else                 scannable)))
-
-(defn- load-pack-detection-configs
-  "Load compiled pack from standards-path and convert rules to detection configs.
-   Returns vector of detection config maps, or nil if pack unavailable."
-  [standards-path opts]
-  (try
-    (let [result (policy-pack/compile-standards-pack standards-path)]
-      (when (:success? result)
-        (let [rules     (get-in result [:pack :pack/rules])
-              filtered  (filter-pack-rules rules opts)
-              configs   (keep pack-rule->detection-config filtered)]
-          (when (seq configs)
-            (vec configs)))))
-    (catch Exception _ nil)))
-
-(defn- enrich-violation
+(defn- ^{:stratum 0} enrich-violation
   "Attach remediation metadata from the pack rule to a violation map.
    Downstream classify and execute phases use these fields."
   [violation remediation]
@@ -276,8 +131,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Diff/plan detection and incremental mode helpers
-
-(defn- safe-git-ref?
+(defn- ^{:stratum 0} safe-git-ref?
   "Return true iff ref contains only characters valid in a git ref argument.
    Rejects empty strings, nil, and any value starting with '-' (which git
    could interpret as an option flag)."
@@ -287,54 +141,7 @@
                 (not (str/starts-with? ref "-"))
                 (re-matches #"[a-zA-Z0-9/_.\-~^@{}]+" ref))))
 
-(defn- git-diff
-  "Run git diff and return the output string."
-  [repo-path since-ref]
-  (when (safe-git-ref? since-ref)
-    (try
-      (let [pb (ProcessBuilder. ^java.util.List
-                ["git" "diff" (str since-ref "..HEAD")])
-            _  (.directory pb (io/file repo-path))
-            proc (.start pb)
-            out  (slurp (.getInputStream proc))]
-        (.waitFor proc)
-        (when-not (str/blank? out) out))
-      (catch Exception _ nil))))
-
-(defn- git-diff-name-only
-  "Run git diff --name-only and return set of changed file paths."
-  [repo-path since-ref]
-  (when (safe-git-ref? since-ref)
-    (try
-      (let [pb (ProcessBuilder. ^java.util.List
-                ["git" "diff" "--name-only" (str since-ref "..HEAD")])
-            _  (.directory pb (io/file repo-path))
-            proc (.start pb)
-            out  (slurp (.getInputStream proc))]
-        (.waitFor proc)
-        (when-not (str/blank? out)
-          (set (str/split-lines (str/trim out)))))
-      (catch Exception _ nil))))
-
-(defn- scan-diff-rule
-  "Scan a git diff for violations using a diff-analysis rule.
-   Returns vector of Violation maps."
-  [rule-cfg diff-content]
-  (let [rule-id  (:rule/id rule-cfg)
-        rule-cat (:rule/category rule-cfg)
-        title    (:rule/title rule-cfg)
-        pattern  (re-pattern (get-in rule-cfg [:rule/detection :pattern]))
-        matches  (positive-matches pattern diff-content)]
-    (mapv (fn [{:keys [line match]}]
-            (factory/->violation
-             rule-id rule-cat title
-             "<diff>"     ; file is the entire diff
-             line match
-             nil          ; no suggestion for diff violations
-             false ""))
-          matches)))
-
-(defn- scan-plan-rule
+(defn- ^{:stratum 0} scan-plan-rule
   "Scan plan output for violations using a plan-output rule.
    Uses the policy-pack detect-violation dispatcher for resource-level analysis.
    Returns vector of Violation maps."
@@ -368,50 +175,13 @@
             nil false "")]))
       [])))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Per-rule scanning
-
-(defn- scan-file-record
-  "Load and scan a single file record against a rule config.
-   Returns vector of raw Violation maps, or [] if the file cannot be read."
-  [rule-cfg index file-record]
-  (let [path    (:path file-record)
-        content (try
-                  (slurp (str (:repo-root index) "/" path))
-                  (catch Exception _ nil))]
-    (if content
-      (scan-file rule-cfg path content)
-      [])))
-
-(defn- scan-rule
-  "Scan the entire repo for a single rule.
-   Returns vector of raw Violation maps."
-  [rule-cfg index]
-  (let [file-pred      (get rule-cfg :file-pred (constantly false))
-        matching-files (repo-index/find-files index #(file-pred (:path %)))]
-    (->> matching-files
-         (mapcat (partial scan-file-record rule-cfg index))
-         vec)))
-
-(defn- get-rule-configs
-  "Resolve detection configs from opts :pack or by compiling from standards-path.
-   Returns vector of detection config maps, or nil if none found."
-  [opts standards-path]
-  (or (when-let [pack (get opts :pack)]
-        (let [rules    (get pack :pack/rules)
-              filtered (filter-pack-rules rules opts)]
-          (when (seq filtered)
-            (vec (keep pack-rule->detection-config filtered)))))
-      (load-pack-detection-configs standards-path opts)))
-
 ;------------------------------------------------------------------------------ Layer 1.5
 ;; Built-in Clojure-AST linters
 ;;
 ;; These linters do not flow through pack-rule detection configs because
 ;; their analysis is structural, not regex-driven. They are first-class
 ;; rules of the scanner and run alongside content/diff/plan rules.
-
-(defn- exceptions-as-data-selected?
+(defn- ^{:stratum 0} exceptions-as-data-selected?
   "True when the rules selector resolves the exceptions-as-data linter on.
    Defaults on for `:all` / `:always-apply`; opts in for explicit selectors."
   [opts]
@@ -424,7 +194,145 @@
            (contains? requested exc-data/rule-id)) true
       :else false)))
 
-(defn- run-exceptions-as-data
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} violations-for-positive-rule
+  "Scan a single file with a positive-match rule (pattern = violation).
+   Returns vector of Violation maps (without :auto-fixable? / :rationale —
+   those are added by classify)."
+  [rule-cfg file-path content]
+  (let [rule-id  (get rule-cfg :rule/id)
+        rule-cat (get rule-cfg :rule/category)
+        title    (get rule-cfg :title)
+        pattern  (get rule-cfg :pattern)
+        suggest  (get rule-cfg :suggest-fn)
+        matches  (positive-matches pattern content)]
+    (mapv (fn [{:keys [line match]}]
+            (factory/->violation
+             rule-id
+             rule-cat
+             title
+             file-path
+             line
+             match
+             (suggest match)
+             false          ; classify phase fills this in
+             ""))           ; classify phase fills this in
+          matches)))
+
+(defn- ^{:stratum 1} violations-for-negative-rule
+  "Scan a single file with a negative-match rule (absence of pattern = violation).
+   Returns a vector of 0 or 1 Violation maps."
+  [rule-cfg file-path content]
+  (let [rule-id  (get rule-cfg :rule/id)
+        rule-cat (get rule-cfg :rule/category)
+        title    (get rule-cfg :title)
+        pattern  (get rule-cfg :pattern)
+        suggest  (get rule-cfg :suggest-fn)
+        ep       (get rule-cfg :email-pattern)
+        present? (if ep
+                   (header-present? content pattern ep)
+                   (pattern-present? content pattern))
+        absence-msg (if ep
+                      (msg/t :scan/missing-header)
+                      (str "(missing: " title ")"))]
+    (if present?
+      []
+      [(factory/->violation
+        rule-id
+        rule-cat
+        title
+        file-path
+        1
+        absence-msg
+        (suggest nil)
+        false
+        "")])))
+
+(defn- ^{:stratum 1} pack-rule->detection-config
+  "Convert a compiled pack rule into the detection config format used by scan-file.
+   Returns nil for rules without :content-scan detection."
+  [rule]
+  (let [detection   (get rule :rule/detection)
+        remediation (get rule :rule/remediation)
+        globs       (get-in rule [:rule/applies-to :file-globs])]
+    (when (= :content-scan (get detection :type))
+      (cond->
+        {:rule/id       (get rule :rule/id)
+         :rule/category (get rule :rule/category)
+         :title         (get rule :rule/title)
+         :pattern       (re-pattern (get detection :pattern))
+         :file-pred     (globs->file-pred (or globs ["**/*"]))
+         :suggest-fn    (build-suggest-fn detection remediation)
+         :detect-mode   (get detection :mode :positive)}
+
+        (get detection :email-pattern)
+        (assoc :email-pattern (re-pattern (get detection :email-pattern)))
+
+        remediation
+        (assoc :remediation remediation)))))
+
+(defn- ^{:stratum 1} category-matches?
+  "Check if a rule's Dewey category falls in a category selector's range.
+   Uses static range lookup — no cross-layer dependency."
+  [rule cat-kw]
+  (let [cat-name (name cat-kw)
+        rule-cat (:rule/category rule)]
+    (or (= cat-name rule-cat)
+        (when-let [[lo hi] (get category-dewey-ranges cat-name)]
+          (try
+            (let [code (Integer/parseInt (str rule-cat))]
+              (and (<= lo code) (<= code hi)))
+            (catch Exception _ false))))))
+
+(defn- ^{:stratum 1} git-diff
+  "Run git diff and return the output string."
+  [repo-path since-ref]
+  (when (safe-git-ref? since-ref)
+    (try
+      (let [pb (ProcessBuilder. ^java.util.List
+                ["git" "diff" (str since-ref "..HEAD")])
+            _  (.directory pb (io/file repo-path))
+            proc (.start pb)
+            out  (slurp (.getInputStream proc))]
+        (.waitFor proc)
+        (when-not (str/blank? out) out))
+      (catch Exception _ nil))))
+
+(defn- ^{:stratum 1} git-diff-name-only
+  "Run git diff --name-only and return set of changed file paths."
+  [repo-path since-ref]
+  (when (safe-git-ref? since-ref)
+    (try
+      (let [pb (ProcessBuilder. ^java.util.List
+                ["git" "diff" "--name-only" (str since-ref "..HEAD")])
+            _  (.directory pb (io/file repo-path))
+            proc (.start pb)
+            out  (slurp (.getInputStream proc))]
+        (.waitFor proc)
+        (when-not (str/blank? out)
+          (set (str/split-lines (str/trim out)))))
+      (catch Exception _ nil))))
+
+(defn- ^{:stratum 1} scan-diff-rule
+  "Scan a git diff for violations using a diff-analysis rule.
+   Returns vector of Violation maps."
+  [rule-cfg diff-content]
+  (let [rule-id  (:rule/id rule-cfg)
+        rule-cat (:rule/category rule-cfg)
+        title    (:rule/title rule-cfg)
+        pattern  (re-pattern (get-in rule-cfg [:rule/detection :pattern]))
+        matches  (positive-matches pattern diff-content)]
+    (mapv (fn [{:keys [line match]}]
+            (factory/->violation
+             rule-id rule-cat title
+             "<diff>"     ; file is the entire diff
+             line match
+             nil          ; no suggestion for diff violations
+             false ""))
+          matches)))
+
+(defn- ^{:stratum 1} run-exceptions-as-data
   "Run the AST-based exceptions-as-data linter against the repo. Returns
    a vector of actionable Violation maps when selected, or nil when the
    rule selector leaves the linter off. Returned rows are already in the
@@ -444,10 +352,107 @@
     (filterv #(= :cleanup-needed (:classification %))
              (:violations (exc-data/scan-repo repo-path changed-files)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Top-level entry point
+(defn- ^{:stratum 1} scan-plan-rules
+  "Scan plan-output rules against terraform plan output."
+  [plan-rules plan-output]
+  (when plan-output
+    (->> plan-rules
+         (mapcat #(scan-plan-rule % plan-output))
+         vec)))
 
-(defn- scan-changed-files
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} scan-file
+  "Dispatch to the appropriate scanner for a rule config.
+   Returns vector of raw (pre-classify) Violation maps."
+  [rule-cfg file-path content]
+  (case (get rule-cfg :detect-mode :positive)
+    :positive (violations-for-positive-rule rule-cfg file-path content)
+    :negative (violations-for-negative-rule rule-cfg file-path content)
+    []))
+
+(defn- ^{:stratum 2} rule-matches-selector?
+  "Check if a rule matches a selector element (keyword — rule ID or category ID)."
+  [rule selector-kw]
+  (or (= selector-kw (:rule/id rule))
+      (category-matches? rule selector-kw)))
+
+(defn- ^{:stratum 2} scan-diff-rules
+  "Scan diff-analysis rules against a git diff."
+  [diff-rules diff-content]
+  (when diff-content
+    (->> diff-rules
+         (mapcat #(scan-diff-rule % diff-content))
+         vec)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} filter-pack-rules
+  "Filter compiled pack rules by the :rules option.
+
+   Supported selectors:
+   - :all / :always-apply — all rules with scannable detection types
+   - keyword — single rule ID match
+   - set of keywords — matches rule IDs OR category IDs
+     e.g. #{:std/clojure :mf.cat/workflows}
+
+   Only rules with scannable detection types (content-scan, diff-analysis,
+   plan-output) pass through."
+  [pack-rules opts]
+  (let [raw       (get opts :rules :always-apply)
+        requested (if (string? raw) (keyword (subs raw 1)) raw)
+        scannable (filter #(contains? scannable-types
+                                      (get-in % [:rule/detection :type]))
+                          pack-rules)]
+    (cond
+      (contains? #{:all :always-apply} requested) scannable
+      (keyword? requested)  (filter #(= requested (:rule/id %)) scannable)
+      (set? requested)      (filter (fn [rule]
+                                      (some #(rule-matches-selector? rule %) requested))
+                                    scannable)
+      :else                 scannable)))
+
+;; Per-rule scanning
+(defn- ^{:stratum 3} scan-file-record
+  "Load and scan a single file record against a rule config.
+   Returns vector of raw Violation maps, or [] if the file cannot be read."
+  [rule-cfg index file-record]
+  (let [path    (:path file-record)
+        content (try
+                  (slurp (str (:repo-root index) "/" path))
+                  (catch Exception _ nil))]
+    (if content
+      (scan-file rule-cfg path content)
+      [])))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} load-pack-detection-configs
+  "Load compiled pack from standards-path and convert rules to detection configs.
+   Returns vector of detection config maps, or nil if pack unavailable."
+  [standards-path opts]
+  (try
+    (let [result (policy-pack/compile-standards-pack standards-path)]
+      (when (:success? result)
+        (let [rules     (get-in result [:pack :pack/rules])
+              filtered  (filter-pack-rules rules opts)
+              configs   (keep pack-rule->detection-config filtered)]
+          (when (seq configs)
+            (vec configs)))))
+    (catch Exception _ nil)))
+
+(defn- ^{:stratum 4} scan-rule
+  "Scan the entire repo for a single rule.
+   Returns vector of raw Violation maps."
+  [rule-cfg index]
+  (let [file-pred      (get rule-cfg :file-pred (constantly false))
+        matching-files (repo-index/find-files index #(file-pred (:path %)))]
+    (->> matching-files
+         (mapcat (partial scan-file-record rule-cfg index))
+         vec)))
+
+;; Top-level entry point
+(defn- ^{:stratum 4} scan-changed-files
   "Scan only files present in the changed-files set for a single rule config."
   [cfg index changed-files]
   (let [file-pred (get cfg :file-pred (constantly false))
@@ -457,7 +462,20 @@
                                       (file-pred (:path f))))))]
     (mapcat #(scan-file-record cfg index %) matching)))
 
-(defn- scan-and-enrich
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} get-rule-configs
+  "Resolve detection configs from opts :pack or by compiling from standards-path.
+   Returns vector of detection config maps, or nil if none found."
+  [opts standards-path]
+  (or (when-let [pack (get opts :pack)]
+        (let [rules    (get pack :pack/rules)
+              filtered (filter-pack-rules rules opts)]
+          (when (seq filtered)
+            (vec (keep pack-rule->detection-config filtered)))))
+      (load-pack-detection-configs standards-path opts)))
+
+(defn- ^{:stratum 5} scan-and-enrich
   "Scan a single rule config (full or incremental) and enrich violations."
   [cfg index changed-files]
   (let [viols (if changed-files
@@ -468,7 +486,9 @@
       (mapv #(enrich-violation % rem) viols)
       viols)))
 
-(defn- scan-content-rules
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} scan-content-rules
   "Scan content-scan rules across the repo index.
    When changed-files is non-nil, limits scanning to those files only."
   [content-cfgs index changed-files]
@@ -476,23 +496,9 @@
        (mapcat #(scan-and-enrich % index changed-files))
        vec))
 
-(defn- scan-diff-rules
-  "Scan diff-analysis rules against a git diff."
-  [diff-rules diff-content]
-  (when diff-content
-    (->> diff-rules
-         (mapcat #(scan-diff-rule % diff-content))
-         vec)))
+;------------------------------------------------------------------------------ Layer 7
 
-(defn- scan-plan-rules
-  "Scan plan-output rules against terraform plan output."
-  [plan-rules plan-output]
-  (when plan-output
-    (->> plan-rules
-         (mapcat #(scan-plan-rule % plan-output))
-         vec)))
-
-(defn scan-repo
+(defn ^{:stratum 7} scan-repo
   "Scan a repo for violations across all configured rules.
 
    Supports multiple detection types:

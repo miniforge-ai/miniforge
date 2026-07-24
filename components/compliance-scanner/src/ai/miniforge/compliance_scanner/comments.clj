@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.comments
   "Render classified Violations into PR review comment payloads per
    N13 §2.3 (Closed-Loop PR Pipeline — Violation Comment Renderer).
@@ -31,9 +30,9 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Severity inference
 
-(defn- infer-severity
+;; Severity inference
+(defn- ^{:stratum 0} infer-severity
   "Map a classified Violation to a :violation/severity keyword.
 
    Heuristic: violations whose `:rule/category` matches
@@ -49,16 +48,57 @@
                                    (str/includes? category "critical")))]
         (if critical-cat? :error :warning))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Payload construction
-
-(defn- rationale-text
+(defn- ^{:stratum 0} rationale-text
   "Return a violation rationale when it is a string; otherwise return empty text."
   [violation]
   (let [rationale (get violation :rationale)]
     (if (string? rationale) rationale "")))
 
-(defn violation->payload
+;; Body rendering
+(defn- ^{:stratum 0} pr-edn
+  "Pretty-print an EDN value for embedding in a comment body. Stable
+   key ordering keeps comment diffs minimal across re-renders."
+  [v]
+  (if (map? v)
+    (let [ordered-keys [:violation/rule-id
+                        :violation/severity
+                        :violation/auto-fixable?
+                        :violation/suggested-fix
+                        :violation/rationale
+                        :violation/pack-id
+                        :violation/pack-version]
+          present      (filter #(contains? v %) ordered-keys)
+          extras       (sort (remove (set ordered-keys) (keys v)))
+          all-keys     (concat present extras)
+          lines        (for [k all-keys]
+                         (str " " (pr-str k) " " (pr-str (get v k))))]
+      (str "{" (str/triml (str/join "\n" lines)) "}"))
+    (pr-str v)))
+
+;; Parser (round-trip helper)
+(defn ^{:stratum 0} extract-payload
+  "Extract a `:comment/payload` map from a comment body produced by
+   `render-body`. Returns nil if no payload block is found.
+
+   Used by the Comment Response Agent's bot-comment-table parser
+   (per `pr-monitoring-workflow.md` Bot Comment Handling) to recover
+   the structured payload from a posted comment."
+  [body]
+  (when (string? body)
+    (let [block-re #"(?s)```edn\s*:comment/payload\s*(\{.*?\})\s*```"]
+      (when-let [[_ edn-str] (re-find block-re body)]
+        (try
+          ;; clojure.edn/read-string is strictly EDN — no reader macros,
+          ;; no #=, no eval. Comment bodies are untrusted input once
+          ;; posted/retrieved from a PR. {:default identity} swallows
+          ;; unknown tagged literals safely.
+          (edn/read-string {:default (fn [_tag value] value)} edn-str)
+          (catch Exception _ nil))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} violation->payload
   "Build the :comment/payload map for a single classified Violation.
 
    Arguments:
@@ -83,30 +123,7 @@
    :violation/pack-id        (:pack/id pack-info)
    :violation/pack-version   (:pack/version pack-info)})
 
-;------------------------------------------------------------------------------ Layer 0
-;; Body rendering
-
-(defn- pr-edn
-  "Pretty-print an EDN value for embedding in a comment body. Stable
-   key ordering keeps comment diffs minimal across re-renders."
-  [v]
-  (if (map? v)
-    (let [ordered-keys [:violation/rule-id
-                        :violation/severity
-                        :violation/auto-fixable?
-                        :violation/suggested-fix
-                        :violation/rationale
-                        :violation/pack-id
-                        :violation/pack-version]
-          present      (filter #(contains? v %) ordered-keys)
-          extras       (sort (remove (set ordered-keys) (keys v)))
-          all-keys     (concat present extras)
-          lines        (for [k all-keys]
-                         (str " " (pr-str k) " " (pr-str (get v k))))]
-      (str "{" (str/triml (str/join "\n" lines)) "}"))
-    (pr-str v)))
-
-(defn- render-body
+(defn- ^{:stratum 1} render-body
   "Build the human-readable comment body with the embedded EDN payload
    block."
   [violation payload]
@@ -122,10 +139,10 @@
        "```\n"
        "<sub>Posted by `miniforge-policy-evaluator[bot]` — see N13 §2.3</sub>"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Single-comment builder
+;------------------------------------------------------------------------------ Layer 2
 
-(defn violation->comment
+;; Single-comment builder
+(defn ^{:stratum 2} violation->comment
   "Render a single classified Violation to the comment record per
    N13 §2.3.
 
@@ -149,10 +166,10 @@
      :comment/body    body
      :comment/payload payload}))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Bulk renderer
+;------------------------------------------------------------------------------ Layer 3
 
-(defn violations->comments
+;; Bulk renderer
+(defn ^{:stratum 3} violations->comments
   "Render a vector of classified Violations to a vector of comment
    records.
 
@@ -167,28 +184,6 @@
        (sort-by (juxt :comment/path :comment/line
                       (comp str :violation/rule-id :comment/payload)))
        vec))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Parser (round-trip helper)
-
-(defn extract-payload
-  "Extract a `:comment/payload` map from a comment body produced by
-   `render-body`. Returns nil if no payload block is found.
-
-   Used by the Comment Response Agent's bot-comment-table parser
-   (per `pr-monitoring-workflow.md` Bot Comment Handling) to recover
-   the structured payload from a posted comment."
-  [body]
-  (when (string? body)
-    (let [block-re #"(?s)```edn\s*:comment/payload\s*(\{.*?\})\s*```"]
-      (when-let [[_ edn-str] (re-find block-re body)]
-        (try
-          ;; clojure.edn/read-string is strictly EDN — no reader macros,
-          ;; no #=, no eval. Comment bodies are untrusted input once
-          ;; posted/retrieved from a PR. {:default identity} swallows
-          ;; unknown tagged literals safely.
-          (edn/read-string {:default (fn [_tag value] value)} edn-str)
-          (catch Exception _ nil))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

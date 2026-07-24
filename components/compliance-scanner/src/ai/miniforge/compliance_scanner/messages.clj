@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.messages
   "Component-scoped message translator for compliance-scanner."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} t
   (messages/create-translator
    "config/compliance-scanner/messages/en-US.edn"
    :compliance-scanner/messages))

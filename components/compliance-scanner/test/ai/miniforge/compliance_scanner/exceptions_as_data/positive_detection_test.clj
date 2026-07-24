@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.positive-detection-test
   "Positive detection: throws inside non-boundary namespaces are flagged."
   (:require
@@ -23,7 +22,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(deftest detects-bare-throw-in-non-boundary-namespace
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} detects-bare-throw-in-non-boundary-namespace
   (testing "(throw ex-info ...) inside a defn yields one violation"
     (let [src "(ns ai.miniforge.foo.core)
               (defn boom []
@@ -37,7 +38,7 @@
         (is (= :cleanup-needed (:classification v)))
         (is (pos-int? (:line v)))))))
 
-(deftest detects-ex-info-without-throw
+(deftest ^{:stratum 0} detects-ex-info-without-throw
   (testing "bare (ex-info ...) is flagged even without an enclosing throw"
     (let [src "(ns ai.miniforge.foo.core)
               (defn make-err [] (ex-info \"oops\" {}))"
@@ -45,7 +46,7 @@
       (is (= 1 (count violations)))
       (is (= :ex-info (:kind (first violations)))))))
 
-(deftest detects-throw-anomaly!-bang
+(deftest ^{:stratum 0} detects-throw-anomaly!-bang
   (testing "namespaced response/throw-anomaly! is flagged as throw"
     (let [src "(ns ai.miniforge.foo.core
                 (:require [ai.miniforge.response.interface :as response]))
@@ -57,7 +58,7 @@
       (is (= 1 (count violations)))
       (is (= :throw (:kind (first violations)))))))
 
-(deftest detects-exception-class-instantiation
+(deftest ^{:stratum 0} detects-exception-class-instantiation
   (testing "(IllegalArgumentException. ...) is flagged"
     (let [src "(ns ai.miniforge.foo.core)
               (defn boom []
@@ -67,7 +68,7 @@
       (is (pos? (count violations)))
       (is (some #{:throw :ctor} (map :kind violations))))))
 
-(deftest ordinary-rethrow-remains-cleanup-needed
+(deftest ^{:stratum 0} ordinary-rethrow-remains-cleanup-needed
   (testing "simple rethrow outside InterruptedException catch is still actionable"
     (let [src "(ns ai.miniforge.foo.core)
               (defn run []
@@ -80,7 +81,7 @@
       (is (= 1 (count violations)))
       (is (= :cleanup-needed (:classification (first violations)))))))
 
-(deftest interrupted-catch-different-symbol-remains-cleanup-needed
+(deftest ^{:stratum 0} interrupted-catch-different-symbol-remains-cleanup-needed
   (testing "InterruptedException catches only exempt the caught binding rethrow"
     (let [src "(ns ai.miniforge.foo.core)
               (defn run []
@@ -93,14 +94,14 @@
       (is (= 2 (count violations)))
       (is (every? #(= :cleanup-needed (:classification %)) violations)))))
 
-(deftest reports-line-and-column
+(deftest ^{:stratum 0} reports-line-and-column
   (testing "every violation carries a usable line:col location"
     (let [src "(ns ai.miniforge.foo.core)\n\n(defn b []\n  (throw (ex-info \"m\" {})))"
           {:keys [violations]} (exc/analyze-content "foo.clj" src)]
       (is (every? #(pos-int? (:line %)) violations))
       (is (every? #(some? (:column %)) violations)))))
 
-(deftest ignores-throws-in-docstrings
+(deftest ^{:stratum 0} ignores-throws-in-docstrings
   (testing "the word `throw` inside a string literal does not trigger"
     (let [src "(ns ai.miniforge.foo.core)
               (defn ok
@@ -110,7 +111,7 @@
           {:keys [violations]} (exc/analyze-content "foo.clj" src)]
       (is (= 0 (count violations))))))
 
-(deftest snippet-is-single-line-and-truncated
+(deftest ^{:stratum 0} snippet-is-single-line-and-truncated
   (testing "snippet output collapses whitespace and limits length"
     (let [src "(ns ai.miniforge.foo.core)
               (defn b [] (throw (ex-info \"x\" {:a 1 :b 2})))"

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.named-constants
   "Named-constants locator (Dewey 006) — deterministic MEASUREMENT tool.
 
@@ -38,43 +37,30 @@
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
-(def rule-id :std/named-constants)
-(def rule-category "006")
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private exempt-values
+(def ^{:stratum 0} rule-id :std/named-constants)
+
+(def ^{:stratum 0} rule-category "006")
+
+(def ^{:stratum 0} ^:private exempt-values
   "Numeric values that are structural sentinels, never magic: loop / index
    bounds (-1, 0, 1) and the doubling identity (2). Mirrors the rule's
    \"larger than 2 or smaller than -1\" threshold."
   #{-1.0 0.0 1.0 2.0})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Numeric classification
-
-(def ^:private numeric-token-pattern
+(def ^{:stratum 0} ^:private numeric-token-pattern
   "A token that is a Clojure numeric literal: integers, decimals (with optional
    exponent and M/N suffix), leading-dot decimals, hex, radix, and ratios."
   #"[-+]?(?:\d+\.?\d*(?:[eE][-+]?\d+)?[MN]?|\.\d+(?:[eE][-+]?\d+)?M?|0[xX][0-9a-fA-F]+|\d+r[0-9a-zA-Z]+|\d+/\d+)")
 
-(defn- numeric-token? [tok]
-  (boolean (re-matches numeric-token-pattern tok)))
-
-(defn- magic-numeric?
-  "True when `tok` is a numeric literal whose value is not a structural
-   sentinel. Hex / radix / ratio literals (which Double/parseDouble cannot
-   read) are treated as magic — they carry meaning worth naming."
-  [tok]
-  (and (numeric-token? tok)
-       (let [t (str/replace tok #"[MN]$" "")]
-         (try
-           (not (contains? exempt-values (Double/parseDouble t)))
-           (catch Exception _ true)))))
-
-(def ^:private token-char?
+(def ^{:stratum 0} ^:private token-char?
   "Characters that may appear inside a symbol / number token. A token ends at
    whitespace or a structural delimiter."
   (complement #{\space \tab \newline \return \, \( \) \[ \] \{ \} \" \; \' \` \~ \@ \^}))
 
-(defn- skip-string
+(defn- ^{:stratum 0} skip-string
   "Given `content` and the index just AFTER an opening quote, return
    `[end-index end-line end-col]` positioned just after the closing quote,
    counting newlines so later line numbers stay correct."
@@ -88,7 +74,51 @@
         (= (.charAt content j) \") [(inc j) l (inc cl)]
         :else (recur (inc j) l (inc cl))))))
 
-(defn scan-numeric-tokens
+(defn- ^{:stratum 0} normalize-separators [^String p] (str/replace p "\\" "/"))
+
+(defn- ^{:stratum 0} target-file? [rel]
+  (and (str/ends-with? rel ".clj")
+       (or (re-find #"^components/[^/]+/src/" rel)
+           (re-find #"^bases/[^/]+/src/" rel))))
+
+(defn- ^{:stratum 0} safe-slurp
+  "Read a file, returning its content or nil on any I/O error (permissions,
+   encoding, transient failure). The locator is best-effort — a single
+   unreadable file must not abort the whole scan."
+  [f]
+  (try (slurp f) (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} numeric-token? [tok]
+  (boolean (re-matches numeric-token-pattern tok)))
+
+(defn- ^{:stratum 1} list-target-files [repo-root]
+  (let [root (io/file repo-root)
+        root-len (inc (count (.getAbsolutePath root)))]
+    (->> (file-seq root)
+         (filter #(.isFile ^java.io.File %))
+         (map (fn [^java.io.File f]
+                (normalize-separators (subs (.getAbsolutePath f) root-len))))
+         (filter target-file?)
+         vec)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} magic-numeric?
+  "True when `tok` is a numeric literal whose value is not a structural
+   sentinel. Hex / radix / ratio literals (which Double/parseDouble cannot
+   read) are treated as magic — they carry meaning worth naming."
+  [tok]
+  (and (numeric-token? tok)
+       (let [t (str/replace tok #"[MN]$" "")]
+         (try
+           (not (contains? exempt-values (Double/parseDouble t)))
+           (catch Exception _ true)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} scan-numeric-tokens
   "Char-lex `content`, returning `[{:line :col :token}]` for every numeric
    literal token in a CODE position (outside strings, comments, char-literals)."
   [^String content]
@@ -133,10 +163,10 @@
                        (conj! acc {:line line :col col :token tok})
                        acc)))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; File + repo scan
+;------------------------------------------------------------------------------ Layer 4
 
-(defn analyze-content
+;; File + repo scan
+(defn ^{:stratum 4} analyze-content
   "Return violation maps for magic numeric literals in `content`.
    `rel` is the repo-relative path used in the record."
   [rel ^String content]
@@ -150,31 +180,9 @@
            :kind     :magic-numeric})
         (scan-numeric-tokens content)))
 
-(defn- normalize-separators [^String p] (str/replace p "\\" "/"))
+;------------------------------------------------------------------------------ Layer 5
 
-(defn- target-file? [rel]
-  (and (str/ends-with? rel ".clj")
-       (or (re-find #"^components/[^/]+/src/" rel)
-           (re-find #"^bases/[^/]+/src/" rel))))
-
-(defn- list-target-files [repo-root]
-  (let [root (io/file repo-root)
-        root-len (inc (count (.getAbsolutePath root)))]
-    (->> (file-seq root)
-         (filter #(.isFile ^java.io.File %))
-         (map (fn [^java.io.File f]
-                (normalize-separators (subs (.getAbsolutePath f) root-len))))
-         (filter target-file?)
-         vec)))
-
-(defn- safe-slurp
-  "Read a file, returning its content or nil on any I/O error (permissions,
-   encoding, transient failure). The locator is best-effort — a single
-   unreadable file must not abort the whole scan."
-  [f]
-  (try (slurp f) (catch Exception _ nil)))
-
-(defn scan-repo
+(defn ^{:stratum 5} scan-repo
   "Scan `repo-root` for magic numeric literals. Returns
    {:violations [...] :files-scanned N :rule/id :std/named-constants
     :counts {:magic-numeric N}}. Pure locator: no writes, no throw, no exit —

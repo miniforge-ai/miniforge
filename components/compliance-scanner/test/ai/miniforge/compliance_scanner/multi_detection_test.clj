@@ -15,28 +15,36 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.multi-detection-test
   "Tests for multi-detection scanning, category selectors, and incremental mode."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.compliance-scanner.scan]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Access private functions via var for unit testing
-(def ^:private category-matches?
+(def ^{:stratum 0} ^:private category-matches?
   (var-get #'ai.miniforge.compliance-scanner.scan/category-matches?))
 
-(def ^:private rule-matches-selector?
+(def ^{:stratum 0} ^:private rule-matches-selector?
   (var-get #'ai.miniforge.compliance-scanner.scan/rule-matches-selector?))
 
-(def ^:private category-dewey-ranges
+(def ^{:stratum 0} ^:private category-dewey-ranges
   (var-get #'ai.miniforge.compliance-scanner.scan/category-dewey-ranges))
+
+;; ============================================================================
+;; Diff rule scanning
+;; ============================================================================
+(def ^{:stratum 0} ^:private scan-diff-rule
+  (var-get #'ai.miniforge.compliance-scanner.scan/scan-diff-rule))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
 ;; Category Dewey ranges data
 ;; ============================================================================
-
-(deftest category-dewey-ranges-test
+(deftest ^{:stratum 1} category-dewey-ranges-test
   (testing "has all 10 categories"
     (is (= 10 (count category-dewey-ranges))))
 
@@ -48,8 +56,7 @@
 ;; ============================================================================
 ;; Category matching
 ;; ============================================================================
-
-(deftest category-matches-exact-test
+(deftest ^{:stratum 1} category-matches-exact-test
   (testing "exact name match"
     (let [rule {:rule/category "foundations"}]
       (is (true? (category-matches? rule :mf.cat/foundations)))))
@@ -58,7 +65,7 @@
     (let [rule {:rule/category "foundations"}]
       (is (not (category-matches? rule :mf.cat/languages))))))
 
-(deftest category-matches-dewey-range-test
+(deftest ^{:stratum 1} category-matches-dewey-range-test
   (testing "Dewey code 210 matches :mf.cat/languages (200-299)"
     (let [rule {:rule/category "210"}]
       (is (true? (category-matches? rule :mf.cat/languages)))))
@@ -78,8 +85,7 @@
 ;; ============================================================================
 ;; Rule selector matching
 ;; ============================================================================
-
-(deftest rule-matches-selector-rule-id-test
+(deftest ^{:stratum 1} rule-matches-selector-rule-id-test
   (testing "matches by rule ID"
     (let [rule {:rule/id :std/clojure :rule/category "210"}]
       (is (true? (rule-matches-selector? rule :std/clojure)))))
@@ -88,19 +94,12 @@
     (let [rule {:rule/id :std/clojure :rule/category "210"}]
       (is (not (rule-matches-selector? rule :std/python))))))
 
-(deftest rule-matches-selector-category-test
+(deftest ^{:stratum 1} rule-matches-selector-category-test
   (testing "matches by category keyword"
     (let [rule {:rule/id :std/clojure :rule/category "210"}]
       (is (true? (rule-matches-selector? rule :mf.cat/languages))))))
 
-;; ============================================================================
-;; Diff rule scanning
-;; ============================================================================
-
-(def ^:private scan-diff-rule
-  (var-get #'ai.miniforge.compliance-scanner.scan/scan-diff-rule))
-
-(deftest scan-diff-rule-test
+(deftest ^{:stratum 1} scan-diff-rule-test
   (testing "detects pattern in diff content"
     (let [rule-cfg {:rule/id       :test/removed-import
                     :rule/category "300"
