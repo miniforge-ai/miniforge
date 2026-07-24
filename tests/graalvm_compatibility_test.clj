@@ -267,6 +267,58 @@
         (is (some? (resolve 'ai.miniforge.workflow.interface/run-pipeline))
             "Should resolve run-pipeline")))))
 
+(deftest test-operator-intervention-application-executes
+  (testing "Phase D intervention mechanisms run under Babashka, not just load"
+    ;; A loading namespace is not a working one: SCI refuses some interop
+    ;; at call time, so the control path is exercised here rather than
+    ;; merely required. Resolved dynamically so a classpath without the
+    ;; operator brick reports a plain load failure instead of a compile
+    ;; error in this file.
+    (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
+      (is loaded? (str "Operator interface should load: " error-msg))
+      (when loaded?
+        (let [[es-loaded?] (require-namespace 'ai.miniforge.event-stream.interface)
+              create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
+              create-interv (resolve 'ai.miniforge.operator.interface/create-intervention)
+              approve (resolve 'ai.miniforge.operator.interface/approve-intervention)
+              apply-interv! (resolve 'ai.miniforge.operator.interface/apply-intervention!)
+              register-evaluator! (resolve 'ai.miniforge.operator.interface/register-policy-evaluator!)]
+          (is es-loaded? "event-stream interface should load")
+          (is (every? some? [create-stream create-interv approve apply-interv!
+                             register-evaluator!])
+              "Phase D application entry points should resolve")
+          (when (every? some? [create-stream create-interv approve apply-interv!
+                               register-evaluator!])
+            (let [stream (create-stream {:sinks []})
+                  approved (fn [type target-id]
+                             (:intervention
+                              (approve (create-interv
+                                        {:intervention/type type
+                                         :intervention/target-id target-id
+                                         :intervention/requested-by "graalvm-test"
+                                         :intervention/request-source :tui}))))
+                  failure-code #(get-in % [:intervention/details :failure/code])]
+              ;; Unwired mechanisms must fail typed rather than throw.
+              (is (= :no-resume-launcher
+                     (failure-code (apply-interv! stream (approved :retry (str (random-uuid))))))
+                  "retry without a launcher fails typed under Babashka")
+              (is (= :not-implemented
+                     (failure-code (apply-interv! stream (approved :waive (str (random-uuid))))))
+                  "waive fails typed under Babashka")
+              ;; The re-evaluate mechanism actually runs: evaluator →
+              ;; gate event → materialized PolicyEvaluation readback.
+              (register-evaluator! (fn [_request]
+                                     {:evaluation/passed? true
+                                      :evaluation/packs-applied []
+                                      :evaluation/violations []}))
+              (try
+                (is (= :verified
+                       (:intervention/state
+                        (apply-interv! stream (approved :re-evaluate "graalvm/synthetic#1"))))
+                    "re-evaluate materializes and verifies a PolicyEvaluation under Babashka")
+                (finally
+                  (register-evaluator! nil))))))))))
+
 ;; ============================================================================
 ;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
 ;; ============================================================================
