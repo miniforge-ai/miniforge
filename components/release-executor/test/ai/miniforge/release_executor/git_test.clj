@@ -137,6 +137,29 @@
         (git/force-push! "/tmp/wt" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
+;;-------------------------------------------- path traversal + base safety
+(deftest write-file-path-traversal-test
+  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-wf-"})]
+    (try
+      (testing "write-file! writes a normal relative path"
+        (is (:success? (git/write-file! dir "docs/pull-requests/p.md" "hi\n")))
+        (is (= "hi\n" (slurp (str (fs/path dir "docs/pull-requests/p.md"))))))
+      (testing "write-file! rejects a ../ escape and writes nothing outside root"
+        (let [r (git/write-file! dir "../escape.md" "nope")]
+          (is (not (:success? r)))
+          (is (not (fs/exists? (fs/path (fs/parent dir) "escape.md"))))))
+      (finally (fs/delete-tree dir)))))
+
+(deftest range-fns-reject-unsafe-base-test
+  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-range-"})]
+    (try
+      (init-repo! dir)
+      (testing "range/ahead functions return nil for an unsafe base (no git call)"
+        (is (nil? (git/diff-stats-range dir "-x")))
+        (is (nil? (git/count-test-defs-range dir "--upload-pack=evil")))
+        (is (nil? (git/commits-ahead-of-base dir "a;rm -rf /"))))
+      (finally (fs/delete-tree dir)))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"

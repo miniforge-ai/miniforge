@@ -217,16 +217,17 @@
    Uses the three-dot merge-base form so concurrent movement of origin/<base>
    does not shrink the count to zero. Returns nil on git failure."
   [worktree-path base-branch]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "rev-list" "--count" "--right-only"
-             (str "origin/" base-branch "...HEAD"))]
-      (when (zero? (:exit r))
-        (try
-          (Long/parseLong (str/trim (get r :out "0")))
-          (catch NumberFormatException _ nil))))
-    (catch Exception _ nil)))
+  (when-not (validate-safe-branch-name base-branch)
+    (try
+      (let [r (process/shell
+               {:dir (str worktree-path) :out :string :err :string :continue true}
+               "git" "rev-list" "--count" "--right-only"
+               (str "origin/" base-branch "...HEAD"))]
+        (when (zero? (:exit r))
+          (try
+            (Long/parseLong (str/trim (get r :out "0")))
+            (catch NumberFormatException _ nil))))
+      (catch Exception _ nil))))
 
 (defn diff-stats
   "Get line-level diff stats for staged changes.
@@ -254,21 +255,22 @@
    origin/<base> — `git diff origin/<base>...HEAD --numstat` with the
    three-dot form (merge-base diff). Mirrors sandbox/diff-stats-range."
   [worktree-path base-branch]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "diff" (str "origin/" base-branch "...HEAD") "--numstat")]
-      (when (zero? (:exit r))
-        (let [lines (str/split-lines (str/trim (get r :out "")))
-              parsed (keep (fn [line]
-                             (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
-                               {:additions (parse-long adds)
-                                :deletions (parse-long dels)}))
-                           lines)]
-          {:additions (reduce + 0 (map :additions parsed))
-           :deletions (reduce + 0 (map :deletions parsed))
-           :files (count parsed)})))
-    (catch Exception _ nil)))
+  (when-not (validate-safe-branch-name base-branch)
+    (try
+      (let [r (process/shell
+               {:dir (str worktree-path) :out :string :err :string :continue true}
+               "git" "diff" (str "origin/" base-branch "...HEAD") "--numstat")]
+        (when (zero? (:exit r))
+          (let [lines (str/split-lines (str/trim (get r :out "")))
+                parsed (keep (fn [line]
+                               (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                                 {:additions (parse-long adds)
+                                  :deletions (parse-long dels)}))
+                             lines)]
+            {:additions (reduce + 0 (map :additions parsed))
+             :deletions (reduce + 0 (map :deletions parsed))
+             :files (count parsed)})))
+      (catch Exception _ nil))))
 
 (defn count-test-defs
   "Count deftest forms in staged changes.
@@ -290,16 +292,17 @@
   "Count deftest forms added/removed in origin/<base>...HEAD (merge-base diff).
    Mirrors sandbox/count-test-defs-range."
   [worktree-path base-branch]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "diff" (str "origin/" base-branch "...HEAD") "-U0")]
-      (when (zero? (:exit r))
-        (let [diff-text (get r :out "")
-              added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
-              removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
-          {:added added :removed removed})))
-    (catch Exception _ nil)))
+  (when-not (validate-safe-branch-name base-branch)
+    (try
+      (let [r (process/shell
+               {:dir (str worktree-path) :out :string :err :string :continue true}
+               "git" "diff" (str "origin/" base-branch "...HEAD") "-U0")]
+        (when (zero? (:exit r))
+          (let [diff-text (get r :out "")
+                added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
+                removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
+            {:added added :removed removed})))
+      (catch Exception _ nil))))
 
 (defn commit-changes!
   "Commit staged changes with the given message.
@@ -355,19 +358,35 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
+(defn- inside-worktree?
+  "True when `file` resolves inside `worktree-path` after canonicalization
+   (collapses `..`, symlinks, and redundant separators). Kept self-contained
+   rather than reusing files/path-traversal-anomaly, which depends on this
+   namespace (a git→files require would cycle)."
+  [worktree-path ^java.io.File file]
+  (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
+        target (.getCanonicalPath file)]
+    (or (= target root)
+        (str/starts-with? target (str root java.io.File/separator)))))
+
 (defn write-file!
-  "Write content to a relative path inside the worktree.
-   Creates parent directories as needed.
-   Returns {:success? bool :output string :error string}."
+  "Write content to a path inside the worktree, creating parent dirs.
+   Rejects a `rel-path` that escapes the worktree root (absolute path, `..`
+   segments, or symlinked parents) via a canonical-path check — parity with
+   the sandbox backend's guard. Returns {:success? bool :output string
+   :error string}."
   [worktree-path rel-path content]
-  (try
-    (let [file   (java.io.File. (str worktree-path) (str rel-path))
-          parent (.getParentFile file)]
-      (when parent (.mkdirs parent))
-      (spit file content)
-      (result/shell-success {:output (str rel-path)}))
-    (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+  (let [file (java.io.File. (str worktree-path) (str rel-path))]
+    (if-not (inside-worktree? worktree-path file)
+      (result/shell-failure (str "Path traversal rejected: " rel-path
+                                 " escapes worktree root"))
+      (try
+        (let [parent (.getParentFile file)]
+          (when parent (.mkdirs parent))
+          (spit file content)
+          (result/shell-success {:output (str rel-path)}))
+        (catch Exception e
+          (result/shell-failure (.getMessage e)))))))
 
 (defn edit-pr-body!
   "Update the body of an existing PR using gh CLI on the host. Injects

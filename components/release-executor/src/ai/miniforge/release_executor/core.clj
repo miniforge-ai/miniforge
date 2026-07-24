@@ -217,6 +217,13 @@
         (not (result/succeeded? stage-r))
         (fail state :stage-failed (:error stage-r))
 
+        ;; The listing command itself failed — don't misread an errored
+        ;; `git diff --cached --name-only` as an empty staged set (which
+        ;; would fall through to the boundary-commit path or a spurious
+        ;; :no-files-to-stage). Fail fast with the real error.
+        (and staged-r (not (result/succeeded? staged-r)))
+        (fail state :stage-list-failed (:error staged-r))
+
         (pos? staged-count)
         (assoc state :write-metrics {:total-operations staged-count
                                      :files-written staged-count})
@@ -634,19 +641,39 @@
               (when logger
                 (log/info logger :release-executor :pr-doc-generated
                           {:data {:path rel-path}}))
-              (if host-mode?
-                (do
-                  (git/exec! worktree-path ["git" "add" rel-path])
-                  (git/exec! worktree-path ["git" "commit" "--amend" "--no-edit" "--no-verify"])
-                  (git/force-push! worktree-path (:github-token state)))
-                (do
-                  (sandbox/exec! executor environment-id (str "git add " rel-path))
-                  (sandbox/exec! executor environment-id "git commit --amend --no-edit --no-verify")
-                  (sandbox/exec! executor environment-id "git push --force-with-lease"
-                                 (gh-exec-opts state))))
-              (assoc state
-                     :pr-doc-path    rel-path
-                     :pr-doc-content content))
+              ;; Amend the doc onto the branch tip and re-push. Thread each
+              ;; step's result so a failed add/amend/push does not let us
+              ;; claim :pr-doc-path — the doc would be in the worktree but
+              ;; not on the pushed branch. Publish is best-effort: on
+              ;; failure we warn and continue (the PR + doc file still exist
+              ;; locally) rather than fail the whole release for a doc-only
+              ;; step.
+              (let [publish-r
+                    (if host-mode?
+                      (let [add-r    (git/exec! worktree-path ["git" "add" rel-path])
+                            commit-r (when (result/succeeded? add-r)
+                                       (git/exec! worktree-path
+                                                  ["git" "commit" "--amend" "--no-edit" "--no-verify"]))]
+                        (if (and commit-r (result/succeeded? commit-r))
+                          (git/force-push! worktree-path (:github-token state))
+                          (or commit-r add-r)))
+                      (let [add-r    (sandbox/exec! executor environment-id (str "git add " rel-path))
+                            commit-r (when (result/succeeded? add-r)
+                                       (sandbox/exec! executor environment-id
+                                                      "git commit --amend --no-edit --no-verify"))]
+                        (if (and commit-r (result/succeeded? commit-r))
+                          (sandbox/exec! executor environment-id "git push --force-with-lease"
+                                         (gh-exec-opts state))
+                          (or commit-r add-r))))]
+                (if (result/succeeded? publish-r)
+                  (assoc state :pr-doc-path rel-path :pr-doc-content content)
+                  (do
+                    (when logger
+                      (log/warn logger :release-executor :pr-doc-publish-failed
+                                {:message (str "PR doc amend/push did not complete; "
+                                               "not claiming it was published: "
+                                               (:error publish-r))}))
+                    state))))
             (do
               (when logger
                 (log/warn logger :release-executor :pr-doc-generation-failed
