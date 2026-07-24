@@ -88,7 +88,8 @@
     (if (seq files)
       (do
         (println "🔍 Stratum-linting" (count files) "Clojure file(s)...")
-        ;; Autofix, the same shape as fmt:md-staged's `lint --fix`:
+        ;; Autofix, the same shape `bb fmt:md` already uses (fmt/md-staged
+        ;; runs markdownlint --fix and re-stages):
         ;; stratum-lint infers each def's real stratum from the same-file
         ;; reference graph and regroups under regenerated headings, so a
         ;; decorative/misordered heading never reaches a commit. Exit

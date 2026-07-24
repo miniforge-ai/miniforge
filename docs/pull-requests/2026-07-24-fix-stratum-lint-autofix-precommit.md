@@ -7,7 +7,7 @@ fix ([miniforge-ai/stratum-lint#6](https://github.com/miniforge-ai/stratum-lint/
 and changes `bb lint:stratum` (the pre-commit gate) from "lint staged
 files, fail on any finding" to "autofix staged files, re-stage the result,
 fail only when autofix genuinely can't resolve it" — the same shape
-`fmt:md-staged` already uses for Markdown.
+`bb fmt:md` already uses for Markdown.
 
 ## Motivation
 
