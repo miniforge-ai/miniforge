@@ -135,7 +135,7 @@
     (not (:create-pr? state)) state
     :else
     (let [gh-auth (if (:host-mode? state)
-                    (git/check-gh-auth!)
+                    (git/check-gh-auth! (:github-token state))
                     (sandbox/check-gh-auth! (:executor state) (:environment-id state)
                                             (gh-exec-opts state)))]
       (if (:authenticated? gh-auth)
@@ -324,7 +324,7 @@
     :else
     (let [{:keys [branch host-mode? worktree-path executor environment-id]} state
           result (if host-mode?
-                   (git/push-branch! worktree-path branch)
+                   (git/push-branch! worktree-path branch (:github-token state))
                    (sandbox/push-branch! executor environment-id branch
                                          (gh-exec-opts state)))]
       (if (result/succeeded? result)
@@ -372,7 +372,7 @@
                    :body        (with-provenance (:release/pr-body release-meta) state)
                    :base-branch base-branch}
           result (if host-mode?
-                   (git/create-pr! worktree-path pr-opts)
+                   (git/create-pr! worktree-path pr-opts (:github-token state))
                    (sandbox/create-pr! executor environment-id pr-opts
                                        (gh-exec-opts state)))]
       (if (result/succeeded? result)
@@ -587,7 +587,7 @@
                 state)]
       (try
         (if host-mode?
-          (git/edit-pr-body! worktree-path pr-number body)
+          (git/edit-pr-body! worktree-path pr-number body (:github-token state))
           (sandbox/edit-pr-body! executor environment-id pr-number body
                                  (gh-exec-opts state)))
         (when logger

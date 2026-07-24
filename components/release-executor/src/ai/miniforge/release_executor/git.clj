@@ -48,6 +48,42 @@
   [user]
   {:available? true :authenticated? true :user user})
 
+;------------------------------------------------------------------------------ Layer 0
+;; Safety + credential helpers (host-mode parity with sandbox.clj)
+
+(defn validate-safe-branch-name
+  "Return nil when `branch` is safe to pass as a git/gh argument, else a
+   shell-failure result. Mirrors sandbox/validate-safe-branch-name: allows
+   only [A-Za-z0-9._/-] (the set git permits) and rejects blank names or
+   names starting with '-', which git would read as an option flag (option
+   injection). Host-mode passes branch names as argv (not through `sh -c`),
+   so shell metacharacters are already inert, but a leading-'-' name is still
+   an argument-injection vector — hence the guard."
+  [branch]
+  (let [s (str branch)]
+    (cond
+      (str/blank? s)
+      (result/shell-failure "Unsafe branch name: must not be blank" {:branch nil})
+
+      (str/starts-with? s "-")
+      (result/shell-failure "Unsafe branch name: must not start with '-'" {:branch nil})
+
+      (not (re-matches #"[A-Za-z0-9._/-]+" s))
+      (result/shell-failure (str "Unsafe branch name: " s) {:branch nil})
+
+      :else nil)))
+
+(defn- gh-shell-opts
+  "process/shell option map for a gh call, injecting the caller's
+   `github-token` as GH_TOKEN so host-mode uses the same credential the
+   pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
+   `worktree-path` may be nil (e.g. `gh auth status` needs no cwd). When no
+   token is supplied the call inherits the ambient environment."
+  [worktree-path github-token]
+  (cond-> {:out :string :err :string :continue true}
+    worktree-path (assoc :dir (str worktree-path))
+    github-token  (assoc :extra-env {"GH_TOKEN" github-token})))
+
 ;------------------------------------------------------------------------------ Layer 1
 ;; Generic command runner
 
@@ -90,10 +126,12 @@
       (result/shell-failure (.getMessage e)))))
 
 (defn check-gh-auth!
-  "Check if gh CLI is available and authenticated on the host.
+  "Check if gh CLI is available and authenticated on the host. Injects
+   `github-token` as GH_TOKEN so the check reflects the credential the
+   pipeline will use to open the PR (not just ambient host auth).
 
    Returns {:available? bool :authenticated? bool :user string :error string}"
-  []
+  [github-token]
   (try
     (let [which-r (process/shell
                    {:out :string :err :string :continue true}
@@ -101,7 +139,7 @@
       (if-not (zero? (:exit which-r))
         (gh-unavailable "gh CLI not found. Install with: brew install gh")
         (let [auth-r (process/shell
-                      {:out :string :err :string :continue true}
+                      (gh-shell-opts nil github-token)
                       "gh" "auth" "status")]
           (if (zero? (:exit auth-r))
             (let [output (get auth-r :out "")
@@ -122,7 +160,9 @@
 
    Returns {:success? bool :branch string :base-branch string :error string}"
   [worktree-path branch-name]
-  (try
+  (or
+   (validate-safe-branch-name branch-name)
+   (try
     (let [dir-opts {:dir (str worktree-path) :out :string :err :string :continue true}
           default-branch-r (process/shell dir-opts
                                           "git" "symbolic-ref" "refs/remotes/origin/HEAD")
@@ -131,6 +171,12 @@
                                str/trim
                                (str/replace #"refs/remotes/origin/" ""))
                            "main")
+          ;; Refresh origin/<default> before branching so later
+          ;; origin/<base>...HEAD range diffs / commits-ahead resolve
+          ;; against current tips (sandbox/create-branch! fetches too).
+          ;; Best-effort: a fetch failure (offline worktree) degrades to a
+          ;; possibly-stale base rather than aborting the release.
+          _ (process/shell dir-opts "git" "fetch" "origin" default-branch)
           checkout-r (process/shell dir-opts
                                     "git" "checkout" "-b" branch-name)]
       (if (zero? (:exit checkout-r))
@@ -142,7 +188,7 @@
             (result/shell-failure (str "Failed to create branch: " (get retry-r :err ""))
                                   {:branch nil})))))
     (catch Exception e
-      (result/shell-failure (.getMessage e) {:branch nil}))))
+      (result/shell-failure (.getMessage e) {:branch nil})))))
 
 (defn fetch-branch!
   "Fetch origin/<branch> into the local worktree.
@@ -151,15 +197,17 @@
    `origin/<base>` range diffs and commits-ahead resolve on the host.
    Returns a shell-result."
   [worktree-path branch]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "fetch" "origin" (str branch))]
-      (if (zero? (:exit r))
-        (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
-    (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+  (or
+   (validate-safe-branch-name branch)
+   (try
+     (let [r (process/shell
+              {:dir (str worktree-path) :out :string :err :string :continue true}
+              "git" "fetch" "origin" (str branch))]
+       (if (zero? (:exit r))
+         (result/shell-success {:output (get r :out "")})
+         (result/shell-failure (get r :err ""))))
+     (catch Exception e
+       (result/shell-failure (.getMessage e))))))
 
 (defn commits-ahead-of-base
   "Count commits HEAD has added since branching from origin/<base>.
@@ -270,19 +318,23 @@
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
 
 (defn push-branch!
-  "Push the current branch to origin.
+  "Push the current branch to origin. Injects `github-token` as GH_TOKEN so
+   gh's git credential helper authenticates the push with the pipeline's
+   credential.
 
    Returns {:success? bool :error string}"
-  [worktree-path branch-name]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "push" "-u" "origin" branch-name)]
-      (if (zero? (:exit r))
-        (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
-    (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+  [worktree-path branch-name github-token]
+  (or
+   (validate-safe-branch-name branch-name)
+   (try
+     (let [r (process/shell
+              (gh-shell-opts worktree-path github-token)
+              "git" "push" "-u" "origin" branch-name)]
+       (if (zero? (:exit r))
+         (result/shell-success {:output (get r :out "")})
+         (result/shell-failure (get r :err ""))))
+     (catch Exception e
+       (result/shell-failure (.getMessage e))))))
 
 (defn write-file!
   "Write content to a relative path inside the worktree.
@@ -299,12 +351,13 @@
       (result/shell-failure (.getMessage e)))))
 
 (defn edit-pr-body!
-  "Update the body of an existing PR using gh CLI on the host.
+  "Update the body of an existing PR using gh CLI on the host. Injects
+   `github-token` as GH_TOKEN.
    Returns {:success? bool :output string :error string}."
-  [worktree-path pr-number body]
+  [worktree-path pr-number body github-token]
   (try
     (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
+             (gh-shell-opts worktree-path github-token)
              "gh" "pr" "edit" (str pr-number) "--body" (or body ""))]
       (if (zero? (:exit r))
         (result/shell-success {:output (get r :out "")})
@@ -333,10 +386,10 @@
    release retry reuses it instead of opening a duplicate.
    Falls back to a failure carrying the original create error when the PR
    cannot be resolved via gh pr view."
-  [worktree-path]
+  [worktree-path github-token]
   (try
     (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
+             (gh-shell-opts worktree-path github-token)
              "gh" "pr" "view" "--json" "url" "--jq" ".url")]
       (if-let [pr (and (zero? (:exit r))
                        (parse-pr-ref (get r :out "")))]
@@ -359,27 +412,29 @@
      `gh pr view` rather than opening a duplicate.
 
    Returns {:success? bool :pr-number int :pr-url string :error string}"
-  [worktree-path {:keys [title body base-branch]}]
-  (try
-    (let [base   (or base-branch "main")
-          result (process/shell
-                  {:dir (str worktree-path) :out :string :err :string :continue true}
-                  "gh" "pr" "create"
-                  "--title" title
-                  "--body"  (or body "")
-                  "--base"  base)]
-      (cond
-        (zero? (:exit result))
-        (if-let [pr (parse-pr-ref (get result :out ""))]
-          (result/shell-success pr)
-          (result/shell-failure (msg/t :pr/create-unconfirmed
-                                       {:output (str/trim (get result :out ""))})
-                                {:pr-url nil :pr-number nil}))
+  [worktree-path {:keys [title body base-branch]} github-token]
+  (let [base (or base-branch "main")]
+    (or
+     (validate-safe-branch-name base)
+     (try
+       (let [result (process/shell
+                     (gh-shell-opts worktree-path github-token)
+                     "gh" "pr" "create"
+                     "--title" title
+                     "--body"  (or body "")
+                     "--base"  base)]
+         (cond
+           (zero? (:exit result))
+           (if-let [pr (parse-pr-ref (get result :out ""))]
+             (result/shell-success pr)
+             (result/shell-failure (msg/t :pr/create-unconfirmed
+                                          {:output (str/trim (get result :out ""))})
+                                   {:pr-url nil :pr-number nil}))
 
-        (pr-already-exists? (get result :err ""))
-        (reuse-existing-pr! worktree-path)
+           (pr-already-exists? (get result :err ""))
+           (reuse-existing-pr! worktree-path github-token)
 
-        :else
-        (result/shell-failure (get result :err "") {:pr-url nil :pr-number nil})))
-    (catch Exception e
-      (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
+           :else
+           (result/shell-failure (get result :err "") {:pr-url nil :pr-number nil})))
+       (catch Exception e
+         (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))))
