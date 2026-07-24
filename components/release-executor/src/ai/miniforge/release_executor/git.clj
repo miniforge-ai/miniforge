@@ -63,13 +63,14 @@
   (let [s (str branch)]
     (cond
       (str/blank? s)
-      (result/shell-failure "Unsafe branch name: must not be blank" {:branch nil})
+      (result/shell-failure "Unsafe branch name: must not be blank" {:branch s})
 
       (str/starts-with? s "-")
-      (result/shell-failure "Unsafe branch name: must not start with '-'" {:branch nil})
+      (result/shell-failure (str "Unsafe branch name: must not start with '-': " (pr-str s))
+                            {:branch s})
 
       (not (re-matches #"[A-Za-z0-9._/-]+" s))
-      (result/shell-failure (str "Unsafe branch name: " s) {:branch nil})
+      (result/shell-failure (str "Unsafe branch name: " (pr-str s)) {:branch s})
 
       :else nil)))
 
