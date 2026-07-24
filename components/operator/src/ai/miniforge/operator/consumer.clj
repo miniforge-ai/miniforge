@@ -121,7 +121,8 @@
       (try
         (let [parsed (edn/read-string (slurp f :encoding "UTF-8"))]
           (merge empty-cursor
-                 (select-keys parsed [:processed-intervention-ids
+                 (select-keys parsed [:schema-version
+                                      :processed-intervention-ids
                                       :processed-files])))
         (catch Exception _e empty-cursor))
       empty-cursor)))

@@ -1178,14 +1178,13 @@
 ))
           sandbox? (or (:sandbox opts) (:spec/sandbox spec))
           [context sandbox-cleanup] (sandbox/setup-sandbox-context base-context sandbox? spec enriched-spec quiet)
-          progress-cleanup (display/start-progress! event-stream quiet)
-          ;; Acquire the governed control path last, after every binding that
-          ;; may throw. The consumer is process-scoped; this workflow only
-          ;; registers its live control handles.
-          _operator-control (register-workflow-control! workflow-id
-                                                        control-state
-                                                        event-stream)]
+          progress-cleanup (display/start-progress! event-stream quiet)]
       (try
+        ;; Acquire the governed control path first inside the try, after
+        ;; every binding that may throw, so the finally below always runs
+        ;; its cleanups even if registration fails. The consumer is
+        ;; process-scoped; this workflow only registers its live handles.
+        (register-workflow-control! workflow-id control-state event-stream)
         (when-not quiet
           (display/print-workflow-header (keyword (str "adhoc-" (hash spec))) "adhoc" quiet))
         (dashboard/print-dashboard-status! quiet)

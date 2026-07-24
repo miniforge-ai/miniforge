@@ -121,7 +121,9 @@
             (is (= 1 (count (events-of-type
                              stream
                              consumer/intervention-requested-event-type))))
-            ;; Fixtures carry request-source :tui → auto-approved.
+            ;; Every fixture carries a request-source in
+            ;; consumer/auto-approve-request-sources (:tui or
+            ;; :native-app) → auto-approved.
             (let [changes (events-of-type
                            stream consumer/state-changed-event-type)]
               (is (= 1 (count changes)))
