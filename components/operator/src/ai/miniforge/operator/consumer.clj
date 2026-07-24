@@ -294,15 +294,16 @@
 
 (defn- governed-request-event
   "Build the governed audit event from the server-created intervention.
-   The wire event contributes only its valid source identity; client-claimed
-   lifecycle state, timestamps, workflow routing, and sequence are ignored."
-  [stream event created]
-  (let [workflow-id (intervention-workflow-id created)
-        envelope (es/intervention-requested stream workflow-id created)]
-    (assoc envelope
-           :event/id (or (:event/id event) (:event/id envelope))
-           :event/timestamp (or (:event/timestamp event)
-                                (:event/timestamp envelope)))))
+   The wire event contributes only its valid source identity, already
+   captured in `created` by `event->request`. Everything else is
+   server-assigned: `es/intervention-requested` stamps a fresh
+   envelope, so `:event/id` (snowflake-ordered), `:event/timestamp`
+   (the audit clock), `:event/sequence-number`, and `:workflow/id`
+   routing all come from the server. Client-claimed identity,
+   timestamps, workflow routing, lifecycle state, and sequence are
+   ignored — never preferred over the server envelope."
+  [stream created]
+  (es/intervention-requested stream (intervention-workflow-id created) created))
 
 ;; ── Single-event routing ───────────────────────────────────────────────────
 
@@ -314,7 +315,7 @@
     (if (anomaly/anomaly? created)
       (do (publish-anomaly! operator-stream file-name created)
           nil)
-      (let [governed-event (governed-request-event destination event created)
+      (let [governed-event (governed-request-event destination created)
             _ (es/publish! destination governed-event)
             gate (if (contains? auto-approve-request-sources
                                 (:intervention/request-source created))

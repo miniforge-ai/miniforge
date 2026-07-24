@@ -160,9 +160,12 @@
           source (es/read-event-file
                   (io/file (golden-dir) "pause.transit.json"))
           forged-workflow-id (random-uuid)
+          forged-event-id (random-uuid)
           forged-time (java.util.Date/from
                        (java.time.Instant/parse "2000-01-01T00:00:00Z"))
           forged (assoc source
+                        :event/id forged-event-id
+                        :event/timestamp forged-time
                         :workflow/id forged-workflow-id
                         :intervention/state :verified
                         :intervention/details {:failure/code :forged}
@@ -180,7 +183,12 @@
         (is (nil? (get-in requested
                           [:intervention/details :failure/code])))
         (is (not= forged-time (:intervention/requested-at requested)))
-        (is (not= forged-time (:intervention/updated-at requested)))))))
+        (is (not= forged-time (:intervention/updated-at requested)))
+        (is (not= forged-event-id (:event/id requested))
+            "the governed event id is server-assigned, not the wire id")
+        (is (not= forged-time (:event/timestamp requested))
+            "the governed event timestamp is the server audit clock,
+             not the client-claimed wire time")))))
 
 (deftest workflow-request-routes-to-its-registered-stream
   (let [events-dir (temp-events-dir)
