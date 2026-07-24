@@ -369,11 +369,23 @@
          (if https-url
            (do
              (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
-             (let [retry (raw-push! worktree-path branch-name github-token)]
-               ;; Restore the original remote URL so the token never persists
-               ;; in the worktree's git config.
-               (exec! worktree-path ["git" "remote" "set-url" "origin" remote-url])
-               retry))
+             (let [retry     (raw-push! worktree-path branch-name github-token)
+                   ;; Restore the original remote URL so the token never
+                   ;; persists in the worktree's git config.
+                   restore-r (exec! worktree-path
+                                    ["git" "remote" "set-url" "origin" remote-url])]
+               (if (result/succeeded? restore-r)
+                 retry
+                 ;; The restore failed — origin may still embed the token.
+                 ;; Fail loud (even if the push itself succeeded) with the
+                 ;; scrub command, rather than report a clean success while a
+                 ;; credential is persisted in git config.
+                 (result/shell-failure
+                  (str "Pushed via HTTPS token fallback but could not restore the "
+                       "origin remote URL; it may still embed the GitHub token. "
+                       "Scrub it: git remote set-url origin " remote-url ". "
+                       "Restore error: " (:error restore-r))
+                  {:push-succeeded? (result/succeeded? retry)}))))
            result))))))
 
 (defn force-push!

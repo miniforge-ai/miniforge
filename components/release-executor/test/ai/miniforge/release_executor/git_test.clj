@@ -187,6 +187,31 @@
           (is (= "git@github.com:o/r.git" (last (second set-urls)))
               "original ssh origin is restored"))))))
 
+(deftest push-branch-restore-failure-fails-loud-test
+  (testing "restore of origin failing after the https fallback fails loud with a scrub hint"
+    (let [push-n (atom 0) seturl-n (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              (if (= 1 @push-n)
+                                {:exit 1 :out "" :err "ssh: denied"}
+                                {:exit 0 :out "ok" :err ""}))
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
+                          (do (swap! seturl-n inc)
+                              (if (= 1 @seturl-n)
+                                {:exit 0 :out "" :err ""}          ; set to https ok
+                                {:exit 1 :out "" :err "config locked"})) ; restore fails
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r (git/push-branch! "/tmp/wt" "b" "tok")]
+          (is (not (:success? r)) "restore failure makes the overall result a failure")
+          (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
+          (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
