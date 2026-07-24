@@ -319,9 +319,17 @@
             (let [events-dir (io/file (System/getProperty "java.io.tmpdir")
                                       (str "bb-consumer-gate-" (System/currentTimeMillis)))
                   create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
-                  consume! (resolve 'ai.miniforge.operator.interface/consume-operator-events!)
-                  stream (create-stream {:sinks []})]
-              (.mkdirs (io/file events-dir "operator"))
+                  consume! (resolve 'ai.miniforge.operator.interface/consume-operator-events!)]
+              ;; Fail with the missing symbol named, not an opaque NPE
+              ;; when a nil resolve is invoked below — this gate exists to
+              ;; catch these vars moving, so say WHICH one moved.
+              (is (some? create-stream)
+                  "event-stream/create-event-stream must resolve")
+              (is (some? consume!)
+                  "operator/consume-operator-events! must resolve")
+              (when (and create-stream consume!)
+               (let [stream (create-stream {:sinks []})]
+                (.mkdirs (io/file events-dir "operator"))
               ;; An empty operator dir is enough: the pass still opens the
               ;; lock file, acquires the lock, and releases it — the exact
               ;; sequence that used to throw.
@@ -349,7 +357,7 @@
                       (str "second pass must not throw (lock released?): "
                            (::threw again)))
                   (is (consumer-lock-acquirable? (io/file events-dir "operator"))
-                      "second pass must also release its lock"))))))))))
+                      "second pass must also release its lock"))))))))))))
 
 ;; ============================================================================
 ;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
