@@ -116,6 +116,14 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def default-events-dir
+  "The default events root (`~/.miniforge/events`) as a java.io.File —
+   the base every other path fn in this family defaults to. Exposed so
+   callers that must resolve the root themselves (the operator
+   application layer reconstructing a resume context) read the same
+   convention the file sink writes under instead of rebuilding it."
+  sinks/default-events-dir)
+
 (def operator-dir
   "The cross-workflow operator events directory (`{base-dir}/operator/`).
    Writer side: [[operator-event-file-path]] via the file sink; read
