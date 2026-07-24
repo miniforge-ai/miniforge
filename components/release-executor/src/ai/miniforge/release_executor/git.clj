@@ -130,13 +130,16 @@
       (result/shell-failure (.getMessage e)))))
 
 (defn check-gh-auth!
-  "Check if gh CLI is available and authenticated on the host. Injects
-   `github-token` as GH_TOKEN so the check reflects the credential the
-   pipeline will use to open the PR (not just ambient host auth).
+  "Check if gh CLI is available and authenticated on the host. The optional
+   `github-token` is injected as GH_TOKEN so the check reflects the
+   credential the pipeline will use to open the PR (not just ambient host
+   auth); the 0-arity keeps the historical public-interface signature and
+   inherits the ambient environment.
 
    Returns {:available? bool :authenticated? bool :user string :error string}"
-  [github-token]
-  (try
+  ([] (check-gh-auth! nil))
+  ([github-token]
+   (try
     (let [which-r (process/shell
                    {:out :string :err :string :continue true}
                    "which" "gh")]
@@ -152,7 +155,7 @@
             (gh-available-unauthenticated
              (str "gh not authenticated. Run: gh auth login\n" (get auth-r :err "")))))))
     (catch Exception e
-      (gh-unavailable (.getMessage e)))))
+      (gh-unavailable (.getMessage e))))))
 
 (defn create-branch!
   "Create a new git branch for the release, branching from HEAD so that
@@ -356,37 +359,42 @@
    whose `origin` is an SSH remote can still push, matching
    sandbox/push-branch!.
 
+   The optional `github-token` drives GH_TOKEN injection and the HTTPS
+   fallback; the 2-arity keeps the historical public-interface signature
+   (ambient credentials, no fallback).
+
    Returns {:success? bool :error string}"
-  [worktree-path branch-name github-token]
-  (or
-   (validate-safe-branch-name branch-name)
-   (let [result (raw-push! worktree-path branch-name github-token)]
-     (if (or (result/succeeded? result) (not github-token))
-       result
-       (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
-             remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-             https-url  (ssh->https-with-token remote-url github-token)]
-         (if https-url
-           (do
-             (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
-             (let [retry     (raw-push! worktree-path branch-name github-token)
-                   ;; Restore the original remote URL so the token never
-                   ;; persists in the worktree's git config.
-                   restore-r (exec! worktree-path
-                                    ["git" "remote" "set-url" "origin" remote-url])]
-               (if (result/succeeded? restore-r)
-                 retry
-                 ;; The restore failed — origin may still embed the token.
-                 ;; Fail loud (even if the push itself succeeded) with the
-                 ;; scrub command, rather than report a clean success while a
-                 ;; credential is persisted in git config.
-                 (result/shell-failure
-                  (str "Pushed via HTTPS token fallback but could not restore the "
-                       "origin remote URL; it may still embed the GitHub token. "
-                       "Scrub it: git remote set-url origin " remote-url ". "
-                       "Restore error: " (:error restore-r))
-                  {:push-succeeded? (result/succeeded? retry)}))))
-           result))))))
+  ([worktree-path branch-name] (push-branch! worktree-path branch-name nil))
+  ([worktree-path branch-name github-token]
+   (or
+    (validate-safe-branch-name branch-name)
+    (let [result (raw-push! worktree-path branch-name github-token)]
+      (if (or (result/succeeded? result) (not github-token))
+        result
+        (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
+              remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
+              https-url  (ssh->https-with-token remote-url github-token)]
+          (if https-url
+            (do
+              (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
+              (let [retry     (raw-push! worktree-path branch-name github-token)
+                    ;; Restore the original remote URL so the token never
+                    ;; persists in the worktree's git config.
+                    restore-r (exec! worktree-path
+                                     ["git" "remote" "set-url" "origin" remote-url])]
+                (if (result/succeeded? restore-r)
+                  retry
+                  ;; The restore failed — origin may still embed the token.
+                  ;; Fail loud (even if the push itself succeeded) with the
+                  ;; scrub command, rather than report a clean success while a
+                  ;; credential is persisted in git config.
+                  (result/shell-failure
+                   (str "Pushed via HTTPS token fallback but could not restore the "
+                        "origin remote URL; it may still embed the GitHub token. "
+                        "Scrub it: git remote set-url origin " remote-url ". "
+                        "Restore error: " (:error restore-r))
+                   {:push-succeeded? (result/succeeded? retry)}))))
+            result)))))))
 
 (defn force-push!
   "Force-push the current branch with --force-with-lease, injecting
@@ -500,30 +508,35 @@
    - A branch that already has an open PR (retry/resume) reuses that PR via
      `gh pr view` rather than opening a duplicate.
 
+   The optional `github-token` (injected as GH_TOKEN) is the new host-mode
+   credential path; the 2-arity keeps the historical public-interface
+   signature and inherits the ambient environment.
+
    Returns {:success? bool :pr-number int :pr-url string :error string}"
-  [worktree-path {:keys [title body base-branch]} github-token]
-  (let [base (or base-branch "main")]
-    (or
-     (validate-safe-branch-name base)
-     (try
-       (let [result (process/shell
-                     (gh-shell-opts worktree-path github-token)
-                     "gh" "pr" "create"
-                     "--title" title
-                     "--body"  (or body "")
-                     "--base"  base)]
-         (cond
-           (zero? (:exit result))
-           (if-let [pr (parse-pr-ref (get result :out ""))]
-             (result/shell-success pr)
-             (result/shell-failure (msg/t :pr/create-unconfirmed
-                                          {:output (str/trim (get result :out ""))})
-                                   {:pr-url nil :pr-number nil}))
+  ([worktree-path pr-opts] (create-pr! worktree-path pr-opts nil))
+  ([worktree-path {:keys [title body base-branch]} github-token]
+   (let [base (or base-branch "main")]
+     (or
+      (validate-safe-branch-name base)
+      (try
+        (let [result (process/shell
+                      (gh-shell-opts worktree-path github-token)
+                      "gh" "pr" "create"
+                      "--title" title
+                      "--body"  (or body "")
+                      "--base"  base)]
+          (cond
+            (zero? (:exit result))
+            (if-let [pr (parse-pr-ref (get result :out ""))]
+              (result/shell-success pr)
+              (result/shell-failure (msg/t :pr/create-unconfirmed
+                                           {:output (str/trim (get result :out ""))})
+                                    {:pr-url nil :pr-number nil}))
 
-           (pr-already-exists? (get result :err ""))
-           (reuse-existing-pr! worktree-path github-token)
+            (pr-already-exists? (get result :err ""))
+            (reuse-existing-pr! worktree-path github-token)
 
-           :else
-           (result/shell-failure (get result :err "") {:pr-url nil :pr-number nil})))
-       (catch Exception e
-         (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))))
+            :else
+            (result/shell-failure (get result :err "") {:pr-url nil :pr-number nil})))
+        (catch Exception e
+          (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil})))))))
