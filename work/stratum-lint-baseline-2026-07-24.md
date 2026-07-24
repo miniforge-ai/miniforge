@@ -174,7 +174,8 @@ second place for the same signal to be ignored. Two parts, in order:
 2. Once the pin is bumped, evaluate `--fix` output quality across the
    codebase. If it's reliable, change `bb lint:stratum` (`tasks/lint.clj`'s
    `stratum-staged`) to run `--fix` on staged files automatically — the same
-   shape as `fmt:md-staged`'s `lint --fix` — instead of failing and asking
+   shape `bb fmt:md` already uses (`tasks/fmt.clj`'s `md-staged` runs
+   `markdownlint --fix` and re-stages) — instead of failing and asking
    the developer to hand-fix headings. That closes the loop for good: a
    commit that would have introduced a decorative heading gets normalized
    before it lands, not just rejected.
