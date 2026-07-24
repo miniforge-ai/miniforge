@@ -155,6 +155,20 @@
                      {:intervention/type type
                       :intervention/target-type resolved-target-type})))
 
+(defn- validate-target-type-supported
+  "Return an `:invalid-input` anomaly when a known target category does
+   not match the bounded category assigned to the intervention type."
+  [type resolved-target-type]
+  (let [supported-target-type (intervention-target-type type)]
+    (when (not= supported-target-type resolved-target-type)
+      (anomaly/anomaly :invalid-input
+                       (messages/t :intervention/unsupported-target-type
+                                   {:type type
+                                    :target-type resolved-target-type})
+                       {:intervention/type type
+                        :intervention/target-type resolved-target-type
+                        :intervention/supported-target-type supported-target-type}))))
+
 (defn- validate-target-id
   "Return an `:invalid-input` anomaly when `target-id` is missing, else
    nil."
@@ -209,8 +223,9 @@
    1. `:intervention/type` is in the bounded vocabulary
    2. a target type can be resolved (caller-supplied or vocabulary default)
    3. the resolved target type is recognized
-   4. `:intervention/target-id` is present
-   5. `:intervention/requested-by` and `:intervention/request-source` are
+   4. the intervention verb supports the resolved target type
+   5. `:intervention/target-id` is present
+   6. `:intervention/requested-by` and `:intervention/request-source` are
       both present
 
    Required keys in `request`:
@@ -233,6 +248,7 @@
     (or (validate-intervention-type type)
         (validate-target-type-resolvable type resolved-target-type)
         (validate-target-type-known type resolved-target-type)
+        (validate-target-type-supported type resolved-target-type)
         (validate-target-id type target-id)
         (validate-requester type requested-by request-source)
         (build-intervention request resolved-target-type approval-required?* now))))

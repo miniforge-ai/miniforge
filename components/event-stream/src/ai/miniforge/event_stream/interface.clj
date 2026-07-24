@@ -34,7 +34,7 @@
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
-;------------------------------------------------------------------------------ Layer 0
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
 
 (def create-control-state
@@ -116,6 +116,13 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
+(def operator-dir
+  "The cross-workflow operator events directory (`{base-dir}/operator/`).
+   Writer side: [[operator-event-file-path]] via the file sink; read
+   side: the operator-event consumer (Phase D D-2). Arities: () defaults
+   base-dir to ~/.miniforge/events; (base-dir)."
+  sinks/operator-dir)
+
 (def serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
    the exact encoding the file sink writes to disk (verbose mode: no
@@ -170,7 +177,7 @@
    executor. Returns nil."
   heartbeat/stop-heartbeat!)
 
-;------------------------------------------------------------------------------ Layer 1
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
 
 (def workflow-started
@@ -491,7 +498,7 @@
    :auth/context)."
   events/zettel-promoted)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Listener, control, approval, and callback APIs
 
 (def register-listener!
@@ -633,7 +640,7 @@
    workflow-id, agent-id, optional opts (:print?, :quiet?)."
   callbacks/create-streaming-callback)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Reliability metric event constructors (N3 §3.17)
 
 (def sli-computed
@@ -699,7 +706,7 @@
    add :index/changed-files."
   events/repo-index-coverage-changed)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Meta-loop event constructors
 
 (def meta-loop-cycle-completed
@@ -713,7 +720,7 @@
    (:meta-loop/error, :meta-loop/error-class)."
   events/meta-loop-cycle-failed)
 
-;------------------------------------------------------------------------------ Layer 3
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Observer / knowledge failure event constructors
 
 (def observer-signal-failed
@@ -744,7 +751,7 @@
    before the first tool call so resume-on-kill has a valid session id."
   events/agent-session-captured)
 
-;------------------------------------------------------------------------------ Layer 4
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event-stream reader — replay events from the file-sink layout
 
 (def strip-transit-prefix
@@ -753,6 +760,14 @@
    become keywords; `~u` / `~t` (UUID / instant) prefixes become the
    stripped string form. Returns the de-prefixed value."
   reader/strip-transit-prefix)
+
+(def read-event-file
+  "Parse one transit-JSON event file into an event map (prefixes
+   stripped: `:event/type` back to a keyword, UUID/instant values as
+   plain strings). Returns the parsed map, or nil when the file cannot
+   be read or parsed — callers that must be loud about malformed files
+   branch on the nil themselves."
+  reader/read-event-file)
 
 (def read-workflow-events
   "Read every `.json` event file under a workflow directory, sorted by
@@ -770,7 +785,7 @@
    workflow."
   reader/read-workflow-events-by-id)
 
-;------------------------------------------------------------------------------ Layer 5
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer
 
 (def render-timeline

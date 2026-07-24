@@ -131,6 +131,16 @@
     (rel/enter-safe-mode! mgr :emergency-stop "Manual halt")
     (is (= :safe-mode (rel/degradation-mode mgr)))))
 
+(deftest manual-entry-preserves-manual-trigger-test
+  (let [stream (make-stream)
+        mgr (rel/create-degradation-manager stream)]
+    (rel/enter-safe-mode! mgr :manual "Operator requested safe mode")
+    (is (= :safe-mode (rel/degradation-mode mgr)))
+    (let [entered (->> (:events @stream)
+                       (filter #(= :safe-mode/entered (:event/type %)))
+                       first)]
+      (is (= :manual (:safe-mode/trigger entered))))))
+
 ;; ---------------------------------------------------------------------------- Safe-mode exit
 
 (deftest safe-mode-exit-requires-justification-test

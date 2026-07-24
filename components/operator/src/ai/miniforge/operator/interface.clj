@@ -20,11 +20,13 @@
   "Public API for the operator (meta-agent) component.
    Manages the meta-loop: observe signals, detect patterns, propose improvements."
   (:require
+   [ai.miniforge.operator.application :as application]
+   [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.core :as core]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.protocol :as proto]))
 
-;------------------------------------------------------------------------------ Layer 0
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Protocol re-exports
 
 (def Operator
@@ -78,7 +80,7 @@
    :rejected, :verified, :failed."
   intervention/terminal-states)
 
-;------------------------------------------------------------------------------ Layer 1
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Operator creation
 
 (def create-operator
@@ -111,7 +113,7 @@
    Controls improvement approval policies."
   core/create-governance)
 
-;------------------------------------------------------------------------------ Layer 1a
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Bounded supervisory interventions
 
 (def create-intervention
@@ -200,7 +202,75 @@
   "Check if a set of intervention types is within the bounded vocabulary."
   intervention/bounded-vocabulary?)
 
-;------------------------------------------------------------------------------ Layer 2
+;; ────────────────────────────────────────────────────────────────────────────
+;; Operator-event consumer (Phase D D-2)
+
+(def consume-operator-events!
+  "Run one consumption pass over `{events-dir}/operator/`: parse
+   intervention-requested events, validate, route through the
+   lifecycle (auto-approving operator-driven request sources), publish
+   every transition onto the stream, and advance the idempotency
+   cursor. Options: :events-dir, :stream (required), :apply! (the D-3
+   application hook), :accept? (an ownership predicate that defers
+   unowned requests without advancing the cursor), and :stream-for
+   (a per-request governed-stream router). Returns
+   {:routed n :skipped n :anomalies n}."
+  consumer/consume-pass!)
+
+(def start-operator-consumer!
+  "Start a fixed-delay background poller running the consumer pass.
+   Options are those of [[consume-operator-events!]] plus :interval-ms
+   (default 1000). Returns a handle for [[stop-operator-consumer!]]."
+  consumer/start!)
+
+(def stop-operator-consumer!
+  "Stop a poller started by [[start-operator-consumer!]]. Idempotent."
+  consumer/stop!)
+
+(def auto-approve-request-sources
+  "Request sources whose interventions are auto-approved (the human IS
+   the approver): the operator surfaces, not delegated agents."
+  consumer/auto-approve-request-sources)
+
+;; ── Intervention application (Phase D D-3) ──────────────────────────────────
+
+(def register-live-runner!
+  "Register a live runner's control handles for a workflow id so
+   interventions can act on it. `handles` must include
+   {:control-state <atom>} and should include :event-stream so governed
+   lifecycle events retain the workflow's sequence counter."
+  application/register-runner!)
+
+(def register-degradation-manager!
+  "Register the process-scoped degradation manager used by safe-mode
+   interventions."
+  application/register-degradation-manager!)
+
+(def deregister-live-runner!
+  "Remove a workflow id from the live-runner registry. Idempotent."
+  application/deregister-runner!)
+
+(def live-intervention-target?
+  "Ownership predicate for a process-scoped operator consumer. Returns
+   true for process-global targets and for workflow targets registered
+   to a live runner in this process."
+  application/live-intervention-target?)
+
+(def live-intervention-stream
+  "Return the registered workflow event stream for a workflow-targeted
+   intervention, or nil when the operator stream should be used."
+  application/live-intervention-stream)
+
+(def apply-intervention!
+  "The D-3 `:apply!` hook: apply one approved intervention to its live
+   runner (control-state flags / no-effect verbs / safe-mode), advance
+   the lifecycle approved→dispatched→applied→verified (or →failed with
+   a localized reason and typed `[:intervention/details :failure/code]`),
+   publishing every transition. Pass as `:apply!` to [[consume-operator-events!]] /
+   [[start-operator-consumer!]]."
+  application/apply-intervention!)
+
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Signal observation
 
 (defn observe-signal
@@ -234,7 +304,7 @@
   [operator query]
   (proto/get-signals operator query))
 
-;------------------------------------------------------------------------------ Layer 3
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Pattern analysis
 
 (defn analyze-patterns
@@ -277,7 +347,7 @@
   [generator patterns context]
   (proto/generate-improvements generator patterns context))
 
-;------------------------------------------------------------------------------ Layer 4
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Improvement management
 
 (defn propose-improvement
@@ -332,7 +402,7 @@
   [operator proposal-id reason]
   (proto/reject-improvement operator proposal-id reason))
 
-;------------------------------------------------------------------------------ Layer 5
+;; ────────────────────────────────────────────────────────────────────────────
 ;; Governance
 
 (defn requires-approval?

@@ -9,6 +9,9 @@
   :intervention/unknown-target-type
   "Unknown intervention target type"
 
+  :intervention/unsupported-target-type
+  "Intervention {type} does not support target type {target-type}"
+
   :intervention/target-id-required
   "Intervention target id is required"
 
@@ -22,4 +25,45 @@
   "Cannot transition from terminal state: {state}"
 
   :intervention/invalid-transition
-  "No intervention transition defined for [{state} {event}]"}}
+  "No intervention transition defined for [{state} {event}]"
+
+  ;; Operator-event consumer (Phase D D-2)
+  :consumer/state-changed
+  "Intervention {type} state changed to {state}"
+
+  :consumer/event-anomaly
+  "Malformed operator event rejected: {file}"
+
+  :consumer/unreadable-event
+  "Unreadable operator event file: {file}"
+
+  :consumer/invalid-identity
+  "Operator event has invalid identity fields: {file}"
+
+  ;; Intervention application (Phase D D-3)
+  :application/application-error
+  "Intervention application failed"
+
+  :application/control-state-readback-mismatch
+  "Workflow control-state readback did not match the requested state"
+
+  :application/default-justification
+  "Operator intervention"
+
+  :application/invalid-control-state
+  "Live runner registration requires an atom :control-state"
+
+  :application/no-degradation-manager
+  "No process degradation manager is available"
+
+  :application/no-live-runner
+  "No live runner owns the intervention target"
+
+  :application/not-implemented
+  "The intervention mechanism is not implemented"
+
+  :application/safe-mode-readback-mismatch
+  "Degradation-mode readback did not match the requested state"
+
+  :application/unknown-failure
+  "Intervention application failed for an unknown reason"}}
