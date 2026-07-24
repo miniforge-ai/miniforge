@@ -212,6 +212,59 @@
           (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
           (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
 
+;;-------------------------------------------- force-push shares the fallback
+(deftest force-push-https-fallback-test
+  (testing "force-push over SSH fails with a token → rewrite to https-with-token, retry, restore"
+    (let [calls  (atom [])
+          push-n (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (swap! calls conj a)
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              (if (= 1 @push-n)
+                                {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
+                                {:exit 0 :out "pushed" :err ""}))
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r        (git/force-push! "/tmp/wt" "tok")
+              set-urls (filter #(= ["git" "remote" "set-url"] (vec (take 3 %))) @calls)]
+          (is (:success? r) "second force-push over https succeeds")
+          (is (= 2 @push-n) "force-push retried once after the SSH failure")
+          (is (= 2 (count set-urls)) "origin is set to https-with-token then restored")
+          (is (re-find #"x-access-token:tok@github\.com/o/r\.git" (str (last (first set-urls))))
+              "temporary origin embeds the token over https")
+          (is (= "git@github.com:o/r.git" (last (second set-urls)))
+              "original ssh origin is restored"))))))
+
+(deftest force-push-restore-failure-fails-loud-test
+  (testing "force-push restore failure after the https fallback fails loud with a scrub hint"
+    (let [push-n (atom 0) seturl-n (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              (if (= 1 @push-n)
+                                {:exit 1 :out "" :err "ssh: denied"}
+                                {:exit 0 :out "ok" :err ""}))
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
+                          (do (swap! seturl-n inc)
+                              (if (= 1 @seturl-n)
+                                {:exit 0 :out "" :err ""}
+                                {:exit 1 :out "" :err "config locked"}))
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r (git/force-push! "/tmp/wt" "tok")]
+          (is (not (:success? r)) "restore failure makes the overall result a failure")
+          (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
+          (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
