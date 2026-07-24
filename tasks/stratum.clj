@@ -17,11 +17,12 @@
 ;; limitations under the License.
 (ns stratum
   "Stratum-lint autofix mechanics, split out of `lint` (rule 210: a
-   namespace wanting a fourth real layer is the signal to split it — this
-   chain runs stratum-lint-deps/restage! -> lint-only-and-fail!/
-   advisory-lint! -> autofix-and-restage!, a genuine 3-deep call graph).
-   `lint/stratum-staged` is the dispatcher; everything here is its
-   mechanics."
+   namespace wanting a fourth real layer is the signal to split it).
+   `lint/stratum-staged` is the dispatcher; it calls `autofix-and-restage!`
+   for fully-staged files or `lint-only-and-fail!` for partially-staged
+   ones. `autofix-and-restage!` composes `restage!` and `advisory-lint!`,
+   which both read `stratum-lint-deps` — the genuine 3-deep layer chain
+   that no longer fits alongside the dispatcher in one file."
   (:require
    [babashka.process :as p]
    [clojure.string :as str]))
@@ -44,7 +45,7 @@
    fails, rather than silently leaving the fixed content unstaged."
   [files]
   (doseq [f files]
-    (let [{:keys [exit err]} (p/sh "git" "add" f)]
+    (let [{:keys [exit err]} (p/sh "git" "add" "--" f)]
       (when-not (zero? exit)
         (println "❌ Failed to re-stage" f "after autofix:" err)
         (System/exit exit)))))
