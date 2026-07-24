@@ -109,13 +109,16 @@
     ;; Host-mode path: local-dogfood context supplies a worktree but no
     ;; sandbox executor.  Accepting this as valid (with :host-mode? true) is
     ;; the root fix for the dogfood PR failure described in the ns docstring.
-    (and (:worktree-path state)
+    ;; A blank :worktree-path is NOT present — babashka.process treats
+    ;; :dir "" as the current working directory, which would run host git/gh
+    ;; against whatever repo the process happens to sit in.
+    (and (not (str/blank? (:worktree-path state)))
          (nil? (:executor state))
          (nil? (:environment-id state)))
     (assoc state :host-mode? true)
 
     ;; Sandbox-mode guards — same order/messages as before
-    (not (:worktree-path state))
+    (str/blank? (:worktree-path state))
     (fail state :missing-worktree-path (msg/t :exec/missing-worktree-path))
 
     (not (:executor state))

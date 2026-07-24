@@ -410,10 +410,15 @@
    rather than reusing files/path-traversal-anomaly, which depends on this
    namespace (a git→files require would cycle)."
   [worktree-path ^java.io.File file]
-  (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
-        target (.getCanonicalPath file)]
-    (or (= target root)
-        (str/starts-with? target (str root java.io.File/separator)))))
+  (try
+    (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
+          target (.getCanonicalPath file)]
+      (or (= target root)
+          (str/starts-with? target (str root java.io.File/separator))))
+    ;; getCanonicalPath can throw on invalid paths / IO errors. The check
+    ;; runs before write-file!'s own try, so fail closed here (treat as
+    ;; escaping) — write-file! then returns a shell-failure, never throws.
+    (catch Exception _ false)))
 
 (defn write-file!
   "Write content to a path inside the worktree, creating parent dirs.

@@ -226,4 +226,8 @@
       (is (not (:host-mode? r)))
       (is (not (core/failed? r)))))
   (testing ":create-pr? true with neither executor nor worktree still fails"
-    (is (core/failed? (core/step-validate-inputs {:create-pr? true})))))
+    (is (core/failed? (core/step-validate-inputs {:create-pr? true}))))
+  (testing "a blank :worktree-path is not host-mode (babashka :dir \"\" = cwd)"
+    (let [r (core/step-validate-inputs {:worktree-path "  " :create-pr? true})]
+      (is (not (:host-mode? r)))
+      (is (core/failed? r)))))
