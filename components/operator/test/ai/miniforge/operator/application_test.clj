@@ -349,6 +349,147 @@
         (is (= [:approved :dispatched :applied :verified]
                (state-trail stream)))))))
 
+(deftest retry-keeps-the-fsm-snapshot-and-the-full-completed-set
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        captured (atom nil)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-resume-launcher
+      (assoc (recording-launcher captured workflow-id) :events-dir events-dir)
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention!
+                      stream (approved :retry (str workflow-id)))]
+          (is (= :verified (:intervention/state result)))
+          (is (nil? (:resume/from-phase @captured)))
+          (is (= [:explore :plan] (:resume/completed-phases @captured))))))))
+
+(deftest retry-without-reconstructable-history-fails-typed
+  (let [events-dir (temp-events-dir)]
+    (with-resume-launcher
+      {:launch! (fn [_plan] {:resume/run-id (random-uuid)})
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention!
+                      stream (approved :retry (str (random-uuid))))]
+          (is (= :failed (:intervention/state result)))
+          (is (= :no-resume-context (failure-code result))
+              "a target with no events must not be guessed into a plan"))))))
+
+(deftest retry-from-phase-without-a-phase-detail-fails-typed
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] {:resume/run-id (random-uuid)})
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention!
+                      stream (approved :retry-from-phase (str workflow-id)))]
+          (is (= :failed (:intervention/state result)))
+          (is (= :missing-phase (failure-code result))))))))
+
+(deftest retry-from-phase-rejects-a-phase-the-run-never-reached
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        launched (atom false)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] (reset! launched true) {:resume/run-id (random-uuid)})
+       :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              interv (assoc (approved :retry-from-phase (str workflow-id))
+                            :intervention/details {"phase" "implement"})
+              result (application/apply-intervention! stream interv)]
+          (is (= :failed (:intervention/state result)))
+          (is (= :unknown-phase (failure-code result)))
+          (is (false? @launched)
+              "an unvalidated phase must never reach the launcher"))))))
+
+(deftest retry-launcher-reporting-no-run-fails-typed
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)]
+    (stage-two-phase-run! events-dir workflow-id)
+    (with-resume-launcher
+      {:launch! (fn [_plan] nil) :events-dir events-dir}
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention!
+                      stream (approved :retry (str workflow-id)))]
+          (is (= :failed (:intervention/state result)))
+          (is (= :resume-not-dispatched (failure-code result))))))))
+
+(deftest retry-verification-is-a-readback-not-the-launchers-word
+  (testing "a launcher reporting a run that never started fails the readback"
+    (let [events-dir (temp-events-dir)
+          workflow-id (random-uuid)]
+      (stage-two-phase-run! events-dir workflow-id)
+      (with-resume-launcher
+        {:launch! (fn [_plan] {:resume/run-id (random-uuid)})
+         :events-dir events-dir}
+        (fn []
+          (let [stream (memory-stream)
+                result (application/apply-intervention!
+                        stream (approved :retry (str workflow-id)))]
+            (is (= :failed (:intervention/state result)))
+            (is (= :resume-readback-mismatch (failure-code result)))
+            (is (= [:dispatched :applied :failed] (state-trail stream))
+                "the failure lands after :applied — the dispatch did happen")))))))
+
+(deftest a-throwing-launcher-becomes-a-failed-intervention
+  (testing "a mechanism that blows up must not abort the consumer's pass"
+    (let [events-dir (temp-events-dir)
+          workflow-id (random-uuid)]
+      (stage-two-phase-run! events-dir workflow-id)
+      (with-resume-launcher
+        {:launch! (fn [_plan] (throw (ex-info "launcher exploded" {})))
+         :events-dir events-dir}
+        (fn []
+          (let [stream (memory-stream)
+                result (application/apply-intervention!
+                        stream (approved :retry (str workflow-id)))]
+            (is (= :failed (:intervention/state result)))
+            (is (= :application-error (failure-code result)))))))))
+
+(deftest injected-retry-from-phase-file-drives-the-resume-launcher
+  (testing "the Rust-produced golden fixture reaches the resume mechanism"
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)
+          resumed-id (random-uuid)
+          captured (atom nil)]
+      (stage-golden! events-dir "retry-from-phase.transit.json")
+      (stage-workflow-history!
+       events-dir golden-pause-target-id
+       [(workflow-event (parse-uuid golden-pause-target-id) :workflow/started
+                        {:workflow/spec {:workflow-type :canonical-sdlc}})
+        (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
+                        {:workflow/phase :explore :phase/outcome :success})
+        (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
+                        {:workflow/phase :implement :phase/outcome :failure})])
+      (stage-two-phase-run! events-dir resumed-id)
+      (with-resume-launcher
+        (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
+        (fn []
+          (is (= {:routed 1 :skipped 0 :anomalies 0}
+                 (consumer/consume-pass! {:events-dir events-dir
+                                          :stream stream
+                                          :apply! application/apply-intervention!})))
+          (is (= :implement (:resume/from-phase @captured))
+              "the fixture's `phase` detail survives the wire round-trip")
+          (is (= [:approved :dispatched :applied :verified]
+                 (state-trail stream))))))))
+
+(deftest resume-launcher-registration-rejects-unusable-handles
+  (testing "wiring fails early instead of becoming an application error"
+    (doseq [handles [{} {:launch! "not-a-fn"} :not-a-map]]
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"requires a :launch! function"
+           (application/register-resume-launcher! handles))))))
+
 ;------------------------------------------------------------------------------ Registry
 
 (deftest registry-round-trip
