@@ -92,12 +92,12 @@ proof sits on H4.
 
 | Id | Condition | Definition |
 |---|---|---|
-| C1 | single-pass | One agent, one attempt, full tier budget |
+| C1 | single-agent | One agent, one continuous session with tools, full tier budget; self-directed iteration permitted; no fresh-context resampling |
 | C2 | best-of-N | One model, N independent attempts, verifier-selected winner |
 | C2s | best-of-N + synthesis | C2's model and attempt count, with a synthesis pass replacing the verifier pick (isolates aggregation from diversity) |
 | C3 | independent + synthesis | N heterogeneous agents, independent attempts, one synthesis pass (mixture-of-agents proper) |
 | C4 | sequential debate | r debate rounds (r pinned per manifest), each agent sees prior prose, judge closes |
-| C5 | static pipeline | Fixed role relay (interpreter → proposer → implementer → verifier → synthesizer), transcript handoff, no shared graph |
+| C5 | static pipeline (incumbent) | Fixed role relay (interpreter → proposer → implementer → verifier → synthesizer) with the N2-style validate/repair loop and bounded review-comment rounds (pinned per manifest); transcript handoff, no shared graph |
 | C6 | workspace | N14 deliberation run (stage per experiment manifest) |
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
 
@@ -110,6 +110,13 @@ separate "roles + relay" from "shared typed state" — if C6 only matches C5, th
 not earning its overhead. Population pinning: each condition's manifest MUST enumerate
 exact model ids, role bindings, and prompts; C2's model MUST be the strongest single model
 available to the candidate condition's population.
+
+Condition envelope: a condition is a complete policy for spending its tier budget.
+Internal iteration — self-review, test-and-repair loops, review-comment resolution — is a
+condition feature, executed inside the run and metered by the budget (§4). Participants
+MAY author and run their own tests and any visible repository suite. The sealed acceptance
+suite (§6) is executed exactly once, after the run terminates, against the exported
+artifact; no condition receives feedback from it at any point.
 
 ## 4. Budget protocol
 
@@ -133,6 +140,9 @@ available to the candidate condition's population.
 - **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group by
   (experiment_id, label) and aggregate per cell: mean/min–max score, majority status,
   within-cell spread. A row is divergent only when stable across replicates.
+- **Concurrent baselines**: baseline conditions are re-run within each experiment at the
+  same (task, tier); historical baseline results MUST NOT substitute (prices, registry,
+  and task versions drift, breaking the paired comparison).
 - **Comparability preconditions**: `compare` MUST fail — rejecting the comparison and
   naming the offending snapshots — on: mixed `experiment_id`, mixed registry version,
   mixed product, duplicate `state_var_id` within a snapshot, or non-replicate label
@@ -183,6 +193,23 @@ A task qualifies for gate use only after calibration establishes that it can dis
    A saturated or floored task MUST be revised or excluded before manifest pinning.
 3. **Separation of data**: calibration runs MUST NOT be reused as gate data.
 
+### 6.4 Acceptance suite construction
+
+The suite is authored together with the reference solution, before manifest pinning, and
+sealed. It MUST contain four test classes:
+
+1. **Resolution tests** (must-pass): one or more per injected contradiction, encoding the
+   sealed intended resolution's observable behavior.
+2. **Invariant tests** (must-pass): one per mechanically checkable `:hard` constraint.
+3. **Regression tests** (must-pass): the seeded repository's visible suite still passes.
+4. **Evidence-integration tests**: behavior that is correct only if the run consulted the
+   packaged telemetry/fixtures (guards against prior-knowledge shortcuts).
+
+Must-pass designation is pinned with the manifest. For each contradiction the author MUST
+supply at least one **distractor solution** — typically the literal implementation of a
+single stakeholder's demand — and the suite MUST fail every distractor. Solvability
+(§6.3) plus distractor rejection constitute the suite's validity proof.
+
 ## 7. Metrics and scoring
 
 Per run, the snapshot MUST record these as state variables (thresholds pinned in the
@@ -215,6 +242,11 @@ An effect is claimed only when between-condition spread exceeds within-condition
 (replicate) spread on the same (task, tier), consistently across replicates. Otherwise the
 result is reported as null. The matrix MUST display within-cell spread next to
 between-condition spread.
+
+Replicate counts at this scale support pre-registered decision rules, not significance
+tests. Reported uncertainty MUST use exact (binomial) intervals; a manifest that states a
+p-value or power criterion MUST pin the replicate count that delivers it, and results MUST
+NOT be described with significance language the pinned counts cannot support.
 
 ### 8.2 Ablation delta
 
