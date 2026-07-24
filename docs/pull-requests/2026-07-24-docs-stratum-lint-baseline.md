@@ -43,14 +43,13 @@ autofix) and the subsequent per-component fix-wave PRs.
 
 ## Related Issues/PRs
 
-- Upstream: false-positive fix to be filed against
-  `miniforge-ai/stratum-lint` (Wave 0, tracked separately).
+- Upstream: Wave 0's false-positive fix is a separate PR against the
+  `miniforge-ai/stratum-lint` repo, not this one.
 - Follow-on: per-component fix PRs for Waves 1-4, one PR per component per
   `workflows/pr-layering` (722).
 
 ## Checklist
 
 - [x] PR doc committed with the change
-- [x] Raw findings reproducible via the documented `bb -m
-      stratum-lint.interface` invocation
+- [x] Raw findings reproducible via the documented `bb -m stratum-lint.interface` invocation
 - [x] Commit-budget override rationale recorded in the commit message

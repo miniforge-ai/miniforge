@@ -10,10 +10,15 @@ and `standards/miniforge/languages/clojure`.
 
 **Method:** Resolved the pinned dep via `bb -Sdeps` (no change to `tasks/lint.clj`
 — that pin already existed; the pre-commit hook it's wired into only ever
-pointed it at staged files). Ran `bb -m stratum-lint.interface bases components projects
-development/src` — full-tree, not staged-only. Raw output (876 lines) is
-archived at `work/stratum-lint-baseline-2026-07-24.findings.txt`; this document
-is the analysis and remediation plan built on top of it.
+pointed it at staged files). Ran, full-tree instead of staged-only:
+
+```bash
+bb -m stratum-lint.interface bases components projects development/src
+```
+
+Raw output (876 lines) is archived at
+`work/stratum-lint-baseline-2026-07-24.findings.txt`; this document is the
+analysis and remediation plan built on top of it.
 
 ## Scope
 
