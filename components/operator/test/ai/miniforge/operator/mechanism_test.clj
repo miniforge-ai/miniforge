@@ -19,11 +19,14 @@
 (ns ai.miniforge.operator.mechanism-test
   "Unit coverage for the pure halves of the D-3b mechanisms: reading the
    requested phase off the wire, deriving a run's real phase history,
-   and shaping the resume plan. The lifecycle wiring these feed is
-   covered in `application-test`."
+   shaping the resume plan, and turning an evaluation verdict into the
+   gate event `supervisory-state` materializes. The lifecycle wiring
+   these feed is covered in `application-test`."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.mechanism :as mechanism]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Requested phase
@@ -103,3 +106,65 @@
                   (anomaly/anomaly :fault "launcher blew up" {})]]
     (is (nil? (mechanism/launched-run-id result))
         (str "result " (pr-str result)))))
+
+;------------------------------------------------------------------------------ Policy re-evaluation
+
+(def ^:private re-evaluate-intervention
+  {:intervention/id (random-uuid)
+   :intervention/type :re-evaluate
+   :intervention/target-type :pr
+   :intervention/target-id "golden/synthetic#1"
+   :intervention/requested-by "op@example.invalid"
+   :intervention/details {"packs" ["golden-pack"]}})
+
+(defn- memory-stream [] (es/create-event-stream {:sinks []}))
+
+(defn- materialized-evals
+  [stream]
+  (vals (:policy-evals (supervisory/apply-events supervisory/empty-table
+                                                 (es/get-events stream)))))
+
+(deftest evaluation-request-carries-target-and-requester
+  (let [request (mechanism/evaluation-request re-evaluate-intervention)]
+    (is (= "golden/synthetic#1" (:policy/target-id request)))
+    (is (= :pr (:policy/target-type request)))
+    (is (= "op@example.invalid" (:policy/requested-by request)))
+    (is (= {"packs" ["golden-pack"]} (:policy/details request))
+        "scoping details pass through verbatim")))
+
+(deftest gate-event-type-follows-the-verdict
+  (let [stream (memory-stream)
+        passed (mechanism/evaluation-gate-event stream re-evaluate-intervention
+                                                {:evaluation/passed? true})
+        failed (mechanism/evaluation-gate-event stream re-evaluate-intervention
+                                                {:evaluation/passed? false})]
+    (is (= :gate/passed (:event/type passed)))
+    (is (= :gate/failed (:event/type failed)))
+    (is (= :pr (:gate/target-type passed)))
+    (is (= "golden/synthetic#1" (:gate/target-id passed)))
+    (is (= mechanism/re-evaluation-gate-id (:gate/id passed)))))
+
+(deftest gate-event-coerces-pack-ids-to-strings
+  (let [event (mechanism/evaluation-gate-event
+               (memory-stream) re-evaluate-intervention
+               {:evaluation/passed? true
+                :evaluation/packs-applied [:golden-pack "literal-pack"]})]
+    (is (= ["golden-pack" "literal-pack"] (:gate/packs event))
+        "PolicyEvaluation requires string pack ids; evaluators use either")))
+
+(deftest recording-an-evaluation-reads-the-new-record-back
+  (let [stream (memory-stream)
+        readback (mechanism/record-policy-evaluation!
+                  stream re-evaluate-intervention
+                  {:evaluation/passed? false
+                   :evaluation/packs-applied ["golden-pack"]
+                   :evaluation/violations [{:rule-id :golden/rule-001
+                                            :severity :medium
+                                            :message "synthetic"}]})
+        evals (materialized-evals stream)]
+    (is (true? (:observed readback)))
+    (is (= (:expected readback) (:observed readback)))
+    (is (= 1 (count evals)))
+    (is (= (:policy-eval/id readback) (:policy-eval/id (first evals)))
+        "the readback names the record the accumulator materialized")
+    (is (false? (:policy-eval/passed? (first evals))))))

@@ -18,19 +18,37 @@
 
 (ns ai.miniforge.operator.mechanism
   "Intervention mechanisms that reach past the runner's control-state —
-   Phase D D-3b. `application` owns the lifecycle; this namespace owns
-   the mechanisms whose effect lives in another component.
+   Phase D D-3b.
 
-   `:retry` / `:retry-from-phase` map to `workflow-resume`. The domain
-   half runs here — rebuilding the run's resume state and validating a
-   requested phase against its real phase history — and the runtime
-   half, starting a pipeline, is a handle the process owner registers
-   with `application`. A component cannot reach into a base to load a
-   workflow and drive a run, so the honest split is: do the real work
-   here, fail loudly when the handle is missing."
+   `application` owns the lifecycle; this namespace owns the two
+   mechanisms whose effect lives in another component:
+
+   | verb                        | mechanism                              |
+   |-----------------------------|----------------------------------------|
+   | :retry / :retry-from-phase  | `workflow-resume` reconstruction, then |
+   |                             | the registered resume launcher         |
+   | :re-evaluate                | a gate event that materializes a NEW   |
+   |                             | PolicyEvaluation in `supervisory-state`|
+
+   Both are split the same way: the *domain* half runs here (rebuilding
+   resume state, validating the requested phase against the run's real
+   phase history, turning an evaluation verdict into the gate event the
+   accumulator materializes), and the *runtime* half — starting a
+   pipeline, fetching a PR diff, loading policy packs — is a handle the
+   process owner registers with `application`. A component cannot reach
+   into a base for either, so the honest split is: do the real work
+   here, fail loudly when the handle is missing.
+
+   Nothing here fabricates a verdict. `re-evaluate` publishes only what
+   the registered evaluator computed; without an evaluator the verb
+   fails rather than inventing a pass."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.interface :as es]
+   [ai.miniforge.operator.messages :as messages]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.workflow-resume.interface :as wr]
+   [clojure.set :as set]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -168,3 +186,82 @@
   (boolean
    (and run-id
         (not (anomaly/anomaly? (wr/reconstruct-context events-dir (str run-id)))))))
+
+;; ── Policy re-evaluation ───────────────────────────────────────────────────
+
+(def ^:const re-evaluation-gate-id
+  "Gate id stamped on the gate event a `:re-evaluate` intervention
+   publishes, so the resulting PolicyEvaluation is attributable to an
+   operator re-run rather than to a workflow gate."
+  :supervisory/re-evaluate)
+
+(defn evaluation-request
+  "The payload handed to the registered policy evaluator. Carries the
+   target and the requester identity the audit record needs; details
+   pass through verbatim so a client can scope the re-run (packs,
+   rule ids) without this layer growing an opinion about them."
+  [interv]
+  {:policy/target-type (:intervention/target-type interv)
+   :policy/target-id (str (:intervention/target-id interv))
+   :policy/requested-by (:intervention/requested-by interv)
+   :policy/details (:intervention/details interv)
+   :policy/intervention-id (:intervention/id interv)})
+
+(defn- materialized-policy-eval-ids
+  "PolicyEvaluation ids currently materialized from `stream`'s events,
+   folded through the canonical supervisory accumulator. Reading the
+   entity table — not the raw event log — is what makes the post-publish
+   comparison a readback of the record rather than of our own write."
+  [stream]
+  (set (keys (:policy-evals
+              (supervisory/apply-events supervisory/empty-table
+                                        (es/get-events stream))))))
+
+(defn- pack-ids
+  "Pack identifiers as the strings `:policy-eval/packs-applied` requires;
+   evaluators name packs with keywords or strings interchangeably."
+  [packs]
+  (mapv #(if (string? %) % (str (symbol %))) (or packs [])))
+
+(defn evaluation-gate-event
+  "The `:gate/passed` / `:gate/failed` event that materializes a new
+   PolicyEvaluation for `interv`'s target.
+
+   Going through a gate event rather than writing a
+   `:supervisory/policy-evaluated` snapshot keeps the producer/
+   materializer direction intact: producers emit gate outcomes,
+   `supervisory-state` derives the record. Its `:policy-eval/id` is this
+   event's `:event/id`, so every re-evaluation is a fresh, immutable
+   record per N5-delta-1 §12.2 — never a mutation of a prior one."
+  [stream interv evaluation]
+  (let [passed? (true? (:evaluation/passed? evaluation))
+        target-id (str (:intervention/target-id interv))]
+    (-> (es/create-envelope stream
+                            (if passed? :gate/passed :gate/failed)
+                            nil
+                            (messages/t :application/policy-re-evaluated
+                                        {:target target-id
+                                         :result (if passed? "pass" "fail")}))
+        (assoc :gate/id re-evaluation-gate-id
+               :gate/target-type :pr
+               :gate/target-id target-id
+               :gate/packs (pack-ids (:evaluation/packs-applied evaluation))
+               :gate/violations (vec (:evaluation/violations evaluation))))))
+
+(defn record-policy-evaluation!
+  "Publish the evaluator's verdict and read the entity table back.
+
+   Returns the readback the verification step asserts:
+   `{:verb :re-evaluate :policy-eval/id <id> :observed <bool>
+     :expected true}` — `:observed` is true only when a PolicyEvaluation
+   that did not exist before the publish exists after it."
+  [stream interv evaluation]
+  (let [before (materialized-policy-eval-ids stream)
+        event (evaluation-gate-event stream interv evaluation)
+        _ (es/publish! stream event)
+        added (set/difference (materialized-policy-eval-ids stream) before)]
+    {:verb :re-evaluate
+     :policy-eval/id (:event/id event)
+     :policy-eval/passed? (true? (:evaluation/passed? evaluation))
+     :observed (contains? added (:event/id event))
+     :expected true}))

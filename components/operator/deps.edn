@@ -9,6 +9,7 @@
         ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/reliability {:local/root "../reliability"}
+        ai.miniforge/supervisory-state {:local/root "../supervisory-state"}
         ai.miniforge/workflow-resume {:local/root "../workflow-resume"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

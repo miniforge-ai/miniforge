@@ -53,6 +53,9 @@
   :application/invalid-control-state
   "Live runner registration requires an atom :control-state"
 
+  :application/invalid-policy-evaluator
+  "Policy evaluator registration requires a function"
+
   :application/invalid-resume-launcher
   "Resume launcher registration requires a :launch! function"
 
@@ -65,6 +68,9 @@
   :application/no-live-runner
   "No live runner owns the intervention target"
 
+  :application/no-policy-evaluator
+  "No process policy evaluator is available"
+
   :application/no-resume-context
   "The target workflow has no reconstructable resume context"
 
@@ -73,6 +79,12 @@
 
   :application/not-implemented
   "The intervention mechanism is not implemented"
+
+  :application/policy-evaluation-readback-mismatch
+  "No new policy evaluation was recorded for the target"
+
+  :application/policy-re-evaluated
+  "Policy re-evaluated for {target}: {result}"
 
   :application/resume-not-dispatched
   "The resume launcher reported no resumed run"
