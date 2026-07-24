@@ -32,7 +32,8 @@
    | :pause / :resume / :cancel         | event-stream control-state flags   |
    | :acknowledge / :request-human-review | supervisory-state only (no machine effect) |
    | :force-safe-mode / :exit-safe-mode | degradation manager (when wired)   |
-   | :retry / :retry-from-phase / :waive / :re-evaluate / :request-replan | not yet applied — fail loudly |
+   | :retry / :retry-from-phase         | workflow-resume + the resume launcher |
+   | :waive / :re-evaluate / :request-replan | not yet applied — fail loudly |
 
    **Process-lifetime honesty:** control-state is in-process, so
    interventions act only on workflows registered by a live runner in
@@ -44,11 +45,14 @@
    **Verification is a readback, not an echo:** control-state verbs
    verify by reading the flag back (`paused?` / `cancelled?`), so a
    `verified` chip means the runner's own control flags actually
-   changed."
+   changed. A retry holds the same bar: it verifies by reconstructing
+   the launched run from its own event history, so a launcher naming a
+   run it never started does not buy a `verified` chip."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
+   [ai.miniforge.operator.mechanism :as mechanism]
    [ai.miniforge.operator.messages :as messages]
    [ai.miniforge.reliability.interface :as reliability]))
 
@@ -64,13 +68,28 @@
   ;; target. Its canonical target id therefore is not a runner id.
   (atom nil))
 
+(defonce ^:private process-resume-launcher
+  ;; {:launch! (fn [plan] -> {:resume/run-id …}), :events-dir <dir-or-nil>}
+  ;; A retry restarts a run whose runner is gone by definition, so it
+  ;; cannot go through the live-runner registry. Starting a pipeline is
+  ;; adapter work (workflow loader + LLM client), so the process owner
+  ;; registers the handle — the same shape as the degradation manager.
+  (atom nil))
+
 (def ^:private failure-message-key-by-code
   {:application-error :application/application-error
    :control-state-readback-mismatch :application/control-state-readback-mismatch
+   :missing-phase :application/missing-phase
    :no-degradation-manager :application/no-degradation-manager
    :no-live-runner :application/no-live-runner
+   :no-resume-context :application/no-resume-context
+   :no-resume-launcher :application/no-resume-launcher
    :not-implemented :application/not-implemented
-   :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch})
+   :resume-not-dispatched :application/resume-not-dispatched
+   :resume-readback-mismatch :application/resume-readback-mismatch
+   :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch
+   :unknown-phase :application/unknown-phase
+   :unresolved-workflow-type :application/unresolved-workflow-type})
 
 (def ^:private expected-degradation-mode-by-verb
   {:force-safe-mode :safe-mode
@@ -95,6 +114,27 @@
    interventions."
   [manager]
   (reset! process-degradation-manager manager)
+  nil)
+
+(defn register-resume-launcher!
+  "Register the process-scoped resume launcher used by `:retry` /
+   `:retry-from-phase`.
+
+   `handles` must carry `:launch!` — `(fn [plan] → {:resume/run-id …})`
+   — which starts a run from the resume plan
+   [[ai.miniforge.operator.mechanism/resume-plan]] builds and reports
+   the run id it started. `:events-dir` optionally overrides the event
+   root the resume context is reconstructed from (default:
+   `~/.miniforge/events`).
+
+   Pass nil to clear. Without a registered launcher, retries fail
+   `:no-resume-launcher` rather than parking."
+  [handles]
+  (when-not (or (nil? handles)
+                (and (map? handles) (ifn? (:launch! handles))))
+    (throw (ex-info (messages/t :application/invalid-resume-launcher)
+                    {:launch! (:launch! handles)})))
+  (reset! process-resume-launcher handles)
   nil)
 
 (defn deregister-runner!
@@ -242,12 +282,53 @@
   (when-let [applied (advance! stream dispatched intervention/apply-result)]
     (advance! stream applied intervention/verify {:verb verb})))
 
+(defn- resume-events-dir
+  [launcher]
+  (or (:events-dir launcher) (es/default-events-dir)))
+
+(defn- dispatch-resume!
+  "Hand `plan` to the launcher, then read the run it reports back
+   through the resume machinery itself. The readback is deliberately
+   the resume component's view rather than the launcher's return value:
+   a launcher naming a run it never started must not buy a `verified`
+   chip."
+  [stream dispatched launcher events-dir verb plan]
+  (let [run-id (mechanism/launched-run-id ((:launch! launcher) plan))]
+    (if-not run-id
+      (fail! stream dispatched :resume-not-dispatched)
+      (let [readback {:verb verb
+                      :resume/run-id run-id
+                      :resume/from-phase (:resume/from-phase plan)
+                      :observed (mechanism/resume-observable? events-dir run-id)
+                      :expected true}]
+        (when-let [applied (advance! stream dispatched
+                                     intervention/apply-result readback)]
+          (verify-readback! stream applied readback
+                            :resume-readback-mismatch))))))
+
+(defn- apply-resume-verb!
+  "Rebuild resume state for a retry, then dispatch it.
+
+   Every rejection is typed and lands before the launcher runs — a
+   request naming a phase the run never reached must not be guessed
+   into a plan and started."
+  [stream dispatched launcher verb interv]
+  (if-not launcher
+    (fail! stream dispatched :no-resume-launcher)
+    (let [events-dir (resume-events-dir launcher)
+          prepared (mechanism/prepare-resume events-dir interv verb)]
+      (if-let [failure-code (:failure/code prepared)]
+        (fail! stream dispatched failure-code)
+        (dispatch-resume! stream dispatched launcher events-dir verb
+                          (:resume/plan prepared))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; The applier hook
 
 (defn apply-intervention!
   "Apply one `:approved` intervention. This is the `:apply!` hook the
-   operator-event consumer invokes (Phase D D-3).
+   operator-event consumer invokes (Phase D D-3, mechanisms extended in
+   D-3b).
 
    Returns the final intervention map (state `:verified` or `:failed`),
    or nil when a lifecycle step was itself rejected (never expected
@@ -274,10 +355,17 @@
                                  verb
                                  interv)
 
-          ;; :retry / :retry-from-phase / :waive / :re-evaluate /
-          ;; :request-replan — mechanisms not yet wired (resume
-          ;; machinery, waiver records, policy re-evaluation). Loud,
-          ;; typed failure per the honesty doctrine; D-3b lands them.
+          (:retry :retry-from-phase)
+          (apply-resume-verb! stream
+                              dispatched
+                              @process-resume-launcher
+                              verb
+                              interv)
+
+          ;; :waive / :re-evaluate — mechanisms not yet wired (waiver
+          ;; records, policy re-evaluation). :request-replan — deferred
+          ;; to D-7 (phase-redirect semantics). Loud, typed failure per
+          ;; the honesty doctrine.
           (fail! stream dispatched :not-implemented))
         (catch Exception _e
           ;; A throwing mechanism must not abort the consumer's pass —

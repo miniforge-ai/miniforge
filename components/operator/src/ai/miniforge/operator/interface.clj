@@ -246,6 +246,14 @@
    interventions."
   application/register-degradation-manager!)
 
+(def register-resume-launcher!
+  "Register the process-scoped resume launcher used by `:retry` /
+   `:retry-from-phase` (Phase D D-3b). Takes a handles map carrying
+   `:launch!` — `(fn [resume-plan] → {:resume/run-id …})` — and an
+   optional `:events-dir` override. Pass nil to clear. Unregistered,
+   retries fail `:no-resume-launcher`."
+  application/register-resume-launcher!)
+
 (def deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
   application/deregister-runner!)

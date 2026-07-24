@@ -21,7 +21,11 @@
    Phase D verification-bar sequence: injected request file → consumer
    → applier → control-state flip → observable
    proposed→approved→dispatched→applied→verified event trail, and the
-   no-live-runner failure path."
+   no-live-runner failure path.
+
+   D-3b adds the resume launcher behind `:retry` / `:retry-from-phase`,
+   verified by reconstructing the launched run from its own event
+   history rather than by trusting what the launcher reported."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.application :as application]
@@ -115,6 +119,62 @@
       (finally
         (reset! manager-state original)))))
 
+(defn- with-resume-launcher
+  "Bind the process-scoped resume launcher for the duration of `f`,
+   restoring whatever was there before."
+  [launcher f]
+  (let [launcher-state (var-get #'application/process-resume-launcher)
+        original @launcher-state]
+    (reset! launcher-state launcher)
+    (try
+      (f)
+      (finally
+        (reset! launcher-state original)))))
+
+;; -- Staged workflow history -- what a resume reconstructs from ------------
+
+(defn- workflow-event
+  [workflow-id event-type attrs]
+  (merge {:event/id (random-uuid)
+          :event/type event-type
+          :event/timestamp (java.util.Date.)
+          :event/sequence-number 0
+          :workflow/id workflow-id}
+         attrs))
+
+(defn- stage-workflow-history!
+  "Write `events` into the live layout `read-workflow-events-by-id`
+   probes, through the production transit encoder. Returns workflow-id."
+  [events-dir workflow-id events]
+  (let [dir (io/file events-dir "live" (str workflow-id))]
+    (.mkdirs dir)
+    (doseq [[i event] (map-indexed vector events)]
+      (spit (io/file dir (format "%03d-event.json" i))
+            (es/serialize-event event)
+            :encoding "UTF-8"))
+    workflow-id))
+
+(defn- stage-two-phase-run!
+  "A run that completed `:explore` then `:plan` and stopped. Its phase
+   history is exactly #{:explore :plan} — anything else a
+   `retry-from-phase` names must be rejected."
+  [events-dir workflow-id]
+  (stage-workflow-history!
+   events-dir workflow-id
+   [(workflow-event workflow-id :workflow/started
+                    {:workflow/spec {:workflow-type :canonical-sdlc
+                                     :version "1.0.0"}})
+    (workflow-event workflow-id :workflow/phase-completed
+                    {:workflow/phase :explore :phase/outcome :success})
+    (workflow-event workflow-id :workflow/phase-completed
+                    {:workflow/phase :plan :phase/outcome :success})]))
+
+(defn- recording-launcher
+  "A resume launcher that records the plan it was handed and reports
+   `run-id` as the run it started."
+  [captured run-id]
+  {:launch! (fn [plan] (reset! captured plan) {:resume/run-id run-id})})
+
 ;------------------------------------------------------------------------------ Phase D verification bar — request file → paused workflow
 
 (deftest injected-request-file-pauses-the-registered-runner
@@ -187,13 +247,56 @@
     (is (= :verified (:intervention/state result)))
     (is (= [:dispatched :applied :verified] (state-trail stream)))))
 
-(deftest retry-fails-not-implemented
-  (with-runner
-    (fn [wid _cs]
+(deftest verbs-without-a-mechanism-fail-not-implemented
+  (testing "waive and re-evaluate have no mechanism yet; request-replan is D-7"
+    (doseq [[verb target-id] [[:waive (str (random-uuid))]
+                              [:re-evaluate "golden/synthetic#1"]
+                              [:request-replan (str (random-uuid))]]]
       (let [stream (memory-stream)
-            result (application/apply-intervention! stream (approved :retry wid))]
-        (is (= :failed (:intervention/state result)))
+            result (application/apply-intervention! stream
+                                                    (approved verb target-id))]
+        (is (= :failed (:intervention/state result))
+            (str verb " must fail rather than park"))
         (is (= :not-implemented (failure-code result)))))))
+
+;------------------------------------------------------------------------------ Retry — resume machinery (D-3b)
+
+(deftest retry-without-a-launcher-fails-typed
+  (with-resume-launcher
+    nil
+    (fn []
+      (let [stream (memory-stream)
+            result (application/apply-intervention!
+                    stream (approved :retry (str (random-uuid))))]
+        (is (= :failed (:intervention/state result)))
+        (is (= :no-resume-launcher (failure-code result)))))))
+
+(deftest retry-from-phase-rewinds-and-verifies-by-readback
+  (let [events-dir (temp-events-dir)
+        workflow-id (random-uuid)
+        resumed-id (random-uuid)
+        captured (atom nil)]
+    (stage-two-phase-run! events-dir workflow-id)
+    ;; The launcher's run is observable in the event history the resume
+    ;; machinery itself reads — that is what `verified` asserts.
+    (stage-two-phase-run! events-dir resumed-id)
+    (with-resume-launcher
+      (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
+      (fn []
+        (let [stream (memory-stream)
+              interv (assoc (approved :retry-from-phase (str workflow-id))
+                            :intervention/details {"phase" "plan"})
+              result (application/apply-intervention! stream interv)]
+          (is (= :verified (:intervention/state result)))
+          (is (= [:dispatched :applied :verified] (state-trail stream)))
+          (is (= :plan (:resume/from-phase @captured))
+              "the wire's string-keyed `phase` detail resolves to a phase keyword")
+          (is (= [:explore] (:resume/completed-phases @captured))
+              "rewinding to :plan re-runs :plan and everything after it")
+          (is (nil? (:resume/machine-snapshot @captured))
+              "a rewind must not restore an FSM snapshot parked past the target")
+          (is (= :canonical-sdlc (:resume/workflow-type @captured))))))))
+
 
 (deftest safe-mode-without-manager-fails-typed
   (with-degradation-manager
