@@ -56,7 +56,7 @@
    :task (lint/clj-all)}
 
   lint:stratum
-  {:doc  "Stratified-design lint (stratum-lint) over staged Clojure files"
+  {:doc  "Stratified-design autofix (stratum-lint --fix) over staged Clojure files"
    :requires ([lint])
    :task (lint/stratum-staged)}
 
