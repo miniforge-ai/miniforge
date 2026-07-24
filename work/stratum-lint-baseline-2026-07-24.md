@@ -158,15 +158,25 @@ several PRs, not one.
 
 ### Wave 0 — close the enforcement gap (small, unblocks everything else)
 
-The only thing currently running `stratum-lint` is `bb lint:stratum`
-(`tasks/lint.clj`'s `stratum-staged`), gated to **staged files only**, in
-pre-commit. Nothing scans the full tree in CI. That's how 876 findings
-accumulated invisibly — pre-commit only ever asked "did this commit make
-things worse," never "how much debt already exists." Add a `bb
-lint:stratum:all` task (mirrors `lint:clj:all`) running the full-tree
-invocation used for this baseline, wired into CI as **report-only** (exit
-code observed, not gated) until Wave 5 lands. Re-baselines findings-count as
-a tracked metric.
+**Decided:** no new CI step. Enforcement stays in pre-commit, strengthened
+rather than duplicated elsewhere — a report-only CI job would just be a
+second place for the same signal to be ignored. Two parts, in order:
+
+1. File a PR against `miniforge-ai/stratum-lint` fixing the SL001
+   false-positive class documented above (unscoped symbol walk conflating
+   shadowed params/defrecord protocol-method heads with real calls). Merge
+   there first, then bump the pin in `tasks/lint.clj`.
+2. Once the pin is bumped, evaluate `--fix` output quality across the
+   codebase. If it's reliable, change `bb lint:stratum` (`tasks/lint.clj`'s
+   `stratum-staged`) to run `--fix` on staged files automatically — the same
+   shape as `fmt:md-staged`'s `lint --fix` — instead of failing and asking
+   the developer to hand-fix headings. That closes the loop for good: a
+   commit that would have introduced a decorative heading gets normalized
+   before it lands, not just rejected.
+
+`bb lint:stratum:all` (full-tree invocation, matching `lint:clj:all`'s
+shape) is still worth adding as a manual/ad-hoc task for re-baselining
+during Waves 1-4 — just not as a second enforcement point.
 
 ### Wave 1 — mechanical relabeling via `--fix`, decorative-heading files only
 
@@ -219,24 +229,20 @@ above it) or it's genuinely a namespace-level constant that predates any
 needed — can bundle into whichever wave (1 or 2) is already touching that
 file.
 
-### Wave 5 — flip the gate
+### Wave 5 — confirm the gate holds
 
-Once a full-tree run reports zero findings, promote `lint:stratum:all` from
-report-only to blocking in CI (parallel to the existing staged pre-commit
-check), closing the loop that let this accumulate. Bump the `stratum-lint`
-pin only after this baseline is clear, so a future tool upgrade doesn't
-conflate "new tool version found new things" with "old debt was never
-cleared."
+Once a full-tree run reports zero findings and Wave 0's autofix wiring is
+live, there's no separate report-only step to flip — pre-commit already
+enforces at every commit. Wave 5 is just verification: re-run the full-tree
+invocation once more to confirm zero findings, and confirm the autofixing
+`bb lint:stratum` actually catches a deliberately-reintroduced decorative
+heading in a scratch commit before calling the gate closed.
 
-## Open questions before starting Wave 1
+## Decisions (resolved 2026-07-24)
 
-1. Confirm the PR-batching granularity: one component per PR (matches the
-   `exception-cleanup-inventory.md` precedent), or bundle several small
-   components per PR to reduce PR count given ~75 affected components.
-2. Whether to file the shadowing/protocol-method-head false-positive class as
-   an issue against `miniforge-ai/stratum-lint` before or after Wave 3 —
-   doing it first could shrink Wave 3's file count if a scoped fix lands
-   quickly, but shouldn't block starting the manual triage.
-3. Wave 0's CI wiring: report-only step location (existing GH Actions
-   workflow vs. new one) — not decided here, needs a look at
-   `.github/workflows/`.
+- **PR granularity:** one component per PR, matching the
+  `exception-cleanup-inventory.md` precedent.
+- **Upstream fix sequencing:** stratum-lint's false-positive fix is filed and
+  merged *before* Wave 1 starts, not in parallel — Wave 0 above.
+- **Enforcement location:** pre-commit only, autofix-first (see Wave 0). No
+  new CI workflow.
