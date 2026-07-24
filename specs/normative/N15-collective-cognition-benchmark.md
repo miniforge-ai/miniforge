@@ -172,12 +172,28 @@ fixture content MUST be synthetic and identifiable as synthetic; no real names, 
 outcomes styled as real evidence, or plausible-real identifiers. Tasks are versioned;
 result comparisons across task versions are void.
 
+### 6.3 Calibration
+
+A task qualifies for gate use only after calibration establishes that it can discriminate:
+
+1. **Solvability**: the task author's reference solution MUST pass the full hidden
+   acceptance suite. No LLM is involved in this proof.
+2. **Discrimination**: in calibration runs at the experiment's budget tiers, the baseline
+   conditions MUST neither saturate (all replicates pass) nor floor (all replicates fail).
+   A saturated or floored task MUST be revised or excluded before manifest pinning.
+3. **Separation of data**: calibration runs MUST NOT be reused as gate data.
+
 ## 7. Metrics and scoring
 
 Per run, the snapshot MUST record these as state variables (thresholds pinned in the
 registry entry):
 
-- **success** — hidden acceptance tests (primary; execution-scored)
+- **success** — primary; binary; execution-scored. A run MUST export an artifact and a
+  decision record. success = 1 iff the artifact passes every must-pass test in the sealed
+  acceptance suite AND violates zero `:hard` constraints; each must-pass test encodes one
+  requirement of the sealed intended resolution (§6.1). The passed fraction is recorded as
+  `success_partial` for diagnostics; gates (§8.4–§8.5) read only the binary. A run that
+  exports no artifact scores 0.
 - **coverage** — requirement checklist fraction (judge-scored; judge model pinned and
   disjoint from participant models)
 - **contradiction handling** — sealed-resolution match per injected contradiction (judge-scored)
