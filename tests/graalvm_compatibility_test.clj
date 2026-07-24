@@ -320,6 +320,98 @@
                   (register-evaluator! nil))))))))))
 
 ;; ============================================================================
+;; Execution gate — loading is not enough
+;; ============================================================================
+;;
+;; Every test above proves a namespace LOADS under Babashka. That is a
+;; weaker guarantee than it looks: SCI also refuses individual *method
+;; calls* at invocation time, so a namespace can load cleanly and still
+;; die on its first real call. The operator-event consumer did exactly
+;; that — it held its cross-process guard with `(with-open [lock ...])`,
+;; and `FileLockImpl.close` is not on SCI's allowlist. Because the
+;; consumer runs inside the bb-hosted workflow runner behind a poller
+;; that contains per-tick failures, the whole governed control path
+;; degraded to a once-a-second warning that consumed nothing.
+;;
+;; So: exercise the call path, not just the require.
+
+(defn- consumer-lock-acquirable?
+  "Open a FRESH channel on the operator dir's `.consumer.lock` and try to
+   acquire the lock, releasing by CLOSING THE CHANNEL (never the lock —
+   bb forbids every `sun.nio.ch.FileLockImpl` method). Returns true iff
+   `.tryLock` yields a lock.
+
+   This is the direct check the twice-run pass cannot make on its own: an
+   empty operator dir returns `{:routed 0 …}` whether the pass acquired
+   the lock or bailed because it could not, so a leaked/still-held lock is
+   invisible in the result map. Here a lock the consumer failed to release
+   surfaces as either nil (another holder) or an
+   `OverlappingFileLockException` (same JVM, overlapping region) — both
+   map to false."
+  [operator-dir]
+  (let [lock-file (io/file operator-dir ".consumer.lock")
+        channel (java.nio.channels.FileChannel/open
+                 (.toPath lock-file)
+                 (into-array java.nio.file.OpenOption
+                             [java.nio.file.StandardOpenOption/CREATE
+                              java.nio.file.StandardOpenOption/WRITE]))]
+    (try
+      (some? (.tryLock channel))
+      (catch Exception _ false)
+      (finally (.close channel)))))
+
+(deftest test-operator-consumer-pass-executes-in-babashka
+  (testing "consume-operator-events! runs a full pass under Babashka"
+    (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
+      (is loaded? (str "operator interface should load: " error-msg))
+      (when loaded?
+        (let [[es-loaded? es-err] (require-namespace 'ai.miniforge.event-stream.interface)]
+          (is es-loaded? (str "event-stream interface should load: " es-err))
+          (when es-loaded?
+            (let [events-dir (io/file (System/getProperty "java.io.tmpdir")
+                                      (str "bb-consumer-gate-" (System/currentTimeMillis)))
+                  create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
+                  consume! (resolve 'ai.miniforge.operator.interface/consume-operator-events!)]
+              ;; Fail with the missing symbol named, not an opaque NPE
+              ;; when a nil resolve is invoked below — this gate exists to
+              ;; catch these vars moving, so say WHICH one moved.
+              (is (some? create-stream)
+                  "event-stream/create-event-stream must resolve")
+              (is (some? consume!)
+                  "operator/consume-operator-events! must resolve")
+              (when (and create-stream consume!)
+               (let [stream (create-stream {:sinks []})]
+                (.mkdirs (io/file events-dir "operator"))
+              ;; An empty operator dir is enough: the pass still opens the
+              ;; lock file, acquires the lock, and releases it — the exact
+              ;; sequence that used to throw.
+              (let [result (try
+                             (consume! {:events-dir events-dir :stream stream})
+                             (catch Exception e
+                               {::threw (ex-message e)}))]
+                (is (nil? (::threw result))
+                    (str "consumer pass must not throw under Babashka: "
+                         (::threw result)))
+                (is (map? result) "a completed pass returns a result map")
+                ;; Directly prove the pass RELEASED its lock: a fresh
+                ;; acquirer must succeed. An empty-dir result map cannot
+                ;; distinguish a released lock from a leaked one, so this
+                ;; is the assertion that actually guards release.
+                (is (consumer-lock-acquirable? (io/file events-dir "operator"))
+                    "consumer must release its lock so a fresh acquirer succeeds")
+                ;; Second pass is the additional regression check: the
+                ;; release path runs again and still does not throw.
+                (let [again (try
+                              (consume! {:events-dir events-dir :stream stream})
+                              (catch Exception e
+                                {::threw (ex-message e)}))]
+                  (is (nil? (::threw again))
+                      (str "second pass must not throw (lock released?): "
+                           (::threw again)))
+                  (is (consumer-lock-acquirable? (io/file events-dir "operator"))
+                      "second pass must also release its lock"))))))))))))
+
+;; ============================================================================
 ;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
 ;; ============================================================================
 
