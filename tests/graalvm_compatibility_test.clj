@@ -268,6 +268,57 @@
             "Should resolve run-pipeline")))))
 
 ;; ============================================================================
+;; Execution gate — loading is not enough
+;; ============================================================================
+;;
+;; Every test above proves a namespace LOADS under Babashka. That is a
+;; weaker guarantee than it looks: SCI also refuses individual *method
+;; calls* at invocation time, so a namespace can load cleanly and still
+;; die on its first real call. The operator-event consumer did exactly
+;; that — it held its cross-process guard with `(with-open [lock ...])`,
+;; and `FileLockImpl.close` is not on SCI's allowlist. Because the
+;; consumer runs inside the bb-hosted workflow runner behind a poller
+;; that contains per-tick failures, the whole governed control path
+;; degraded to a once-a-second warning that consumed nothing.
+;;
+;; So: exercise the call path, not just the require.
+
+(deftest test-operator-consumer-pass-executes-in-babashka
+  (testing "consume-operator-events! runs a full pass under Babashka"
+    (let [[loaded? error-msg] (require-namespace 'ai.miniforge.operator.interface)]
+      (is loaded? (str "operator interface should load: " error-msg))
+      (when loaded?
+        (let [[es-loaded? es-err] (require-namespace 'ai.miniforge.event-stream.interface)]
+          (is es-loaded? (str "event-stream interface should load: " es-err))
+          (when es-loaded?
+            (let [events-dir (io/file (System/getProperty "java.io.tmpdir")
+                                      (str "bb-consumer-gate-" (System/currentTimeMillis)))
+                  create-stream (resolve 'ai.miniforge.event-stream.interface/create-event-stream)
+                  consume! (resolve 'ai.miniforge.operator.interface/consume-operator-events!)
+                  stream (create-stream {:sinks []})]
+              (.mkdirs (io/file events-dir "operator"))
+              ;; An empty operator dir is enough: the pass still opens the
+              ;; lock file, acquires the lock, and releases it — the exact
+              ;; sequence that used to throw.
+              (let [result (try
+                             (consume! {:events-dir events-dir :stream stream})
+                             (catch Exception e
+                               {::threw (ex-message e)}))]
+                (is (nil? (::threw result))
+                    (str "consumer pass must not throw under Babashka: "
+                         (::threw result)))
+                (is (map? result) "a completed pass returns a result map")
+                ;; Second pass proves the lock was actually released;
+                ;; a leaked lock would make this one a no-op or throw.
+                (let [again (try
+                              (consume! {:events-dir events-dir :stream stream})
+                              (catch Exception e
+                                {::threw (ex-message e)}))]
+                  (is (nil? (::threw again))
+                      (str "second pass must not throw (lock released?): "
+                           (::threw again))))))))))))
+
+;; ============================================================================
 ;; miniforge-project BB-safety gate — no JVM-only bricks on the CLI classpath
 ;; ============================================================================
 

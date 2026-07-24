@@ -444,13 +444,27 @@
                                      [java.nio.file.StandardOpenOption/CREATE
                                       java.nio.file.StandardOpenOption/WRITE]))]
       (try
-        (if-let [file-lock (.tryLock channel)]
-          (with-open [_held-lock file-lock]
-            (consume-operator-dir! operator-dir
-                                   stream
-                                   apply!
-                                   accept-request?
-                                   destination-for))
+        ;; The lock is released by CLOSING THE CHANNEL (the enclosing
+        ;; `with-open`), never by calling `.close`/`.release` on the
+        ;; FileLock itself. java.nio guarantees channel closure drops
+        ;; every lock the JVM holds on that file, so this is equivalent
+        ;; — and it is the only form that works under Babashka, whose
+        ;; interpreter refuses both `FileLockImpl.close` and
+        ;; `.release` ("Method close on class sun.nio.ch.FileLockImpl
+        ;; not allowed!"). That matters because this consumer runs
+        ;; inside the bb-hosted workflow runner: a `with-open` on the
+        ;; lock threw on EVERY poll tick, and the poller's per-tick
+        ;; containment turned it into a warning loop that consumed
+        ;; nothing — the control path looked alive and was dead.
+        ;; `.tryLock` itself is permitted under bb; only the release
+        ;; methods are blocked. See snowflake.clj for the sibling
+        ;; JVM-only-lease case.
+        (if (some? (.tryLock channel))
+          (consume-operator-dir! operator-dir
+                                 stream
+                                 apply!
+                                 accept-request?
+                                 destination-for)
           empty-pass-result)
         (catch Exception e
           (if (overlapping-file-lock? e)
