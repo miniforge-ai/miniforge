@@ -264,7 +264,31 @@
       (is (= :test-rule (:code error)))
       (is (= "Error!" (:message error)))
       (is (= :high (:severity error)))
-      (is (= "Fix it" (:remediation error)))))
+      (is (= "Fix it" (:remediation error)))
+      (is (= "main.py" (get-in error [:location :path]))
+          "content-scan path still surfaces from :artifact-path")))
+
+  (testing "Semantic violation surfaces the judge's nested file/line/snippet
+            (not {:matches nil :path nil}) so the finding is actionable"
+    (let [violation {:rule {:rule/id :std/named-constants
+                            :rule/severity :high
+                            :rule/enforcement {:action :hard-halt
+                                               :message "Magic number."}}
+                     :violation {:type :semantic
+                                 :rule-id :std/named-constants
+                                 :message "Magic number."
+                                 :violations [{:rule/id :std/named-constants
+                                               :file "components/x/src/x.clj"
+                                               :line 42
+                                               :current "(Thread/sleep 5000)"
+                                               :rationale "5000 is a magic number"}]}}
+          error (detection/violation->error violation)]
+      (is (= "components/x/src/x.clj" (get-in error [:location :path]))
+          "path comes from the judge's :file")
+      (is (= 42 (get-in error [:location :matches 0 :line]))
+          "line is preserved from the nested violation")
+      (is (= "(Thread/sleep 5000)" (get-in error [:location :matches 0 :current]))
+          "the offending snippet reaches the agent")))
 
   (testing "Converts violation to warning"
     (let [violation {:rule {:rule/id :test-rule

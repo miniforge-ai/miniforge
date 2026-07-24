@@ -684,13 +684,29 @@ depending on ambient namespace loading or raw var resolution."}
   (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
           violations))
 
+(defn- violation-location
+  "Location for a gate finding, spanning both detector shapes. Content-scan
+   / diff detectors carry top-level `:matches` + `:artifact-path`. The
+   semantic (LLM-judge) detector instead nests its per-file hits — each
+   `{:file :line :current}` from `semantic-analyzer` — under `:violations`,
+   with no top-level `:matches`/`:artifact-path`. Reading only the top-level
+   keys collapsed every semantic finding to `{:matches nil :path nil}`,
+   dropping the file/line/snippet the judge produced and leaving the
+   redirect agent nothing to act on. Surface the nested hits so a semantic
+   finding names concrete sites like the mechanical detectors do."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    {:matches (mapv #(select-keys % [:file :line :current :rationale]) hits)
+     :path    (:file (first hits))}
+    {:matches (:matches violation)
+     :path    (:artifact-path violation)}))
+
 (defn violation->error
   [{:keys [rule violation]}]
   {:code (:rule/id rule)
    :message (:message violation)
    :severity (:rule/severity rule)
-   :location {:matches (:matches violation)
-              :path (:artifact-path violation)}
+   :location (violation-location violation)
    :remediation (get-in rule [:rule/enforcement :remediation])})
 
 (defn violation->warning
