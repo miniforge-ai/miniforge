@@ -234,10 +234,15 @@ fetch objects outside the projection by id.
 
 ### 4.4 Ablation switch (normative)
 
-A conforming implementation MUST support `cross_visibility: none`: projections then include
-only objects authored by the receiving role plus goals, constraints, and specification-
-derived objects. This switch exists solely so N15 can measure whether shared state is
-load-bearing. It MUST NOT alter scheduling, budgets, or validation.
+A conforming implementation MUST support `cross_visibility: none`. Under it, the visible
+set for a role is exactly: objects authored by that role, objects authored by the
+interpreter (the specification-derived set), objects injected via OCI (source `:user`),
+and all goals and `:hard` constraints. §4.2's required content is then computed over the
+visible set only: derived objects (conflicts) appear iff every object they reference is in
+the visible set, and the delta covers visible objects only. No content, summary, or
+existence signal of any object outside the visible set may appear in the projection. This
+switch exists solely so N15 can measure whether shared state is load-bearing. It MUST NOT
+alter scheduling, budgets, or validation.
 
 ## 5. Activations and roles
 
@@ -282,7 +287,9 @@ Committed transactions and derived conflicts produce events; a static eligibilit
 event types to roles. The v0 scheduler MUST be deterministic: priority order (1) open
 conflicts, (2) blocked goals, (3) stale open questions, (4) round-robin among eligible
 roles; bounded concurrency (manifest-configurable); at most one in-flight activation per
-role.
+role. Staleness is deterministic: an open question is stale when at least S committed
+transactions have occurred since it was last touched — created, answered, or referenced
+by any committed operation — with S pinned in the run manifest.
 
 ### 6.2 Prohibitions and the seam
 
