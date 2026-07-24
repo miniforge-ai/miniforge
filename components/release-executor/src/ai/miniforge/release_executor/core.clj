@@ -196,9 +196,10 @@
 
    Empty-stage handling: when nothing is dirty, the implementer's writes
    may already be committed on the branch as phase-boundary commits.
-   `git rev-list --count origin/<base>..HEAD` detects this carry-forward case
-   and treats it as success — step-commit will skip cleanly and step-push will
-   ship the existing commits."
+   commits-ahead-of-base (git rev-list --count --right-only
+   origin/<base>...HEAD — the three-dot merge-base form) detects this
+   carry-forward case and treats it as success — step-commit will skip
+   cleanly and step-push will ship the existing commits."
   [state]
   (if (failed? state)
     state

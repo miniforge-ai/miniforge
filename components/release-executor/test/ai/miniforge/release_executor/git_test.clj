@@ -35,8 +35,9 @@
          args))
 
 (defn- init-repo!
-  "Initialise a throwaway git repo with one seed commit and a fake origin
-   remote so origin-relative commands have something to resolve."
+  "Initialise a throwaway git repo with one seed commit. No `origin` remote
+   is added, so origin-relative host-mode calls (create-branch!'s best-effort
+   fetch) degrade gracefully — which is itself part of what these tests cover."
   [dir]
   (sh! dir "git" "init" "-q")
   (sh! dir "git" "config" "user.email" "test@example.com")
