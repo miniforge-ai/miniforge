@@ -66,7 +66,7 @@ Its lifecycle is bound to the N15 gates:
   the Stage 0 pilot and anything else built to produce N15 evidence. This scoping is not a
   loophole: gate results are interpretable only if the pilot implements §4.1, §4.4, and
   §5.1 faithfully. An unfaithful pilot cannot falsify the design.
-- **Gate G0 passes.** Status advances to Draft on the normative track; Stage 1 conformance
+- **Gate G0 passes.** Status remains Draft but is no longer speculative; Stage 1 conformance
   applies as written.
 - **Gate G0 fails.** This specification MUST be re-statused **Informative** and annotated
   as a recorded negative result — retained to state what was tested and why it should not
