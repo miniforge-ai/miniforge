@@ -30,17 +30,27 @@ normal development, not just in dedicated cleanup PRs.
     exploding a leading/trailing comment block — e.g. this repo's Apache
     header, on every Clojure file per rule 810 — into one double-spaced
     line per comment instead of one tight block).
-  - `stratum-staged` now invokes `--fix` instead of plain lint, re-`git
-    add`s every staged file after a successful fix (mirrors
-    `fmt/md-staged`'s re-stage step), and only fails the commit when
-    `--fix`'s own exit code says it couldn't resolve the file (a parse
-    failure, or a genuine same-file reference cycle — SL000/SL007).
-  - After a successful autofix, runs one more plain (non-fix) lint pass
-    over the same files and prints any remaining findings as a
-    non-blocking advisory. In practice this is only ever SL003 (over the
-    3-layer budget) — `--fix` regroups defs correctly but can't split a
-    file into multiple namespaces, so that stays a manual `rule 210`
-    namespace-split, surfaced but not enforced here.
+  - `stratum-staged` now splits staged files by whether they carry
+    unstaged changes beyond what's staged (`unstaged-files`, mirroring
+    `staged-files`). A partially-staged file (e.g. after `git add -p`) is
+    lint-checked with the *old* fail-only behavior instead of autofixed —
+    `--fix` reads the working-tree file, so autofixing and re-staging it
+    whole would silently include work-in-progress the developer left out
+    on purpose (`lint-only-and-fail!`).
+  - A fully-staged file goes through `autofix-and-restage!`: run `--fix`,
+    then `restage!` (re-`git add`, mirrors `fmt/md-staged`'s re-stage
+    step, but checks `git add`'s own exit code — no longer possible for
+    the fixed content to fail to stage silently), then `advisory-lint!`.
+    `autofix-and-restage!` only fails the commit when `--fix`'s own exit
+    code says it couldn't resolve the file (a parse failure, or a genuine
+    same-file reference cycle — SL000/SL007).
+  - `advisory-lint!` runs one more plain (non-fix) lint pass over the
+    fixed files and prints any remaining findings — in practice always
+    SL003 (over the 3-layer budget), since `--fix` resolves everything
+    else, but the message doesn't presume that's the only possibility —
+    as a non-blocking advisory. Prints stderr too and fails the commit on
+    any exit code other than 0 (clean) or 1 (findings present), so a
+    broken tool invocation can't pass silently.
 - `bb.edn` — updated `lint:stratum`'s doc string to say "autofix" instead
   of "lint".
 
@@ -68,6 +78,15 @@ declaration, not just in the stratum-lint repo's own test suite.
 Did not run the full `bb pre-commit` against a real staged production file
 in this PR — that's deliberately deferred to the Wave 1-4 per-component
 fix PRs, where each component's autofix diff gets reviewed on its own.
+
+Added a fifth path after automated review flagged the working-tree/index
+gap: staged one edit to a scratch file (`git add`), then made a second,
+unstaged edit to the same file (simulating `git add -p`). Confirmed the
+unstaged marker never reached the git index (`git show :file` before and
+after `stratum-staged` runs) — the file was lint-checked and the commit
+correctly blocked on its pre-existing findings, with zero mutation to the
+staged content. Re-ran the plain fully-staged case afterward to confirm
+it still autofixes and re-stages normally.
 
 Caught the comment-block bug (#7) exactly this way: this PR's own
 pre-commit run autofixed `tasks/lint.clj` itself, and its Apache header —

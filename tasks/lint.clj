@@ -28,6 +28,16 @@
       str/split-lines
       (->> (remove str/blank?))))
 
+(defn ^{:stratum 0} unstaged-files
+  "Files with working-tree changes beyond what's staged — a partially
+   staged file (e.g. after `git add -p`) shows up here too."
+  []
+  (-> (p/sh "git" "diff" "--name-only")
+      :out
+      str/split-lines
+      (->> (remove str/blank?))
+      set))
+
 (defn ^{:stratum 0} clj-all []
   (println "🔍 Linting all Clojure files...")
   (println "Directories: bases components development/src")
@@ -50,11 +60,60 @@
                   {:git/sha "acd82a2f5c0155cb03d92ce1f4465cc064125895"
                    :deps/root "clojure"}}}))
 
+(defn ^{:stratum 0} restage!
+  "Re-stage `files` after autofix; fails the commit if `git add` itself
+   fails, rather than silently leaving the fixed content unstaged."
+  [files]
+  (doseq [f files]
+    (let [{:keys [exit err]} (p/sh "git" "add" f)]
+      (when-not (zero? exit)
+        (println "❌ Failed to re-stage" f "after autofix:" err)
+        (System/exit exit)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} staged-by-ext [ext]
   (->> (staged-files)
        (filter (fn [f] (str/ends-with? f ext)))))
+
+(defn ^{:stratum 1} lint-only-and-fail!
+  "Plain (non-fix) lint over `files`; fails the commit on any finding.
+   Used for files with unstaged changes beyond what's staged, where
+   autofixing would risk silently staging work-in-progress the developer
+   left out on purpose."
+  [files]
+  (println "⚠️  Skipping autofix for partially-staged file(s) — checking only:"
+           (str/join ", " files))
+  (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
+                                      "bb" "-Sdeps" stratum-lint-deps
+                                      "-m" "stratum-lint.interface"
+                                      files)]
+    (when-not (str/blank? out) (println out))
+    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+    (when-not (zero? exit)
+      (println "❌ Stratified-design lint failed — stage the file fully to"
+               "allow autofix, or fix headings by hand. Exit code:" exit)
+      (System/exit exit))))
+
+(defn ^{:stratum 1} advisory-lint!
+  "Plain (non-fix) lint pass over already-fixed `files`; prints any
+   remaining findings (in practice always SL003 — over the layer budget,
+   needs a namespace split — since --fix resolves everything else) as a
+   non-blocking advisory. Only a genuinely unexpected exit (neither clean
+   nor findings-present) fails the commit — a broken tool invocation
+   should never pass silently."
+  [files]
+  (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
+                                      "bb" "-Sdeps" stratum-lint-deps
+                                      "-m" "stratum-lint.interface"
+                                      files)]
+    (when-not (str/blank? out)
+      (println "⚠️  Stratified-design findings remain after autofix (often a namespace split needed for an over-budget file):")
+      (println out))
+    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+    (when-not (contains? #{0 1} exit)
+      (println "❌ Post-fix advisory lint pass could not run — exit code:" exit)
+      (System/exit exit))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -81,46 +140,51 @@
           (System/exit 3)))
       (println "✓ No Clojure files to lint"))))
 
-(defn ^{:stratum 2} stratum-staged []
+(defn ^{:stratum 2} autofix-and-restage!
+  "Run --fix over fully-staged `files`, re-stage on success. Exit
+   contract in --fix mode: 0 covers \"already clean\" and \"successfully
+   fixed\"; 1 is reserved for what --fix genuinely cannot resolve on its
+   own (a parse failure, or a same-file reference cycle) and still fails
+   the commit for a human to look at."
+  [files]
+  (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
+                                      "bb" "-Sdeps" stratum-lint-deps
+                                      "-m" "stratum-lint.interface" "--fix"
+                                      files)]
+    (when-not (str/blank? out) (println out))
+    (when-not (str/blank? err) (binding [*out* *err*] (println err)))
+    (if-not (zero? exit)
+      (do
+        (println "❌ Stratified-design lint could not auto-fix — exit code:" exit)
+        (System/exit exit))
+      (do
+        (restage! files)
+        (advisory-lint! files)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} stratum-staged
+  "Autofix, the same shape `bb fmt:md` already uses (fmt/md-staged runs
+   markdownlint --fix and re-stages): stratum-lint infers each def's real
+   stratum from the same-file reference graph and regroups under
+   regenerated headings, so a decorative/misordered heading never reaches
+   a commit. Files without Layer headings are ignored by the linter, so
+   unannotated legacy namespaces pass untouched — enforcement tightens
+   file-by-file as headings appear.
+
+   A file with unstaged changes beyond what's staged (e.g. after `git add
+   -p`) is lint-checked instead of autofixed — --fix operates on the
+   working-tree file, and re-staging it whole would silently include
+   work-in-progress the developer deliberately left unstaged."
+  []
   (let [files (->> (concat (staged-by-ext ".clj")
                            (staged-by-ext ".cljc"))
                    (remove (fn [f] (str/starts-with? f ".clj-kondo/"))))]
     (if (seq files)
-      (do
+      (let [dirty (unstaged-files)
+            unsafe (filter dirty files)
+            safe (remove dirty files)]
         (println "🔍 Stratum-linting" (count files) "Clojure file(s)...")
-        ;; Autofix, the same shape `bb fmt:md` already uses (fmt/md-staged
-        ;; runs markdownlint --fix and re-stages):
-        ;; stratum-lint infers each def's real stratum from the same-file
-        ;; reference graph and regroups under regenerated headings, so a
-        ;; decorative/misordered heading never reaches a commit. Exit
-        ;; contract in --fix mode: 0 covers "already clean" and
-        ;; "successfully fixed"; 1 is reserved for what --fix genuinely
-        ;; cannot resolve on its own (a parse failure, or a same-file
-        ;; reference cycle) and still fails the commit for a human to
-        ;; look at. Files without Layer headings are ignored by the
-        ;; linter, so unannotated legacy namespaces pass untouched —
-        ;; enforcement tightens file-by-file as headings appear.
-        (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
-                                            "bb" "-Sdeps" stratum-lint-deps
-                                            "-m" "stratum-lint.interface" "--fix"
-                                            files)]
-          (when-not (str/blank? out) (println out))
-          (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-          (if-not (zero? exit)
-            (do
-              (println "❌ Stratified-design lint could not auto-fix — exit code:" exit)
-              (System/exit exit))
-            (do
-              (doseq [f files] (p/sh "git" "add" f))
-              ;; Autofix regroups defs; it can't split a file that still
-              ;; has more real strata than the budget (3) — that needs an
-              ;; actual namespace split (rule 210). Surface it as advisory
-              ;; output rather than blocking the commit.
-              (let [{:keys [out]} (apply p/sh {:out :string :err :string}
-                                        "bb" "-Sdeps" stratum-lint-deps
-                                        "-m" "stratum-lint.interface"
-                                        files)]
-                (when-not (str/blank? out)
-                  (println "⚠️  Still needs a namespace split after autofix (over the 3-layer budget):")
-                  (println out)))))))
+        (when (seq unsafe) (lint-only-and-fail! unsafe))
+        (when (seq safe) (autofix-and-restage! safe)))
       (println "✓ No Clojure files to stratum-lint"))))
