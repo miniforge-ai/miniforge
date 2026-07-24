@@ -367,10 +367,24 @@
   "Transition workflow to failed state using FSM. Same wall-clock
    duration semantics as transition-to-completed — duration is
    reported even on failure so the user can see how long the run
-   ran before failing."
+   ran before failing.
+
+   `:fail` is valid from `:running`, but a resumed run can be parked in a
+   phase state (e.g. `:phase-1-verify`) that defines no `:fail`
+   transition. Routing through the throwing `transition-execution` there
+   raises `:anomalies/fsm-unknown-event`, which SHADOWS the real error
+   that triggered this failure (the workflow-resume-fsm-advance defect:
+   the generic error path fed the machine an event no phase state
+   accepts, masking the original resume error). Use the non-throwing
+   result variant; when `:fail` is unknown at the current state, mark the
+   run failed directly so it still terminates and the original error
+   surfaces instead of a spurious FSM anomaly."
   [ctx]
   (-> (if (:execution/fsm-machine ctx)
-        (transition-execution ctx :fail)
+        (let [result (transition-execution-result ctx :fail)]
+          (if (anomaly/anomaly? result)
+            (assoc ctx :execution/status :failed)
+            result))
         (assoc ctx :execution/status :failed))
       (assoc :execution/ended-at (System/currentTimeMillis))
       stamp-wall-clock-duration))
