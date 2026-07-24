@@ -254,6 +254,15 @@
    retries fail `:no-resume-launcher`."
   application/register-resume-launcher!)
 
+(def register-policy-evaluator!
+  "Register the process-scoped PR policy evaluator used by
+   `:re-evaluate` (Phase D D-3b). Takes `(fn [request] → evaluation)`
+   returning the `policy-pack/evaluate-external-pr` result shape. Pass
+   nil to clear. Unregistered, `:re-evaluate` fails
+   `:no-policy-evaluator` — it never publishes a verdict it did not
+   receive."
+  application/register-policy-evaluator!)
+
 (def deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
   application/deregister-runner!)
@@ -270,11 +279,14 @@
   application/live-intervention-stream)
 
 (def apply-intervention!
-  "The D-3 `:apply!` hook: apply one approved intervention to its live
-   runner (control-state flags / no-effect verbs / safe-mode), advance
-   the lifecycle approved→dispatched→applied→verified (or →failed with
-   a localized reason and typed `[:intervention/details :failure/code]`),
-   publishing every transition. Pass as `:apply!` to [[consume-operator-events!]] /
+  "The D-3 `:apply!` hook: apply one approved intervention to its
+   mechanism — control-state flags on a live runner, no-effect verbs,
+   safe-mode, and (D-3b) the resume launcher for `:retry` /
+   `:retry-from-phase` and the policy evaluator for `:re-evaluate`.
+   Advances the lifecycle approved→dispatched→applied→verified (or
+   →failed with a localized reason and typed
+   `[:intervention/details :failure/code]`), publishing every
+   transition. Pass as `:apply!` to [[consume-operator-events!]] /
    [[start-operator-consumer!]]."
   application/apply-intervention!)
 

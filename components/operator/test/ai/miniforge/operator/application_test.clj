@@ -23,15 +23,19 @@
    proposed→approved→dispatched→applied→verified event trail, and the
    no-live-runner failure path.
 
-   D-3b adds the resume launcher behind `:retry` / `:retry-from-phase`,
-   verified by reconstructing the launched run from its own event
-   history rather than by trusting what the launcher reported."
+   D-3b adds the two mechanisms that reach past control-state: the
+   resume launcher behind `:retry` / `:retry-from-phase` and the policy
+   evaluator behind `:re-evaluate`. Both are verified by readback —
+   reconstructing the launched run from its own event history, and
+   finding a PolicyEvaluation in the materialized entity table that was
+   not there before the publish."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.application :as application]
    [ai.miniforge.operator.consumer :as consumer]
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.reliability.interface :as reliability]
+   [ai.miniforge.supervisory-state.interface :as supervisory]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -119,17 +123,25 @@
       (finally
         (reset! manager-state original)))))
 
-(defn- with-resume-launcher
-  "Bind the process-scoped resume launcher for the duration of `f`,
-   restoring whatever was there before."
-  [launcher f]
-  (let [launcher-state (var-get #'application/process-resume-launcher)
-        original @launcher-state]
-    (reset! launcher-state launcher)
+(defn- with-mechanism-handle
+  "Bind one of the process-scoped mechanism handles for the duration of
+   `f`, restoring whatever was there before."
+  [handle-var handle f]
+  (let [handle-state (var-get handle-var)
+        original @handle-state]
+    (reset! handle-state handle)
     (try
       (f)
       (finally
-        (reset! launcher-state original)))))
+        (reset! handle-state original)))))
+
+(defn- with-resume-launcher
+  [launcher f]
+  (with-mechanism-handle #'application/process-resume-launcher launcher f))
+
+(defn- with-policy-evaluator
+  [evaluate f]
+  (with-mechanism-handle #'application/process-policy-evaluator evaluate f))
 
 ;; -- Staged workflow history -- what a resume reconstructs from ------------
 
@@ -174,6 +186,13 @@
    `run-id` as the run it started."
   [captured run-id]
   {:launch! (fn [plan] (reset! captured plan) {:resume/run-id run-id})})
+
+(defn- policy-evals
+  "PolicyEvaluation entities materialized from `stream`'s events through
+   the canonical supervisory accumulator."
+  [stream]
+  (vals (:policy-evals (supervisory/apply-events supervisory/empty-table
+                                                 (es/get-events stream)))))
 
 ;------------------------------------------------------------------------------ Phase D verification bar — request file → paused workflow
 
@@ -248,9 +267,8 @@
     (is (= [:dispatched :applied :verified] (state-trail stream)))))
 
 (deftest verbs-without-a-mechanism-fail-not-implemented
-  (testing "waive and re-evaluate have no mechanism yet; request-replan is D-7"
+  (testing "waive has no Waiver store to write to; request-replan is D-7"
     (doseq [[verb target-id] [[:waive (str (random-uuid))]
-                              [:re-evaluate "golden/synthetic#1"]
                               [:request-replan (str (random-uuid))]]]
       (let [stream (memory-stream)
             result (application/apply-intervention! stream
@@ -489,6 +507,83 @@
            clojure.lang.ExceptionInfo
            #"requires a :launch! function"
            (application/register-resume-launcher! handles))))))
+
+(def ^:const golden-pr-target-id
+  "PR target the re-evaluation tests score."
+  "golden/synthetic#1")
+
+(defn- failing-evaluation []
+  {:evaluation/passed? false
+   :evaluation/packs-applied [:golden-pack]
+   :evaluation/violations [{:rule-id :golden/rule-001
+                            :severity :medium
+                            :category :process
+                            :message "Golden synthetic violation"}]})
+
+(deftest re-evaluate-without-an-evaluator-fails-typed
+  (with-policy-evaluator
+    nil
+    (fn []
+      (let [stream (memory-stream)
+            result (application/apply-intervention!
+                    stream (approved :re-evaluate golden-pr-target-id))]
+        (is (= :failed (:intervention/state result)))
+        (is (= :no-policy-evaluator (failure-code result))
+            "no verdict is invented when nothing can compute one")
+        (is (empty? (events-of-type stream :gate/failed))
+            "and nothing is published on the target's behalf")))))
+
+(deftest re-evaluate-writes-a-new-policy-evaluation
+  (let [captured (atom nil)]
+    (with-policy-evaluator
+      (fn [request] (reset! captured request) (failing-evaluation))
+      (fn []
+        (let [stream (memory-stream)
+              result (application/apply-intervention!
+                      stream (approved :re-evaluate golden-pr-target-id))
+              evals (policy-evals stream)]
+          (is (= :verified (:intervention/state result)))
+          (is (= [:dispatched :applied :verified] (state-trail stream)))
+          (is (= golden-pr-target-id (:policy/target-id @captured))
+              "the evaluator is asked about the intervention's target")
+          (is (= 1 (count evals)) "exactly one PolicyEvaluation materialized")
+          (is (= (get-in result [:intervention/outcome :policy-eval/id])
+                 (:policy-eval/id (first evals)))
+              "the verified outcome names the record that was written"))))))
+
+(deftest re-evaluation-adds-a-record-rather-than-mutating-one
+  (testing "N5-delta-1 §12.2: completed evaluations are immutable"
+    (with-policy-evaluator
+      (fn [_request] (failing-evaluation))
+      (fn []
+        (let [stream (memory-stream)
+              first-result (application/apply-intervention!
+                            stream (approved :re-evaluate golden-pr-target-id))
+              second-result (application/apply-intervention!
+                             stream (approved :re-evaluate golden-pr-target-id))
+              eval-ids (mapv :policy-eval/id (policy-evals stream))]
+          (is (= :verified (:intervention/state first-result)))
+          (is (= :verified (:intervention/state second-result)))
+          (is (= 2 (count (set eval-ids)))
+              "the second re-evaluation is a second record with a fresh id"))))))
+
+(deftest a-throwing-evaluator-becomes-a-failed-intervention
+  (with-policy-evaluator
+    (fn [_request] (throw (ex-info "evaluator exploded" {})))
+    (fn []
+      (let [stream (memory-stream)
+            result (application/apply-intervention!
+                    stream (approved :re-evaluate golden-pr-target-id))]
+        (is (= :failed (:intervention/state result)))
+        (is (= :application-error (failure-code result)))
+        (is (empty? (policy-evals stream))
+            "a throwing evaluator writes no PolicyEvaluation")))))
+
+(deftest policy-evaluator-registration-rejects-a-non-function
+  (is (thrown-with-msg?
+       clojure.lang.ExceptionInfo
+       #"requires a function"
+       (application/register-policy-evaluator! "not-a-fn"))))
 
 ;------------------------------------------------------------------------------ Registry
 

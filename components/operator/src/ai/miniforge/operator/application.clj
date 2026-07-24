@@ -33,7 +33,8 @@
    | :acknowledge / :request-human-review | supervisory-state only (no machine effect) |
    | :force-safe-mode / :exit-safe-mode | degradation manager (when wired)   |
    | :retry / :retry-from-phase         | workflow-resume + the resume launcher |
-   | :waive / :re-evaluate / :request-replan | not yet applied — fail loudly |
+   | :re-evaluate                       | policy evaluator → new PolicyEvaluation |
+   | :waive / :request-replan           | not yet applied — fail loudly      |
 
    **Process-lifetime honesty:** control-state is in-process, so
    interventions act only on workflows registered by a live runner in
@@ -42,12 +43,21 @@
    not-yet-applied verbs fail the same way: a red chip with a stable
    code beats silently-parked hope.
 
+   `:waive` stays unapplied on purpose. N5-delta-1 §6 Waiver records
+   have a schema (`schema/Waiver`) and a TUI surface that derives
+   `:waived` from them, but no store: no event type produces one, no
+   accumulator table holds one, no emitter publishes one. Applying the
+   verb would mean inventing that store here, off to one side of the
+   supervisory entity families — so it fails `:not-implemented` until
+   the store lands where the other entities live.
+
    **Verification is a readback, not an echo:** control-state verbs
    verify by reading the flag back (`paused?` / `cancelled?`), so a
    `verified` chip means the runner's own control flags actually
-   changed. A retry holds the same bar: it verifies by reconstructing
-   the launched run from its own event history, so a launcher naming a
-   run it never started does not buy a `verified` chip."
+   changed. The D-3b mechanisms hold the same bar: a resume verifies by
+   reconstructing the launched run from its event history, a
+   re-evaluation by finding a PolicyEvaluation in the materialized
+   entity table that was not there before the publish."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.consumer :as consumer]
@@ -76,15 +86,25 @@
   ;; registers the handle — the same shape as the degradation manager.
   (atom nil))
 
+(defonce ^:private process-policy-evaluator
+  ;; (fn [request] -> {:evaluation/passed? … :evaluation/violations […]
+  ;;                   :evaluation/packs-applied […]})
+  ;; The return shape is `policy-pack/evaluate-external-pr`'s, so the
+  ;; canonical implementer is a partial of it bound to a pack loader and
+  ;; a PR fetcher — both adapter-owned.
+  (atom nil))
+
 (def ^:private failure-message-key-by-code
   {:application-error :application/application-error
    :control-state-readback-mismatch :application/control-state-readback-mismatch
    :missing-phase :application/missing-phase
    :no-degradation-manager :application/no-degradation-manager
    :no-live-runner :application/no-live-runner
+   :no-policy-evaluator :application/no-policy-evaluator
    :no-resume-context :application/no-resume-context
    :no-resume-launcher :application/no-resume-launcher
    :not-implemented :application/not-implemented
+   :policy-evaluation-readback-mismatch :application/policy-evaluation-readback-mismatch
    :resume-not-dispatched :application/resume-not-dispatched
    :resume-readback-mismatch :application/resume-readback-mismatch
    :safe-mode-readback-mismatch :application/safe-mode-readback-mismatch
@@ -135,6 +155,26 @@
     (throw (ex-info (messages/t :application/invalid-resume-launcher)
                     {:launch! (:launch! handles)})))
   (reset! process-resume-launcher handles)
+  nil)
+
+(defn register-policy-evaluator!
+  "Register the process-scoped PR policy evaluator used by
+   `:re-evaluate`.
+
+   `evaluate` is `(fn [request] → evaluation)` where `request` is
+   [[ai.miniforge.operator.mechanism/evaluation-request]] and
+   `evaluation` is the `policy-pack/evaluate-external-pr` result shape
+   (`:evaluation/passed?`, `:evaluation/violations`,
+   `:evaluation/packs-applied`). Pass nil to clear.
+
+   Without a registered evaluator, `:re-evaluate` fails
+   `:no-policy-evaluator`. It never publishes a verdict it did not
+   receive — a fabricated pass is worse than a visible failure."
+  [evaluate]
+  (when-not (or (nil? evaluate) (ifn? evaluate))
+    (throw (ex-info (messages/t :application/invalid-policy-evaluator)
+                    {:evaluator evaluate})))
+  (reset! process-policy-evaluator evaluate)
   nil)
 
 (defn deregister-runner!
@@ -322,6 +362,23 @@
         (dispatch-resume! stream dispatched launcher events-dir verb
                           (:resume/plan prepared))))))
 
+(defn- apply-re-evaluate-verb!
+  "Run the registered evaluator, publish its verdict as a gate event,
+   and read the materialized entity table back.
+
+   `verified` means a PolicyEvaluation that did not exist before the
+   publish exists after it — a new immutable record per N5-delta-1
+   §12.2, not a mutation of the evaluation being re-run."
+  [stream dispatched evaluate interv]
+  (if-not evaluate
+    (fail! stream dispatched :no-policy-evaluator)
+    (let [evaluation (evaluate (mechanism/evaluation-request interv))
+          readback (mechanism/record-policy-evaluation! stream interv evaluation)]
+      (when-let [applied (advance! stream dispatched
+                                   intervention/apply-result readback)]
+        (verify-readback! stream applied readback
+                          :policy-evaluation-readback-mismatch)))))
+
 ;------------------------------------------------------------------------------ Layer 2
 ;; The applier hook
 
@@ -362,10 +419,17 @@
                               verb
                               interv)
 
-          ;; :waive / :re-evaluate — mechanisms not yet wired (waiver
-          ;; records, policy re-evaluation). :request-replan — deferred
-          ;; to D-7 (phase-redirect semantics). Loud, typed failure per
-          ;; the honesty doctrine.
+          :re-evaluate
+          (apply-re-evaluate-verb! stream
+                                   dispatched
+                                   @process-policy-evaluator
+                                   interv)
+
+          ;; :waive — N5-delta-1 §6 Waiver records have a schema and a
+          ;; TUI surface but no store: no event, no entity table, no
+          ;; emitter. :request-replan — deferred to D-7 (phase-redirect
+          ;; semantics). Loud, typed failure per the honesty doctrine
+          ;; rather than a mechanism invented here.
           (fail! stream dispatched :not-implemented))
         (catch Exception _e
           ;; A throwing mechanism must not abort the consumer's pass —
