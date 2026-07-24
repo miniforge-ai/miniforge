@@ -23,8 +23,13 @@ normal development, not just in dedicated cleanup PRs.
 ## Changes in Detail
 
 - `tasks/lint.clj`:
-  - Bumped `stratum-lint-deps` sha to `d83e92d5` (the merged lexical-
-    scoping fix).
+  - Bumped `stratum-lint-deps` sha to `acd82a2f` (the merged lexical-
+    scoping fix, [#6](https://github.com/miniforge-ai/stratum-lint/pull/6),
+    plus a second fix found while validating this PR end-to-end,
+    [#7](https://github.com/miniforge-ai/stratum-lint/pull/7): `--fix` was
+    exploding a leading/trailing comment block — e.g. this repo's Apache
+    header, on every Clojure file per rule 810 — into one double-spaced
+    line per comment instead of one tight block).
   - `stratum-staged` now invokes `--fix` instead of plain lint, re-`git
     add`s every staged file after a successful fix (mirrors
     `fmt/md-staged`'s re-stage step), and only fails the commit when
@@ -64,6 +69,15 @@ Did not run the full `bb pre-commit` against a real staged production file
 in this PR — that's deliberately deferred to the Wave 1-4 per-component
 fix PRs, where each component's autofix diff gets reviewed on its own.
 
+Caught the comment-block bug (#7) exactly this way: this PR's own
+pre-commit run autofixed `tasks/lint.clj` itself, and its Apache header —
+present in this file and, per rule 810, in every other Clojure source in
+the repo — came back double-spaced. Filed and merged the fix upstream,
+bumped the pin again, and confirmed re-running the corrected `--fix`
+against the already-mangled file self-heals it (verified byte-for-byte:
+only the header's blank lines are removed, the already-correct Layer
+structure is untouched).
+
 ## Deployment Plan
 
 Merges to `main`. Takes effect on the next commit that stages a `.clj`/
@@ -77,13 +91,18 @@ cleared most of the tree's debt before most developers hit it organically.
 
 ## Related Issues/PRs
 
-- Upstream fix: [miniforge-ai/stratum-lint#6](https://github.com/miniforge-ai/stratum-lint/pull/6)
+- Upstream fixes: [miniforge-ai/stratum-lint#6](https://github.com/miniforge-ai/stratum-lint/pull/6)
+  (SL001 scoping), [#7](https://github.com/miniforge-ai/stratum-lint/pull/7)
+  (comment-block preservation, found while validating this PR)
 - Baseline: `work/stratum-lint-baseline-2026-07-24.md` (Wave 0)
 - Follow-on: Waves 1-4, per-component fix PRs
 
 ## Checklist
 
-- [x] Upstream fix merged before this PR (sequencing per the baseline plan)
+- [x] Both upstream fixes merged before this PR (sequencing per the
+      baseline plan)
 - [x] All four autofix code paths exercised functionally
 - [x] Transitional commit-budget interaction documented, not silently left
       as a surprise
+- [x] Comment-block bug found during end-to-end validation, fixed
+      upstream, and confirmed self-healing on the already-mangled file
