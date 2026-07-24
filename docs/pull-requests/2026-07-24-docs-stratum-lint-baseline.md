@@ -11,8 +11,9 @@ work through the resulting debt.
 Rule 210's per-file `Layer N` heading convention has been cargo-culted:
 headings are being reused as decorative section banners rather than marking
 real one-way strata. Nobody had run the linter full-tree to see the scale,
-because the only wiring (`bb lint:stratum`) only ever checks staged files.
-This PR establishes the baseline so remediation can be planned and tracked.
+because the only existing wiring (`bb lint:stratum`) checks staged files
+only. This PR establishes the baseline so remediation can be planned and
+tracked.
 
 ## Changes in Detail
 

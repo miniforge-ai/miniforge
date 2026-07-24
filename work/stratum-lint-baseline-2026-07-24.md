@@ -5,12 +5,12 @@
 **Tool:** [stratum-lint](https://github.com/miniforge-ai/stratum-lint), sha
 `7ca43db35c7547fe919069e9d69ef8c5d2810042` (the pin already declared in
 `tasks/lint.clj`). Enforces `languages/clojure` (210)'s per-file `Layer N`
-heading convention — see `standards/miniforge/foundations/stratified-design.mdc`
-and `standards/miniforge/languages/clojure.mdc`.
+heading convention — see `standards/miniforge/foundations/stratified-design`
+and `standards/miniforge/languages/clojure`.
 
 **Method:** Resolved the pinned dep via `bb -Sdeps` (no change to `tasks/lint.clj`
-— that pin already existed, only the pre-commit hook only ever pointed it at
-staged files). Ran `bb -m stratum-lint.interface bases components projects
+— that pin already existed; the pre-commit hook it's wired into only ever
+pointed it at staged files). Ran `bb -m stratum-lint.interface bases components projects
 development/src` — full-tree, not staged-only. Raw output (876 lines) is
 archived at `work/stratum-lint-baseline-2026-07-24.findings.txt`; this document
 is the analysis and remediation plan built on top of it.
@@ -214,10 +214,10 @@ genuine call to a higher-numbered def? False positives get no code change
 (or, if it's worth silencing, a rename to stop the collision). Real ones
 (the `telemetry.clj` shape) get the higher-numbered def moved down — usually
 means it was never a "higher" concept, just placed later in the file. Small
-blast radius per file; can run independently of Waves 1/2. Worth filing the
-shadowing/method-head false-positive class upstream against `stratum-lint`
-separately — the tool doing lexical scoping would remove ~most of this wave
-for future runs.
+blast radius per file; can run independently of Waves 1/2. Once Wave 0's
+upstream fix lands, re-run the lint first — the tool doing lexical scoping
+will have already cleared most of this wave's false positives, shrinking
+the file list to whatever's left.
 
 ### Wave 4 — pre-heading defs (SL004)
 
