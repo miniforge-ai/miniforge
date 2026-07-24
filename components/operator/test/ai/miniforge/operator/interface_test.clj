@@ -20,6 +20,7 @@
   "Tests for the operator (meta-agent) component."
   (:require
    [clojure.test :refer [deftest is testing]]
+   [ai.miniforge.knowledge.interface :as knowledge]
    [ai.miniforge.operator.interface :as op]
    [ai.miniforge.operator.protocol :as proto]))
 
@@ -155,6 +156,33 @@
       (is (:success? result))
       (is (= :applied (get-in result [:applied :improvement/status]))))))
 
+(deftest apply-improvement-idempotency-test
+  (testing "apply-improvement returns nil when proposal is not in :proposed state"
+    (let [operator (op/create-operator)
+          {:keys [proposal-id]} (op/propose-improvement operator
+                                                         {:type :rule-addition
+                                                          :target :test
+                                                          :rationale "Test"})]
+      (testing "first apply succeeds"
+        (is (:success? (op/apply-improvement operator proposal-id))))
+      (testing "second apply on already-:applied proposal returns nil"
+        (is (nil? (op/apply-improvement operator proposal-id))))
+      (testing "state is still :applied after the no-op second call"
+        (let [proposals (op/get-proposals operator {:status :applied})]
+          (is (= 1 (count proposals))))))))
+
+(deftest apply-improvement-guards-rejected-test
+  (testing "apply-improvement cannot override a human rejection"
+    (let [operator (op/create-operator)
+          {:keys [proposal-id]} (op/propose-improvement operator
+                                                         {:type :rule-addition
+                                                          :target :test
+                                                          :rationale "Test"})]
+      (op/reject-improvement operator proposal-id "Not needed")
+      (is (nil? (op/apply-improvement operator proposal-id)))
+      (let [proposals (op/get-proposals operator {:status :rejected})]
+        (is (= 1 (count proposals)))))))
+
 (deftest reject-improvement-test
   (testing "reject-improvement updates proposal with reason"
     (let [operator (op/create-operator)
@@ -165,6 +193,18 @@
           rejected (op/reject-improvement operator proposal-id "Not applicable")]
       (is (= :rejected (:improvement/status rejected)))
       (is (= "Not applicable" (:improvement/rejection-reason rejected))))))
+
+(deftest reject-improvement-idempotency-test
+  (testing "reject-improvement returns nil when proposal is already :rejected"
+    (let [operator (op/create-operator)
+          {:keys [proposal-id]} (op/propose-improvement operator
+                                                         {:type :rule-addition
+                                                          :target :test
+                                                          :rationale "Test"})]
+      (op/reject-improvement operator proposal-id "First reason")
+      (is (nil? (op/reject-improvement operator proposal-id "Second reason")))
+      (let [proposals (op/get-proposals operator {:status :rejected})]
+        (is (= "First reason" (:improvement/rejection-reason (first proposals))))))))
 
 ;; ============================================================================
 ;; Governance tests
@@ -217,3 +257,24 @@
     (is (contains? op/improvement-types :prompt-change))
     (is (contains? op/improvement-types :rule-addition))
     (is (contains? op/improvement-types :workflow-modification))))
+
+;; ============================================================================
+;; Knowledge store integration tests
+;; ============================================================================
+
+(deftest apply-improvement-writes-rule-exactly-once-test
+  (testing "apply-improvement writes exactly one rule to the knowledge store"
+    (let [k-store  (knowledge/create-store)
+          operator (op/create-operator {:knowledge-store k-store})
+          {:keys [proposal-id]} (op/propose-improvement operator
+                                                         {:type      :rule-addition
+                                                          :target    :knowledge-base
+                                                          :rationale "Prevent syntax errors"})]
+
+      (testing "first apply writes one zettel"
+        (is (:success? (op/apply-improvement operator proposal-id)))
+        (is (= 1 (count (knowledge/list-zettels k-store)))))
+
+      (testing "second apply is a no-op — knowledge store still has exactly one zettel"
+        (is (nil? (op/apply-improvement operator proposal-id)))
+        (is (= 1 (count (knowledge/list-zettels k-store))))))))

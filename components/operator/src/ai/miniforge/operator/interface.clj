@@ -315,14 +315,20 @@
 (defn apply-improvement
   "Apply an approved improvement.
 
-   Returns {:success? bool :applied improvement-map}"
+   Returns {:success? bool :applied improvement-map} when the proposal is in
+   :proposed state, or nil if the proposal is not in :proposed state (already
+   :applied, :rejected, or missing) — callers must nil-check before
+   destructuring."
   [operator proposal-id]
   (proto/apply-improvement operator proposal-id))
 
 (defn reject-improvement
   "Reject an improvement proposal.
 
-   Returns updated proposal with rejection reason."
+   Returns the updated proposal map (with :improvement/rejection-reason) when
+   the proposal is in :proposed state, or nil if the proposal is not in
+   :proposed state (already :applied, :rejected, or missing) — callers must
+   nil-check."
   [operator proposal-id reason]
   (proto/reject-improvement operator proposal-id reason))
 
