@@ -76,7 +76,7 @@ ablation pairing, and pre-registered gates under the surviving core protocol.
 |---|---|---|
 | H1 | Sampling: additional inference alone explains gains | C1 vs. C2 |
 | H2 | Diversity: heterogeneous models beat same-compute homogeneous sampling | C2 (best single model, N samples) vs. C3 (N models) |
-| H3 | Aggregation: structured fusion beats pick-best | C2 vs. C3-synthesis; C4 vs. C3 |
+| H3 | Aggregation: structured fusion beats pick-best | C2 vs. C2s; C4 vs. C3 |
 | H4 | Collective cognition: persistent typed shared state beats equal-compute sampling, fusion, debate, and relay | C6 vs. best of C1–C5; C6 vs. C7 |
 | H5 | Reuse: cross-run persistent knowledge adds capability (deferred; requires N14 post-v1 cross-run workspaces) | reserved |
 
@@ -92,6 +92,7 @@ proof sits on H4.
 |---|---|---|
 | C1 | single-pass | One agent, one attempt, full tier budget |
 | C2 | best-of-N | One model, N independent attempts, verifier-selected winner |
+| C2s | best-of-N + synthesis | C2's model and attempt count, with a synthesis pass replacing the verifier pick (isolates aggregation from diversity) |
 | C3 | independent + synthesis | N heterogeneous agents, independent attempts, one synthesis pass (mixture-of-agents proper) |
 | C4 | sequential debate | r debate rounds (r pinned per manifest), each agent sees prior prose, judge closes |
 | C5 | static pipeline | Fixed role relay (interpreter → proposer → implementer → verifier → synthesizer), transcript handoff, no shared graph |
@@ -99,7 +100,8 @@ proof sits on H4.
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
 
 Requirements: every experiment MUST include C1, C2, and C6; C7 MUST be included whenever C6
-is (paired). C5 exists to separate "roles + relay" from "shared typed state" — if C6 only
+is (paired). C2s is REQUIRED in any experiment claiming an H3 result and OPTIONAL otherwise. C5 exists to separate
+"roles + relay" from "shared typed state" — if C6 only
 matches C5, the graph is not earning its overhead. Population pinning: each condition's
 manifest MUST enumerate exact model ids, role bindings, and prompts; C2's model MUST be the
 strongest single model available to C3/C6 populations.

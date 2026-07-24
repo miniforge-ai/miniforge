@@ -126,6 +126,8 @@ capsules and evidence bundles; the workspace holds statements about them plus re
 
 Objects carry a status from a closed set:
 
+- goals: `:open` → `:accepted` | `:rejected` (only via `close-goal`, which MUST reference
+  the decision(s) covering the outcome)
 - claims/hypotheses/plans/decisions: `:open` → `:contested` → `:accepted` | `:rejected` | `:superseded`
 - questions: `:open` → `:answered` | `:retired`
 - experiments: `:proposed` → `:running` → `:completed` | `:aborted`
@@ -168,10 +170,11 @@ closed vocabulary (§3.2). Every operation MUST identify the objects it touches.
 ### 3.2 Operation vocabulary (closed set, v1)
 
 `assert-claim`, `refine-claim`, `challenge`, `attach-evidence`, `add-question`,
-`answer-question`, `propose-hypothesis`, `split-hypothesis`, `merge-hypotheses`,
-`propose-experiment`, `record-experiment-result`, `propose-plan`, `revise-plan`,
-`propose-decision`, `accept-decision`, `reject-decision`, `register-artifact`,
-`invalidate-artifact`, `add-constraint`, `declare-blocked`, `close-goal`.
+`answer-question`, `retire-question`, `propose-hypothesis`, `split-hypothesis`,
+`merge-hypotheses`, `propose-experiment`, `record-experiment-result`, `propose-plan`,
+`revise-plan`, `propose-decision`, `accept-decision`, `reject-decision`,
+`register-artifact`, `invalidate-artifact`, `add-goal`, `add-constraint`,
+`declare-blocked`, `close-goal`.
 
 ### 3.3 Operation classes and merge semantics
 
@@ -179,7 +182,7 @@ closed vocabulary (§3.2). Every operation MUST identify the objects it touches.
 |---|---|---|
 | additive | assert-claim, add-question, attach-evidence, propose-* , register-artifact, challenge, declare-blocked | Commute; commit even on stale basis if touched objects still exist and are non-terminal |
 | mergeable | refine-claim, revise-plan, answer-question | Commit if touched objects unchanged since basis; otherwise reject with current state returned |
-| exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-constraint | Commit only against current version of touched objects; single writer wins |
+| exclusive | accept-decision, reject-decision, record-experiment-result, merge-hypotheses, invalidate-artifact, close-goal, add-goal, add-constraint, retire-question | Commit only against current version of touched objects; single writer wins |
 
 ### 3.4 Validation pipeline
 
@@ -266,8 +269,9 @@ for a conforming Stage 1+ deliberation run:
 - Only **verifier** MAY `record-experiment-result` and attach `:execution` evidence.
 - Only **synthesizer** MAY `propose-decision`, `accept-decision`, `close-goal`; acceptance
   of decisions classified high-impact by policy pack (N4) MUST route to OCI approval (§10.2).
-- Only **interpreter** MAY `add-constraint` with source `:spec`; `:hard` constraints
-  otherwise only via OCI.
+- Only **interpreter** MAY `add-goal` and `add-constraint` with source `:spec`; goals and
+  `:hard` constraints otherwise only via OCI.
+- Only **meta-watchdog** MAY `retire-question`; the user MAY retire questions via OCI.
 - All roles MAY `assert-claim`, `add-question`, `declare-blocked`.
 
 ## 6. Scheduling (v0: structural)
