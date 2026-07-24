@@ -300,8 +300,8 @@ Defines:
 
 Defines:
 
-- Closed object taxonomy (goal/constraint/question/claim/hypothesis/experiment/evidence/plan/decision/artifact-ref/
-  conflict/blocker) with structural statuses, not numeric confidences (§2)
+- Closed object taxonomy (goal, constraint, question, claim, hypothesis, experiment, evidence, plan, decision,
+  artifact-ref, conflict, blocker) with structural statuses, not numeric confidences (§2)
 - Transaction vocabulary with commutative/mergeable/exclusive classes, validation pipeline, and the anti-livelock rule:
   a challenge must carry evidence or a discriminating experiment (§3)
 - Deterministic projections as an activation's only input (N12-conformant), plus the `cross_visibility: none` ablation

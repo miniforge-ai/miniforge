@@ -71,6 +71,9 @@ ablation pairing, and pre-registered gates under the surviving core protocol.
   inter-agent relay) divided by total participant tokens.
 - **Ablation pair**: C6 vs. C7 on identical (task, tier, seed inputs).
 - **Gate**: a pre-registered decision rule over experiment outcomes.
+- **Selection/synthesis/closing pass**: a participant pass inside a condition that picks,
+  fuses, or commits candidate outputs. Metered by the condition's budget. Distinct from
+  the scoring judge (§7), which scores sealed metrics and is outside participant budgets.
 
 ## 2. Hypothesis registry
 
@@ -93,10 +96,10 @@ proof sits on H4.
 | Id | Condition | Definition |
 |---|---|---|
 | C1 | single-agent | One agent, one continuous session with tools, full tier budget; self-directed iteration permitted; no fresh-context resampling |
-| C2 | best-of-N | One model, N independent attempts, verifier-selected winner |
-| C2s | best-of-N + synthesis | C2's model and attempt count, with a synthesis pass replacing the verifier pick (isolates aggregation from diversity) |
+| C2 | best-of-N | One model, N independent attempts, a selection pass picks the winner |
+| C2s | best-of-N + synthesis | C2's model and attempt count, with a synthesis pass replacing the selection pass (isolates aggregation from diversity) |
 | C3 | independent + synthesis | N heterogeneous agents, independent attempts, one synthesis pass (mixture-of-agents proper) |
-| C4 | sequential debate | r debate rounds (r pinned per manifest), each agent sees prior prose, judge closes |
+| C4 | sequential debate | r debate rounds (r pinned per manifest), each agent sees prior prose, a closing pass commits the answer |
 | C5 | static pipeline (incumbent) | Fixed role relay (interpreter → proposer → implementer → verifier → synthesizer) with the N2-style validate/repair loop and bounded review-comment rounds (pinned per manifest); transcript handoff, no shared graph |
 | C6 | workspace | N14 deliberation run (stage per experiment manifest) |
 | C7 | workspace-ablated | C6 with `cross_visibility: none` (N14 §4.4); all else identical |
@@ -126,8 +129,11 @@ artifact; no condition receives feedback from it at any point.
 - **Tiers**: every experiment MUST run ≥2 tiers. Results are reported as cost-quality
   points per tier, forming per-condition curves. Claims of superiority MUST cite matched
   tiers; cross-tier comparison is void.
-- **Tolerance**: realized spend MUST land within the manifest-pinned tolerance of the tier
-  (default ±10%); runs outside tolerance are excluded and re-run, and the exclusion logged.
+- **Ceiling semantics**: the tier is a hard allowance ceiling, harness-enforced —
+  exhaustion triggers the condition's own termination semantics, so overspend cannot
+  occur by construction. Underspend from legitimate early termination (success, closure)
+  is a valid result; realized spend is recorded and reported, never grounds for
+  exclusion. Conditions are compared at matched allowance, not matched realized spend.
 - **Accounting classes**: participant tokens split into object-level (task reasoning,
   artifact production) vs. coordination overhead (workspace operations, projections,
   relay/synthesis scaffolding). Judge/scoring tokens are outside participant budgets.
@@ -229,7 +235,8 @@ registry entry):
 - **cost**, **wall-clock**, **tokens by class**, **activation/attempt count**
 - **overhead fraction** (§4)
 - **hypothesis diversity** — count of live alternatives at budget midpoint (anti-anchoring
-  signal; C4–C6 only)
+  signal; C4–C7; both members of an ablation pair MUST emit it so blinding's effect on
+  alternative preservation is itself measurable)
 - **failure category** — closed v1 set, judge-coded with human spot-check: specification
   misread, premature consensus, livelock/loop, lost context, verification skipped,
   coordination overhead exhaustion, other
