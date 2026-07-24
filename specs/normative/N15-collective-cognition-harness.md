@@ -145,10 +145,14 @@ artifact; no condition receives feedback from it at any point.
 
 - **Replication**: k ≥ 3 replicates per (condition, task, tier). The kernel MUST group
   replicates by full cell identity — `experiment_id`, task input `source_hashes`, and the
-  complete variant identity (`workflow` VariantRef, `model`, `method`, and all `axes`
-  including `budget_tier` and `ablation`) — treating `run_id` as the sole replicate
-  distinguisher. `label` is display-only and MUST NOT be a grouping key (existing
-  producers use coarse labels such as "baseline"). Per cell, aggregate: mean/min–max
+  entire `variant` value excluding `label`: every populated `variant.*` field
+  (`workflow`, `prompt`, `model`, `method`) plus all `axes` (including `budget_tier` and
+  `ablation`) — treating `run_id` as the sole replicate distinguisher. Model identity
+  lives in exactly one place per condition: single-model conditions MUST populate the
+  contract's `variant.model` field; multi-model conditions leave `model` unset and MUST
+  carry their manifest-pinned population id in a `population` axis. `label` is
+  display-only and MUST NOT be a grouping key (existing producers use coarse labels such
+  as "baseline"). Per cell, aggregate: mean/min–max
   score, majority status, within-cell spread. A row is divergent only when stable across
   replicates.
 - **Concurrent baselines**: baseline conditions are re-run within each experiment at the
