@@ -107,9 +107,9 @@
 (defn resume-plan
   "The launcher payload for a retry.
 
-   Deliberately shaped as the options a resume run needs — the same set
-   `mf resume` threads into `run-pipeline` — so a launcher is a thin
-   adapter rather than a translation layer.
+   Deliberately shaped around the same *semantic inputs* a resume run needs
+   (phase results, workspace checkpoint, optional FSM snapshot, DAG state),
+   so a launcher can be a thin adapter rather than a large translation layer.
 
    `from-phase` nil (plain `:retry`) keeps the FSM machine snapshot: the
    mapping table's \"resume path with FSM snapshot dispatch\". A
