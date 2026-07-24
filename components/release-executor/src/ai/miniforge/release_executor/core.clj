@@ -208,7 +208,7 @@
                     (sandbox/stage-files! executor environment-id :all))
           staged-r (when (result/succeeded? stage-r)
                      (if host-mode?
-                       (git/exec! worktree-path "git diff --cached --name-only")
+                       (git/exec! worktree-path ["git" "diff" "--cached" "--name-only"])
                        (sandbox/exec! executor environment-id "git diff --cached --name-only")))
           staged-output (get staged-r :output "")
           staged-count (count (remove str/blank? (str/split-lines staged-output)))]
@@ -299,7 +299,7 @@
     (get-in state [:write-metrics :preexisting-commits])
     (let [{:keys [host-mode? worktree-path executor environment-id]} state
           sha-r (if host-mode?
-                  (git/exec! worktree-path "git rev-parse HEAD")
+                  (git/exec! worktree-path ["git" "rev-parse" "HEAD"])
                   (sandbox/exec! executor environment-id "git rev-parse HEAD"))]
       (cond-> state
         (result/succeeded? sha-r)
@@ -635,9 +635,9 @@
                           {:data {:path rel-path}}))
               (if host-mode?
                 (do
-                  (git/exec! worktree-path (str "git add " rel-path))
-                  (git/exec! worktree-path "git commit --amend --no-edit --no-verify")
-                  (git/exec! worktree-path "git push --force-with-lease"))
+                  (git/exec! worktree-path ["git" "add" rel-path])
+                  (git/exec! worktree-path ["git" "commit" "--amend" "--no-edit" "--no-verify"])
+                  (git/force-push! worktree-path (:github-token state)))
                 (do
                   (sandbox/exec! executor environment-id (str "git add " rel-path))
                   (sandbox/exec! executor environment-id "git commit --amend --no-edit --no-verify")

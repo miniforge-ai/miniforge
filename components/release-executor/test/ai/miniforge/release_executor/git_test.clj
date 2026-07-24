@@ -64,7 +64,7 @@
     (try
       (init-repo! dir)
       (testing "exec! runs a command in the worktree"
-        (is (:success? (git/exec! dir "git rev-parse --is-inside-work-tree"))))
+        (is (:success? (git/exec! dir ["git" "rev-parse" "--is-inside-work-tree"]))))
       (testing "write-file! + stage-files! + commit-changes! round-trip"
         (is (:success? (git/write-file! dir "src/a.clj" "(ns a)\n")))
         (is (:success? (git/stage-files! dir :all)))
@@ -88,7 +88,7 @@
           (is (:success? r))
           (is (= "release/x" (:branch r)))
           (is (= "release/x"
-                 (:output (git/exec! dir "git rev-parse --abbrev-ref HEAD"))))))
+                 (:output (git/exec! dir ["git" "rev-parse" "--abbrev-ref" "HEAD"]))))))
       (testing "create-branch! rejects an option-injection name before any git call"
         (let [r (git/create-branch! dir "-rf")]
           (is (not (:success? r)))))
@@ -126,6 +126,15 @@
         (git/check-gh-auth! "tok-123"))
       (let [auth (first (filter #(= "gh" (first (:args %))) @calls))]
         (is (= "tok-123" (get-in auth [:opts :extra-env "GH_TOKEN"])))))))
+
+(deftest force-push-injects-token-test
+  (testing "force-push! passes GH_TOKEN via :extra-env"
+    (let [seen (atom nil)]
+      (with-redefs [process/shell (fn [opts & _]
+                                    (reset! seen opts)
+                                    {:exit 0 :out "" :err ""})]
+        (git/force-push! "/tmp/wt" "push-tok"))
+      (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test

@@ -88,14 +88,17 @@
 ;; Generic command runner
 
 (defn exec!
-  "Run a shell command string in the worktree directory.
-   Returns {:success? bool :output string :error string}.
-   Used for ad-hoc git commands (git rev-parse, git add, git commit --amend, etc.)."
-  [worktree-path cmd]
+  "Run a git command in the worktree directory. `args` is an argv vector
+   (e.g. [\"git\" \"rev-parse\" \"HEAD\"]) passed straight to the process — NOT
+   through `sh -c` — so shell metacharacters in any argument are inert and
+   there is no command-injection surface even if an argument carries
+   untrusted data. Returns {:success? bool :output string :error string}.
+   For ad-hoc git commands (rev-parse, diff --name-only, add, amend)."
+  [worktree-path args]
   (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "sh" "-c" cmd)]
+    (let [r (apply process/shell
+                   {:dir (str worktree-path) :out :string :err :string :continue true}
+                   args)]
       (if (zero? (:exit r))
         (result/shell-success {:output (str/trim (get r :out ""))})
         (result/shell-failure (str/trim (get r :err ""))
@@ -335,6 +338,22 @@
          (result/shell-failure (get r :err ""))))
      (catch Exception e
        (result/shell-failure (.getMessage e))))))
+
+(defn force-push!
+  "Force-push the current branch with --force-with-lease, injecting
+   `github-token` as GH_TOKEN so gh's git credential helper authenticates
+   with the pipeline credential (the PR-doc amend path uses this). Returns a
+   shell-result."
+  [worktree-path github-token]
+  (try
+    (let [r (process/shell
+             (gh-shell-opts worktree-path github-token)
+             "git" "push" "--force-with-lease")]
+      (if (zero? (:exit r))
+        (result/shell-success {:output (get r :out "")})
+        (result/shell-failure (get r :err ""))))
+    (catch Exception e
+      (result/shell-failure (.getMessage e)))))
 
 (defn write-file!
   "Write content to a relative path inside the worktree.
