@@ -68,6 +68,13 @@
 (defn meta-loop-context!
   "The process-wide meta-loop context, created on first use."
   []
+  ;; Double-checked locking. The inner `or` is NOT the outer one repeated:
+  ;; the outer read is the fast path (no lock once initialized); the inner
+  ;; read re-checks after acquiring the lock, because a racing thread may
+  ;; have created the context in the window between the outer read
+  ;; returning nil and this thread taking the lock. Without it, two first
+  ;; callers would each `reset!` a distinct context (and a second
+  ;; `supervisory/attach!` + `correlator/attach!` onto the stream).
   (or @meta-loop-ctx
       (locking meta-loop-ctx
         (or @meta-loop-ctx
@@ -78,6 +85,10 @@
 
 (defn- ensure-operator-consumer!
   [ctx]
+  ;; Double-checked locking (see meta-loop-context!). The inner re-check
+  ;; matters more here: without it a race would `start-operator-consumer!`
+  ;; twice, leaving a second poller thread orphaned — its handle
+  ;; overwritten and never stopped.
   (or @operator-consumer-handle
       (locking operator-consumer-handle
         (or @operator-consumer-handle
