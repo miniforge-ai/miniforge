@@ -701,10 +701,33 @@ depending on ambient namespace loading or raw var resolution."}
     {:matches (:matches violation)
      :path    (:artifact-path violation)}))
 
+(defn- violation-message
+  "Finding message shown to the redirect/review agent. A semantic
+   violation's top-level `:message` is only the generic rule statement; the
+   judge's specific per-instance findings (what/where) live in `:violations`
+   (each `:rationale` is the judge's message for that site). Fold each hit
+   into the message as `path:line — rationale [snippet]` so the agent sees
+   the concrete instances to change, not just the rule — the other half of
+   why unlocalized semantic findings couldn't be acted on. Non-semantic
+   detectors keep their single `:message` unchanged."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    (str (:message violation)
+         "\n"
+         (str/join
+          "\n"
+          (map (fn [{:keys [file line current rationale]}]
+                 (str "  - " file
+                      (when line (str ":" line))
+                      (when-not (str/blank? rationale) (str " — " rationale))
+                      (when-not (str/blank? current) (str "  [" current "]"))))
+               hits)))
+    (:message violation)))
+
 (defn violation->error
   [{:keys [rule violation]}]
   {:code (:rule/id rule)
-   :message (:message violation)
+   :message (violation-message violation)
    :severity (:rule/severity rule)
    :location (violation-location violation)
    :remediation (get-in rule [:rule/enforcement :remediation])})

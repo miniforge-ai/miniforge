@@ -288,7 +288,13 @@
       (is (= 42 (get-in error [:location :matches 0 :line]))
           "line is preserved from the nested violation")
       (is (= "(Thread/sleep 5000)" (get-in error [:location :matches 0 :current]))
-          "the offending snippet reaches the agent")))
+          "the offending snippet reaches the agent")
+      (is (clojure.string/includes? (:message error) "Magic number.")
+          "the generic rule statement is retained")
+      (is (clojure.string/includes? (:message error) "components/x/src/x.clj:42")
+          "the specific site is folded into the message")
+      (is (clojure.string/includes? (:message error) "5000 is a magic number")
+          "the judge's specific per-instance message reaches the agent")))
 
   (testing "Converts violation to warning"
     (let [violation {:rule {:rule/id :test-rule
