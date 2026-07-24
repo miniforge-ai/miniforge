@@ -22,14 +22,26 @@ normal development, not just in dedicated cleanup PRs.
 
 ## Changes in Detail
 
+- `tasks/stratum.clj` (new): the autofix mechanics — `stratum-lint-deps`,
+  `restage!`, `lint-only-and-fail!`, `advisory-lint!`,
+  `autofix-and-restage!`. Split out of `tasks/lint.clj` because this PR's
+  own dogfooding caught it tripping the very rule it enforces: the real
+  call chain (`stratum-lint-deps`/`restage!` → `lint-only-and-fail!`/
+  `advisory-lint!` → `autofix-and-restage!` → the dispatcher) is 4 real
+  layers deep, one over budget (rule 210's "a file wanting a fourth band
+  is the signal to split the namespace"). `tasks/lint.clj`'s dispatcher
+  calls into it via a qualified `stratum/...` reference, which the
+  per-file check doesn't count — each file is back to 3 layers, verified
+  with the linter itself against both files (zero findings).
+  `stratum-lint-deps`'s sha (now in `tasks/stratum.clj`) is bumped to
+  `acd82a2f` — the merged lexical-scoping fix,
+  [#6](https://github.com/miniforge-ai/stratum-lint/pull/6), plus a
+  second fix found while validating this PR end-to-end,
+  [#7](https://github.com/miniforge-ai/stratum-lint/pull/7): `--fix` was
+  exploding a leading/trailing comment block — e.g. this repo's Apache
+  header, on every Clojure file per rule 810 — into one double-spaced
+  line per comment instead of one tight block.
 - `tasks/lint.clj`:
-  - Bumped `stratum-lint-deps` sha to `acd82a2f` (the merged lexical-
-    scoping fix, [#6](https://github.com/miniforge-ai/stratum-lint/pull/6),
-    plus a second fix found while validating this PR end-to-end,
-    [#7](https://github.com/miniforge-ai/stratum-lint/pull/7): `--fix` was
-    exploding a leading/trailing comment block — e.g. this repo's Apache
-    header, on every Clojure file per rule 810 — into one double-spaced
-    line per comment instead of one tight block).
   - `stratum-staged` now splits staged files by whether they carry
     unstaged changes beyond what's staged (`unstaged-files`, mirroring
     `staged-files`). A partially-staged file (e.g. after `git add -p`) is
