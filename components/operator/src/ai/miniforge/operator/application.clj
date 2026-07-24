@@ -175,6 +175,16 @@
                                 (failure-message reason-code))]
       failed)))
 
+(defn- verify-readback!
+  "Shared tail for every readback-verified mechanism: verify `applied`
+   when the mechanism's observable matches what the verb asked for, else
+   fail with `mismatch-code`. Returns nil when the lifecycle step is
+   itself rejected."
+  [stream applied readback mismatch-code]
+  (if (= (:observed readback) (:expected readback))
+    (advance! stream applied intervention/verify readback)
+    (fail! stream applied mismatch-code)))
+
 ;; ── Mechanisms ─────────────────────────────────────────────────────────────
 
 (defn- control-state-effect!
@@ -194,33 +204,34 @@
 
 (defn- apply-control-verb!
   [stream dispatched entry verb]
-  (let [{:keys [observed expected] :as readback}
-        (control-state-effect! (:control-state entry) verb)]
-    (if-let [applied (advance! stream dispatched intervention/apply-result)]
-      (if (= observed expected)
-        (advance! stream applied intervention/verify readback)
-        (fail! stream applied :control-state-readback-mismatch))
-      nil)))
+  (let [readback (control-state-effect! (:control-state entry) verb)]
+    (when-let [applied (advance! stream dispatched intervention/apply-result)]
+      (verify-readback! stream applied readback
+                        :control-state-readback-mismatch))))
+
+(defn- safe-mode-effect!
+  "Move the degradation manager for `verb` and return the readback the
+   verification step asserts."
+  [manager verb interv]
+  (let [justification (intervention-justification interv)]
+    (case verb
+      :force-safe-mode
+      (reliability/enter-safe-mode! manager :manual justification)
+      :exit-safe-mode
+      (reliability/exit-safe-mode! manager
+                                   justification
+                                   (:intervention/requested-by interv)))
+    {:verb verb
+     :observed (reliability/degradation-mode manager)
+     :expected (get expected-degradation-mode-by-verb verb)}))
 
 (defn- apply-safe-mode-verb!
   [stream dispatched manager verb interv]
   (if manager
-    (let [justification (intervention-justification interv)
-          _ (case verb
-              :force-safe-mode
-              (reliability/enter-safe-mode! manager :manual justification)
-              :exit-safe-mode
-              (reliability/exit-safe-mode! manager
-                                           justification
-                                           (:intervention/requested-by interv)))
-          observed (reliability/degradation-mode manager)
-          expected (get expected-degradation-mode-by-verb verb)
-          readback {:verb verb :observed observed :expected expected}]
-      (if-let [applied (advance! stream dispatched intervention/apply-result)]
-        (if (= observed expected)
-          (advance! stream applied intervention/verify readback)
-          (fail! stream applied :safe-mode-readback-mismatch))
-        nil))
+    (let [readback (safe-mode-effect! manager verb interv)]
+      (when-let [applied (advance! stream dispatched intervention/apply-result)]
+        (verify-readback! stream applied readback
+                          :safe-mode-readback-mismatch)))
     (fail! stream dispatched :no-degradation-manager)))
 
 (defn- apply-no-effect-verb!
