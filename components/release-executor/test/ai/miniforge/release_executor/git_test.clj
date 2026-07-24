@@ -160,6 +160,33 @@
         (is (nil? (git/commits-ahead-of-base dir "a;rm -rf /"))))
       (finally (fs/delete-tree dir)))))
 
+;;-------------------------------------------- push SSH→HTTPS fallback
+(deftest push-branch-https-fallback-test
+  (testing "push fails with a token → rewrite SSH origin to https-with-token, retry, restore"
+    (let [calls   (atom [])
+          push-n  (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (swap! calls conj a)
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              (if (= 1 @push-n)
+                                {:exit 1 :out "" :err "ssh: permission denied (publickey)"}
+                                {:exit 0 :out "pushed" :err ""}))
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r        (git/push-branch! "/tmp/wt" "b" "tok")
+              set-urls (filter #(= ["git" "remote" "set-url"] (vec (take 3 %))) @calls)]
+          (is (:success? r) "second push over https succeeds")
+          (is (= 2 (count set-urls)) "origin is set to https-with-token then restored")
+          (is (re-find #"x-access-token:tok@github\.com/o/r\.git" (str (last (first set-urls))))
+              "temporary origin embeds the token over https")
+          (is (= "git@github.com:o/r.git" (last (second set-urls)))
+              "original ssh origin is restored"))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
