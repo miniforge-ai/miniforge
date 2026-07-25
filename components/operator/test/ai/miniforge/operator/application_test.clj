@@ -169,7 +169,10 @@
 
 (deftest ^{:stratum 0} resume-launcher-registration-rejects-unusable-handles
   (testing "wiring fails early instead of becoming an application error"
-    (doseq [handles [{} {:launch! "not-a-fn"} :not-a-map]]
+    ;; `:launch! :kw` / a map are `ifn?` but not `fn?` — the old check
+    ;; let them register and fail later; they must be rejected here.
+    (doseq [handles [{} {:launch! "not-a-fn"} :not-a-map
+                     {:launch! :a-keyword} {:launch! {:not "a fn"}}]]
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo
            #"requires a :launch! function"
@@ -188,10 +191,14 @@
                             :message "Golden synthetic violation"}]})
 
 (deftest ^{:stratum 0} policy-evaluator-registration-rejects-a-non-function
-  (is (thrown-with-msg?
-       clojure.lang.ExceptionInfo
-       #"requires a function"
-       (application/register-policy-evaluator! "not-a-fn"))))
+  ;; string, keyword, and map are all NOT `fn?` (keyword/map are `ifn?`,
+  ;; which the old check wrongly accepted).
+  (doseq [bad ["not-a-fn" :a-keyword {:not "a fn"}]]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"requires a function"
+         (application/register-policy-evaluator! bad))
+        (str "bad evaluator " (pr-str bad)))))
 
 (deftest ^{:stratum 0} ownership-filter-does-not-hide-invalid-request-types
   (is (true? (application/live-intervention-target?

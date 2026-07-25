@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.application
   "Intervention application layer — Phase D D-3.
 
@@ -67,18 +66,18 @@
    [ai.miniforge.reliability.interface :as reliability]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Live-runner registry — process-scoped
 
-(defonce ^:private live-runners
+;; Live-runner registry — process-scoped
+(defonce ^{:stratum 0} ^:private live-runners
   ;; workflow-id string → {:control-state <atom>}
   (atom {}))
 
-(defonce ^:private process-degradation-manager
+(defonce ^{:stratum 0} ^:private process-degradation-manager
   ;; Safe mode is a process-level `:degradation` target, not a workflow
   ;; target. Its canonical target id therefore is not a runner id.
   (atom nil))
 
-(defonce ^:private process-resume-launcher
+(defonce ^{:stratum 0} ^:private process-resume-launcher
   ;; {:launch! (fn [plan] -> {:resume/run-id …}), :events-dir <dir-or-nil>}
   ;; A retry restarts a run whose runner is gone by definition, so it
   ;; cannot go through the live-runner registry. Starting a pipeline is
@@ -86,7 +85,7 @@
   ;; registers the handle — the same shape as the degradation manager.
   (atom nil))
 
-(defonce ^:private process-policy-evaluator
+(defonce ^{:stratum 0} ^:private process-policy-evaluator
   ;; (fn [request] -> {:evaluation/passed? … :evaluation/violations […]
   ;;                   :evaluation/packs-applied […]})
   ;; The return shape is `policy-pack/evaluate-external-pr`'s, so the
@@ -94,7 +93,7 @@
   ;; a PR fetcher — both adapter-owned.
   (atom nil))
 
-(def ^:private failure-message-key-by-code
+(def ^{:stratum 0} ^:private failure-message-key-by-code
   {:application-error :application/application-error
    :control-state-readback-mismatch :application/control-state-readback-mismatch
    :missing-phase :application/missing-phase
@@ -112,163 +111,22 @@
    :unknown-phase :application/unknown-phase
    :unresolved-workflow-type :application/unresolved-workflow-type})
 
-(def ^:private expected-degradation-mode-by-verb
+(def ^{:stratum 0} ^:private expected-degradation-mode-by-verb
   {:force-safe-mode :safe-mode
    :exit-safe-mode :nominal})
 
-(defn register-runner!
-  "Register a live runner's control handles for `workflow-id`.
-   `handles` must carry `:control-state`; `:event-stream` enables the
-   process consumer to publish lifecycle events through this workflow's
-   sequence counter."
-  [workflow-id handles]
-  (when-not (and (map? handles)
-                 (instance? clojure.lang.Atom (:control-state handles)))
-    (throw (ex-info (messages/t :application/invalid-control-state)
-                    {:workflow-id workflow-id
-                     :control-state (:control-state handles)})))
-  (swap! live-runners assoc (str workflow-id) handles)
-  nil)
-
-(defn register-degradation-manager!
-  "Register the process-scoped degradation manager used by safe-mode
-   interventions."
-  [manager]
-  (reset! process-degradation-manager manager)
-  nil)
-
-(defn register-resume-launcher!
-  "Register the process-scoped resume launcher used by `:retry` /
-   `:retry-from-phase`.
-
-   `handles` must carry `:launch!` — `(fn [plan] → {:resume/run-id …})`
-   — which starts a run from the resume plan
-   [[ai.miniforge.operator.mechanism/resume-plan]] builds and reports
-   the run id it started. `:events-dir` optionally overrides the event
-   root the resume context is reconstructed from (default:
-   `~/.miniforge/events`).
-
-   Pass nil to clear. Without a registered launcher, retries fail
-   `:no-resume-launcher` rather than parking."
-  [handles]
-  (when-not (or (nil? handles)
-                (and (map? handles) (ifn? (:launch! handles))))
-    (throw (ex-info (messages/t :application/invalid-resume-launcher)
-                    {:launch! (:launch! handles)})))
-  (reset! process-resume-launcher handles)
-  nil)
-
-(defn register-policy-evaluator!
-  "Register the process-scoped PR policy evaluator used by
-   `:re-evaluate`.
-
-   `evaluate` is `(fn [request] → evaluation)` where `request` is
-   [[ai.miniforge.operator.mechanism/evaluation-request]] and
-   `evaluation` is the `policy-pack/evaluate-external-pr` result shape
-   (`:evaluation/passed?`, `:evaluation/violations`,
-   `:evaluation/packs-applied`). Pass nil to clear.
-
-   Without a registered evaluator, `:re-evaluate` fails
-   `:no-policy-evaluator`. It never publishes a verdict it did not
-   receive — a fabricated pass is worse than a visible failure."
-  [evaluate]
-  (when-not (or (nil? evaluate) (ifn? evaluate))
-    (throw (ex-info (messages/t :application/invalid-policy-evaluator)
-                    {:evaluator evaluate})))
-  (reset! process-policy-evaluator evaluate)
-  nil)
-
-(defn deregister-runner!
-  "Remove `workflow-id` from the live-runner registry. Idempotent."
-  [workflow-id]
-  (swap! live-runners dissoc (str workflow-id))
-  nil)
-
-(defn live-runner?
-  [workflow-id]
-  (contains? @live-runners (str workflow-id)))
-
-(defn live-intervention-target?
-  "True when this process may claim `event` for application. Workflow
-   targets must belong to a registered live runner; process-global
-   intervention targets may be claimed by whichever serialized consumer
-   sees them first."
-  [event]
-  (if-not (intervention/valid-type? (:intervention/type event))
-    true
-    (let [canonical-target-type
-          (intervention/intervention-target-type (:intervention/type event))
-          declared-target-type (:intervention/target-type event)]
-      (or (and declared-target-type
-               (not= canonical-target-type declared-target-type))
-          (not= :workflow canonical-target-type)
-          (live-runner? (:intervention/target-id event))))))
-
-(defn live-intervention-stream
-  "Return the registered event stream for a workflow-targeted
-   intervention, or nil for process-global and unowned targets."
-  [event]
-  (when (= :workflow
-           (intervention/intervention-target-type
-            (:intervention/type event)))
-    (:event-stream
-     (get @live-runners (str (:intervention/target-id event))))))
-
-(defn- failure-message
-  [reason-code]
-  (messages/t (get failure-message-key-by-code
-                   reason-code
-                   :application/unknown-failure)))
-
-(defn- intervention-justification
+(defn- ^{:stratum 0} intervention-justification
   [interv]
   (if-some [justification (:intervention/justification interv)]
     justification
     (messages/t :application/default-justification)))
 
-(defn- transition-succeeded?
+(defn- ^{:stratum 0} transition-succeeded?
   [result]
   (true? (:success? result)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Lifecycle publication helpers
-
-(defn- advance!
-  "Apply lifecycle `step-fn` to `interv`, publish the transition, and
-   return the updated intervention. Returns nil when the lifecycle step
-   itself is rejected."
-  [stream interv step-fn & step-args]
-  (let [result (apply step-fn interv step-args)]
-    (if (transition-succeeded? result)
-      (let [updated (:intervention result)]
-        (consumer/publish-state-changed! stream updated)
-        updated)
-      nil)))
-
-(defn- fail!
-  [stream interv reason-code]
-  (let [with-failure-code (assoc-in interv
-                                    [:intervention/details :failure/code]
-                                    reason-code)]
-    (when-let [failed (advance! stream
-                                with-failure-code
-                                intervention/fail
-                                (failure-message reason-code))]
-      failed)))
-
-(defn- verify-readback!
-  "Shared tail for every readback-verified mechanism: verify `applied`
-   when the mechanism's observable matches what the verb asked for, else
-   fail with `mismatch-code`. Returns nil when the lifecycle step is
-   itself rejected."
-  [stream applied readback mismatch-code]
-  (if (= (:observed readback) (:expected readback))
-    (advance! stream applied intervention/verify readback)
-    (fail! stream applied mismatch-code)))
-
 ;; ── Mechanisms ─────────────────────────────────────────────────────────────
-
-(defn- control-state-effect!
+(defn- ^{:stratum 0} control-state-effect!
   "Flip the control-state flag for `verb` and return the readback the
    verification step asserts."
   [control-state verb]
@@ -283,14 +141,121 @@
                 {:verb :cancel :observed (boolean (es/cancelled? control-state))
                  :expected true})))
 
-(defn- apply-control-verb!
-  [stream dispatched entry verb]
-  (let [readback (control-state-effect! (:control-state entry) verb)]
-    (when-let [applied (advance! stream dispatched intervention/apply-result)]
-      (verify-readback! stream applied readback
-                        :control-state-readback-mismatch))))
+(defn- ^{:stratum 0} resume-events-dir
+  [launcher]
+  (or (:events-dir launcher) (es/default-events-dir)))
 
-(defn- safe-mode-effect!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} register-runner!
+  "Register a live runner's control handles for `workflow-id`.
+   `handles` must carry `:control-state`; `:event-stream` enables the
+   process consumer to publish lifecycle events through this workflow's
+   sequence counter."
+  [workflow-id handles]
+  (when-not (and (map? handles)
+                 (instance? clojure.lang.Atom (:control-state handles)))
+    (throw (ex-info (messages/t :application/invalid-control-state)
+                    {:workflow-id workflow-id
+                     :control-state (:control-state handles)})))
+  (swap! live-runners assoc (str workflow-id) handles)
+  nil)
+
+(defn ^{:stratum 1} register-degradation-manager!
+  "Register the process-scoped degradation manager used by safe-mode
+   interventions."
+  [manager]
+  (reset! process-degradation-manager manager)
+  nil)
+
+(defn ^{:stratum 1} register-resume-launcher!
+  "Register the process-scoped resume launcher used by `:retry` /
+   `:retry-from-phase`.
+
+   `handles` must carry `:launch!` — `(fn [plan] → {:resume/run-id …})`
+   — which starts a run from the resume plan
+   [[ai.miniforge.operator.mechanism/resume-plan]] builds and reports
+   the run id it started. `:events-dir` optionally overrides the event
+   root the resume context is reconstructed from (default:
+   `~/.miniforge/events`).
+
+   Pass nil to clear. Without a registered launcher, retries fail
+   `:no-resume-launcher` rather than parking."
+  [handles]
+  ;; `fn?`, not `ifn?`: a launcher must be an actual function. `ifn?`
+  ;; also admits keywords / maps / sets, which would register silently
+  ;; and only surface later as `:resume-not-dispatched` — reject the
+  ;; misconfiguration here, where the message names it.
+  (when-not (or (nil? handles)
+                (and (map? handles) (fn? (:launch! handles))))
+    (throw (ex-info (messages/t :application/invalid-resume-launcher)
+                    {:launch! (:launch! handles)})))
+  (reset! process-resume-launcher handles)
+  nil)
+
+(defn ^{:stratum 1} register-policy-evaluator!
+  "Register the process-scoped PR policy evaluator used by
+   `:re-evaluate`.
+
+   `evaluate` is `(fn [request] → evaluation)` where `request` is
+   [[ai.miniforge.operator.mechanism/evaluation-request]] and
+   `evaluation` is the `policy-pack/evaluate-external-pr` result shape
+   (`:evaluation/passed?`, `:evaluation/violations`,
+   `:evaluation/packs-applied`). Pass nil to clear.
+
+   Without a registered evaluator, `:re-evaluate` fails
+   `:no-policy-evaluator`. It never publishes a verdict it did not
+   receive — a fabricated pass is worse than a visible failure."
+  [evaluate]
+  ;; `fn?`, not `ifn?` — see register-resume-launcher!. A keyword or map
+  ;; is not an evaluator; reject it at registration, not as a confusing
+  ;; `:invalid-policy-evaluation` on the first re-evaluate.
+  (when-not (or (nil? evaluate) (fn? evaluate))
+    (throw (ex-info (messages/t :application/invalid-policy-evaluator)
+                    {:evaluator evaluate})))
+  (reset! process-policy-evaluator evaluate)
+  nil)
+
+(defn ^{:stratum 1} deregister-runner!
+  "Remove `workflow-id` from the live-runner registry. Idempotent."
+  [workflow-id]
+  (swap! live-runners dissoc (str workflow-id))
+  nil)
+
+(defn ^{:stratum 1} live-runner?
+  [workflow-id]
+  (contains? @live-runners (str workflow-id)))
+
+(defn ^{:stratum 1} live-intervention-stream
+  "Return the registered event stream for a workflow-targeted
+   intervention, or nil for process-global and unowned targets."
+  [event]
+  (when (= :workflow
+           (intervention/intervention-target-type
+            (:intervention/type event)))
+    (:event-stream
+     (get @live-runners (str (:intervention/target-id event))))))
+
+(defn- ^{:stratum 1} failure-message
+  [reason-code]
+  (messages/t (get failure-message-key-by-code
+                   reason-code
+                   :application/unknown-failure)))
+
+;; Lifecycle publication helpers
+(defn- ^{:stratum 1} advance!
+  "Apply lifecycle `step-fn` to `interv`, publish the transition, and
+   return the updated intervention. Returns nil when the lifecycle step
+   itself is rejected."
+  [stream interv step-fn & step-args]
+  (let [result (apply step-fn interv step-args)]
+    (if (transition-succeeded? result)
+      (let [updated (:intervention result)]
+        (consumer/publish-state-changed! stream updated)
+        updated)
+      nil)))
+
+(defn- ^{:stratum 1} safe-mode-effect!
   "Move the degradation manager for `verb` and return the readback the
    verification step asserts."
   [manager verb interv]
@@ -306,7 +271,65 @@
      :observed (reliability/degradation-mode manager)
      :expected (get expected-degradation-mode-by-verb verb)}))
 
-(defn- apply-safe-mode-verb!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} live-intervention-target?
+  "True when this process may claim `event` for application. Workflow
+   targets must belong to a registered live runner; process-global
+   intervention targets may be claimed by whichever serialized consumer
+   sees them first."
+  [event]
+  (if-not (intervention/valid-type? (:intervention/type event))
+    true
+    (let [canonical-target-type
+          (intervention/intervention-target-type (:intervention/type event))
+          declared-target-type (:intervention/target-type event)]
+      (or (and declared-target-type
+               (not= canonical-target-type declared-target-type))
+          (not= :workflow canonical-target-type)
+          (live-runner? (:intervention/target-id event))))))
+
+(defn- ^{:stratum 2} fail!
+  [stream interv reason-code]
+  (let [with-failure-code (assoc-in interv
+                                    [:intervention/details :failure/code]
+                                    reason-code)]
+    (when-let [failed (advance! stream
+                                with-failure-code
+                                intervention/fail
+                                (failure-message reason-code))]
+      failed)))
+
+(defn- ^{:stratum 2} apply-no-effect-verb!
+  "Verbs whose whole effect IS the supervisory record (Phase D mapping:
+   `supervisory-state only`). Dispatch → applied → verified with no
+   machine touch."
+  [stream dispatched verb]
+  (when-let [applied (advance! stream dispatched intervention/apply-result)]
+    (advance! stream applied intervention/verify {:verb verb})))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} verify-readback!
+  "Shared tail for every readback-verified mechanism: verify `applied`
+   when the mechanism's observable matches what the verb asked for, else
+   fail with `mismatch-code`. Returns nil when the lifecycle step is
+   itself rejected."
+  [stream applied readback mismatch-code]
+  (if (= (:observed readback) (:expected readback))
+    (advance! stream applied intervention/verify readback)
+    (fail! stream applied mismatch-code)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} apply-control-verb!
+  [stream dispatched entry verb]
+  (let [readback (control-state-effect! (:control-state entry) verb)]
+    (when-let [applied (advance! stream dispatched intervention/apply-result)]
+      (verify-readback! stream applied readback
+                        :control-state-readback-mismatch))))
+
+(defn- ^{:stratum 4} apply-safe-mode-verb!
   [stream dispatched manager verb interv]
   (if manager
     (let [readback (safe-mode-effect! manager verb interv)]
@@ -315,19 +338,7 @@
                           :safe-mode-readback-mismatch)))
     (fail! stream dispatched :no-degradation-manager)))
 
-(defn- apply-no-effect-verb!
-  "Verbs whose whole effect IS the supervisory record (Phase D mapping:
-   `supervisory-state only`). Dispatch → applied → verified with no
-   machine touch."
-  [stream dispatched verb]
-  (when-let [applied (advance! stream dispatched intervention/apply-result)]
-    (advance! stream applied intervention/verify {:verb verb})))
-
-(defn- resume-events-dir
-  [launcher]
-  (or (:events-dir launcher) (es/default-events-dir)))
-
-(defn- dispatch-resume!
+(defn- ^{:stratum 4} dispatch-resume!
   "Hand `plan` to the launcher, then read the run it reports back
    through the resume machinery itself. The readback is deliberately
    the resume component's view rather than the launcher's return value:
@@ -347,23 +358,7 @@
           (verify-readback! stream applied readback
                             :resume-readback-mismatch))))))
 
-(defn- apply-resume-verb!
-  "Rebuild resume state for a retry, then dispatch it.
-
-   Every rejection is typed and lands before the launcher runs — a
-   request naming a phase the run never reached must not be guessed
-   into a plan and started."
-  [stream dispatched launcher verb interv]
-  (if-not launcher
-    (fail! stream dispatched :no-resume-launcher)
-    (let [events-dir (resume-events-dir launcher)
-          prepared (mechanism/prepare-resume events-dir interv verb)]
-      (if-let [failure-code (:failure/code prepared)]
-        (fail! stream dispatched failure-code)
-        (dispatch-resume! stream dispatched launcher events-dir verb
-                          (:resume/plan prepared))))))
-
-(defn- apply-re-evaluate-verb!
+(defn- ^{:stratum 4} apply-re-evaluate-verb!
   "Run the registered evaluator, publish its verdict as a gate event,
    and read the materialized entity table back.
 
@@ -385,10 +380,28 @@
             (verify-readback! stream applied readback
                               :policy-evaluation-readback-mismatch)))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; The applier hook
+;------------------------------------------------------------------------------ Layer 5
 
-(defn apply-intervention!
+(defn- ^{:stratum 5} apply-resume-verb!
+  "Rebuild resume state for a retry, then dispatch it.
+
+   Every rejection is typed and lands before the launcher runs — a
+   request naming a phase the run never reached must not be guessed
+   into a plan and started."
+  [stream dispatched launcher verb interv]
+  (if-not launcher
+    (fail! stream dispatched :no-resume-launcher)
+    (let [events-dir (resume-events-dir launcher)
+          prepared (mechanism/prepare-resume events-dir interv verb)]
+      (if-let [failure-code (:failure/code prepared)]
+        (fail! stream dispatched failure-code)
+        (dispatch-resume! stream dispatched launcher events-dir verb
+                          (:resume/plan prepared))))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+;; The applier hook
+(defn ^{:stratum 6} apply-intervention!
   "Apply one `:approved` intervention. This is the `:apply!` hook the
    operator-event consumer invokes (Phase D D-3, mechanisms extended in
    D-3b).
