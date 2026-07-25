@@ -369,32 +369,42 @@
             remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
             https-url  (ssh->https-with-token remote-url github-token)]
         (if https-url
-          (do
-            (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
-            (let [retry     (push!)
-                  ;; Restore the original remote URL so the token never
-                  ;; persists in the worktree's git config.
-                  restore-r (exec! worktree-path
-                                   ["git" "remote" "set-url" "origin" remote-url])]
-              (if (result/succeeded? restore-r)
-                retry
-                ;; The restore failed — origin may still embed the token.
-                ;; Fail loud (even when the push itself succeeded) with the
-                ;; scrub command, rather than report a clean success while a
-                ;; credential is persisted in git config. When the retry push
-                ;; also failed, carry its error too so the root cause isn't
-                ;; lost.
-                (let [pushed? (result/succeeded? retry)]
-                  (result/shell-failure
-                   (if pushed?
-                     (msg/t :push/https-fallback-restore-failed
-                            {:remote-url    remote-url
-                             :restore-error (:error restore-r)})
-                     (msg/t :push/https-fallback-push-and-restore-failed
-                            {:remote-url    remote-url
-                             :push-error    (:error retry)
-                             :restore-error (:error restore-r)}))
-                   {:push-succeeded? pushed?})))))
+          (let [set-r (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])]
+            (if-not (result/succeeded? set-r)
+              ;; Could not repoint origin at the token URL, so the fallback
+              ;; never applied — origin is unchanged (still the original URL,
+              ;; no token persisted, nothing to scrub). Report both the
+              ;; original push failure and the set-url error rather than
+              ;; pushing over the unchanged remote and masking the reason.
+              (result/shell-failure
+               (msg/t :push/https-fallback-setup-failed
+                      {:push-error    (:error result)
+                       :set-url-error (:error set-r)})
+               {:push-succeeded? false})
+              (let [retry     (push!)
+                    ;; Restore the original remote URL so the token never
+                    ;; persists in the worktree's git config.
+                    restore-r (exec! worktree-path
+                                     ["git" "remote" "set-url" "origin" remote-url])]
+                (if (result/succeeded? restore-r)
+                  retry
+                  ;; The restore failed — origin may still embed the token.
+                  ;; Fail loud (even when the push itself succeeded) with the
+                  ;; scrub command, rather than report a clean success while a
+                  ;; credential is persisted in git config. When the retry push
+                  ;; also failed, carry its error too so the root cause isn't
+                  ;; lost.
+                  (let [pushed? (result/succeeded? retry)]
+                    (result/shell-failure
+                     (if pushed?
+                       (msg/t :push/https-fallback-restore-failed
+                              {:remote-url    remote-url
+                               :restore-error (:error restore-r)})
+                       (msg/t :push/https-fallback-push-and-restore-failed
+                              {:remote-url    remote-url
+                               :push-error    (:error retry)
+                               :restore-error (:error restore-r)}))
+                     {:push-succeeded? pushed?}))))))
           result)))))
 
 (defn- raw-force-push!
