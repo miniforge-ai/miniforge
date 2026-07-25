@@ -125,10 +125,6 @@
 (defn logs-dir []
   (str (home-dir) "/logs"))
 
-(defn commands-dir
-  ([] (str (home-dir) "/commands"))
-  ([workflow-id] (str (commands-dir) "/" workflow-id)))
-
 (defn dashboard-port-file []
   (str (home-dir) "/dashboard.port"))
 

@@ -80,19 +80,6 @@
           (dispatch-fn msg))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Command sending
-
-(defn send-command!
-  "Send a command to a running workflow via filesystem protocol.
-   Writes a .edn command file that the workflow runner's command poller picks up."
-  [workflow-id command]
-  (let [commands-dir (io/file (System/getProperty "user.home")
-                              ".miniforge" "commands" (str workflow-id))
-        cmd-file (io/file commands-dir (str (System/currentTimeMillis) ".edn"))]
-    (.mkdirs commands-dir)
-    (spit cmd-file (pr-str {:command command :timestamp (java.util.Date.)}))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; File tracking and polling
 
 (defn track-file!
@@ -147,7 +134,7 @@
   (reset! running? false)
   (.interrupt thread))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 3
 ;; Main subscription entry point
 
 (defn subscribe-to-files!
@@ -184,9 +171,6 @@
   (def cleanup (subscribe-to-files! (fn [msg] (swap! messages conj msg))))
 
   @messages
-
-  ;; Send a test command
-  (send-command! "test-workflow-id" :pause)
 
   (cleanup)
 

@@ -6,6 +6,12 @@
   :supervisory/intervention-state-changed
   "Intervention {intervention-id} -> {state}"
 
+  :operator-request/missing-fields
+  "Intervention request is missing required fields: {fields}"
+
+  :operator-request/invalid-workflow-target
+  "Workflow-targeted intervention has a non-UUID target id: {target-id}"
+
   :dependency/health-updated
   "Dependency {dependency-id} health -> {status}"
 

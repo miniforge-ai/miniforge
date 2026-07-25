@@ -25,7 +25,7 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.main.display :as main-display]
    [ai.miniforge.cli.workflow-runner.context :as context]
-   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
+   [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.cli.main.commands.resume :as sut]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.event-stream.interface :as es]
@@ -145,8 +145,11 @@
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_event-stream] nil)
                   correlator/attach! (fn [_event-stream] nil)
-                  dashboard/start-command-poller! (fn [_workflow-id _control-state]
-                                                    (fn [] nil))
+                  control/register-workflow-control! (fn [_workflow-id
+                                                         _control-state
+                                                         _event-stream]
+                                                       nil)
+                  control/release-workflow-control! (fn [_workflow-id] nil)
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
                   sut/load-workflow (fn [_workflow-type _workflow-version _opts]
@@ -196,7 +199,8 @@
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_] nil)
                   correlator/attach! (fn [_] nil)
-                  dashboard/start-command-poller! (fn [_ _] (fn [] nil))
+                  control/register-workflow-control! (fn [_ _ _] nil)
+                  control/release-workflow-control! (fn [_] nil)
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
                   sut/load-workflow (fn [& _]
@@ -247,8 +251,11 @@
                   es/create-event-stream (fn [] :event-stream)
                   supervisory/attach! (fn [_event-stream] nil)
                   correlator/attach! (fn [_event-stream] nil)
-                  dashboard/start-command-poller! (fn [_workflow-id _control-state]
-                                                    (fn [] nil))
+                  control/register-workflow-control! (fn [_workflow-id
+                                                         _control-state
+                                                         _event-stream]
+                                                       nil)
+                  control/release-workflow-control! (fn [_workflow-id] nil)
                   main-display/print-info (fn [& _] nil)
                   main-display/print-error (fn [& _] nil)
                   sut/load-workflow (fn [_workflow-type _workflow-version _opts]

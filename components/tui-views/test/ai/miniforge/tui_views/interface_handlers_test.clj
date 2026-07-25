@@ -24,7 +24,7 @@
    - handle-remediate-prs (remediation stub)
    - handle-decompose-pr (decomposition stub)
    - handle-cache-policy-result / handle-cache-risk-triage (caching side-effects)
-   - handle-control-action (filesystem command writing)
+   - handle-control-action (governed intervention requests)
    - handle-archive-workflows (workflow archival)
    - handle-fleet-risk-triage (LLM-based fleet risk triage)
    - handle-reload-workflow-detail (workflow detail reload)
@@ -40,6 +40,8 @@
    [ai.miniforge.tui-views.persistence.pr-cache :as pr-cache]
    [ai.miniforge.tui-views.persistence.github :as github]
    [ai.miniforge.policy-pack.interface :as policy-pack]
+   [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.llm.interface :as llm]))
 
 ;; ---------------------------------------------------------------------------- Helpers
@@ -180,19 +182,38 @@
 
 ;; ---------------------------------------------------------------------------- handle-control-action
 
-(deftest handle-control-action-returns-nil-test
-  (testing "returns nil (fire-and-forget side-effect)"
+(deftest handle-control-action-requests-an-intervention-test
+  (testing "writes a governed intervention request and reports nothing on success"
     (let [wf-id (random-uuid)
-          ;; We can't easily test file writing without temp dirs, but we can
-          ;; verify the function doesn't throw and returns nil.
-          ;; Using a temp dir via system property override.
-          tmp-dir (System/getProperty "java.io.tmpdir")
-          original-home (System/getProperty "user.home")]
-      (try
-        (System/setProperty "user.home" tmp-dir)
+          requests (atom [])]
+      (with-redefs [es/request-intervention!
+                    (fn [request]
+                      (swap! requests conj request)
+                      (assoc request :intervention/id (random-uuid)))]
         (is (nil? (iface/handle-control-action {:action :pause :workflow-id wf-id})))
-        (finally
-          (System/setProperty "user.home" original-home))))))
+        (let [request (first @requests)]
+          (is (= 1 (count @requests)))
+          (is (= :pause (:intervention/type request)))
+          (is (= :workflow (:intervention/target-type request)))
+          (is (= (str wf-id) (:intervention/target-id request)))
+          (is (= :tui (:intervention/request-source request))))))))
+
+(deftest handle-control-action-surfaces-write-failure-test
+  (testing "a throwing write becomes a side-effect error, not silence"
+    (with-redefs [es/request-intervention!
+                  (fn [_request] (throw (ex-info "operator dir unwritable" {})))]
+      (let [m (iface/handle-control-action {:action :cancel
+                                            :workflow-id (random-uuid)})]
+        (is (= :msg/side-effect-error (msg-type m)))))))
+
+(deftest handle-control-action-surfaces-anomaly-test
+  (testing "an anomaly from the writer becomes a side-effect error"
+    (with-redefs [es/request-intervention!
+                  (fn [_request]
+                    (anomaly/anomaly :invalid-input "missing fields" {}))]
+      (let [m (iface/handle-control-action {:action :resume
+                                            :workflow-id (random-uuid)})]
+        (is (= :msg/side-effect-error (msg-type m)))))))
 
 ;; ---------------------------------------------------------------------------- handle-archive-workflows
 

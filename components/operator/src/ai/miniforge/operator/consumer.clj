@@ -83,9 +83,14 @@
   "Request sources whose interventions are auto-approved: the operator
    surfaces where a human performed the originating gesture, so a
    second approval step would approve the approver (Phase D decision 4,
-   v1). Delegated sources (`:meta-agent`, `:api`) are NOT here — they
-   park at `:pending-human`."
-  #{:tui :native-app})
+   v1). `:cli` and `:dashboard` join `:tui` / `:native-app` with D-4,
+   which routes the console's and the CLI's pause/resume/cancel
+   controls through this channel — a click or a typed command is the
+   same human gesture, and parking them at `:pending-human` with no
+   approver UI would make the control silently do nothing. Delegated
+   sources (`:meta-agent`, `:api`) are NOT here — they park at
+   `:pending-human`."
+  #{:cli :dashboard :native-app :tui})
 
 (def ^:private cursor-file-name ".processed")
 (def ^:private consumer-lock-file-name ".consumer.lock")
