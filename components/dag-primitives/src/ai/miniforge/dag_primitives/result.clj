@@ -15,39 +15,39 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.result
   "Result monad — consistent ok/err patterns for pipeline and DAG operations."
   (:require [ai.miniforge.anomaly.interface :as anomaly]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Constructors
+;------------------------------------------------------------------------------ Layer 0
 
-(defn ok
+;; Constructors
+(defn ^{:stratum 0} ok
   "Success result.  Returns {:ok? true :data data}"
   [data]
   {:ok? true :data data})
 
-(defn err
+(defn ^{:stratum 0} err
   "Error result.  Returns {:ok? false :error {:code kw :message str [:data map]}}"
   ([code message]
    {:ok? false :error {:code code :message message}})
   ([code message data]
    {:ok? false :error {:code code :message message :data data}}))
 
-(defn ok?  [result] (:ok? result false))
-(defn err? [result] (not (:ok? result true)))
+(defn ^{:stratum 0} ok?  [result] (:ok? result false))
 
-;;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 0} err? [result] (not (:ok? result true)))
+
 ;; Extraction
-
-(defn- unwrap-error-message
+(defn- ^{:stratum 0} unwrap-error-message
   "Return an error message when it is a string; otherwise return the canonical fallback."
   [error]
   (let [message (get error :message)]
     (if (string? message) message "Unwrap called on error result")))
 
-(defn unwrap-anomaly
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} unwrap-anomaly
   "Extract data from a result. On ok, return the wrapped data; on err,
    return a canonical `:fault` anomaly carrying the error code, message,
    and any error data the result carried.
@@ -65,7 +65,7 @@
                          (:code error) (assoc :code (:code error))
                          (:data error) (assoc :error-data (:data error)))))))
 
-(defn unwrap
+(defn ^{:stratum 1} unwrap
   "Extract data from an ok result; throw on error.
 
    DEPRECATED: prefer [[unwrap-anomaly]], which returns an anomaly map
@@ -78,38 +78,34 @@
     (:data result)
     (throw (ex-info "Unwrap called on error result" {:error (:error result)}))))
 
-(defn unwrap-or
+(defn ^{:stratum 1} unwrap-or
   "Extract data from an ok result, or return default on error."
   [result default]
   (if (ok? result) (:data result) default))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Transforms
-
-(defn map-ok
+(defn ^{:stratum 1} map-ok
   "Apply f to the data inside an ok result; pass errors through."
   [result f]
   (if (ok? result) (ok (f (:data result))) result))
 
-(defn map-err
+(defn ^{:stratum 1} map-err
   "Apply f to the error inside an err result; pass oks through."
   [result f]
   (if (err? result) {:ok? false :error (f (:error result))} result))
 
-;;------------------------------------------------------------------------------ Layer 3
 ;; Combinators
-
-(defn and-then
+(defn ^{:stratum 1} and-then
   "Chain f (returns a result) onto an ok result; pass errors through."
   [result f]
   (if (ok? result) (f (:data result)) result))
 
-(defn or-else
+(defn ^{:stratum 1} or-else
   "Chain f (returns a result) onto an err result; pass oks through."
   [result f]
   (if (err? result) (f (:error result)) result))
 
-(defn collect
+(defn ^{:stratum 1} collect
   "Collect a seq of results into a result of seq.
    Returns the first error encountered, or ok of all data values."
   [results]
