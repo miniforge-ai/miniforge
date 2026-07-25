@@ -379,15 +379,22 @@
               (if (result/succeeded? restore-r)
                 retry
                 ;; The restore failed — origin may still embed the token.
-                ;; Fail loud (even if the push itself succeeded) with the
+                ;; Fail loud (even when the push itself succeeded) with the
                 ;; scrub command, rather than report a clean success while a
-                ;; credential is persisted in git config.
-                (result/shell-failure
-                 (str "Pushed via HTTPS token fallback but could not restore the "
-                      "origin remote URL; it may still embed the GitHub token. "
-                      "Scrub it: git remote set-url origin " remote-url ". "
-                      "Restore error: " (:error restore-r))
-                 {:push-succeeded? (result/succeeded? retry)}))))
+                ;; credential is persisted in git config. When the retry push
+                ;; also failed, carry its error too so the root cause isn't
+                ;; lost.
+                (let [pushed? (result/succeeded? retry)]
+                  (result/shell-failure
+                   (if pushed?
+                     (msg/t :push/https-fallback-restore-failed
+                            {:remote-url    remote-url
+                             :restore-error (:error restore-r)})
+                     (msg/t :push/https-fallback-push-and-restore-failed
+                            {:remote-url    remote-url
+                             :push-error    (:error retry)
+                             :restore-error (:error restore-r)}))
+                   {:push-succeeded? pushed?})))))
           result)))))
 
 (defn- raw-force-push!

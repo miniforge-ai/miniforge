@@ -265,6 +265,33 @@
           (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
           (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
 
+(deftest force-push-push-and-restore-both-fail-test
+  (testing "https retry push AND restore both fail → error carries both, push-succeeded? false"
+    (let [push-n (atom 0) seturl-n (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              (if (= 1 @push-n)
+                                {:exit 1 :out "" :err "ssh: denied"}
+                                {:exit 128 :out "" :err "remote rejected https"}))
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
+                          (do (swap! seturl-n inc)
+                              (if (= 1 @seturl-n)
+                                {:exit 0 :out "" :err ""}
+                                {:exit 1 :out "" :err "config locked"}))
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r (git/force-push! "/tmp/wt" "tok")]
+          (is (not (:success? r)))
+          (is (false? (:push-succeeded? r)) "records that the retry push also failed")
+          (is (re-find #"remote rejected https" (:error r)) "includes the retry push error")
+          (is (re-find #"config locked" (:error r)) "includes the restore error")
+          (is (re-find #"Scrub it" (:error r)) "still surfaces the scrub command"))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
