@@ -117,8 +117,11 @@
 
 (deftest ^{:stratum 0} workflow-cancel-cmd-reports-write-failure-test
   (testing "a failed request is reported, never reported as success"
+    ;; The failure path now also (shared/exit! …); stub it so the test
+    ;; asserts the message without the real System/exit killing the run.
     (with-redefs [es/request-intervention!
-                  (fn [_request] (throw (ex-info "disk full" {})))]
+                  (fn [_request] (throw (ex-info "disk full" {})))
+                  shared/exit! (fn [_] nil)]
       (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
         (is (.contains output "disk full"))
         (is (not (.contains output "Cancel signal sent")))))))
@@ -127,7 +130,8 @@
   (testing "an :invalid-input anomaly from the writer surfaces as an error"
     (with-redefs [es/request-intervention!
                   (fn [_request]
-                    (anomaly/anomaly :invalid-input "bad request" {}))]
+                    (anomaly/anomaly :invalid-input "bad request" {}))
+                  shared/exit! (fn [_] nil)]
       (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
         (is (.contains output "bad request"))
         (is (not (.contains output "Cancel signal sent")))))))
