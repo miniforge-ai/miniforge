@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.engine-test
   (:require
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.reliability.interface :as rel]
    [clojure.test :refer [deftest is]]))
 
-(defn- dependency-failure
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} dependency-failure
   [overrides]
   (merge {:failure/class :failure.class/external
           :failure/source :external-provider
@@ -32,7 +33,9 @@
           :failure/message "rate limit"}
          overrides))
 
-(deftest compute-cycle-emits-dependency-health-updated-events
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} compute-cycle-emits-dependency-health-updated-events
   (let [event-stream (stream/create-event-stream {:sinks []})
         engine (rel/create-engine event-stream {:tiers []})
         result (rel/compute-cycle! engine {:dependency/incidents [(dependency-failure {})]})
@@ -45,7 +48,7 @@
     (is (= :anthropic (:dependency/id dependency-event)))
     (is (= :degraded (:dependency/status dependency-event)))))
 
-(deftest compute-cycle-emits-dependency-recovered-events
+(deftest ^{:stratum 1} compute-cycle-emits-dependency-recovered-events
   (let [event-stream (stream/create-event-stream {:sinks []})
         engine (rel/create-engine event-stream {:tiers []})]
     (rel/compute-cycle! engine {:dependency/incidents (repeat 3 (dependency-failure {:dependency/class :outage}))})
@@ -57,4 +60,4 @@
           recovered-event (last recovered-events)]
       (is (= 1 (count recovered-events)))
       (is (= :healthy (:dependency/status recovered-event)))
-      (is (= :unavailable (:dependency/previous-status recovered-event)))))) 
+      (is (= :unavailable (:dependency/previous-status recovered-event))))))

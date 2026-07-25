@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.decision.spec
   "Malli schemas for canonical decision checkpoints and episodes.
    Layer 0: Enums and registry
@@ -27,28 +26,39 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums and registry
 
-(def source-kinds
+;; Enums and registry
+(def ^{:stratum 0} source-kinds
   [:control-plane-agent :loop-escalation :workflow-node :external-agent :policy-gate])
 
-(def authority-kinds
+(def ^{:stratum 0} authority-kinds
   [:human :system :model :rule :hybrid])
 
-(def checkpoint-statuses
+(def ^{:stratum 0} checkpoint-statuses
   [:pending :resolved :cancelled :expired])
 
-(def episode-statuses
+(def ^{:stratum 0} episode-statuses
   [:pending :resolved :completed])
 
-(def response-types
+(def ^{:stratum 0} response-types
   [:approve :approve-with-constraints :reject :choose-option
    :request-more-evidence :reroute :mark-delegable :always-escalate :defer])
 
-(def risk-tiers
+(def ^{:stratum 0} risk-tiers
   [:low :medium :high :critical])
 
-(def registry
+(defn ^{:stratum 0} valid?
+  [schema value]
+  (m/validate schema value))
+
+(defn ^{:stratum 0} explain
+  [schema value]
+  (some-> (m/explain schema value)
+          me/humanize))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} registry
   "Malli registry for decision types."
   {;; Common identifiers
    :id/uuid uuid?
@@ -63,16 +73,27 @@
    :response/type (into [:enum] response-types)
    :risk/tier (into [:enum] risk-tiers)})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Canonical model
+(defn ^{:stratum 1} validate-result
+  "Return `value` when it validates against `schema`, else return an anomaly."
+  [schema value]
+  (if (valid? schema value)
+    value
+    (anomaly/anomaly :invalid-input
+                     "Decision schema validation failed"
+                     {:schema schema
+                      :value value
+                      :errors (explain schema value)})))
 
-(def Alternative
+;------------------------------------------------------------------------------ Layer 2
+
+;; Canonical model
+(def ^{:stratum 2} Alternative
   "Schema for one proposed alternative."
   [:map {:registry registry}
    [:id any?]
    [:summary :id/string]])
 
-(def DecisionSource
+(def ^{:stratum 2} DecisionSource
   "Schema for checkpoint source metadata."
   [:map {:registry registry}
    [:kind :source/kind]
@@ -81,14 +102,64 @@
    [:origin-run-id {:optional true} :id/string]
    [:loop-id {:optional true} :id/uuid]])
 
-(def DecisionTask
+(def ^{:stratum 2} DecisionTask
   "Schema for task metadata attached to a checkpoint."
   [:map {:registry registry}
    [:kind keyword?]
    [:goal {:optional true} :id/string]
    [:task-id {:optional true} :id/uuid]])
 
-(def DecisionProposal
+(def ^{:stratum 2} DecisionUncertainty
+  "Schema for uncertainty information."
+  [:map {:registry registry}
+   [:class keyword?]
+   [:reason :id/string]
+   [:agent-confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
+
+(def ^{:stratum 2} DecisionRisk
+  "Schema for risk data."
+  [:map {:registry registry}
+   [:tier :risk/tier]
+   [:critical-paths {:optional true} [:vector :id/string]]
+   [:requires-owner-review? {:optional true} boolean?]])
+
+(def ^{:stratum 2} ControlPlaneContext
+  [:map {:registry registry}
+   [:context/text {:optional true} :id/string]
+   [:context/deadline {:optional true} :common/timestamp]
+   [:context/tags {:optional true} [:set keyword?]]])
+
+(def ^{:stratum 2} LoopEscalationContext
+  [:map {:registry registry}
+   [:loop/iteration int?]
+   [:loop/state keyword?]
+   [:loop/termination [:map [:reason keyword?]]]
+   [:task/type {:optional true} keyword?]
+   [:error-count int?]])
+
+(def ^{:stratum 2} DecisionResponse
+  "Schema for the structured supervision response."
+  [:map {:registry registry}
+   [:type :response/type]
+   [:value {:optional true} any?]
+   [:constraints {:optional true} [:vector :id/string]]
+   [:rationale {:optional true} :id/string]
+   [:authority-role :authority/kind]])
+
+(defn ^{:stratum 2} validate
+  "Boundary wrapper around the canonical anomaly-returning
+   [[validate-result]]. Returns `value` on success and throws only for
+   legacy callers. Prefer `validate-result` in non-boundary code."
+  [schema value]
+  (let [result (validate-result schema value)]
+    (if (anomaly/anomaly? result)
+      (throw (ex-info (:anomaly/message result)
+                      (:anomaly/data result)))
+      result)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} DecisionProposal
   "Schema for the proposed action under judgment."
   [:map {:registry registry}
    [:action-type keyword?]
@@ -98,47 +169,12 @@
    [:files {:optional true} [:vector :id/string]]
    [:diff-summary {:optional true} :id/string]])
 
-(def DecisionUncertainty
-  "Schema for uncertainty information."
-  [:map {:registry registry}
-   [:class keyword?]
-   [:reason :id/string]
-   [:agent-confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
-
-(def DecisionRisk
-  "Schema for risk data."
-  [:map {:registry registry}
-   [:tier :risk/tier]
-   [:critical-paths {:optional true} [:vector :id/string]]
-   [:requires-owner-review? {:optional true} boolean?]])
-
-(def ControlPlaneContext
-  [:map {:registry registry}
-   [:context/text {:optional true} :id/string]
-   [:context/deadline {:optional true} :common/timestamp]
-   [:context/tags {:optional true} [:set keyword?]]])
-
-(def LoopEscalationContext
-  [:map {:registry registry}
-   [:loop/iteration int?]
-   [:loop/state keyword?]
-   [:loop/termination [:map [:reason keyword?]]]
-   [:task/type {:optional true} keyword?]
-   [:error-count int?]])
-
-(def DecisionContext
+(def ^{:stratum 3} DecisionContext
   [:or ControlPlaneContext LoopEscalationContext])
 
-(def DecisionResponse
-  "Schema for the structured supervision response."
-  [:map {:registry registry}
-   [:type :response/type]
-   [:value {:optional true} any?]
-   [:constraints {:optional true} [:vector :id/string]]
-   [:rationale {:optional true} :id/string]
-   [:authority-role :authority/kind]])
+;------------------------------------------------------------------------------ Layer 4
 
-(def DecisionCheckpoint
+(def ^{:stratum 4} DecisionCheckpoint
   [:map {:registry registry}
    [:checkpoint/id :id/uuid]
    [:checkpoint/status :checkpoint/status]
@@ -153,7 +189,9 @@
    [:context {:optional true} DecisionContext]
    [:response {:optional true} DecisionResponse]])
 
-(def DecisionEpisode
+;------------------------------------------------------------------------------ Layer 5
+
+(def ^{:stratum 5} DecisionEpisode
   "Normalized decision episode. The first implementation captures
    pending and resolved episodes before downstream outcome mining."
   [:map {:registry registry}
@@ -179,34 +217,3 @@
                           :summary "Choose one"}})
 
   :leave-this-here)
-
-(defn valid?
-  [schema value]
-  (m/validate schema value))
-
-(defn explain
-  [schema value]
-  (some-> (m/explain schema value)
-          me/humanize))
-
-(defn validate-result
-  "Return `value` when it validates against `schema`, else return an anomaly."
-  [schema value]
-  (if (valid? schema value)
-    value
-    (anomaly/anomaly :invalid-input
-                     "Decision schema validation failed"
-                     {:schema schema
-                      :value value
-                      :errors (explain schema value)})))
-
-(defn validate
-  "Boundary wrapper around the canonical anomaly-returning
-   [[validate-result]]. Returns `value` on success and throws only for
-   legacy callers. Prefer `validate-result` in non-boundary code."
-  [schema value]
-  (let [result (validate-result schema value)]
-    (if (anomaly/anomaly? result)
-      (throw (ex-info (:anomaly/message result)
-                      (:anomaly/data result)))
-      result)))

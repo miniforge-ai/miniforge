@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.dependency-health-test
   (:require
    [clojure.test :refer [deftest is]]
    [ai.miniforge.reliability.interface :as rel]))
 
-(defn- dependency-failure
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} dependency-failure
   [overrides]
   (merge {:failure/class :failure.class/external
           :failure/source :external-provider
@@ -31,7 +32,9 @@
           :failure/message "rate limit"}
          overrides))
 
-(deftest provider-rate-limits-project-degraded-health
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} provider-rate-limits-project-degraded-health
   (let [rolling-state (rel/apply-dependency-signals {}
                                              [(dependency-failure {})]
                                              [])
@@ -41,7 +44,7 @@
     (is (= :provider (:dependency/kind anthropic-health)))
     (is (= 1 (:dependency/failure-count anthropic-health)))))
 
-(deftest repeated-outages-cross-unavailable-threshold
+(deftest ^{:stratum 1} repeated-outages-cross-unavailable-threshold
   (let [incidents (repeat 3 (dependency-failure {:dependency/class :outage
                                                  :failure/message "provider outage"}))
         rolling-state (rel/apply-dependency-signals {} incidents [])
@@ -50,7 +53,7 @@
     (is (= :unavailable (:dependency/status anthropic-health)))
     (is (= 3 (:dependency/failure-count anthropic-health)))))
 
-(deftest environment-misconfiguration-is-tracked-separately
+(deftest ^{:stratum 1} environment-misconfiguration-is-tracked-separately
   (let [rolling-state (rel/apply-dependency-signals
                        {}
                        [(dependency-failure {:failure/source :user-env
@@ -64,7 +67,7 @@
     (is (= :operator-action-required (:dependency/status env-health)))
     (is (= :environment (:dependency/kind env-health)))))
 
-(deftest recovery-resets-health-to-healthy
+(deftest ^{:stratum 1} recovery-resets-health-to-healthy
   (let [rolling-state (rel/apply-dependency-signals
                        {}
                        [(dependency-failure {:dependency/class :outage})]

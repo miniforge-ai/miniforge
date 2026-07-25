@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.report
   "EDN delta report and markdown work-spec writers.
 
@@ -25,14 +24,14 @@
             [clojure.pprint  :as pprint]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Path helpers
 
-(defn- report-path
+;; Path helpers
+(defn- ^{:stratum 0} report-path
   "Return the absolute path for the EDN compliance report."
   [repo-path]
   (str repo-path "/.miniforge/compliance-report.edn"))
 
-(defn- work-spec-path
+(defn- ^{:stratum 0} work-spec-path
   "Return the absolute path for the dated markdown work spec."
   [repo-path]
   (let [date-str (.format
@@ -40,15 +39,15 @@
                   (java.time.LocalDate/now))]
     (str repo-path "/docs/compliance/" date-str "-compliance-delta.md")))
 
-(defn- ensure-parent!
+(defn- ^{:stratum 0} ensure-parent!
   "Create parent directories for a file path if they don't exist."
   [file-path]
   (-> (io/file file-path) .getParentFile .mkdirs))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Report writers
 
-(defn write-report!
+;; Report writers
+(defn ^{:stratum 1} write-report!
   "Write EDN delta report to .miniforge/compliance-report.edn.
 
    Arguments:
@@ -62,7 +61,7 @@
     (spit path (with-out-str (pprint/pprint delta-report)))
     path))
 
-(defn write-work-spec!
+(defn ^{:stratum 1} write-work-spec!
   "Write markdown work spec to docs/compliance/YYYY-MM-DD-compliance-delta.md.
 
    Arguments:

@@ -15,35 +15,34 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.schema
   "Malli schemas for reliability data structures per N1 §5.5.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums
 
-(def WorkflowTier
+;; Enums
+(def ^{:stratum 0} WorkflowTier
   [:enum :best-effort :standard :critical])
 
-(def SliName
+(def ^{:stratum 0} SliName
   [:enum :SLI-1 :SLI-2 :SLI-3 :SLI-4 :SLI-5 :SLI-6 :SLI-7])
 
-(def Window
+(def ^{:stratum 0} Window
   [:enum :1h :7d :30d])
 
-(def DegradationMode
+(def ^{:stratum 0} DegradationMode
   [:enum :nominal :degraded :safe-mode])
 
-(def DependencyKind
+(def ^{:stratum 0} DependencyKind
   [:enum :provider :platform :environment])
 
-(def DependencyHealthStatus
+(def ^{:stratum 0} DependencyHealthStatus
   [:enum :healthy :degraded :unavailable :misconfigured :operator-action-required])
 
-;------------------------------------------------------------------------------ Layer 0
-;; Records
+;------------------------------------------------------------------------------ Layer 1
 
-(def SliResult
+;; Records
+(def ^{:stratum 1} SliResult
   [:map
    [:sli/name SliName]
    [:sli/value :double]
@@ -51,7 +50,7 @@
    [:sli/tier {:optional true} WorkflowTier]
    [:sli/dimensions {:optional true} :map]])
 
-(def SloCheck
+(def ^{:stratum 1} SloCheck
   [:map
    [:breached? :boolean]
    [:sli/name SliName]
@@ -60,7 +59,7 @@
    [:slo/tier WorkflowTier]
    [:slo/window Window]])
 
-(def ErrorBudget
+(def ^{:stratum 1} ErrorBudget
   [:map
    [:error-budget/tier WorkflowTier]
    [:error-budget/sli SliName]
@@ -69,7 +68,7 @@
    [:error-budget/burn-rate :double]
    [:error-budget/computed-at inst?]])
 
-(def DependencyHealth
+(def ^{:stratum 1} DependencyHealth
   [:map
    [:dependency/id keyword?]
    [:dependency/source keyword?]

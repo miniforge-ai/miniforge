@@ -15,17 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.plan-test
   "Tests for the plan phase."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [ai.miniforge.compliance-scanner.plan :as plan]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Test fixtures
-
-(defn- make-violation
+(defn- ^{:stratum 0} make-violation
   [rule-id rule-category file line auto-fixable?]
   {:rule/id       rule-id
    :rule/category rule-category
@@ -37,13 +37,15 @@
    :auto-fixable? auto-fixable?
    :rationale     "test"})
 
-(def ^:private file-a "components/foo/src/core.clj")
-(def ^:private file-b "components/bar/src/core.clj")
+(def ^{:stratum 0} ^:private file-a "components/foo/src/core.clj")
+
+(def ^{:stratum 0} ^:private file-b "components/bar/src/core.clj")
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ---------------------------------------------------------------------------
 ;; DAG topology
-
-(deftest same-file-different-rules-creates-deps
+(deftest ^{:stratum 1} same-file-different-rules-creates-deps
   (testing "two rules on the same file produce an intra-file dep edge"
     (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
                  (make-violation :std/header-copyright "810" file-a 1  true)]
@@ -60,7 +62,7 @@
         ;; 810 depends on 210
         (is (contains? (:task/deps task-810) (:task/id task-210)))))))
 
-(deftest different-files-have-no-deps
+(deftest ^{:stratum 1} different-files-have-no-deps
   (testing "violations on different files produce tasks with no cross-file deps"
     (let [viols [(make-violation :std/clojure "210" file-a 10 true)
                  (make-violation :std/clojure "210" file-b 5  true)]
@@ -69,7 +71,7 @@
       ;; Each task has no deps (separate files)
       (is (every? #(empty? (:task/deps %)) dag-tasks)))))
 
-(deftest single-violation-has-no-deps
+(deftest ^{:stratum 1} single-violation-has-no-deps
   (testing "a plan with one violation produces a task with an empty dep set"
     (let [viols [(make-violation :std/datever "730" file-a 3 true)]
           {:keys [dag-tasks]} (plan/plan viols ".")]
@@ -78,8 +80,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Summary statistics
-
-(deftest summary-stats-are-correct
+(deftest ^{:stratum 1} summary-stats-are-correct
   (testing "plan summary counts match the violation list"
     (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
                  (make-violation :std/header-copyright "810" file-a 1  true)
@@ -94,8 +95,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Markdown work spec
-
-(deftest work-spec-contains-expected-sections
+(deftest ^{:stratum 1} work-spec-contains-expected-sections
   (testing "work spec markdown includes all required section headers"
     (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
                  (make-violation :std/header-copyright "810" file-b 1  false)]
@@ -106,7 +106,7 @@
       (is (str/includes? work-spec "## Needs-Review Summary"))
       (is (str/includes? work-spec "## Execution Instructions")))))
 
-(deftest work-spec-lists-rule-categories
+(deftest ^{:stratum 1} work-spec-lists-rule-categories
   (testing "work spec includes each rule category in section headers"
     (let [viols [(make-violation :std/clojure  "210" file-a 10 true)
                  (make-violation :std/datever  "730" file-b 3  true)]
@@ -114,7 +114,7 @@
       (is (str/includes? work-spec "210 —"))
       (is (str/includes? work-spec "730 —")))))
 
-(deftest work-spec-no-violations-shows-no-review-message
+(deftest ^{:stratum 1} work-spec-no-violations-shows-no-review-message
   (testing "work spec says no violations need review when all are auto-fixable"
     (let [viols [(make-violation :std/clojure "210" file-a 10 true)]
           {:keys [work-spec]} (plan/plan viols ".")]
@@ -122,8 +122,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Task structure
-
-(deftest tasks-have-required-keys
+(deftest ^{:stratum 1} tasks-have-required-keys
   (testing "every PlanTask has all required keys"
     (let [viols [(make-violation :std/clojure          "210" file-a 10 true)
                  (make-violation :std/header-copyright "810" file-b 1  false)]

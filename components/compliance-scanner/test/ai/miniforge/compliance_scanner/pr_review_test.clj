@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.pr-review-test
   "Tests for the `pr-review` Layer 1 entry point (N13 §2.2).
 
@@ -30,7 +29,9 @@
             [ai.miniforge.compliance-scanner.scan      :as scan-impl]
             [ai.miniforge.compliance-scanner.execute   :as execute-impl]))
 
-(def ^:private one-violation
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private one-violation
   {:rule/id        :ai.miniforge.standards/example-rule
    :rule/category  "code-quality"
    :rule/title     "Example rule"
@@ -41,13 +42,7 @@
    :auto-fixable?  true
    :rationale      "test fixture"})
 
-(def ^:private fake-scan-result
-  {:violations       [one-violation]
-   :rules-scanned    [:ai.miniforge.standards/example-rule]
-   :files-scanned    1
-   :scan-duration-ms 1})
-
-(deftest base-ref-required
+(deftest ^{:stratum 0} base-ref-required
   (testing "missing :base-ref throws with anomaly tag"
     (let [thrown (try
                    (scanner/pr-review "/nonexistent" ".standards" {})
@@ -61,7 +56,50 @@
                  (scanner/pr-review "/nonexistent" ".standards"
                                     {:base-ref ""})))))
 
-(deftest scan-invoked-with-since
+(deftest ^{:stratum 0} empty-scan-returns-empty-comments
+  (testing "no violations → empty comments vector + zeroed summary"
+    (with-redefs [scan-impl/scan-repo (fn [_ _ _] {:violations       []
+                                                   :rules-scanned    []
+                                                   :files-scanned    0
+                                                   :scan-duration-ms 1})
+                  execute-impl/execute! (fn [& _] (throw (ex-info "should not be called" {})))]
+      (let [{:pr-review/keys [comments summary]}
+            (scanner/pr-review "/some/repo" ".standards"
+                               {:base-ref "origin/main"})]
+        (is (= [] comments))
+        (is (zero? (:total summary)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private fake-scan-result
+  {:violations       [one-violation]
+   :rules-scanned    [:ai.miniforge.standards/example-rule]
+   :files-scanned    1
+   :scan-duration-ms 1})
+
+(deftest ^{:stratum 1} summary-counts
+  (testing "summary aggregates total / auto-fixable / needs-review / files / rules"
+    (let [v1 (assoc one-violation :file "a.clj" :rule/id :rule/a :auto-fixable? true)
+          v2 (assoc one-violation :file "b.clj" :rule/id :rule/b :auto-fixable? false)
+          v3 (assoc one-violation :file "a.clj" :rule/id :rule/a :auto-fixable? true)]
+      (with-redefs [scan-impl/scan-repo (fn [_ _ _] {:violations       [v1 v2 v3]
+                                                     :rules-scanned    [:rule/a :rule/b]
+                                                     :files-scanned    2
+                                                     :scan-duration-ms 1})
+                    classify-impl/classify-violations identity
+                    execute-impl/execute! (fn [& _] (throw (ex-info "should not be called" {})))]
+        (let [{:pr-review/keys [summary]}
+              (scanner/pr-review "/some/repo" ".standards"
+                                 {:base-ref "origin/main"})]
+          (is (= 3 (:total summary)))
+          (is (= 2 (:auto-fixable summary)))
+          (is (= 1 (:needs-review summary)))
+          (is (= 2 (:files-affected summary)))
+          (is (= 2 (:rules-violated summary))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} scan-invoked-with-since
   (testing "pr-review forwards :base-ref to scan as :since and never to execute!"
     (let [scan-calls    (atom [])
           execute-calls (atom 0)]
@@ -93,7 +131,7 @@
                                  :comment/payload :violation/pack-id])))
           (is (= 1 (get-in result [:pr-review/summary :total]))))))))
 
-(deftest pack-info-default
+(deftest ^{:stratum 2} pack-info-default
   (testing "no :pack-info supplied → default pack-id/version filled in"
     (with-redefs [scan-impl/scan-repo (fn [_ _ _] fake-scan-result)
                   execute-impl/execute! (fn [& _] (throw (ex-info "should not be called" {})))]
@@ -104,36 +142,3 @@
                                          :comment/payload :violation/pack-id])))
         (is (= "0.0.0"   (get-in result [:pr-review/comments 0
                                          :comment/payload :violation/pack-version])))))))
-
-(deftest summary-counts
-  (testing "summary aggregates total / auto-fixable / needs-review / files / rules"
-    (let [v1 (assoc one-violation :file "a.clj" :rule/id :rule/a :auto-fixable? true)
-          v2 (assoc one-violation :file "b.clj" :rule/id :rule/b :auto-fixable? false)
-          v3 (assoc one-violation :file "a.clj" :rule/id :rule/a :auto-fixable? true)]
-      (with-redefs [scan-impl/scan-repo (fn [_ _ _] {:violations       [v1 v2 v3]
-                                                     :rules-scanned    [:rule/a :rule/b]
-                                                     :files-scanned    2
-                                                     :scan-duration-ms 1})
-                    classify-impl/classify-violations identity
-                    execute-impl/execute! (fn [& _] (throw (ex-info "should not be called" {})))]
-        (let [{:pr-review/keys [summary]}
-              (scanner/pr-review "/some/repo" ".standards"
-                                 {:base-ref "origin/main"})]
-          (is (= 3 (:total summary)))
-          (is (= 2 (:auto-fixable summary)))
-          (is (= 1 (:needs-review summary)))
-          (is (= 2 (:files-affected summary)))
-          (is (= 2 (:rules-violated summary))))))))
-
-(deftest empty-scan-returns-empty-comments
-  (testing "no violations → empty comments vector + zeroed summary"
-    (with-redefs [scan-impl/scan-repo (fn [_ _ _] {:violations       []
-                                                   :rules-scanned    []
-                                                   :files-scanned    0
-                                                   :scan-duration-ms 1})
-                  execute-impl/execute! (fn [& _] (throw (ex-info "should not be called" {})))]
-      (let [{:pr-review/keys [comments summary]}
-            (scanner/pr-review "/some/repo" ".standards"
-                               {:base-ref "origin/main"})]
-        (is (= [] comments))
-        (is (zero? (:total summary)))))))

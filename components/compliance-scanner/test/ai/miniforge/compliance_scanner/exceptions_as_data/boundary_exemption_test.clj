@@ -15,20 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.boundary-exemption-test
   "Boundary-namespace exemption: throws in cli/web/http/mcp/etc. are skipped."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(deftest cli-namespace-is-boundary
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} cli-namespace-is-boundary
   (testing "*.cli.* and *-main namespaces are boundaries"
     (is (true?  (exc/boundary-namespace? 'ai.miniforge.cli.main)))
     (is (true?  (exc/boundary-namespace? 'ai.miniforge.cli.commands.scan)))
     (is (true?  (exc/boundary-namespace? 'ai.miniforge.foo.bar-main)))))
 
-(deftest http-and-web-namespaces-are-boundaries
+(deftest ^{:stratum 0} http-and-web-namespaces-are-boundaries
   (testing "explicit `http` and `web` segments are boundaries"
     (is (true? (exc/boundary-namespace? 'ai.miniforge.foo.http.handlers)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.web.handlers))))
@@ -38,7 +39,7 @@
     ;; — its core/impl namespaces still need to return anomalies internally.
     (is (false? (exc/boundary-namespace? 'ai.miniforge.bb-data-plane-http.core)))))
 
-(deftest mcp-listener-consumer-and-boundary-namespaces
+(deftest ^{:stratum 0} mcp-listener-consumer-and-boundary-namespaces
   (testing "the explicit boundary segments are detected"
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp.bridge)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.kafka.consumer)))
@@ -46,24 +47,24 @@
     (is (true? (exc/boundary-namespace? 'ai.miniforge.events.listeners)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.foo.boundary.in)))))
 
-(deftest dashed-mcp-base-is-boundary
+(deftest ^{:stratum 0} dashed-mcp-base-is-boundary
   (testing "the MCP context-server base is an external protocol boundary"
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.tools)))
     (is (true? (exc/boundary-namespace? 'ai.miniforge.mcp-context-server.server)))))
 
-(deftest response-anomaly-bridge-is-boundary
+(deftest ^{:stratum 0} response-anomaly-bridge-is-boundary
   (testing "the canonical thrown-anomaly bridge is an explicit boundary"
     (is (true? (exc/boundary-namespace? 'ai.miniforge.response.anomaly)))
     (is (false? (exc/boundary-namespace? 'ai.miniforge.response.translate)))))
 
-(deftest core-namespaces-are-not-boundaries
+(deftest ^{:stratum 0} core-namespaces-are-not-boundaries
   (testing "ordinary component core namespaces are not boundaries"
     (is (false? (exc/boundary-namespace? 'ai.miniforge.agent.planner)))
     (is (false? (exc/boundary-namespace? 'ai.miniforge.workflow.runner)))
     (is (false? (exc/boundary-namespace? 'ai.miniforge.config.user)))
     (is (false? (exc/boundary-namespace? 'ai.miniforge.some-mcp-ish.core)))))
 
-(deftest boundary-files-yield-zero-violations
+(deftest ^{:stratum 0} boundary-files-yield-zero-violations
   (testing "throws inside a CLI namespace produce no violations"
     (let [src "(ns ai.miniforge.cli.main)
               (defn -main [& _]
@@ -80,7 +81,7 @@
       (is (true? boundary?))
       (is (zero? (count violations))))))
 
-(deftest response-anomaly-bridge-yields-zero-violations
+(deftest ^{:stratum 0} response-anomaly-bridge-yields-zero-violations
   (testing "throw+ inside response.anomaly is the canonical escalation bridge"
     (let [src "(ns ai.miniforge.response.anomaly)
               (defn throw-anomaly! [a]

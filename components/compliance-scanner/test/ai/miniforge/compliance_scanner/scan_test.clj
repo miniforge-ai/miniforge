@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.scan-test
   "Tests for the scan phase.
 
@@ -25,24 +24,70 @@
             [clojure.java.io :as io]
             [ai.miniforge.compliance-scanner.scan :as scan]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Helpers
-
-(def ^:private d210-pattern
+(def ^{:stratum 0} ^:private d210-pattern
   "Canonical Dewey 210 detection pattern from .standards/languages/clojure.mdc."
   (re-pattern "\\(or \\((:[a-zA-Z][a-zA-Z0-9?!_*+<>-]*)\\s+([a-zA-Z][a-zA-Z0-9_-]*)\\)\\s+((?:nil|true|false|\"[^\"]*\"|-?\\d+(?:\\.\\d+)?|\\[\\]|\\{\\}|:[a-zA-Z][a-zA-Z0-9_-]*))\\)"))
 
-(defn- matches? [pattern s]
+(defn- ^{:stratum 0} matches? [pattern s]
   (boolean (re-find pattern s)))
 
-(def ^:private test-pack
+(def ^{:stratum 0} ^:private test-pack
   "Pre-compiled pack fixture for integration tests."
   (edn/read-string (slurp (io/resource "test-fixtures/clojure-210-pack.edn"))))
 
 ;; ---------------------------------------------------------------------------
-;; Dewey 210 regex tests
+;; Integration: scan a temp directory
+(defn- ^{:stratum 0} write-temp-file!
+  "Write content to a temporary file and return its java.io.File."
+  [dir relative-path content]
+  (let [f (io/file dir relative-path)]
+    (io/make-parents f)
+    (spit f content)
+    f))
 
-(deftest dewey-210-matches-simple-literal-defaults
+(defn- ^{:stratum 0} run-in-dir!
+  "Run a subprocess in `dir`, clearing inherited Git hook env vars."
+  [dir & cmd]
+  (let [pb       (doto (ProcessBuilder. ^java.util.List (vec cmd))
+                   (.directory dir)
+                   (.inheritIO))
+        env      (.environment pb)
+        git-keys (filterv #(re-find #"^GIT_" %) (keys env))]
+    (doseq [k git-keys] (.remove env k))
+    (let [exit (.waitFor (.start pb))]
+      (when-not (zero? exit)
+        (throw (ex-info "Test subprocess failed"
+                        {:cmd cmd :dir (.getAbsolutePath dir) :exit exit})))
+      exit)))
+
+;; ---------------------------------------------------------------------------
+;; safe-git-ref? validation
+(deftest ^{:stratum 0} safe-git-ref-allows-well-formed-refs
+  (testing "common git ref forms are accepted"
+    (is (#'scan/safe-git-ref? "origin/main"))
+    (is (#'scan/safe-git-ref? "HEAD~1"))
+    (is (#'scan/safe-git-ref? "abc123def456"))
+    (is (#'scan/safe-git-ref? "v1.0.0-rc1"))
+    (is (#'scan/safe-git-ref? "refs/heads/feature-branch"))))
+
+(deftest ^{:stratum 0} safe-git-ref-rejects-unsafe-values
+  (testing "values that could inject git options or shell constructs are rejected"
+    (is (not (#'scan/safe-git-ref? "; rm -rf /")))
+    (is (not (#'scan/safe-git-ref? "--exec=cmd")))
+    (is (not (#'scan/safe-git-ref? "-C /malicious/path")))
+    (is (not (#'scan/safe-git-ref? "ref with spaces")))
+    (is (not (#'scan/safe-git-ref? "")))
+    (is (not (#'scan/safe-git-ref? nil)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ---------------------------------------------------------------------------
+;; Dewey 210 regex tests
+(deftest ^{:stratum 1} dewey-210-matches-simple-literal-defaults
   (testing "integer default"
     (is (matches? d210-pattern "(or (:timeout m) 5000)")))
   (testing "nil default"
@@ -58,12 +103,12 @@
   (testing "empty map default"
     (is (matches? d210-pattern "(or (:opts m) {})"))))
 
-(deftest dewey-210-does-not-match-dual-key-coalesce
+(deftest ^{:stratum 1} dewey-210-does-not-match-dual-key-coalesce
   (testing "two-key coalesce (dual-key pattern — must be left alone)"
     ;; (or (:k1 m) (:k2 m) default) should NOT match
     (is (not (matches? d210-pattern "(or (:k1 m) (:k2 m) :fallback)")))))
 
-(deftest dewey-210-does-not-match-computed-default
+(deftest ^{:stratum 1} dewey-210-does-not-match-computed-default
   (testing "computed default via function call"
     ;; (or (:k m) (some-fn)) — default is not a literal
     (is (not (matches? d210-pattern "(or (:k m) (some-fn))"))))
@@ -72,33 +117,7 @@
     ;; Note: our pattern requires a literal, so symbol defaults won't match.
     (is (not (matches? d210-pattern "(or (:k m) my-var)")))))
 
-;; ---------------------------------------------------------------------------
-;; Integration: scan a temp directory
-
-(defn- write-temp-file!
-  "Write content to a temporary file and return its java.io.File."
-  [dir relative-path content]
-  (let [f (io/file dir relative-path)]
-    (io/make-parents f)
-    (spit f content)
-    f))
-
-(defn- run-in-dir!
-  "Run a subprocess in `dir`, clearing inherited Git hook env vars."
-  [dir & cmd]
-  (let [pb       (doto (ProcessBuilder. ^java.util.List (vec cmd))
-                   (.directory dir)
-                   (.inheritIO))
-        env      (.environment pb)
-        git-keys (filterv #(re-find #"^GIT_" %) (keys env))]
-    (doseq [k git-keys] (.remove env k))
-    (let [exit (.waitFor (.start pb))]
-      (when-not (zero? exit)
-        (throw (ex-info "Test subprocess failed"
-                        {:cmd cmd :dir (.getAbsolutePath dir) :exit exit})))
-      exit)))
-
-(deftest scan-repo-detects-210-in-temp-dir
+(deftest ^{:stratum 1} scan-repo-detects-210-in-temp-dir
   (testing "scan-repo finds Dewey 210 violations in a synthetic repo"
     (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
                                  (str "cs-scan-test-" (System/currentTimeMillis)))
@@ -151,7 +170,7 @@
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
 
-(deftest scan-repo-excludes-fatal-only-exceptions-as-data-rows
+(deftest ^{:stratum 1} scan-repo-excludes-fatal-only-exceptions-as-data-rows
   (testing "top-level review output keeps cleanup-needed rows actionable"
     (let [tmp-dir (doto (io/file (System/getProperty "java.io.tmpdir")
                                  (str "cs-exc-filter-test-" (System/currentTimeMillis)))
@@ -188,26 +207,6 @@
         (finally
           (doseq [f (reverse (file-seq tmp-dir))]
             (.delete f)))))))
-
-;; ---------------------------------------------------------------------------
-;; safe-git-ref? validation
-
-(deftest safe-git-ref-allows-well-formed-refs
-  (testing "common git ref forms are accepted"
-    (is (#'scan/safe-git-ref? "origin/main"))
-    (is (#'scan/safe-git-ref? "HEAD~1"))
-    (is (#'scan/safe-git-ref? "abc123def456"))
-    (is (#'scan/safe-git-ref? "v1.0.0-rc1"))
-    (is (#'scan/safe-git-ref? "refs/heads/feature-branch"))))
-
-(deftest safe-git-ref-rejects-unsafe-values
-  (testing "values that could inject git options or shell constructs are rejected"
-    (is (not (#'scan/safe-git-ref? "; rm -rf /")))
-    (is (not (#'scan/safe-git-ref? "--exec=cmd")))
-    (is (not (#'scan/safe-git-ref? "-C /malicious/path")))
-    (is (not (#'scan/safe-git-ref? "ref with spaces")))
-    (is (not (#'scan/safe-git-ref? "")))
-    (is (not (#'scan/safe-git-ref? nil)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

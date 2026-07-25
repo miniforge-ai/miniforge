@@ -1,0 +1,876 @@
+bases/cli/src/ai/miniforge/cli/backends.clj:119:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/config.clj:174:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/main/commands/control_plane.clj:45:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/cli/src/ai/miniforge/cli/main/commands/etl.clj:213:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/main/commands/events.clj:116:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/main/commands/fleet.clj:141:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+bases/cli/src/ai/miniforge/cli/main/commands/init.clj:70:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/main/commands/pr.clj:210:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/src/ai/miniforge/cli/main/commands/run.clj:57:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/cli/src/ai/miniforge/cli/main/commands/runtime.clj:116:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/tui.clj:440:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/workflow_recommender.clj:204:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/src/ai/miniforge/cli/workflow_runner/sandbox.clj:98:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/cli/test/ai/miniforge/cli/main/commands/pr_monitor_test.clj:107:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/main/commands/pr_monitor_test.clj:125:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/main/commands/pr_monitor_test.clj:147:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/main/commands/pr_monitor_test.clj:168:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/main/commands/resume_test.clj:36:1: SL004 'resolve-resume-workflow-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main/commands/resume_test.clj:64:1: SL004 'throw-resume-anomaly-preserves-canonical-metadata-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:32:1: SL004 'help-cmd-uses-generic-workflow-examples-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:42:1: SL004 'help-cmd-reads-copy-from-message-catalog-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:68:1: SL004 'create-pr-train-manager-handles-construction-errors-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:76:1: SL004 'create-pr-train-manager-handles-non-throwable-sling-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:84:1: SL004 'create-repo-dag-manager-handles-construction-errors-test' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/main_test.clj:173:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/workflow_runner/display_output_test.clj:37:1: SL004 'capture-stdout' appears before the first Layer heading
+bases/cli/test/ai/miniforge/cli/workflow_runner/display_output_test.clj:538:1: SL002 Layer 7 heading appears after Layer 7; headings must strictly increase
+bases/cli/test/ai/miniforge/cli/workflow_runner/display_output_test.clj:556:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/installer.clj:249:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj:41:1: SL001 'LSPClient' (Layer 0) refs 'initialized?' (Layer 4); refs must target layers <= 0
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/client.clj:189:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/manager.clj:222:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/lsp/protocol.clj:151:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/mcp/protocol.clj:129:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/lsp-mcp-bridge/src/ai/miniforge/lsp_mcp_bridge/tasks.clj:159:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:95:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:101:1: SL001 'shell-grep' (Layer 0) refs 'source-root' (Layer 1); refs must target layers <= 0
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:122:1: SL001 'shell-glob' (Layer 0) refs 'source-root' (Layer 1); refs must target layers <= 0
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:320:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:341:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:363:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/context_cache.clj:413:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/protocol.clj:42:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/server.clj:64:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/tools.clj:51:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/tools.clj:64:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/tools.clj:116:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+bases/mcp-context-server/src/ai/miniforge/mcp_context_server/tools.clj:156:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+bases/mcp-context-server/test/ai/miniforge/mcp_context_server/context_cache_additional_test.clj:26:1: SL004 'with-clean-cache' appears before the first Layer heading
+bases/mcp-context-server/test/ai/miniforge/mcp_context_server/context_cache_additional_test.clj:65:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+bases/mcp-context-server/test/ai/miniforge/mcp_context_server/context_cache_test.clj:200:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+bases/mcp-context-server/test/ai/miniforge/mcp_context_server/context_cache_test.clj:329:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/adapter-claude-code/src/ai/miniforge/adapter_claude_code/discovery.clj:81:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/adapter-claude-code/src/ai/miniforge/adapter_claude_code/impl.clj:131:1: SL002 Layer 0 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/interface_test.clj:95:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/interface_test.clj:129:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/interface_test.clj:157:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/interface_test.clj:177:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/interface_test.clj:205:1: SL002 Layer 0 heading appears after Layer 1; headings must strictly increase
+components/adapter-claude-code/test/ai/miniforge/adapter_claude_code/tool_profiles_test.clj:122:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/core.clj:28:1: SL004 'retry-type->failure-class' appears before the first Layer heading
+components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/core.clj:38:1: SL004 '->failure-class' appears before the first Layer heading
+components/agent-runtime/src/ai/miniforge/agent_runtime/error_classifier/core.clj:141:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/artifact_session.clj:276:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/artifact_session.clj:958:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/agent/src/ai/miniforge/agent/artifact_session.clj:958:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/core.clj:43:1: SL004 'default-logger' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/core.clj:218:1: SL001 'BaseAgent' (Layer 1) refs 'invoke' (Layer 2); refs must target layers <= 1
+components/agent/src/ai/miniforge/agent/core.clj:218:1: SL001 'BaseAgent' (Layer 1) refs 'repair' (Layer 2); refs must target layers <= 1
+components/agent/src/ai/miniforge/agent/curator.clj:182:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/curator.clj:651:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/implementer.clj:72:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:122:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:142:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:168:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:292:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:367:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/src/ai/miniforge/agent/implementer.clj:899:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/agent/src/ai/miniforge/agent/interface.clj:723:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/meta/loop.clj:63:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/agent/src/ai/miniforge/agent/protocols/impl/messaging.clj:219:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/protocols/records/memory.clj:28:1: SL004 'AgentMemory' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/protocols/records/memory.clj:45:1: SL004 'InMemoryStore' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/protocols/records/specialized.clj:29:1: SL004 'FunctionalAgent' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/reviewer/artifact.clj:263:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/reviewer/gates.clj:298:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/reviewer/issues.clj:181:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/reviewer/llm_response.clj:163:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/reviewer/prompts.clj:154:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/src/ai/miniforge/agent/role_config.clj:37:1: SL004 'load-edn' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/role_config.clj:42:1: SL004 'lookup-or-throw' appears before the first Layer heading
+components/agent/src/ai/miniforge/agent/supervisory_bridge.clj:61:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_capsule_test.clj:31:1: SL004 'delete-dir!' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/artifact_session_capsule_test.clj:37:1: SL004 'local-cat-exec!' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/artifact_session_capsule_test.clj:52:1: SL004 'run-session*' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/artifact_session_capsule_test.clj:220:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:72:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:200:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:233:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:248:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:268:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:334:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:376:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_extended_test.clj:376:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/artifact_session_test.clj:113:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/test/ai/miniforge/agent/artifact_session_test.clj:533:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/core_test.clj:336:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/curator_test.clj:274:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/file_artifacts_extended_test.clj:63:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/agent/test/ai/miniforge/agent/implementer_extended_test.clj:434:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/agent/test/ai/miniforge/agent/implementer_extended_test.clj:479:1: SL002 Layer 7 heading appears after Layer 7; headings must strictly increase
+components/agent/test/ai/miniforge/agent/implementer_extended_test.clj:501:1: SL002 Layer 7 heading appears after Layer 7; headings must strictly increase
+components/agent/test/ai/miniforge/agent/implementer_extended_test.clj:501:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/implementer_test.clj:679:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/agent/test/ai/miniforge/agent/implementer_test.clj:679:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/interface_test.clj:289:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/planner_test.clj:33:1: SL004 'min-stagnation-threshold-ms' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/planner_test.clj:40:1: SL004 'min-total-budget-ms' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/planner_test.clj:663:1: SL002 Layer 1 heading appears after Layer 6; headings must strictly increase
+components/agent/test/ai/miniforge/agent/planner_test.clj:699:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/releaser_test.clj:268:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/agent/test/ai/miniforge/agent/role_config_test.clj:23:1: SL004 'role-defaults-loaded-test' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/role_config_test.clj:31:1: SL004 'role-default-shape-test' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/role_config_test.clj:42:1: SL004 'role-default-lookup-test' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/role_config_test.clj:47:1: SL004 'role-default-unknown-test' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/role_config_test.clj:57:1: SL004 'roles-fn-test' appears before the first Layer heading
+components/agent/test/ai/miniforge/agent/tester_test.clj:290:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/artifact/src/ai/miniforge/artifact/protocols/impl/transit_store.clj:246:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/artifact/test/ai/miniforge/artifact/core_test.clj:81:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/artifact/test/ai/miniforge/artifact/core_test.clj:102:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/artifact/test/ai/miniforge/artifact/core_test.clj:123:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:191:1: SL001 'handle-trigger' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:206:1: SL001 'handle-workflow-started' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:211:1: SL001 'handle-workflow-completed' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:223:1: SL001 'handle-workflow-failed' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:229:1: SL001 'handle-no-handler' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:235:1: SL001 'handle-suppress' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:241:1: SL001 'tick' (Layer 2) refs 'pure-state' (Layer 3); refs must target layers <= 2
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:274:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/core.clj:480:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/emitter.clj:75:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/interface.clj:63:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/automation-edge-correlator/src/ai/miniforge/automation_edge_correlator/schema.clj:46:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:132:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:199:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:228:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:258:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:275:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:323:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:341:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:357:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/automation-edge-correlator/test/ai/miniforge/automation_edge_correlator/correlator_test.clj:408:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/bb-config/src/ai/miniforge/bb_config/core.clj:31:1: SL004 'default-filename' appears before the first Layer heading
+components/bb-data-plane-http/src/ai/miniforge/bb_data_plane_http/core.clj:32:1: SL004 'default-base-url' appears before the first Layer heading
+components/bb-data-plane-http/src/ai/miniforge/bb_data_plane_http/core.clj:33:1: SL004 'default-base-url-env' appears before the first Layer heading
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:46:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:67:1: SL001 'install-plan' (Layer 0) refs 'installed?' (Layer 1); refs must target layers <= 0
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:115:1: SL001 'install-plan-java' (Layer 0) refs 'installed?' (Layer 1); refs must target layers <= 0
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:134:1: SL001 'install-plan-markdownlint' (Layer 0) refs 'installed?' (Layer 1); refs must target layers <= 0
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:154:1: SL001 'install-plan-opencode' (Layer 0) refs 'installed?' (Layer 1); refs must target layers <= 0
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:171:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/src/ai/miniforge/bb_platform/core.clj:237:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/bb-platform/test/ai/miniforge/bb_platform/core_test.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/test/ai/miniforge/bb_platform/core_test.clj:64:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/test/ai/miniforge/bb_platform/core_test.clj:120:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/test/ai/miniforge/bb_platform/core_test.clj:134:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/bb-platform/test/ai/miniforge/bb_platform/core_test.clj:186:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/boundary/src/ai/miniforge/boundary/contract.clj:109:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/boundary/src/ai/miniforge/boundary/core.clj:143:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/comments.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/comments.clj:86:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/comments.clj:171:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj:67:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj:133:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj:191:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj:258:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/exceptions_as_data.clj:378:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/execute.clj:333:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/factory.clj:42:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/factory.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/factory.clj:67:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/factory.clj:78:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/factory.clj:87:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/interface.clj:68:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/interface.clj:106:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/interface.clj:223:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/named_constants.clj:41:1: SL004 'rule-id' appears before the first Layer heading
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/named_constants.clj:42:1: SL004 'rule-category' appears before the first Layer heading
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/named_constants.clj:44:1: SL004 'exempt-values' appears before the first Layer heading
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/schema.clj:39:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/schema.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/schema.clj:60:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/schema.clj:71:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/compliance-scanner/src/ai/miniforge/compliance_scanner/schema.clj:80:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/config/src/ai/miniforge/config/user.clj:95:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/config/src/ai/miniforge/config/user.clj:294:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:24:1: SL004 'connect-validates-config-test' appears before the first Layer heading
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:32:1: SL004 'connect-close-lifecycle-test' appears before the first Layer heading
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:43:1: SL004 'extract-form4-transactions-test' appears before the first Layer heading
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:86:1: SL004 'extract-form4-transactions-invalid-xml-test' appears before the first Layer heading
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:91:1: SL004 'monthly-windows-test' appears before the first Layer heading
+components/connector-edgar/test/ai/miniforge/connector_edgar/interface_test.clj:101:1: SL004 'discover-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:24:1: SL004 'cell-value-nil-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:28:1: SL004 'parse-sheet-column-mapping-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:52:1: SL004 'parse-sheet-with-filter-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:72:1: SL004 'parse-sheet-missing-sheet-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:79:1: SL004 'extract-enriches-series-id-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:100:1: SL004 'extract-decimal-year-date-format-test' appears before the first Layer heading
+components/connector-excel/test/ai/miniforge/connector_excel/interface_test.clj:123:1: SL004 'connect-validates-config-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:27:1: SL004 'resource-schemas-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:41:1: SL004 'build-url-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:72:1: SL004 'build-query-params-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:97:1: SL004 'connect-validates-config-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:103:1: SL004 'connect-close-lifecycle-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:119:1: SL004 'discover-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:128:1: SL004 'extract-follows-link-pagination-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:152:1: SL004 'extract-reviews-fans-out-across-pulls-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:206:1: SL004 'extract-reviews-filters-by-cursor-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:249:1: SL004 'checkpoint-test' appears before the first Layer heading
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:280:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-github/test/ai/miniforge/connector_github/impl_test.clj:297:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-http/src/ai/miniforge/connector_http/rate_limit.clj:83:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/connector-jira/test/ai/miniforge/connector_jira/impl_test.clj:296:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/connector-linter/src/ai/miniforge/connector_linter/etl.clj:155:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/connector-pipeline-output/src/ai/miniforge/connector_pipeline_output/schema.clj:84:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/connector-sarif/src/ai/miniforge/connector_sarif/schema.clj:86:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/connector-sarif/test/ai/miniforge/connector_sarif/format_test.clj:118:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/format_test.clj:207:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/format_test.clj:273:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/format_test.clj:305:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/interface_test.clj:34:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/interface_test.clj:48:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/schema_test.clj:53:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/schema_test.clj:82:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/connector-sarif/test/ai/miniforge/connector_sarif/schema_test.clj:109:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/context-pack/src/ai/miniforge/context_pack/factory.clj:24:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/context-pack/src/ai/miniforge/context_pack/factory.clj:39:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/context-pack/src/ai/miniforge/context_pack/factory.clj:48:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/context-pack/src/ai/miniforge/context_pack/interface.clj:47:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/control-plane-adapter/src/ai/miniforge/control_plane_adapter/protocol.clj:92:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/control-plane-adapter/test/ai/miniforge/control_plane_adapter/interface_test.clj:74:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/control-plane-adapter/test/ai/miniforge/control_plane_adapter/interface_test.clj:97:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/control-plane-adapter/test/ai/miniforge/control_plane_adapter/interface_test.clj:117:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/control-plane/src/ai/miniforge/control_plane/decision_queue.clj:232:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/control-plane/src/ai/miniforge/control_plane/interface.clj:47:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/control-plane/src/ai/miniforge/control_plane/interface.clj:190:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/control-plane/src/ai/miniforge/control_plane/registry.clj:192:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/src/ai/miniforge/dag_executor/branch_registry.clj:58:1: SL004 't' appears before the first Layer heading
+components/dag-executor/src/ai/miniforge/dag_executor/branch_registry.clj:241:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/src/ai/miniforge/dag_executor/interface.clj:866:1: SL003 file uses 13 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/src/ai/miniforge/dag_executor/parallel.clj:56:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/parallel.clj:142:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/parallel.clj:215:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:69:1: SL001 'unknown-kind-error' (Layer 1) refs 'kind' (Layer 4); refs must target layers <= 1
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:80:1: SL001 'unsupported-kind-error' (Layer 1) refs 'kind' (Layer 4); refs must target layers <= 1
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:94:1: SL001 'resolve-executable' (Layer 2) refs 'kind' (Layer 4); refs must target layers <= 2
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:132:1: SL001 'make-descriptor' (Layer 3) refs 'capabilities' (Layer 4); refs must target layers <= 3
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:132:1: SL001 'make-descriptor' (Layer 3) refs 'kind' (Layer 4); refs must target layers <= 3
+components/dag-executor/src/ai/miniforge/dag_executor/protocols/impl/runtime/descriptor.clj:188:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/src/ai/miniforge/dag_executor/scheduler.clj:56:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/scheduler.clj:135:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/scratch_commit.clj:158:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:34:1: SL004 't' appears before the first Layer heading
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:93:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:105:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:123:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:154:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:271:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/src/ai/miniforge/dag_executor/state.clj:424:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/test/ai/miniforge/dag_executor/branch_registry_test.clj:178:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/test/ai/miniforge/dag_executor/execution_plan_test.clj:60:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/execution_plan_test.clj:94:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:40:1: SL004 'stub-runtime-info' appears before the first Layer heading
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:95:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:128:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:193:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:234:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:293:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/executor_test.clj:334:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:143:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:186:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:215:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:238:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:339:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/interface_test.clj:378:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:52:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:74:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:95:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:108:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:159:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:258:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:334:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:377:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:396:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/parallel_test.clj:449:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/protocols/worktree_copy_test.clj:71:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:126:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:143:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:164:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:208:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:231:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:254:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:273:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:347:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/scheduler_test.clj:427:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/state_profile_test.clj:86:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/state_profile_test.clj:124:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/state_profile_test.clj:150:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/state_profile_test.clj:172:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-executor/test/ai/miniforge/dag_executor/workspace_test.clj:151:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/dag-primitives/src/ai/miniforge/dag_primitives/result.clj:99:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/decision/test/ai/miniforge/decision/interface_test.clj:88:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:122:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:170:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:198:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:222:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:308:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/decision/test/ai/miniforge/decision/interface_test.clj:401:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/diagnosis/src/ai/miniforge/diagnosis/engine.clj:57:1: SL002 Layer 0 heading appears after Layer 1; headings must strictly increase
+components/diagnosis/src/ai/miniforge/diagnosis/engine.clj:60:1: SL001 'correlation->diagnosis' (Layer 0) refs 'infer-affected-heuristic' (Layer 1); refs must target layers <= 0
+components/diagnosis/src/ai/miniforge/diagnosis/engine.clj:60:1: SL001 'correlation->diagnosis' (Layer 0) refs 'infer-improvement-type' (Layer 1); refs must target layers <= 0
+components/diagnosis/src/ai/miniforge/diagnosis/interface.clj:50:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/approval.clj:47:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/approval.clj:159:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/approval.clj:258:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/core.clj:62:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:66:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:194:1: SL002 Layer 0 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:397:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:818:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:859:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:876:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:899:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:925:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:944:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:968:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:1018:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:1034:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:1052:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:1330:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/core.clj:1597:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/digest.clj:55:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/event_type_registry.clj:77:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/event_type_registry.clj:122:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/interface/events.clj:295:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/interface/events.clj:305:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/interface/events.clj:406:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/interface/events.clj:462:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/interface/events.clj:512:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/listeners.clj:204:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/schema.clj:104:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/schema.clj:1134:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/src/ai/miniforge/event_stream/snowflake.clj:91:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/snowflake.clj:121:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/snowflake.clj:151:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/snowflake.clj:324:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/timeline.clj:66:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/timeline.clj:154:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/timeline.clj:276:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/event-stream/src/ai/miniforge/event_stream/timeline.clj:288:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:31:1: SL004 'no-op-stream' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:36:1: SL004 'collect-stream' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:87:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:194:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:378:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:543:1: SL002 Layer 3 heading appears after Layer 5; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:564:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:591:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/core_test.clj:634:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/test/ai/miniforge/event_stream/event_type_registry_test.clj:110:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/identity_propagation_test.clj:173:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/test/ai/miniforge/event_stream/progress_integration_test.clj:348:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/test/ai/miniforge/event_stream/reader_test.clj:26:1: SL004 'with-temp-dir' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/reader_test.clj:36:1: SL004 'write-event!' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:32:1: SL004 'with-temp-dir' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:42:1: SL004 'sample-event' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:52:1: SL004 'read-transit-json' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:58:1: SL004 'list-files' appears before the first Layer heading
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:237:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:257:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:375:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:432:1: SL002 Layer 0 heading appears after Layer 4; headings must strictly increase
+components/event-stream/test/ai/miniforge/event_stream/sinks_test.clj:432:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/event-stream/test/ai/miniforge/event_stream/zettel_promoted_test.clj:178:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj:48:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj:123:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj:139:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/collector.clj:621:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/extraction.clj:149:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/interface.clj:388:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/protocols/impl/evidence_bundle.clj:176:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj:458:1: SL003 file uses 11 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/src/ai/miniforge/evidence_bundle/workflow_integration.clj:105:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:137:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:187:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:220:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:245:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:296:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:337:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:357:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:396:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/assembly_integration_test.clj:426:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/evidence-bundle/test/ai/miniforge/evidence_bundle/collector_compliance_test.clj:233:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/fsm/src/ai/miniforge/fsm/core.clj:88:1: SL001 'define-machine' (Layer 1) refs 'context' (Layer 2); refs must target layers <= 1
+components/fsm/src/ai/miniforge/fsm/core.clj:283:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/fsm/src/ai/miniforge/fsm/interface.clj:133:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/gate-classification/src/ai/miniforge/gate_classification/core.clj:36:1: SL001 'ClassificationGate' (Layer 0) refs 'check-artifact' (Layer 1); refs must target layers <= 0
+components/gate-classification/src/ai/miniforge/gate_classification/core.clj:36:1: SL001 'ClassificationGate' (Layer 0) refs 'repair-artifact' (Layer 2); refs must target layers <= 0
+components/gate-classification/src/ai/miniforge/gate_classification/rules.clj:119:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/gate/src/ai/miniforge/gate/behavioral.clj:130:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/gate/src/ai/miniforge/gate/format.clj:176:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/gate/src/ai/miniforge/gate/policy_pack.clj:523:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/gate/src/ai/miniforge/gate/pre_verify_lint.clj:46:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/gate/test/ai/miniforge/gate/validation_pipeline_test.clj:147:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/gate/test/ai/miniforge/gate/validation_pipeline_test.clj:187:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/gate/test/ai/miniforge/gate/validation_pipeline_test.clj:210:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/gate/test/ai/miniforge/gate/validation_pipeline_test.clj:239:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/gate/test/ai/miniforge/gate/validation_pipeline_test.clj:266:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/knowledge-pack/test/ai/miniforge/knowledge_pack/pack_test.clj:173:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/knowledge-pack/test/ai/miniforge/knowledge_pack/verify_test.clj:116:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/interface.clj:581:1: SL003 file uses 10 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/promotion.clj:157:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/schema.clj:199:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/store.clj:454:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/trust.clj:178:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/src/ai/miniforge/knowledge/zettel.clj:254:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/knowledge/test/ai/miniforge/knowledge/pattern_detection_test.clj:29:1: SL004 'fresh-store' appears before the first Layer heading
+components/knowledge/test/ai/miniforge/knowledge/pattern_detection_test.clj:34:1: SL004 'seed-learnings!' appears before the first Layer heading
+components/knowledge/test/ai/miniforge/knowledge/promotion_test.clj:198:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/test/ai/miniforge/knowledge/trust_test.clj:124:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/knowledge/test/ai/miniforge/knowledge/trust_test.clj:153:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/knowledge/test/ai/miniforge/knowledge/trust_test.clj:213:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/knowledge/test/ai/miniforge/knowledge/trust_test.clj:254:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/knowledge/test/ai/miniforge/knowledge/zettel_revision_test.clj:246:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/llm/src/ai/miniforge/llm/interface.clj:400:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj:204:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/llm/src/ai/miniforge/llm/protocols/impl/llm_client.clj:2123:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/llm/src/ai/miniforge/llm/protocols/records/llm_client.clj:28:1: SL004 'CLIClient' appears before the first Layer heading
+components/llm/test/ai/miniforge/llm/http_providers_test.clj:432:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/llm/test/ai/miniforge/llm/interface_test.clj:968:1: SL002 Layer 5 heading appears after Layer 5; headings must strictly increase
+components/llm/test/ai/miniforge/llm/interface_test.clj:1024:1: SL002 Layer 5 heading appears after Layer 5; headings must strictly increase
+components/llm/test/ai/miniforge/llm/interface_test.clj:1150:1: SL002 Layer 5 heading appears after Layer 5; headings must strictly increase
+components/llm/test/ai/miniforge/llm/interface_test.clj:1389:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/logging/src/ai/miniforge/logging/interface.clj:175:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/loop/src/ai/miniforge/loop/gates.clj:38:1: SL004 'Gate' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/gates.clj:39:1: SL004 'check' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/gates.clj:40:1: SL004 'gate-id' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/gates.clj:41:1: SL004 'gate-type' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/gates.clj:42:1: SL004 'repair' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/gates.clj:456:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/loop/src/ai/miniforge/loop/inner.clj:162:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/loop/src/ai/miniforge/loop/inner.clj:242:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/loop/src/ai/miniforge/loop/interface.clj:99:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/loop/src/ai/miniforge/loop/interface.clj:239:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/interface.clj:275:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/interface.clj:384:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/interface.clj:438:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/repair.clj:35:1: SL004 'RepairStrategy' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/repair.clj:36:1: SL004 'can-repair?' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/repair.clj:37:1: SL004 'repair' appears before the first Layer heading
+components/loop/src/ai/miniforge/loop/schema.clj:102:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/schema.clj:115:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/schema.clj:133:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/schema.clj:189:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/src/ai/miniforge/loop/schema.clj:207:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/escalation_test.clj:121:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/loop/test/ai/miniforge/loop/gates_test.clj:220:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/loop/test/ai/miniforge/loop/gates_test.clj:242:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/loop/test/ai/miniforge/loop/inner_test.clj:160:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/inner_test.clj:181:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/inner_test.clj:291:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/loop/test/ai/miniforge/loop/interface_test.clj:59:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/interface_test.clj:93:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/interface_test.clj:151:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/interface_test.clj:185:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:120:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:149:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:173:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:193:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:211:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:236:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:259:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:277:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/loop/test/ai/miniforge/loop/metrics_accumulation_test.clj:293:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/metric-registry/src/ai/miniforge/metric_registry/schema.clj:85:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/observer/src/ai/miniforge/observer/interface.clj:230:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/operator/src/ai/miniforge/operator/core.clj:242:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/operator/src/ai/miniforge/operator/llm_improvement_generator.clj:162:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/operator/src/ai/miniforge/operator/llm_pattern_detector.clj:156:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/operator/src/ai/miniforge/operator/protocol.clj:116:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/operator/test/ai/miniforge/operator/core_test.clj:67:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:84:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:136:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:155:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:166:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:232:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/operator/test/ai/miniforge/operator/core_test.clj:262:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/operator/test/ai/miniforge/operator/defaults_test.clj:45:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/operator/test/ai/miniforge/operator/protocol_test.clj:39:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/orchestrator/src/ai/miniforge/orchestrator/core.clj:198:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/orchestrator/src/ai/miniforge/orchestrator/interface.clj:216:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/orchestrator/src/ai/miniforge/orchestrator/protocol.clj:80:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/orchestrator/test/ai/miniforge/orchestrator/interface_test.clj:89:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/orchestrator/test/ai/miniforge/orchestrator/interface_test.clj:104:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/orchestrator/test/ai/miniforge/orchestrator/interface_test.clj:136:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/orchestrator/test/ai/miniforge/orchestrator/interface_test.clj:184:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/orchestrator/test/ai/miniforge/orchestrator/interface_test.clj:200:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/patterns/src/ai/miniforge/patterns/core.clj:55:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/phase-deployment/src/ai/miniforge/phase_deployment/config_resolver.clj:99:1: SL001 'apply-secret-resolution' (Layer 0) refs 'access-secret' (Layer 1); refs must target layers <= 0
+components/phase-deployment/src/ai/miniforge/phase_deployment/policy.clj:56:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase-deployment/test/ai/miniforge/phase_deployment/defaults_test.clj:62:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-deployment/test/ai/miniforge/phase_deployment/gates_extra_test.clj:75:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-deployment/test/ai/miniforge/phase_deployment/gates_extra_test.clj:109:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-deployment/test/ai/miniforge/phase_deployment/policy_extra_test.clj:70:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-software-factory/src/ai/miniforge/phase_software_factory/plan.clj:57:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-software-factory/src/ai/miniforge/phase_software_factory/plan.clj:110:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase-software-factory/src/ai/miniforge/phase_software_factory/plan.clj:174:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase/src/ai/miniforge/phase/agent_behavior.clj:114:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase/src/ai/miniforge/phase/agent_behavior.clj:231:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/phase/src/ai/miniforge/phase/file_context.clj:35:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase/src/ai/miniforge/phase/interface.clj:58:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase/src/ai/miniforge/phase/phase_result.clj:156:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/phase/src/ai/miniforge/phase/registry.clj:174:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/phase/src/ai/miniforge/phase/telemetry.clj:59:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase/src/ai/miniforge/phase/telemetry.clj:69:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/phase/src/ai/miniforge/phase/telemetry.clj:105:1: SL001 'emit-phase-started!' (Layer 1) refs 'emit-milestone-started!' (Layer 3); refs must target layers <= 1
+components/phase/src/ai/miniforge/phase/telemetry.clj:126:1: SL001 'emit-phase-completed!' (Layer 1) refs 'emit-milestone-completed!' (Layer 3); refs must target layers <= 1
+components/phase/src/ai/miniforge/phase/telemetry.clj:126:1: SL001 'emit-phase-completed!' (Layer 1) refs 'emit-milestone-failed!' (Layer 3); refs must target layers <= 1
+components/phase/src/ai/miniforge/phase/telemetry.clj:126:1: SL001 'emit-phase-completed!' (Layer 1) refs 'emit-milestone-reached!' (Layer 3); refs must target layers <= 1
+components/phase/src/ai/miniforge/phase/telemetry.clj:180:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pipeline-pack/src/ai/miniforge/pipeline_pack/loader.clj:55:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pipeline-pack/src/ai/miniforge/pipeline_pack/registry.clj:31:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/core.clj:117:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/core.clj:276:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/core.clj:333:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/core.clj:454:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:168:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:202:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:291:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:324:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:368:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:497:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:559:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/detection.clj:663:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/intent.clj:152:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/interface/mapping.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/interface/taxonomy.clj:48:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/interface/taxonomy.clj:77:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/knowledge_safety.clj:57:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/knowledge_safety.clj:68:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/loader.clj:148:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/loader.clj:262:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/loader.clj:438:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/loader.clj:475:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/loader.clj:496:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/policy-pack/src/ai/miniforge/policy_pack/mapping.clj:97:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/mdc_compiler.clj:718:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/registry.clj:103:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/registry.clj:129:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/rules/pack_dependency_validation.clj:389:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/policy-pack/src/ai/miniforge/policy_pack/schema.clj:351:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/schema.clj:390:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/taxonomy.clj:99:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/src/ai/miniforge/policy_pack/taxonomy.clj:147:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/test/ai/miniforge/policy_pack/detection_test.clj:277:1: SL002 Layer 1 heading appears after Layer 5; headings must strictly increase
+components/policy-pack/test/ai/miniforge/policy_pack/detection_test.clj:337:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/policy-pack/test/ai/miniforge/policy_pack/detection_test.clj:337:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/policy-pack/test/ai/miniforge/policy_pack/interface_test.clj:352:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/policy-pack/test/ai/miniforge/policy_pack/loader_test.clj:218:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pr-label-watcher/src/ai/miniforge/pr_label_watcher/core.clj:50:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-label-watcher/src/ai/miniforge/pr_label_watcher/core.clj:80:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/ci_monitor.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/classifier.clj:85:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/classifier.clj:101:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/conflict_resolution.clj:79:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj:326:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj:369:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj:407:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj:479:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/events.clj:45:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj:164:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj:238:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/fix_loop.clj:428:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:261:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:302:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:874:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:891:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:898:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:905:1: SL002 Layer 6 heading appears after Layer 6; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/interface.clj:1050:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/listener_registry.clj:458:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj:54:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj:80:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj:288:1: SL002 Layer 1 heading appears after Layer 2; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_budget.clj:51:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_budget.clj:121:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/monitor_budget.clj:163:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/pr_poller.clj:114:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/pr_poller.clj:195:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/pr_poller.clj:287:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/responder.clj:238:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/resume_dispatcher.clj:284:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_monitor.clj:44:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_monitor.clj:192:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_scheduler.clj:38:1: SL004 'run-gh' appears before the first Layer heading
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/review_scheduler.clj:52:1: SL004 'existing-review-shas' appears before the first Layer heading
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/triage.clj:65:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/triage.clj:244:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pr-lifecycle/test/ai/miniforge/pr_lifecycle/responder_test.clj:137:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/pr-scoring/src/ai/miniforge/pr_scoring/core.clj:67:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-scoring/src/ai/miniforge/pr_scoring/core.clj:123:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/pr-train/src/ai/miniforge/pr_train/interface.clj:347:1: SL003 file uses 13 distinct layers (max 3); split the namespace or extract a component
+components/pr-train/src/ai/miniforge/pr_train/risk.clj:54:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/pr-train/src/ai/miniforge/pr_train/schema.clj:204:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+components/pr-train/src/ai/miniforge/pr_train/state.clj:398:1: SL003 file uses 11 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/src/ai/miniforge/progress_detector/config.clj:55:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/config.clj:107:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/config.clj:197:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/detectors/repair_loop.clj:255:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/src/ai/miniforge/progress_detector/detectors/tool_loop.clj:108:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/detectors/tool_loop.clj:192:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/detectors/tool_loop.clj:209:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/src/ai/miniforge/progress_detector/interface.clj:153:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/interface.clj:285:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/interface.clj:359:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/interface.clj:402:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/interface.clj:402:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/src/ai/miniforge/progress_detector/protocol.clj:106:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/runtime.clj:110:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/schema.clj:128:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/schema.clj:153:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/schema.clj:178:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/src/ai/miniforge/progress_detector/tool_profile.clj:140:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/config_test.clj:134:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/config_test.clj:151:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/config_test.clj:173:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/repair_loop_test.clj:126:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/repair_loop_test.clj:316:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/tool_loop_test.clj:130:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/tool_loop_test.clj:168:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/tool_loop_test.clj:249:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/detectors/tool_loop_test.clj:280:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:94:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:109:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:155:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:170:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:191:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/event_envelope_test.clj:206:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:70:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:82:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:132:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:160:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:181:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/interface_test.clj:199:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/protocol_test.clj:68:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/protocol_test.clj:100:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:130:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:150:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:165:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:213:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:228:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/runtime_test.clj:228:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/test/ai/miniforge/progress_detector/schema_test.clj:102:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/schema_test.clj:143:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/schema_test.clj:175:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/supervisor_test.clj:122:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/supervisor_test.clj:145:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:46:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:91:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:111:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:124:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:141:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/progress-detector/test/ai/miniforge/progress_detector/tool_profile_test.clj:153:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/release-executor/src/ai/miniforge/release_executor/git.clj:51:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/release-executor/src/ai/miniforge/release_executor/git.clj:110:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/budget.clj:83:1: SL002 Layer 0 heading appears after Layer 2; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/degradation.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/engine.clj:57:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/interface.clj:264:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/reliability/src/ai/miniforge/reliability/schema.clj:43:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:68:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:79:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:99:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:110:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:120:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:130:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/reliability/src/ai/miniforge/reliability/sli.clj:152:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-dag/src/ai/miniforge/repo_dag/core.clj:563:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/repo-dag/src/ai/miniforge/repo_dag/interface.clj:410:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/repo-dag/src/ai/miniforge/repo_dag/schema.clj:145:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/repo-dag/test/ai/miniforge/repo_dag/dag_crud_test.clj:27:1: SL004 '*manager*' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_crud_test.clj:29:1: SL004 'manager-fixture' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_queries_test.clj:26:1: SL004 '*manager*' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_queries_test.clj:28:1: SL004 'manager-fixture' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_topology_test.clj:27:1: SL004 '*manager*' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_topology_test.clj:29:1: SL004 'manager-fixture' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_validation_test.clj:27:1: SL004 '*manager*' appears before the first Layer heading
+components/repo-dag/test/ai/miniforge/repo_dag/dag_validation_test.clj:29:1: SL004 'manager-fixture' appears before the first Layer heading
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:40:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:54:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:65:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:79:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:90:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/factory.clj:103:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/interface.clj:44:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/interface.clj:105:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/interface.clj:161:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/repo-index/src/ai/miniforge/repo_index/repo_map.clj:37:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/repo_map.clj:126:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/scanner.clj:50:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/scanner.clj:62:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/scanner.clj:106:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/schema.clj:36:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/schema.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/schema.clj:68:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/search_lex.clj:49:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/search_lex.clj:120:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/search_lex.clj:155:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/src/ai/miniforge/repo_index/search_lex.clj:187:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:41:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:65:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:85:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:99:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:110:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:123:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/factory_test.clj:139:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/repo_map_test.clj:68:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/repo_map_test.clj:83:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/repo_map_test.clj:104:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/repo_map_test.clj:123:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/repo_map_test.clj:175:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/schema_test.clj:75:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/schema_test.clj:94:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/repo-index/test/ai/miniforge/repo_index/schema_test.clj:142:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/reporting/src/ai/miniforge/reporting/core.clj:274:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/reporting/src/ai/miniforge/reporting/interface.clj:177:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/reporting/test/ai/miniforge/reporting/interface_test.clj:213:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/reporting/test/ai/miniforge/reporting/views_test.clj:224:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+components/response-chain/src/ai/miniforge/response_chain/core.clj:50:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/response-chain/src/ai/miniforge/response_chain/core.clj:104:1: SL001 'recompute-succeeded?' (Layer 2) refs 'steps' (Layer 4); refs must target layers <= 2
+components/response-chain/src/ai/miniforge/response_chain/core.clj:109:1: SL001 'conj-step' (Layer 2) refs 'steps' (Layer 4); refs must target layers <= 2
+components/response-chain/src/ai/miniforge/response_chain/core.clj:188:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/response-chain/src/ai/miniforge/response_chain/interface.clj:125:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/response/src/ai/miniforge/response/anomaly.clj:144:1: SL001 'retryable?' (Layer 2) refs 'anomaly' (Layer 3); refs must target layers <= 2
+components/response/src/ai/miniforge/response/anomaly.clj:157:1: SL001 'anomaly-category' (Layer 2) refs 'anomaly' (Layer 3); refs must target layers <= 2
+components/response/src/ai/miniforge/response/anomaly.clj:287:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/response/src/ai/miniforge/response/builder.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/response/src/ai/miniforge/response/builder.clj:243:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/response/src/ai/miniforge/response/chain.clj:275:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/response/src/ai/miniforge/response/interface.clj:474:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/response/src/ai/miniforge/response/translate.clj:306:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/schema/src/ai/miniforge/schema/interface.clj:457:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/schema/test/ai/miniforge/schema/interface_test.clj:247:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/schema/test/ai/miniforge/schema/supervisory_test.clj:286:1: SL003 file uses 9 distinct layers (max 3); split the namespace or extract a component
+components/self-healing/src/ai/miniforge/self_healing/backend_health.clj:378:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/self-healing/src/ai/miniforge/self_healing/integration.clj:198:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/self-healing/src/ai/miniforge/self_healing/stream_recovery.clj:306:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/self-healing/src/ai/miniforge/self_healing/workaround_detector.clj:327:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/spec-parser/src/ai/miniforge/spec_parser/core.clj:266:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/spec-parser/src/ai/miniforge/spec_parser/interface.clj:113:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/supervisory-state/src/ai/miniforge/supervisory_state/core.clj:52:1: SL001 'with-attention' (Layer 1) refs 'table' (Layer 4); refs must target layers <= 1
+components/supervisory-state/src/ai/miniforge/supervisory_state/core.clj:58:1: SL001 'tick' (Layer 1) refs 'table' (Layer 4); refs must target layers <= 1
+components/supervisory-state/src/ai/miniforge/supervisory_state/core.clj:142:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/supervisory-state/src/ai/miniforge/supervisory_state/emitter.clj:37:1: SL004 'attach-entity' appears before the first Layer heading
+components/supervisory-state/src/ai/miniforge/supervisory_state/golden_fixtures.clj:318:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/supervisory-state/src/ai/miniforge/supervisory_state/interface.clj:69:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/supervisory-state/src/ai/miniforge/supervisory_state/schema.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/task/src/ai/miniforge/task/interface.clj:224:1: SL001 'enqueue' (Layer 4) refs 'task' (Layer 7); refs must target layers <= 4
+components/task/src/ai/miniforge/task/interface.clj:420:1: SL003 file uses 8 distinct layers (max 3); split the namespace or extract a component
+components/task/test/ai/miniforge/task/core_test.clj:25:1: SL004 'message-pattern' appears before the first Layer heading
+components/task/test/ai/miniforge/task/core_test.clj:32:1: SL004 'reset-store-fixture' appears before the first Layer heading
+components/task/test/ai/miniforge/task/core_test.clj:39:1: SL004 'reachable-states' appears before the first Layer heading
+components/task/test/ai/miniforge/task/core_test.clj:236:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/task/test/ai/miniforge/task/core_test.clj:276:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/task/test/ai/miniforge/task/interface_test.clj:25:1: SL004 'reset-store-fixture' appears before the first Layer heading
+components/task/test/ai/miniforge/task/interface_test.clj:120:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/interface.clj:314:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/loader.clj:168:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/client.clj:39:1: SL001 'LSPClient' (Layer 0) refs 'initialized?' (Layer 3); refs must target layers <= 0
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/client.clj:39:1: SL001 'LSPClient' (Layer 0) refs 'server-capabilities' (Layer 3); refs must target layers <= 0
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/client.clj:193:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/manager.clj:311:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/process.clj:164:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/lsp/protocol.clj:169:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/registry.clj:210:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tool-registry/src/ai/miniforge/tool_registry/schema.clj:238:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/tool/src/ai/miniforge/tool/interface.clj:87:1: SL001 'unregister!' (Layer 1) refs 'tool-id' (Layer 2); refs must target layers <= 1
+components/tool/src/ai/miniforge/tool/interface.clj:92:1: SL001 'get-tool' (Layer 1) refs 'tool-id' (Layer 2); refs must target layers <= 1
+components/tool/src/ai/miniforge/tool/interface.clj:190:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-engine/src/ai/miniforge/tui_engine/layout/buffer.clj:47:1: SL001 'buf-put-string' (Layer 0) refs 'text' (Layer 1); refs must target layers <= 0
+components/tui-views/src/ai/miniforge/tui_views/file_subscription.clj:150:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/src/ai/miniforge/tui_views/model.clj:161:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/src/ai/miniforge/tui_views/schema.clj:95:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/schema.clj:102:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/update/command.clj:450:1: SL002 Layer 4 heading appears after Layer 4; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/update/command.clj:511:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/src/ai/miniforge/tui_views/update/completion.clj:103:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/src/ai/miniforge/tui_views/update/events.clj:776:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/src/ai/miniforge/tui_views/update/selection.clj:126:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/update/selection.clj:153:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/view/interpret.clj:89:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/tui-views/src/ai/miniforge/tui_views/view/interpret.clj:243:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/test/ai/miniforge/tui_views/chain_events_test.clj:173:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:26:1: SL004 'quit-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:35:1: SL004 'view-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:53:1: SL004 'refresh-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:59:1: SL004 'help-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:64:1: SL004 'theme-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:73:1: SL004 'unknown-command-test' appears before the first Layer heading
+components/tui-views/test/ai/miniforge/tui_views/command_test.clj:78:1: SL004 'command-mode-integration-test' appears before the first Layer heading
+components/web-dashboard/src/ai/miniforge/web_dashboard/filter_eval.clj:91:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/web-dashboard/src/ai/miniforge/web_dashboard/filters.clj:291:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+components/web-dashboard/src/ai/miniforge/web_dashboard/server.clj:47:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/control_plane.clj:227:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj:120:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj:127:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj:537:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj:597:1: SL002 Layer 3 heading appears after Layer 3; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/server/handlers.clj:662:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/web-dashboard/src/ai/miniforge/web_dashboard/state/trains.clj:1078:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/web-dashboard/src/ai/miniforge/web_dashboard/views/control_plane.clj:70:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/views/control_plane.clj:94:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/views/control_plane.clj:227:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/web-dashboard/src/ai/miniforge/web_dashboard/views/workflows.clj:24:1: SL004 'ms-per-second' appears before the first Layer heading
+components/web-dashboard/src/ai/miniforge/web_dashboard/views/workflows.clj:25:1: SL004 'ms-per-minute' appears before the first Layer heading
+components/workflow-compliance-scanner/src/ai/miniforge/workflow_compliance_scanner/phases.clj:62:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/workflow-compliance-scanner/src/ai/miniforge/workflow_compliance_scanner/phases.clj:135:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-compliance-scanner/src/ai/miniforge/workflow_compliance_scanner/phases.clj:179:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-compliance-scanner/src/ai/miniforge/workflow_compliance_scanner/phases.clj:227:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-resume/src/ai/miniforge/workflow_resume/core.clj:369:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-resume/src/ai/miniforge/workflow_resume/core.clj:390:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-resume/src/ai/miniforge/workflow_resume/schema.clj:68:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-resume/test/ai/miniforge/workflow_resume/core_test.clj:221:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow-resume/test/ai/miniforge/workflow_resume/core_test.clj:533:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/actions.clj:218:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/agent_factory.clj:235:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/comparison.clj:82:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/configurable.clj:300:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/core.clj:66:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/guards.clj:222:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/interface.clj:435:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/loader.clj:314:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/observe_phase.clj:347:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/protocols/impl/phase_executor.clj:197:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/registry.clj:362:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/release.clj:207:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/runner_cleanup.clj:60:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/workflow/src/ai/miniforge/workflow/runner_environment.clj:36:1: SL004 'env-logger' appears before the first Layer heading
+components/workflow/src/ai/miniforge/workflow/runner_environment.clj:52:1: SL002 Layer 0 heading appears after Layer 0; headings must strictly increase
+components/workflow/src/ai/miniforge/workflow/runner_events.clj:340:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/workflow/src/ai/miniforge/workflow/runner_events.clj:362:1: SL002 Layer 2 heading appears after Layer 2; headings must strictly increase
+components/workflow/src/ai/miniforge/workflow/state.clj:236:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/trigger.clj:102:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/src/ai/miniforge/workflow/validator.clj:168:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:30:1: SL004 'create-test-stream' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:35:1: SL004 'event-types' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:40:1: SL004 'mock-load-workflow' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:47:1: SL004 'mock-pipeline-success' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:57:1: SL004 'mock-pipeline-failure' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/chain_events_test.clj:68:1: SL004 'with-chain-mocks' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/cost_breakdown_test.clj:123:1: SL002 Layer 1 heading appears after Layer 1; headings must strictly increase
+components/workflow/test/ai/miniforge/workflow/dag_orchestrator_test.clj:171:1: SL002 Layer 2 heading appears after Layer 3; headings must strictly increase
+components/workflow/test/ai/miniforge/workflow/dag_orchestrator_test.clj:546:1: SL003 file uses 6 distinct layers (max 3); split the namespace or extract a component
+components/workflow/test/ai/miniforge/workflow/dag_resilience_detection_test.clj:119:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+components/workflow/test/ai/miniforge/workflow/dag_resilience_failover_test.clj:153:1: SL003 file uses 5 distinct layers (max 3); split the namespace or extract a component
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:31:1: SL004 'test-poll-interval-ms' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:36:1: SL004 'test-abandon-after-hours' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:40:1: SL004 'test-deref-timeout-ms' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:46:1: SL004 'test-max-total-fix-attempts' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:51:1: SL004 'test-override-poll-interval-ms' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:56:1: SL004 'three-days-in-seconds' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/observe_phase_test.clj:60:1: SL004 'sample-pr' appears before the first Layer heading
+components/workflow/test/ai/miniforge/workflow/replay_test.clj:147:1: SL003 file uses 4 distinct layers (max 3); split the namespace or extract a component
+projects/miniforge/test/ai/miniforge/knowledge/interface_test.clj:234:1: SL003 file uses 7 distinct layers (max 3); split the namespace or extract a component
+projects/miniforge/test/ai/miniforge/workflow/dag_orchestrator_test.clj:522:1: SL003 file uses 15 distinct layers (max 3); split the namespace or extract a component
