@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.connector-linter.etl
   "Data-driven field-mapping ETL engine for linter output.
 
@@ -20,9 +19,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Field extraction
 
-(defn- extract-field
+;; Field extraction
+(defn- ^{:stratum 0} extract-field
   "Extract a value from a record using a path spec.
    Path can be a keyword (single key) or vector (get-in path).
    Numeric elements in vectors index into sequential collections."
@@ -38,14 +37,26 @@
                                  path-spec)
     :else                nil))
 
-(defn- map-severity
+(defn- ^{:stratum 0} map-severity
   "Map a raw severity value to a canonical severity keyword using the mapping's severity-map."
   [severity-map raw-value]
   (let [key (if (keyword? raw-value) (name raw-value) raw-value)]
     (get severity-map key
          (get severity-map raw-value :low))))
 
-(defn- record->violation
+;; Format-specific record extraction
+(defn- ^{:stratum 0} parse-json-safe
+  "Parse JSON string, returning nil on failure."
+  [s]
+  (when-not (str/blank? s)
+    (try (json/parse-string s true) (catch Exception _ nil))))
+
+;; Mapping registry
+(def ^{:stratum 0} ^:private mappings-resource "connector_linter/linter-mappings.edn")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} record->violation
   "Transform a single parsed record into the canonical violation shape
    using the field mapping spec."
   [linter-id fields severity-map record file-override]
@@ -69,16 +80,7 @@
             (str (name linter-id) ": " (or message "")))
            :rule/severity severity)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Format-specific record extraction
-
-(defn- parse-json-safe
-  "Parse JSON string, returning nil on failure."
-  [s]
-  (when-not (str/blank? s)
-    (try (json/parse-string s true) (catch Exception _ nil))))
-
-(defn- matches-filter?
+(defn- ^{:stratum 1} matches-filter?
   "Check if a record matches the mapping's filter predicate."
   [filter-spec record]
   (if filter-spec
@@ -86,7 +88,7 @@
        (extract-field record (get filter-spec :path)))
     true))
 
-(defn- extract-records-json
+(defn- ^{:stratum 1} extract-records-json
   "Extract records from a JSON array. Optionally unwrap via path."
   [output unwrap-path]
   (let [data (parse-json-safe output)]
@@ -94,12 +96,12 @@
       (extract-field data unwrap-path)
       (when (sequential? data) data))))
 
-(defn- extract-records-json-lines
+(defn- ^{:stratum 1} extract-records-json-lines
   "Extract records from newline-delimited JSON (one object per line)."
   [output]
   (keep parse-json-safe (str/split-lines output)))
 
-(defn- extract-records-json-nested
+(defn- ^{:stratum 1} extract-records-json-nested
   "Extract records from a JSON array of parent objects, each containing
    a nested array of child records. File path comes from the parent."
   [output parent-file-path unwrap-path]
@@ -111,7 +113,7 @@
                   (mapv #(assoc % ::parent-file file) children)))
               parents))))
 
-(defn- extract-records-edn
+(defn- ^{:stratum 1} extract-records-edn
   "Extract records from EDN output. Optionally unwrap via path."
   [output unwrap-path]
   (try
@@ -121,7 +123,16 @@
         (when (sequential? data) data)))
     (catch Exception _ nil)))
 
-(defn- extract-records
+(def ^{:stratum 1} mappings
+  (delay
+    (if-let [url (io/resource mappings-resource)]
+      (let [raw (edn/read-string (slurp url))]
+        (zipmap (map :mapping/id raw) raw))
+      {})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} extract-records
   "Dispatch record extraction based on format."
   [output mapping]
   (let [fmt    (get mapping :mapping/format)
@@ -135,10 +146,14 @@
       :edn         (extract-records-edn output unwrap)
       nil)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Apply mapping
+(defn ^{:stratum 2} get-mapping
+  [linter-id]
+  (get @mappings linter-id))
 
-(defn apply-mapping
+;------------------------------------------------------------------------------ Layer 3
+
+;; Apply mapping
+(defn ^{:stratum 3} apply-mapping
   [mapping output]
   (let [linter-id    (get mapping :mapping/id)
         fields       (get mapping :mapping/fields)
@@ -151,19 +166,3 @@
                  (record->violation linter-id fields severity-map record
                                    (get record ::parent-file))))
          (filterv #(seq (:current %))))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Mapping registry
-
-(def ^:private mappings-resource "connector_linter/linter-mappings.edn")
-
-(def mappings
-  (delay
-    (if-let [url (io/resource mappings-resource)]
-      (let [raw (edn/read-string (slurp url))]
-        (zipmap (map :mapping/id raw) raw))
-      {})))
-
-(defn get-mapping
-  [linter-id]
-  (get @mappings linter-id))
