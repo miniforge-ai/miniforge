@@ -107,11 +107,20 @@
 
 (defn ^{:stratum 0} launched-run-id
   "The run id a launcher reported, or nil when it reported none. A
-   launcher that returns an anomaly, nil, or a map without a run id has
-   not dispatched anything the lifecycle can verify."
+   launcher that returns an anomaly, nil, a map without a run id, or a
+   run id that is not a scalar identifier has not dispatched anything
+   the lifecycle can verify.
+
+   Only `string?` / `uuid?` run ids are accepted: a map or collection
+   under `:resume/run-id` is a misbehaving launcher, and letting it
+   through would `(str …)` into a directory name that matches nothing
+   and surface as the misleading `:resume-readback-mismatch` instead of
+   the accurate `:resume-not-dispatched`."
   [launch-result]
   (when (and (map? launch-result) (not (anomaly/anomaly? launch-result)))
-    (:resume/run-id launch-result)))
+    (let [run-id (:resume/run-id launch-result)]
+      (when (or (string? run-id) (uuid? run-id))
+        run-id))))
 
 (defn ^{:stratum 0} resume-observable?
   "Readback for a dispatched resume: true when the launched run has

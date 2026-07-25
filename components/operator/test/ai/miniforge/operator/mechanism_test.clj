@@ -89,11 +89,18 @@
 
 ;------------------------------------------------------------------------------ Launcher result
 (deftest ^{:stratum 0} launched-run-id-accepts-only-a-reported-run
-  (is (= "run-1" (mechanism/launched-run-id {:resume/run-id "run-1"})))
-  (doseq [result [nil {} "run-1"
-                  (anomaly/anomaly :fault "launcher blew up" {})]]
-    (is (nil? (mechanism/launched-run-id result))
-        (str "result " (pr-str result)))))
+  (testing "a scalar run id (string or uuid) is the report the lifecycle verifies"
+    (is (= "run-1" (mechanism/launched-run-id {:resume/run-id "run-1"})))
+    (let [u (random-uuid)]
+      (is (= u (mechanism/launched-run-id {:resume/run-id u})))))
+  (testing "no report, an anomaly, or a non-scalar run id all read as nil"
+    (doseq [result [nil {} "run-1"
+                    (anomaly/anomaly :fault "launcher blew up" {})
+                    {:resume/run-id {:nested "map"}}
+                    {:resume/run-id [:a :collection]}
+                    {:resume/run-id 42}]]
+      (is (nil? (mechanism/launched-run-id result))
+          (str "result " (pr-str result))))))
 
 ;------------------------------------------------------------------------------ Policy re-evaluation
 (def ^{:stratum 0} ^:private re-evaluate-intervention
