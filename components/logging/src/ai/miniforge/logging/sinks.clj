@@ -38,7 +38,6 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;;------------------------------------------------------------------------------ Layer 0: File Sink
 (defn ^{:stratum 0} log-file-path
   "Get path to log file for a workflow.
 
@@ -58,7 +57,6 @@
       (/ (.length file) 1024.0 1024.0)
       0.0)))
 
-;;------------------------------------------------------------------------------ Layer 1: Stream Sinks
 (defn ^{:stratum 0} stdout-sink
   "Create a stdout sink that prints logs to standard output.
 
@@ -104,7 +102,6 @@
           (catch Exception _e
             nil))))))
 
-;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
 (defn ^{:stratum 0} fleet-sink
   "Create a fleet sink that sends logs to fleet command via HTTP.
 
@@ -181,7 +178,6 @@
           (when (or batch-full? time-exceeded?)
             (flush-batch!)))))))
 
-;;------------------------------------------------------------------------------ Layer 3: Multi-Sink
 (defn ^{:stratum 0} multi-sink
   "Create a multi-sink that writes to multiple sinks simultaneously.
 
@@ -237,7 +233,6 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-;;------------------------------------------------------------------------------ Layer 4: Sink Factory
 (defn ^{:stratum 3} create-sink
   "Create a log sink from configuration.
 

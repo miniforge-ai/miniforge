@@ -37,15 +37,20 @@ content loss.
 `interface.clj` — the file the baseline flagged — is now resolved to 2 real
 layers (was mislabeled as 4). `--fix` also processed `sinks.clj`, which the
 original baseline scan reported zero findings for; it turns out its
-decorative headings used a double-semicolon `;;---- Layer N: <label>`
-format that the linter's heading parser doesn't recognize, so the file was
-silently skipped by the original scan rather than passing — exactly the
-"documented limitation" the baseline doc warned about (files with no
-recognized heading under-report the true debt). Once `--fix` computed
-`sinks.clj`'s real reference graph, it came out to **5 distinct layers**,
-over the 3-layer budget. This is pre-existing structural debt this PR did
-not create — it's the same code, now correctly labeled — and is out of
-scope here; tracked as Wave 2 (needs an actual namespace split).
+decorative headings (`;;------ Layer N: <label>`, e.g. `Layer 2: Fleet
+Sink`) carry trailing descriptive text after the layer number, which
+`stratum-lint`'s heading regex (`^;+\s*-*\s*Layer\s+(\d+)\s*-*\s*$`)
+doesn't match — it requires nothing but optional dashes/whitespace after
+`Layer N`, not a colon and a label. So these were never recognized as
+headings at all (semicolon count is irrelevant to the regex; the trailing
+text is what breaks the match), and the file was silently skipped by the
+original scan rather than passing — exactly the "documented limitation"
+the baseline doc warned about (files with no recognized heading
+under-report the true debt). Once `--fix` computed `sinks.clj`'s real
+reference graph, it came out to **5 distinct layers**, over the 3-layer
+budget. This is pre-existing structural debt this PR did not create — it's
+the same code, now correctly labeled — and is out of scope here; tracked as
+Wave 2 (needs an actual namespace split).
 
 Checked every changed file for the known tool limitation where a same-line
 trailing comment (`closing-form])  ; comment`) can get detached and
@@ -53,6 +58,29 @@ reattached next to the wrong def during reordering: one such comment
 exists in `sinks.clj` (`[:file]) ;; Default to file sink`, inside a `let`
 binding in `create-sinks-from-config`), and it stayed correctly attached
 to the same binding after the fix — no hand-correction needed.
+
+**Follow-up (post-review):** because the old double-semicolon banners in
+`sinks.clj` were never recognized as real headings, `--fix` left them in
+place as ordinary comments — dragged along with whichever def ended up
+nearest them after the reorder. The result: 5 stale banners
+(`Layer 0: File Sink`, `Layer 1: Stream Sinks`, `Layer 2: Fleet Sink`,
+`Layer 3: Multi-Sink`, `Layer 4: Sink Factory`) ended up sitting at layer
+numbers that contradict the real, adjacent single-semicolon heading and
+the def's own `^{:stratum n}` metadata — e.g. `Layer 2: Fleet Sink` sitting
+directly above `fleet-sink`, which is tagged `^{:stratum 0}`. Flagged by
+Copilot review on this PR. Not a `stratum-lint` bug (the regex is working
+exactly as documented) — a per-file cleanup call. Removed all 5: each
+one's descriptive fragment (`File Sink`, `Stream Sinks`, `Fleet Sink`,
+`Multi-Sink`, `Sink Factory`) is redundant with either the function name
+or its own docstring's opening line, so deleting loses no information
+that isn't already stated nearby; keeping a labeled-but-wrong-numbered
+banner next to a correct one would only re-create the exact confusion
+being fixed. Re-ran `--fix` twice after the deletion: no output either
+time (nothing left to rewrite), confirming the removal didn't touch the
+real heading structure — same single `SL003` finding on `sinks.clj`, same
+5-layer count, only the line number shifted. Checked every other changed
+file in the component for the same pattern (`grep` for `;;.*Layer\s+\d+.*:`)
+— none found; `sinks.clj` was the only offender.
 
 ## Testing Plan
 
@@ -109,3 +137,7 @@ the namespace.
 - [x] Component test suite passes (11 tests, 54 assertions, 0
       failures/errors)
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
+- [x] Post-review: stale double-semicolon banners with wrong `Layer N:`
+      labels removed from `sinks.clj` (5); confirmed absent elsewhere in
+      the component; re-verified idempotency and unchanged finding after
+      removal
