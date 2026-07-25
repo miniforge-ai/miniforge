@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.mechanism
   "Intervention mechanisms that reach past the runner's control-state —
    Phase D D-3b.
@@ -52,9 +51,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Request-detail reading
 
-(def phase-detail-keys
+;; Request-detail reading
+(def ^{:stratum 0} phase-detail-keys
   "Keys `:retry-from-phase` accepts for its target phase, in priority
    order. The wire form is the string `\"phase\"`: transit-JSON map keys
    inside `:intervention/details` arrive untagged, so the reader leaves
@@ -63,7 +62,7 @@
    The keyword form is what in-process callers write."
   ["phase" :phase])
 
-(defn- phase-keyword
+(defn- ^{:stratum 0} phase-keyword
   "Coerce a details value to a phase keyword, or nil when it carries no
    usable phase. Blank strings are nil rather than `:` — an empty
    request must fail as a missing phase, not resolve to a phantom one."
@@ -73,16 +72,8 @@
     (and (string? v) (not (str/blank? v))) (keyword v)
     :else nil))
 
-(defn requested-phase
-  "The phase an intervention's `:intervention/details` targets, as a
-   keyword, or nil when the request carries none."
-  [interv]
-  (let [details (:intervention/details interv)]
-    (some #(phase-keyword (get details %)) phase-detail-keys)))
-
 ;; ── Phase history — the resume mechanism's own record of what ran ──────────
-
-(defn known-phases
+(defn ^{:stratum 0} known-phases
   "Every phase the target run actually recorded, drawn from the
    reconstructed resume context: phases it completed, phases it produced
    a result for (a failed phase has a result but is not completed), and
@@ -94,17 +85,104 @@
                   (keys (:phase-results context)))
       current-phase (conj current-phase))))
 
-(defn phases-before
+(defn ^{:stratum 0} phases-before
   "The completed-phase prefix strictly preceding `phase`. Rewinding to
    `phase` means everything from `phase` onward must run again, so the
    resume's completed set is truncated there."
   [completed-phases phase]
   (vec (take-while #(not= phase %) completed-phases)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Resume plan
+(defn- ^{:stratum 0} resume-failure
+  [code]
+  {:failure/code code})
 
-(defn resume-plan
+(defn ^{:stratum 0} launched-run-id
+  "The run id a launcher reported, or nil when it reported none. A
+   launcher that returns an anomaly, nil, or a map without a run id has
+   not dispatched anything the lifecycle can verify."
+  [launch-result]
+  (when (and (map? launch-result) (not (anomaly/anomaly? launch-result)))
+    (:resume/run-id launch-result)))
+
+(defn ^{:stratum 0} resume-observable?
+  "Readback for a dispatched resume: true when the launched run has
+   become observable in the event history the resume machinery itself
+   reads. Asserts the mechanism's own record — a run that never started
+   reconstructs to a `:not-found` anomaly and reads back false."
+  [events-dir run-id]
+  (boolean
+   (and run-id
+        (not (anomaly/anomaly? (wr/reconstruct-context events-dir (str run-id)))))))
+
+;; ── Policy re-evaluation ───────────────────────────────────────────────────
+(def ^{:stratum 0} ^:const re-evaluation-gate-id
+  "Gate id stamped on the gate event a `:re-evaluate` intervention
+   publishes, so the resulting PolicyEvaluation is attributable to an
+   operator re-run rather than to a workflow gate."
+  :supervisory/re-evaluate)
+
+(defn ^{:stratum 0} evaluation-request
+  "The payload handed to the registered policy evaluator. Carries the
+   target and the requester identity the audit record needs; details
+   pass through verbatim so a client can scope the re-run (packs,
+   rule ids) without this layer growing an opinion about them."
+  [interv]
+  {:policy/target-type (:intervention/target-type interv)
+   :policy/target-id (str (:intervention/target-id interv))
+   :policy/requested-by (:intervention/requested-by interv)
+   :policy/details (:intervention/details interv)
+   :policy/intervention-id (:intervention/id interv)})
+
+(defn- ^{:stratum 0} materialized-policy-eval-ids
+  "PolicyEvaluation ids currently materialized from `stream`'s events,
+   folded through the canonical supervisory accumulator. Reading the
+   entity table — not the raw event log — is what makes the post-publish
+   comparison a readback of the record rather than of our own write."
+  [stream]
+  (set (keys (:policy-evals
+              (supervisory/apply-events supervisory/empty-table
+                                        (es/get-events stream))))))
+
+(defn- ^{:stratum 0} pack-id
+  "One pack identifier as the string `:policy-eval/packs-applied`
+   requires. Evaluators name packs as strings, keywords, or symbols
+   interchangeably; coerce each explicitly, preserving any namespace
+   (`:my/pack` → `\"my/pack\"`), with a `str` fallback for anything else.
+
+   The prior `(str (symbol %))` leaned on `symbol` accepting a keyword —
+   which it happens to on Clojure 1.12, but that is not `symbol`'s
+   contract and it throws outright on a non-ident (e.g. a numeric id).
+   Explicit coercion removes the dependency."
+  [pack]
+  (cond
+    (string? pack) pack
+    (or (keyword? pack) (symbol? pack))
+    (if-let [ns (namespace pack)] (str ns "/" (name pack)) (name pack))
+    :else (str pack)))
+
+(defn ^{:stratum 0} valid-evaluation?
+  "A usable evaluator result: a map carrying a boolean
+   `:evaluation/passed?`. Anything else — nil, a non-map, or a map
+   whose verdict is missing or non-boolean — is NOT an evaluation and
+   must never be published as one. Without this check a nil/garbage
+   result coerces to `passed? false` and mints a bogus `:gate/failed`
+   PolicyEvaluation, breaking the \"never publishes a verdict it did
+   not receive\" guarantee."
+  [evaluation]
+  (and (map? evaluation)
+       (boolean? (:evaluation/passed? evaluation))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} requested-phase
+  "The phase an intervention's `:intervention/details` targets, as a
+   keyword, or nil when the request carries none."
+  [interv]
+  (let [details (:intervention/details interv)]
+    (some #(phase-keyword (get details %)) phase-detail-keys)))
+
+;; Resume plan
+(defn ^{:stratum 1} resume-plan
   "The launcher payload for a retry: the resume inputs a run needs, under
    stable `:resume/*` keys.
 
@@ -141,11 +219,13 @@
            :resume/intervention-id (:intervention/id interv)}
     from-phase (assoc :resume/from-phase from-phase)))
 
-(defn- resume-failure
-  [code]
-  {:failure/code code})
+(defn- ^{:stratum 1} pack-ids
+  [packs]
+  (mapv pack-id (or packs [])))
 
-(defn prepare-resume
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} prepare-resume
   "Rebuild resume state for a `:retry` / `:retry-from-phase`
    intervention against `events-dir`.
 
@@ -177,61 +257,7 @@
               {:resume/plan (resume-plan interv context workflow-identity
                                          from-phase)})))))))
 
-(defn launched-run-id
-  "The run id a launcher reported, or nil when it reported none. A
-   launcher that returns an anomaly, nil, or a map without a run id has
-   not dispatched anything the lifecycle can verify."
-  [launch-result]
-  (when (and (map? launch-result) (not (anomaly/anomaly? launch-result)))
-    (:resume/run-id launch-result)))
-
-(defn resume-observable?
-  "Readback for a dispatched resume: true when the launched run has
-   become observable in the event history the resume machinery itself
-   reads. Asserts the mechanism's own record — a run that never started
-   reconstructs to a `:not-found` anomaly and reads back false."
-  [events-dir run-id]
-  (boolean
-   (and run-id
-        (not (anomaly/anomaly? (wr/reconstruct-context events-dir (str run-id)))))))
-
-;; ── Policy re-evaluation ───────────────────────────────────────────────────
-
-(def ^:const re-evaluation-gate-id
-  "Gate id stamped on the gate event a `:re-evaluate` intervention
-   publishes, so the resulting PolicyEvaluation is attributable to an
-   operator re-run rather than to a workflow gate."
-  :supervisory/re-evaluate)
-
-(defn evaluation-request
-  "The payload handed to the registered policy evaluator. Carries the
-   target and the requester identity the audit record needs; details
-   pass through verbatim so a client can scope the re-run (packs,
-   rule ids) without this layer growing an opinion about them."
-  [interv]
-  {:policy/target-type (:intervention/target-type interv)
-   :policy/target-id (str (:intervention/target-id interv))
-   :policy/requested-by (:intervention/requested-by interv)
-   :policy/details (:intervention/details interv)
-   :policy/intervention-id (:intervention/id interv)})
-
-(defn- materialized-policy-eval-ids
-  "PolicyEvaluation ids currently materialized from `stream`'s events,
-   folded through the canonical supervisory accumulator. Reading the
-   entity table — not the raw event log — is what makes the post-publish
-   comparison a readback of the record rather than of our own write."
-  [stream]
-  (set (keys (:policy-evals
-              (supervisory/apply-events supervisory/empty-table
-                                        (es/get-events stream))))))
-
-(defn- pack-ids
-  "Pack identifiers as the strings `:policy-eval/packs-applied` requires;
-   evaluators name packs with keywords or strings interchangeably."
-  [packs]
-  (mapv #(if (string? %) % (str (symbol %))) (or packs [])))
-
-(defn evaluation-gate-event
+(defn ^{:stratum 2} evaluation-gate-event
   "The `:gate/passed` / `:gate/failed` event that materializes a new
    PolicyEvaluation for `interv`'s target.
 
@@ -256,19 +282,9 @@
                :gate/packs (pack-ids (:evaluation/packs-applied evaluation))
                :gate/violations (vec (:evaluation/violations evaluation))))))
 
-(defn valid-evaluation?
-  "A usable evaluator result: a map carrying a boolean
-   `:evaluation/passed?`. Anything else — nil, a non-map, or a map
-   whose verdict is missing or non-boolean — is NOT an evaluation and
-   must never be published as one. Without this check a nil/garbage
-   result coerces to `passed? false` and mints a bogus `:gate/failed`
-   PolicyEvaluation, breaking the \"never publishes a verdict it did
-   not receive\" guarantee."
-  [evaluation]
-  (and (map? evaluation)
-       (boolean? (:evaluation/passed? evaluation))))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn record-policy-evaluation!
+(defn ^{:stratum 3} record-policy-evaluation!
   "Publish the evaluator's verdict and read the entity table back.
    Caller MUST gate on [[valid-evaluation?]] first — this fn assumes a
    well-formed evaluation and does not re-check.
