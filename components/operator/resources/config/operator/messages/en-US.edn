@@ -53,17 +53,56 @@
   :application/invalid-control-state
   "Live runner registration requires an atom :control-state"
 
+  :application/invalid-policy-evaluator
+  "Policy evaluator registration requires a function"
+
+  :application/invalid-resume-launcher
+  "Resume launcher registration requires a :launch! function"
+
+  :application/missing-phase
+  "The retry-from-phase request carries no target phase"
+
   :application/no-degradation-manager
   "No process degradation manager is available"
 
   :application/no-live-runner
   "No live runner owns the intervention target"
 
+  :application/no-policy-evaluator
+  "No process policy evaluator is available"
+
+  :application/invalid-policy-evaluation
+  "Policy evaluator returned no usable verdict"
+
+  :application/no-resume-context
+  "The target workflow has no reconstructable resume context"
+
+  :application/no-resume-launcher
+  "No process resume launcher is available"
+
   :application/not-implemented
   "The intervention mechanism is not implemented"
+
+  :application/policy-evaluation-readback-mismatch
+  "No new policy evaluation was recorded for the target"
+
+  :application/policy-re-evaluated
+  "Policy re-evaluated for {target}: {result}"
+
+  :application/resume-not-dispatched
+  "The resume launcher reported no resumed run"
+
+  :application/resume-readback-mismatch
+  "The resumed run is not observable in the event history"
 
   :application/safe-mode-readback-mismatch
   "Degradation-mode readback did not match the requested state"
 
   :application/unknown-failure
-  "Intervention application failed for an unknown reason"}}
+  "Intervention application failed for an unknown reason"
+
+  :application/unknown-phase
+  "The requested phase is not in the target workflow's phase history"
+
+  :application/unresolved-workflow-type
+  "No loadable workflow type could be resolved for the retry"}}
