@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.interface
   "Public API for structured EDN logging.
    Provides logger creation, context management, and level-specific log
@@ -28,9 +27,9 @@
    [ai.miniforge.logging.http :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Logger creation and configuration
 
-(defn create-logger
+;; Logger creation and configuration
+(defn ^{:stratum 0} create-logger
   "Create a new EDN logger.
 
    Options:
@@ -43,7 +42,7 @@
   ([] (core/create-logger))
   ([opts] (core/create-logger opts)))
 
-(defn with-context
+(defn ^{:stratum 0} with-context
   "Return a new logger with additional context merged into all entries.
    Context keys are typically namespaced like :ctx/workflow-id,
    :ctx/agent-id. Nil logger passes through (the result is still nil)
@@ -57,12 +56,12 @@
   (when logger
     (core/with-context* logger context-map)))
 
-(defn get-context
+(defn ^{:stratum 0} get-context
   "Return the current context map from a logger."
   [logger]
   (core/get-context logger))
 
-(defn collecting-logger
+(defn ^{:stratum 0} collecting-logger
   "Create a logger that collects entries into an atom for testing.
    Returns [logger entries-atom].
 
@@ -76,10 +75,8 @@
      [(core/create-logger (assoc opts :output output-fn))
       entries])))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Core logging function
-
-(defn log
+(defn ^{:stratum 0} log
   "Emit a structured log entry.
 
    Arguments:
@@ -103,47 +100,44 @@
 ;; Level-specific convenience functions. Each wrapper is nil-safe so
 ;; callers don't have to repeat `(when logger …)` at every call site
 ;; — passing a nil logger drops the entry on the floor.
-
-(defn trace
+(defn ^{:stratum 0} trace
   "Log at :trace level (detailed internal state). Nil logger = no-op."
   ([logger category event] (trace logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :trace category event opts))))
 
-(defn debug
+(defn ^{:stratum 0} debug
   "Log at :debug level (operational detail). Nil logger = no-op."
   ([logger category event] (debug logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :debug category event opts))))
 
-(defn info
+(defn ^{:stratum 0} info
   "Log at :info level (business events). Nil logger = no-op."
   ([logger category event] (info logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :info category event opts))))
 
-(defn warn
+(defn ^{:stratum 0} warn
   "Log at :warn level (recoverable issues). Nil logger = no-op."
   ([logger category event] (warn logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :warn category event opts))))
 
-(defn error
+(defn ^{:stratum 0} error
   "Log at :error level (failed operations). Nil logger = no-op."
   ([logger category event] (error logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :error category event opts))))
 
-(defn fatal
+(defn ^{:stratum 0} fatal
   "Log at :fatal level (system-level failures). Nil logger = no-op."
   ([logger category event] (fatal logger category event {}))
   ([logger category event opts]
    (when logger (core/log* logger :fatal category event opts))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Timed execution
-
-(defn timed
+(defn ^{:stratum 0} timed
   "Execute f and log start/completion with duration.
    Returns the result of f. Nil logger skips both log entries and just
    returns `(f)`.
@@ -156,7 +150,24 @@
     (first (core/timed* logger level category event f))
     (f)))
 
-(defmacro with-timing
+(defn ^{:stratum 0} cleanup-old-rotated-logs
+  "Delete rotated log files in `logs-dir` older than `retention-days`.
+   Returns the number of files deleted."
+  [logs-dir retention-days]
+  (core/cleanup-old-rotated-logs logs-dir retention-days))
+
+;; HTTP request builder — used by both the in-brick fleet sink and the
+;; event-stream fleet sink. Pass-through to `ai.miniforge.logging.http`.
+(defn ^{:stratum 0} build-json-post
+  "Build a `java.net.http.HttpRequest` POST with a JSON-string `body`
+   and a Bearer `api-key` header. `timeout-ms` sets the request-level
+   timeout. Used by every fleet-style HTTP sink (logging + event-stream)."
+  [uri body api-key timeout-ms]
+  (http/build-json-post uri body api-key timeout-ms))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defmacro ^{:stratum 1} with-timing
   "Execute body and log start/completion with duration.
    Returns the result of body.
 
@@ -165,23 +176,6 @@
        (do-expensive-work))"
   [logger level category event & body]
   `(timed ~logger ~level ~category ~event (fn [] ~@body)))
-
-(defn cleanup-old-rotated-logs
-  "Delete rotated log files in `logs-dir` older than `retention-days`.
-   Returns the number of files deleted."
-  [logs-dir retention-days]
-  (core/cleanup-old-rotated-logs logs-dir retention-days))
-
-;------------------------------------------------------------------------------ Layer 3
-;; HTTP request builder — used by both the in-brick fleet sink and the
-;; event-stream fleet sink. Pass-through to `ai.miniforge.logging.http`.
-
-(defn build-json-post
-  "Build a `java.net.http.HttpRequest` POST with a JSON-string `body`
-   and a Bearer `api-key` header. `timeout-ms` sets the request-level
-   timeout. Used by every fleet-style HTTP sink (logging + event-stream)."
-  [uri body api-key timeout-ms]
-  (http/build-json-post uri body api-key timeout-ms))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
