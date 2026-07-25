@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.user-defaults-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -24,9 +23,9 @@
    [ai.miniforge.config.user :as user]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Default config policy
 
-(deftest default-config-prefers-opencode-test
+;; Default config policy
+(deftest ^{:stratum 0} default-config-prefers-opencode-test
   (let [cfg config/default-config]
     (testing "default llm backend routes provider auth through OpenCode"
       (is (= :opencode (get-in cfg [:llm :backend])))
@@ -49,7 +48,7 @@
           ":workflow/worktree-root must be present in the default config so
            create-worktree-executor picks it up without a disk read"))))
 
-(deftest load-default-config-falls-back-to-edn-resource-test
+(deftest ^{:stratum 0} load-default-config-falls-back-to-edn-resource-test
   (let [orig-resource io/resource]
     (with-redefs [user/find-resource (fn [path]
                                        (case path
@@ -67,7 +66,7 @@
             "fallback EDN must carry :workflow/worktree-root so the dag-executor
              can locate worktrees even when the primary resource is missing")))))
 
-(deftest repo-config-support-test
+(deftest ^{:stratum 0} repo-config-support-test
   (testing "repo-config-path appends .miniforge/config.edn to the provided root"
     (is (= (str "/tmp/repo" java.io.File/separator
                 ".miniforge" java.io.File/separator

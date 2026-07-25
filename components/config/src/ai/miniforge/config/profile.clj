@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.profile
   "User profile management (~/.miniforge/profile.edn).
 
@@ -40,28 +39,12 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema and path
 
-(def profile-path
+;; Schema and path
+(def ^{:stratum 0} profile-path
   (str (user/miniforge-home) "/profile.edn"))
 
-
-;------------------------------------------------------------------------------ Layer 1
-;; Load and validate
-
-(defn load-profile
-  "Load user profile from ~/.miniforge/profile.edn using Aero.
-   Returns the profile map, or nil if file does not exist."
-  ([] (load-profile profile-path))
-  ([path]
-   (let [f (io/file path)]
-     (when (.exists f)
-       (try
-         (aero/read-config f)
-         (catch Exception _
-           nil))))))
-
-(defn validate-profile
+(defn ^{:stratum 0} validate-profile
   "Validate a profile map. Returns {:valid? bool :errors [...]}.
    Checks that :tokens is a map with keyword keys and string values,
    and that :identity has :name and :email when present."
@@ -85,10 +68,8 @@
     {:valid? (empty? errors)
      :errors errors}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Token resolution
-
-(defn- gh-cli-token
+(defn- ^{:stratum 0} gh-cli-token
   "Attempt to get a GitHub token from the gh CLI.
    Returns the token string or nil."
   []
@@ -99,7 +80,24 @@
           (when (seq token) token))))
     (catch Exception _ nil)))
 
-(defn resolve-token
+;------------------------------------------------------------------------------ Layer 1
+
+;; Load and validate
+(defn ^{:stratum 1} load-profile
+  "Load user profile from ~/.miniforge/profile.edn using Aero.
+   Returns the profile map, or nil if file does not exist."
+  ([] (load-profile profile-path))
+  ([path]
+   (let [f (io/file path)]
+     (when (.exists f)
+       (try
+         (aero/read-config f)
+         (catch Exception _
+           nil))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} resolve-token
   "Resolve a git authentication token for a given host kind.
 
    Resolution order:

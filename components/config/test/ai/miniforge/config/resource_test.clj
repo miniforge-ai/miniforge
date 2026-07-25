@@ -15,30 +15,36 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.resource-test
   (:require
    [ai.miniforge.config.resource :as resource]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; A real map resource shipped by this component, used for the happy path.
-(def ^:private a-real-resource "config/default-user-config-fallback.edn")
-(def ^:private a-missing-resource "config/does-not-exist-xyz.edn")
+(def ^{:stratum 0} ^:private a-real-resource "config/default-user-config-fallback.edn")
+
+(def ^{:stratum 0} ^:private a-missing-resource "config/does-not-exist-xyz.edn")
+
 ;; Test fixtures (under test/resource_test_fixtures/, on the test classpath).
 ;; The malformed fixture uses a .txt extension so the EDN linter does not
 ;; reject its deliberately invalid content; the loader reads by path, not
 ;; extension.
-(def ^:private a-malformed-resource "resource_test_fixtures/malformed-edn.txt")
-(def ^:private a-non-map-resource "resource_test_fixtures/non-map.edn")
+(def ^{:stratum 0} ^:private a-malformed-resource "resource_test_fixtures/malformed-edn.txt")
 
-(deftest load-config-resource-happy-path
+(def ^{:stratum 0} ^:private a-non-map-resource "resource_test_fixtures/non-map.edn")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} load-config-resource-happy-path
   (testing "returns the parsed map for a resource on the classpath"
     (is (map? (resource/load-config-resource a-real-resource))))
   (testing "an empty required-keys set is a no-op"
     (is (map? (resource/load-config-resource a-real-resource [])))))
 
-(deftest load-config-resource-missing-resource
+(deftest ^{:stratum 1} load-config-resource-missing-resource
   (testing "throws a clear ex-info naming the missing resource"
     (let [ex (try (resource/load-config-resource a-missing-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
@@ -55,7 +61,7 @@
       (is (= "add the component resources to the classpath"
              (:hint (ex-data ex)))))))
 
-(deftest load-config-resource-extra-ex-data-contract
+(deftest ^{:stratum 1} load-config-resource-extra-ex-data-contract
   (testing "throws a clear ex-info when caller-supplied diagnostic ex-data is not a map"
     (let [ex (try (resource/load-config-resource a-real-resource nil [:hint "bad"])
                   (catch clojure.lang.ExceptionInfo e e))]
@@ -63,14 +69,14 @@
       (is (= a-real-resource (:config/resource (ex-data ex))))
       (is (= [:hint "bad"] (:config/extra-ex-data (ex-data ex)))))))
 
-(deftest load-config-resource-missing-key
+(deftest ^{:stratum 1} load-config-resource-missing-key
   (testing "throws when a required key is absent, naming the key"
     (let [ex (try (resource/load-config-resource a-real-resource [:definitely-not-a-key])
                   (catch clojure.lang.ExceptionInfo e e))]
       (is (instance? clojure.lang.ExceptionInfo ex))
       (is (= [:definitely-not-a-key] (:config/missing-keys (ex-data ex)))))))
 
-(deftest load-config-resource-malformed
+(deftest ^{:stratum 1} load-config-resource-malformed
   (testing "throws a clear ex-info for malformed EDN"
     (let [ex (try (resource/load-config-resource a-malformed-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
@@ -79,7 +85,7 @@
       (is (= :invalid-config (:config/error (ex-data ex))))
       (is (= :malformed-edn (:config/invalid-config-reason (ex-data ex)))))))
 
-(deftest load-config-resource-unreadable-resource
+(deftest ^{:stratum 1} load-config-resource-unreadable-resource
   (testing "distinguishes resource read failures from malformed EDN"
     (let [missing-file-url (java.net.URL.
                             (str "file:/tmp/miniforge-missing-"
@@ -94,7 +100,7 @@
       (is (= :unreadable-resource
              (:config/invalid-config-reason (ex-data ex)))))))
 
-(deftest load-config-resource-non-map
+(deftest ^{:stratum 1} load-config-resource-non-map
   (testing "throws when the EDN parses to a non-map value"
     (let [ex (try (resource/load-config-resource a-non-map-resource)
                   (catch clojure.lang.ExceptionInfo e e))]
@@ -103,7 +109,7 @@
       (is (= :invalid-config (:config/error (ex-data ex))))
       (is (= :not-a-map (:config/invalid-config-reason (ex-data ex)))))))
 
-(deftest read-config-resource-or-fail-open
+(deftest ^{:stratum 1} read-config-resource-or-fail-open
   (testing "returns the fallback for a missing resource"
     (is (= {:fallback true}
            (resource/read-config-resource-or a-missing-resource {:fallback true}))))
