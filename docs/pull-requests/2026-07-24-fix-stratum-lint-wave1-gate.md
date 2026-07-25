@@ -60,10 +60,11 @@ before committing, not just trusted after one.
 
 Since the last redo attempt on this branch, [#1471](https://github.com/miniforge-ai/miniforge/pull/1471)
 made any remaining post-fix finding (SL003 here — 5 files over the
-3-layer budget, unchanged from the baseline) block the commit by default
+3-layer budget by real reference-graph depth, only 1 of which the
+baseline's heading-based count had flagged) block the commit by default
 instead of print a non-blocking advisory. This commit uses
-`MINIFORGE_STRATUM_BUDGET_MODE=warn`: these 5 files are pre-existing,
-already-tracked violations this PR doesn't create or worsen — the
+`MINIFORGE_STRATUM_BUDGET_MODE=warn`: these are pre-existing depth
+violations this PR doesn't create or worsen, just makes visible — the
 mechanical fix pass can't resolve them (that needs an actual namespace
 split, Wave 2, not attempted here) — and blocking a comment-attachment
 correction on a pre-existing, already-documented violation isn't the
@@ -86,9 +87,16 @@ scenario the override exists to prevent.
 - `clj-kondo --lint components/gate`: 0 errors, 0 warnings.
 - Plain (non-fix) lint after fixing: 5 SL003 findings remain
   (`policy_pack.clj` 9 layers, `format.clj` 8, `capabilities.clj` 7,
-  `pre_verify_lint.clj` 5, `precommit_discipline.clj` 4) — genuine,
-  reference-graph-derived depth exceeding the budget, Wave 2 scope, not
-  a regression from this change.
+  `pre_verify_lint.clj` 5, `precommit_discipline.clj` 4). The baseline
+  audit had recorded only one of these (`policy_pack.clj`, then counted
+  at 4 layers) — that count came from the file's existing, cargo-culted
+  headings, which under-tracked the real depth. `--fix` computes each
+  def's actual stratum from the same-file reference graph regardless of
+  what the old headings said, so it surfaces the true depth for every
+  file, not just the one the old heading count happened to flag. Not a
+  regression from this change — these files' real call graphs were
+  already this deep before this PR; the mechanical fix just makes it
+  visible. Genuinely Wave 2 scope (needs an actual namespace split).
 - Full `bb pre-commit` gate green: `poly:check`, `lint:clj`,
   `lint:stratum` (advisory under `MINIFORGE_STRATUM_BUDGET_MODE=warn`
   for the reason above), `fmt:md`, `test:precommit` (331 tests),

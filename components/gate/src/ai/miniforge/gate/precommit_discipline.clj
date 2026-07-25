@@ -18,7 +18,7 @@
 (ns ai.miniforge.gate.precommit-discipline
   "Pre-commit hook discipline policy gate.
   
-   Enforces .cursor/rules/700-workflows/715-pre-commit-discipline.mdc by:
+   Enforces .cursor/rules/workflows/pre-commit-discipline.mdc by:
    1. Checking git history for commits made with --no-verify
    2. Validating that bypassed commits have proper [BYPASS-HOOKS: reason] documentation
    3. Verifying manual validation steps were documented
@@ -130,7 +130,7 @@
              3. If commit is pushed, add corrective commit with proper practices
              4. Ensure future commits follow pre-commit discipline guidelines
              
-             See .cursor/rules/700-workflows/715-pre-commit-discipline.mdc for details."})
+             See .cursor/rules/workflows/pre-commit-discipline.mdc for details."})
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -163,7 +163,7 @@
 (defn ^{:stratum 1} validate-bypass-commit
   "Validate a commit that bypassed pre-commit hooks.
   
-   According to 715-pre-commit-discipline.mdc, bypassed commits must:
+   According to .cursor/rules/workflows/pre-commit-discipline.mdc, bypassed commits must:
    1. Have [BYPASS-HOOKS: reason] in the message
    2. Document manual validation steps
    3. Explain why bypass was necessary
