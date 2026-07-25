@@ -19,9 +19,10 @@
   "Config loader implementation.
 
    Stratification (intra-namespace):
-   Layer 0 — `read-edn` and `default-path` (no in-ns deps).
-   Layer 1 — `load` (composes Layer 0).
-   Layer 2 — `get` (composes Layer 0 + Layer 1)."
+   Layer 0 — `default-filename` and `read-edn` (no in-ns deps).
+   Layer 1 — `default-path` (composes Layer 0).
+   Layer 2 — `load` (composes Layer 0 + Layer 1).
+   Layer 3 — `get` (composes Layer 1 + Layer 2)."
   (:refer-clojure :exclude [load get])
   (:require [ai.miniforge.bb-paths.interface :as paths]
             [babashka.fs :as fs]
@@ -48,7 +49,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; Composes Layer 0.
+;; Composes Layer 0 + Layer 1.
 (defn ^{:stratum 2} load
   "Load the whole config map."
   ([] (read-edn (default-path)))
@@ -56,7 +57,7 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
-;; Composes Layer 0 (`default-path`) + Layer 1 (`load`).
+;; Composes Layer 1 (`default-path`) + Layer 2 (`load`).
 (defn ^{:stratum 3} get
   "Return the config slice for `task-key`."
   ([task-key] (get (default-path) task-key))
