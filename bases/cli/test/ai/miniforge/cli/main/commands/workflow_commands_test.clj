@@ -86,14 +86,14 @@
       (with-redefs [es/request-intervention!
                     (fn [_] (anomaly/anomaly :fault "operator dir unwritable" {}))
                     shared/exit! (fn [code] (reset! exit-code code))]
-        (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))
+        (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))
         (is (some? @exit-code) "cancel must exit non-zero on a write anomaly"))))
   (testing "a thrown write likewise exits with error"
     (let [exit-code (atom nil)]
       (with-redefs [es/request-intervention!
                     (fn [_] (throw (ex-info "boom" {})))
                     shared/exit! (fn [code] (reset! exit-code code))]
-        (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))
+        (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))
         (is (some? @exit-code) "cancel must exit non-zero when the write throws")))))
 
 (deftest ^{:stratum 0} workflow-cancel-cmd-requests-a-cancel-intervention-test
@@ -103,7 +103,11 @@
                     (fn [request]
                       (swap! requests conj request)
                       (assoc request :intervention/id (random-uuid)))]
-        (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-456"}))
+        ;; A UUID id reflects the real contract: the operator writer
+        ;; rejects a non-UUID workflow target, so a governed run's id is
+        ;; always a UUID string.
+        (let [wid (str (random-uuid))
+              output (with-out-str (sut/workflow-cancel-cmd {:id wid}))
               request (first @requests)]
           (is (.contains output "Cancel"))
           (is (= 1 (count @requests)))
@@ -111,7 +115,7 @@
           ;; vocabulary names the same operation `:cancel`.
           (is (= :cancel (:intervention/type request)))
           (is (= :workflow (:intervention/target-type request)))
-          (is (= "wf-456" (:intervention/target-id request)))
+          (is (= wid (:intervention/target-id request)))
           (is (= :cli (:intervention/request-source request)))
           (is (string? (:intervention/requested-by request))))))))
 
@@ -122,7 +126,7 @@
     (with-redefs [es/request-intervention!
                   (fn [_request] (throw (ex-info "disk full" {})))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
+      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
         (is (.contains output "disk full"))
         (is (not (.contains output "Cancel signal sent")))))))
 
@@ -132,7 +136,7 @@
                   (fn [_request]
                     (anomaly/anomaly :invalid-input "bad request" {}))
                   shared/exit! (fn [_] nil)]
-      (let [output (with-out-str (sut/workflow-cancel-cmd {:id "wf-789"}))]
+      (let [output (with-out-str (sut/workflow-cancel-cmd {:id (str (random-uuid))}))]
         (is (.contains output "bad request"))
         (is (not (.contains output "Cancel signal sent")))))))
 

@@ -166,3 +166,20 @@
                               (plan-executor/execute-plan
                                {:plan/id "p1" :plan/tasks []} {:quiet true})))
         (is (registered-and-released? calls))))))
+
+(deftest governed-workflow-id-is-always-a-uuid
+  (testing "the operator channel routes by UUID, so a governed run must have one"
+    (let [gwid #'runner/governed-workflow-id]
+      ;; a UUID session-id is adopted as-is
+      (let [u (random-uuid)]
+        (is (= u (gwid u true))))
+      ;; a UUID *string* is parsed and adopted (same run, controllable)
+      (let [u (random-uuid)]
+        (is (= u (gwid (str u) true))))
+      ;; a non-UUID session-id is discarded for a fresh UUID rather than
+      ;; leaving the run uncontrollable
+      (is (uuid? (gwid "named-session" true)))
+      (is (not= "named-session" (gwid "named-session" true)))
+      ;; an absent session-id is the normal case: a fresh UUID
+      (is (uuid? (gwid nil true)))
+      (is (uuid? (gwid :a-keyword true))))))

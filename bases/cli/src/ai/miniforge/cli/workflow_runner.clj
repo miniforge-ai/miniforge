@@ -1068,6 +1068,27 @@
 ;------------------------------------------------------------------------------ Layer 2
 ;; Spec-driven execution
 
+(defn- governed-workflow-id
+  "A UUID workflow id for a governed run. The operator control channel
+   routes `:pause`/`:resume`/`:cancel` interventions by coercing the
+   target id to a UUID, so a run WITHOUT a UUID id is uncontrollable —
+   its interventions can't reach its live-runner registry or audit
+   trail. Use the spec's `:session-id` when it already is a UUID (or a
+   UUID string); otherwise mint one. A PRESENT-but-non-UUID session-id
+   is warned about (it was silently discarded); an absent one is the
+   normal case and mints quietly."
+  [session-id quiet]
+  (or (when (uuid? session-id) session-id)
+      (when (string? session-id) (parse-uuid session-id))
+      (let [fresh (random-uuid)]
+        (when (and (some? session-id) (not quiet))
+          (println (display/colorize
+                    :yellow
+                    (messages/t :workflow-runner/non-uuid-session-id
+                                {:session-id (pr-str session-id)
+                                 :workflow-id (str fresh)}))))
+        fresh)))
+
 (defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   ;; Piggyback deferred GC on each spec-driven workflow start.
   (run-gc-pass-best-effort!)
@@ -1094,7 +1115,8 @@
           _supervisor (supervisory/attach! event-stream)
           ;; N15-6: see meta-loop attach above for rationale.
           _correlator (correlator/attach! event-stream)
-          workflow-id (or (get-in enriched-spec [:spec/metadata :session-id]) (random-uuid))
+          workflow-id (governed-workflow-id
+                       (get-in enriched-spec [:spec/metadata :session-id]) quiet)
           ;; Control state the governed operator channel flips for
           ;; :pause / :resume / :cancel interventions.
           control-state (es/create-control-state)
