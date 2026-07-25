@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-jira.resources
   "Jira Cloud REST API resource type registry and URL/param builders.
    Resource definitions are loaded from an EDN resource file at startup."
@@ -24,12 +23,43 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-;;------------------------------------------------------------------------------ Layer 0
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Resource loading
+(def ^{:stratum 0} ^:private resource-path "config/connector-jira/resources.edn")
 
-(def ^:private resource-path "config/connector-jira/resources.edn")
+;; URL and param builders
+(defn ^{:stratum 0} build-base-url
+  "Build the Jira Cloud base URL from config.
+   When :jira/cloud-id is present, uses the Atlassian API gateway — required for
+   scoped API tokens (tokens with explicit permission scopes).
+   Falls back to the classic site URL for classic (unscoped) API tokens."
+  [config]
+  (if-let [cloud-id (:jira/cloud-id config)]
+    (str "https://api.atlassian.com/ex/jira/" cloud-id)
+    (str "https://" (:jira/site config) ".atlassian.net")))
 
-(defn- load-resources []
+(defn ^{:stratum 0} build-url
+  "Build a Jira API URL by substituting path parameters."
+  [base-url resource-def config]
+  (str base-url
+       (-> (:endpoint resource-def)
+           (str/replace "{board_id}" (str (get config :jira/board-id "")))
+           (str/replace "{issue_key}" (str (get config :jira/issue-key ""))))))
+
+(defn- ^{:stratum 0} resolved-project-key
+  "Return :jira/project-key from config only if it is a real resolved value.
+   Treats nil, blank, and unresolved placeholders (${...}) as absent."
+  [config]
+  (let [pk (:jira/project-key config)]
+    (when (and (string? pk)
+               (not (str/blank? pk))
+               (not (str/starts-with? pk "${")))
+      pk)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-resources []
   (if-let [res (io/resource resource-path)]
     (edn/read-string (slurp res))
     (response/throw-anomaly! :anomalies/not-found
@@ -40,47 +70,7 @@
                               :classpath/resource resource-path
                               :config/resource resource-path})))
 
-(def jira-resources
-  "Registry of Jira Cloud REST API resource types, loaded from EDN."
-  (delay (load-resources)))
-
-(defn get-resource
-  "Look up a resource definition by key."
-  [resource-key]
-  (get @jira-resources resource-key))
-
-;;------------------------------------------------------------------------------ Layer 1
-;; URL and param builders
-
-(defn build-base-url
-  "Build the Jira Cloud base URL from config.
-   When :jira/cloud-id is present, uses the Atlassian API gateway — required for
-   scoped API tokens (tokens with explicit permission scopes).
-   Falls back to the classic site URL for classic (unscoped) API tokens."
-  [config]
-  (if-let [cloud-id (:jira/cloud-id config)]
-    (str "https://api.atlassian.com/ex/jira/" cloud-id)
-    (str "https://" (:jira/site config) ".atlassian.net")))
-
-(defn build-url
-  "Build a Jira API URL by substituting path parameters."
-  [base-url resource-def config]
-  (str base-url
-       (-> (:endpoint resource-def)
-           (str/replace "{board_id}" (str (get config :jira/board-id "")))
-           (str/replace "{issue_key}" (str (get config :jira/issue-key ""))))))
-
-(defn- resolved-project-key
-  "Return :jira/project-key from config only if it is a real resolved value.
-   Treats nil, blank, and unresolved placeholders (${...}) as absent."
-  [config]
-  (let [pk (:jira/project-key config)]
-    (when (and (string? pk)
-               (not (str/blank? pk))
-               (not (str/starts-with? pk "${")))
-      pk)))
-
-(defn build-query-params
+(defn ^{:stratum 1} build-query-params
   "Build query params for a Jira API request.
    For the issues resource, constructs JQL with optional project and cursor filters.
 
@@ -104,7 +94,20 @@
       ;; Other resources: no JQL
       params)))
 
-(defn resource-schemas
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} jira-resources
+  "Registry of Jira Cloud REST API resource types, loaded from EDN."
+  (delay (load-resources)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} get-resource
+  "Look up a resource definition by key."
+  [resource-key]
+  (get @jira-resources resource-key))
+
+(defn ^{:stratum 3} resource-schemas
   "Return discover-compatible schema list for all known Jira resources."
   []
   (mapv (fn [[k v]]

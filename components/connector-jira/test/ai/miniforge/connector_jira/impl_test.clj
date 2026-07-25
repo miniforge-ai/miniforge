@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-jira.impl-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -25,10 +24,10 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Resource registry tests
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest resource-schemas-test
+;; Resource registry tests
+(deftest ^{:stratum 0} resource-schemas-test
   (testing "resource-schemas returns all known resources"
     (let [schemas (resources/resource-schemas)]
       (is (= 5 (count schemas)))
@@ -39,10 +38,8 @@
       (is (some #(= "sprints" (:schema/name %)) schemas))
       (is (some #(= "comments" (:schema/name %)) schemas)))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; URL building tests
-
-(deftest build-base-url-test
+(deftest ^{:stratum 0} build-base-url-test
   (testing "builds classic site URL from :jira/site"
     (is (= "https://mycompany.atlassian.net"
            (resources/build-base-url {:jira/site "mycompany"}))))
@@ -51,7 +48,7 @@
     (is (= "https://api.atlassian.com/ex/jira/abc-123"
            (resources/build-base-url {:jira/site "mycompany" :jira/cloud-id "abc-123"})))))
 
-(deftest build-url-test
+(deftest ^{:stratum 0} build-url-test
   (testing "builds issues search URL"
     (let [resource-def (resources/get-resource :issues)
           url (resources/build-url "https://myco.atlassian.net" resource-def {})]
@@ -79,10 +76,8 @@
           url (resources/build-url "https://myco.atlassian.net" resource-def config)]
       (is (= "https://myco.atlassian.net/rest/api/3/issue/PROJ-123/comment" url)))))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Query param building
-
-(deftest build-query-params-test
+(deftest ^{:stratum 0} build-query-params-test
   (testing "issues: includes JQL with project key and default fields"
     (let [resource-def (resources/get-resource :issues)
           params (resources/build-query-params resource-def nil {} {:jira/project-key "PROJ"})]
@@ -118,15 +113,13 @@
       (is (= 50 (get params "maxResults")))
       (is (nil? (get params "jql"))))))
 
-;;------------------------------------------------------------------------------ Layer 3
 ;; Connect / close lifecycle
-
-(deftest connect-validates-config-test
+(deftest ^{:stratum 0} connect-validates-config-test
   (testing "do-connect requires :jira/site"
     (let [result (impl/do-connect {} nil)]
       (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest connect-close-lifecycle-test
+(deftest ^{:stratum 0} connect-close-lifecycle-test
   (testing "connect and close with valid config"
     (let [result (impl/do-connect {:jira/site "mycompany"} nil)]
       (is (= :connected (:connector/status result)))
@@ -134,17 +127,15 @@
       (let [close-result (impl/do-close (:connection/handle result))]
         (is (= :closed (:connector/status close-result)))))))
 
-(deftest discover-test
+(deftest ^{:stratum 0} discover-test
   (testing "discover returns all resources"
     (let [handle (:connection/handle (impl/do-connect {:jira/site "mycompany"} nil))
           result (impl/do-discover handle)]
       (is (= 5 (:discover/total-count result)))
       (impl/do-close handle))))
 
-;;------------------------------------------------------------------------------ Layer 4
 ;; Extract with mocked HTTP
-
-(deftest extract-issues-offset-pagination-test
+(deftest ^{:stratum 0} extract-issues-offset-pagination-test
   (testing "do-extract drains offset-paginated Jira responses"
     (let [handle (:connection/handle (impl/do-connect {:jira/site "test"
                                                        :jira/project-key "PROJ"} nil))
@@ -176,7 +167,7 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest extract-projects-test
+(deftest ^{:stratum 0} extract-projects-test
   (testing "do-extract for projects uses :values response key"
     (let [handle (:connection/handle (impl/do-connect {:jira/site "test"} nil))]
       (try
@@ -193,7 +184,7 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest extract-unknown-resource-test
+(deftest ^{:stratum 0} extract-unknown-resource-test
   (testing "do-extract throws for unknown resource"
     (let [handle (:connection/handle (impl/do-connect {:jira/site "test"} nil))]
       (try
@@ -201,16 +192,14 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest checkpoint-test
+(deftest ^{:stratum 0} checkpoint-test
   (testing "checkpoint returns committed"
     (let [cursor {:cursor/type :timestamp-watermark :cursor/value "2026-01-01 00:00"}
           result (impl/do-checkpoint cursor)]
       (is (= :committed (:checkpoint/status result))))))
 
-;;------------------------------------------------------------------------------ Layer 5
 ;; Boundary schema validation
-
-(deftest config-schema-validation-test
+(deftest ^{:stratum 0} config-schema-validation-test
   (testing "valid config passes"
     (is (:valid? (jira-schema/validate jira-schema/JiraConfig
                                        {:jira/site "mycompany"
@@ -225,7 +214,7 @@
                                        {:jira/site "mycompany"
                                         :auth/method :basic})))))
 
-(deftest response-schema-validation-test
+(deftest ^{:stratum 0} response-schema-validation-test
   (testing "valid paginated response passes"
     (is (:valid? (jira-schema/validate-response
                   {:startAt 0 :maxResults 50 :total 100}))))
@@ -234,7 +223,7 @@
     (is (not (:valid? (jira-schema/validate-response
                        {:startAt 0 :maxResults 50}))))))
 
-(deftest issue-schema-validation-test
+(deftest ^{:stratum 0} issue-schema-validation-test
   (testing "valid issue passes"
     (is (:valid? (jira-schema/validate jira-schema/JiraIssue
                                        {:id "10001" :key "PROJ-1"
@@ -251,7 +240,7 @@
                                             {:key "PROJ-1"
                                              :fields {:summary "A bug"}}))))))
 
-(deftest validate-records-filters-invalid-test
+(deftest ^{:stratum 0} validate-records-filters-invalid-test
   (testing "valid records pass through"
     (let [records [{:id "1" :key "PROJ-1" :fields {:summary "ok"}}
                    {:id "2" :key "PROJ-2" :fields {:summary "also ok"}}]]
@@ -267,7 +256,7 @@
     (let [records [{:anything "goes"}]]
       (is (= 1 (count (jira-schema/validate-records :unknown records)))))))
 
-(deftest extract-filters-malformed-api-records-test
+(deftest ^{:stratum 0} extract-filters-malformed-api-records-test
   (testing "extract drops records that fail schema validation"
     (let [handle (:connection/handle (impl/do-connect {:jira/site "test"
                                                        :jira/project-key "PROJ"} nil))]
@@ -293,24 +282,22 @@
         (finally
           (impl/do-close handle))))))
 
-;;------------------------------------------------------------------------------ Layer 6
 ;; Migrated validation helpers — connector boundaries return anomalies.
-
-(deftest discover-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} discover-returns-anomaly-on-unknown-handle-test
   (testing "do-discover returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-discover "no-such-handle")]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} extract-returns-anomaly-on-unknown-handle-test
   (testing "do-extract returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-extract "no-such-handle" "issues" {})]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest connect-rejects-malformed-auth-test
+(deftest ^{:stratum 0} connect-rejects-malformed-auth-test
   (testing "do-connect returns an anomaly when auth credential-ref is malformed"
     (let [result (impl/do-connect {:jira/site "mycompany"}
                                   {:auth/method :api-key
@@ -320,7 +307,7 @@
       (is (= :anomalies/incorrect (:anomaly/category result)))
       (is (some? (:errors result))))))
 
-(deftest connect-accepts-valid-auth-test
+(deftest ^{:stratum 0} connect-accepts-valid-auth-test
   (testing "do-connect succeeds when auth credential-ref validates"
     (let [result (impl/do-connect {:jira/site "mycompany"}
                                   {:auth/method        :api-key
