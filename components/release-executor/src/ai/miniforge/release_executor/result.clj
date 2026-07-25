@@ -15,37 +15,33 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.result
   "Result builders for release-executor operations.
    Provides consistent result structures across all operations.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Result predicates
 
-(defn succeeded?
+;; Result predicates
+(defn ^{:stratum 0} succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; Shell operation results
-
-(defn shell-success
+(defn ^{:stratum 0} shell-success
   "Create a shell operation success result."
   [data]
   (merge {:success? true} data))
 
-(defn shell-failure
+(defn ^{:stratum 0} shell-failure
   "Create a shell operation failure result."
   ([error-msg]
    (shell-failure error-msg {}))
   ([error-msg data]
    (merge {:success? false :error error-msg} data)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Phase execution results
-
-(defn phase-success
+(defn ^{:stratum 0} phase-success
   "Create a release phase success result."
   [artifacts metrics]
   {:success? true
@@ -53,7 +49,7 @@
    :errors []
    :metrics metrics})
 
-(defn phase-failure
+(defn ^{:stratum 0} phase-failure
   "Create a release phase failure result."
   ([error-type error-msg]
    (phase-failure error-type error-msg {}))

@@ -44,14 +44,14 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pipeline helpers
 
-(defn failed?
+;; Pipeline helpers
+(defn ^{:stratum 0} failed?
   "Check if pipeline has failed."
   [state]
   (contains? state :failure))
 
-(defn fail
+(defn ^{:stratum 0} fail
   "Mark pipeline as failed with error info."
   [state error-type error-msg & {:keys [hint]}]
   (let [logger (:logger state)]
@@ -61,7 +61,7 @@
            (cond-> {:type error-type :message error-msg}
              hint (assoc :hint hint)))))
 
-(defn- gh-exec-opts
+(defn- ^{:stratum 0} gh-exec-opts
   "Build executor opts with GH_TOKEN env var when github-token is present.
    The token is required for gh CLI commands (gh pr create, gh auth status)
    inside the capsule where the host's gh auth context is not available."
@@ -70,7 +70,7 @@
     {:env {"GH_TOKEN" token}}
     {}))
 
-(defn extract-code-artifacts
+(defn ^{:stratum 0} extract-code-artifacts
   "Extract code artifacts from workflow artifacts (used for PR metadata generation)."
   [workflow-artifacts]
   (->> workflow-artifacts
@@ -81,17 +81,163 @@
                   (:content artifact))))
        (remove nil?)))
 
-(defn extract-workflow-data
+(defn ^{:stratum 0} extract-workflow-data
   "Extract review and test artifacts from workflow artifacts for PR metadata.
    Returns a map with :review-artifacts and :test-artifacts."
   [workflow-artifacts]
   {:review-artifacts (metadata/extract-review-artifacts workflow-artifacts)
    :test-artifacts (metadata/extract-test-artifacts workflow-artifacts)})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Pipeline steps
+(defn- ^{:stratum 0} net-negative-tests?
+  "True when the diff removes more test definitions than it adds."
+  [{:keys [removed added] :as test-counts}]
+  (and test-counts (pos? removed) (> removed added)))
 
-(defn step-validate-inputs
+(defn- ^{:stratum 0} heavily-destructive?
+  "True when deletions exceed 20 lines and outnumber additions 3-to-1."
+  [{:keys [deletions additions] :as diff-stats}]
+  (and diff-stats
+       (> deletions 20)
+       (> deletions (* 3 (max 1 additions)))))
+
+(defn ^{:stratum 0} provenance-frontmatter
+  "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
+   state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
+   `generated-by: miniforge` (authorship) plus whatever provenance is present.
+   Visible in the rendered PR — human-readable AND deterministically parsable
+   (fixed position, explicit `---` delimiters, rigid key: value)."
+  [{:keys [provenance commit-sha]}]
+  (let [{:keys [workflow spec task]} provenance
+        rows (cond-> []
+               workflow   (conj (str "miniforge-workflow: " workflow))
+               spec       (conj (str "spec: " spec))
+               task       (conj (str "task: " task))
+               commit-sha (conj (str "commit: " commit-sha))
+               true       (conj "generated-by: miniforge"))]
+    (str "---\n" (str/join "\n" rows) "\n---\n\n")))
+
+(defn- ^{:stratum 0} pr-doc-filename
+  "Generate a docs/pull-requests/ filename from the PR title.
+   Format: YYYY-MM-DD-<slugified-title>.md"
+  [pr-title]
+  (let [date (.format (java.time.LocalDate/now)
+                      (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd"))
+        slug (-> (or pr-title "untitled")
+                 str/lower-case
+                 (str/replace #"[^a-z0-9]+" "-")
+                 (str/replace #"^-|-$" ""))]
+    (str date "-" slug ".md")))
+
+(defn- ^{:stratum 0} render-pr-doc
+  "Render a docs/pull-requests/ markdown file from release metadata."
+  [{:keys [release/pr-title release/pr-description release/commit-message]}
+   {:keys [pr-number pr-url branch]}]
+  (str "<!--\n"
+       "  Title: Miniforge.ai\n"
+       "  Author: Christopher Lester (christopher@miniforge.ai)\n"
+       "  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n"
+       "-->\n\n"
+       "# " (or commit-message pr-title "Release") "\n\n"
+       (when pr-url
+         (str "**PR:** [#" pr-number "](" pr-url ")\n"
+              "**Branch:** `" branch "`\n\n"))
+       (or pr-description "") "\n"))
+
+(defn- ^{:stratum 0} format-files-changed
+  "Format a list of files changed from code artifacts as a markdown bullet list."
+  [code-artifacts]
+  (let [files (mapcat :code/files code-artifacts)]
+    (if (seq files)
+      (str/join "\n" (map #(str "- `" (:path %) "` (" (name (get % :action :create)) ")") files))
+      "_No file changes recorded._")))
+
+(defn- ^{:stratum 0} format-test-results
+  "Format test results from test artifacts as markdown."
+  [test-artifacts]
+  (if (seq test-artifacts)
+    (let [latest (last test-artifacts)
+          results (:test/results latest)
+          summary (:test/summary latest)
+          total   (:test/total latest)
+          passed  (:test/passed latest)
+          failed  (:test/failed latest)]
+      (str (when results
+             (str "**Result**: " (name results) "\n"))
+           (when (and total passed)
+             (str "**Passed**: " passed "/" total
+                  (when (and failed (pos? failed))
+                    (str " (" failed " failed)"))
+                  "\n"))
+           (when (and summary (not (str/blank? summary)))
+             (str "\n" summary))))
+    "_No test artifacts available._"))
+
+(defn- ^{:stratum 0} format-review-decision
+  "Format review decision, summary, and any unresolved non-blocking warnings
+   from review artifacts as markdown."
+  [review-artifacts]
+  (if (seq review-artifacts)
+    (let [latest       (last review-artifacts)
+          decision     (:review/decision latest)
+          summary      (:review/summary latest)
+          known-issues (metadata/format-known-issues (:review/warnings latest))]
+      (str (when decision
+             (str (msg/t :pr/decision {:decision (name decision)}) "\n"))
+           (when (and summary (not (str/blank? summary)))
+             (str "\n" summary))
+           (when known-issues
+             (str "\n\n" known-issues))))
+    "_No review artifacts available._"))
+
+(defn- ^{:stratum 0} looks-like-structured-pr-body?
+  "True when a string already starts with the canonical PR-body shape
+   (a `## Summary` header at top, possibly after a blank line)."
+  [s]
+  (and (string? s)
+       (boolean (re-find #"(?m)\A\s*##\s+Summary\b" s))))
+
+(defn- ^{:stratum 0} non-blank-section
+  "Render `(str header body \"\\n\\n\")` only when `body` is a non-blank string."
+  [header body]
+  (when (and body (not (str/blank? body)))
+    (str header body "\n\n")))
+
+(defn- ^{:stratum 0} pr-body-needs-update?
+  "True when the post-create PR body should be overwritten."
+  [release-meta]
+  (let [body (:release/pr-body release-meta)]
+    (or (nil? body)
+        (str/blank? body)
+        (= (str/trim body) (str/trim (str (:release/pr-title release-meta)))))))
+
+(defn ^{:stratum 0} pipeline->result
+  "Convert pipeline state to phase result."
+  [state]
+  (let [{:keys [logger failure release-artifact write-metrics
+                branch commit-sha pr-number pr-url]} state]
+    (if failure
+      (result/phase-failure (:type failure) (:message failure)
+                            {:hint    (:hint failure)
+                             :metrics (or write-metrics {})})
+      (do
+        (when logger
+          (log/info logger :release-executor :phase-completed
+                    {:data {:branch        branch
+                            :commit        commit-sha
+                            :pr-url        pr-url
+                            :files-written (:files-written write-metrics)}}))
+        (result/phase-success
+         [release-artifact]
+         (merge write-metrics
+                {:pr-number  pr-number
+                 :pr-url     pr-url
+                 :commit-sha commit-sha
+                 :branch     branch}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Pipeline steps
+(defn ^{:stratum 1} step-validate-inputs
   "Validate that the pipeline state carries enough context to execute.
 
    Host mode: when :worktree-path IS present and :executor / :environment-id
@@ -129,7 +275,7 @@
 
     :else state))
 
-(defn step-check-gh-auth
+(defn ^{:stratum 1} step-check-gh-auth
   "Check gh CLI auth.  Dispatches to git/check-gh-auth! (host) or
    sandbox/check-gh-auth! (sandbox)."
   [state]
@@ -148,7 +294,7 @@
                       (msg/t :gh/auth-login-hint)
                       (msg/t :gh/install-hint)))))))
 
-(defn step-generate-metadata [state]
+(defn ^{:stratum 1} step-generate-metadata [state]
   (if (failed? state)
     state
     (if (:release-meta state)
@@ -162,7 +308,7 @@
           (assoc state :release-meta release-meta)
           (fail state :metadata-generation-failed (msg/t :step/metadata-generation-failed)))))))
 
-(defn step-create-branch
+(defn ^{:stratum 1} step-create-branch
   "Create the release branch.  Dispatches git backend based on :host-mode?."
   [state]
   (if (failed? state)
@@ -194,7 +340,7 @@
                                      "; PR targets " detected " instead of stacking.")}))
           (assoc state :branch (:branch result) :base-branch base))))))
 
-(defn step-stage-dirty-files
+(defn ^{:stratum 1} step-stage-dirty-files
   "Stage all dirty files.  Dispatches git backend based on :host-mode?.
 
    Empty-stage handling: when nothing is dirty, the implementer's writes
@@ -243,19 +389,7 @@
         :else
         (fail state :no-files-to-stage (msg/t :step/no-files-to-stage))))))
 
-(defn- net-negative-tests?
-  "True when the diff removes more test definitions than it adds."
-  [{:keys [removed added] :as test-counts}]
-  (and test-counts (pos? removed) (> removed added)))
-
-(defn- heavily-destructive?
-  "True when deletions exceed 20 lines and outnumber additions 3-to-1."
-  [{:keys [deletions additions] :as diff-stats}]
-  (and diff-stats
-       (> deletions 20)
-       (> deletions (* 3 (max 1 additions)))))
-
-(defn step-validate-diff
+(defn ^{:stratum 1} step-validate-diff
   "Validate diff is not destructive before committing.  Dispatches git backend
    based on :host-mode?.
 
@@ -297,7 +431,7 @@
                          {:data (merge {} diff-stats test-counts)}))
             state)))))
 
-(defn step-commit
+(defn ^{:stratum 1} step-commit
   "Commit staged changes.  Dispatches git backend based on :host-mode?.
 
    Skipped when step-stage-dirty-files found no dirty files and the branch
@@ -326,7 +460,7 @@
         (assoc state :commit-sha (:commit-sha result))
         (fail state :commit-failed (:error result))))))
 
-(defn step-push
+(defn ^{:stratum 1} step-push
   "Push branch to origin.  Dispatches git backend based on :host-mode?."
   [state]
   (cond
@@ -342,23 +476,7 @@
         state
         (fail state :push-failed (:error result))))))
 
-(defn provenance-frontmatter
-  "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
-   state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
-   `generated-by: miniforge` (authorship) plus whatever provenance is present.
-   Visible in the rendered PR — human-readable AND deterministically parsable
-   (fixed position, explicit `---` delimiters, rigid key: value)."
-  [{:keys [provenance commit-sha]}]
-  (let [{:keys [workflow spec task]} provenance
-        rows (cond-> []
-               workflow   (conj (str "miniforge-workflow: " workflow))
-               spec       (conj (str "spec: " spec))
-               task       (conj (str "task: " task))
-               commit-sha (conj (str "commit: " commit-sha))
-               true       (conj "generated-by: miniforge"))]
-    (str "---\n" (str/join "\n" rows) "\n---\n\n")))
-
-(defn with-provenance
+(defn ^{:stratum 1} with-provenance
   "Prepend the provenance frontmatter to a PR body. Idempotent: a body that
    already opens with a `---` frontmatter block is returned unchanged."
   [body state]
@@ -367,105 +485,7 @@
       body
       (str (provenance-frontmatter state) body))))
 
-(defn step-create-pr
-  "Create the pull request.  Dispatches git backend based on :host-mode?.
-
-   git/create-pr! carries the same duplicate-PR reuse logic as
-   sandbox/create-pr! — retry-safe on both backends."
-  [state]
-  (cond
-    (failed? state)           state
-    (not (:create-pr? state)) state
-    :else
-    (let [{:keys [release-meta base-branch host-mode? worktree-path
-                  executor environment-id]} state
-          pr-opts {:title       (:release/pr-title release-meta)
-                   :body        (with-provenance (:release/pr-body release-meta) state)
-                   :base-branch base-branch}
-          result (if host-mode?
-                   (git/create-pr! worktree-path pr-opts (:github-token state))
-                   (sandbox/create-pr! executor environment-id pr-opts
-                                       (gh-exec-opts state)))]
-      (if (result/succeeded? result)
-        (assoc state
-               :pr-number (:pr-number result)
-               :pr-url    (:pr-url result))
-        (fail state :pr-create-failed (:error result))))))
-
-(defn- pr-doc-filename
-  "Generate a docs/pull-requests/ filename from the PR title.
-   Format: YYYY-MM-DD-<slugified-title>.md"
-  [pr-title]
-  (let [date (.format (java.time.LocalDate/now)
-                      (java.time.format.DateTimeFormatter/ofPattern "yyyy-MM-dd"))
-        slug (-> (or pr-title "untitled")
-                 str/lower-case
-                 (str/replace #"[^a-z0-9]+" "-")
-                 (str/replace #"^-|-$" ""))]
-    (str date "-" slug ".md")))
-
-(defn- render-pr-doc
-  "Render a docs/pull-requests/ markdown file from release metadata."
-  [{:keys [release/pr-title release/pr-description release/commit-message]}
-   {:keys [pr-number pr-url branch]}]
-  (str "<!--\n"
-       "  Title: Miniforge.ai\n"
-       "  Author: Christopher Lester (christopher@miniforge.ai)\n"
-       "  Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.\n"
-       "-->\n\n"
-       "# " (or commit-message pr-title "Release") "\n\n"
-       (when pr-url
-         (str "**PR:** [#" pr-number "](" pr-url ")\n"
-              "**Branch:** `" branch "`\n\n"))
-       (or pr-description "") "\n"))
-
-(defn- format-files-changed
-  "Format a list of files changed from code artifacts as a markdown bullet list."
-  [code-artifacts]
-  (let [files (mapcat :code/files code-artifacts)]
-    (if (seq files)
-      (str/join "\n" (map #(str "- `" (:path %) "` (" (name (get % :action :create)) ")") files))
-      "_No file changes recorded._")))
-
-(defn- format-test-results
-  "Format test results from test artifacts as markdown."
-  [test-artifacts]
-  (if (seq test-artifacts)
-    (let [latest (last test-artifacts)
-          results (:test/results latest)
-          summary (:test/summary latest)
-          total   (:test/total latest)
-          passed  (:test/passed latest)
-          failed  (:test/failed latest)]
-      (str (when results
-             (str "**Result**: " (name results) "\n"))
-           (when (and total passed)
-             (str "**Passed**: " passed "/" total
-                  (when (and failed (pos? failed))
-                    (str " (" failed " failed)"))
-                  "\n"))
-           (when (and summary (not (str/blank? summary)))
-             (str "\n" summary))))
-    "_No test artifacts available._"))
-
-(defn- format-review-decision
-  "Format review decision, summary, and any unresolved non-blocking warnings
-   from review artifacts as markdown."
-  [review-artifacts]
-  (if (seq review-artifacts)
-    (let [latest       (last review-artifacts)
-          decision     (:review/decision latest)
-          summary      (:review/summary latest)
-          known-issues (metadata/format-known-issues (:review/warnings latest))]
-      (str (when decision
-             (str (msg/t :pr/decision {:decision (name decision)}) "\n"))
-           (when (and summary (not (str/blank? summary)))
-             (str "\n" summary))
-           (when known-issues
-             (str "\n\n" known-issues))))
-    "_No review artifacts available._"))
-
-(defn- render-pr-doc-full
+(defn- ^{:stratum 1} render-pr-doc-full
   "Render a comprehensive docs/pull-requests/ markdown file.
    Includes: title, summary, files changed, test results, review decision."
   [release-meta state-info code-artifacts workflow-data]
@@ -494,7 +514,7 @@
          "## Review Decision\n\n"
          review-md "\n")))
 
-(defn step-write-pr-doc
+(defn ^{:stratum 1} step-write-pr-doc
   "Write a docs/pull-requests/ markdown file, stage it, and amend the commit.
    Runs after step-create-pr so PR number/URL are available.
    Skipped when :create-pr? is false (no PR → no PR doc needed).
@@ -537,20 +557,7 @@
                       {:message (.getMessage e)}))
           state)))))
 
-(defn- looks-like-structured-pr-body?
-  "True when a string already starts with the canonical PR-body shape
-   (a `## Summary` header at top, possibly after a blank line)."
-  [s]
-  (and (string? s)
-       (boolean (re-find #"(?m)\A\s*##\s+Summary\b" s))))
-
-(defn- non-blank-section
-  "Render `(str header body \"\\n\\n\")` only when `body` is a non-blank string."
-  [header body]
-  (when (and body (not (str/blank? body)))
-    (str header body "\n\n")))
-
-(defn- render-pr-body-fallback
+(defn- ^{:stratum 1} render-pr-body-fallback
   "Render a structured GitHub PR body when the releaser agent didn't produce one.
    Distinct from `render-pr-doc-full` (which targets the committed
    docs/pull-requests/*.md file): no HTML copyright header, no placeholder strings."
@@ -572,15 +579,68 @@
          (non-blank-section "## Review\n\n"        review-md)
          "🤖 Generated autonomously by [miniforge](https://github.com/miniforge-ai/miniforge).\n")))
 
-(defn- pr-body-needs-update?
-  "True when the post-create PR body should be overwritten."
-  [release-meta]
-  (let [body (:release/pr-body release-meta)]
-    (or (nil? body)
-        (str/blank? body)
-        (= (str/trim body) (str/trim (str (:release/pr-title release-meta)))))))
+(defn ^{:stratum 1} step-build-artifact [state]
+  (if (failed? state)
+    state
+    (let [{:keys [worktree-path branch base-branch commit-sha create-pr?
+                  pr-number pr-url release-meta write-metrics code-artifacts]} state
+          release-content (merge write-metrics
+                                 {:git-staged?   true
+                                  :worktree-path (str worktree-path)
+                                  :branch        branch
+                                  :base-branch   base-branch
+                                  :commit-sha    commit-sha
+                                  :pr-created?   (boolean create-pr?)
+                                  :pr-number     pr-number
+                                  :pr-url        pr-url
+                                  :release-metadata release-meta})
+          release-artifact (artifact/build-artifact
+                            {:id       (random-uuid)
+                             :type     :release
+                             :version  "1.0.0"
+                             :content  release-content
+                             :metadata {:phase                 :release
+                                        :code-artifacts-count  (count code-artifacts)}})]
+      (assoc state :release-artifact release-artifact))))
 
-(defn step-update-pr-body
+(defn ^{:stratum 1} step-save-artifact [state]
+  (if (failed? state)
+    state
+    (do
+      (when-let [artifact-store (:artifact-store state)]
+        (try
+          (artifact/save! artifact-store (:release-artifact state))
+          (catch Exception _e nil)))
+      state)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} step-create-pr
+  "Create the pull request.  Dispatches git backend based on :host-mode?.
+
+   git/create-pr! carries the same duplicate-PR reuse logic as
+   sandbox/create-pr! — retry-safe on both backends."
+  [state]
+  (cond
+    (failed? state)           state
+    (not (:create-pr? state)) state
+    :else
+    (let [{:keys [release-meta base-branch host-mode? worktree-path
+                  executor environment-id]} state
+          pr-opts {:title       (:release/pr-title release-meta)
+                   :body        (with-provenance (:release/pr-body release-meta) state)
+                   :base-branch base-branch}
+          result (if host-mode?
+                   (git/create-pr! worktree-path pr-opts (:github-token state))
+                   (sandbox/create-pr! executor environment-id pr-opts
+                                       (gh-exec-opts state)))]
+      (if (result/succeeded? result)
+        (assoc state
+               :pr-number (:pr-number result)
+               :pr-url    (:pr-url result))
+        (fail state :pr-create-failed (:error result))))))
+
+(defn ^{:stratum 2} step-update-pr-body
   "Update the GitHub PR body when the initial body was missing or degraded.
    Dispatches git backend based on :host-mode?."
   [state]
@@ -613,7 +673,7 @@
                       {:message (.getMessage e)}))
           state)))))
 
-(defn step-generate-pr-doc
+(defn ^{:stratum 2} step-generate-pr-doc
   "Generate a comprehensive PR doc at docs/pull-requests/YYYY-MM-DD-<slug>.md.
    Stages the doc and amends the release commit to include it, then force-pushes.
    Dispatches git backend based on :host-mode?.
@@ -688,68 +748,10 @@
                       {:message (.getMessage e)}))
           state)))))
 
-(defn step-build-artifact [state]
-  (if (failed? state)
-    state
-    (let [{:keys [worktree-path branch base-branch commit-sha create-pr?
-                  pr-number pr-url release-meta write-metrics code-artifacts]} state
-          release-content (merge write-metrics
-                                 {:git-staged?   true
-                                  :worktree-path (str worktree-path)
-                                  :branch        branch
-                                  :base-branch   base-branch
-                                  :commit-sha    commit-sha
-                                  :pr-created?   (boolean create-pr?)
-                                  :pr-number     pr-number
-                                  :pr-url        pr-url
-                                  :release-metadata release-meta})
-          release-artifact (artifact/build-artifact
-                            {:id       (random-uuid)
-                             :type     :release
-                             :version  "1.0.0"
-                             :content  release-content
-                             :metadata {:phase                 :release
-                                        :code-artifacts-count  (count code-artifacts)}})]
-      (assoc state :release-artifact release-artifact))))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn step-save-artifact [state]
-  (if (failed? state)
-    state
-    (do
-      (when-let [artifact-store (:artifact-store state)]
-        (try
-          (artifact/save! artifact-store (:release-artifact state))
-          (catch Exception _e nil)))
-      state)))
-
-(defn pipeline->result
-  "Convert pipeline state to phase result."
-  [state]
-  (let [{:keys [logger failure release-artifact write-metrics
-                branch commit-sha pr-number pr-url]} state]
-    (if failure
-      (result/phase-failure (:type failure) (:message failure)
-                            {:hint    (:hint failure)
-                             :metrics (or write-metrics {})})
-      (do
-        (when logger
-          (log/info logger :release-executor :phase-completed
-                    {:data {:branch        branch
-                            :commit        commit-sha
-                            :pr-url        pr-url
-                            :files-written (:files-written write-metrics)}}))
-        (result/phase-success
-         [release-artifact]
-         (merge write-metrics
-                {:pr-number  pr-number
-                 :pr-url     pr-url
-                 :commit-sha commit-sha
-                 :branch     branch}))))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Main execute function
-
-(defn execute-release-phase
+(defn ^{:stratum 3} execute-release-phase
   "Execute the release phase.
 
    Accepts two backends transparently:
