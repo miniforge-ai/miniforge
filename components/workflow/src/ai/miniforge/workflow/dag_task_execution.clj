@@ -26,6 +26,7 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.dag-merge-anomaly :as merge-anomaly]
    [ai.miniforge.workflow.dag-plan :as dag-plan]
    [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]))
 
@@ -82,9 +83,19 @@
                      :metrics (:metrics wf-result)}
               (:pr-info wf-result)    (assoc :pr-info (:pr-info wf-result))
               (:task-branch wf-result) (assoc :task-branch (:task-branch wf-result))))
-    (dag/err :task-execution-failed
-             (:error wf-result)
-             {:task-id task-id :metrics (:metrics wf-result)})))
+    (let [error (:error wf-result)
+          ;; `run-mini-workflow` short-circuits a v2 multi-parent merge
+          ;; failure by putting the FULL typed anomaly map (not a string)
+          ;; here — dag/err's message must be a string or unwrap-anomaly
+          ;; silently falls back to a generic message. Extract the
+          ;; anomaly's own message for that slot and keep the raw map
+          ;; reachable under :merge/anomaly for :anomaly/category-based
+          ;; classification downstream (dashboard, evidence bundle).
+          anomaly (when (merge-anomaly/merge-error? error) error)]
+      (dag/err :task-execution-failed
+               (if anomaly (:anomaly/message anomaly) error)
+               (cond-> {:task-id task-id :metrics (:metrics wf-result)}
+                 anomaly (assoc :merge/anomaly anomaly))))))
 
 (defn ^{:stratum 0} placeholder-result [task-id description]
   (dag/ok {:task-id task-id
