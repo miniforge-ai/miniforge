@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.programmer-error-guard-test
   "Programmer-error guard. An unknown category is a wiring mistake at
    the call site, not a runtime condition — boundary throws
@@ -26,7 +25,9 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest unknown-category-throws-illegal-argument
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} unknown-category-throws-illegal-argument
   (testing "execute with a non-vocabulary category throws IllegalArgumentException"
     (is (thrown? IllegalArgumentException
                  (boundary/execute :no-such-category
@@ -34,7 +35,7 @@
                                    :op
                                    (constantly :ok))))))
 
-(deftest unknown-category-on-long-form-also-throws
+(deftest ^{:stratum 0} unknown-category-on-long-form-also-throws
   (testing "execute-with-exception-handling enforces the same guard"
     (is (thrown? IllegalArgumentException
                  (boundary/execute-with-exception-handling
@@ -43,7 +44,7 @@
                   :op
                   (constantly :ok))))))
 
-(deftest non-keyword-category-throws-illegal-argument
+(deftest ^{:stratum 0} non-keyword-category-throws-illegal-argument
   (testing "a string in the category slot is a programmer error and throws"
     (is (thrown? IllegalArgumentException
                  (boundary/execute "db"
@@ -51,7 +52,7 @@
                                    :op
                                    (constantly :ok))))))
 
-(deftest nil-category-throws-illegal-argument
+(deftest ^{:stratum 0} nil-category-throws-illegal-argument
   (testing "nil in the category slot is a programmer error and throws"
     (is (thrown? IllegalArgumentException
                  (boundary/execute nil
@@ -59,7 +60,7 @@
                                    :op
                                    (constantly :ok))))))
 
-(deftest illegal-argument-message-lists-known-categories
+(deftest ^{:stratum 0} illegal-argument-message-lists-known-categories
   (testing "the thrown message lists the standard category vocabulary so the call site can self-correct"
     (try
       (boundary/execute :no-such-category
