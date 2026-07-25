@@ -185,11 +185,11 @@ function postWorkflowCommand(workflowId, command) {
     return data;
   }))
   .then(data => {
-    showToast(window.miniforge.t('toast/command-sent', { command }), 'info', 3000);
+    showToast(window.miniforge.t('toast/intervention-requested', { command }), 'info', 3000);
     console.log('Intervention requested:', data);
   })
   .catch(err => {
-    showToast(window.miniforge.t('toast/command-failed', { error: err.message }), 'error');
+    showToast(window.miniforge.t('toast/intervention-failed', { error: err.message }), 'error');
     console.error('Error requesting intervention:', err);
   });
 }

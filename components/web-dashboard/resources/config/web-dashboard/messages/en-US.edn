@@ -162,8 +162,10 @@
   :ws/status-error             "Error"
 
   ;; toast notifications — fleet + control plane
-  :toast/command-sent          "Command sent: {command}"
-  :toast/command-failed        "Failed to send command: {error}"
+  ;; The console requests governed interventions (Phase D D-4), not the
+  ;; legacy ungoverned "commands"; the copy matches the vocabulary.
+  :toast/intervention-requested "Intervention requested: {command}"
+  :toast/intervention-failed    "Intervention request failed: {error}"
   :toast/error-with-detail     "Error: {detail}"
   :toast/sync-error            "Sync error: {detail}"
   :toast/repo-added            "Added: {repo}"

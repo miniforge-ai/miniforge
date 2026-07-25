@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.interface
   "Public API for the TUI views component.
 
@@ -48,39 +47,33 @@
    [ai.miniforge.tui-views.prompts :as prompts]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Side-effect handlers — each returns [msg-type payload] or nil
 
-(def ^:private fallback-operator-principal
+;; Side-effect handlers — each returns [msg-type payload] or nil
+(def ^{:stratum 0} ^:private fallback-operator-principal
   "Stamped on interventions when the OS account is unreadable — an
    explicit placeholder beats a nil actor on the audit stream."
   "tui")
 
-(defn- operator-principal
-  "Identity stamped on interventions this TUI requests: the OS account
-   driving the session."
-  []
-  (or (System/getProperty "user.name") fallback-operator-principal))
-
-(defn handle-sync-prs [{:keys [state]}]
+(defn ^{:stratum 0} handle-sync-prs [{:keys [state]}]
   (let [{:keys [prs error]} (persistence-pr/load-pr-items (when state {:state state}))
         cache (pr-cache/read-cache)
         prs-with-cache (pr-cache/apply-cached-policy (or prs []) cache)
         cached-risk (pr-cache/apply-cached-agent-risk (or prs []) cache)]
     (msg/prs-synced-with-cache prs-with-cache cached-risk error)))
 
-(defn handle-discover-repos [{:keys [owner]}]
+(defn ^{:stratum 0} handle-discover-repos [{:keys [owner]}]
   (msg/repos-discovered (persistence-pr/discover-repos owner)))
 
-(defn handle-browse-repos [{:keys [owner provider limit source]}]
+(defn ^{:stratum 0} handle-browse-repos [{:keys [owner provider limit source]}]
   (let [result (persistence-pr/browse-repos {:owner owner :provider provider :limit limit})]
     (msg/repos-browsed (assoc result :source source))))
 
-(defn handle-open-url [{:keys [url]}]
+(defn ^{:stratum 0} handle-open-url [{:keys [url]}]
   (when url
     (try (browse/browse-url url) (catch Exception _ nil)))
   nil)
 
-(defn handle-evaluate-policy [{:keys [pr pr-id]}]
+(defn ^{:stratum 0} handle-evaluate-policy [{:keys [pr pr-id]}]
   (try
     (let [result (policy-pack/evaluate-external-pr
                   (persistence-pr/load-policy-packs) pr)]
@@ -90,7 +83,7 @@
                             {:evaluation/passed? nil
                              :evaluation/error (.getMessage e)}))))
 
-(defn handle-batch-evaluate-policy
+(defn ^{:stratum 0} handle-batch-evaluate-policy
   "Evaluate policy for multiple PRs in batch.
    Returns a single :msg/review-completed message with all results,
    reusing the existing review-completed handler to merge policy data."
@@ -109,7 +102,7 @@
     (catch Exception _
       (msg/review-completed []))))
 
-(defn handle-create-train [train-mgr {:keys [name description]
+(defn ^{:stratum 0} handle-create-train [train-mgr {:keys [name description]
                                        :or {description ""}}]
   (try
     (let [train-id (pr-train/create-train
@@ -120,7 +113,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :create-train}})))))
 
-(defn handle-add-to-train [train-mgr {:keys [train-id prs]}]
+(defn ^{:stratum 0} handle-add-to-train [train-mgr {:keys [train-id prs]}]
   (try
     (doseq [pr prs]
       (pr-train/add-pr train-mgr train-id
@@ -133,7 +126,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :add-to-train}})))))
 
-(defn handle-merge-next [train-mgr {:keys [train-id]}]
+(defn ^{:stratum 0} handle-merge-next [train-mgr {:keys [train-id]}]
   (try
     (let [result (pr-train/merge-next train-mgr train-id)]
       (if result
@@ -144,7 +137,7 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :merge-next}})))))
 
-(defn handle-review-prs [{:keys [prs]}]
+(defn ^{:stratum 0} handle-review-prs [{:keys [prs]}]
   (try
     (let [packs (persistence-pr/load-policy-packs)]
       (msg/review-completed
@@ -160,13 +153,94 @@
       (msg/side-effect-error
        (response/error (.getMessage e) {:data {:type :review-prs}})))))
 
-(defn handle-remediate-prs [{:keys [prs]}]
+(defn ^{:stratum 0} handle-remediate-prs [{:keys [prs]}]
   (let [fixable (count (filter #(seq (get-in % [:pr/policy :evaluation/violations])) prs))]
     (msg/remediation-completed 0 fixable "Remediation via pr-lifecycle not yet wired")))
 
-(defonce ^:private decompose-llm-client (delay (llm/create-client)))
+(defonce ^{:stratum 0} ^:private decompose-llm-client (delay (llm/create-client)))
 
-(defn handle-decompose-pr
+(defn ^{:stratum 0} handle-fetch-pr-diff
+  "Fetch PR diff and detail from GitHub CLI."
+  [{:keys [repo number]}]
+  (try
+    (let [n (long (if (string? number) (Long/parseLong number) number))
+          {:keys [diff detail]} (github/fetch-pr-diff-and-detail repo n)]
+      (if (and (nil? diff) (nil? detail))
+        (msg/pr-diff-fetched [repo n] nil nil (tr/t :chat/pr-diff-fetch-failed))
+        (msg/pr-diff-fetched [repo n] diff detail nil)))
+    (catch Throwable e
+      (msg/pr-diff-fetched [repo number] nil nil (.getMessage e)))))
+
+(defn ^{:stratum 0} handle-cache-policy-result [{:keys [pr-id result prs]}]
+  (pr-cache/persist-policy-result! pr-id result prs)
+  nil)
+
+(defn ^{:stratum 0} handle-cache-risk-triage [{:keys [risk-map prs]}]
+  (pr-cache/persist-risk-triage! risk-map prs)
+  nil)
+
+(defn ^{:stratum 0} handle-archive-workflows [{:keys [workflow-ids]}]
+  (let [result (persistence/archive-workflows! workflow-ids)]
+    (msg/workflows-archived result)))
+
+;; Lazy LLM client — initialized on first chat message
+(def ^{:stratum 0} llm-client (delay (llm/create-client)))
+
+(defn ^{:stratum 0} format-check-context [checks]
+  (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))
+
+(defn ^{:stratum 0} format-pr-summary-line
+  "Format a PR as a one-line summary for prompt context."
+  [pr]
+  (str "- " (:pr/repo pr) "#" (:pr/number pr) " " (:pr/title pr)))
+
+(def ^{:stratum 0} action-pattern
+  "Regex to parse [ACTION: type | label | description] from LLM response."
+  #"\[ACTION:\s*(\S+)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\s*\]")
+
+(defn ^{:stratum 0} action-match->action
+  "Convert a regex match from action-pattern into a ChatAction map."
+  [[_ action-type label description]]
+  {:action      (keyword action-type)
+   :label       (str/trim label)
+   :description (str/trim description)})
+
+(defn ^{:stratum 0} chat-msg->llm-msg
+  "Convert an internal chat message to the LLM API format."
+  [m]
+  {:role (name (:role m)) :content (:content m)})
+
+;------------------------------------------------------------------------------ Fleet risk triage
+(def ^{:stratum 0} ^:private risk-line-pattern
+  "Regex for parsing a single RISK: line from fleet triage LLM response."
+  #"RISK:\s*(\S+#\d+)\s*\|\s*(\w+)\s*\|\s*(.*)")
+
+(defn ^{:stratum 0} fleet-triage-system-prompt
+  "Load the fleet triage system prompt from templates."
+  []
+  (prompts/get-template :fleet-triage/system))
+
+(defn ^{:stratum 0} handle-reload-workflow-detail
+  "Reload workflow detail from the persisted event file on disk."
+  [{:keys [workflow-id]}]
+  (when-let [detail (persistence/load-workflow-detail workflow-id)]
+    (msg/workflow-detail-loaded workflow-id detail)))
+
+(defn ^{:stratum 0} stop-tui!
+  "Stop the miniforge TUI. Restores terminal state.
+   Safe to call multiple times."
+  [app]
+  (tui/stop! app))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} operator-principal
+  "Identity stamped on interventions this TUI requests: the OS account
+   driving the session."
+  []
+  (or (System/getProperty "user.name") fallback-operator-principal))
+
+(defn ^{:stratum 1} handle-decompose-pr
   "Decompose a large PR into sub-PRs.
    Entire body is wrapped in try/catch — no exceptions leak."
   [{:keys [pr decompose-fn]}]
@@ -207,118 +281,7 @@
                                    {:sub-prs []
                                     :message (.getMessage e)})))))
 
-(defn handle-fetch-pr-diff
-  "Fetch PR diff and detail from GitHub CLI."
-  [{:keys [repo number]}]
-  (try
-    (let [n (long (if (string? number) (Long/parseLong number) number))
-          {:keys [diff detail]} (github/fetch-pr-diff-and-detail repo n)]
-      (if (and (nil? diff) (nil? detail))
-        (msg/pr-diff-fetched [repo n] nil nil (tr/t :chat/pr-diff-fetch-failed))
-        (msg/pr-diff-fetched [repo n] diff detail nil)))
-    (catch Throwable e
-      (msg/pr-diff-fetched [repo number] nil nil (.getMessage e)))))
-
-(defn handle-cache-policy-result [{:keys [pr-id result prs]}]
-  (pr-cache/persist-policy-result! pr-id result prs)
-  nil)
-
-(defn handle-cache-risk-triage [{:keys [risk-map prs]}]
-  (pr-cache/persist-risk-triage! risk-map prs)
-  nil)
-
-(defn handle-control-action
-  "Request a `:pause` / `:resume` / `:cancel` intervention on a workflow.
-
-   Writes a `:supervisory/intervention-requested` event into the
-   operator directory — the one governed control channel (Phase D
-   decision 2). The runner's operator-event consumer picks it up,
-   drives it through the intervention lifecycle, and flips the run's
-   control state; the chips the TUI renders come back off the same
-   stream. A write failure is surfaced as a flash message rather than
-   swallowed: a control gesture that went nowhere must say so."
-  [{:keys [action workflow-id]}]
-  (try
-    (let [result (es/request-intervention!
-                  {:intervention/type action
-                   :intervention/target-type :workflow
-                   :intervention/target-id (str workflow-id)
-                   :intervention/requested-by (operator-principal)
-                   :intervention/request-source :tui})]
-      (when (anomaly/anomaly? result)
-        (msg/side-effect-error
-         (response/error (:anomaly/message result)
-                         {:data {:type :control-action}}))))
-    (catch Exception e
-      (msg/side-effect-error
-       (response/error (.getMessage e) {:data {:type :control-action}})))))
-
-(defn handle-archive-workflows [{:keys [workflow-ids]}]
-  (let [result (persistence/archive-workflows! workflow-ids)]
-    (msg/workflows-archived result)))
-
-(defn handle-chat-execute-action
-  "Execute a chat-suggested action. Routes to the appropriate handler
-   based on the action type keyword."
-  [{:keys [action context]}]
-  (try
-    (let [action-type (:action action)
-          result (case action-type
-                   :review
-                   (if-let [pr (:pr context)]
-                     (handle-review-prs {:prs [pr]})
-                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-review)}))
-
-                   :evaluate
-                   (if-let [pr (:pr context)]
-                     (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
-                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-evaluation)}))
-
-                   :sync
-                   (handle-sync-prs {})
-
-                   :open
-                   (if-let [url (get-in context [:pr :pr/url])]
-                     (do (handle-open-url {:url url})
-                         (msg/chat-action-result {:success? true :message (tr/t :chat/opened-url {:url url})}))
-                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-url)}))
-
-                   :remediate
-                   (if-let [pr (:pr context)]
-                     (handle-remediate-prs {:prs [pr]})
-                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
-
-                   :decompose
-                   (if-let [pr (:pr context)]
-                     (handle-decompose-pr (effect/decompose-pr pr))
-                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
-
-                   (msg/chat-action-result
-                    {:success? false
-                     :message (tr/t :chat/unknown-action {:action (name (or action-type :none))})}))]
-        (if (= :msg/side-effect-error (first result))
-          (let [payload (second result)
-                message (or (get-in payload [:error :message])
-                            (:message payload)
-                            (:error payload)
-                            (tr/t :flash/action-failed))]
-            (msg/chat-action-result {:success? false :message message}))
-          result))
-    (catch Exception e
-      (msg/chat-action-result {:success? false :message (.getMessage e)}))))
-
-;; Lazy LLM client — initialized on first chat message
-(def llm-client (delay (llm/create-client)))
-
-(defn format-check-context [checks]
-  (str/join ", " (map #(str (:name %) "=" (-> % (get :conclusion :unknown) name)) checks)))
-
-(defn format-pr-summary-line
-  "Format a PR as a one-line summary for prompt context."
-  [pr]
-  (str "- " (:pr/repo pr) "#" (:pr/number pr) " " (:pr/title pr)))
-
-(defn build-pr-context-str
+(defn ^{:stratum 1} build-pr-context-str
   "Build a text summary of PR data for the LLM system prompt."
   [{:keys [pr/behind-main? pr/branch pr/ci-status pr/number
            pr/policy pr/readiness pr/repo pr/risk pr/status pr/title
@@ -374,7 +337,111 @@
                     (tr/t :chat/pr-context-packs {:packs (str/join ", " packs)}))
                   "\n"))))))
 
-(defn- build-context-section
+(defn ^{:stratum 1} parse-actions
+  "Extract structured actions from LLM response text.
+   Returns [clean-content actions-vec]."
+  [content]
+  (let [matches (re-seq action-pattern content)
+        actions (mapv action-match->action matches)
+        clean (-> content
+                  (str/replace action-pattern "")
+                  str/trim)]
+    [clean actions]))
+
+(defn ^{:stratum 1} parse-risk-line
+  "Parse a single RISK: line into {:id [repo num] :level str :reason str}, or nil."
+  [line]
+  (when-let [[_ id-str level reason] (re-matches risk-line-pattern line)]
+    (let [[repo num-str] (str/split id-str #"#" 2)
+          num (coerce/safe-parse-int num-str)]
+      (when num
+        {:id     [repo num]
+         :level  (str/lower-case (str/trim level))
+         :reason (str/trim reason)}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} handle-control-action
+  "Request a `:pause` / `:resume` / `:cancel` intervention on a workflow.
+
+   Writes a `:supervisory/intervention-requested` event into the
+   operator directory — the one governed control channel (Phase D
+   decision 2). The runner's operator-event consumer picks it up,
+   drives it through the intervention lifecycle, and flips the run's
+   control state; the chips the TUI renders come back off the same
+   stream. A write failure is surfaced as a flash message rather than
+   swallowed: a control gesture that went nowhere must say so."
+  [{:keys [action workflow-id]}]
+  (try
+    (let [result (es/request-intervention!
+                  {:intervention/type action
+                   :intervention/target-type :workflow
+                   :intervention/target-id (str workflow-id)
+                   :intervention/requested-by (operator-principal)
+                   :intervention/request-source :tui})]
+      (when (anomaly/anomaly? result)
+        (msg/side-effect-error
+         (response/error (:anomaly/message result)
+                         {:data {:type :control-action}}))))
+    (catch Exception e
+      ;; Pass the exception itself, not (.getMessage e): response/error
+      ;; preserves the class + a stack preview + any ex-data and fills a
+      ;; blank/nil message (e.g. an NPE) instead of dropping to "Unknown
+      ;; error".
+      (msg/side-effect-error
+       (response/error e {:data {:type :control-action}})))))
+
+(defn ^{:stratum 2} handle-chat-execute-action
+  "Execute a chat-suggested action. Routes to the appropriate handler
+   based on the action type keyword."
+  [{:keys [action context]}]
+  (try
+    (let [action-type (:action action)
+          result (case action-type
+                   :review
+                   (if-let [pr (:pr context)]
+                     (handle-review-prs {:prs [pr]})
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-review)}))
+
+                   :evaluate
+                   (if-let [pr (:pr context)]
+                     (handle-evaluate-policy {:pr pr :pr-id [(:pr/repo pr) (:pr/number pr)]})
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-for-evaluation)}))
+
+                   :sync
+                   (handle-sync-prs {})
+
+                   :open
+                   (if-let [url (get-in context [:pr :pr/url])]
+                     (do (handle-open-url {:url url})
+                         (msg/chat-action-result {:success? true :message (tr/t :chat/opened-url {:url url})}))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-url)}))
+
+                   :remediate
+                   (if-let [pr (:pr context)]
+                     (handle-remediate-prs {:prs [pr]})
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
+
+                   :decompose
+                   (if-let [pr (:pr context)]
+                     (handle-decompose-pr (effect/decompose-pr pr))
+                     (msg/chat-action-result {:success? false :message (tr/t :chat/no-pr-in-context)}))
+
+                   (msg/chat-action-result
+                    {:success? false
+                     :message (tr/t :chat/unknown-action {:action (name (or action-type :none))})}))]
+        (if (= :msg/side-effect-error (first result))
+          (let [payload (second result)
+                message (or (get-in payload [:error :message])
+                            (:message payload)
+                            (:error payload)
+                            (tr/t :flash/action-failed))]
+            (msg/chat-action-result {:success? false :message message}))
+          result))
+    (catch Exception e
+      (msg/chat-action-result {:success? false :message (.getMessage e)}))))
+
+(defn- ^{:stratum 2} build-context-section
   "Build the context section for the chat system prompt."
   [context]
   (case (get context :type :unknown)
@@ -397,41 +464,43 @@
 
     "Unknown context."))
 
-(defn build-chat-system-prompt
+(defn ^{:stratum 2} parse-risk-triage-response
+  "Parse the full LLM triage response into a vector of assessments."
+  [content]
+  (into [] (keep parse-risk-line) (str/split-lines content)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} build-chat-system-prompt
   "Build a context-aware system prompt for the chat LLM."
   [context]
   (prompts/render :chat/system
                   {:max-line-width (get context :max-line-width 60)
                    :context        (build-context-section context)}))
 
-(def action-pattern
-  "Regex to parse [ACTION: type | label | description] from LLM response."
-  #"\[ACTION:\s*(\S+)\s*\|\s*([^|]+?)\s*\|\s*([^\]]+?)\s*\]")
+(defn ^{:stratum 3} handle-fleet-risk-triage
+  "Send all PR summaries to LLM for fleet-level risk triage.
+   Returns per-PR risk assessments."
+  [{:keys [pr-summaries]}]
+  (try
+    (let [summaries-text (str/join "\n" (map :summary pr-summaries))
+          ids (mapv :id pr-summaries)
+          result (llm/complete @llm-client {:system (fleet-triage-system-prompt)
+                                                :prompt summaries-text})]
+      (if (llm/success? result)
+        (let [content (llm/get-content result)
+              assessments (parse-risk-triage-response content)
+              matched (if (seq assessments)
+                        assessments
+                        (mapv #(hash-map :id % :level "medium" :reason "Unable to assess") ids))]
+          (msg/fleet-risk-triaged matched))
+        (msg/fleet-risk-triaged-error "LLM request failed")))
+    (catch Exception e
+      (msg/fleet-risk-triaged-error (.getMessage e)))))
 
-(defn action-match->action
-  "Convert a regex match from action-pattern into a ChatAction map."
-  [[_ action-type label description]]
-  {:action      (keyword action-type)
-   :label       (str/trim label)
-   :description (str/trim description)})
+;------------------------------------------------------------------------------ Layer 4
 
-(defn parse-actions
-  "Extract structured actions from LLM response text.
-   Returns [clean-content actions-vec]."
-  [content]
-  (let [matches (re-seq action-pattern content)
-        actions (mapv action-match->action matches)
-        clean (-> content
-                  (str/replace action-pattern "")
-                  str/trim)]
-    [clean actions]))
-
-(defn chat-msg->llm-msg
-  "Convert an internal chat message to the LLM API format."
-  [m]
-  {:role (name (:role m)) :content (:content m)})
-
-(defn handle-chat-send [{:keys [message context history]}]
+(defn ^{:stratum 4} handle-chat-send [{:keys [message context history]}]
   (try
     (let [system-prompt (build-chat-system-prompt context)
           messages (mapv chat-msg->llm-msg (or history []))
@@ -452,63 +521,10 @@
     (catch Exception e
       (msg/chat-response (tr/t :chat/error {:error (.getMessage e)}) []))))
 
-;------------------------------------------------------------------------------ Fleet risk triage
+;------------------------------------------------------------------------------ Layer 5
 
-(def ^:private risk-line-pattern
-  "Regex for parsing a single RISK: line from fleet triage LLM response."
-  #"RISK:\s*(\S+#\d+)\s*\|\s*(\w+)\s*\|\s*(.*)")
-
-(defn parse-risk-line
-  "Parse a single RISK: line into {:id [repo num] :level str :reason str}, or nil."
-  [line]
-  (when-let [[_ id-str level reason] (re-matches risk-line-pattern line)]
-    (let [[repo num-str] (str/split id-str #"#" 2)
-          num (coerce/safe-parse-int num-str)]
-      (when num
-        {:id     [repo num]
-         :level  (str/lower-case (str/trim level))
-         :reason (str/trim reason)}))))
-
-(defn parse-risk-triage-response
-  "Parse the full LLM triage response into a vector of assessments."
-  [content]
-  (into [] (keep parse-risk-line) (str/split-lines content)))
-
-(defn fleet-triage-system-prompt
-  "Load the fleet triage system prompt from templates."
-  []
-  (prompts/get-template :fleet-triage/system))
-
-(defn handle-fleet-risk-triage
-  "Send all PR summaries to LLM for fleet-level risk triage.
-   Returns per-PR risk assessments."
-  [{:keys [pr-summaries]}]
-  (try
-    (let [summaries-text (str/join "\n" (map :summary pr-summaries))
-          ids (mapv :id pr-summaries)
-          result (llm/complete @llm-client {:system (fleet-triage-system-prompt)
-                                                :prompt summaries-text})]
-      (if (llm/success? result)
-        (let [content (llm/get-content result)
-              assessments (parse-risk-triage-response content)
-              matched (if (seq assessments)
-                        assessments
-                        (mapv #(hash-map :id % :level "medium" :reason "Unable to assess") ids))]
-          (msg/fleet-risk-triaged matched))
-        (msg/fleet-risk-triaged-error "LLM request failed")))
-    (catch Exception e
-      (msg/fleet-risk-triaged-error (.getMessage e)))))
-
-(defn handle-reload-workflow-detail
-  "Reload workflow detail from the persisted event file on disk."
-  [{:keys [workflow-id]}]
-  (when-let [detail (persistence/load-workflow-detail workflow-id)]
-    (msg/workflow-detail-loaded workflow-id detail)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Effect dispatcher
-
-(defn dispatch-effect
+(defn ^{:stratum 5} dispatch-effect
   "Route a side-effect to its handler. Returns [msg-type payload] or nil."
   [train-mgr effect]
   (case (:type effect)
@@ -535,10 +551,10 @@
     :reload-workflow-detail (handle-reload-workflow-detail effect)
     nil))
 
-;------------------------------------------------------------------------------ Layer 2
-;; TUI lifecycle
+;------------------------------------------------------------------------------ Layer 6
 
-(defn start-tui!
+;; TUI lifecycle
+(defn ^{:stratum 6} start-tui!
   "Start the miniforge TUI.
 
    Arguments:
@@ -593,13 +609,7 @@
         (tui/stop! app)))
     app))
 
-(defn stop-tui!
-  "Stop the miniforge TUI. Restores terminal state.
-   Safe to call multiple times."
-  [app]
-  (tui/stop! app))
-
-(defn start-standalone-tui!
+(defn ^{:stratum 6} start-standalone-tui!
   "Start the TUI in standalone monitoring mode.
    Discovers and tail-follows workflow event files from ~/.miniforge/events/.
    Does not require an in-memory event stream.
