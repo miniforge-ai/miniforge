@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.tool-profiles-test
   "Tests for the Claude CLI tool-profile contributions.
 
@@ -30,13 +29,13 @@
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Expected-shape constants
 
-(def ^:private expected-tool-ids
+;; Expected-shape constants
+(def ^{:stratum 0} ^:private expected-tool-ids
   #{:tool/Read :tool/Bash :tool/Grep :tool/Glob
     :tool/Edit :tool/Write :tool/WebSearch :tool/WebFetch})
 
-(def ^:private expected-determinisms
+(def ^{:stratum 0} ^:private expected-determinisms
   {:tool/Read       :stable-with-resource-version
    :tool/Bash       :environment-dependent
    :tool/Grep       :stable-ish
@@ -46,41 +45,14 @@
    :tool/WebSearch  :unstable
    :tool/WebFetch   :unstable})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Profile-data shape
-
-(deftest claude-cli-profiles-cardinality-test
-  (testing "8 profiles registered, one per native Claude CLI tool"
-    (is (= 8 (count sut/claude-cli-profiles)))
-    (is (= expected-tool-ids
-           (into #{} (map :tool/id) sut/claude-cli-profiles)))))
-
-(deftest claude-cli-profiles-determinism-test
-  (testing "each profile carries the documented determinism level"
-    (doseq [profile sut/claude-cli-profiles]
-      (let [tool-id (:tool/id profile)]
-        (is (= (get expected-determinisms tool-id)
-               (:determinism profile))
-            (str tool-id " :determinism mismatch"))))))
-
-(deftest claude-cli-profiles-categories-test
+(deftest ^{:stratum 0} claude-cli-profiles-categories-test
   (testing "every profile carries the tool-loop anomaly category"
     (doseq [profile sut/claude-cli-profiles]
       (is (contains? (:anomaly/categories profile)
                      :anomalies.agent/tool-loop)
           (str (:tool/id profile) " missing tool-loop category")))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registration semantics — isolated registries
-
-(deftest register-profiles-into-fresh-registry-test
-  (testing "register-profiles! populates an empty registry"
-    (let [registry (pd/make-tool-registry)]
-      (sut/register-profiles! registry)
-      (is (= expected-tool-ids
-             (into #{} (pd/all-tool-ids registry)))))))
-
-(deftest register-profiles-idempotent-test
+(deftest ^{:stratum 0} register-profiles-idempotent-test
   (testing "calling register-profiles! twice does not duplicate or corrupt"
     (let [registry (pd/make-tool-registry)]
       (sut/register-profiles! registry)
@@ -89,7 +61,7 @@
         (is (= after-first @registry)
             "registry value identical after second register call")))))
 
-(deftest register-profiles-propagates-first-anomaly-test
+(deftest ^{:stratum 0} register-profiles-propagates-first-anomaly-test
   (testing "bulk registration returns the first invalid profile anomaly"
     (let [registry (pd/make-tool-registry)
           first-profile {:tool/id :tool/First
@@ -104,7 +76,53 @@
           (is (= :invalid-input (:anomaly/type result)))
           (is (= #{:tool/First} (set (pd/all-tool-ids registry)))))))))
 
-(deftest registry-determinism-lookup-test
+(deftest ^{:stratum 0} unknown-tool-stays-unstable-test
+  (testing "tools outside the Claude CLI set fall through to :unstable default"
+    (let [registry (pd/make-tool-registry)]
+      (sut/register-profiles! registry)
+      (is (= :unstable (pd/tool-determinism :tool/SomeMcpTool registry))
+          "unknown tool defaults to :unstable per tool-profile API"))))
+
+;; load-profiles — fail-fast config loading
+(deftest ^{:stratum 0} load-profiles-throws-on-missing-resource-test
+  (testing "Absent classpath resource raises an ex-info, not a silent nil"
+    (with-redefs-fn {#'sut/profiles-resource-path
+                     "config/adapter_claude_code/does-not-exist.edn"}
+      (fn []
+        (let [ex (try
+                   (#'sut/load-profiles)
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= "config/adapter_claude_code/does-not-exist.edn"
+                 (:config/resource (ex-data ex)))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Profile-data shape
+(deftest ^{:stratum 1} claude-cli-profiles-cardinality-test
+  (testing "8 profiles registered, one per native Claude CLI tool"
+    (is (= 8 (count sut/claude-cli-profiles)))
+    (is (= expected-tool-ids
+           (into #{} (map :tool/id) sut/claude-cli-profiles)))))
+
+(deftest ^{:stratum 1} claude-cli-profiles-determinism-test
+  (testing "each profile carries the documented determinism level"
+    (doseq [profile sut/claude-cli-profiles]
+      (let [tool-id (:tool/id profile)]
+        (is (= (get expected-determinisms tool-id)
+               (:determinism profile))
+            (str tool-id " :determinism mismatch"))))))
+
+;; Registration semantics — isolated registries
+(deftest ^{:stratum 1} register-profiles-into-fresh-registry-test
+  (testing "register-profiles! populates an empty registry"
+    (let [registry (pd/make-tool-registry)]
+      (sut/register-profiles! registry)
+      (is (= expected-tool-ids
+             (into #{} (pd/all-tool-ids registry)))))))
+
+(deftest ^{:stratum 1} registry-determinism-lookup-test
   (testing "registered profiles answer pd/tool-determinism queries"
     (let [registry (pd/make-tool-registry)]
       (sut/register-profiles! registry)
@@ -112,24 +130,15 @@
         (is (= expected (pd/tool-determinism tool-id registry))
             (str tool-id " determinism lookup"))))))
 
-(deftest unknown-tool-stays-unstable-test
-  (testing "tools outside the Claude CLI set fall through to :unstable default"
-    (let [registry (pd/make-tool-registry)]
-      (sut/register-profiles! registry)
-      (is (= :unstable (pd/tool-determinism :tool/SomeMcpTool registry))
-          "unknown tool defaults to :unstable per tool-profile API"))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Load-time contribution to the process-wide registry
-
-(deftest default-tool-registry-populated-at-load-test
+(deftest ^{:stratum 1} default-tool-registry-populated-at-load-test
   (testing "requiring this ns has registered the eight profiles globally"
     (let [global-ids (into #{} (pd/all-tool-ids))]
       (doseq [tool-id expected-tool-ids]
         (is (contains? global-ids tool-id)
             (str tool-id " missing from default-tool-registry"))))))
 
-(deftest default-registry-determinism-test
+(deftest ^{:stratum 1} default-registry-determinism-test
   (testing "default-tool-registry returns documented determinism levels"
     (doseq [[tool-id expected] expected-determinisms]
       (is (= expected (pd/tool-determinism tool-id))
