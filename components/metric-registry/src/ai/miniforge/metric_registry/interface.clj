@@ -11,71 +11,89 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; -- Schema re-exports --
-(def AcquisitionClass
+(def ^{:stratum 0} AcquisitionClass
   "Malli `[:enum ...]` schema for a metric's acquisition class (sourcing tier)."
   reg-schema/AcquisitionClass)
-(def ImplementationMode
+
+(def ^{:stratum 0} ImplementationMode
   "Malli `[:enum ...]` schema for how a metric is implemented (pull/derive/vendor/deprecated)."
   reg-schema/ImplementationMode)
-(def RefreshCadence
+
+(def ^{:stratum 0} RefreshCadence
   "Malli `[:enum ...]` schema for a metric's refresh cadence (realtime through annual)."
   reg-schema/RefreshCadence)
-(def RedistributionRisk
+
+(def ^{:stratum 0} RedistributionRisk
   "Malli `[:enum ...]` schema for a metric's redistribution-risk level (none/low/medium/high)."
   reg-schema/RedistributionRisk)
-(def MetricDirection
+
+(def ^{:stratum 0} MetricDirection
   "Malli `[:enum ...]` schema for a metric's directional polarity (normal/inverse)."
   reg-schema/MetricDirection)
-(def MetricUnit
+
+(def ^{:stratum 0} MetricUnit
   "Malli `[:enum ...]` schema for a metric's unit (percent/ratio/index/basis-points/count/usd/level)."
   reg-schema/MetricUnit)
-(def MetricEntry
+
+(def ^{:stratum 0} MetricEntry
   "Malli `[:map ...]` schema for one metric definition (id, name, sourcing, cadence, unit, etc.)."
   reg-schema/MetricEntry)
-(def MetricFamily
+
+(def ^{:stratum 0} MetricFamily
   "Malli `[:map ...]` schema for a named group of related metrics."
   reg-schema/MetricFamily)
-(def MetricRegistry
+
+(def ^{:stratum 0} MetricRegistry
   "Malli `[:map ...]` schema for the complete registry (id, version, families, pipeline map)."
   reg-schema/MetricRegistry)
 
 ;; -- Enum value sets --
-(def acquisition-classes
+(def ^{:stratum 0} acquisition-classes
   "Vector of the four acquisition-class keywords, in taxonomy order."
   reg-schema/acquisition-classes)
-(def implementation-modes
+
+(def ^{:stratum 0} implementation-modes
   "Vector of the implementation-mode keywords."
   reg-schema/implementation-modes)
-(def refresh-cadences
+
+(def ^{:stratum 0} refresh-cadences
   "Vector of the refresh-cadence keywords, ordered fastest to slowest."
   reg-schema/refresh-cadences)
-(def redistribution-risks
+
+(def ^{:stratum 0} redistribution-risks
   "Vector of the redistribution-risk keywords ([:none :low :medium :high]), in ascending order of risk."
   reg-schema/redistribution-risks)
-(def metric-directions
+
+(def ^{:stratum 0} metric-directions
   "Vector of the metric-direction keywords."
   reg-schema/metric-directions)
-(def metric-units
+
+(def ^{:stratum 0} metric-units
   "Vector of the metric-unit keywords."
   reg-schema/metric-units)
 
 ;; -- Validation --
-(def valid-metric?
+(def ^{:stratum 0} valid-metric?
   "Predicate: true if value conforms to the MetricEntry schema, false otherwise. Takes one metric value."
   reg-schema/valid-metric?)
-(def valid-family?
+
+(def ^{:stratum 0} valid-family?
   "Predicate: true if value conforms to the MetricFamily schema, false otherwise. Takes one family value."
   reg-schema/valid-family?)
-(def valid-registry?
+
+(def ^{:stratum 0} valid-registry?
   "Predicate: true if value conforms to the MetricRegistry schema, false otherwise. Takes one registry value."
   reg-schema/valid-registry?)
-(def validate-registry
+
+(def ^{:stratum 0} validate-registry
   "Validate a registry value against MetricRegistry. Returns {:valid? bool :errors map-or-nil}; never throws on invalid input."
   reg-schema/validate-registry)
 
 ;; -- Loading --
-(defn load-registry
+(defn ^{:stratum 0} load-registry
   "Load a metric registry from an EDN file path.
    Returns {:success? true :registry ...} or {:success? false :error ...}"
   [path]
@@ -93,37 +111,37 @@
       (schema/exception-failure :registry e))))
 
 ;; -- Lookups --
-(defn all-metrics
+(defn ^{:stratum 0} all-metrics
   "Return flat sequence of all metrics across all families."
   [registry]
   (lookup/all-metrics registry))
 
-(defn find-metric
+(defn ^{:stratum 0} find-metric
   "Find a single metric by id. Returns nil if not found."
   [registry metric-id]
   (lookup/find-metric registry metric-id))
 
-(defn find-metrics-by-family
+(defn ^{:stratum 0} find-metrics-by-family
   "Return all metrics in a given family."
   [registry family-id]
   (lookup/find-metrics-by-family registry family-id))
 
-(defn find-metrics-by-source-type
+(defn ^{:stratum 0} find-metrics-by-source-type
   "Return all metrics matching a given acquisition class."
   [registry source-type]
   (lookup/find-metrics-by-source-type registry source-type))
 
-(defn find-metrics-by-pipeline
+(defn ^{:stratum 0} find-metrics-by-pipeline
   "Return metric ids mapped to a given pipeline name."
   [registry pipeline-name]
   (lookup/find-metrics-by-pipeline registry pipeline-name))
 
-(defn family-ids
+(defn ^{:stratum 0} family-ids
   "Return all family ids in the registry."
   [registry]
   (lookup/family-ids registry))
 
-(defn metric-count
+(defn ^{:stratum 0} metric-count
   "Return total number of metrics across all families."
   [registry]
   (lookup/metric-count registry))
