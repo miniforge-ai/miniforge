@@ -15,48 +15,50 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-config.core
   "Config loader implementation.
 
    Stratification (intra-namespace):
-   Layer 0 — `read-edn` and `default-path` (no in-ns deps).
-   Layer 1 — `load` (composes Layer 0).
-   Layer 2 — `get` (composes Layer 0 + Layer 1)."
+   Layer 0 — `default-filename` and `read-edn` (no in-ns deps).
+   Layer 1 — `default-path` (composes Layer 0).
+   Layer 2 — `load` (composes Layer 0 + Layer 1).
+   Layer 3 — `get` (composes Layer 1 + Layer 2)."
   (:refer-clojure :exclude [load get])
   (:require [ai.miniforge.bb-paths.interface :as paths]
             [babashka.fs :as fs]
             [clojure.edn :as edn]))
 
-(def ^:const default-filename "bb-tasks.edn")
-
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
 
-(defn read-edn
+(def ^{:stratum 0} ^:const default-filename "bb-tasks.edn")
+
+;; No in-namespace dependencies.
+(defn ^{:stratum 0} read-edn
   "Parse `path` as EDN. Returns `{}` if the file is absent."
   [path]
   (if (fs/exists? path)
     (edn/read-string (slurp path))
     {}))
 
-(defn default-path
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} default-path
   "Absolute path to `bb-tasks.edn` under the current repo root."
   []
   (str (paths/repo-root) "/" default-filename))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
+;------------------------------------------------------------------------------ Layer 2
 
-(defn load
+;; Composes Layer 0 + Layer 1.
+(defn ^{:stratum 2} load
   "Load the whole config map."
   ([] (read-edn (default-path)))
   ([path] (read-edn path)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Composes Layer 0 (`default-path`) + Layer 1 (`load`).
+;------------------------------------------------------------------------------ Layer 3
 
-(defn get
+;; Composes Layer 1 (`default-path`) + Layer 2 (`load`).
+(defn ^{:stratum 3} get
   "Return the config slice for `task-key`."
   ([task-key] (get (default-path) task-key))
   ([source task-key]
