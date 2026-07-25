@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.capabilities-test
   "Tests for injecting mechanical tool gates into the policy-pack registry."
   (:require
@@ -23,7 +22,9 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest register-mechanical-capabilities-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} register-mechanical-capabilities-test
   (testing "registers the failing mechanical gates as capabilities"
     (let [available (sut/register-mechanical-capabilities!)]
       (doseq [capability-kw [:lint :format :syntax :no-secrets]]
@@ -32,7 +33,7 @@
             (str capability-kw " should be registered"))
         (is (fn? (:check (policy-pack/get-capability capability-kw))))))))
 
-(deftest no-secrets-capability-surfaces-violation-test
+(deftest ^{:stratum 0} no-secrets-capability-surfaces-violation-test
   (testing "a hardcoded secret surfaces as a capability violation"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :no-secrets))
@@ -43,14 +44,14 @@
       (is (= :capability (:type result)))
       (is (= :no-secrets (:capability result))))))
 
-(deftest no-secrets-capability-clean-test
+(deftest ^{:stratum 0} no-secrets-capability-clean-test
   (testing "a clean artifact yields nil through the no-secrets capability"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :no-secrets))
           artifact {:artifact/content "(def x 42)" :artifact/path "core.clj"}]
       (is (nil? (check artifact {}))))))
 
-(deftest syntax-capability-surfaces-violation-test
+(deftest ^{:stratum 0} syntax-capability-surfaces-violation-test
   (testing "a syntax error surfaces as a capability violation through the gate"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :syntax))
@@ -60,7 +61,7 @@
       (is (= :capability (:type result)))
       (is (= :syntax (:capability result))))))
 
-(deftest format-capability-surfaces-format-drift-test
+(deftest ^{:stratum 0} format-capability-surfaces-format-drift-test
   (testing "unformatted content surfaces as a deterministic format violation"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :format))
@@ -72,7 +73,7 @@
       (is (= :capability (:type result)))
       (is (= :format (:capability result))))))
 
-(deftest format-capability-clean-test
+(deftest ^{:stratum 0} format-capability-clean-test
   (testing "formatted content yields nil"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :format))
@@ -81,7 +82,7 @@
                     :artifact/path              "core.clj"}]
       (is (nil? (check artifact {}))))))
 
-(deftest format-capability-missing-check-fails-loud-test
+(deftest ^{:stratum 0} format-capability-missing-check-fails-loud-test
   (testing "format capability never silently passes without a check contract"
     (sut/register-mechanical-capabilities!)
     (let [check    (:check (policy-pack/get-capability :format))
@@ -92,7 +93,7 @@
       (is (= :format (:capability result)))
       (is (re-find #"requires" (:message result))))))
 
-(deftest registration-idempotent-test
+(deftest ^{:stratum 0} registration-idempotent-test
   (testing "repeated registration is safe and stays stable"
     (sut/register-mechanical-capabilities!)
     (let [before (policy-pack/list-capabilities)]

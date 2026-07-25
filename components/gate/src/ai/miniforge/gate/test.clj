@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.test
   "Test validation gates.
 
@@ -24,9 +23,9 @@
   (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test checking
 
-(defn check-tests-pass
+;; Test checking
+(defn ^{:stratum 0} check-tests-pass
   "Check if tests pass.
 
    In real impl, this would run tests and check results.
@@ -51,7 +50,7 @@
                  :message (str (:fail-count test-results) " tests failed")
                  :failures (:failures test-results)}]})))
 
-(defn check-coverage
+(defn ^{:stratum 0} check-coverage
   "Check if coverage meets threshold.
 
    Default threshold: 80%"
@@ -77,29 +76,29 @@
                  :coverage coverage
                  :threshold threshold}]})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Registry
-
-(registry/register-gate! :tests-pass)
-(registry/register-gate! :coverage)
-
-(defmethod registry/get-gate :tests-pass
+(defmethod ^{:stratum 0} registry/get-gate :tests-pass
   [_]
   {:name :tests-pass
    :description "Validates all tests pass"
    :check check-tests-pass
    :repair nil})
 
-(defmethod registry/get-gate :coverage
+(defmethod ^{:stratum 0} registry/get-gate :coverage
   [_]
   {:name :coverage
    :description "Validates test coverage meets threshold (default 80%)"
    :check check-coverage
    :repair nil})
 
+(defmethod ^{:stratum 0} registry/get-gate :test [_] (registry/get-gate :tests-pass))
+
+;; Registry
+(registry/register-gate! :tests-pass)
+
+(registry/register-gate! :coverage)
+
 ;; Aliases for common gate names
 (registry/register-gate! :test)
-(defmethod registry/get-gate :test [_] (registry/get-gate :tests-pass))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

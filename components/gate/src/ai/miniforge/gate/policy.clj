@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.policy
   "Policy validation gates.
 
@@ -31,35 +30,16 @@
             [slingshot.slingshot         :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Policy checks
 
-(def secret-patterns
+;; Policy checks
+(def ^{:stratum 0} secret-patterns
   "Patterns that might indicate hardcoded secrets."
   [#"(?i)(password|secret|api[_-]?key|token)\s*=\s*[\"'][^\"']{8,}"
    #"(?i)aws[_-]?(access|secret)[_-]?key[_-]?id?\s*=\s*[\"'][A-Z0-9]{16,}"
    #"sk-[a-zA-Z0-9]{32,}"  ; OpenAI keys
-   #"ghp_[a-zA-Z0-9]{36}"]) ; GitHub tokens
+   #"ghp_[a-zA-Z0-9]{36}"])  ; GitHub tokens
 
-(defn check-no-secrets
-  "Check for hardcoded secrets in content."
-  [artifact _ctx]
-  (let [content (or (:content artifact)
-                    (get-in artifact [:artifact/content])
-                    "")
-        content-str (if (string? content) content (pr-str content))
-        matches (for [pattern secret-patterns
-                      :let [matches (re-seq pattern content-str)]
-                      :when (seq matches)]
-                  {:pattern (str pattern)
-                   :count (count matches)})]
-    (if (empty? matches)
-      {:passed? true}
-      {:passed? false
-       :errors [{:type :secrets-detected
-                 :message "Potential hardcoded secrets detected"
-                 :matches matches}]})))
-
-(defn check-plan-complete
+(defn ^{:stratum 0} check-plan-complete
   "Check if plan artifact is complete."
   [artifact _ctx]
   (let [plan (or (:plan artifact)
@@ -88,7 +68,7 @@
       {:passed? true
        :step-count (count steps)})))
 
-(defn check-review-approved
+(defn ^{:stratum 0} check-review-approved
   "Check if review is approved.
 
    Reads the decision from the ONE canonical location
@@ -107,7 +87,7 @@
        :errors [{:type :not-approved
                  :message (msg/t :review/not-approved {:decision (pr-str decision)})}]})))
 
-(defn check-quality
+(defn ^{:stratum 0} check-quality
   "Generic quality check - passes if no explicit failures."
   [artifact _ctx]
   (let [quality-issues (get-in artifact [:metadata :quality-issues] [])]
@@ -116,7 +96,7 @@
       {:passed? false
        :errors quality-issues})))
 
-(defn check-release-ready
+(defn ^{:stratum 0} check-release-ready
   "Check release readiness."
   [artifact _ctx]
   (let [ready? (or (get-in artifact [:metadata :release-ready])
@@ -128,54 +108,8 @@
        :errors [{:type :not-release-ready
                  :message "Artifact not ready for release"}]})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Registry
-
-(registry/register-gate! :no-secrets)
-(registry/register-gate! :plan-complete)
-(registry/register-gate! :review-approved)
-(registry/register-gate! :quality-check)
-(registry/register-gate! :release-ready)
-
-(defmethod registry/get-gate :no-secrets
-  [_]
-  {:name :no-secrets
-   :description "Validates no hardcoded secrets in content"
-   :check check-no-secrets
-   :repair nil})
-
-(defmethod registry/get-gate :plan-complete
-  [_]
-  {:name :plan-complete
-   :description "Validates plan artifact is complete"
-   :check check-plan-complete
-   :repair nil})
-
-(defmethod registry/get-gate :review-approved
-  [_]
-  {:name :review-approved
-   :description "Validates review is approved"
-   :check check-review-approved
-   :repair nil})
-
-(defmethod registry/get-gate :quality-check
-  [_]
-  {:name :quality-check
-   :description "General quality validation"
-   :check check-quality
-   :repair nil})
-
-(defmethod registry/get-gate :release-ready
-  [_]
-  {:name :release-ready
-   :description "Validates artifact is ready for release"
-   :check check-release-ready
-   :repair nil})
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Policy Pack Gate (classifies by enforcement action, via policy-pack)
-
-(defn check-policy-pack
+(defn ^{:stratum 0} check-policy-pack
   "Check artifact against loaded policy packs, classifying each violation by its
    rule's enforcement action (`:rule/enforcement :action`) via
    `policy-pack/check-artifact`. `:hard-halt` and `:require-approval` block the
@@ -223,7 +157,7 @@
        :warnings []
        :approval-required []})))
 
-(defn repair-policy-pack
+(defn ^{:stratum 0} repair-policy-pack
   "Attempt to repair policy violations.
    Currently returns failure — repair requires LLM agent."
   [artifact errors _ctx]
@@ -232,14 +166,81 @@
    :errors errors
    :message "Policy violation repair requires LLM agent"})
 
-(registry/register-gate! :policy-pack)
+;------------------------------------------------------------------------------ Layer 1
 
-(defmethod registry/get-gate :policy-pack
+(defn ^{:stratum 1} check-no-secrets
+  "Check for hardcoded secrets in content."
+  [artifact _ctx]
+  (let [content (or (:content artifact)
+                    (get-in artifact [:artifact/content])
+                    "")
+        content-str (if (string? content) content (pr-str content))
+        matches (for [pattern secret-patterns
+                      :let [matches (re-seq pattern content-str)]
+                      :when (seq matches)]
+                  {:pattern (str pattern)
+                   :count (count matches)})]
+    (if (empty? matches)
+      {:passed? true}
+      {:passed? false
+       :errors [{:type :secrets-detected
+                 :message "Potential hardcoded secrets detected"
+                 :matches matches}]})))
+
+(defmethod ^{:stratum 1} registry/get-gate :no-secrets
+  [_]
+  {:name :no-secrets
+   :description "Validates no hardcoded secrets in content"
+   :check check-no-secrets
+   :repair nil})
+
+(defmethod ^{:stratum 1} registry/get-gate :plan-complete
+  [_]
+  {:name :plan-complete
+   :description "Validates plan artifact is complete"
+   :check check-plan-complete
+   :repair nil})
+
+(defmethod ^{:stratum 1} registry/get-gate :review-approved
+  [_]
+  {:name :review-approved
+   :description "Validates review is approved"
+   :check check-review-approved
+   :repair nil})
+
+(defmethod ^{:stratum 1} registry/get-gate :quality-check
+  [_]
+  {:name :quality-check
+   :description "General quality validation"
+   :check check-quality
+   :repair nil})
+
+(defmethod ^{:stratum 1} registry/get-gate :release-ready
+  [_]
+  {:name :release-ready
+   :description "Validates artifact is ready for release"
+   :check check-release-ready
+   :repair nil})
+
+(defmethod ^{:stratum 1} registry/get-gate :policy-pack
   [_]
   {:name :policy-pack
    :description "Validates code against loaded policy packs by enforcement action"
    :check check-policy-pack
    :repair repair-policy-pack})
+
+;; Registry
+(registry/register-gate! :no-secrets)
+
+(registry/register-gate! :plan-complete)
+
+(registry/register-gate! :review-approved)
+
+(registry/register-gate! :quality-check)
+
+(registry/register-gate! :release-ready)
+
+(registry/register-gate! :policy-pack)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

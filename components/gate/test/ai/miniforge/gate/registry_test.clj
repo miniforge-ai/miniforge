@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.registry-test
   (:require [clojure.test :refer [deftest is testing]]
             ;; Loads every gate-component defmethod (syntax, lint, policy, …) so
@@ -25,9 +24,9 @@
             [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Unknown gate fails closed
 
-(deftest unknown-gate-fails-closed-test
+;; Unknown gate fails closed
+(deftest ^{:stratum 0} unknown-gate-fails-closed-test
   (testing "a gate keyword with no registration resolves to a fail-closed check"
     (let [gate   (registry/get-gate :totally-unregistered-gate)
           result ((:check gate) {:content "x"} {})]
@@ -36,7 +35,7 @@
       (is (= :unknown-gate (-> result :errors first :type)))
       (is (nil? (:repair gate))))))
 
-(deftest noop-gate-passes-test
+(deftest ^{:stratum 0} noop-gate-passes-test
   (testing ":noop is the explicit, registered pass-through"
     (let [gate   (registry/get-gate :noop)
           result ((:check gate) {:content "x"} {})]
@@ -44,10 +43,8 @@
       (is (empty? (:errors result)))
       (is (contains? (registry/list-gates) :noop)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Resolve-check
-
-(deftest gate-registered?-distinguishes-real-from-default-test
+(deftest ^{:stratum 0} gate-registered?-distinguishes-real-from-default-test
   (testing "gate-registered? is true for a real gate, false for an unknown one"
     (is (true? (registry/gate-registered? :noop)))
     (is (true? (registry/gate-registered? :syntax)))
@@ -64,12 +61,14 @@
 ;; A gate referenced here that no longer resolves is a fail-closed footgun: a
 ;; workflow would halt on it at runtime. Fix by registering the gate or, for a
 ;; deliberate skip, referencing :noop in the workflow.
-(def shipped-gate-references
+(def ^{:stratum 0} shipped-gate-references
   #{:syntax :format :lint :no-secrets :pre-verify-lint :tests-pass :coverage
     :policy-verify :review-approved :quality-check :policy-review :plan-complete
     :release-ready :policy-pack :noop})
 
-(deftest shipped-gate-references-resolve-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} shipped-gate-references-resolve-test
   (testing "every gate-owned reference in a shipped workflow resolves to a real
             registration (never the fail-closed default)"
     (doseq [gate-kw shipped-gate-references]

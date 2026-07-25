@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.policy-pack
   "Phase-scoped policy-pack gate.
 
@@ -71,46 +70,15 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pack source
 
-(def ^:private standards-pack-resource
+;; Pack source
+(def ^{:stratum 0} ^:private standards-pack-resource
   "Classpath location of the compiled standards pack (emitted by
    `bb standards:pack`, placed on the classpath at build time)."
   "packs/miniforge-standards.pack.edn")
 
-(defn- read-standards-pack
-  "Read the shipped standards pack manifest from the classpath.
-
-   Returns nil ONLY when the resource is absent (a repo legitimately without a
-   compiled pack). A present-but-malformed/unreadable pack THROWS — so
-   `gate.interface/check-gate` converts it into a failed gate (fail-closed),
-   rather than letting a corrupt pack masquerade as 'no pack' and silently
-   skip enforcement."
-  []
-  (when-let [res (io/resource standards-pack-resource)]
-    (edn/read-string (slurp res))))
-
-(def ^:private standards-pack
-  "Memoized shipped pack — read once per JVM (the classpath is stable for a
-   process). A read failure is cached as a thrown deref, keeping enforcement
-   fail-closed on every evaluation."
-  (delay (read-standards-pack)))
-
-(defn- packs-for-gate
-  "Packs to evaluate. When ctx carries an explicit `:policy-packs` key, that
-   value is authoritative — even an empty vector (a run that disabled all
-   packs is respected, not silently re-seeded). When the key is absent (the
-   normal SDLC path), the shipped standards pack is used so the gate actually
-   evaluates. Empty when no pack resource is present."
-  [ctx]
-  (if (contains? ctx :policy-packs)
-    (vec (:policy-packs ctx))
-    (if-let [pack @standards-pack] [pack] [])))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Context wiring
-
-(defn- artifact-changed-files
+(defn- ^{:stratum 0} artifact-changed-files
   "The changed files [{:path :content}] this gate evaluates, taken from the
    resolved policy artifact (its code files, or a single content artifact).
    This is the changed-files scope handed to the judge."
@@ -127,7 +95,7 @@
 
     :else []))
 
-(defn- batched-semantic-analyzer
+(defn- ^{:stratum 0} batched-semantic-analyzer
   "An `analyze-rule`-shaped fn (repo-path ignored) backed by ONE batched judge
    call per changed file across ALL `acting-rules`. Memoizes the batch in a
    per-evaluation atom, so the N per-rule semantic check-fn invocations in a
@@ -143,7 +111,139 @@
          :violations (get-in result [:by-rule (:rule/id rule)] [])
          :status     (:status result)}))))
 
-(defn- with-semantic-wiring
+(defn- ^{:stratum 0} no-policy-packs-warning
+  []
+  {:type :no-policy-packs
+   :message (msg/t :policy-pack/no-policy-packs)})
+
+(defn- ^{:stratum 0} artifact-has-code?
+  [artifact]
+  (and (map? artifact)
+       (or (seq (:code/files artifact))
+           (contains? artifact :artifact/content)
+           (contains? artifact :content))))
+
+(defn- ^{:stratum 0} implement-artifact
+  [ctx]
+  (get-in ctx [:execution/phase-results :implement :artifact]))
+
+(defn- ^{:stratum 0} path-inside-worktree?
+  [worktree file]
+  (let [root-path (str (.getPath worktree) java.io.File/separator)
+        file-path (.getPath file)]
+    (or (= file-path (.getPath worktree))
+        (str/starts-with? file-path root-path))))
+
+;------------------------------------------------------------------------------ Layer 1.5
+;; Compiled policy evaluation and per-rule application evidence
+(defn- ^{:stratum 0} compile-anomaly?
+  [result]
+  (contains? result :anomaly/type))
+
+(defn- ^{:stratum 0} compile-anomaly-message
+  [anomaly]
+  (or (:anomaly/message anomaly)
+      (:message anomaly)
+      (name (:anomaly/type anomaly))))
+
+(defn- ^{:stratum 0} compile-pack-results
+  [packs]
+  (mapv policy-pack/compile-pack-checks packs))
+
+(defn- ^{:stratum 0} compiled-rules
+  [compile-results]
+  (mapcat :compiled-rules compile-results))
+
+(defn- ^{:stratum 0} phase-compiled-rule?
+  [phase compiled]
+  (policy-pack/rule-applies-to-phase? (:rule compiled) phase))
+
+(defn- ^{:stratum 0} file-entry->artifact
+  [file-entry]
+  (let [path    (or (:artifact/path file-entry) (:path file-entry))
+        content (or (:artifact/content file-entry) (:content file-entry))]
+    (cond-> file-entry
+      path    (assoc :artifact/path path)
+      content (assoc :artifact/content content))))
+
+(defn- ^{:stratum 0} rule-applicable-to-artifact?
+  [rule phase context artifact]
+  (seq (policy-pack/filter-applicable-rules
+        [rule]
+        (assoc context :phase phase :artifact artifact))))
+
+(defn- ^{:stratum 0} violation-entry
+  [compiled violation]
+  {:rule (:rule compiled)
+   :violation violation
+   :timestamp (java.time.Instant/now)})
+
+(def ^{:stratum 0} ^:private judge-acting-actions
+  "Enforcement actions for which the LLM judge actually runs. A semantic rule
+   that only warns/audits is guidance — surfaced via behavior injection, not
+   evaluated by the judge — so the run never pays for an LLM call that could
+   only produce a non-blocking finding."
+  #{:hard-halt :require-approval})
+
+(defn- ^{:stratum 0} audit-violations
+  [violations]
+  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
+          violations))
+
+(defn- ^{:stratum 0} violation-summary
+  "Non-sensitive summary of a violation for an evidence event. Drops :matches
+   — which can carry source lines or secret material (e.g. a no-secrets rule's
+   matched token) and must never reach a stored event. Keeps the message, the
+   artifact path, and a match count."
+  [violation]
+  (when violation
+    {:message       (:message violation)
+     :artifact-path (:artifact-path violation)
+     :match-count   (count (:matches violation))}))
+
+(defn- ^{:stratum 0} emit-rule-evidence!
+  "Publish one :gate/rule-applied event per classified rule. No-op when the
+   run carries no event stream. Fail-safe: evidence emission must never break
+   enforcement, so a publish error is swallowed (the gate verdict still
+   stands)."
+  [ctx phase classified]
+  (when-let [stream (:event-stream ctx)]
+    (try
+      (let [wid (:workflow/id ctx)]
+        (doseq [{:keys [rule-id status severity enforcement violation]} classified]
+          (event-stream/publish!
+           stream
+           (event-stream/gate-rule-applied stream wid phase rule-id status
+                                           {:severity    severity
+                                            :enforcement enforcement
+                                            :violation   violation}))))
+      (catch Exception _ nil))))
+
+(defn ^{:stratum 0} repair-policy-pack
+  "Policy violations cannot be fixed in-place; the workflow must redirect to
+   :implement for an agent to address the root cause (mirrors the behavioral
+   gate)."
+  [artifact errors _ctx]
+  {:success? false
+   :artifact artifact
+   :errors   errors
+   :message  (msg/t :policy-pack/repair-required)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} read-standards-pack
+  "Read the shipped standards pack manifest from the classpath.
+
+   Returns nil ONLY when the resource is absent (a repo legitimately without a
+   compiled pack). A present-but-malformed/unreadable pack THROWS — so
+   `gate.interface/check-gate` converts it into a failed gate (fail-closed),
+   rather than letting a corrupt pack masquerade as 'no pack' and silently
+   skip enforcement."
+  []
+  (when-let [res (io/resource standards-pack-resource)]
+    (edn/read-string (slurp res))))
+
+(defn- ^{:stratum 1} with-semantic-wiring
   "Inject the LLM-judge seam the policy-pack semantic detector needs. Derives
    `:llm-client` from the run's `:llm-backend` when absent, sets `:complete-fn`
    to `llm/complete`, and injects a `:semantic-analyze-fn` that runs the batched
@@ -169,37 +269,61 @@
                                        acting-rules (artifact-changed-files artifact)))
       ctx)))
 
-(defn- no-policy-packs-warning
-  []
-  {:type :no-policy-packs
-   :message (msg/t :policy-pack/no-policy-packs)})
-
-(defn- artifact-has-code?
-  [artifact]
-  (and (map? artifact)
-       (or (seq (:code/files artifact))
-           (contains? artifact :artifact/content)
-           (contains? artifact :content))))
-
-(defn- implement-artifact
-  [ctx]
-  (get-in ctx [:execution/phase-results :implement :artifact]))
-
-(defn- path-inside-worktree?
-  [worktree file]
-  (let [root-path (str (.getPath worktree) java.io.File/separator)
-        file-path (.getPath file)]
-    (or (= file-path (.getPath worktree))
-        (str/starts-with? file-path root-path))))
-
-(defn- safe-worktree-file
+(defn- ^{:stratum 1} safe-worktree-file
   [worktree-path file-path]
   (let [worktree (.getCanonicalFile (io/file worktree-path))
         file     (.getCanonicalFile (io/file worktree file-path))]
     (when (path-inside-worktree? worktree file)
       file)))
 
-(defn- code-file-entry
+(defn- ^{:stratum 1} compile-anomaly-result
+  [anomaly]
+  {:passed?  false
+   :compiled? false
+   :blocking [{:code    :policy-pack/compile-failed
+               :message (msg/t :policy-pack/compile-error
+                               {:message (compile-anomaly-message anomaly)})
+               :data    (:anomaly/data anomaly)}]
+   :warnings []})
+
+(defn- ^{:stratum 1} phase-compiled-rules
+  [compile-results phase]
+  (filterv #(phase-compiled-rule? phase %) (compiled-rules compile-results)))
+
+(defn- ^{:stratum 1} artifact-inputs
+  [artifact]
+  (if-let [files (seq (:code/files artifact))]
+    (mapv file-entry->artifact files)
+    [(file-entry->artifact artifact)]))
+
+(defn- ^{:stratum 1} semantic-judge-applies?
+  "True unless this is a semantic-detector rule whose enforcement action is
+   non-acting. Non-semantic detectors (content-scan, diff, etc.) always run —
+   they are cheap and deterministic."
+  [compiled]
+  (or (not= :semantic (:detector compiled))
+      (contains? judge-acting-actions
+                 (get-in compiled [:rule :rule/enforcement :action]))))
+
+(defn- ^{:stratum 1} guidance-only-semantic?
+  "A semantic-detector rule with a non-acting enforcement action — surfaced as
+   guidance (behavior injection), never evaluated by the judge (see
+   `semantic-judge-applies?`). Evidence marks these `:guidance`, not `:passed`,
+   so the event log never claims the judge cleared a rule it skipped."
+  [rule]
+  (and (= :semantic (policy-pack/resolve-detector rule))
+       (not (contains? judge-acting-actions
+                       (get-in rule [:rule/enforcement :action])))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private standards-pack
+  "Memoized shipped pack — read once per JVM (the classpath is stable for a
+   process). A read failure is cached as a thrown deref, keeping enforcement
+   fail-closed on every evaluation."
+  (delay (read-standards-pack)))
+
+(defn- ^{:stratum 2} code-file-entry
   [worktree-path file-path action]
   (let [file    (safe-worktree-file worktree-path file-path)
         content (cond
@@ -209,7 +333,25 @@
       content (assoc :content content)
       action  (assoc :action action))))
 
-(defn- rehydrate-code-files
+(defn- ^{:stratum 2} applicable-artifacts
+  [rule phase artifact context]
+  (filterv #(rule-applicable-to-artifact? rule phase context %)
+           (artifact-inputs artifact)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} packs-for-gate
+  "Packs to evaluate. When ctx carries an explicit `:policy-packs` key, that
+   value is authoritative — even an empty vector (a run that disabled all
+   packs is respected, not silently re-seeded). When the key is absent (the
+   normal SDLC path), the shipped standards pack is used so the gate actually
+   evaluates. Empty when no pack resource is present."
+  [ctx]
+  (if (contains? ctx :policy-packs)
+    (vec (:policy-packs ctx))
+    (if-let [pack @standards-pack] [pack] [])))
+
+(defn- ^{:stratum 3} rehydrate-code-files
   [artifact worktree-path]
   (when-let [paths (seq (:code/file-paths artifact))]
     (let [actions (get artifact :code/file-actions [])
@@ -220,116 +362,7 @@
                         paths)]
       (assoc artifact :code/files files))))
 
-(defn- policy-artifact
-  "Resolve the artifact that pack-derived policy should evaluate.
-
-   Verify emits test metadata and review emits a verdict, but policy rules
-   target the code-under-review. Prefer an explicit code artifact when present;
-   otherwise use the implement phase artifact, rehydrating paths-only metadata
-   from the execution worktree when available."
-  [artifact ctx]
-  (let [impl-artifact (implement-artifact ctx)
-        worktree-path (:execution/worktree-path ctx)]
-    (cond
-      (artifact-has-code? artifact)
-      artifact
-
-      (and worktree-path (seq (:code/file-paths impl-artifact)))
-      (rehydrate-code-files impl-artifact worktree-path)
-
-      (artifact-has-code? impl-artifact)
-      impl-artifact
-
-      :else
-      artifact)))
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; Compiled policy evaluation and per-rule application evidence
-
-(defn- compile-anomaly?
-  [result]
-  (contains? result :anomaly/type))
-
-(defn- compile-anomaly-message
-  [anomaly]
-  (or (:anomaly/message anomaly)
-      (:message anomaly)
-      (name (:anomaly/type anomaly))))
-
-(defn- compile-anomaly-result
-  [anomaly]
-  {:passed?  false
-   :compiled? false
-   :blocking [{:code    :policy-pack/compile-failed
-               :message (msg/t :policy-pack/compile-error
-                               {:message (compile-anomaly-message anomaly)})
-               :data    (:anomaly/data anomaly)}]
-   :warnings []})
-
-(defn- compile-pack-results
-  [packs]
-  (mapv policy-pack/compile-pack-checks packs))
-
-(defn- compiled-rules
-  [compile-results]
-  (mapcat :compiled-rules compile-results))
-
-(defn- phase-compiled-rule?
-  [phase compiled]
-  (policy-pack/rule-applies-to-phase? (:rule compiled) phase))
-
-(defn- phase-compiled-rules
-  [compile-results phase]
-  (filterv #(phase-compiled-rule? phase %) (compiled-rules compile-results)))
-
-(defn- file-entry->artifact
-  [file-entry]
-  (let [path    (or (:artifact/path file-entry) (:path file-entry))
-        content (or (:artifact/content file-entry) (:content file-entry))]
-    (cond-> file-entry
-      path    (assoc :artifact/path path)
-      content (assoc :artifact/content content))))
-
-(defn- artifact-inputs
-  [artifact]
-  (if-let [files (seq (:code/files artifact))]
-    (mapv file-entry->artifact files)
-    [(file-entry->artifact artifact)]))
-
-(defn- rule-applicable-to-artifact?
-  [rule phase context artifact]
-  (seq (policy-pack/filter-applicable-rules
-        [rule]
-        (assoc context :phase phase :artifact artifact))))
-
-(defn- applicable-artifacts
-  [rule phase artifact context]
-  (filterv #(rule-applicable-to-artifact? rule phase context %)
-           (artifact-inputs artifact)))
-
-(defn- violation-entry
-  [compiled violation]
-  {:rule (:rule compiled)
-   :violation violation
-   :timestamp (java.time.Instant/now)})
-
-(def ^:private judge-acting-actions
-  "Enforcement actions for which the LLM judge actually runs. A semantic rule
-   that only warns/audits is guidance — surfaced via behavior injection, not
-   evaluated by the judge — so the run never pays for an LLM call that could
-   only produce a non-blocking finding."
-  #{:hard-halt :require-approval})
-
-(defn- semantic-judge-applies?
-  "True unless this is a semantic-detector rule whose enforcement action is
-   non-acting. Non-semantic detectors (content-scan, diff, etc.) always run —
-   they are cheap and deterministic."
-  [compiled]
-  (or (not= :semantic (:detector compiled))
-      (contains? judge-acting-actions
-                 (get-in compiled [:rule :rule/enforcement :action]))))
-
-(defn- acting-semantic-rules
+(defn- ^{:stratum 3} acting-semantic-rules
   "The enabled rules that resolve to the semantic judge AND carry an acting
    enforcement action AND are applicable to this run's `artifact` — exactly the
    rules the batched judge evaluates together. Applicability uses the same
@@ -345,7 +378,7 @@
                             (get-in % [:rule/enforcement :action])))
        (filterv #(seq (applicable-artifacts % phase artifact ctx)))))
 
-(defn- run-compiled-rule
+(defn- ^{:stratum 3} run-compiled-rule
   [artifact context compiled]
   (if-not (semantic-judge-applies? compiled)
     []
@@ -355,58 +388,7 @@
           result ((:check-fn compiled) inputs context)]
       (mapv #(violation-entry compiled %) (:violations result)))))
 
-(defn- run-compiled-rules
-  [compiled-rules artifact context]
-  (mapcat #(run-compiled-rule artifact context %) compiled-rules))
-
-(defn- audit-violations
-  [violations]
-  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
-(defn- compiled-check-result
-  [packs phase artifact context]
-  (let [compile-results (compile-pack-results packs)]
-    (if-let [anomaly (first (filter compile-anomaly? compile-results))]
-      (compile-anomaly-result anomaly)
-      (let [violations (vec (run-compiled-rules
-                             (phase-compiled-rules compile-results phase)
-                             artifact
-                             context))
-            blocking   (policy-pack/blocking-violations violations)
-            approvals  (policy-pack/approval-required-violations violations)
-            warnings   (policy-pack/warning-violations violations)
-            audits     (audit-violations violations)]
-        {:passed?          (empty? blocking)
-         :compiled?        true
-         :violations       violations
-         :blocking         (mapv policy-pack/violation->error blocking)
-         :require-approval (mapv policy-pack/violation->error approvals)
-         :warnings         (mapv policy-pack/violation->warning warnings)
-         :audits           (mapv policy-pack/violation->warning audits)}))))
-
-(defn- violation-summary
-  "Non-sensitive summary of a violation for an evidence event. Drops :matches
-   — which can carry source lines or secret material (e.g. a no-secrets rule's
-   matched token) and must never reach a stored event. Keeps the message, the
-   artifact path, and a match count."
-  [violation]
-  (when violation
-    {:message       (:message violation)
-     :artifact-path (:artifact-path violation)
-     :match-count   (count (:matches violation))}))
-
-(defn- guidance-only-semantic?
-  "A semantic-detector rule with a non-acting enforcement action — surfaced as
-   guidance (behavior injection), never evaluated by the judge (see
-   `semantic-judge-applies?`). Evidence marks these `:guidance`, not `:passed`,
-   so the event log never claims the judge cleared a rule it skipped."
-  [rule]
-  (and (= :semantic (policy-pack/resolve-detector rule))
-       (not (contains? judge-acting-actions
-                       (get-in rule [:rule/enforcement :action])))))
-
-(defn- classify-rules
+(defn- ^{:stratum 3} classify-rules
   "Per-rule evidence: classify every enabled rule across `packs` for `phase`.
    `violations` are the {:rule :violation} maps from compiled check results.
 
@@ -449,28 +431,62 @@
                :violation   (violation-summary (get violated id))}))
           enabled)))
 
-(defn- emit-rule-evidence!
-  "Publish one :gate/rule-applied event per classified rule. No-op when the
-   run carries no event stream. Fail-safe: evidence emission must never break
-   enforcement, so a publish error is swallowed (the gate verdict still
-   stands)."
-  [ctx phase classified]
-  (when-let [stream (:event-stream ctx)]
-    (try
-      (let [wid (:workflow/id ctx)]
-        (doseq [{:keys [rule-id status severity enforcement violation]} classified]
-          (event-stream/publish!
-           stream
-           (event-stream/gate-rule-applied stream wid phase rule-id status
-                                           {:severity    severity
-                                            :enforcement enforcement
-                                            :violation   violation}))))
-      (catch Exception _ nil))))
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 2
+(defn- ^{:stratum 4} policy-artifact
+  "Resolve the artifact that pack-derived policy should evaluate.
+
+   Verify emits test metadata and review emits a verdict, but policy rules
+   target the code-under-review. Prefer an explicit code artifact when present;
+   otherwise use the implement phase artifact, rehydrating paths-only metadata
+   from the execution worktree when available."
+  [artifact ctx]
+  (let [impl-artifact (implement-artifact ctx)
+        worktree-path (:execution/worktree-path ctx)]
+    (cond
+      (artifact-has-code? artifact)
+      artifact
+
+      (and worktree-path (seq (:code/file-paths impl-artifact)))
+      (rehydrate-code-files impl-artifact worktree-path)
+
+      (artifact-has-code? impl-artifact)
+      impl-artifact
+
+      :else
+      artifact)))
+
+(defn- ^{:stratum 4} run-compiled-rules
+  [compiled-rules artifact context]
+  (mapcat #(run-compiled-rule artifact context %) compiled-rules))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} compiled-check-result
+  [packs phase artifact context]
+  (let [compile-results (compile-pack-results packs)]
+    (if-let [anomaly (first (filter compile-anomaly? compile-results))]
+      (compile-anomaly-result anomaly)
+      (let [violations (vec (run-compiled-rules
+                             (phase-compiled-rules compile-results phase)
+                             artifact
+                             context))
+            blocking   (policy-pack/blocking-violations violations)
+            approvals  (policy-pack/approval-required-violations violations)
+            warnings   (policy-pack/warning-violations violations)
+            audits     (audit-violations violations)]
+        {:passed?          (empty? blocking)
+         :compiled?        true
+         :violations       violations
+         :blocking         (mapv policy-pack/violation->error blocking)
+         :require-approval (mapv policy-pack/violation->error approvals)
+         :warnings         (mapv policy-pack/violation->warning warnings)
+         :audits           (mapv policy-pack/violation->warning audits)}))))
+
+;------------------------------------------------------------------------------ Layer 6
+
 ;; Phase-scoped check
-
-(defn check-policy-pack-for-phase
+(defn ^{:stratum 6} check-policy-pack-for-phase
   "Evaluate the pack against `artifact` for `phase`.
 
    Selects the enabled rules whose `:applies-to {:phases}` includes `phase`
@@ -500,45 +516,38 @@
                                 (:warnings result)
                                 (:audits result)))}))))
 
-(defn check-policy-verify
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} check-policy-verify
   "Pack gate for the verify phase."
   [artifact ctx]
   (check-policy-pack-for-phase :verify artifact ctx))
 
-(defn check-policy-review
+(defn ^{:stratum 7} check-policy-review
   "Pack gate for the review phase."
   [artifact ctx]
   (check-policy-pack-for-phase :review artifact ctx))
 
-(defn repair-policy-pack
-  "Policy violations cannot be fixed in-place; the workflow must redirect to
-   :implement for an agent to address the root cause (mirrors the behavioral
-   gate)."
-  [artifact errors _ctx]
-  {:success? false
-   :artifact artifact
-   :errors   errors
-   :message  (msg/t :policy-pack/repair-required)})
+;------------------------------------------------------------------------------ Layer 8
 
-;------------------------------------------------------------------------------ Layer 3
-;; Registry
-
-(registry/register-gate! :policy-verify)
-(registry/register-gate! :policy-review)
-
-(defmethod registry/get-gate :policy-verify
+(defmethod ^{:stratum 8} registry/get-gate :policy-verify
   [_]
   {:name        :policy-verify
    :description (msg/t :policy-pack/description-verify)
    :check       check-policy-verify
    :repair      repair-policy-pack})
 
-(defmethod registry/get-gate :policy-review
+(defmethod ^{:stratum 8} registry/get-gate :policy-review
   [_]
   {:name        :policy-review
    :description (msg/t :policy-pack/description-review)
    :check       check-policy-review
    :repair      repair-policy-pack})
+
+;; Registry
+(registry/register-gate! :policy-verify)
+
+(registry/register-gate! :policy-review)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.precommit-discipline
   "Pre-commit hook discipline policy gate.
   
@@ -31,10 +30,10 @@
             [clojure.java.shell :as shell]
             [clojure.string :as str]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Git history analysis
+;------------------------------------------------------------------------------ Layer 0
 
-(defn exec-git
+;; Git history analysis
+(defn ^{:stratum 0} exec-git
   "Execute a git command and return output.
   
    Arguments:
@@ -50,7 +49,92 @@
        :out ""
        :err (ex-message ex)})))
 
-(defn get-recent-commits
+(defn ^{:stratum 0} check-no-verify-in-history?
+  "Check if a commit was likely made with --no-verify.
+
+   Since --no-verify doesn't leave direct traces in git history, we use heuristics:
+   - Commit message contains [BYPASS-HOOKS:] or similar markers
+   - Commit message explicitly mentions --no-verify
+   - Context clues about bypassing pre-commit hooks
+
+   Arguments:
+     commit - Commit map with :message
+
+   Returns:
+     Boolean indicating if commit appears to have bypassed hooks"
+  [commit]
+  (let [msg (:message commit)
+        msg-lower (str/lower-case msg)]
+    (boolean
+     (or
+      ;; Explicit bypass documentation
+      (re-find #"\[BYPASS-HOOKS:" msg)
+      (re-find #"--no-verify" msg)
+      (re-find #"skip.*hooks?" msg-lower)
+      (re-find #"bypass.*pre-?commit" msg-lower)))))
+
+(defn ^{:stratum 0} parse-bypass-reason
+  "Extract bypass reason from commit message.
+  
+   Arguments:
+     message - Commit message string
+     
+   Returns:
+     String with bypass reason, or nil if not found"
+  [message]
+  (when-let [match (re-find #"\[BYPASS-HOOKS:\s*([^\]]+)\]" message)]
+    (str/trim (second match))))
+
+(defn ^{:stratum 0} check-manual-validation
+  "Check if commit message documents manual validation steps.
+  
+   Arguments:
+     message - Commit message string
+     
+   Returns:
+     {:documented? bool :steps [string]}"
+  [message]
+  (let [manual-section (re-find #"Manual validation:\s*([\s\S]*?)(?=\n\n|\Z)" message)
+        validation-lines (when manual-section
+                          (->> (str/split (second manual-section) #"\n")
+                               (map str/trim)
+                               (filter #(str/starts-with? % "-"))
+                               (mapv #(str/replace % #"^-\s*" ""))))]
+    {:documented? (boolean (seq validation-lines))
+     :steps (or validation-lines [])}))
+
+(defn ^{:stratum 0} repair-precommit-discipline
+  "Attempt to repair pre-commit discipline violations.
+  
+   Pre-commit discipline violations cannot be automatically repaired because:
+   1. Git history cannot be rewritten in shared branches
+   2. Proper documentation requires human judgment
+   3. Manual validation steps must be actually performed
+   
+   Arguments:
+     artifact - Artifact to repair
+     errors   - Errors from check
+     ctx      - Execution context
+     
+   Returns:
+     {:success? false :message string}"
+  [artifact errors _ctx]
+  {:success? false
+   :artifact artifact
+   :errors errors
+   :message "Pre-commit discipline violations cannot be automatically repaired.
+             
+             To fix:
+             1. Review the flagged commits and their documentation
+             2. If commit is recent and local, amend with proper documentation
+             3. If commit is pushed, add corrective commit with proper practices
+             4. Ensure future commits follow pre-commit discipline guidelines
+             
+             See .cursor/rules/700-workflows/715-pre-commit-discipline.mdc for details."})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-recent-commits
   "Get recent commits with full messages.
   
    Arguments:
@@ -76,61 +160,7 @@
            vec)
       [])))
 
-(defn check-no-verify-in-history?
-  "Check if a commit was likely made with --no-verify.
-
-   Since --no-verify doesn't leave direct traces in git history, we use heuristics:
-   - Commit message contains [BYPASS-HOOKS:] or similar markers
-   - Commit message explicitly mentions --no-verify
-   - Context clues about bypassing pre-commit hooks
-
-   Arguments:
-     commit - Commit map with :message
-
-   Returns:
-     Boolean indicating if commit appears to have bypassed hooks"
-  [commit]
-  (let [msg (:message commit)
-        msg-lower (str/lower-case msg)]
-    (boolean
-     (or
-      ;; Explicit bypass documentation
-      (re-find #"\[BYPASS-HOOKS:" msg)
-      (re-find #"--no-verify" msg)
-      (re-find #"skip.*hooks?" msg-lower)
-      (re-find #"bypass.*pre-?commit" msg-lower)))))
-
-(defn parse-bypass-reason
-  "Extract bypass reason from commit message.
-  
-   Arguments:
-     message - Commit message string
-     
-   Returns:
-     String with bypass reason, or nil if not found"
-  [message]
-  (when-let [match (re-find #"\[BYPASS-HOOKS:\s*([^\]]+)\]" message)]
-    (str/trim (second match))))
-
-(defn check-manual-validation
-  "Check if commit message documents manual validation steps.
-  
-   Arguments:
-     message - Commit message string
-     
-   Returns:
-     {:documented? bool :steps [string]}"
-  [message]
-  (let [manual-section (re-find #"Manual validation:\s*([\s\S]*?)(?=\n\n|\Z)" message)
-        validation-lines (when manual-section
-                          (->> (str/split (second manual-section) #"\n")
-                               (map str/trim)
-                               (filter #(str/starts-with? % "-"))
-                               (mapv #(str/replace % #"^-\s*" ""))))]
-    {:documented? (boolean (seq validation-lines))
-     :steps (or validation-lines [])}))
-
-(defn validate-bypass-commit
+(defn ^{:stratum 1} validate-bypass-commit
   "Validate a commit that bypassed pre-commit hooks.
   
    According to 715-pre-commit-discipline.mdc, bypassed commits must:
@@ -184,10 +214,10 @@
     {:valid? (empty? (filter #(= :error (:severity %)) violations))
      :violations violations}))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Gate implementation
+;------------------------------------------------------------------------------ Layer 2
 
-(defn check-precommit-discipline
+;; Gate implementation
+(defn ^{:stratum 2} check-precommit-discipline
   "Check pre-commit discipline across recent git history.
   
    Arguments:
@@ -250,46 +280,17 @@
       (assoc :metadata {:bypassed-commits-found (count bypassed-commits)
                         :total-commits-checked (count commits)}))))
 
-(defn repair-precommit-discipline
-  "Attempt to repair pre-commit discipline violations.
-  
-   Pre-commit discipline violations cannot be automatically repaired because:
-   1. Git history cannot be rewritten in shared branches
-   2. Proper documentation requires human judgment
-   3. Manual validation steps must be actually performed
-   
-   Arguments:
-     artifact - Artifact to repair
-     errors   - Errors from check
-     ctx      - Execution context
-     
-   Returns:
-     {:success? false :message string}"
-  [artifact errors _ctx]
-  {:success? false
-   :artifact artifact
-   :errors errors
-   :message "Pre-commit discipline violations cannot be automatically repaired.
-             
-             To fix:
-             1. Review the flagged commits and their documentation
-             2. If commit is recent and local, amend with proper documentation
-             3. If commit is pushed, add corrective commit with proper practices
-             4. Ensure future commits follow pre-commit discipline guidelines
-             
-             See .cursor/rules/700-workflows/715-pre-commit-discipline.mdc for details."})
+;------------------------------------------------------------------------------ Layer 3
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Registry integration
-
-(registry/register-gate! :precommit-discipline)
-
-(defmethod registry/get-gate :precommit-discipline
+(defmethod ^{:stratum 3} registry/get-gate :precommit-discipline
   [_]
   {:name :precommit-discipline
    :description "Validates pre-commit hook discipline and bypass documentation"
    :check check-precommit-discipline
    :repair repair-precommit-discipline})
+
+;; Registry integration
+(registry/register-gate! :precommit-discipline)
 
 ;;------------------------------------------------------------------------------ Rich Comment
 (comment
