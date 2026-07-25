@@ -28,41 +28,57 @@ This branch went through several redo cycles before this final version:
 3. This branch's own `tasks/stratum.clj` had never been rebased onto
    `main` through the pin bumps that followed (#1465, #1470, #1471), so
    it was still pointing at the pre-#13 sha. Reset the branch onto
-   current `main` (pin `80699e37`) and re-ran `--fix` fresh: the tool now
-   self-heals both files mechanically, no hand-editing needed.
+   current `main` (pin `80699e37`) and re-ran `--fix` fresh — but this
+   only reshuffled the comment relative to whatever it happened to be
+   adjacent to already, because the *same-line* positional information
+   (no newline between `config])` and the comment) had been destroyed
+   back in the original Wave 1 autofix, before #12/#13 existed to
+   preserve it. A comment already sitting on its own line, with no other
+   marker, is structurally indistinguishable from a legitimate leading
+   comment — `--fix` has nothing left to reconstruct the original
+   attachment from.
+4. Automated review (Copilot) correctly caught that this reshuffle still
+   left the comment reading as attached to `mode-rank`/the `;; Pipeline
+   stages` section rather than to the `defrecord` — same symptom as the
+   original bug, different cause. Fixed by hand-restoring the true
+   same-line form (`config])  ; comment`) for both files, then
+   re-running `--fix`: confirmed zero diff, i.e. the fixed tool
+   recognizes and preserves a genuine same-line trailing comment as
+   stable — the same shape independently verified on `gate`'s
+   `policy.clj`.
 
 ## Changes in Detail
 
-`stratum-lint --fix` (pinned sha `80699e378cb8ebbb6daeb928431aa4a6b373c07e`)
-run directly against the two affected files:
-
 - `components/reliability/src/ai/miniforge/reliability/degradation.clj` —
-  `; data-driven degradation policy` moved from a leading comment on the
-  unrelated `mode-rank` def back to trailing `DegradationManager`'s
-  closing `config])` (blank line now separates it from `mode-rank`,
-  instead of from the `defrecord`).
+  `; data-driven degradation policy` restored to the same line as
+  `DegradationManager`'s closing `config])` (`config])  ; data-driven
+  degradation policy`), separated from the next def (`mode-rank`) by a
+  blank line.
 - `components/reliability/src/ai/miniforge/reliability/engine.clj` —
-  same move for `; {:windows [:7d] :tiers [:standard :critical]
+  same restoration for `; {:windows [:7d] :tiers [:standard :critical]
   :dependency-health {...}}` against `ReliabilityEngine`'s closing
   `config])`.
 
 No other change — headings, metadata, and every other line are untouched.
-Verified stable across two consecutive `--fix` passes before committing
-(zero diff on the second pass).
+`stratum-lint --fix` (pinned sha `80699e378cb8ebbb6daeb928431aa4a6b373c07e`)
+run against both files after the hand-restoration confirms the same-line
+form is stable: zero diff, i.e. the fix doesn't move it again.
 
 ## Testing Plan
 
-- `--fix` run twice in a row on both files; zero diff between the two
-  passes (idempotency confirmed directly).
+- Hand-restored the same-line form, then ran `--fix` twice in a row on
+  both files; zero diff on both passes (confirms the restoration is
+  stable under the tool, not just visually plausible).
 - `clj-kondo --lint` on both files: 0 errors, 0 warnings.
 - `bb -m stratum-lint.interface components/reliability` (plain lint, no
   `--fix`): same 6 SL003 findings as before this fix (`budget.clj`,
   `degradation.clj`, `dependency_health.clj`, `engine.clj`, `sli.clj`,
   `slo.clj`) — unaffected, Wave 2 scope, confirms nothing else regressed.
-- Confirmed via the committed diff that each comment now sits directly
-  after its `defrecord`'s closing line, separated from the *next* def by
-  a blank line — unambiguously trailing `DegradationManager`/
-  `ReliabilityEngine` again.
+- Confirmed via the committed diff that each comment sits on the same
+  line as its `defrecord`'s closing `config])`, with a blank line
+  separating it from the *next* def — unambiguously trailing
+  `DegradationManager`/`ReliabilityEngine`, not leading the following
+  def/section.
 
 ## Deployment Plan
 
@@ -78,17 +94,20 @@ attempted here.
 - Follows up on #1462 (Wave 1 `reliability` autofix, merged with this bug
   present).
 - Fixes the two known instances of
-  [stratum-lint#9](https://github.com/miniforge-ai/stratum-lint/issues/9),
-  now resolved mechanically via
+  [stratum-lint#9](https://github.com/miniforge-ai/stratum-lint/issues/9).
   [#12](https://github.com/miniforge-ai/stratum-lint/pull/12) and
-  [#13](https://github.com/miniforge-ai/stratum-lint/pull/13) (idempotency).
+  [#13](https://github.com/miniforge-ai/stratum-lint/pull/13) (idempotency)
+  fixed the tool so a same-line trailing comment stays stable once one
+  exists, but couldn't reconstruct same-line positioning already lost
+  before those fixes landed — this PR's hand-restoration supplies that.
 - Same branch-staleness root cause as gate's redo on #1464.
 
 ## Checklist
 
-- [x] Idempotency verified directly (two `--fix` passes, zero diff)
-      before committing, not just after one pass
-- [x] Both comments verified to unambiguously attach to their originating
-      `defrecord` again
+- [x] Idempotency verified directly (two `--fix` passes after hand-
+      restoration, zero diff both times)
+- [x] Both comments verified to sit on the same line as their
+      originating `defrecord`'s closing `config])`, not merely
+      adjacent to it
 - [x] Plain lint findings unchanged (no new/fewer SL003, no regressions)
 - [x] `clj-kondo` clean

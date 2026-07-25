@@ -80,9 +80,8 @@
 (defrecord ^{:stratum 0} DegradationManager
   [fsm-state      ; atom wrapping FSM state
    event-stream   ; event stream atom for emitting events
-   config])
+   config])  ; data-driven degradation policy
 
-; data-driven degradation policy
 (def ^{:stratum 0} ^:private mode-rank
   {:nominal 0
    :degraded 1
