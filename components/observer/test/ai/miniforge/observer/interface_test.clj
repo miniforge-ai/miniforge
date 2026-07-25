@@ -69,16 +69,6 @@
     (let [obs (observer/create-observer {:initial-state {:custom-key :custom-value}})]
       (is (some? obs) "Observer with initial state should be created"))))
 
-;; ============================================================================
-;; WorkflowObserver Integration Tests
-;; ============================================================================
-;; ============================================================================
-;; Run All Tests
-;; ============================================================================
-(deftest ^{:stratum 0} run-all-observer-tests
-  (testing "All observer tests should pass"
-    (is true "Observer component is fully tested")))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================

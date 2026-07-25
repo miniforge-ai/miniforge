@@ -4,9 +4,11 @@
 
 Runs the pinned `stratum-lint --fix` over all 8 `.clj` files in
 `components/observer` (5 src, 3 test) and commits the result. Regroups
-each file's top-level defs under `;---- Layer N` headings that match the
-tool's own same-file reference-graph inference, and adds `^{:stratum n}`
-metadata to every def. No logic changes.
+each file's top-level defs under the tool's canonical heading form —
+a long-dash comment line ending in `Layer N`
+(`;------------------------------------------------------------------------------ Layer N`)
+— that matches the tool's own same-file reference-graph inference, and
+adds `^{:stratum n}` metadata to every def. No logic changes.
 
 ## Motivation
 
@@ -43,6 +45,29 @@ layers respectively) and report clean.
 Three test files were also normalized the same way (headings +
 metadata only; `deftest` reordering, no assertion changes).
 
+### Review follow-up (not part of the mechanical fix)
+
+Automated review flagged two items on `interface_test.clj`, addressed
+separately from the stratum-lint mechanics above:
+
+- `run-all-observer-tests` was a no-op (`(is true "...")`) asserting
+  nothing about Observer behavior, preceded by a stale "WorkflowObserver
+  Integration Tests" header with no tests under it. Checked git history
+  (`git log --follow`) before touching it: the real WorkflowObserver
+  protocol tests this header once introduced were relocated to
+  `projects/miniforge/test/ai/miniforge/observer/interface_integration_test.clj`
+  in commit `76af82fbd` ("refactor: split unit and integration tests"),
+  and still live there today with real assertions (confirmed by running
+  that namespace directly: 1 test, 7 assertions, 0 failures/errors). The
+  no-op `deftest` itself was a no-op since the component's original
+  commit (`6231b5e2e`) — never asserted anything beyond `(is true ...)`.
+  Removed both the stale header and the no-op test; no coverage lost,
+  since none of it was providing any.
+- The Overview's mention of `;---- Layer N` headings was shorthand that
+  didn't match the actual committed heading syntax (the long-dash
+  canonical form, `;------------------------------------------------------------------------------ Layer N`,
+  same as every other Wave 1 PR's real output). Fixed the wording here.
+
 ## Testing Plan
 
 1. Ran `--fix` a second time over the already-fixed tree — zero diff,
@@ -59,8 +84,12 @@ metadata only; `deftest` reordering, no assertion changes).
    `core.clj`, 5 real layers each) — expected Wave 2 work per above, not
    a defect in this PR.
 5. Ran the component's test suite directly (`clojure -A:test`,
-   requiring and running all 3 observer test namespaces): 24 tests, 105
-   assertions, 0 failures, 0 errors.
+   requiring and running all 3 observer test namespaces): 23 tests, 104
+   assertions, 0 failures, 0 errors (post review-follow-up removal of
+   the one no-op test). Also ran the relocated integration test
+   (`projects/miniforge`, `observer.interface-integration-test`)
+   directly to confirm the real WorkflowObserver protocol coverage is
+   intact: 1 test, 7 assertions, 0 failures, 0 errors.
 
 ## Deployment Plan
 
@@ -86,8 +115,12 @@ metadata) with no behavior change and no callers outside
 - [x] Checked for the known same-line trailing-comment mis-attachment
       failure mode; none present, no hand-fix required
 - [x] `clj-kondo`: 0 errors, 0 warnings
-- [x] Component test suite green: 24/24, 105 assertions, 0 failures,
-      0 errors
+- [x] Component test suite green: 23/23, 104 assertions, 0 failures,
+      0 errors; relocated integration test also verified (1/1, 7
+      assertions)
 - [x] Post-fix plain lint: `interface.clj` clean; `SL003` remainder on
       `alerts.clj`/`core.clj` documented as Wave 2 scope, not this PR's
       to fix
+- [x] Review follow-up: stale header + no-op test removed from
+      `interface_test.clj` after confirming via git history that no
+      coverage was lost; doc wording for the heading syntax corrected
