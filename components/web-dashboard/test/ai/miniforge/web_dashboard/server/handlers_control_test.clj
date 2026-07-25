@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.handlers-control-test
   "The console's run controls now write governed intervention requests
    (Phase D D-4). These tests pin the command → intervention-verb
@@ -29,25 +28,25 @@
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Helpers
+(defn- ^{:stratum 0} fresh-state [] (state-core/create-state {}))
 
-(defn- fresh-state [] (state-core/create-state {}))
+(defn- ^{:stratum 0} command-body [command] (json/generate-string {:command command}))
 
-(defn- command-body [command] (json/generate-string {:command command}))
+(defn- ^{:stratum 0} response-body [response] (json/parse-string (:body response) true))
 
-(defn- response-body [response] (json/parse-string (:body response) true))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Command vocabulary
-
-(deftest console-controls-map-to-intervention-verbs
+(deftest ^{:stratum 0} console-controls-map-to-intervention-verbs
   (testing "pause/resume/cancel are the three verbs the console offers"
     (is (= {"pause" :pause "resume" :resume "cancel" :cancel}
            sut/control-intervention-by-command))
     (testing "the legacy `stop` command name is gone with the .edn poller"
       (is (not (contains? sut/control-intervention-by-command "stop"))))))
 
-(deftest each-command-writes-its-intervention
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} each-command-writes-its-intervention
   (doseq [[command expected-type] sut/control-intervention-by-command]
     (testing command
       (let [requests (atom [])
@@ -67,7 +66,28 @@
             (is (= :dashboard (:intervention/request-source request)))
             (is (= "dashboard" (:intervention/requested-by request)))))))))
 
-(deftest unknown-commands-are-rejected-at-the-boundary
+(deftest ^{:stratum 1} a-body-supplied-requester-cannot-spoof-the-audit-identity
+  (testing "the unauthenticated endpoint ignores any client-named principal"
+    (let [requests (atom [])
+          workflow-id (str (random-uuid))
+          ;; The exact key the vulnerable `command-requester` read:
+          ;; top-level `:action/requester` (namespaced), not nested
+          ;; `:action → :requester`. JSON carries it as "action/requester".
+          spoofed (json/generate-string
+                   {:command "cancel"
+                    :action/requester {:principal "ceo@example.com"
+                                       :role :admin}})]
+      (with-redefs [event-stream/request-intervention!
+                    (fn [request]
+                      (swap! requests conj request)
+                      (assoc request :intervention/id (random-uuid)))]
+        (let [response (sut/handle-api-workflow-command
+                        (fresh-state) workflow-id spoofed)]
+          (is (= 200 (:status response)))
+          (is (= "dashboard" (:intervention/requested-by (first @requests)))
+              "requested-by is server-derived, not the spoofed principal"))))))
+
+(deftest ^{:stratum 1} unknown-commands-are-rejected-at-the-boundary
   (testing "an unrecognized command 4xxs instead of being written and dropped"
     (let [requests (atom [])]
       (with-redefs [event-stream/request-intervention!
@@ -77,7 +97,7 @@
           (is (<= 400 (:status response) 499))
           (is (empty? @requests)))))))
 
-(deftest write-failure-is-reported-not-swallowed
+(deftest ^{:stratum 1} write-failure-is-reported-not-swallowed
   (testing "a throwing write yields an error response, never `requested`"
     (with-redefs [event-stream/request-intervention!
                   (fn [_request] (throw (ex-info "operator dir unwritable" {})))]
