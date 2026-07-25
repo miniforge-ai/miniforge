@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.cursors
   "Shared timestamp-watermark cursor utilities for REST API connectors.
 
@@ -25,26 +24,15 @@
   (:require [clojure.string :as str])
   (:import [java.time Instant]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Timestamp parsing
+;------------------------------------------------------------------------------ Layer 0
 
-(defn parse-timestamp
+;; Timestamp parsing
+(defn ^{:stratum 0} parse-timestamp
   [value]
   (when (and (string? value) (not (str/blank? value)))
     (Instant/parse value)))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Per-record cursor predicates and builders
-
-(defn after-cursor?
-  [timestamp-fn cursor record]
-  (if-let [cursor-ts (some-> cursor :cursor/value parse-timestamp)]
-    (some-> (timestamp-fn record)
-            parse-timestamp
-            (.isAfter cursor-ts))
-    true))
-
-(defn last-record-cursor
+(defn ^{:stratum 0} last-record-cursor
   [resource-def records]
   (when-let [last-record (last records)]
     (when (= :timestamp-watermark (:cursor-type resource-def))
@@ -52,15 +40,24 @@
        :cursor/value (or (:updated_at last-record)
                          (:created_at last-record))})))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Collection-level cursor operations
-
-(defn sort-by-timestamp
+(defn ^{:stratum 0} sort-by-timestamp
   [timestamp-fn records]
   (sort-by #(or (timestamp-fn %) "") records))
 
-(defn max-timestamp-cursor
+(defn ^{:stratum 0} max-timestamp-cursor
   [timestamp-fn records]
   (when-let [latest-ts (some->> records (keep timestamp-fn) sort last)]
     {:cursor/type  :timestamp-watermark
      :cursor/value latest-ts}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Per-record cursor predicates and builders
+(defn ^{:stratum 1} after-cursor?
+  [timestamp-fn cursor record]
+  (if-let [cursor-ts (some-> cursor :cursor/value parse-timestamp)]
+    (some-> (timestamp-fn record)
+            parse-timestamp
+            (.isAfter cursor-ts))
+    true))

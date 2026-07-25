@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.core
   "HttpConnector defrecord — thin protocol wrapper delegating to impl."
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-http.impl :as impl]))
 
-(defrecord HttpConnector []
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} HttpConnector []
   connector/Connector
   (connect    [_ config auth]                      (impl/do-connect config auth))
   (close      [_ handle]                           (impl/do-close handle))
