@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server
   "HTTP server with WebSocket support for the production web dashboard."
   (:require
@@ -40,14 +39,12 @@
    [ai.miniforge.control-plane.interface :as cp]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Configuration defaults
+(def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
 
-(def ^:private defaults dashboard-config/defaults)
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Discovery file
-
-(defn write-discovery-file!
+(defn ^{:stratum 0} write-discovery-file!
   "Write dashboard discovery file for auto-connect."
   [port]
   (try
@@ -62,7 +59,7 @@
     (catch Exception e
       (println "Warning: Could not write discovery file:" (ex-message e)))))
 
-(defn delete-discovery-file!
+(defn ^{:stratum 0} delete-discovery-file!
   "Remove dashboard discovery file on shutdown."
   []
   (try
@@ -71,10 +68,8 @@
         (.delete (io/file discovery-file))))
     (catch Exception _ nil)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Request routing
-
-(defn create-handler
+(defn ^{:stratum 0} create-handler
   "Create main HTTP request handler with routing and workflow event integration."
   [state]
   (let [workflow-connections (atom #{})
@@ -299,7 +294,6 @@
               "command" (if (= :post (:request-method req))
                           (handlers/handle-api-workflow-command-v2 state wf-id (slurp (:body req)))
                           (responses/not-found-response))
-              "commands" (handlers/handle-api-workflow-commands-poll state wf-id)
               (responses/not-found-response)))
 
           ;; Control Plane API endpoints
@@ -361,10 +355,15 @@
           :else
           (responses/not-found-response))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Server lifecycle
+(defn ^{:stratum 0} get-server-port
+  "Get server port."
+  [{:keys [port]}]
+  port)
 
-(defn start-server!
+;------------------------------------------------------------------------------ Layer 1
+
+;; Server lifecycle
+(defn ^{:stratum 1} start-server!
   "Start HTTP server with WebSocket support.
 
    Options:
@@ -423,7 +422,7 @@
      :state state
      :watcher-cleanup watcher-cleanup}))
 
-(defn stop-server!
+(defn ^{:stratum 1} stop-server!
   "Stop HTTP server and watcher."
   [{:keys [server watcher-cleanup]}]
   (when watcher-cleanup
@@ -432,8 +431,3 @@
     (delete-discovery-file!)
     (http/server-stop! server {:timeout 100})
     (println "Web dashboard stopped")))
-
-(defn get-server-port
-  "Get server port."
-  [{:keys [port]}]
-  port)

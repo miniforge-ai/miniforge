@@ -21,7 +21,7 @@
   (:require
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.workflow-runner.context :as context]
-   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
+   [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.supervisory-state.interface :as supervisory]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
@@ -110,7 +110,6 @@
         _correlator (correlator/attach! event-stream)
         workflow-id (random-uuid)
         control-state (es/create-control-state)
-        command-poller-cleanup (dashboard/start-command-poller! workflow-id control-state)
         llm-client (context/create-llm-client workflow nil quiet)
         callbacks {:on-phase-start (fn [_ctx interceptor]
                                      (when-not quiet
@@ -136,6 +135,10 @@
       (display/print-info (str "Executing plan: " plan-id " (" task-count " tasks)"))
       (display/print-info (str "Format: " (name format-type))))
     (try
+      ;; Governed control path: register before the DAG starts so a
+      ;; pause/cancel intervention aimed at this run can reach it, and
+      ;; release in the finally so a dead runner stops claiming them.
+      (control/register-workflow-control! workflow-id control-state event-stream)
       (let [result (workflow/execute-plan-as-dag plan ctx)]
         (when-not quiet
           (let [completed (:tasks-completed result 0)
@@ -150,4 +153,4 @@
         (display/print-error (str "Plan execution failed: " (ex-message e)))
         (throw e))
       (finally
-        (when command-poller-cleanup (command-poller-cleanup))))))
+        (control/release-workflow-control! workflow-id)))))

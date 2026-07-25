@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.workflows
   "Workflow state from live and historical event streams."
   (:require
@@ -23,35 +22,27 @@
    [ai.miniforge.web-dashboard.watcher :as watcher]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Pure helpers
+(def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
 
-(def ^:private defaults dashboard-config/defaults)
-
-(def events-dir-path
+(def ^{:stratum 0} events-dir-path
   "Default event archive directory shared by the CLI and dashboard."
   (str (config/miniforge-home) "/events"))
 
-(def stale-threshold-ms
-  "Workflows with no events for this long are considered stale (10 minutes)."
-  (:stale-threshold-ms defaults))
-
-(def max-recent-workflows
-  "Maximum number of recent workflows returned from the live stream."
-  (:max-recent-workflows defaults))
-
-(def phase-lifecycle-types
+(def ^{:stratum 0} phase-lifecycle-types
   "Event types that carry phase classification data."
   #{:workflow/phase-started :workflow/phase-completed})
 
-(def terminal-statuses
+(def ^{:stratum 0} terminal-statuses
   "Workflow statuses that indicate no further execution."
   #{:completed :failed :stale})
 
-(def dependency-event-types
+(def ^{:stratum 0} dependency-event-types
   "Event types that carry canonical dependency-health projections."
   #{:dependency/health-updated :dependency/recovered})
 
-(def dependency-status-priority
+(def ^{:stratum 0} dependency-status-priority
   "Sort dependency issues from most urgent to least urgent."
   {:operator-action-required 0
    :misconfigured 1
@@ -59,11 +50,11 @@
    :degraded 3
    :healthy 4})
 
-(def dependency-active-statuses
+(def ^{:stratum 0} dependency-active-statuses
   "Statuses that represent dependency trouble rather than healthy state."
   #{:operator-action-required :misconfigured :unavailable :degraded})
 
-(def dependency-status-severity
+(def ^{:stratum 0} dependency-status-severity
   "Severity labels used to summarize dependency health in workflow state."
   {:operator-action-required :error
    :misconfigured :error
@@ -71,7 +62,7 @@
    :degraded :warning
    :healthy :success})
 
-(defn normalize-ts
+(defn ^{:stratum 0} normalize-ts
   "Normalize timestamp inputs to java.util.Date for UI rendering."
   [ts]
   (cond
@@ -88,7 +79,7 @@
 
     :else nil))
 
-(defn ->instant
+(defn ^{:stratum 0} ->instant
   "Normalize timestamp inputs to java.time.Instant for comparisons."
   [ts]
   (cond
@@ -105,34 +96,16 @@
 
     :else nil))
 
-(defn ts-epoch-ms
-  "Timestamp → epoch millis for sorting."
-  [ts]
-  (if-let [date (normalize-ts ts)]
-    (.getTime ^java.util.Date date)
-    0))
-
-(defn wf-id
+(defn ^{:stratum 0} wf-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn workflow-id=
-  "String-normalized workflow-id equality so UUID/string forms match."
-  [expected event]
-  (= (some-> expected str)
-     (some-> (wf-id event) str)))
-
-(defn event-ts
+(defn ^{:stratum 0} event-ts
   "Extract the canonical event timestamp."
   [event]
   (or (:event/timestamp event) (:timestamp event)))
 
-(defn workflow-event-file
-  "Resolve the event file for a specific workflow-id."
-  [workflow-id]
-  (io/file events-dir-path (str workflow-id ".edn")))
-
-(defn read-event-file
+(defn ^{:stratum 0} read-event-file
   "Read all parseable EDN events from a workflow event file."
   [file]
   (try
@@ -144,7 +117,103 @@
     (catch Exception _
       [])))
 
-(defn dedupe-events
+(defn ^{:stratum 0} wf-name-from-started
+  "Extract a display name for a workflow from its started event."
+  [started id]
+  (let [spec (or (get started :workflow/spec)
+                 (get started :workflow-spec)
+                 (get started :spec))]
+    (or (get spec :spec/title)
+        (get spec :title)
+        (get spec :name)
+        (str "Workflow " (subs (str id) 0 (min 8 (count (str id))))))))
+
+(defn ^{:stratum 0} event-phase
+  "Extract the phase from an event, accepting both qualified and legacy keys."
+  [event]
+  (or (get event :workflow/phase) (get event :phase)))
+
+(defn ^{:stratum 0} workflow-recency
+  "Epoch millis of the most recent workflow activity, for sorting newest-first."
+  [wf]
+  (or (some-> (:updated-at wf) .getTime)
+      (some-> (:started-at wf) .getTime)
+      0))
+
+(defn ^{:stratum 0} first-event
+  "Return the first event of event-type from events."
+  [event-type events]
+  (->> events (filter #(= event-type (:event/type %))) first))
+
+(defn ^{:stratum 0} last-event
+  "Return the last event of event-type from events."
+  [event-type events]
+  (->> events (filter #(= event-type (:event/type %))) last))
+
+(defn- ^{:stratum 0} assoc-some
+  "Assoc only non-nil key/value pairs."
+  [m & kvs]
+  (reduce (fn [acc [k v]]
+            (if (nil? v)
+              acc
+              (assoc acc k v)))
+          m
+          (partition 2 kvs)))
+
+(defn- ^{:stratum 0} dependency-id
+  [event]
+  (or (:dependency/id event)
+      (:dependency/vendor event)
+      (:dependency/source event)))
+
+(defn- ^{:stratum 0} dependency-sort-label
+  [dependency]
+  (or (:dependency/vendor dependency)
+      (some-> (:dependency/id dependency) str)))
+
+(defn ^{:stratum 0} live-stream-events
+  "Read all currently buffered live events from the in-memory event stream."
+  [state]
+  (try
+    (if-let [stream (:event-stream @state)]
+      (es/get-events stream)
+      [])
+    (catch Exception e
+      (println "Error reading live workflow events:" (ex-message e))
+      [])))
+
+(defn- ^{:stratum 0} matches-event-type? [event-type event]
+  (or (nil? event-type) (= event-type (:event/type event))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} stale-threshold-ms
+  "Workflows with no events for this long are considered stale (10 minutes)."
+  (:stale-threshold-ms defaults))
+
+(def ^{:stratum 1} max-recent-workflows
+  "Maximum number of recent workflows returned from the live stream."
+  (:max-recent-workflows defaults))
+
+(defn ^{:stratum 1} ts-epoch-ms
+  "Timestamp → epoch millis for sorting."
+  [ts]
+  (if-let [date (normalize-ts ts)]
+    (.getTime ^java.util.Date date)
+    0))
+
+(defn ^{:stratum 1} workflow-id=
+  "String-normalized workflow-id equality so UUID/string forms match."
+  [expected event]
+  (= (some-> expected str)
+     (some-> (wf-id event) str)))
+
+(defn ^{:stratum 1} workflow-event-file
+  "Resolve the event file for a specific workflow-id."
+  [workflow-id]
+  (io/file events-dir-path (str workflow-id ".edn")))
+
+(defn ^{:stratum 1} dedupe-events
   "Deduplicate live + historical events by event-id, falling back to a
    composite key of stable fields when no id is present."
   [events]
@@ -161,23 +230,55 @@
        vals
        vec))
 
-(defn wf-name-from-started
-  "Extract a display name for a workflow from its started event."
-  [started id]
-  (let [spec (or (get started :workflow/spec)
-                 (get started :workflow-spec)
-                 (get started :spec))]
-    (or (get spec :spec/title)
-        (get spec :title)
-        (get spec :name)
-        (str "Workflow " (subs (str id) 0 (min 8 (count (str id))))))))
+(defn ^{:stratum 1} workflow-progress
+  "Progress percentage for a workflow: 100 when terminal, 50 while running."
+  [status]
+  (if (terminal-statuses status) 100 50))
 
-(defn event-phase
-  "Extract the phase from an event, accepting both qualified and legacy keys."
+(defn- ^{:stratum 1} dependency-event?
   [event]
-  (or (get event :workflow/phase) (get event :phase)))
+  (contains? dependency-event-types (:event/type event)))
 
-(defn wf-phase
+(defn- ^{:stratum 1} dependency-status-rank
+  [status]
+  (get dependency-status-priority status Long/MAX_VALUE))
+
+(defn- ^{:stratum 1} dependency-entity
+  [event]
+  (let [{:dependency/keys [status source kind vendor class retryability
+                           failure-count window-size incident-counts
+                           last-observed-at last-recovered-at]} event
+        message (:event/message event)]
+    (assoc-some {:dependency/id (dependency-id event)
+                 :dependency/status (or status :healthy)}
+                :dependency/source            source
+                :dependency/kind              kind
+                :dependency/vendor            vendor
+                :dependency/class             class
+                :dependency/retryability      retryability
+                :dependency/failure-count     failure-count
+                :dependency/window-size       window-size
+                :dependency/incident-counts   incident-counts
+                :dependency/last-observed-at  last-observed-at
+                :dependency/last-recovered-at last-recovered-at
+                :dependency/message           message)))
+
+(defn- ^{:stratum 1} dependency-active?
+  [dependency]
+  (contains? dependency-active-statuses (:dependency/status dependency)))
+
+(defn- ^{:stratum 1} dependency-severity
+  [dependency-issues]
+  (some-> dependency-issues first :dependency/status dependency-status-severity))
+
+(defn- ^{:stratum 1} matches-since? [since-inst event]
+  (or (nil? since-inst)
+      (when-let [evt-inst (->instant (event-ts event))]
+        (not (.isBefore evt-inst since-inst)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} wf-phase
   "Derive the current phase of a workflow from its events."
   [events started]
   (or (event-phase started)
@@ -188,7 +289,7 @@
                event-phase)
       :unknown))
 
-(defn wf-status
+(defn ^{:stratum 2} wf-status
   "Derive a workflow status keyword from terminal events and staleness."
   [completed failed last-event-ts]
   (cond
@@ -202,29 +303,7 @@
                    :stale
                    :running))))
 
-(defn workflow-progress
-  "Progress percentage for a workflow: 100 when terminal, 50 while running."
-  [status]
-  (if (terminal-statuses status) 100 50))
-
-(defn workflow-recency
-  "Epoch millis of the most recent workflow activity, for sorting newest-first."
-  [wf]
-  (or (some-> (:updated-at wf) .getTime)
-      (some-> (:started-at wf) .getTime)
-      0))
-
-(defn first-event
-  "Return the first event of event-type from events."
-  [event-type events]
-  (->> events (filter #(= event-type (:event/type %))) first))
-
-(defn last-event
-  "Return the last event of event-type from events."
-  [event-type events]
-  (->> events (filter #(= event-type (:event/type %))) last))
-
-(defn workflow-metrics
+(defn ^{:stratum 2} workflow-metrics
   "Aggregate workflow metrics from terminal and phase completion events.
    Prefers values on the :workflow/completed event; falls back to summing
    individual phase completion events."
@@ -245,7 +324,7 @@
       cost-usd    (assoc :cost-usd cost-usd)
       duration-ms (assoc :duration-ms duration-ms))))
 
-(defn workflow-output-preview
+(defn ^{:stratum 2} workflow-output-preview
   "Build a short preview from the latest streaming chunks."
   [events]
   (some->> events
@@ -258,51 +337,7 @@
            str/trim
            not-empty))
 
-(defn- assoc-some
-  "Assoc only non-nil key/value pairs."
-  [m & kvs]
-  (reduce (fn [acc [k v]]
-            (if (nil? v)
-              acc
-              (assoc acc k v)))
-          m
-          (partition 2 kvs)))
-
-(defn- dependency-id
-  [event]
-  (or (:dependency/id event)
-      (:dependency/vendor event)
-      (:dependency/source event)))
-
-(defn- dependency-event?
-  [event]
-  (contains? dependency-event-types (:event/type event)))
-
-(defn- dependency-status-rank
-  [status]
-  (get dependency-status-priority status Long/MAX_VALUE))
-
-(defn- dependency-entity
-  [event]
-  (let [{:dependency/keys [status source kind vendor class retryability
-                           failure-count window-size incident-counts
-                           last-observed-at last-recovered-at]} event
-        message (:event/message event)]
-    (assoc-some {:dependency/id (dependency-id event)
-                 :dependency/status (or status :healthy)}
-                :dependency/source            source
-                :dependency/kind              kind
-                :dependency/vendor            vendor
-                :dependency/class             class
-                :dependency/retryability      retryability
-                :dependency/failure-count     failure-count
-                :dependency/window-size       window-size
-                :dependency/incident-counts   incident-counts
-                :dependency/last-observed-at  last-observed-at
-                :dependency/last-recovered-at last-recovered-at
-                :dependency/message           message)))
-
-(defn- workflow-dependency-health
+(defn- ^{:stratum 2} workflow-dependency-health
   "Project the latest dependency-health entities from workflow events."
   [events]
   (->> events
@@ -313,16 +348,7 @@
                    health))
                {})))
 
-(defn- dependency-active?
-  [dependency]
-  (contains? dependency-active-statuses (:dependency/status dependency)))
-
-(defn- dependency-sort-label
-  [dependency]
-  (or (:dependency/vendor dependency)
-      (some-> (:dependency/id dependency) str)))
-
-(defn- active-dependencies
+(defn- ^{:stratum 2} active-dependencies
   [dependency-health]
   (->> (vals dependency-health)
        (filter dependency-active?)
@@ -330,34 +356,7 @@
                       dependency-sort-label))
        vec))
 
-(defn- dependency-severity
-  [dependency-issues]
-  (some-> dependency-issues first :dependency/status dependency-status-severity))
-
-(defn- attach-dependency-health
-  [workflow dependency-health]
-  (let [dependency-issues (active-dependencies dependency-health)]
-    (cond-> workflow
-      (seq dependency-health)
-      (assoc :dependency-health dependency-health)
-
-      (seq dependency-issues)
-      (assoc :dependency-issues dependency-issues
-             :dependency-severity (dependency-severity dependency-issues)
-             :failure-attribution (first dependency-issues)))))
-
-(defn live-stream-events
-  "Read all currently buffered live events from the in-memory event stream."
-  [state]
-  (try
-    (if-let [stream (:event-stream @state)]
-      (es/get-events stream)
-      [])
-    (catch Exception e
-      (println "Error reading live workflow events:" (ex-message e))
-      [])))
-
-(defn historical-events
+(defn ^{:stratum 2} historical-events
   "Read archived events from disk for one workflow or the full archive."
   [workflow-id]
   (if workflow-id
@@ -372,18 +371,24 @@
              vec)
         []))))
 
-(defn- matches-workflow? [workflow-id event]
+(defn- ^{:stratum 2} matches-workflow? [workflow-id event]
   (or (nil? workflow-id) (workflow-id= workflow-id event)))
 
-(defn- matches-event-type? [event-type event]
-  (or (nil? event-type) (= event-type (:event/type event))))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- matches-since? [since-inst event]
-  (or (nil? since-inst)
-      (when-let [evt-inst (->instant (event-ts event))]
-        (not (.isBefore evt-inst since-inst)))))
+(defn- ^{:stratum 3} attach-dependency-health
+  [workflow dependency-health]
+  (let [dependency-issues (active-dependencies dependency-health)]
+    (cond-> workflow
+      (seq dependency-health)
+      (assoc :dependency-health dependency-health)
 
-(defn filter-events
+      (seq dependency-issues)
+      (assoc :dependency-issues dependency-issues
+             :dependency-severity (dependency-severity dependency-issues)
+             :failure-attribution (first dependency-issues)))))
+
+(defn ^{:stratum 3} filter-events
   "Filter and sort events newest-first.
 
    Options:
@@ -403,10 +408,8 @@
          (take limit)
          vec)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Data fetchers
-
-(defn- merged-events
+(defn- ^{:stratum 3} merged-events
   "Combine in-process live events with disk-archive events, filtering
    out any disk events for workflow IDs already represented in the
    live stream. Avoids duplicating in-process workflow events and
@@ -418,7 +421,9 @@
                          (remove #(live-wf-ids (wf-id %))))]
     (into live-events disk-events)))
 
-(defn- workflow-summary-from-events
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} workflow-summary-from-events
   "Build the workflow summary map for a single workflow from its
    chronologically-ordered events. Returns the summary with
    dependency-health attached."
@@ -445,45 +450,7 @@
                             output-preview (assoc :latest-output output-preview))]
     (attach-dependency-health summary dependency-health)))
 
-(defn- compute-workflows
-  "Build the sorted, capped list of workflow summaries for `state`."
-  [state]
-  (try
-    (let [grouped-events (->> (merged-events state)
-                              (filter (comp some? wf-id))
-                              (group-by wf-id))]
-      (->> grouped-events
-           (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
-           (sort-by workflow-recency >)
-           (take max-recent-workflows)
-           vec))
-    (catch Exception e
-      (println "Error getting workflows:" (ex-message e))
-      [])))
-
-(def get-workflows
-  "Get workflows from live event stream + disk archive (cached 5s).
-   Merging both sources ensures workflows running in a separate process
-   (e.g. bb miniforge run) are visible in the dashboard."
-  (let [ttl-ms 5000
-        cache  (atom {})]
-    (fn [state]
-      (let [now    (System/currentTimeMillis)
-            cached (get @cache [state])]
-        (if (and cached (< (- now (:time cached)) ttl-ms))
-          (:value cached)
-          (let [result (compute-workflows state)]
-            (swap! cache assoc [state] {:value result :time now})
-            result))))))
-
-(defn get-workflow-detail
-  "Get workflow detail by string id."
-  [state id]
-  (let [workflows (get-workflows state)]
-    (or (first (filter #(= (str (:id %)) id) workflows))
-        {:error "Workflow not found"})))
-
-(defn get-events
+(defn ^{:stratum 4} get-events
   "Query raw events from live memory plus archived event files.
 
    Options:
@@ -500,24 +467,48 @@
       (println "Error querying events:" (ex-message e))
       [])))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} compute-workflows
+  "Build the sorted, capped list of workflow summaries for `state`."
+  [state]
+  (try
+    (let [grouped-events (->> (merged-events state)
+                              (filter (comp some? wf-id))
+                              (group-by wf-id))]
+      (->> grouped-events
+           (map (fn [[id wf-events]] (workflow-summary-from-events id wf-events)))
+           (sort-by workflow-recency >)
+           (take max-recent-workflows)
+           vec))
+    (catch Exception e
+      (println "Error getting workflows:" (ex-message e))
+      [])))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(def ^{:stratum 6} get-workflows
+  "Get workflows from live event stream + disk archive (cached 5s).
+   Merging both sources ensures workflows running in a separate process
+   (e.g. bb miniforge run) are visible in the dashboard."
+  (let [ttl-ms 5000
+        cache  (atom {})]
+    (fn [state]
+      (let [now    (System/currentTimeMillis)
+            cached (get @cache [state])]
+        (if (and cached (< (- now (:time cached)) ttl-ms))
+          (:value cached)
+          (let [result (compute-workflows state)]
+            (swap! cache assoc [state] {:value result :time now})
+            result))))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} get-workflow-detail
+  "Get workflow detail by string id."
+  [state id]
+  (let [workflows (get-workflows state)]
+    (or (first (filter #(= (str (:id %)) id) workflows))
+        {:error "Workflow not found"})))
+
 ;; Workflow command queue
-
-(defn enqueue-command!
-  "Enqueue a control command for a workflow.
-   Commands: :pause, :resume, :stop"
-  [state workflow-id command]
-  (swap! state update-in [:workflow-commands (str workflow-id)]
-         (fnil conj [])
-         {:command (keyword command)
-          :timestamp (System/currentTimeMillis)}))
-
-(defn dequeue-commands!
-  "Atomically dequeue all pending commands for a workflow.
-   Returns the commands and removes them from the queue."
-  [state workflow-id]
-  (let [wf-id (str workflow-id)
-        commands (get-in @state [:workflow-commands wf-id] [])]
-    (when (seq commands)
-      (swap! state update :workflow-commands dissoc wf-id))
-    commands))

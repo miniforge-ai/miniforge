@@ -37,7 +37,7 @@
   :status/empty-pipeline     "Workflow pipeline is empty"
   :status/duplicate-phases   "Duplicate phase ids make transition targets ambiguous"
   :status/paused             "⏸  Workflow paused, waiting for resume..."
-  :status/stopped-dashboard  "⏹  Workflow stopped by dashboard"
+  :status/stopped-dashboard  "⏹  Workflow cancelled by operator intervention"
   :status/stopped-control    "Workflow stopped by control plane"
   :status/empty-completion   "Workflow completed but produced no artifacts or phase results"
   :status/max-redirects      "Redirect cycle limit exceeded ({max-redirects} redirects)"

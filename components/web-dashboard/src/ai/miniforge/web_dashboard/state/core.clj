@@ -11,14 +11,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.core
   "Pure utilities and state atom creation.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure utilities
 
-(defn ttl-memoize
+;; Pure utilities
+(defn ^{:stratum 0} ttl-memoize
   "Memoize a function with TTL in milliseconds.
   Cache is keyed by all arguments."
   [ttl-ms f]
@@ -32,10 +31,8 @@
             (swap! cache assoc args {:value result :time now})
             result))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; State atom creation and access
-
-(defn create-state
+(defn ^{:stratum 0} create-state
   "Create dashboard state atom."
   [opts]
   (atom (merge {:event-stream nil
@@ -43,13 +40,12 @@
                 :repo-dag-manager nil
                 :fleet/default-dag-id nil
                 :fleet/repo-trains {}
-                :workflow-commands {}
                 :archived-workflows (atom {})
                 :archive-loading? (atom true)
                 :start-time (System/currentTimeMillis)}
                opts)))
 
-(defn get-uptime
+(defn ^{:stratum 0} get-uptime
   "Get server uptime in milliseconds."
   [state]
   (- (System/currentTimeMillis) (:start-time @state)))

@@ -249,7 +249,9 @@
                                     {:value (format-time (:started-at workflow))})])))
 
 (defn- workflow-panel-controls
-  "Pause/resume/stop buttons — only rendered for running workflows."
+  "Pause/resume/cancel buttons — only rendered for running workflows.
+   Each posts the matching intervention verb; `cancel` is the operation
+   the pre-D-4 command channel called `stop`."
   [workflow-id]
   [:div.workflow-panel-controls
    [:button.btn.btn-sm
@@ -261,9 +263,9 @@
      :title (msg/t :cp/btn-resume)}
     (msg/t :cp/btn-resume)]
    [:button.btn.btn-sm.btn-danger
-    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','stop')")
-     :title (msg/t :workflow/btn-stop)}
-    (msg/t :workflow/btn-stop)]])
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','cancel')")
+     :title (msg/t :workflow/btn-cancel)}
+    (msg/t :workflow/btn-cancel)]])
 
 (defn- workflow-panel-meta
   "Meta row: status badge, phase, progress, and any available metric fields."

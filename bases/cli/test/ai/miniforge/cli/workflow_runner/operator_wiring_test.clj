@@ -20,7 +20,7 @@
   (:require
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.automation-edge-correlator.interface :as correlator]
-   [ai.miniforge.cli.workflow-runner :as sut]
+   [ai.miniforge.cli.workflow-runner.control :as sut]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.interface :as operator]
    [ai.miniforge.supervisory-state.interface :as supervisory]

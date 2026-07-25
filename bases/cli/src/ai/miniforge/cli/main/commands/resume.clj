@@ -35,7 +35,7 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selection-config :as selection-config]
    [ai.miniforge.cli.workflow-runner.context :as context]
-   [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
+   [ai.miniforge.cli.workflow-runner.control :as control]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.interface :as supervisory]
@@ -193,10 +193,14 @@
             ;; alongside the supervisory snapshots.
             _correlator (correlator/attach! event-stream)
             control-state (es/create-control-state)
-            command-poller-cleanup (dashboard/start-command-poller! resume-run-id control-state)
             llm-client (context/create-llm-client workflow nil quiet)]
 
         (try
+          ;; Governed control path: the resumed run gets the same
+          ;; pause/resume/cancel reach as a fresh one, released below.
+          (control/register-workflow-control! resume-run-id
+                                              control-state
+                                              event-stream)
           (let [result (run-pipeline resume-workflow
                                      {}
                                      {:llm-backend llm-client
@@ -239,4 +243,4 @@
                                              {:error (ex-message e)}))
             (throw e))
           (finally
-            (when command-poller-cleanup (command-poller-cleanup))))))))
+            (control/release-workflow-control! resume-run-id)))))))

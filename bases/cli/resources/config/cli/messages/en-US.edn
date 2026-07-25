@@ -693,6 +693,7 @@
   :workflow-runner/available-workflows "\nAvailable Workflows:"
   :workflow-runner/workflow-type-label ":workflow/type {type}"
   :workflow-runner/list-failed "Failed to list workflows: {error}"
+  :workflow-runner/non-uuid-session-id "⚠ Non-UUID :session-id {session-id} not adopted; governed run uses {workflow-id} so it stays controllable"
   :workflow-runner/spec-execution-failed "\n❌ Workflow execution failed: {error}"
   :workflow-runner/resume-state-failed "Failed to load resume state: {error}"
   :workflow-runner/resuming "\n🔄 Resuming workflow {workflow-id}"

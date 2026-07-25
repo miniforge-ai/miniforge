@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.workflow-commands
   "Workflow subcommands: execute (spec file), inspect, status, cancel,
    gc-scratch.
@@ -27,6 +26,7 @@
    [babashka.fs :as fs]
    [clojure.edn :as edn]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.cli.main.display :as display]
@@ -34,16 +34,25 @@
    [ai.miniforge.cli.main.commands.run :as cmd-run]
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.dag-executor.interface :as gc-queue]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(def ^:private exit-code-error
+;; Helpers
+(def ^{:stratum 0} ^:private exit-code-error
   "Process exit code signalling command failure (non-zero)."
   1)
 
-(defn- read-event-lines
+(defn- ^{:stratum 0} operator-principal
+  "Identity stamped on interventions this CLI requests. The OS account
+   is the only principal the CLI actually knows; naming the binary
+   instead would put an unattributable actor on the audit stream."
+  []
+  (or (System/getProperty "user.name")
+      (app-config/binary-name)))
+
+(defn- ^{:stratum 0} read-event-lines
   "Read all non-blank EDN lines from a workflow event file."
   [event-file]
   (try
@@ -53,7 +62,7 @@
          (keep #(try (edn/read-string %) (catch Exception _ nil))))
     (catch Exception _ [])))
 
-(defn derive-status
+(defn ^{:stratum 0} derive-status
   "Derive a workflow status label from its event stream."
   [events]
   (let [by-type (group-by :event/type events)]
@@ -63,16 +72,14 @@
       (seq (get by-type :workflow/started))   "running"
       :else                                   "unknown")))
 
-(defn- colorize-status [s]
+(defn- ^{:stratum 0} colorize-status [s]
   (case s
     "completed" (display/style s :foreground :green)
     "failed"    (display/style s :foreground :red)
     (display/style s :foreground :yellow)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Command implementations
-
-(defn workflow-execute-cmd
+(defn ^{:stratum 0} workflow-execute-cmd
   "Execute a workflow from a spec file (alias for `run <spec>`).
 
    Routes through the same pipeline as `miniforge run <spec>`:
@@ -83,7 +90,9 @@
       (shared/usage-error! :workflow-cmd/execute-usage "workflow execute <spec-file>")
       (cmd-run/run-cmd opts))))
 
-(defn workflow-inspect-cmd
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} workflow-inspect-cmd
   "Print a Mermaid stateDiagram-v2 of the compiled execution machine
    for a workflow EDN file. Phase 6 of the FSM RFC — visual audit of
    the verdict-driven guarded `:phase/fail` array shape, including the
@@ -114,7 +123,7 @@
              (messages/t :workflow-cmd/inspect-failed {:error (ex-message e)}))
             (shared/exit! exit-code-error)))))))
 
-(defn workflow-status-cmd
+(defn ^{:stratum 1} workflow-status-cmd
   "Show the status of a workflow by ID.
 
    Reads the workflow's event file from the events directory and
@@ -155,31 +164,41 @@
                                 (when dur (str "  (" dur "ms)"))))))
               (println))))))))
 
-(defn workflow-cancel-cmd
-  "Cancel a running workflow by writing a stop command file.
+(defn ^{:stratum 1} workflow-cancel-cmd
+  "Cancel a running workflow by requesting a `:cancel` intervention.
 
-   The CLI command poller (started with each workflow) reads this file
-   and calls event-stream/cancel! on the control state."
+   Writes a `:supervisory/intervention-requested` event into
+   `{events-dir}/operator/` — the same governed channel the console and
+   the TUI use. The runner's operator-event consumer routes it through
+   the intervention lifecycle and flips the run's control state; every
+   transition is on the audit stream. (Pre-D-4 this wrote an ungoverned
+   `.edn` command file whose legacy verb was `stop`; the intervention
+   vocabulary names the same operation `:cancel`.)"
   [opts]
   (let [{:keys [id]} opts]
     (if-not id
       (shared/usage-error! :workflow-cmd/cancel-usage "workflow cancel <id>")
-      (let [commands-dir (app-config/commands-dir (str id))
-            cmd-file     (str commands-dir "/cancel-" (System/currentTimeMillis) ".edn")
-            wf-id-str    (str id)
-            timestamp    (java.util.Date.)
-            cmd-data     {:command "stop"
-                          :workflow-id wf-id-str
-                          :timestamp timestamp}]
-        (try
-          (fs/create-dirs commands-dir)
-          (spit cmd-file (pr-str cmd-data))
-          (display/print-success (messages/t :workflow-cmd/cancel-success {:id id}))
-          (catch Exception e
-            (display/print-error (messages/t :workflow-cmd/cancel-failed
-                                            {:error (ex-message e)}))))))))
+      (try
+        (let [result (es/request-intervention!
+                      {:intervention/type :cancel
+                       :intervention/target-type :workflow
+                       :intervention/target-id (str id)
+                       :intervention/requested-by (operator-principal)
+                       :intervention/request-source :cli})]
+          (if (anomaly/anomaly? result)
+            ;; Non-zero exit on failure: a cancel that never reached the
+            ;; operator dir must not look like success to a script.
+            (do (display/print-error (messages/t :workflow-cmd/cancel-failed
+                                                 {:error (:anomaly/message result)}))
+                (shared/exit! exit-code-error))
+            (display/print-success (messages/t :workflow-cmd/cancel-success
+                                               {:id id}))))
+        (catch Exception e
+          (display/print-error (messages/t :workflow-cmd/cancel-failed
+                                           {:error (ex-message e)}))
+          (shared/exit! exit-code-error))))))
 
-(defn workflow-gc-scratch-cmd
+(defn ^{:stratum 1} workflow-gc-scratch-cmd
   "Scan the scratch-ref GC queue and delete refs older than `max-age-days`.
 
    Reads `~/.miniforge/scratch-gc-queue.edn`, removes entries whose
