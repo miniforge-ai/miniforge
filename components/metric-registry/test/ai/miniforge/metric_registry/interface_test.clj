@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.metric-registry.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.metric-registry.interface :as mr]))
 
-(def ^:private sample-metric
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private sample-metric
   {:metric/id              "T10Y2Y"
    :metric/name            "10Y-2Y Treasury Spread"
    :metric/source-type     :public_canonical
@@ -32,7 +33,7 @@
    :metric/direction       :normal
    :metric/unit            :percent})
 
-(def ^:private sample-house-metric
+(def ^{:stratum 0} ^:private sample-house-metric
   {:metric/id              "BUFFETT_INDICATOR"
    :metric/name            "Buffett Indicator (Market Cap / GDP)"
    :metric/source-type     :house_factor
@@ -44,7 +45,23 @@
    :metric/direction       :inverse
    :metric/unit            :ratio})
 
-(def ^:private sample-registry
+;; -- Enum value sets --
+(deftest ^{:stratum 0} enum-sets-test
+  (testing "Acquisition classes"
+    (is (= [:public_canonical :official_market :premium_benchmark :house_factor]
+           mr/acquisition-classes)))
+
+  (testing "Implementation modes"
+    (is (= [:pull :derive :vendor :deprecated]
+           mr/implementation-modes)))
+
+  (testing "Refresh cadences"
+    (is (= [:realtime :daily :weekly :monthly :quarterly :annual]
+           mr/refresh-cadences))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private sample-registry
   {:registry/id      "risk-metrics"
    :registry/version "2026.03.17"
    :registry/families
@@ -58,8 +75,7 @@
    {"fred-risk-data" ["T10Y2Y" "BUFFETT_INDICATOR"]}})
 
 ;; -- Schema validation --
-
-(deftest valid-metric-test
+(deftest ^{:stratum 1} valid-metric-test
   (testing "Valid public canonical metric passes"
     (is (true? (mr/valid-metric? sample-metric))))
 
@@ -72,7 +88,7 @@
   (testing "Invalid enum value fails"
     (is (false? (mr/valid-metric? (assoc sample-metric :metric/source-type :invalid))))))
 
-(deftest valid-family-test
+(deftest ^{:stratum 1} valid-family-test
   (testing "Valid family passes"
     (is (true? (mr/valid-family?
                 {:family/id :yield-curve
@@ -85,7 +101,9 @@
                  :family/name "Empty"
                  :family/metrics []})))))
 
-(deftest validate-registry-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} validate-registry-test
   (testing "Valid registry passes"
     (let [result (mr/validate-registry sample-registry)]
       (is (true? (:valid? result)))
@@ -103,28 +121,12 @@
           result (mr/validate-registry bad)]
       (is (false? (:valid? result))))))
 
-;; -- Enum value sets --
-
-(deftest enum-sets-test
-  (testing "Acquisition classes"
-    (is (= [:public_canonical :official_market :premium_benchmark :house_factor]
-           mr/acquisition-classes)))
-
-  (testing "Implementation modes"
-    (is (= [:pull :derive :vendor :deprecated]
-           mr/implementation-modes)))
-
-  (testing "Refresh cadences"
-    (is (= [:realtime :daily :weekly :monthly :quarterly :annual]
-           mr/refresh-cadences))))
-
 ;; -- Lookup functions --
-
-(deftest all-metrics-test
+(deftest ^{:stratum 2} all-metrics-test
   (testing "Returns all metrics across families"
     (is (= 2 (count (mr/all-metrics sample-registry))))))
 
-(deftest find-metric-test
+(deftest ^{:stratum 2} find-metric-test
   (testing "Find existing metric by id"
     (let [m (mr/find-metric sample-registry "T10Y2Y")]
       (is (some? m))
@@ -133,7 +135,7 @@
   (testing "Returns nil for missing metric"
     (is (nil? (mr/find-metric sample-registry "NONEXISTENT")))))
 
-(deftest find-metrics-by-family-test
+(deftest ^{:stratum 2} find-metrics-by-family-test
   (testing "Find metrics in yield-curve family"
     (let [ms (mr/find-metrics-by-family sample-registry :yield-curve)]
       (is (= 1 (count ms)))
@@ -142,7 +144,7 @@
   (testing "Returns nil for missing family"
     (is (nil? (mr/find-metrics-by-family sample-registry :nonexistent)))))
 
-(deftest find-metrics-by-source-type-test
+(deftest ^{:stratum 2} find-metrics-by-source-type-test
   (testing "Find public canonical metrics"
     (let [ms (mr/find-metrics-by-source-type sample-registry :public_canonical)]
       (is (= 1 (count ms)))
@@ -156,7 +158,7 @@
   (testing "Returns empty for unmatched source type"
     (is (empty? (mr/find-metrics-by-source-type sample-registry :premium_benchmark)))))
 
-(deftest find-metrics-by-pipeline-test
+(deftest ^{:stratum 2} find-metrics-by-pipeline-test
   (testing "Find metrics for known pipeline"
     (is (= ["T10Y2Y" "BUFFETT_INDICATOR"]
            (mr/find-metrics-by-pipeline sample-registry "fred-risk-data"))))
@@ -164,11 +166,11 @@
   (testing "Returns nil for unknown pipeline"
     (is (nil? (mr/find-metrics-by-pipeline sample-registry "unknown")))))
 
-(deftest family-ids-test
+(deftest ^{:stratum 2} family-ids-test
   (testing "Returns all family ids"
     (is (= [:yield-curve :house-factors]
            (mr/family-ids sample-registry)))))
 
-(deftest metric-count-test
+(deftest ^{:stratum 2} metric-count-test
   (testing "Counts all metrics"
     (is (= 2 (mr/metric-count sample-registry)))))

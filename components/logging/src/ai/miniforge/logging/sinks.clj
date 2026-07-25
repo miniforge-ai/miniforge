@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.sinks
   "Configurable log sinks for different deployment scenarios.
 
@@ -37,9 +36,9 @@
   (:import
    [java.net.http HttpClient HttpResponse$BodyHandlers]))
 
-;;------------------------------------------------------------------------------ Layer 0: File Sink
+;------------------------------------------------------------------------------ Layer 0
 
-(defn log-file-path
+(defn ^{:stratum 0} log-file-path
   "Get path to log file for a workflow.
 
    Arguments:
@@ -52,49 +51,13 @@
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))
 
-(defn file-size-mb [file-path]
+(defn ^{:stratum 0} file-size-mb [file-path]
   (let [file (io/file file-path)]
     (if (.exists file)
       (/ (.length file) 1024.0 1024.0)
       0.0)))
 
-(defn rotate-log-if-needed [file-path max-size-mb]
-  (when (> (file-size-mb file-path) max-size-mb)
-    (let [timestamp (.format (java.time.LocalDateTime/now)
-                             (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
-          rotated-path (str file-path "." timestamp)]
-      (.renameTo (io/file file-path) (io/file rotated-path)))))
-
-(defn file-sink
-  "Create a file sink that writes logs to per-workflow files.
-
-   Arguments:
-     opts - Map with optional:
-       :base-dir - Base directory (default: ~/.miniforge/logs)
-       :max-size-mb - Max file size before rotation (default 10)
-       :format - :edn or :human (default :human)
-
-   Returns: Sink function (fn [log-entry] -> nil)"
-  [& [opts]]
-  (let [max-size-mb (:max-size-mb opts 10)
-        format-fn (case (:format opts :human)
-                    :edn log-format/format-edn
-                    :human log-format/format-human
-                    log-format/format-human)]
-    (fn [entry]
-      (when-let [workflow-id (:workflow/id entry)]
-        (try
-          (let [file-path (log-file-path workflow-id)]
-            (rotate-log-if-needed file-path max-size-mb)
-            (with-open [writer (io/writer file-path :append true)]
-              (.write writer (format-fn entry))
-              (.write writer "\n")))
-          (catch Exception _e
-            nil))))))
-
-;;------------------------------------------------------------------------------ Layer 1: Stream Sinks
-
-(defn stdout-sink
+(defn ^{:stratum 0} stdout-sink
   "Create a stdout sink that prints logs to standard output.
 
    Arguments:
@@ -116,7 +79,7 @@
           (catch Exception _e
             nil))))))
 
-(defn stderr-sink
+(defn ^{:stratum 0} stderr-sink
   "Create a stderr sink that prints logs to standard error.
 
    Arguments:
@@ -139,9 +102,7 @@
           (catch Exception _e
             nil))))))
 
-;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
-
-(defn fleet-sink
+(defn ^{:stratum 0} fleet-sink
   "Create a fleet sink that sends logs to fleet command via HTTP.
 
    Arguments:
@@ -217,9 +178,7 @@
           (when (or batch-full? time-exceeded?)
             (flush-batch!)))))))
 
-;;------------------------------------------------------------------------------ Layer 3: Multi-Sink
-
-(defn multi-sink
+(defn ^{:stratum 0} multi-sink
   "Create a multi-sink that writes to multiple sinks simultaneously.
 
    Arguments:
@@ -234,9 +193,47 @@
         (catch Exception _e
           nil)))))
 
-;;------------------------------------------------------------------------------ Layer 4: Sink Factory
+;------------------------------------------------------------------------------ Layer 1
 
-(defn create-sink
+(defn ^{:stratum 1} rotate-log-if-needed [file-path max-size-mb]
+  (when (> (file-size-mb file-path) max-size-mb)
+    (let [timestamp (.format (java.time.LocalDateTime/now)
+                             (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
+          rotated-path (str file-path "." timestamp)]
+      (.renameTo (io/file file-path) (io/file rotated-path)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} file-sink
+  "Create a file sink that writes logs to per-workflow files.
+
+   Arguments:
+     opts - Map with optional:
+       :base-dir - Base directory (default: ~/.miniforge/logs)
+       :max-size-mb - Max file size before rotation (default 10)
+       :format - :edn or :human (default :human)
+
+   Returns: Sink function (fn [log-entry] -> nil)"
+  [& [opts]]
+  (let [max-size-mb (:max-size-mb opts 10)
+        format-fn (case (:format opts :human)
+                    :edn log-format/format-edn
+                    :human log-format/format-human
+                    log-format/format-human)]
+    (fn [entry]
+      (when-let [workflow-id (:workflow/id entry)]
+        (try
+          (let [file-path (log-file-path workflow-id)]
+            (rotate-log-if-needed file-path max-size-mb)
+            (with-open [writer (io/writer file-path :append true)]
+              (.write writer (format-fn entry))
+              (.write writer "\n")))
+          (catch Exception _e
+            nil))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-sink
   "Create a log sink from configuration.
 
    Arguments:
@@ -274,7 +271,9 @@
                     {:config sink-config
                      :config/error :invalid-config}))))
 
-(defn create-sinks-from-config
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} create-sinks-from-config
   "Create log sinks from user configuration.
 
    Arguments:

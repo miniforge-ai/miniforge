@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.core
   "Structured EDN logging implementation.
    Layer 0: Pure functions for log entry creation
@@ -27,9 +26,9 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure functions for log entry creation
 
-(defn make-entry
+;; Pure functions for log entry creation
+(defn ^{:stratum 0} make-entry
   "Create a log entry map with required fields.
    Additional context can be merged in."
   [level category event & {:keys [message data]}]
@@ -42,30 +41,28 @@
       message (assoc :log/message message)
       data (assoc :data data))))
 
-(defn merge-context
+(defn ^{:stratum 0} merge-context
   "Merge context map into a log entry, preserving entry values on conflict."
   [entry context]
   (merge context entry))
 
-(defn level-enabled?
+(defn ^{:stratum 0} level-enabled?
   "Check if a log level should be emitted given the configured minimum level."
   [configured-level entry-level]
   (log-format/level-enabled? configured-level entry-level))
 
-(defn format-edn
+(defn ^{:stratum 0} format-edn
   "Format a log entry as an EDN string for output."
   [entry]
   (log-format/format-edn entry))
 
-(defn format-human
+(defn ^{:stratum 0} format-human
   "Format a log entry as a human-readable string."
   [entry]
   (log-format/format-human entry))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Logger protocol and implementations
-
-(defprotocol Logger
+(defprotocol ^{:stratum 0} Logger
   "Protocol for structured logging."
   (log* [this level category event opts]
     "Emit a structured log entry. opts may include :message, :data, and context keys.")
@@ -76,42 +73,14 @@
   (get-config [this]
     "Return the logger configuration."))
 
-(defrecord EDNLogger [config context output-fn]
-  Logger
-  (log* [_this level category event opts]
-    (when (level-enabled? (:min-level config :trace) level)
-      (let [entry (-> (apply make-entry level category event (mapcat identity opts))
-                      (merge-context context))]
-        (output-fn entry)
-        entry)))
-
-  (with-context* [_this context-map]
-    (->EDNLogger config (merge context context-map) output-fn))
-
-  (get-context [_this]
-    context)
-
-  (get-config [_this]
-    config))
-
-(defn default-output-fn
-  "Default output function that prints EDN to *out*."
-  [entry]
-  (println (format-edn entry)))
-
-(defn human-output-fn
-  "Human-readable output function."
-  [entry]
-  (println (format-human entry)))
-
-(defn collecting-output-fn
+(defn ^{:stratum 0} collecting-output-fn
   "Returns [output-fn, entries-atom] for collecting entries in tests."
   []
   (let [entries (atom [])]
     [(fn [entry] (swap! entries conj entry))
      entries]))
 
-(defn log-file-path
+(defn ^{:stratum 0} log-file-path
   "Get path to log file for a workflow.
 
    Arguments:
@@ -124,7 +93,7 @@
     (.mkdirs logs-dir)
     (.getPath (io/file logs-dir log-file))))
 
-(defn file-size-mb
+(defn ^{:stratum 0} file-size-mb
   "Get file size in megabytes.
 
    Arguments:
@@ -137,22 +106,7 @@
       (/ (.length file) 1024.0 1024.0)
       0.0)))
 
-(defn rotate-log-if-needed
-  "Rotate log file if it exceeds size threshold.
-
-   Arguments:
-     file-path - String path to log file
-     max-size-mb - Maximum size in MB (default 10MB)
-
-   Returns: nil"
-  [file-path max-size-mb]
-  (when (> (file-size-mb file-path) max-size-mb)
-    (let [timestamp (.format (java.time.LocalDateTime/now)
-                             (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
-          rotated-path (str file-path "." timestamp)]
-      (.renameTo (io/file file-path) (io/file rotated-path)))))
-
-(defn cleanup-old-rotated-logs
+(defn ^{:stratum 0} cleanup-old-rotated-logs
   "Delete rotated log files in `logs-dir` older than `retention-days`.
 
    Rotated files are named like `<workflow-id>.log.yyyyMMdd-HHmmss`.
@@ -171,7 +125,83 @@
            (filter #(.delete ^java.io.File %))
            count))))
 
-(defn file-output-fn
+(defn ^{:stratum 0} combined-output-fn
+  "Combine multiple output functions.
+
+   Arguments:
+     output-fns - Vector of output functions
+
+   Returns: Combined output function"
+  [output-fns]
+  (fn [entry]
+    (doseq [output-fn output-fns]
+      (try
+        (output-fn entry)
+        (catch Exception _e
+          ;; Continue with other outputs even if one fails
+          nil)))))
+
+(defn ^{:stratum 0} timed*
+  "Execute f, logging start and completion with duration.
+   Returns [result duration-ms]."
+  [logger level category event f]
+  (log* logger level category event {:message "started"})
+  (let [start (System/currentTimeMillis)
+        result (f)
+        duration (- (System/currentTimeMillis) start)]
+    (log* logger level category event
+          {:message "completed"
+           :data {:duration-ms duration}})
+    [result duration]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defrecord ^{:stratum 1} EDNLogger [config context output-fn]
+  Logger
+  (log* [_this level category event opts]
+    (when (level-enabled? (:min-level config :trace) level)
+      (let [entry (-> (apply make-entry level category event (mapcat identity opts))
+                      (merge-context context))]
+        (output-fn entry)
+        entry)))
+
+  (with-context* [_this context-map]
+    (->EDNLogger config (merge context context-map) output-fn))
+
+  (get-context [_this]
+    context)
+
+  (get-config [_this]
+    config))
+
+(defn ^{:stratum 1} default-output-fn
+  "Default output function that prints EDN to *out*."
+  [entry]
+  (println (format-edn entry)))
+
+(defn ^{:stratum 1} human-output-fn
+  "Human-readable output function."
+  [entry]
+  (println (format-human entry)))
+
+(defn ^{:stratum 1} rotate-log-if-needed
+  "Rotate log file if it exceeds size threshold.
+
+   Arguments:
+     file-path - String path to log file
+     max-size-mb - Maximum size in MB (default 10MB)
+
+   Returns: nil"
+  [file-path max-size-mb]
+  (when (> (file-size-mb file-path) max-size-mb)
+    (let [timestamp (.format (java.time.LocalDateTime/now)
+                             (java.time.format.DateTimeFormatter/ofPattern "yyyyMMdd-HHmmss"))
+          rotated-path (str file-path "." timestamp)]
+      (.renameTo (io/file file-path) (io/file rotated-path)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} file-output-fn
   "Output function that writes logs to per-workflow files.
 
    DEPRECATED: Use ai.miniforge.logging.sinks/file-sink instead.
@@ -204,23 +234,7 @@
             ;; Silently fail - don't break logging if file write fails
             nil))))))
 
-(defn combined-output-fn
-  "Combine multiple output functions.
-
-   Arguments:
-     output-fns - Vector of output functions
-
-   Returns: Combined output function"
-  [output-fns]
-  (fn [entry]
-    (doseq [output-fn output-fns]
-      (try
-        (output-fn entry)
-        (catch Exception _e
-          ;; Continue with other outputs even if one fails
-          nil)))))
-
-(defn create-logger
+(defn ^{:stratum 2} create-logger
   "Create a new EDN logger with the given configuration.
 
    Options:
@@ -260,19 +274,6 @@
                        :human human-output-fn
                        output))]
      (->EDNLogger {:min-level min-level} (or context {}) output-fn))))
-
-(defn timed*
-  "Execute f, logging start and completion with duration.
-   Returns [result duration-ms]."
-  [logger level category event f]
-  (log* logger level category event {:message "started"})
-  (let [start (System/currentTimeMillis)
-        result (f)
-        duration (- (System/currentTimeMillis) start)]
-    (log* logger level category event
-          {:message "completed"
-           :data {:duration-ms duration}})
-    [result duration]))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
