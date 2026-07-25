@@ -7,9 +7,8 @@
    Stratification (intra-namespace):
    Layer 0 — `linter-available?`, `run-subprocess`, `lintable-tech`
              (no in-ns deps).
-   Layer 1 — `run-linter` (composes Layer 0).
-   Layer 2 — `run-all`, `run-fixes` (public orchestration; compose
-             Layer 1)."
+   Layer 1 — `run-linter`, `run-fixes` (compose Layer 0).
+   Layer 2 — `run-all` (public orchestration; composes Layer 1)."
   (:require
    [ai.miniforge.clock.interface :as clock]
    [ai.miniforge.connector-linter.etl :as etl]

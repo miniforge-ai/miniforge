@@ -8,9 +8,12 @@
    violation shape using declarative mapping specs loaded from EDN.
    No parser code per linter — all extraction is driven by data.
 
-   Layer 0: Field extraction and severity mapping
-   Layer 1: Format-specific record extraction
-   Layer 2: Apply mapping spec to produce violations"
+   Layer 0: Field extraction, severity mapping, JSON parsing, and the
+            mapping registry's resource name
+   Layer 1: Per-record transform, filter matching, format-specific
+            record extraction, and the mapping registry itself
+   Layer 2: Format dispatch and mapping lookup
+   Layer 3: Apply mapping spec to produce violations"
   (:require
    [ai.miniforge.compliance-scanner.interface :as factory]
    [cheshire.core :as json]
@@ -62,7 +65,6 @@
   [linter-id fields severity-map record file-override]
   (let [file     (or file-override (str (extract-field record (get fields :file))))
         line     (extract-field record (get fields :line))
-        column   (extract-field record (get fields :column))
         message  (extract-field record (get fields :message))
         code     (let [c (extract-field record (get fields :code))]
                    (if (keyword? c) (name c) (str c)))
