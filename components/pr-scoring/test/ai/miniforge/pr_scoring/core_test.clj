@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-scoring.core-test
   "Plumbing tests for the pr-scoring component. Real scoring logic is
    supplied via an injected scorer-fn — these tests use a stub scorer
@@ -26,24 +25,16 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.pr-scoring.interface :as scoring]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- stream []
+;------------------------------------------------------------------------------ Helpers
+(defn- ^{:stratum 0} stream []
   (es/create-event-stream {:sinks []}))
 
-(defn- captured-stream
-  "Build a stream + attach a capture listener. Returns `[stream events-atom]`
-   where `events-atom` accrues every published event."
-  []
-  (let [s (stream)
-        captured (atom [])]
-    (es/subscribe! s ::capture (fn [ev] (swap! captured conj ev)))
-    [s captured]))
-
-(defn- scored-events [events]
+(defn- ^{:stratum 0} scored-events [events]
   (filter #(= :pr/scored (:event/type %)) events))
 
-(defn- pr-created-event [stream repo number]
+(defn- ^{:stratum 0} pr-created-event [stream repo number]
   ;; pr/created isn't an event-stream constructor yet, so hand-build a
   ;; minimal envelope matching the producer shape other components use.
   {:event/type            :pr/created
@@ -56,7 +47,7 @@
    :pr/number             number
    :pr/title              "test PR"})
 
-(def sample-scores
+(def ^{:stratum 0} sample-scores
   {:readiness {:readiness/score 0.9
                :readiness/threshold 0.8
                :readiness/ready? true
@@ -68,21 +59,40 @@
             :policy/violations []}
    :recommendation :merge})
 
-;------------------------------------------------------------------------------ Lifecycle
+(deftest ^{:stratum 0} default-trigger-set-is-loaded-from-edn
+  (testing "triggers come from the EDN resource, not a compiled-in literal"
+    (let [triggers @scoring/default-trigger-event-types]
+      (is (set? triggers))
+      (is (contains? triggers :pr/created))
+      (is (contains? triggers :pr/merged))
+      (is (not (contains? triggers :workflow/started))
+          "workflow events are not PR scoring triggers"))))
 
-(deftest create-does-not-subscribe
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} captured-stream
+  "Build a stream + attach a capture listener. Returns `[stream events-atom]`
+   where `events-atom` accrues every published event."
+  []
+  (let [s (stream)
+        captured (atom [])]
+    (es/subscribe! s ::capture (fn [ev] (swap! captured conj ev)))
+    [s captured]))
+
+;------------------------------------------------------------------------------ Lifecycle
+(deftest ^{:stratum 1} create-does-not-subscribe
   (let [s (stream)
         c (scoring/create s)]
     (is (false? (:subscribed? @c)))))
 
-(deftest start-then-stop-roundtrips-subscription-flag
+(deftest ^{:stratum 1} start-then-stop-roundtrips-subscription-flag
   (let [s (stream)
         c (scoring/attach! s)]
     (is (true? (:subscribed? @c)))
     (scoring/stop! c)
     (is (false? (:subscribed? @c)))))
 
-(deftest start-is-idempotent
+(deftest ^{:stratum 1} start-is-idempotent
   (let [s (stream)
         c (scoring/attach! s)]
     (is (true? (:subscribed? @c)))
@@ -90,16 +100,17 @@
     (is (true? (:subscribed? @c)) "repeat start! is a no-op")
     (scoring/stop! c)))
 
-;------------------------------------------------------------------------------ Emission
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest default-scorer-emits-nothing
+;------------------------------------------------------------------------------ Emission
+(deftest ^{:stratum 2} default-scorer-emits-nothing
   (let [[s captured] (captured-stream)
         _ (scoring/attach! s)]
     (es/publish! s (pr-created-event s "acme/widget" 42))
     (is (empty? (scored-events @captured))
         "default scorer-fn returns nil; no :pr/scored event emitted")))
 
-(deftest scorer-returning-scores-emits-pr-scored
+(deftest ^{:stratum 2} scorer-returning-scores-emits-pr-scored
   (let [[s captured] (captured-stream)
         _ (scoring/attach! s {:scorer-fn (constantly sample-scores)})]
     (es/publish! s (pr-created-event s "acme/widget" 42))
@@ -111,14 +122,14 @@
         (is (= :low (get-in ev [:pr/risk :risk/level])))
         (is (= :merge (:pr/recommendation ev)))))))
 
-(deftest scorer-returning-nil-skips-emission
+(deftest ^{:stratum 2} scorer-returning-nil-skips-emission
   (let [[s captured] (captured-stream)
         _ (scoring/attach! s {:scorer-fn (fn [_] nil)})]
     (es/publish! s (pr-created-event s "acme/widget" 42))
     (is (empty? (scored-events @captured))
         "nil return from scorer-fn suppresses :pr/scored emission")))
 
-(deftest non-pr-events-do-not-trigger-scorer
+(deftest ^{:stratum 2} non-pr-events-do-not-trigger-scorer
   (let [calls (atom 0)
         [s captured] (captured-stream)
         _ (scoring/attach! s {:scorer-fn (fn [_] (swap! calls inc) sample-scores)})]
@@ -126,16 +137,7 @@
     (is (= 0 @calls) "workflow/started does not trigger scoring")
     (is (empty? (scored-events @captured)))))
 
-(deftest default-trigger-set-is-loaded-from-edn
-  (testing "triggers come from the EDN resource, not a compiled-in literal"
-    (let [triggers @scoring/default-trigger-event-types]
-      (is (set? triggers))
-      (is (contains? triggers :pr/created))
-      (is (contains? triggers :pr/merged))
-      (is (not (contains? triggers :workflow/started))
-          "workflow events are not PR scoring triggers"))))
-
-(deftest trigger-override-narrows-dispatch
+(deftest ^{:stratum 2} trigger-override-narrows-dispatch
   (testing "A caller-supplied :trigger-event-types restricts scoring to just those events"
     (let [calls (atom [])
           [s captured] (captured-stream)
@@ -148,14 +150,14 @@
           "only :pr/merged events invoked the scorer")
       (is (= 1 (count (scored-events @captured)))))))
 
-(deftest scorer-fn-exceptions-are-swallowed
+(deftest ^{:stratum 2} scorer-fn-exceptions-are-swallowed
   (let [[s captured] (captured-stream)
         _ (scoring/attach! s {:scorer-fn (fn [_] (throw (ex-info "boom" {})))})]
     (es/publish! s (pr-created-event s "acme/widget" 42))
     (is (empty? (scored-events @captured))
         "scorer throwing does not crash the component nor emit partial events")))
 
-(deftest partial-score-maps-pass-through
+(deftest ^{:stratum 2} partial-score-maps-pass-through
   (testing "Scorer returns only readiness; emitted event carries only that field"
     (let [[s captured] (captured-stream)
           _ (scoring/attach! s {:scorer-fn (fn [_]

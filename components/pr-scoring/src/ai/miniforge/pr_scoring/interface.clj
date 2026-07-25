@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-scoring.interface
   "Public API for the pr-scoring component (N5-delta-2 §3).
 
@@ -36,10 +35,10 @@
   (:require
    [ai.miniforge.pr-scoring.core :as core]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Lifecycle
+;------------------------------------------------------------------------------ Layer 0
 
-(def create
+;; Lifecycle
+(def ^{:stratum 0} create
   "Build a fresh pr-scoring component instance bound to event stream `stream`.
    Does not subscribe yet — call [[start!]] to begin consuming events.
 
@@ -53,45 +52,43 @@
    {:stream :scorer-fn :triggers :subscribed?}."
   core/create)
 
-(def start!
+(def ^{:stratum 0} start!
   "Subscribe the component to its stream so events begin flowing to the
    scorer-fn. Idempotent — repeat calls are no-ops.
    Args: `component` (the atom from [[create]]). Returns that same atom."
   core/start!)
 
-(def stop!
+(def ^{:stratum 0} stop!
   "Unsubscribe the component from its stream. Idempotent — no-op if not
    currently subscribed.
    Args: `component` (the atom). Returns that same atom."
   core/stop!)
 
-(def attach!
+(def ^{:stratum 0} attach!
   "Create + start in one step.
    Args: `stream`, and an optional opts map (see [[create]]).
    Returns the started component atom."
   core/attach!)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Extension points
-
-(def default-scorer-fn
+(def ^{:stratum 0} default-scorer-fn
   "Placeholder scorer used when no `:scorer-fn` is supplied to [[create]].
    1-ary fn (pr-event → nil); always returns nil, so no `:pr/scored`
    events are emitted. Replace with a real scorer at create time."
   core/default-scorer-fn)
 
-(def load-default-triggers
+(def ^{:stratum 0} load-default-triggers
   "Read the default trigger-event-types set from the classpath resource at
    [[trigger-config-resource]]. Takes no args. Returns a set of event-type
    keywords. Throws ex-info if the resource is missing from the classpath."
   core/load-default-triggers)
 
-(def default-trigger-event-types
+(def ^{:stratum 0} default-trigger-event-types
   "A delay wrapping the default trigger set (see [[load-default-triggers]]);
    deref to obtain the set of event-type keywords. Delayed so the classpath
    scan runs on first use rather than at namespace load."
   core/default-trigger-event-types)
 
-(def trigger-config-resource
+(def ^{:stratum 0} trigger-config-resource
   "String: classpath location of the default trigger-event-types EDN set."
   core/trigger-config-resource)
