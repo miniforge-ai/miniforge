@@ -15,17 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.comments-test
   "Tests for the violation comment renderer (N13 §2.3)."
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [ai.miniforge.compliance-scanner.comments :as comments]))
 
-(def ^:private base-pack-info
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private base-pack-info
   {:pack/id "miniforge-standards" :pack/version "1.4.0"})
 
-(def ^:private auto-fixable-violation
+(def ^{:stratum 0} ^:private auto-fixable-violation
   {:rule/id        :ai.miniforge.standards/exceptions-as-data
    :rule/category  "code-quality"
    :rule/title     "Exceptions must be data, not exceptions"
@@ -36,7 +37,7 @@
    :auto-fixable?  true
    :rationale      "Throwing exceptions breaks effect-as-data."})
 
-(def ^:private non-fixable-violation
+(def ^{:stratum 0} ^:private non-fixable-violation
   {:rule/id        :ai.miniforge.standards/no-credentials-in-source
    :rule/category  "security"
    :rule/title     "Hardcoded credentials"
@@ -47,7 +48,14 @@
    :auto-fixable?  false
    :rationale      "Manual review required for credential rotation."})
 
-(deftest payload-shape-required-keys
+(deftest ^{:stratum 0} extract-payload-missing-returns-nil
+  (testing "no payload block → nil"
+    (is (nil? (comments/extract-payload "no payload here")))
+    (is (nil? (comments/extract-payload nil)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} payload-shape-required-keys
   (testing "payload contains all N13 §2.3 keys"
     (let [p (comments/violation->payload auto-fixable-violation base-pack-info)]
       (is (= :ai.miniforge.standards/exceptions-as-data (:violation/rule-id p)))
@@ -58,7 +66,7 @@
       (is (= "1.4.0" (:violation/pack-version p)))
       (is (#{:error :warning :info} (:violation/severity p))))))
 
-(deftest payload-rationale-is-always-text
+(deftest ^{:stratum 1} payload-rationale-is-always-text
   (testing "absent and malformed rationales become empty strings"
     (doseq [violation [(dissoc auto-fixable-violation :rationale)
                        (assoc auto-fixable-violation :rationale nil)
@@ -68,7 +76,7 @@
       (is (= "" (:violation/rationale
                  (comments/violation->payload violation base-pack-info)))))))
 
-(deftest comment-body-uses-normalized-rationale
+(deftest ^{:stratum 1} comment-body-uses-normalized-rationale
   (testing "absent and malformed rationales are omitted from the human-readable body"
     (doseq [rationale [nil false :not-text 987654321]
             :let [violation (assoc auto-fixable-violation :rationale rationale)
@@ -78,7 +86,7 @@
       (is (not (str/includes? body (pr-str rationale)))
           (str "did not render " (pr-str rationale))))))
 
-(deftest payload-severity-inference
+(deftest ^{:stratum 1} payload-severity-inference
   (testing "auto-fixable + non-critical → :warning"
     (is (= :warning
            (:violation/severity
@@ -105,7 +113,7 @@
              (assoc auto-fixable-violation :severity-override :info)
              base-pack-info))))))
 
-(deftest comment-record-shape
+(deftest ^{:stratum 1} comment-record-shape
   (testing "comment record has the four required keys + payload"
     (let [c (comments/violation->comment auto-fixable-violation base-pack-info)]
       (is (= "miniforge-policy-evaluator[bot]" (:comment/author c)))
@@ -114,7 +122,7 @@
       (is (string? (:comment/body c)))
       (is (map? (:comment/payload c))))))
 
-(deftest comment-body-embeds-edn-payload
+(deftest ^{:stratum 1} comment-body-embeds-edn-payload
   (testing "comment body contains a parseable :comment/payload EDN block"
     (let [c (comments/violation->comment auto-fixable-violation base-pack-info)
           body (:comment/body c)]
@@ -123,18 +131,13 @@
       (is (str/includes? body ":violation/rule-id"))
       (is (str/includes? body "miniforge-policy-evaluator[bot]")))))
 
-(deftest extract-payload-roundtrips
+(deftest ^{:stratum 1} extract-payload-roundtrips
   (testing "rendered → extracted yields the same payload"
     (let [c   (comments/violation->comment auto-fixable-violation base-pack-info)
           got (comments/extract-payload (:comment/body c))]
       (is (= (:comment/payload c) got)))))
 
-(deftest extract-payload-missing-returns-nil
-  (testing "no payload block → nil"
-    (is (nil? (comments/extract-payload "no payload here")))
-    (is (nil? (comments/extract-payload nil)))))
-
-(deftest bulk-render-stable-order
+(deftest ^{:stratum 1} bulk-render-stable-order
   (testing "violations are sorted by (path, line, rule-id) ascending"
     (let [vs [(assoc auto-fixable-violation :line 50)
               non-fixable-violation
@@ -147,7 +150,7 @@
             lines               (mapv :comment/line components-comments)]
         (is (= [42 50] lines))))))
 
-(deftest auto-fixable-flag-preserved
+(deftest ^{:stratum 1} auto-fixable-flag-preserved
   (testing "auto-fixable? boolean flows through to payload"
     (is (true?  (-> auto-fixable-violation
                     (comments/violation->comment base-pack-info)
@@ -158,7 +161,7 @@
                     :comment/payload
                     :violation/auto-fixable?)))))
 
-(deftest pack-info-injected
+(deftest ^{:stratum 1} pack-info-injected
   (testing "pack-id and pack-version are passed through"
     (let [p (comments/violation->payload auto-fixable-violation
                                           {:pack/id "custom-pack"

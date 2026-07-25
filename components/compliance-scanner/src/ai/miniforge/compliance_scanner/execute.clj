@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.execute
   "Apply auto-fixable violations to files and create one PR per rule.
 
@@ -29,9 +28,9 @@
             [clojure.string     :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File patch helpers
 
-(defn- apply-line-replacement
+;; File patch helpers
+(defn- ^{:stratum 0} apply-line-replacement
   "Replace the first occurrence of :current with :suggested on the violation's line.
    lines is a vector of strings (0-indexed). line numbers in violations are 1-indexed."
   [lines violation]
@@ -42,18 +41,18 @@
       (update lines idx str/replace-first current suggested)
       lines)))
 
-(defn- prepend-violation?
+(defn- ^{:stratum 0} prepend-violation?
   "Return true if a violation is a prepend-type remediation."
   [violation]
   (or (= :prepend (get violation :remediation-type))
       (= :std/header-copyright (get violation :rule/id))))
 
-(defn- append-violation?
+(defn- ^{:stratum 0} append-violation?
   "Return true if a violation is an append-type remediation."
   [violation]
   (= :append (get violation :remediation-type)))
 
-(defn- apply-prepend
+(defn- ^{:stratum 0} apply-prepend
   "Prepend content from the violation's remediation template."
   [content violation]
   (let [template (get violation :remediation-template)]
@@ -61,7 +60,7 @@
       (str template "\n" content)
       content)))
 
-(defn- apply-append
+(defn- ^{:stratum 0} apply-append
   "Append content from the violation's remediation template."
   [content violation]
   (let [template (get violation :remediation-template)]
@@ -71,7 +70,66 @@
         (str content "\n" template "\n"))
       content)))
 
-(defn patch-file-content
+(def ^{:stratum 0} ^:private semantic-repair-template
+  "Template for LLM semantic repair prompts.
+   Pack-bundled templates (PR #463) will supersede this when wired."
+  (str "Fix the following code violation.\n\n"
+       "**Rule:** %s\n"
+       "**File:** %s:%s\n"
+       "**Current code:** `%s`\n"
+       "**Issue:** %s\n"
+       "%s\n"
+       "\nProvide the corrected code only, no explanation."))
+
+;; Git shell helpers
+(defn- ^{:stratum 0} git!
+  "Run a git command in repo-path directory. Returns the sh result map.
+   Logs non-zero exit codes for debugging (branch -D failures are expected)."
+  [repo-path & args]
+  (let [result (apply shell/sh "git" (concat args [:dir repo-path]))]
+    (when (and (not (zero? (:exit result)))
+               (not (str/includes? (str args) "branch")))  ;; branch -D may fail safely
+      (println (str "  git " (str/join " " args) " → exit " (:exit result)))
+      (when-not (str/blank? (:err result))
+        (println (str "  stderr: " (str/trim (:err result))))))
+    result))
+
+(defn- ^{:stratum 0} branch-slug
+  "Convert a rule category and title to a valid git branch segment."
+  [category title]
+  (-> (str/lower-case title)
+      (str/replace #"[^a-z0-9]+" "-")
+      (str/replace #"-+$" "")
+      (->> (str "fix/compliance-" category "-"))))
+
+;------------------------------------------------------------------------------ Layer 1.5
+;; PR documentation (pure)
+(defn- ^{:stratum 0} today-str
+  "Return today's date as YYYY-MM-DD."
+  []
+  (str (java.time.LocalDate/now)))
+
+(defn- ^{:stratum 0} format-violation-line
+  "Format a single violation as a markdown table row."
+  [v]
+  (str "| `" (get v :file "") "` | " (get v :line 0)
+       " | `" (get v :current "") "`"
+       (when-let [s (get v :suggested)]
+         (str " | `" s "`"))
+       " |"))
+
+(defn- ^{:stratum 0} write-pr-doc!
+  "Write the PR documentation file. Creates parent directories if needed.
+   Returns the relative path written."
+  [repo-path relative-path content]
+  (let [f (io/file repo-path relative-path)]
+    (io/make-parents f)
+    (spit f content)
+    relative-path))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} patch-file-content
   "Apply all violations for one file to its string content. Pure — no I/O.
 
    Line-replacement violations are applied bottom-up (descending line number) so
@@ -95,18 +153,7 @@
                         patched)]
     patched))
 
-(def ^:private semantic-repair-template
-  "Template for LLM semantic repair prompts.
-   Pack-bundled templates (PR #463) will supersede this when wired."
-  (str "Fix the following code violation.\n\n"
-       "**Rule:** %s\n"
-       "**File:** %s:%s\n"
-       "**Current code:** `%s`\n"
-       "**Issue:** %s\n"
-       "%s\n"
-       "\nProvide the corrected code only, no explanation."))
-
-(defn build-semantic-repair-prompt
+(defn ^{:stratum 1} build-semantic-repair-prompt
   "Build a structured prompt for LLM-based semantic repair of a violation.
 
    This is the dispatch path for :semantic remediation strategy violations.
@@ -130,61 +177,19 @@
                       (get violation :rationale "")
                       (or reference ""))}))
 
-(defn- patch-file!
-  "Apply auto-fixable violations to a file on disk. No-op if content is unchanged.
-   Returns the absolute file path."
-  [repo-path file violations]
-  (let [path    (str repo-path "/" file)
-        content (slurp path)
-        patched (patch-file-content content violations)]
-    (when-not (= content patched)
-      (spit path patched))
-    path))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Git shell helpers
-
-(defn- git!
-  "Run a git command in repo-path directory. Returns the sh result map.
-   Logs non-zero exit codes for debugging (branch -D failures are expected)."
-  [repo-path & args]
-  (let [result (apply shell/sh "git" (concat args [:dir repo-path]))]
-    (when (and (not (zero? (:exit result)))
-               (not (str/includes? (str args) "branch")))  ;; branch -D may fail safely
-      (println (str "  git " (str/join " " args) " → exit " (:exit result)))
-      (when-not (str/blank? (:err result))
-        (println (str "  stderr: " (str/trim (:err result))))))
-    result))
-
-(defn- branch-slug
-  "Convert a rule category and title to a valid git branch segment."
-  [category title]
-  (-> (str/lower-case title)
-      (str/replace #"[^a-z0-9]+" "-")
-      (str/replace #"-+$" "")
-      (->> (str "fix/compliance-" category "-"))))
-
-(defn- reset-to-origin-main!
+(defn- ^{:stratum 1} reset-to-origin-main!
   "Detach HEAD at origin/main, giving a clean base for the next rule branch."
   [repo-path]
   (git! repo-path "fetch" "origin" "main" "--quiet")
   (git! repo-path "checkout" "--detach" "origin/main"))
 
-(defn- create-rule-branch!
+(defn- ^{:stratum 1} create-rule-branch!
   "Create and checkout a new branch from origin/main. Deletes if already exists."
   [repo-path branch]
   (git! repo-path "branch" "-D" branch)  ;; safe to fail if absent
   (git! repo-path "checkout" "-b" branch "origin/main"))
 
-;------------------------------------------------------------------------------ Layer 1.5
-;; PR documentation (pure)
-
-(defn- today-str
-  "Return today's date as YYYY-MM-DD."
-  []
-  (str (java.time.LocalDate/now)))
-
-(defn- pr-doc-filename
+(defn- ^{:stratum 1} pr-doc-filename
   "Generate the docs/pull-requests/ filename for a compliance PR."
   [category title]
   (let [slug (-> (str/lower-case title)
@@ -192,16 +197,7 @@
                  (str/replace #"-+$" ""))]
     (str "docs/pull-requests/" (today-str) "-fix-" category "-" slug ".md")))
 
-(defn- format-violation-line
-  "Format a single violation as a markdown table row."
-  [v]
-  (str "| `" (get v :file "") "` | " (get v :line 0)
-       " | `" (get v :current "") "`"
-       (when-let [s (get v :suggested)]
-         (str " | `" s "`"))
-       " |"))
-
-(defn- build-pr-doc
+(defn- ^{:stratum 1} build-pr-doc
   "Generate the PR documentation markdown for a compliance fix.
    Pure function — returns the markdown string."
   [branch category title patched-files violations-fixed auto-violations]
@@ -244,7 +240,7 @@
          "---\n"
          "*Auto-generated by the Miniforge compliance scanner.*\n")))
 
-(defn- build-pr-body
+(defn- ^{:stratum 1} build-pr-body
   "Generate the GitHub PR body with YAML attribution frontmatter."
   [category title violations-fixed file-count pr-doc-path]
   (str "```yaml\n"
@@ -265,19 +261,23 @@
        "\n"
        "\uD83E\uDD16 Generated with [Miniforge](https://miniforge.ai)"))
 
-(defn- write-pr-doc!
-  "Write the PR documentation file. Creates parent directories if needed.
-   Returns the relative path written."
-  [repo-path relative-path content]
-  (let [f (io/file repo-path relative-path)]
-    (io/make-parents f)
-    (spit f content)
-    relative-path))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Per-rule fix, commit, and PR
 
-(defn- fix-and-pr-for-rule!
+(defn- ^{:stratum 2} patch-file!
+  "Apply auto-fixable violations to a file on disk. No-op if content is unchanged.
+   Returns the absolute file path."
+  [repo-path file violations]
+  (let [path    (str repo-path "/" file)
+        content (slurp path)
+        patched (patch-file-content content violations)]
+    (when-not (= content patched)
+      (spit path patched))
+    path))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Per-rule fix, commit, and PR
+(defn- ^{:stratum 3} fix-and-pr-for-rule!
   "Create a branch, apply auto-fixable fixes, write PR doc, commit, push, and open a PR.
    Returns a result map with :branch, :pr-url, :violations-fixed, :files-changed, :pr-doc."
   [repo-path rule-id category title tasks]
@@ -330,10 +330,10 @@
          :violations-fixed violations-fixed
          :files-changed    (count patched-files)}))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Top-level entry point
+;------------------------------------------------------------------------------ Layer 4
 
-(defn execute!
+;; Top-level entry point
+(defn ^{:stratum 4} execute!
   "Apply all auto-fixable violations and create one PR per rule.
 
    Reads DAG tasks from plan, groups by :task/rule-id, and for each rule

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.plan
   "Plan phase: generate DAG task defs and markdown work spec from violations.
 
@@ -28,30 +27,42 @@
             [clojure.string                            :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; DAG topology helpers
 
-(defn- group-by-file-rule
+;; DAG topology helpers
+(defn- ^{:stratum 0} group-by-file-rule
   "Group violations by [file rule-id].
    Returns map of [file rule-id] -> [violation ...]."
   [violations]
   (group-by (fn [v] [(get v :file) (get v :rule/id)]) violations))
 
-(defn- dewey-order
+(defn- ^{:stratum 0} dewey-order
   "Numeric sort key for a Dewey code string."
   [dewey-str]
   (coerce/safe-parse-int dewey-str 0))
 
-(defn- key->uuid-entry
+(defn- ^{:stratum 0} key->uuid-entry
   "Return [k (random-uuid)] for use in building a key->id map."
   [k]
   [k (random-uuid)])
 
-(defn- key->category-entry
+(defn- ^{:stratum 0} key->category-entry
   "Return [k category-string] for a [file rule-id] key and its violations."
   [[k vs]]
   [k (get (first vs) :rule/category "0")])
 
-(defn- file->ordered-rule-ids-entry
+;; Markdown work-spec builder
+(defn- ^{:stratum 0} violation->md-row
+  "Render a single violation as a markdown list item."
+  [v]
+  (let [tag (if (get v :auto-fixable?) (msg/t :plan/tag-auto) (msg/t :plan/tag-review))]
+    (str "- **L" (get v :line) "** `" (get v :current) "`"
+         (when-let [s (get v :suggested)]
+           (str " → `" s "`"))
+         " [" tag "]")))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} file->ordered-rule-ids-entry
   "Return [file ordered-rule-ids] sorted by Dewey category ascending.
    ks is a seq of [file rule-id] keys; the result extracts just the rule-ids."
   [key->cat [file ks]]
@@ -59,7 +70,7 @@
              (sort-by #(dewey-order (get key->cat %)))
              (mapv second))])
 
-(defn- build-task
+(defn- ^{:stratum 1} build-task
   "Build a PlanTask for a [file rule-id] group, resolving intra-file deps."
   [key->id key->cat file->rule-ids [[file rule-id] viols]]
   (let [id        (get key->id [file rule-id])
@@ -70,7 +81,17 @@
         deps      (into #{} (map #(get key->id [file %]) prior-ids))]
     (factory/->plan-task id deps file rule-id viols)))
 
-(defn- build-dag-tasks
+(defn- ^{:stratum 1} render-violation-group
+  "Render a labeled group of violations as markdown lines, or nil if empty."
+  [label viols]
+  (when (seq viols)
+    (concat [label ""]
+            (map violation->md-row viols)
+            [""])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} build-dag-tasks
   "Build PlanTask records with intra-file ordering deps.
 
    Within a file, a task for a rule with a higher Dewey category depends on all
@@ -83,27 +104,7 @@
                                      (group-by first (keys groups))))]
     (mapv (partial build-task key->id key->cat file->rule-ids) groups)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Markdown work-spec builder
-
-(defn- violation->md-row
-  "Render a single violation as a markdown list item."
-  [v]
-  (let [tag (if (get v :auto-fixable?) (msg/t :plan/tag-auto) (msg/t :plan/tag-review))]
-    (str "- **L" (get v :line) "** `" (get v :current) "`"
-         (when-let [s (get v :suggested)]
-           (str " → `" s "`"))
-         " [" tag "]")))
-
-(defn- render-violation-group
-  "Render a labeled group of violations as markdown lines, or nil if empty."
-  [label viols]
-  (when (seq viols)
-    (concat [label ""]
-            (map violation->md-row viols)
-            [""])))
-
-(defn- section-for-rule
+(defn- ^{:stratum 2} section-for-rule
   "Render a markdown section for all violations of one rule."
   [_rule-id viols]
   (let [rule-title (get (first viols) :rule/title (str _rule-id))
@@ -117,7 +118,9 @@
        (render-violation-group (msg/t :plan/auto-fixable-label) auto)
        (render-violation-group (msg/t :plan/needs-review-label) needs)))))
 
-(defn- build-work-spec
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} build-work-spec
   "Build the full markdown work spec string from classified violations."
   [violations summary]
   (let [by-rule      (group-by :rule/id violations)
@@ -168,10 +171,10 @@
        (msg/t :plan/instr-3)
        ""])))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Top-level entry point
+;------------------------------------------------------------------------------ Layer 4
 
-(defn plan
+;; Top-level entry point
+(defn ^{:stratum 4} plan
   "Generate DAG task defs and markdown work spec from violations.
 
    Arguments:
