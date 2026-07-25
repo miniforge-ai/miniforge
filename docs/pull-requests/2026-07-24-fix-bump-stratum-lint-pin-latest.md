@@ -1,10 +1,10 @@
-# fix: bump stratum-lint pin to pick up two correctness fixes
+# fix: bump stratum-lint pin to pick up three correctness fixes
 
 ## Overview
 
 Bumps `tasks/stratum.clj`'s pinned `stratum-lint` sha from `acd82a2f`
 (current on `main`, includes the SL001 scoping and comment-block fixes
-from #1459) to `8a40bdea`, which additionally includes:
+from #1459) to `59b4b9a3`, which additionally includes:
 
 - [stratum-lint#8](https://github.com/miniforge-ai/stratum-lint/pull/8):
   `--fix` keeps a `#_{...}` reader-discard (e.g.
@@ -14,6 +14,11 @@ from #1459) to `8a40bdea`, which additionally includes:
   `--fix` orders a `defrecord`/`deftype` before any def calling its
   auto-generated constructor (`->Name`/`map->Name`) — the old pin could
   produce code that fails to compile.
+- [stratum-lint#12](https://github.com/miniforge-ai/stratum-lint/pull/12):
+  `--fix` keeps a same-line trailing comment (documenting the last field
+  of a multi-line `defrecord`, or the last entry of a vector literal)
+  attached to the def it trails, instead of relocating it above the next
+  def.
 
 ## Motivation
 
@@ -28,16 +33,18 @@ time — confirmed live via a failing `test:graalvm` step (`Unable to
 resolve symbol: ->ClaudeCodeAdapter`) after a commit that had, moments
 earlier, verified clean.
 
-Every other Wave 1 PR so far (`compliance-scanner`, `reliability`,
-`decision`, `gate`) happened not to hit this — none combine a reader-
-discard with a problematic constructor-before-definition ordering — but
-any future component that does would silently corrupt on commit without
-this bump. This is now the priority blocker for continuing Wave 1.
+`compliance-scanner` and `decision` didn't hit any of these three.
+`reliability` and `gate` both hit the same-line-trailing-comment bug
+independently (a real, recurring pattern — 2 of the first 5 components),
+flagged in automated review on `gate`'s PR before this pin bump landed.
+Any future component combining these patterns would silently corrupt on
+commit without this bump — this is the priority blocker for continuing
+Wave 1.
 
 ## Changes in Detail
 
 - `tasks/stratum.clj`: `stratum-lint-deps`'s pinned sha,
-  `acd82a2f` → `8a40bdea`.
+  `acd82a2f` → `59b4b9a3`.
 
 ## Testing Plan
 
@@ -48,11 +55,16 @@ one-line change is the relevant end-to-end confirmation.
 ## Deployment Plan
 
 Merges to `main` immediately — every commit touching a `.clj`/`.cljc`
-file goes through this pin until it's bumped.
+file goes through this pin until it's bumped. Follow-on: re-run `gate`'s
+autofix fresh against this sha (addresses the pending review comment plus
+any other undetected same-line-trailing-comment instances in that
+component), and a small fix-up PR for the already-merged `reliability`
+component's `degradation.clj` to restore its misplaced comment.
 
 ## Related Issues/PRs
 
-- Fixes consumed: [stratum-lint#8](https://github.com/miniforge-ai/stratum-lint/pull/8), [#10](https://github.com/miniforge-ai/stratum-lint/pull/10)
+- Fixes consumed: [stratum-lint#8](https://github.com/miniforge-ai/stratum-lint/pull/8),
+  [#10](https://github.com/miniforge-ai/stratum-lint/pull/10), [#12](https://github.com/miniforge-ai/stratum-lint/pull/12)
 - Blocks: `fix/stratum-lint-wave1-adapter-claude-code` (currently stuck on
   this exact staleness)
 - Part of: `work/stratum-lint-baseline-2026-07-24.md`, Wave 1
