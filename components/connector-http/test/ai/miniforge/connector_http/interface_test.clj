@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-http.interface :as http-conn]
             [ai.miniforge.connector-http.impl :as impl]
             [ai.miniforge.connector.interface :as conn]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Connector metadata
 ;; ---------------------------------------------------------------------------
-
-(deftest connector-metadata-test
+(deftest ^{:stratum 0} connector-metadata-test
   (testing "HTTP connector metadata"
     (let [meta http-conn/connector-metadata]
       (is (= :source (:connector/type meta)))
@@ -36,8 +36,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Connect / close lifecycle
 ;; ---------------------------------------------------------------------------
-
-(deftest connect-close-lifecycle-test
+(deftest ^{:stratum 0} connect-close-lifecycle-test
   (testing "Connect and close lifecycle"
     (let [hc (http-conn/create-http-connector)
           result (conn/connect hc {:http/base-url "https://api.example.com"
@@ -47,13 +46,13 @@
       (let [close-result (conn/close hc (:connection/handle result))]
         (is (= :closed (:connector/status close-result)))))))
 
-(deftest connect-missing-base-url-test
+(deftest ^{:stratum 0} connect-missing-base-url-test
   (testing "Connect returns anomaly without :http/base-url"
     (let [hc (http-conn/create-http-connector)
           result (conn/connect hc {:http/endpoint "/data"} {})]
       (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest connect-missing-endpoint-test
+(deftest ^{:stratum 0} connect-missing-endpoint-test
   (testing "Connect returns anomaly without :http/endpoint"
     (let [hc (http-conn/create-http-connector)
           result (conn/connect hc {:http/base-url "https://api.example.com"} {})]
@@ -62,8 +61,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Extract with stubbed HTTP (override do-request)
 ;; ---------------------------------------------------------------------------
-
-(deftest extract-simple-test
+(deftest ^{:stratum 0} extract-simple-test
   (testing "Extract with simple JSON array response"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
@@ -78,7 +76,7 @@
         (is (= [{:id 1 :name "alpha"} {:id 2 :name "beta"}] (:records result)))
         (conn/close hc handle)))))
 
-(deftest extract-nested-response-path-test
+(deftest ^{:stratum 0} extract-nested-response-path-test
   (testing "Extract with nested response path"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
@@ -95,7 +93,7 @@
         (is (= [{:id 1} {:id 2} {:id 3}] (:records result)))
         (conn/close hc handle)))))
 
-(deftest extract-offset-pagination-test
+(deftest ^{:stratum 0} extract-offset-pagination-test
   (testing "Extract with offset-based pagination"
     (let [call-count (atom 0)]
       (with-redefs [impl/do-request
@@ -130,7 +128,7 @@
             (is (false? (:extract/has-more r2))))
           (conn/close hc handle))))))
 
-(deftest extract-cursor-pagination-test
+(deftest ^{:stratum 0} extract-cursor-pagination-test
   (testing "Extract with cursor-based pagination"
     (with-redefs [impl/do-request
                   (fn [_url _headers params]
@@ -161,7 +159,7 @@
           (is (false? (:extract/has-more r2))))
         (conn/close hc handle)))))
 
-(deftest extract-http-error-test
+(deftest ^{:stratum 0} extract-http-error-test
   (testing "Extract returns anomaly on HTTP 500"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
@@ -176,7 +174,7 @@
           (is (= :transient (:error-type result))))
         (conn/close hc handle)))))
 
-(deftest extract-rate-limited-test
+(deftest ^{:stratum 0} extract-rate-limited-test
   (testing "Extract returns anomaly on HTTP 429"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
@@ -195,8 +193,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Batch extract
 ;; ---------------------------------------------------------------------------
-
-(deftest batch-extract-parallel-test
+(deftest ^{:stratum 0} batch-extract-parallel-test
   (testing "Extract with :batch/param-sets fetches all param sets in parallel"
     (let [calls (atom [])]
       (with-redefs [impl/do-request
@@ -225,7 +222,7 @@
           (is (false? (:extract/has-more result)))
           (conn/close hc handle))))))
 
-(deftest batch-extract-enriches-records-test
+(deftest ^{:stratum 0} batch-extract-enriches-records-test
   (testing "Batch extract merges param-set keys into each record"
     (with-redefs [impl/do-request
                   (fn [_url _headers _params]
@@ -247,7 +244,7 @@
         (is (= "2026-01-01" (:date (first records))))
         (conn/close hc handle)))))
 
-(deftest batch-extract-error-propagates-test
+(deftest ^{:stratum 0} batch-extract-error-propagates-test
   (testing "Batch extract returns anomaly from individual fetches"
     (with-redefs [impl/do-request
                   (fn [_url _headers params]
@@ -269,8 +266,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Auth header construction
 ;; ---------------------------------------------------------------------------
-
-(deftest auth-header-api-key-test
+(deftest ^{:stratum 0} auth-header-api-key-test
   (testing "API key auth sets Bearer header"
     (with-redefs [impl/do-request
                   (fn [_url headers _params]
@@ -285,7 +281,7 @@
         (conn/extract hc handle "data" {})
         (conn/close hc handle)))))
 
-(deftest auth-header-basic-test
+(deftest ^{:stratum 0} auth-header-basic-test
   (testing "Basic auth sets Basic header"
     (with-redefs [impl/do-request
                   (fn [_url headers _params]
@@ -303,8 +299,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Discover
 ;; ---------------------------------------------------------------------------
-
-(deftest discover-test
+(deftest ^{:stratum 0} discover-test
   (testing "Discover returns endpoint info"
     (let [hc (http-conn/create-http-connector)
           handle (:connection/handle
@@ -318,8 +313,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Checkpoint
 ;; ---------------------------------------------------------------------------
-
-(deftest checkpoint-test
+(deftest ^{:stratum 0} checkpoint-test
   (testing "Checkpoint returns committed status"
     (let [hc (http-conn/create-http-connector)
           handle (:connection/handle

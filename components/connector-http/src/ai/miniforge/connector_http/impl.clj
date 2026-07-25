@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.impl
   "Implementation functions for the HTTP connector.
    Pure logic separated from protocol wiring."
@@ -28,18 +27,13 @@
             [cheshire.core :as json])
   (:import [java.util UUID]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; -- Handle state --
-
-(def ^:private handles (connector/create-handle-registry))
-
-(defn get-handle [handle] (connector/get-handle handles handle))
-(defn store-handle! [handle state] (connector/store-handle! handles handle state))
-(defn remove-handle! [handle] (connector/remove-handle! handles handle))
-(defn touch-handle! [handle] (connector/touch-handle! handles handle))
+(def ^{:stratum 0} ^:private handles (connector/create-handle-registry))
 
 ;; -- Auth --
-
-(defn build-auth-headers
+(defn ^{:stratum 0} build-auth-headers
   "Build auth headers from auth config."
   [{:auth/keys [method credential-id]}]
   (case method
@@ -48,8 +42,7 @@
     {}))
 
 ;; -- Rate limiting --
-
-(defn enforce-rate-limit!
+(defn ^{:stratum 0} enforce-rate-limit!
   "Sleep if needed to enforce requests-per-second."
   [handle-state]
   (when-let [rps (get-in handle-state [:config :http/rate-limit :requests-per-second])]
@@ -60,8 +53,7 @@
           (Thread/sleep (long (- min-interval-ms elapsed))))))))
 
 ;; -- HTTP --
-
-(defn do-request
+(defn ^{:stratum 0} do-request
   "Execute an HTTP GET request. Returns schema/success or schema/failure."
   [url headers query-params]
   (let [resp (http/get url {:headers      headers
@@ -85,7 +77,7 @@
       (schema/failure :body (msg/t :http/request-failed {:status status :error (:body resp)})
                       {:error-type :permanent}))))
 
-(defn extract-records
+(defn ^{:stratum 0} extract-records
   "Extract records from response body using configured response-path."
   [body response-path]
   (let [data (if response-path (get-in body response-path) body)]
@@ -95,8 +87,7 @@
       :else              [])))
 
 ;; -- Pagination helpers --
-
-(defn build-page-params
+(defn ^{:stratum 0} build-page-params
   "Build query-params map for the current page."
   [pagination offset cursor-value batch-size]
   (case (:type pagination)
@@ -104,7 +95,7 @@
     :cursor (page/cursor-params pagination cursor-value batch-size)
     {}))
 
-(defn page-has-more?
+(defn ^{:stratum 0} page-has-more?
   "Determine if more pages exist after this batch."
   [pagination body offset record-count]
   (case (:type pagination)
@@ -112,7 +103,7 @@
     :cursor (some? (page/extract-cursor-value body pagination))
     false))
 
-(defn next-cursor-value
+(defn ^{:stratum 0} next-cursor-value
   "Compute the cursor value for the next page."
   [pagination body offset record-count]
   (case (:type pagination)
@@ -120,46 +111,20 @@
     :cursor (page/extract-cursor-value body pagination)
     nil))
 
-;; -- Lifecycle --
+(defn ^{:stratum 0} do-checkpoint [cursor-state]
+  (connector/checkpoint-result cursor-state))
 
-(defn do-connect
-  "Validate config, register handle. Returns connect-result."
-  [config auth]
-  (let [base-url (:http/base-url config)
-        endpoint (:http/endpoint config)]
-    (cond
-      (nil? base-url) (response/make-anomaly :anomalies/incorrect
-                                             (msg/t :http/base-url-required)
-                                             {:config config})
-      (nil? endpoint) (response/make-anomaly :anomalies/incorrect
-                                             (msg/t :http/endpoint-required)
-                                             {:config config})
+;------------------------------------------------------------------------------ Layer 1
 
-      :else
-      (let [handle       (str (UUID/randomUUID))
-            auth-headers (if (and auth (:auth/method auth))
-                           (build-auth-headers auth)
-                           {})]
-        (store-handle! handle {:config       config
-                               :auth-headers auth-headers
-                               :last-request-at nil})
-        (connector/connect-result handle)))))
+(defn ^{:stratum 1} get-handle [handle] (connector/get-handle handles handle))
 
-(defn do-close [handle]
-  (remove-handle! handle)
-  (connector/close-result))
+(defn ^{:stratum 1} store-handle! [handle state] (connector/store-handle! handles handle state))
 
-;; -- Source --
+(defn ^{:stratum 1} remove-handle! [handle] (connector/remove-handle! handles handle))
 
-(defn do-discover [handle]
-  (if-let [{:keys [config]} (get-handle handle)]
-    (connector/discover-result [{:schema/name    (:http/endpoint config)
-                              :schema/base-url (:http/base-url config)}])
-    (response/make-anomaly :anomalies/not-found
-                           (msg/t :http/handle-not-found {:handle handle})
-                           {:handle handle})))
+(defn ^{:stratum 1} touch-handle! [handle] (connector/touch-handle! handles handle))
 
-(defn- fetch-single
+(defn- ^{:stratum 1} fetch-single
   "Fetch one page of records for a single query-params set.
    Returns the records vector."
   [url headers base-query-params response-path pagination opts]
@@ -182,7 +147,46 @@
                         :cursor/value next-val})]
         {:records records :cursor cursor :has-more has-more}))))
 
-(defn do-extract
+;------------------------------------------------------------------------------ Layer 2
+
+;; -- Lifecycle --
+(defn ^{:stratum 2} do-connect
+  "Validate config, register handle. Returns connect-result."
+  [config auth]
+  (let [base-url (:http/base-url config)
+        endpoint (:http/endpoint config)]
+    (cond
+      (nil? base-url) (response/make-anomaly :anomalies/incorrect
+                                             (msg/t :http/base-url-required)
+                                             {:config config})
+      (nil? endpoint) (response/make-anomaly :anomalies/incorrect
+                                             (msg/t :http/endpoint-required)
+                                             {:config config})
+
+      :else
+      (let [handle       (str (UUID/randomUUID))
+            auth-headers (if (and auth (:auth/method auth))
+                           (build-auth-headers auth)
+                           {})]
+        (store-handle! handle {:config       config
+                               :auth-headers auth-headers
+                               :last-request-at nil})
+        (connector/connect-result handle)))))
+
+(defn ^{:stratum 2} do-close [handle]
+  (remove-handle! handle)
+  (connector/close-result))
+
+;; -- Source --
+(defn ^{:stratum 2} do-discover [handle]
+  (if-let [{:keys [config]} (get-handle handle)]
+    (connector/discover-result [{:schema/name    (:http/endpoint config)
+                              :schema/base-url (:http/base-url config)}])
+    (response/make-anomaly :anomalies/not-found
+                           (msg/t :http/handle-not-found {:handle handle})
+                           {:handle handle})))
+
+(defn ^{:stratum 2} do-extract
   "Fetch records from the HTTP API.
    If the handle's config contains :batch/param-sets, fetches all param sets
    in parallel via pmap, enriching each record with its param-set keys.
@@ -226,6 +230,3 @@
     (response/make-anomaly :anomalies/not-found
                            (msg/t :http/handle-not-found {:handle handle})
                            {:handle handle})))
-
-(defn do-checkpoint [cursor-state]
-  (connector/checkpoint-result cursor-state))

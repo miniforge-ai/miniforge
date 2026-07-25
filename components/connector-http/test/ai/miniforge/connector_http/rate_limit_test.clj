@@ -15,24 +15,40 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.rate-limit-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-http.rate-limit :as rate]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def github-mapping
+;; Fixtures
+(def ^{:stratum 0} github-mapping
   {:remaining "x-ratelimit-remaining" :reset "x-ratelimit-reset" :limit "x-ratelimit-limit"})
 
-(def gitlab-mapping
+(def ^{:stratum 0} gitlab-mapping
   {:remaining "ratelimit-remaining" :reset "ratelimit-reset" :limit "ratelimit-limit"})
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Tests
+(deftest ^{:stratum 0} update-rate-state-test
+  (testing "stores rate info in handle atom"
+    (let [handles (atom {"h1" {:config {}}})]
+      (rate/update-rate-state! handles "h1" {:remaining 100 :reset-epoch 99999})
+      (is (= 100 (get-in @handles ["h1" :rate-limit :remaining])))))
 
-(deftest parse-rate-headers-test
+  (testing "no-op when rate-info is nil"
+    (let [handles (atom {"h1" {:config {}}})]
+      (rate/update-rate-state! handles "h1" nil)
+      (is (nil? (get-in @handles ["h1" :rate-limit]))))))
+
+(deftest ^{:stratum 0} acquire-permit-no-block-test
+  (testing "does not block when remaining is above threshold"
+    (let [handles (atom {"h1" {:rate-limit {:remaining 4990 :reset-epoch 9999999999}}})]
+      ;; Should return immediately (nil = no wait needed)
+      (is (nil? (rate/acquire-permit! handles "h1" {}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Tests
+(deftest ^{:stratum 1} parse-rate-headers-test
   (testing "parses GitHub rate limit headers"
     (let [headers {"x-ratelimit-remaining" "4990"
                    "x-ratelimit-reset" "1711468800"
@@ -57,23 +73,6 @@
     (is (nil? (rate/parse-rate-headers {"x-ratelimit-remaining" "bogus"
                                         "x-ratelimit-reset" "also-bogus"}
                                        github-mapping)))))
-
-(deftest update-rate-state-test
-  (testing "stores rate info in handle atom"
-    (let [handles (atom {"h1" {:config {}}})]
-      (rate/update-rate-state! handles "h1" {:remaining 100 :reset-epoch 99999})
-      (is (= 100 (get-in @handles ["h1" :rate-limit :remaining])))))
-
-  (testing "no-op when rate-info is nil"
-    (let [handles (atom {"h1" {:config {}}})]
-      (rate/update-rate-state! handles "h1" nil)
-      (is (nil? (get-in @handles ["h1" :rate-limit]))))))
-
-(deftest acquire-permit-no-block-test
-  (testing "does not block when remaining is above threshold"
-    (let [handles (atom {"h1" {:rate-limit {:remaining 4990 :reset-epoch 9999999999}}})]
-      ;; Should return immediately (nil = no wait needed)
-      (is (nil? (rate/acquire-permit! handles "h1" {}))))))
 
 (comment
   ;; Run: clj -M:dev:test -n ai.miniforge.connector-http.rate-limit-test
