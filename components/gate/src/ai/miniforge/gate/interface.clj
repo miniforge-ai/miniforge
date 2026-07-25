@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.interface
   "Gate registry interface.
 
@@ -50,10 +49,10 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.schema.interface :as schema]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Re-export registry functions
+;------------------------------------------------------------------------------ Layer 0
 
-(def get-gate
+;; Re-export registry functions
+(def ^{:stratum 0} get-gate
   "Get gate implementation for a keyword.
 
    Arguments:
@@ -63,11 +62,11 @@
      Gate map with :name, :check, :repair"
   registry/get-gate)
 
-(def register-gate!
+(def ^{:stratum 0} register-gate!
   "Track a gate as registered."
   registry/register-gate!)
 
-(def list-gates
+(def ^{:stratum 0} list-gates
   "List all registered gate types.
 
    Returns:
@@ -76,8 +75,7 @@
 
 ;;------------------------------------------------------------------------------ Layer 0.5
 ;; Gate result predicates
-
-(defn passed?
+(defn ^{:stratum 0} passed?
   "Check if a gate result passed.
 
    Accepts either of two canonical result shapes:
@@ -98,15 +96,8 @@
     (response/error? result)    false
     :else                       false))
 
-(defn failed?
-  "Check if a gate result failed. See `passed?` for accepted shapes."
-  [result]
-  (not (passed? result)))
-
-;;------------------------------------------------------------------------------ Layer 1
 ;; Gate operations
-
-(defn emit-gate-event!
+(defn ^{:stratum 0} emit-gate-event!
   "Emit a gate lifecycle event when the context carries an event stream."
   [ctx gate-kw event-type & [extra]]
   (try
@@ -118,7 +109,23 @@
         (events/publish! stream (constructor stream (:workflow/id ctx) gate-kw extra))))
     (catch Exception _ nil)))
 
-(defn check-gate
+(defn- ^{:stratum 0} repair-succeeded?
+  "True when a repair result indicates success in either accepted shape:
+   the legacy `:success? bool` or the canonical `response/success`."
+  [result]
+  (cond
+    (contains? result :success?) (boolean (:success? result))
+    (response/success? result)   true
+    :else                        false))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} failed?
+  "Check if a gate result failed. See `passed?` for accepted shapes."
+  [result]
+  (not (passed? result)))
+
+(defn ^{:stratum 1} check-gate
   "Run gate check on an artifact.
 
    Arguments:
@@ -148,16 +155,7 @@
           (emit-gate-event! ctx gate-kw :failed (:errors result))
           result)))))
 
-(defn- repair-succeeded?
-  "True when a repair result indicates success in either accepted shape:
-   the legacy `:success? bool` or the canonical `response/success`."
-  [result]
-  (cond
-    (contains? result :success?) (boolean (:success? result))
-    (response/success? result)   true
-    :else                        false))
-
-(defn repair-gate
+(defn ^{:stratum 1} repair-gate
   "Attempt to repair gate failures.
 
    Arguments:
@@ -184,27 +182,8 @@
       (schema/failure :artifact {:message "No repair function for gate"}
                       {:gate gate-kw :artifact artifact}))))
 
-(defn check-gates
-  "Run multiple gates on an artifact.
-
-   Arguments:
-     gate-kws - Vector of gate keywords
-     artifact - Artifact to validate
-     ctx      - Execution context
-
-   Returns:
-     {:passed? bool :results [...]}"
-  [gate-kws artifact ctx]
-  (let [results (mapv #(check-gate % artifact ctx) gate-kws)
-        all-passed? (every? passed? results)]
-    {:passed? all-passed?
-     :results results
-     :failed-gates (filterv failed? results)}))
-
-;;------------------------------------------------------------------------------ Layer 2
 ;; Response chain support
-
-(defn check-gates-chain
+(defn ^{:stratum 1} check-gates-chain
   "Run multiple gates on an artifact, returning a response chain.
 
    Arguments:
@@ -239,6 +218,25 @@
                                       {:errors (:errors result)})))))))
    (response/create :gates)
    gate-kws))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check-gates
+  "Run multiple gates on an artifact.
+
+   Arguments:
+     gate-kws - Vector of gate keywords
+     artifact - Artifact to validate
+     ctx      - Execution context
+
+   Returns:
+     {:passed? bool :results [...]}"
+  [gate-kws artifact ctx]
+  (let [results (mapv #(check-gate % artifact ctx) gate-kws)
+        all-passed? (every? passed? results)]
+    {:passed? all-passed?
+     :results results
+     :failed-gates (filterv failed? results)}))
 
 ;;------------------------------------------------------------------------------ Rich Comment
 (comment

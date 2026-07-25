@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.behavioral-test
   "Tests for the :behavioral gate."
   (:require [clojure.test :refer [deftest is testing]]
@@ -24,39 +23,19 @@
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]))
 
-;;------------------------------------------------------------------------------ Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def sample-events
+;;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} sample-events
   [{:event/type :tool-call  :tool "Write" :path "src/foo.clj"}
    {:event/type :tool-call  :tool "Read"  :path "src/bar.clj"}
    {:event/type :tool-result :tool "Write" :status :ok}])
-
-(def sample-artifact
-  {:event-stream/events sample-events})
-
-;;------------------------------------------------------------------------------ check-behavioral
-
-(deftest check-behavioral-no-packs-test
-  (testing "Passes with warning when no policy packs are loaded"
-    (let [result (behavioral/check-behavioral sample-artifact
-                                              {:policy-packs [] :phase :observe})]
-      (is (true? (:passed? result)))
-      (is (empty? (:errors result)))
-      (is (= 1 (count (:warnings result))))
-      (is (= :no-policy-packs (-> result :warnings first :type))))))
-
-(deftest check-behavioral-no-packs-key-test
-  (testing "Passes with warning when :policy-packs key is absent"
-    (let [result (behavioral/check-behavioral sample-artifact {:phase :observe})]
-      (is (true? (:passed? result)))
-      (is (= :no-policy-packs (-> result :warnings first :type))))))
 
 ;; Tests inject a `:check-fn` via the ctx map. Local DI keeps stubs scoped to
 ;; the call site and avoids global mutation for normal policy-pack behavior.
 ;; The stub returns the same shape as `policy-pack/check-artifact`: violations
 ;; already bucketed by enforcement action, with :passed? = (empty? blocking).
-
-(defn- stub-check-fn
+(defn- ^{:stratum 0} stub-check-fn
   "Build a stub check fn returning a check-artifact-shaped result. Each bucket
    defaults to empty; :passed? mirrors check-artifact ((empty? blocking))."
   [& {:keys [blocking require-approval warnings audits]
@@ -68,12 +47,53 @@
      :warnings         warnings
      :audits           audits}))
 
-(defn- throwing-check-fn
+(defn- ^{:stratum 0} throwing-check-fn
   "Build a stub policy-pack check fn that throws with the given message."
   [message]
   (fn [_packs _artifact _opts] (throw (ex-info message {}))))
 
-(deftest check-behavioral-clean-result-test
+(deftest ^{:stratum 0} repair-behavioral-empty-errors-test
+  (testing "repair-behavioral with empty errors still returns failure"
+    (let [result (behavioral/repair-behavioral {} [] {})]
+      (is (response/error? result))
+      (is (false? (:success result))))))
+
+;;------------------------------------------------------------------------------ Registry
+(deftest ^{:stratum 0} behavioral-gate-registered-test
+  (testing ":behavioral gate is registered in the registry"
+    (is (contains? (registry/list-gates) :behavioral))))
+
+(deftest ^{:stratum 0} behavioral-gate-has-check-and-repair-test
+  (testing ":behavioral gate exposes :check and :repair functions"
+    (let [gate (registry/get-gate :behavioral)]
+      (is (= :behavioral (:name gate)))
+      (is (fn? (:check gate)))
+      (is (fn? (:repair gate))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} sample-artifact
+  {:event-stream/events sample-events})
+
+;------------------------------------------------------------------------------ Layer 2
+
+;;------------------------------------------------------------------------------ check-behavioral
+(deftest ^{:stratum 2} check-behavioral-no-packs-test
+  (testing "Passes with warning when no policy packs are loaded"
+    (let [result (behavioral/check-behavioral sample-artifact
+                                              {:policy-packs [] :phase :observe})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (= 1 (count (:warnings result))))
+      (is (= :no-policy-packs (-> result :warnings first :type))))))
+
+(deftest ^{:stratum 2} check-behavioral-no-packs-key-test
+  (testing "Passes with warning when :policy-packs key is absent"
+    (let [result (behavioral/check-behavioral sample-artifact {:phase :observe})]
+      (is (true? (:passed? result)))
+      (is (= :no-policy-packs (-> result :warnings first :type))))))
+
+(deftest ^{:stratum 2} check-behavioral-clean-result-test
   (testing "Passes with no errors when policy-pack reports no violations"
     (let [result (behavioral/check-behavioral
                   sample-artifact
@@ -84,7 +104,7 @@
       (is (empty? (:errors result)))
       (is (empty? (:warnings result))))))
 
-(deftest check-behavioral-blocking-violations-test
+(deftest ^{:stratum 2} check-behavioral-blocking-violations-test
   (testing "Fails with errors when :hard-halt (blocking) violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
@@ -99,7 +119,7 @@
       (is (= :no-file-deletion (-> result :errors first :code)))
       (is (empty? (:warnings result))))))
 
-(deftest check-behavioral-approval-required-test
+(deftest ^{:stratum 2} check-behavioral-approval-required-test
   (testing "Fails when :require-approval violations are returned (deploy-style
             fail-closed: approval cannot be granted inline, so the gate blocks)"
     (let [result (behavioral/check-behavioral
@@ -113,7 +133,7 @@
       (is (= 1 (count (:errors result))))
       (is (= :sensitive-path (-> result :errors first :code))))))
 
-(deftest check-behavioral-warning-violations-test
+(deftest ^{:stratum 2} check-behavioral-warning-violations-test
   (testing "Passes with warnings when only :warn violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
@@ -127,7 +147,7 @@
       (is (= 1 (count (:warnings result))))
       (is (= :prefer-helper (-> result :warnings first :code))))))
 
-(deftest check-behavioral-audit-violations-test
+(deftest ^{:stratum 2} check-behavioral-audit-violations-test
   (testing "Passes (warnings) when only :audit violations are returned"
     (let [result (behavioral/check-behavioral
                   sample-artifact
@@ -140,7 +160,7 @@
       (is (empty? (:errors result)))
       (is (= 2 (count (:warnings result)))))))
 
-(deftest check-behavioral-exception-test
+(deftest ^{:stratum 2} check-behavioral-exception-test
   (testing "Returns passing result with warning when policy-pack throws"
     (let [result (behavioral/check-behavioral
                   sample-artifact
@@ -150,7 +170,7 @@
       (is (true? (:passed? result)))
       (is (= :behavioral-check-error (-> result :warnings first :type))))))
 
-(deftest check-behavioral-default-check-fn-exception-test
+(deftest ^{:stratum 2} check-behavioral-default-check-fn-exception-test
   (testing
    "The production default :check-fn path demotes runtime failures to warnings."
     (with-redefs [policy-pack/check-artifact
@@ -164,7 +184,7 @@
         (is (re-find #"policy-pack unavailable"
                      (-> result :warnings first :message)))))))
 
-(deftest check-behavioral-rejects-non-fn-check-fn-test
+(deftest ^{:stratum 2} check-behavioral-rejects-non-fn-check-fn-test
   (testing
    (str "Programmer-error guard: passing a non-nil non-callable :check-fn "
         "is a misconfiguration. The exceptions-as-data rule explicitly "
@@ -179,7 +199,7 @@
                    :phase        :observe
                    :check-fn     "not-a-function"})))))
 
-(deftest check-behavioral-treats-nil-check-fn-as-default-test
+(deftest ^{:stratum 2} check-behavioral-treats-nil-check-fn-as-default-test
   (testing
    (str "An explicit nil :check-fn is treated the same as missing. "
         "Together with the bogus-sym test above, this pins both halves "
@@ -197,8 +217,7 @@
       (is (true? (:passed? result))))))
 
 ;;------------------------------------------------------------------------------ repair-behavioral
-
-(deftest repair-behavioral-always-fails-test
+(deftest ^{:stratum 2} repair-behavioral-always-fails-test
   (testing "repair-behavioral always returns {:success? false}"
     (let [result (behavioral/repair-behavioral
                   sample-artifact
@@ -209,22 +228,3 @@
       (is (= sample-artifact (:artifact result)))
       (is (string? (:message result)))
       (is (seq (:message result))))))
-
-(deftest repair-behavioral-empty-errors-test
-  (testing "repair-behavioral with empty errors still returns failure"
-    (let [result (behavioral/repair-behavioral {} [] {})]
-      (is (response/error? result))
-      (is (false? (:success result))))))
-
-;;------------------------------------------------------------------------------ Registry
-
-(deftest behavioral-gate-registered-test
-  (testing ":behavioral gate is registered in the registry"
-    (is (contains? (registry/list-gates) :behavioral))))
-
-(deftest behavioral-gate-has-check-and-repair-test
-  (testing ":behavioral gate exposes :check and :repair functions"
-    (let [gate (registry/get-gate :behavioral)]
-      (is (= :behavioral (:name gate)))
-      (is (fn? (:check gate)))
-      (is (fn? (:repair gate))))))

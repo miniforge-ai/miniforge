@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.behavioral
   "Behavioral gate — validates telemetry event streams against policy packs.
 
@@ -37,20 +36,20 @@
             [ai.miniforge.policy-pack.interface :as policy-pack]
             [ai.miniforge.response.interface :as response]))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Gate implementation
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- no-policy-packs-warning
+;; Gate implementation
+(defn- ^{:stratum 0} no-policy-packs-warning
   []
   {:type :no-policy-packs
    :message (msg/t :behavioral/no-policy-packs)})
 
-(defn- behavioral-check-error-warning
+(defn- ^{:stratum 0} behavioral-check-error-warning
   [message]
   {:type :behavioral-check-error
    :message (str (msg/t :behavioral/check-error-prefix) message)})
 
-(defn- repair-required-result
+(defn- ^{:stratum 0} repair-required-result
   [artifact errors]
   (let [m (msg/t :behavioral/repair-required)]
     (assoc (response/failure m)
@@ -58,11 +57,13 @@
            :errors errors
            :message m)))
 
-(def ^:private default-check-fn
+(def ^{:stratum 0} ^:private default-check-fn
   "Production default for `:check-fn`."
   #'policy-pack/check-artifact)
 
-(defn check-behavioral
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} check-behavioral
   "Check a telemetry artifact against loaded policy packs for behavioral violations.
 
    Arguments:
@@ -113,7 +114,7 @@
       {:passed?  true
        :warnings [(behavioral-check-error-warning (ex-message e))]})))
 
-(defn repair-behavioral
+(defn ^{:stratum 1} repair-behavioral
   "Behavioral violations cannot be fixed in-place.
 
    The caller must redirect the workflow to the :implement phase for an LLM
@@ -127,17 +128,17 @@
   [artifact errors _ctx]
   (repair-required-result artifact errors))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Registry
+;------------------------------------------------------------------------------ Layer 2
 
-(registry/register-gate! :behavioral)
-
-(defmethod registry/get-gate :behavioral
+(defmethod ^{:stratum 2} registry/get-gate :behavioral
   [_]
   {:name        :behavioral
    :description (msg/t :behavioral/description)
    :check       check-behavioral
    :repair      repair-behavioral})
+
+;; Registry
+(registry/register-gate! :behavioral)
 
 ;;------------------------------------------------------------------------------ Rich Comment
 (comment

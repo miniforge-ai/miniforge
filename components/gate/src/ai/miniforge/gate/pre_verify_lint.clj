@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.gate.pre-verify-lint
   "Pre-verify lint gate — runs language-specific linters before test execution.
 
@@ -18,42 +17,30 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Technology detection
 
-(def ^:private ext->tech
+;; Technology detection
+(def ^{:stratum 0} ^:private ext->tech
   "File extension to technology mapping."
   {"clj" :clojure "cljs" :clojure "cljc" :clojure
    "py" :python "rs" :rust "go" :go
    "js" :javascript "ts" :typescript
    "swift" :swift "rb" :ruby})
 
-(defn- file-extension
+(defn- ^{:stratum 0} file-extension
   "Extract extension from a file path."
   [path]
   (when-let [idx (str/last-index-of (str path) ".")]
     (subs (str path) (inc idx))))
 
-(defn- file->tech
-  "Map a file entry to its technology keyword, or nil."
-  [file-entry]
-  (get ext->tech (file-extension (get file-entry :path ""))))
-
-(defn- detect-technologies
-  "Detect technologies from written file extensions."
-  [artifact]
-  (into #{} (keep file->tech) (get artifact :code/files [])))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Linter execution
-
-(defn- resolve-worktree
+(defn- ^{:stratum 0} resolve-worktree
   "Get the worktree path from context."
   [ctx]
   (or (get ctx :execution/worktree-path)
       (get ctx :worktree-path)
       "."))
 
-(defn- violation->lint-error
+(defn- ^{:stratum 0} violation->lint-error
   "Convert a linter violation to a gate error map."
   [v]
   {:type     :lint-error
@@ -63,7 +50,29 @@
    :rule-id  (get v :rule/id)
    :severity (get v :rule/severity :high)})
 
-(defn check-pre-verify-lint
+(defn ^{:stratum 0} repair-pre-verify-lint
+  "Lint errors cannot be auto-repaired — return to agent."
+  [_artifact errors _ctx]
+  {:success? false
+   :errors errors})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} file->tech
+  "Map a file entry to its technology keyword, or nil."
+  [file-entry]
+  (get ext->tech (file-extension (get file-entry :path ""))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} detect-technologies
+  "Detect technologies from written file extensions."
+  [artifact]
+  (into #{} (keep file->tech) (get artifact :code/files [])))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} check-pre-verify-lint
   "Run configured linters on the worktree before verify."
   [artifact ctx]
   (let [worktree   (resolve-worktree ctx)
@@ -76,20 +85,14 @@
       {:passed? false
        :errors (mapv violation->lint-error violations)})))
 
-(defn repair-pre-verify-lint
-  "Lint errors cannot be auto-repaired — return to agent."
-  [_artifact errors _ctx]
-  {:success? false
-   :errors errors})
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 1
-;; Gate registration
-
-(registry/register-gate! :pre-verify-lint)
-
-(defmethod registry/get-gate :pre-verify-lint
+(defmethod ^{:stratum 4} registry/get-gate :pre-verify-lint
   [_]
   {:name        :pre-verify-lint
    :description "Run language linters before test execution to catch errors fast"
    :check       check-pre-verify-lint
    :repair      repair-pre-verify-lint})
+
+;; Gate registration
+(registry/register-gate! :pre-verify-lint)

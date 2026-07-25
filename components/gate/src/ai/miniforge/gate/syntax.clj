@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.syntax
   "Syntax validation gate.
 
@@ -23,9 +22,9 @@
   (:require [ai.miniforge.gate.registry :as registry]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Syntax checking
 
-(defn parse-clojure
+;; Syntax checking
+(defn ^{:stratum 0} parse-clojure
   "Parse Clojure code using read-string for AST validation.
 
    Reads all top-level forms (not just the first one).
@@ -46,7 +45,19 @@
       {:valid? false
        :error (ex-message ex)})))
 
-(defn check-syntax
+(defn ^{:stratum 0} repair-syntax
+  "Attempt to repair syntax errors.
+
+   Currently returns failure - syntax repair requires LLM."
+  [artifact errors _ctx]
+  {:success? false
+   :artifact artifact
+   :errors errors
+   :message "Syntax repair requires LLM agent"})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} check-syntax
   "Check syntax of artifact content.
 
    Arguments:
@@ -68,27 +79,17 @@
                  :message (:error result)
                  :location nil}]})))
 
-(defn repair-syntax
-  "Attempt to repair syntax errors.
+;------------------------------------------------------------------------------ Layer 2
 
-   Currently returns failure - syntax repair requires LLM."
-  [artifact errors _ctx]
-  {:success? false
-   :artifact artifact
-   :errors errors
-   :message "Syntax repair requires LLM agent"})
-
-;------------------------------------------------------------------------------ Layer 1
-;; Registry
-
-(registry/register-gate! :syntax)
-
-(defmethod registry/get-gate :syntax
+(defmethod ^{:stratum 2} registry/get-gate :syntax
   [_]
   {:name :syntax
    :description "Validates code parses without syntax errors"
    :check check-syntax
    :repair repair-syntax})
+
+;; Registry
+(registry/register-gate! :syntax)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
