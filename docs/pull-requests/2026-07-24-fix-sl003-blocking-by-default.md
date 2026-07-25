@@ -38,13 +38,18 @@ actually split (Wave 2) — or the commit sets
 ## Changes in Detail
 
 - `tasks/stratum.clj`:
-  - `budget-mode-env`/`warn-only?` (new, Layer 0): reads
+  - `budget-mode-env` (new, Layer 0): the env var name,
     `MINIFORGE_STRATUM_BUDGET_MODE`; `"warn"` opts into non-blocking,
-    anything else (including unset) blocks.
+    anything else (including unset) blocks. The check itself
+    (`(= "warn" (System/getenv budget-mode-env))`) is inlined directly
+    in `post-fix-lint!` rather than its own named fn — pulling it out
+    would have pushed this file to 4 real layers, tripping the very
+    check this PR adds (caught live while writing it).
   - `advisory-lint!` renamed to `post-fix-lint!` and now fails the
-    commit (`System/exit 1`) on any remaining finding unless
-    `warn-only?` — an unexpected exit code (neither 0 nor 1) still
-    always fails the commit regardless of mode, unchanged from before.
+    commit (`System/exit 1`) on any remaining finding unless the warn
+    check above is true — an unexpected exit code (neither 0 nor 1)
+    still always fails the commit regardless of mode, unchanged from
+    before.
   - `autofix-and-restage!`'s call site updated to the new name.
 
 ## Testing Plan
