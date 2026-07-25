@@ -132,10 +132,10 @@ cleared most of the tree's debt before most developers hit it organically.
 remaining post-fix finding (in practice always SL003) is no longer
 current — it now fails the commit by default, same as any other rule 210
 violation, with `MINIFORGE_STRATUM_BUDGET_MODE=warn` as an explicit
-opt-out. Renamed `post-fix-lint!` accordingly; this doc's function-name
-references above have been updated to match, but the "non-blocking"
-framing in the surrounding prose reflects this PR's original design, not
-current behavior.
+opt-out. `advisory-lint!` was renamed to `post-fix-lint!` accordingly;
+this doc's function-name references above have been updated to match,
+but the "non-blocking" framing in the surrounding prose reflects this
+PR's original design, not current behavior.
 
 ## Checklist
 
