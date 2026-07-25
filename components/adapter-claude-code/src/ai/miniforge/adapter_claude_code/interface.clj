@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.interface
   "Claude Code adapter for the control plane.
 
@@ -27,9 +26,9 @@
    [ai.miniforge.adapter-claude-code.impl :as impl]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Factory
 
-(defn create-adapter
+;; Factory
+(defn ^{:stratum 0} create-adapter
   "Create a Claude Code adapter instance.
 
    Options:

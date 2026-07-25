@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.discovery
   "Discovery of active Claude Code sessions on the local machine.
 
@@ -34,13 +33,13 @@
    [ai.miniforge.control-plane.interface :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Staleness windows (loaded from EDN)
 
-(def ^:private staleness-resource-path
+;; Staleness windows (loaded from EDN)
+(def ^{:stratum 0} ^:private staleness-resource-path
   "Classpath path to the EDN holding session staleness windows."
   "config/adapter_claude_code/staleness.edn")
 
-(defn- load-config
+(defn- ^{:stratum 0} load-config
   "Read an EDN config resource, failing fast with a clear ex-info when the
    resource is absent from the classpath, malformed, not a map, or missing
    a required key — rather than a low-signal NPE/reader error at load."
@@ -71,25 +70,12 @@
                           {:config/resource path :config/missing-keys (vec missing)})))
         parsed))))
 
-(def staleness-windows
-  "Session staleness windows (milliseconds) loaded from the classpath.
-   Data lives in resources/config/adapter_claude_code/staleness.edn — a
-   missing resource is a packaging error, not a runtime condition."
-  (load-config staleness-resource-path
-               [:session-activity-window-ms :running-window-ms :idle-window-ms]))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Filesystem scanning
-
-(def ^:const claude-base-dir
+(def ^{:stratum 0} ^:const claude-base-dir
   "Default Claude Code configuration directory."
   (str (System/getProperty "user.home") "/.claude"))
 
-(def ^:const projects-dir
-  "Default projects directory within Claude config."
-  (str claude-base-dir "/projects"))
-
-(defn- list-project-dirs
+(defn- ^{:stratum 0} list-project-dirs
   "List all project directories under ~/.claude/projects/.
    Returns seq of java.io.File directories."
   [base-path]
@@ -99,7 +85,7 @@
            (filter #(.isDirectory %))
            seq))))
 
-(defn- find-session-files
+(defn- ^{:stratum 0} find-session-files
   "Find JSONL conversation files in a project directory.
    Returns seq of java.io.File files."
   [project-dir]
@@ -109,17 +95,15 @@
            (filter #(str/ends-with? (.getName %) ".jsonl"))
            seq))))
 
-(defn- file-recently-modified?
+(defn- ^{:stratum 0} file-recently-modified?
   "Check if a file was modified within the given threshold (ms)."
   [^java.io.File file threshold-ms]
   (let [last-mod (.lastModified file)
         now (System/currentTimeMillis)]
     (< (- now last-mod) threshold-ms)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Process liveness detection
-
-(defn- pid-alive?
+(defn- ^{:stratum 0} pid-alive?
   "Check if a process with the given PID is alive.
    Uses /bin/kill -0 on macOS/Linux."
   [pid]
@@ -129,7 +113,7 @@
       (zero? (.exitValue proc)))
     (catch Exception _ false)))
 
-(defn- find-lock-pid
+(defn- ^{:stratum 0} find-lock-pid
   "Try to find a PID from lock files in the project directory.
    Returns PID as long, or nil."
   [project-dir]
@@ -141,14 +125,29 @@
             (Long/parseLong content)))
         (catch Exception _ nil)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Session extraction
+;------------------------------------------------------------------------------ Layer 1
 
-(def activity-threshold-ms
+(def ^{:stratum 1} staleness-windows
+  "Session staleness windows (milliseconds) loaded from the classpath.
+   Data lives in resources/config/adapter_claude_code/staleness.edn — a
+   missing resource is a packaging error, not a runtime condition."
+  (load-config staleness-resource-path
+               [:session-activity-window-ms :running-window-ms :idle-window-ms]))
+
+(def ^{:stratum 1} ^:const projects-dir
+  "Default projects directory within Claude config."
+  (str claude-base-dir "/projects"))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Session extraction
+(def ^{:stratum 2} activity-threshold-ms
   "Consider a session active if its log was modified within this window."
   (:session-activity-window-ms staleness-windows))
 
-(defn- project-dir->session-info
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} project-dir->session-info
   "Extract session info from a project directory.
    Returns agent registration map or nil if no active session."
   [project-dir]
@@ -173,7 +172,9 @@
                          latest-session (assoc :session-file (.getAbsolutePath latest-session)
                                                :last-activity (java.util.Date. (.lastModified latest-session))))})))
 
-(defn discover-sessions
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} discover-sessions
   "Discover all active Claude Code sessions.
 
    Arguments:

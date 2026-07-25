@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.impl
   "Implementation for the Claude Code control-plane adapter."
   (:require
@@ -26,24 +25,13 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Internal helpers
 
-(def ^:const default-decisions-dir
+;; Internal helpers
+(def ^{:stratum 0} ^:const default-decisions-dir
   "Default directory where decisions are dropped for Claude Code agents."
   (str (config/miniforge-home) "/decisions"))
 
-(defn- adapter-decisions-dir
-  [{:keys [decisions-dir]}]
-  (or decisions-dir
-      default-decisions-dir))
-
-(defn- ensure-decisions-dir!
-  [config agent-id]
-  (let [dir (io/file (adapter-decisions-dir config) (str agent-id))]
-    (.mkdirs dir)
-    dir))
-
-(defn- pid-alive?
+(defn- ^{:stratum 0} pid-alive?
   [pid]
   (try
     (let [proc (.start (ProcessBuilder. ["kill" "-0" (str pid)]))]
@@ -52,7 +40,7 @@
     (catch Exception _
       false)))
 
-(defn- session-file-active-within-ms?
+(defn- ^{:stratum 0} session-file-active-within-ms?
   [session-file threshold-ms]
   (and session-file
        (.exists (io/file session-file))
@@ -60,7 +48,30 @@
              (.lastModified (io/file session-file)))
           threshold-ms)))
 
-(defn- poll-status
+(defn- ^{:stratum 0} send-signal!
+  [agent-record command]
+  (let [pid (get-in agent-record [:agent/metadata :pid])
+        signal-map {:pause "-TSTP" :resume "-CONT" :terminate "-TERM"}]
+    (if pid
+      (if-let [signal (get signal-map command)]
+        (try
+          (.start (ProcessBuilder. ["kill" signal (str pid)]))
+          {:success? true}
+          (catch Exception e
+            {:success? false :error (ex-message e)}))
+        {:success? false
+         :error (control-plane/t :adapter/unknown-command {:command command})})
+      {:success? false
+       :error (control-plane/t :adapter/no-pid)})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} adapter-decisions-dir
+  [{:keys [decisions-dir]}]
+  (or decisions-dir
+      default-decisions-dir))
+
+(defn- ^{:stratum 1} poll-status
   [agent-record]
   (let [pid (get-in agent-record [:agent/metadata :pid])
         session-file (get-in agent-record [:agent/metadata :session-file])]
@@ -80,7 +91,17 @@
       :else
       nil)))
 
-(defn- deliver-decision!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} ensure-decisions-dir!
+  [config agent-id]
+  (let [dir (io/file (adapter-decisions-dir config) (str agent-id))]
+    (.mkdirs dir)
+    dir))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} deliver-decision!
   [config agent-record decision-resolution]
   (try
     (let [agent-id (:agent/id agent-record)
@@ -92,26 +113,10 @@
     (catch Exception e
       {:delivered? false :error (ex-message e)})))
 
-(defn- send-signal!
-  [agent-record command]
-  (let [pid (get-in agent-record [:agent/metadata :pid])
-        signal-map {:pause "-TSTP" :resume "-CONT" :terminate "-TERM"}]
-    (if pid
-      (if-let [signal (get signal-map command)]
-        (try
-          (.start (ProcessBuilder. ["kill" signal (str pid)]))
-          {:success? true}
-          (catch Exception e
-            {:success? false :error (ex-message e)}))
-        {:success? false
-         :error (control-plane/t :adapter/unknown-command {:command command})})
-      {:success? false
-       :error (control-plane/t :adapter/no-pid)})))
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Protocol implementation
-
-(defrecord ClaudeCodeAdapter [config]
+(defrecord ^{:stratum 4} ClaudeCodeAdapter [config]
   proto/ControlPlaneAdapter
 
   (adapter-id [_] :claude-code)
@@ -128,9 +133,9 @@
   (send-command [_ agent-record command]
     (send-signal! agent-record command)))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Factory
+;------------------------------------------------------------------------------ Layer 5
 
-(defn create-adapter
+;; Factory
+(defn ^{:stratum 5} create-adapter
   [config]
   (->ClaudeCodeAdapter config))
