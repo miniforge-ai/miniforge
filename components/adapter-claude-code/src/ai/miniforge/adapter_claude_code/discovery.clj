@@ -23,9 +23,11 @@
    2. Recent JSONL conversation log activity
    3. Process liveness via PID checks
 
-   Layer 0: Filesystem scanning
-   Layer 1: Process liveness detection
-   Layer 2: Session extraction"
+   Layer 0: Config/filesystem/PID helpers
+   Layer 1: Staleness windows and projects dir
+   Layer 2: Activity threshold
+   Layer 3: Per-directory session extraction
+   Layer 4: Public discovery API"
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]

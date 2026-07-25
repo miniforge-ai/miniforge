@@ -54,11 +54,14 @@
 
 (defn- ^{:stratum 1} load-profiles
   "Read the tool-profiles EDN catalog from the classpath and return
-   the profile vector. Returns nil if the resource is missing — that
-   is a packaging error, not a runtime condition the caller should
-   handle."
+   the profile vector. Fails fast with an ex-info when the resource is
+   missing — a packaging error, not a runtime condition to swallow —
+   mirroring discovery/load-config's handling of the same failure mode."
   []
-  (when-let [res (io/resource profiles-resource-path)]
+  (let [res (io/resource profiles-resource-path)]
+    (when (nil? res)
+      (throw (ex-info (str "Missing config resource on classpath: " profiles-resource-path)
+                      {:config/resource profiles-resource-path})))
     (-> res slurp edn/read-string (get profiles-section-key))))
 
 ;------------------------------------------------------------------------------ Layer 2

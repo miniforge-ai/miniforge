@@ -5,9 +5,15 @@
 Runs `stratum-lint --fix` over `components/adapter-claude-code` (src + test)
 to replace decorative, non-monotonic `Layer N` section headings with
 headings that reflect the file's real same-file reference graph, and adds
-`^{:stratum n}` metadata to every top-level def. No logic changes — this is
-a mechanical relabel-and-regroup pass, one of the per-component PRs of
-Wave 1.
+`^{:stratum n}` metadata to every top-level def — a mechanical
+relabel-and-regroup pass, one of the per-component PRs of Wave 1. Also
+fixes two issues automated review caught in this specific redo:
+`discovery.clj`'s namespace docstring still described the file's old
+3-layer decorative structure after `--fix` revealed 5 real layers, and
+`tool_profiles.clj`'s `load-profiles` silently returned nil on a missing
+classpath resource instead of failing fast like the sibling
+`discovery/load-config` does for the identical failure mode. Both are
+narrow, verified fixes — not part of the mechanical heading pass.
 
 ## Motivation
 
@@ -66,11 +72,13 @@ verified by reading full diffs, not just `--stat`.
   fix (see Testing Plan).
 - `src/.../impl.clj` — decorative headings collapsed; real shape is 6
   layers (0–5), still trips SL003. `create-adapter` (calls the
-  `->ClaudeCodeAdapter` defrecord constructor) correctly lands at Layer 5,
-  above the `defrecord ClaudeCodeAdapter` it constructs, at Layer 4 — this
-  ordering is load-bearing (Clojure compiles top to bottom, so the
-  constructor symbol must exist before anything calls it) and was
-  specifically re-verified after this redo — see Testing Plan.
+  `->ClaudeCodeAdapter` defrecord constructor) correctly lands at the
+  higher Layer 5, while `defrecord ClaudeCodeAdapter` itself stays at
+  Layer 4 — but still *earlier in the file*, since Clojure compiles
+  top-to-bottom and the constructor symbol must exist before anything
+  calls it. Higher stratum number, later file position: the two track
+  together here, not opposed. This ordering was specifically
+  re-verified after this redo — see Testing Plan.
 - `src/.../interface.clj` — single-heading file, no reordering, just
   `^{:stratum 0}` metadata added.
 - `src/.../tool_profiles.clj` — decorative headings collapsed to 5 real
@@ -91,9 +99,11 @@ verified by reading full diffs, not just `--stat`.
    directly via `diff -r`, not assumed from #13 being merged).
 
 2. **Diff review**: read every changed file in full (not just `git diff
-   --stat`) to confirm each diff is purely heading regrouping +
-   `^{:stratum n}` metadata + def reordering, with zero changes to
-   docstrings, function bodies, or test assertions.
+   --stat`) to confirm each diff is heading regrouping + `^{:stratum n}`
+   metadata + def reordering, with zero changes to test assertions.
+   Two narrow exceptions, both from automated review on this redo (see
+   Overview): `discovery.clj`'s docstring layer summary, and
+   `tool_profiles.clj`'s `load-profiles` fail-fast behavior.
 
 3. **`create-adapter`/`ClaudeCodeAdapter` ordering** (the defrecord-
    constructor bug's exact shape, #10): re-verified `create-adapter`
@@ -124,15 +134,25 @@ verified by reading full diffs, not just `--stat`.
    `MINIFORGE_STRATUM_BUDGET_MODE=warn` for these 3 pre-existing files,
    same reason as `gate`'s and `reliability`'s Wave 1 redos.
 
-6. **Full test suite for the touched namespaces**:
+6. **`load-profiles` fail-fast**: no existing test called `load-profiles`
+   directly or asserted on its nil-return behavior, so nothing to update.
+   `clj-kondo` clean after the change. The classpath resource is present
+   in this repo, so `claude-cli-profiles` still resolves normally at
+   namespace load — the change only affects the already-broken-packaging
+   case, which previously loaded silently as `nil`.
+
+7. **Full test suite for the touched namespaces**:
    `ai.miniforge.adapter-claude-code.interface-test` and
    `ai.miniforge.adapter-claude-code.tool-profiles-test`, both passing,
    re-run after this redo.
 
 ## Deployment Plan
 
-Merges to `main`. Pure source-reformatting — no runtime behavior change,
-no migration, no config change. Safe to merge independently of other
+Merges to `main`. Mostly source-reformatting; two small behavior fixes
+from review (see Overview) — `load-profiles` now throws instead of
+silently registering nothing when its classpath resource is missing,
+which only changes behavior for an already-broken deployment. No
+migration, no config change. Safe to merge independently of other
 Wave 1 component PRs (each is its own PR per the baseline doc's decided
 PR granularity, one component per PR).
 
@@ -158,8 +178,9 @@ PR granularity, one component per PR).
 - [x] Idempotency verified directly (two `--fix` passes, zero diff)
       before committing, not just after one pass
 - [x] Diff read in full for every changed file, not just `--stat`
-- [x] Confirmed zero logic/behavior changes — headings, metadata, and
-      def order only
+- [x] Confirmed the only non-mechanical changes are the two narrow,
+      verified fixes from review (docstring accuracy, fail-fast on
+      missing resource) — everything else is headings/metadata/def order
 - [x] `create-adapter`/`ClaudeCodeAdapter` ordering re-verified correct
       at this pin
 - [x] Post-fix `clj-kondo --lint` clean across the whole component
