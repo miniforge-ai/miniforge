@@ -292,6 +292,31 @@
           (is (re-find #"config locked" (:error r)) "includes the restore error")
           (is (re-find #"Scrub it" (:error r)) "still surfaces the scrub command"))))))
 
+(deftest force-push-https-setup-failure-test
+  (testing "repointing origin to the token URL fails → report it, skip the retry push, no restore"
+    (let [push-n (atom 0) seturl-n (atom 0)]
+      (with-redefs [process/shell
+                    (fn [_opts & args]
+                      (let [a (vec args)]
+                        (cond
+                          (= "push" (second a))
+                          (do (swap! push-n inc)
+                              {:exit 1 :out "" :err "ssh: denied"})
+                          (= ["git" "remote" "get-url" "origin"] a)
+                          {:exit 0 :out "git@github.com:o/r.git" :err ""}
+                          (= ["git" "remote" "set-url"] (vec (take 3 a)))
+                          (do (swap! seturl-n inc)
+                              {:exit 1 :out "" :err "config locked"})
+                          :else {:exit 0 :out "" :err ""})))]
+        (let [r (git/force-push! "/tmp/wt" "tok")]
+          (is (not (:success? r)))
+          (is (= 1 @push-n) "the retry push is not attempted when the token-URL set-url fails")
+          (is (= 1 @seturl-n) "only the token-URL set-url runs; no restore (origin unchanged)")
+          (is (false? (:push-succeeded? r)))
+          (is (re-find #"could not be applied" (:error r)) "reports the fallback could not be set up")
+          (is (re-find #"ssh: denied" (:error r)) "includes the original push error")
+          (is (re-find #"config locked" (:error r)) "surfaces the set-url error"))))))
+
 ;;------------------------------------------- core host-mode dispatch
 (deftest step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
