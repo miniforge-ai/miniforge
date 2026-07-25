@@ -31,11 +31,11 @@ breaks across most of the tree rather than true strata boundaries.
   validation helpers, `create-checkpoint`, `resolve-checkpoint`,
   loop-escalation, `create-episode`/`update-episode`, schema validation).
   `--fix` recomputed each `deftest`'s real stratum from the reference
-  graph — none of the test fns call each other except the three fixture
+  graph — none of the test fns call each other except three fixture
   helpers (`valid-control-plane-checkpoint`, `valid-approve-response`,
-  `loop-state`) that every `deftest` in the file depends on — and
-  collapsed the headings to two real layers: 0 (the fixtures) and 1 (every
-  `deftest`, all leaves relative to each other). Zero findings after.
+  `loop-state`) — and collapsed the headings to two real layers: Layer 0
+  (the fixtures, plus every `deftest` that doesn't call them — 16 tests),
+  Layer 1 (every `deftest` that does — 27 tests). Zero findings after.
 - `components/decision/src/ai/miniforge/decision/interface.clj` — zero
   pre-fix findings, but `--fix` still rewrote it: added `^{:stratum n}`
   metadata to all 24 defs, and folded a decorative `Layer 1`/`Layer 2`
