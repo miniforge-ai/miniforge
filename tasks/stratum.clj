@@ -99,8 +99,8 @@
                                       files)
         warn? (= "warn" (System/getenv budget-mode-env))]
     (when-not (str/blank? out)
-      (println (if warn? "⚠️ " "❌")
-               "Stratified-design findings remain after autofix (needs a namespace split for an over-budget file):")
+      (println (if warn? "⚠️" "❌")
+               "Stratified-design findings remain after autofix (often a namespace split needed for an over-budget file):")
       (println out))
     (when-not (str/blank? err) (binding [*out* *err*] (println err)))
     (cond
