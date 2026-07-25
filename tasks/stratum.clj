@@ -50,7 +50,7 @@
         (println "❌ Failed to re-stage" f "after autofix:" err)
         (System/exit exit)))))
 
-(def ^{:stratum 0} budget-mode-env
+(def ^{:stratum 0} ^:private budget-mode-env
   "Env var toggling how a remaining stratum-lint finding after autofix
    (in practice always SL003 — over the layer budget, needs a namespace
    split, since --fix resolves everything else) is treated: unset or any
