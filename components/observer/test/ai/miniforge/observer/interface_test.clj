@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.interface-test
   "Tests for the Observer component."
   (:require
@@ -23,11 +22,12 @@
    [ai.miniforge.observer.interface :as observer]
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as wf-proto]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Test Fixtures
 ;; ============================================================================
-
-(defn sample-workflow-state
+(defn ^{:stratum 0} sample-workflow-state
   "Create a sample workflow state for testing."
   [workflow-id status & {:keys [tokens cost duration dependency-health failure-attribution]
                          :or {tokens 1000 cost 0.10 duration 5000}}]
@@ -44,7 +44,7 @@
    :workflow/errors (when (= status :failed)
                      [{:phase :test :error "Test failed"}])})
 
-(defn sample-phase-result
+(defn ^{:stratum 0} sample-phase-result
   "Create a sample phase result for testing."
   [success? & {:keys [tokens cost duration errors]
               :or {tokens 500 cost 0.05 duration 2000 errors []}}]
@@ -58,8 +58,7 @@
 ;; ============================================================================
 ;; Observer Creation Tests
 ;; ============================================================================
-
-(deftest create-observer-test
+(deftest ^{:stratum 0} create-observer-test
   (testing "Creating a new observer"
     (let [obs (observer/create-observer)]
       (is (some? obs) "Observer should be created")
@@ -71,10 +70,21 @@
       (is (some? obs) "Observer with initial state should be created"))))
 
 ;; ============================================================================
+;; WorkflowObserver Integration Tests
+;; ============================================================================
+;; ============================================================================
+;; Run All Tests
+;; ============================================================================
+(deftest ^{:stratum 0} run-all-observer-tests
+  (testing "All observer tests should pass"
+    (is true "Observer component is fully tested")))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
 ;; Metrics Collection Tests
 ;; ============================================================================
-
-(deftest collect-workflow-metrics-test
+(deftest ^{:stratum 1} collect-workflow-metrics-test
   (testing "Collecting workflow metrics"
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)
@@ -123,7 +133,7 @@
         (is (= dependency-health (:dependency-health metrics)))
         (is (= failure-attribution (:failure-attribution metrics)))))))
 
-(deftest collect-phase-metrics-test
+(deftest ^{:stratum 1} collect-phase-metrics-test
   (testing "Collecting phase metrics"
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)]
@@ -146,8 +156,7 @@
 ;; ============================================================================
 ;; Query Tests
 ;; ============================================================================
-
-(deftest get-all-metrics-test
+(deftest ^{:stratum 1} get-all-metrics-test
   (testing "Getting all metrics"
     (let [obs (observer/create-observer)
           workflow-ids (repeatedly 5 random-uuid)]
@@ -193,8 +202,7 @@
 ;; ============================================================================
 ;; Analysis Tests
 ;; ============================================================================
-
-(deftest analyze-duration-stats-test
+(deftest ^{:stratum 1} analyze-duration-stats-test
   (testing "Analyzing duration statistics"
     (let [obs (observer/create-observer)
           durations [1000 2000 3000 4000 5000]]
@@ -218,7 +226,7 @@
           (is (= 1000 (:min stats)) "Min should be 1000ms")
           (is (= 5000 (:max stats)) "Max should be 5000ms"))))))
 
-(deftest analyze-cost-stats-test
+(deftest ^{:stratum 1} analyze-cost-stats-test
   (testing "Analyzing cost statistics"
     (let [obs (observer/create-observer)
           costs [0.05 0.10 0.15 0.20 0.25]]
@@ -236,7 +244,7 @@
           (is (= 0.15 (:avg stats)) "Average should be $0.15")
           (is (= 0.75 (:sum stats)) "Total should be $0.75"))))))
 
-(deftest analyze-token-stats-test
+(deftest ^{:stratum 1} analyze-token-stats-test
   (testing "Analyzing token statistics"
     (let [obs (observer/create-observer)
           tokens [500 1000 1500 2000 2500]]
@@ -254,7 +262,7 @@
           (is (= 1500.0 (:avg stats)) "Average should be 1500 tokens")
           (is (= 7500 (:sum stats)) "Total should be 7500 tokens"))))))
 
-(deftest analyze-phase-stats-test
+(deftest ^{:stratum 1} analyze-phase-stats-test
   (testing "Analyzing phase statistics"
     (let [obs (observer/create-observer)
           workflow-id (random-uuid)]
@@ -285,7 +293,7 @@
           (let [deploy-stats (get phase-data :deploy)]
             (is (= 0.0 (:success-rate deploy-stats)) "Deploy should have 0% success")))))))
 
-(deftest analyze-failure-patterns-test
+(deftest ^{:stratum 1} analyze-failure-patterns-test
   (testing "Analyzing failure patterns"
     (let [obs (observer/create-observer)]
 
@@ -325,7 +333,7 @@
         (is (= :anthropic (ffirst dependency-failures)))
         (is (= 2 (get-in (first dependency-failures) [1 :count])))))))
 
-(deftest analyze-trends-test
+(deftest ^{:stratum 1} analyze-trends-test
   (testing "Analyzing metrics trends"
     (let [obs (observer/create-observer)]
 
@@ -343,8 +351,7 @@
 ;; ============================================================================
 ;; Report Generation Tests
 ;; ============================================================================
-
-(deftest generate-summary-report-test
+(deftest ^{:stratum 1} generate-summary-report-test
   (testing "Generating summary report in markdown"
     (let [obs (observer/create-observer)]
 
@@ -386,7 +393,7 @@
         (is (contains? report :tokens) "Should have token analysis")
         (is (contains? report :failures) "Should have failure analysis")))))
 
-(deftest generate-detailed-report-test
+(deftest ^{:stratum 1} generate-detailed-report-test
   (testing "Generating detailed report"
     (let [obs (observer/create-observer)]
 
@@ -399,7 +406,7 @@
         (is (= 3 (:total-workflows report)) "Should have 3 workflows")
         (is (seq (:workflows report)) "Should have workflow data")))))
 
-(deftest generate-recommendations-report-test
+(deftest ^{:stratum 1} generate-recommendations-report-test
   (testing "Generating recommendations report"
     (let [obs (observer/create-observer)]
 
@@ -416,8 +423,7 @@
 ;; ============================================================================
 ;; Telemetry Artifact Tests
 ;; ============================================================================
-
-(deftest create-telemetry-artifact-test
+(deftest ^{:stratum 1} create-telemetry-artifact-test
   (testing "Creating telemetry artifact"
     (let [obs (observer/create-observer)]
 
@@ -433,16 +439,3 @@
         (is (string? (:artifact/content artifact)) "Content should be string")
         (is (= :edn (get-in artifact [:artifact/metadata :format])) "Format should be :edn")
         (is (= 10 (get-in artifact [:artifact/metadata :workflows])) "Should record workflow count")))))
-
-;; ============================================================================
-;; WorkflowObserver Integration Tests
-;; ============================================================================
-
-
-;; ============================================================================
-;; Run All Tests
-;; ============================================================================
-
-(deftest run-all-observer-tests
-  (testing "All observer tests should pass"
-    (is true "Observer component is fully tested")))

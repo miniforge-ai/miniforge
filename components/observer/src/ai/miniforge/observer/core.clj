@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.core
   "Core observer implementation for metrics collection and analysis.
 
@@ -30,22 +29,30 @@
 ;; ============================================================================
 ;; Forward Declarations
 ;; ============================================================================
-
 (declare analyze-duration-stats)
+
 (declare analyze-cost-stats)
+
 (declare analyze-token-stats)
+
 (declare analyze-phase-stats)
+
 (declare analyze-failure-patterns)
+
 (declare analyze-trends)
+
 (declare generate-summary-report)
+
 (declare generate-detailed-report)
+
 (declare generate-recommendations-report)
+
+;------------------------------------------------------------------------------ Layer 0
 
 ;; ============================================================================
 ;; Failure Attribution Helpers
 ;; ============================================================================
-
-(def ^:private failure-attribution-keys
+(def ^{:stratum 0} ^:private failure-attribution-keys
   [:failure/source
    :failure/vendor
    :failure/class
@@ -58,25 +65,12 @@
    :dependency/class
    :dependency/retryability])
 
-(defn- failure-attribution
-  [failure]
-  (let [attribution (select-keys failure failure-attribution-keys)]
-    (when (seq attribution)
-      attribution)))
-
-(defn- collect-failure-attribution
-  [workflow-state]
-  (or (some-> (:workflow/error workflow-state) failure-attribution)
-      (some->> (:workflow/errors workflow-state)
-               (keep failure-attribution)
-               first)))
-
-(defn- collect-dependency-health
+(defn- ^{:stratum 0} collect-dependency-health
   [workflow-state]
   (when-let [projection (:dependency-health workflow-state)]
     (not-empty projection)))
 
-(defn- label
+(defn- ^{:stratum 0} label
   [value]
   (cond
     (keyword? value) (name value)
@@ -85,10 +79,429 @@
     :else (str value)))
 
 ;; ============================================================================
+;; Analysis Functions
+;; ============================================================================
+(defn ^{:stratum 0} calculate-percentile
+  "Calculate percentile from sorted values."
+  [sorted-values percentile]
+  (when (seq sorted-values)
+    (let [idx (int (* (/ percentile 100.0) (count sorted-values)))]
+      (nth sorted-values (min idx (dec (count sorted-values)))))))
+
+(defn ^{:stratum 0} analyze-trends
+  "Analyze metrics trends over time."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+
+        ;; Sort by timestamp (oldest first for trend analysis)
+        sorted-metrics (sort-by :timestamp metrics)
+
+        ;; Split into first half and second half
+        n (count sorted-metrics)
+        first-half (take (quot n 2) sorted-metrics)
+        second-half (drop (quot n 2) sorted-metrics)
+
+        ;; Calculate stats for each half
+        first-durations (map #(get-in % [:metrics :duration-ms]) first-half)
+        second-durations (map #(get-in % [:metrics :duration-ms]) second-half)
+
+        first-costs (map #(get-in % [:metrics :cost-usd]) first-half)
+        second-costs (map #(get-in % [:metrics :cost-usd]) second-half)
+
+        duration-trend (when (and (seq first-durations) (seq second-durations))
+                        {:first-avg (double (/ (reduce + first-durations) (count first-durations)))
+                         :second-avg (double (/ (reduce + second-durations) (count second-durations)))})
+
+        cost-trend (when (and (seq first-costs) (seq second-costs))
+                    {:first-avg (double (/ (reduce + first-costs) (count first-costs)))
+                     :second-avg (double (/ (reduce + second-costs) (count second-costs)))})]
+
+    (proto/analysis-result
+     {:analysis-type :trends
+      :data {:duration-trend duration-trend
+             :cost-trend cost-trend
+             :sample-size n}
+      :summary (cond
+                 (and duration-trend cost-trend)
+                 (format "Duration %.0f -> %.0fms (%.1f%% change), Cost $%.4f -> $%.4f (%.1f%% change)"
+                         (:first-avg duration-trend)
+                         (:second-avg duration-trend)
+                         (* 100.0 (/ (- (:second-avg duration-trend) (:first-avg duration-trend))
+                                    (:first-avg duration-trend)))
+                         (:first-avg cost-trend)
+                         (:second-avg cost-trend)
+                         (* 100.0 (/ (- (:second-avg cost-trend) (:first-avg cost-trend))
+                                    (:first-avg cost-trend))))
+
+                 :else
+                 "Insufficient data for trend analysis")})))
+
+(defn ^{:stratum 0} generate-detailed-report
+  "Generate a detailed metrics breakdown report."
+  [observer opts]
+  (let [output-format (get opts :format :edn)
+        limit (get opts :limit 50)
+
+        all-metrics (proto/get-all-metrics observer {:limit limit})
+        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
+
+        report-data {:workflows all-metrics
+                     :phase-breakdown phase-analysis
+                     :total-workflows (count all-metrics)
+                     :generated-at (java.util.Date.)}]
+
+    (case output-format
+      :edn report-data
+      :markdown (str "# Detailed Workflow Metrics\n\n"
+                     "**Generated:** " (:generated-at report-data) "\n"
+                     "**Total Workflows:** " (:total-workflows report-data) "\n\n"
+                     "## Phase Performance\n"
+                     (:summary phase-analysis) "\n\n"
+                     "## Recent Workflows\n"
+                     (str/join "\n" (map #(format "- %s: %s (%.0fms, $%.4f)"
+                                                   (:workflow-id %)
+                                                   (:status %)
+                                                   (get-in % [:metrics :duration-ms])
+                                                   (get-in % [:metrics :cost-usd]))
+                                         (take 10 all-metrics))))
+      report-data)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} failure-attribution
+  [failure]
+  (let [attribution (select-keys failure failure-attribution-keys)]
+    (when (seq attribution)
+      attribution)))
+
+(defn ^{:stratum 1} calculate-stats
+  "Calculate statistics for a sequence of numeric values."
+  [values]
+  (when (seq values)
+    (let [sorted (sort values)
+          n (count sorted)
+          sum (reduce + sorted)
+          avg (double (/ sum n))
+          p50 (calculate-percentile sorted 50)
+          p95 (calculate-percentile sorted 95)
+          p99 (calculate-percentile sorted 99)
+          min-val (first sorted)
+          max-val (last sorted)]
+      {:count n
+       :sum sum
+       :avg avg
+       :min min-val
+       :max max-val
+       :p50 p50
+       :p95 p95
+       :p99 p99})))
+
+(defn ^{:stratum 1} analyze-failure-patterns
+  "Analyze workflow failure patterns."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+        failed (filter phase/failed? metrics)
+        attributed-failures (keep :failure-attribution failed)
+
+        ;; Analyze which phases fail most often
+        failed-phases (reduce
+                       (fn [acc workflow-metrics]
+                         (let [failed-phases (filter #(not (:success? %)) (:phases workflow-metrics []))]
+                           (reduce
+                            (fn [acc2 phase-metrics]
+                              (update acc2 (:phase phase-metrics) (fnil inc 0)))
+                            acc
+                            failed-phases)))
+                       {}
+                       failed)
+        dependency-failures (->> attributed-failures
+                                 (keep (fn [failure]
+                                         (when-let [dependency-id (or (:dependency/id failure)
+                                                                      (:failure/vendor failure))]
+                                           [dependency-id (select-keys failure
+                                                                       [:failure/source
+                                                                        :failure/vendor
+                                                                        :failure/class
+                                                                        :dependency/class
+                                                                        :dependency/retryability])])))
+                                 (reduce (fn [acc [dependency-id failure]]
+                                           (update acc dependency-id
+                                                   (fn [existing]
+                                                     (-> (merge existing failure)
+                                                         (update :count (fnil inc 0))))))
+                                         {})
+                                 (sort-by (comp - :count val))
+                                 vec)
+
+        total-workflows (count metrics)
+        failure-rate (if (pos? total-workflows)
+                      (double (/ (count failed) total-workflows))
+                      0.0)]
+
+    (proto/analysis-result
+     {:analysis-type :failure-patterns
+      :data {:total-workflows total-workflows
+             :failed-workflows (count failed)
+             :failure-rate failure-rate
+             :failed-phases (sort-by val > failed-phases)
+             :dependency-failures dependency-failures}
+      :summary (format "Failure rate: %.1f%% (%d/%d workflows failed)"
+                       (* 100.0 failure-rate)
+                       (count failed)
+                       total-workflows)
+      :recommendations
+      (cond-> []
+        (seq failed-phases)
+        (conj (str "Most problematic phases: "
+                   (str/join ", " (map first (take 3 (sort-by val > failed-phases))))))
+        (seq dependency-failures)
+        (conj (str "Dependency-attributed failures: "
+                   (str/join ", " (map (comp label first) (take 3 dependency-failures))))))})))
+
+;; ============================================================================
+;; Report Generation
+;; ============================================================================
+(defn ^{:stratum 1} generate-summary-report
+  "Generate a summary performance report."
+  [observer opts]
+  (let [output-format (get opts :format :markdown)
+        limit (get opts :limit 100)
+
+        duration-analysis (proto/analyze-metrics observer :duration-stats {:limit limit})
+        cost-analysis (proto/analyze-metrics observer :cost-stats {:limit limit})
+        token-analysis (proto/analyze-metrics observer :token-stats {:limit limit})
+        failure-analysis (proto/analyze-metrics observer :failure-patterns {:limit limit})
+
+        report-data {:duration duration-analysis
+                     :cost cost-analysis
+                     :tokens token-analysis
+                     :failures failure-analysis
+                     :generated-at (java.util.Date.)}]
+
+    (case output-format
+      :edn report-data
+
+      :markdown
+      (str "# Workflow Performance Summary\n\n"
+           "**Generated:** " (:generated-at report-data) "\n\n"
+           "## Duration Statistics\n"
+           (:summary duration-analysis) "\n\n"
+           "## Cost Statistics\n"
+           (:summary cost-analysis) "\n\n"
+           "## Token Usage Statistics\n"
+           (:summary token-analysis) "\n\n"
+           "## Failure Analysis\n"
+           (:summary failure-analysis) "\n"
+           (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
+             (str "\n**Dependency-attributed failures:**\n"
+                  (str/join "\n"
+                            (map (fn [[dependency-id failure]]
+                                   (format "- %s (%s, count=%d)"
+                                           (label dependency-id)
+                                           (or (some-> (:dependency/class failure) label)
+                                               (some-> (:failure/class failure) label)
+                                               "unknown")
+                                           (:count failure)))
+                                 dependency-failures))
+                  "\n"))
+           (when-let [recs (:recommendations failure-analysis)]
+             (str "\n**Recommendations:**\n"
+                  (str/join "\n" (map #(str "- " %) recs)) "\n")))
+
+      report-data)))
+
+(defn ^{:stratum 1} generate-recommendations-report
+  "Generate recommendations for workflow improvements."
+  [observer opts]
+  (let [output-format (get opts :format :markdown)
+        limit (get opts :limit 100)
+
+        failure-analysis (proto/analyze-metrics observer :failure-patterns {:limit limit})
+        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
+        trends-analysis (proto/analyze-metrics observer :trends {:limit limit})
+
+        ;; Generate recommendations based on analysis
+        recommendations []
+
+        ;; Failure-based recommendations
+        recommendations (if-let [recs (:recommendations failure-analysis)]
+                         (into recommendations recs)
+                         recommendations)
+
+        ;; Phase performance recommendations
+        phase-data (:data phase-analysis)
+        slow-phases (filter (fn [[_phase stats]]
+                             (when-let [avg-duration (get-in stats [:duration :avg])]
+                               (> avg-duration 30000))) ;; > 30 seconds
+                           phase-data)
+
+        recommendations (if (seq slow-phases)
+                         (conj recommendations
+                               (str "Optimize slow phases: "
+                                    (str/join ", " (map first slow-phases))))
+                         recommendations)
+
+        ;; Trend-based recommendations
+        duration-trend (get-in trends-analysis [:data :duration-trend])
+        recommendations (if (and duration-trend
+                                (> (:second-avg duration-trend)
+                                   (* 1.2 (:first-avg duration-trend)))) ;; 20% increase
+                         (conj recommendations
+                               "Warning: Workflow duration increasing over time - investigate performance regression")
+                         recommendations)
+
+        report-data {:recommendations recommendations
+                     :failure-analysis failure-analysis
+                     :phase-analysis phase-analysis
+                     :trends-analysis trends-analysis
+                     :generated-at (java.util.Date.)}]
+
+    (case output-format
+      :edn report-data
+      :markdown (str "# Workflow Improvement Recommendations\n\n"
+                     "**Generated:** " (:generated-at report-data) "\n\n"
+                     "## Recommendations\n"
+                     (if (seq recommendations)
+                       (str/join "\n" (map #(str "- " %) recommendations))
+                       "No specific recommendations at this time. System performing well!")
+                     "\n\n"
+                     "## Supporting Analysis\n\n"
+                     "### Failures\n" (:summary failure-analysis) "\n\n"
+                     (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
+                       (str "### Dependency Attribution\n"
+                            (str/join "\n"
+                                      (map (fn [[dependency-id failure]]
+                                             (format "- %s: %s (%d)"
+                                                     (label dependency-id)
+                                                     (or (some-> (:dependency/class failure) label)
+                                                         (some-> (:failure/class failure) label)
+                                                         "unknown")
+                                                     (:count failure)))
+                                           dependency-failures))
+                            "\n\n"))
+                     "### Trends\n" (:summary trends-analysis) "\n")
+      report-data)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} collect-failure-attribution
+  [workflow-state]
+  (or (some-> (:workflow/error workflow-state) failure-attribution)
+      (some->> (:workflow/errors workflow-state)
+               (keep failure-attribution)
+               first)))
+
+(defn ^{:stratum 2} analyze-duration-stats
+  "Analyze workflow duration statistics."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+        durations (map #(get-in % [:metrics :duration-ms]) metrics)
+        durations (remove nil? durations)
+
+        stats (calculate-stats durations)]
+
+    (proto/analysis-result
+     {:analysis-type :duration-stats
+      :data stats
+      :summary (when stats
+                 (format "Analyzed %d workflows: avg=%.0fms, p50=%.0fms, p95=%.0fms, p99=%.0fms"
+                         (:count stats)
+                         (double (:avg stats))
+                         (double (:p50 stats))
+                         (double (:p95 stats))
+                         (double (:p99 stats))))})))
+
+(defn ^{:stratum 2} analyze-cost-stats
+  "Analyze workflow cost statistics."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+        costs (map #(get-in % [:metrics :cost-usd]) metrics)
+        costs (remove nil? costs)
+
+        stats (calculate-stats costs)]
+
+    (proto/analysis-result
+     {:analysis-type :cost-stats
+      :data stats
+      :summary (when stats
+                 (format "Analyzed %d workflows: avg=$%.4f, p50=$%.4f, p95=$%.4f, total=$%.4f"
+                         (:count stats)
+                         (:avg stats)
+                         (:p50 stats)
+                         (:p95 stats)
+                         (:sum stats)))})))
+
+(defn ^{:stratum 2} analyze-token-stats
+  "Analyze workflow token usage statistics."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+        tokens (map #(get-in % [:metrics :tokens]) metrics)
+        tokens (remove nil? tokens)
+
+        stats (calculate-stats tokens)]
+
+    (proto/analysis-result
+     {:analysis-type :token-stats
+      :data stats
+      :summary (when stats
+                 (format "Analyzed %d workflows: avg=%d tokens, p50=%d, p95=%d, total=%d"
+                         (:count stats)
+                         (int (:avg stats))
+                         (:p50 stats)
+                         (:p95 stats)
+                         (:sum stats)))})))
+
+(defn ^{:stratum 2} analyze-phase-stats
+  "Analyze per-phase performance statistics."
+  [observer opts]
+  (let [limit (get opts :limit 100)
+        metrics (proto/get-all-metrics observer {:limit limit})
+
+        ;; Group phase metrics by phase name
+        phase-groups (reduce
+                      (fn [acc workflow-metrics]
+                        (reduce
+                         (fn [acc2 phase-metrics]
+                           (update acc2 (:phase phase-metrics) (fnil conj []) phase-metrics))
+                         acc
+                         (:phases workflow-metrics [])))
+                      {}
+                      metrics)
+
+        ;; Calculate stats for each phase
+        phase-stats (into {}
+                          (map (fn [[phase-name phase-list]]
+                                 (let [durations (map #(get-in % [:metrics :duration-ms]) phase-list)
+                                       tokens (map #(get-in % [:metrics :tokens]) phase-list)
+                                       success-count (count (filter :success? phase-list))
+                                       total-count (count phase-list)
+                                       success-rate (if (pos? total-count)
+                                                     (double (/ success-count total-count))
+                                                     0.0)]
+                                   [phase-name {:duration (calculate-stats (remove nil? durations))
+                                               :tokens (calculate-stats (remove nil? tokens))
+                                               :success-rate success-rate
+                                               :total-executions total-count}]))
+                               phase-groups))]
+
+    (proto/analysis-result
+     {:analysis-type :phase-stats
+      :data phase-stats
+      :summary (format "Analyzed %d unique phases across %d workflows"
+                       (count phase-stats)
+                       (count metrics))})))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; ============================================================================
 ;; Simple Observer Implementation
 ;; ============================================================================
-
-(defrecord SimpleObserver [state]
+(defrecord ^{:stratum 3} SimpleObserver [state]
   ;; State structure:
   ;; {:metrics {workflow-id -> workflow-metrics}
   ;;  :phase-metrics {workflow-id -> [phase-metrics...]}
@@ -224,11 +637,12 @@
     ;; Currently just logging via history in workflow state
     nil))
 
+;------------------------------------------------------------------------------ Layer 4
+
 ;; ============================================================================
 ;; Constructor
 ;; ============================================================================
-
-(defn create-observer
+(defn ^{:stratum 4} create-observer
   "Create a new SimpleObserver instance.
 
    Options:
@@ -245,406 +659,3 @@
                   :metadata {:created (java.util.Date.)
                             :total-workflows 0}}
                  initial-state)))))
-
-;; ============================================================================
-;; Analysis Functions
-;; ============================================================================
-
-(defn calculate-percentile
-  "Calculate percentile from sorted values."
-  [sorted-values percentile]
-  (when (seq sorted-values)
-    (let [idx (int (* (/ percentile 100.0) (count sorted-values)))]
-      (nth sorted-values (min idx (dec (count sorted-values)))))))
-
-(defn calculate-stats
-  "Calculate statistics for a sequence of numeric values."
-  [values]
-  (when (seq values)
-    (let [sorted (sort values)
-          n (count sorted)
-          sum (reduce + sorted)
-          avg (double (/ sum n))
-          p50 (calculate-percentile sorted 50)
-          p95 (calculate-percentile sorted 95)
-          p99 (calculate-percentile sorted 99)
-          min-val (first sorted)
-          max-val (last sorted)]
-      {:count n
-       :sum sum
-       :avg avg
-       :min min-val
-       :max max-val
-       :p50 p50
-       :p95 p95
-       :p99 p99})))
-
-(defn analyze-duration-stats
-  "Analyze workflow duration statistics."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-        durations (map #(get-in % [:metrics :duration-ms]) metrics)
-        durations (remove nil? durations)
-
-        stats (calculate-stats durations)]
-
-    (proto/analysis-result
-     {:analysis-type :duration-stats
-      :data stats
-      :summary (when stats
-                 (format "Analyzed %d workflows: avg=%.0fms, p50=%.0fms, p95=%.0fms, p99=%.0fms"
-                         (:count stats)
-                         (double (:avg stats))
-                         (double (:p50 stats))
-                         (double (:p95 stats))
-                         (double (:p99 stats))))})))
-
-(defn analyze-cost-stats
-  "Analyze workflow cost statistics."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-        costs (map #(get-in % [:metrics :cost-usd]) metrics)
-        costs (remove nil? costs)
-
-        stats (calculate-stats costs)]
-
-    (proto/analysis-result
-     {:analysis-type :cost-stats
-      :data stats
-      :summary (when stats
-                 (format "Analyzed %d workflows: avg=$%.4f, p50=$%.4f, p95=$%.4f, total=$%.4f"
-                         (:count stats)
-                         (:avg stats)
-                         (:p50 stats)
-                         (:p95 stats)
-                         (:sum stats)))})))
-
-(defn analyze-token-stats
-  "Analyze workflow token usage statistics."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-        tokens (map #(get-in % [:metrics :tokens]) metrics)
-        tokens (remove nil? tokens)
-
-        stats (calculate-stats tokens)]
-
-    (proto/analysis-result
-     {:analysis-type :token-stats
-      :data stats
-      :summary (when stats
-                 (format "Analyzed %d workflows: avg=%d tokens, p50=%d, p95=%d, total=%d"
-                         (:count stats)
-                         (int (:avg stats))
-                         (:p50 stats)
-                         (:p95 stats)
-                         (:sum stats)))})))
-
-(defn analyze-phase-stats
-  "Analyze per-phase performance statistics."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-
-        ;; Group phase metrics by phase name
-        phase-groups (reduce
-                      (fn [acc workflow-metrics]
-                        (reduce
-                         (fn [acc2 phase-metrics]
-                           (update acc2 (:phase phase-metrics) (fnil conj []) phase-metrics))
-                         acc
-                         (:phases workflow-metrics [])))
-                      {}
-                      metrics)
-
-        ;; Calculate stats for each phase
-        phase-stats (into {}
-                          (map (fn [[phase-name phase-list]]
-                                 (let [durations (map #(get-in % [:metrics :duration-ms]) phase-list)
-                                       tokens (map #(get-in % [:metrics :tokens]) phase-list)
-                                       success-count (count (filter :success? phase-list))
-                                       total-count (count phase-list)
-                                       success-rate (if (pos? total-count)
-                                                     (double (/ success-count total-count))
-                                                     0.0)]
-                                   [phase-name {:duration (calculate-stats (remove nil? durations))
-                                               :tokens (calculate-stats (remove nil? tokens))
-                                               :success-rate success-rate
-                                               :total-executions total-count}]))
-                               phase-groups))]
-
-    (proto/analysis-result
-     {:analysis-type :phase-stats
-      :data phase-stats
-      :summary (format "Analyzed %d unique phases across %d workflows"
-                       (count phase-stats)
-                       (count metrics))})))
-
-(defn analyze-failure-patterns
-  "Analyze workflow failure patterns."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-        failed (filter phase/failed? metrics)
-        attributed-failures (keep :failure-attribution failed)
-
-        ;; Analyze which phases fail most often
-        failed-phases (reduce
-                       (fn [acc workflow-metrics]
-                         (let [failed-phases (filter #(not (:success? %)) (:phases workflow-metrics []))]
-                           (reduce
-                            (fn [acc2 phase-metrics]
-                              (update acc2 (:phase phase-metrics) (fnil inc 0)))
-                            acc
-                            failed-phases)))
-                       {}
-                       failed)
-        dependency-failures (->> attributed-failures
-                                 (keep (fn [failure]
-                                         (when-let [dependency-id (or (:dependency/id failure)
-                                                                      (:failure/vendor failure))]
-                                           [dependency-id (select-keys failure
-                                                                       [:failure/source
-                                                                        :failure/vendor
-                                                                        :failure/class
-                                                                        :dependency/class
-                                                                        :dependency/retryability])])))
-                                 (reduce (fn [acc [dependency-id failure]]
-                                           (update acc dependency-id
-                                                   (fn [existing]
-                                                     (-> (merge existing failure)
-                                                         (update :count (fnil inc 0))))))
-                                         {})
-                                 (sort-by (comp - :count val))
-                                 vec)
-
-        total-workflows (count metrics)
-        failure-rate (if (pos? total-workflows)
-                      (double (/ (count failed) total-workflows))
-                      0.0)]
-
-    (proto/analysis-result
-     {:analysis-type :failure-patterns
-      :data {:total-workflows total-workflows
-             :failed-workflows (count failed)
-             :failure-rate failure-rate
-             :failed-phases (sort-by val > failed-phases)
-             :dependency-failures dependency-failures}
-      :summary (format "Failure rate: %.1f%% (%d/%d workflows failed)"
-                       (* 100.0 failure-rate)
-                       (count failed)
-                       total-workflows)
-      :recommendations
-      (cond-> []
-        (seq failed-phases)
-        (conj (str "Most problematic phases: "
-                   (str/join ", " (map first (take 3 (sort-by val > failed-phases))))))
-        (seq dependency-failures)
-        (conj (str "Dependency-attributed failures: "
-                   (str/join ", " (map (comp label first) (take 3 dependency-failures))))))})))
-
-(defn analyze-trends
-  "Analyze metrics trends over time."
-  [observer opts]
-  (let [limit (get opts :limit 100)
-        metrics (proto/get-all-metrics observer {:limit limit})
-
-        ;; Sort by timestamp (oldest first for trend analysis)
-        sorted-metrics (sort-by :timestamp metrics)
-
-        ;; Split into first half and second half
-        n (count sorted-metrics)
-        first-half (take (quot n 2) sorted-metrics)
-        second-half (drop (quot n 2) sorted-metrics)
-
-        ;; Calculate stats for each half
-        first-durations (map #(get-in % [:metrics :duration-ms]) first-half)
-        second-durations (map #(get-in % [:metrics :duration-ms]) second-half)
-
-        first-costs (map #(get-in % [:metrics :cost-usd]) first-half)
-        second-costs (map #(get-in % [:metrics :cost-usd]) second-half)
-
-        duration-trend (when (and (seq first-durations) (seq second-durations))
-                        {:first-avg (double (/ (reduce + first-durations) (count first-durations)))
-                         :second-avg (double (/ (reduce + second-durations) (count second-durations)))})
-
-        cost-trend (when (and (seq first-costs) (seq second-costs))
-                    {:first-avg (double (/ (reduce + first-costs) (count first-costs)))
-                     :second-avg (double (/ (reduce + second-costs) (count second-costs)))})]
-
-    (proto/analysis-result
-     {:analysis-type :trends
-      :data {:duration-trend duration-trend
-             :cost-trend cost-trend
-             :sample-size n}
-      :summary (cond
-                 (and duration-trend cost-trend)
-                 (format "Duration %.0f -> %.0fms (%.1f%% change), Cost $%.4f -> $%.4f (%.1f%% change)"
-                         (:first-avg duration-trend)
-                         (:second-avg duration-trend)
-                         (* 100.0 (/ (- (:second-avg duration-trend) (:first-avg duration-trend))
-                                    (:first-avg duration-trend)))
-                         (:first-avg cost-trend)
-                         (:second-avg cost-trend)
-                         (* 100.0 (/ (- (:second-avg cost-trend) (:first-avg cost-trend))
-                                    (:first-avg cost-trend))))
-
-                 :else
-                 "Insufficient data for trend analysis")})))
-
-;; ============================================================================
-;; Report Generation
-;; ============================================================================
-
-(defn generate-summary-report
-  "Generate a summary performance report."
-  [observer opts]
-  (let [output-format (get opts :format :markdown)
-        limit (get opts :limit 100)
-
-        duration-analysis (proto/analyze-metrics observer :duration-stats {:limit limit})
-        cost-analysis (proto/analyze-metrics observer :cost-stats {:limit limit})
-        token-analysis (proto/analyze-metrics observer :token-stats {:limit limit})
-        failure-analysis (proto/analyze-metrics observer :failure-patterns {:limit limit})
-
-        report-data {:duration duration-analysis
-                     :cost cost-analysis
-                     :tokens token-analysis
-                     :failures failure-analysis
-                     :generated-at (java.util.Date.)}]
-
-    (case output-format
-      :edn report-data
-
-      :markdown
-      (str "# Workflow Performance Summary\n\n"
-           "**Generated:** " (:generated-at report-data) "\n\n"
-           "## Duration Statistics\n"
-           (:summary duration-analysis) "\n\n"
-           "## Cost Statistics\n"
-           (:summary cost-analysis) "\n\n"
-           "## Token Usage Statistics\n"
-           (:summary token-analysis) "\n\n"
-           "## Failure Analysis\n"
-           (:summary failure-analysis) "\n"
-           (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
-             (str "\n**Dependency-attributed failures:**\n"
-                  (str/join "\n"
-                            (map (fn [[dependency-id failure]]
-                                   (format "- %s (%s, count=%d)"
-                                           (label dependency-id)
-                                           (or (some-> (:dependency/class failure) label)
-                                               (some-> (:failure/class failure) label)
-                                               "unknown")
-                                           (:count failure)))
-                                 dependency-failures))
-                  "\n"))
-           (when-let [recs (:recommendations failure-analysis)]
-             (str "\n**Recommendations:**\n"
-                  (str/join "\n" (map #(str "- " %) recs)) "\n")))
-
-      report-data)))
-
-(defn generate-detailed-report
-  "Generate a detailed metrics breakdown report."
-  [observer opts]
-  (let [output-format (get opts :format :edn)
-        limit (get opts :limit 50)
-
-        all-metrics (proto/get-all-metrics observer {:limit limit})
-        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
-
-        report-data {:workflows all-metrics
-                     :phase-breakdown phase-analysis
-                     :total-workflows (count all-metrics)
-                     :generated-at (java.util.Date.)}]
-
-    (case output-format
-      :edn report-data
-      :markdown (str "# Detailed Workflow Metrics\n\n"
-                     "**Generated:** " (:generated-at report-data) "\n"
-                     "**Total Workflows:** " (:total-workflows report-data) "\n\n"
-                     "## Phase Performance\n"
-                     (:summary phase-analysis) "\n\n"
-                     "## Recent Workflows\n"
-                     (str/join "\n" (map #(format "- %s: %s (%.0fms, $%.4f)"
-                                                   (:workflow-id %)
-                                                   (:status %)
-                                                   (get-in % [:metrics :duration-ms])
-                                                   (get-in % [:metrics :cost-usd]))
-                                         (take 10 all-metrics))))
-      report-data)))
-
-(defn generate-recommendations-report
-  "Generate recommendations for workflow improvements."
-  [observer opts]
-  (let [output-format (get opts :format :markdown)
-        limit (get opts :limit 100)
-
-        failure-analysis (proto/analyze-metrics observer :failure-patterns {:limit limit})
-        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
-        trends-analysis (proto/analyze-metrics observer :trends {:limit limit})
-
-        ;; Generate recommendations based on analysis
-        recommendations []
-
-        ;; Failure-based recommendations
-        recommendations (if-let [recs (:recommendations failure-analysis)]
-                         (into recommendations recs)
-                         recommendations)
-
-        ;; Phase performance recommendations
-        phase-data (:data phase-analysis)
-        slow-phases (filter (fn [[_phase stats]]
-                             (when-let [avg-duration (get-in stats [:duration :avg])]
-                               (> avg-duration 30000))) ;; > 30 seconds
-                           phase-data)
-
-        recommendations (if (seq slow-phases)
-                         (conj recommendations
-                               (str "Optimize slow phases: "
-                                    (str/join ", " (map first slow-phases))))
-                         recommendations)
-
-        ;; Trend-based recommendations
-        duration-trend (get-in trends-analysis [:data :duration-trend])
-        recommendations (if (and duration-trend
-                                (> (:second-avg duration-trend)
-                                   (* 1.2 (:first-avg duration-trend)))) ;; 20% increase
-                         (conj recommendations
-                               "Warning: Workflow duration increasing over time - investigate performance regression")
-                         recommendations)
-
-        report-data {:recommendations recommendations
-                     :failure-analysis failure-analysis
-                     :phase-analysis phase-analysis
-                     :trends-analysis trends-analysis
-                     :generated-at (java.util.Date.)}]
-
-    (case output-format
-      :edn report-data
-      :markdown (str "# Workflow Improvement Recommendations\n\n"
-                     "**Generated:** " (:generated-at report-data) "\n\n"
-                     "## Recommendations\n"
-                     (if (seq recommendations)
-                       (str/join "\n" (map #(str "- " %) recommendations))
-                       "No specific recommendations at this time. System performing well!")
-                     "\n\n"
-                     "## Supporting Analysis\n\n"
-                     "### Failures\n" (:summary failure-analysis) "\n\n"
-                     (when-let [dependency-failures (seq (get-in failure-analysis [:data :dependency-failures]))]
-                       (str "### Dependency Attribution\n"
-                            (str/join "\n"
-                                      (map (fn [[dependency-id failure]]
-                                             (format "- %s: %s (%d)"
-                                                     (label dependency-id)
-                                                     (or (some-> (:dependency/class failure) label)
-                                                         (some-> (:failure/class failure) label)
-                                                         "unknown")
-                                                     (:count failure)))
-                                           dependency-failures))
-                            "\n\n"))
-                     "### Trends\n" (:summary trends-analysis) "\n")
-      report-data)))

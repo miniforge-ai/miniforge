@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.protocol
   "Observer protocol for metrics collection and analysis.
 
@@ -26,11 +25,12 @@
    - Generates performance reports
    - Produces telemetry artifacts for Meta Loop")
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Observer Protocol
 ;; ============================================================================
-
-(defprotocol Observer
+(defprotocol ^{:stratum 0} Observer
   "Protocol for observing and analyzing workflow execution metrics."
 
   ;; Metrics Collection
@@ -117,8 +117,7 @@
 ;; ============================================================================
 ;; Metrics Data Structures
 ;; ============================================================================
-
-(defn workflow-metrics
+(defn ^{:stratum 0} workflow-metrics
   "Create a workflow metrics record.
 
    Required fields:
@@ -145,7 +144,7 @@
    :dependency-health dependency-health
    :failure-attribution failure-attribution})
 
-(defn phase-metrics
+(defn ^{:stratum 0} phase-metrics
   "Create a phase metrics record.
 
    Required fields:
@@ -165,7 +164,7 @@
    :iterations (or iterations 1)
    :timestamp (or timestamp (java.util.Date.))})
 
-(defn analysis-result
+(defn ^{:stratum 0} analysis-result
   "Create an analysis result record.
 
    Required fields:
