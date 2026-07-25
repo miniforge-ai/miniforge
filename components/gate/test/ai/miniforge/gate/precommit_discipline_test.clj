@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.precommit-discipline-test
   "Tests for pre-commit discipline policy gate."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.precommit-discipline :as discipline]))
 
-(deftest parse-bypass-reason-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} parse-bypass-reason-test
   (testing "Extracts bypass reason from commit message"
     (is (= "environmental issue"
            (discipline/parse-bypass-reason
@@ -35,7 +36,7 @@
     (is (nil? (discipline/parse-bypass-reason
                "fix: normal commit\n\nNo bypass here")))))
 
-(deftest check-manual-validation-test
+(deftest ^{:stratum 0} check-manual-validation-test
   (testing "Detects documented manual validation"
     (let [message "fix: thing\n\nManual validation:\n- Tests passed: clojure -M:poly test\n- Linting passed: bb lint:clj"
           result (discipline/check-manual-validation message)]
@@ -49,7 +50,7 @@
       (is (not (:documented? result)))
       (is (empty? (:steps result))))))
 
-(deftest check-no-verify-in-history-test
+(deftest ^{:stratum 0} check-no-verify-in-history-test
   (testing "Detects bypass markers in commit messages"
     (is (true? (discipline/check-no-verify-in-history?
                 {:message "fix: thing\n\n[BYPASS-HOOKS: reason]"})))
@@ -64,7 +65,7 @@
     (is (false? (discipline/check-no-verify-in-history?
                  {:message "fix: normal commit\n\nJust a regular fix"})))))
 
-(deftest validate-bypass-commit-test
+(deftest ^{:stratum 0} validate-bypass-commit-test
   (testing "Valid bypassed commit passes"
     (let [commit {:hash "abc123"
                   :subject "fix: emergency fix"
@@ -104,7 +105,7 @@
                       (re-find #"Root cause:" (:message %)))
                 (:violations result))))))
 
-(deftest check-precommit-discipline-integration-test
+(deftest ^{:stratum 0} check-precommit-discipline-integration-test
   (testing "Gate returns passed for clean history"
     ;; Note: This test will check actual git history if run in a git repo
     ;; In CI/test environments without recent bypass commits, should pass

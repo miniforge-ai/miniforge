@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.interface-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -25,9 +24,9 @@
    [ai.miniforge.control-plane-adapter.interface :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures and factories
 
-(defn- make-temp-dir
+;; Test fixtures and factories
+(defn- ^{:stratum 0} make-temp-dir
   "Create a temp directory that auto-deletes on JVM exit."
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
@@ -36,14 +35,14 @@
     (.deleteOnExit dir)
     dir))
 
-(defn- temp-resource-url
+(defn- ^{:stratum 0} temp-resource-url
   [contents]
   (let [file (java.io.File/createTempFile "adapter-config" ".edn")]
     (.deleteOnExit file)
     (spit file contents :encoding "UTF-8")
     (.toURL (.toURI file))))
 
-(defn- write-file!
+(defn- ^{:stratum 0} write-file!
   "Write content to a file inside dir, creating parents as needed."
   [^java.io.File dir relative-path content]
   (let [file (io/file dir relative-path)]
@@ -51,19 +50,19 @@
     (spit file content)
     file))
 
-(defn- touch-fresh!
+(defn- ^{:stratum 0} touch-fresh!
   "Set a file's last-modified to now (so it appears 'recently active')."
   [^java.io.File file]
   (.setLastModified file (System/currentTimeMillis))
   file)
 
-(defn- touch-stale!
+(defn- ^{:stratum 0} touch-stale!
   "Backdate a file's last-modified beyond the activity threshold."
   [^java.io.File file]
   (.setLastModified file (- (System/currentTimeMillis) (* 10 60 1000))) ;; 10 min
   file)
 
-(defn- agent-record
+(defn- ^{:stratum 0} agent-record
   [& {:as overrides}]
   (merge {:agent/id          (random-uuid)
           :agent/external-id "test-project"
@@ -76,32 +75,57 @@
 ;; A PID that should never be valid (PID 0 is the kernel scheduler on POSIX
 ;; and `kill -0 0` is implementation-defined; very large unused PIDs are
 ;; safer for "definitely not alive" assertions).
-(def ^:private definitely-dead-pid 99999999)
+(def ^{:stratum 0} ^:private definitely-dead-pid 99999999)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; create-adapter / adapter-id
-
-(deftest create-adapter-returns-record-test
+(deftest ^{:stratum 0} create-adapter-returns-record-test
   (testing "create-adapter returns a control-plane adapter"
     (let [a (sut/create-adapter)]
       (is (satisfies? proto/ControlPlaneAdapter a))
       (is (= :claude-code (proto/adapter-id a))))))
 
-(deftest create-adapter-stores-config-test
+(deftest ^{:stratum 0} create-adapter-stores-config-test
   (testing "Config map is preserved on the adapter"
     (let [a (sut/create-adapter {:projects-dir "/tmp/example"})]
       (is (= {:projects-dir "/tmp/example"} (:config a))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; discover-agents — exercises discovery/discover-sessions via real filesystem
+;; load-config — fail-fast config loading
+(deftest ^{:stratum 0} load-config-throws-on-missing-resource-test
+  (testing "Absent classpath resource raises an ex-info, not an NPE"
+    (let [ex (try
+               (#'discovery/load-config "config/adapter_claude_code/does-not-exist.edn"
+                                        [:k])
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= "config/adapter_claude_code/does-not-exist.edn"
+             (:config/resource (ex-data ex)))))))
 
-(deftest discover-agents-returns-empty-when-no-projects-test
+(deftest ^{:stratum 0} load-config-throws-on-missing-key-test
+  (testing "Present resource missing a required key raises an ex-info"
+    (let [ex (try
+               (#'discovery/load-config "config/adapter_claude_code/staleness.edn"
+                                        [:nope])
+               nil
+               (catch clojure.lang.ExceptionInfo e e))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= [:nope] (:config/missing-keys (ex-data ex)))))))
+
+(deftest ^{:stratum 0} staleness-windows-loads-test
+  (testing "Valid resource still loads the expected window keys"
+    (is (= #{:session-activity-window-ms :running-window-ms :idle-window-ms}
+           (set (keys discovery/staleness-windows))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; discover-agents — exercises discovery/discover-sessions via real filesystem
+(deftest ^{:stratum 1} discover-agents-returns-empty-when-no-projects-test
   (testing "Empty projects directory yields no agents"
     (let [empty-dir (make-temp-dir)
           adapter (sut/create-adapter)]
       (is (= [] (proto/discover-agents adapter {:projects-dir (.getAbsolutePath empty-dir)}))))))
 
-(deftest discover-agents-finds-recently-active-session-test
+(deftest ^{:stratum 1} discover-agents-finds-recently-active-session-test
   (testing "Project with a fresh sessions/*.jsonl is discovered as an agent"
     (let [base (make-temp-dir)
           ;; Create projects/<project>/sessions/<session>.jsonl with fresh mtime
@@ -118,7 +142,7 @@
                (get-in a [:agent/metadata :session-file])))
         (is (inst? (get-in a [:agent/metadata :last-activity])))))))
 
-(deftest discover-agents-skips-stale-and-pidless-projects-test
+(deftest ^{:stratum 1} discover-agents-skips-stale-and-pidless-projects-test
   (testing "Project with only a stale session log and no lock is excluded"
     (let [base (make-temp-dir)
           stale-session (write-file! base "old-proj/sessions/x.jsonl" "{}\n")
@@ -126,10 +150,8 @@
           adapter (sut/create-adapter)]
       (is (empty? (proto/discover-agents adapter {:projects-dir (.getAbsolutePath base)}))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; poll-agent-status
-
-(deftest poll-agent-status-returns-running-when-recent-log-test
+(deftest ^{:stratum 1} poll-agent-status-returns-running-when-recent-log-test
   (testing "Without PID, recent session-file mtime ⇒ :running"
     (let [base (make-temp-dir)
           session-file (write-file! base "sessions/x.jsonl" "{}\n")
@@ -139,7 +161,7 @@
                             {:session-file (.getAbsolutePath session-file)})]
       (is (= {:status :running} (proto/poll-agent-status adapter rec))))))
 
-(deftest poll-agent-status-returns-nil-when-stale-and-no-pid-test
+(deftest ^{:stratum 1} poll-agent-status-returns-nil-when-stale-and-no-pid-test
   (testing "No PID and stale log ⇒ nil (agent gone)"
     (let [base (make-temp-dir)
           session-file (write-file! base "sessions/x.jsonl" "{}\n")
@@ -149,15 +171,13 @@
                             {:session-file (.getAbsolutePath session-file)})]
       (is (nil? (proto/poll-agent-status adapter rec))))))
 
-(deftest poll-agent-status-returns-nil-when-no-metadata-test
+(deftest ^{:stratum 1} poll-agent-status-returns-nil-when-no-metadata-test
   (testing "No PID and no session-file ⇒ nil"
     (let [adapter (sut/create-adapter)]
       (is (nil? (proto/poll-agent-status adapter (agent-record)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; deliver-decision
-
-(deftest deliver-decision-writes-edn-file-test
+(deftest ^{:stratum 1} deliver-decision-writes-edn-file-test
   (testing "Decision is written as <decision-id>.edn under decisions-dir/<agent-id>/"
     (let [base (make-temp-dir)
           adapter (sut/create-adapter {:decisions-dir (.getAbsolutePath base)})
@@ -174,17 +194,15 @@
       (let [round-trip (read-string (slurp expected))]
         (is (= resolution round-trip))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; send-command
-
-(deftest send-command-without-pid-test
+(deftest ^{:stratum 1} send-command-without-pid-test
   (testing "send-command returns failure when no PID is available"
     (let [adapter (sut/create-adapter)
           ret (proto/send-command adapter (agent-record) :pause)]
       (is (false? (:success? ret)))
       (is (string? (:error ret))))))
 
-(deftest send-command-unknown-command-test
+(deftest ^{:stratum 1} send-command-unknown-command-test
   (testing "send-command rejects unknown command keywords even when PID is present"
     (let [adapter (sut/create-adapter)
           rec (agent-record :agent/metadata {:pid definitely-dead-pid})
@@ -192,7 +210,7 @@
       (is (false? (:success? ret)))
       (is (string? (:error ret))))))
 
-(deftest send-command-known-command-with-pid-shape-test
+(deftest ^{:stratum 1} send-command-known-command-with-pid-shape-test
   (testing "Known command with PID returns a {:success? bool} shape"
     (let [adapter (sut/create-adapter)
           rec (agent-record :agent/metadata {:pid definitely-dead-pid})
@@ -202,31 +220,7 @@
       (is (contains? ret :success?))
       (is (boolean? (:success? ret))))))
 
-;------------------------------------------------------------------------------ Layer 0
-;; load-config — fail-fast config loading
-
-(deftest load-config-throws-on-missing-resource-test
-  (testing "Absent classpath resource raises an ex-info, not an NPE"
-    (let [ex (try
-               (#'discovery/load-config "config/adapter_claude_code/does-not-exist.edn"
-                                        [:k])
-               nil
-               (catch clojure.lang.ExceptionInfo e e))]
-      (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (= "config/adapter_claude_code/does-not-exist.edn"
-             (:config/resource (ex-data ex)))))))
-
-(deftest load-config-throws-on-missing-key-test
-  (testing "Present resource missing a required key raises an ex-info"
-    (let [ex (try
-               (#'discovery/load-config "config/adapter_claude_code/staleness.edn"
-                                        [:nope])
-               nil
-               (catch clojure.lang.ExceptionInfo e e))]
-      (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (= [:nope] (:config/missing-keys (ex-data ex)))))))
-
-(deftest load-config-throws-on-malformed-edn-test
+(deftest ^{:stratum 1} load-config-throws-on-malformed-edn-test
   (testing "Malformed classpath config carries resource and error data"
     (let [path "config/adapter_claude_code/malformed-edn.txt"
           url (temp-resource-url "{:broken")
@@ -241,7 +235,7 @@
       (is (= path (:classpath/resource (ex-data ex))))
       (is (= :malformed-edn (:config/error (ex-data ex)))))))
 
-(deftest load-config-throws-on-non-map-test
+(deftest ^{:stratum 1} load-config-throws-on-non-map-test
   (testing "Non-map classpath config carries resource and error data"
     (let [path "config/adapter_claude_code/non-map.edn"
           url (temp-resource-url "[:not :a :map]")
@@ -255,8 +249,3 @@
       (is (= path (:config/resource (ex-data ex))))
       (is (= path (:classpath/resource (ex-data ex))))
       (is (= :not-a-map (:config/error (ex-data ex)))))))
-
-(deftest staleness-windows-loads-test
-  (testing "Valid resource still loads the expected window keys"
-    (is (= #{:session-activity-window-ms :running-window-ms :idle-window-ms}
-           (set (keys discovery/staleness-windows))))))

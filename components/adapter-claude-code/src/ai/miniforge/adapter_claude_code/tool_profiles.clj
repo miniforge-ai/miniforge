@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.adapter-claude-code.tool-profiles
   "Tool profile contributions for the Claude CLI native toolset.
 
@@ -39,28 +38,35 @@
    [clojure.java.io                          :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Profile data loader
 
-(def ^:private profiles-resource-path
+;; Profile data loader
+(def ^{:stratum 0} ^:private profiles-resource-path
   "Classpath path to the EDN holding the eight Claude CLI tool
    profiles. Pulled to a constant so tests and REPL exploration
    reference the same string."
   "config/adapter_claude_code/tool-profiles.edn")
 
-(def ^:private profiles-section-key
+(def ^{:stratum 0} ^:private profiles-section-key
   "Top-level EDN key the catalog is filed under."
   :adapter-claude-code/tool-profiles)
 
-(defn- load-profiles
-  "Read the tool-profiles EDN catalog from the classpath and return
-   the profile vector. Returns nil if the resource is missing — that
-   is a packaging error, not a runtime condition the caller should
-   handle."
-  []
-  (when-let [res (io/resource profiles-resource-path)]
-    (-> res slurp edn/read-string (get profiles-section-key))))
+;------------------------------------------------------------------------------ Layer 1
 
-(def claude-cli-profiles
+(defn- ^{:stratum 1} load-profiles
+  "Read the tool-profiles EDN catalog from the classpath and return
+   the profile vector. Fails fast with an ex-info when the resource is
+   missing — a packaging error, not a runtime condition to swallow —
+   mirroring discovery/load-config's handling of the same failure mode."
+  []
+  (let [res (io/resource profiles-resource-path)]
+    (when (nil? res)
+      (throw (ex-info (str "Missing config resource on classpath: " profiles-resource-path)
+                      {:config/resource profiles-resource-path})))
+    (-> (slurp res :encoding "UTF-8") edn/read-string (get profiles-section-key))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} claude-cli-profiles
   "Loaded profile entries for the eight Claude CLI native tools.
    Resolved at namespace load from
    resources/config/adapter_claude_code/tool-profiles.edn — the
@@ -68,10 +74,10 @@
    or category sets don't require a code change here."
   (load-profiles))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Registration
+;------------------------------------------------------------------------------ Layer 3
 
-(defn register-profiles!
+;; Registration
+(defn ^{:stratum 3} register-profiles!
   "Register every profile in `claude-cli-profiles` against `registry`.
 
    Idempotent: each entry overwrites by :tool/id, so calling twice
@@ -96,11 +102,11 @@
     @registry
     claude-cli-profiles)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Load-time contribution
+;------------------------------------------------------------------------------ Layer 4
 
+;; Load-time contribution
 #_{:clj-kondo/ignore [:unused-private-var]}
-(defonce ^:private registered?
+(defonce ^{:stratum 4} ^:private registered?
   ;; Side-effect at namespace load: contribute the eight profiles to
   ;; the process-wide registry. defonce makes it a one-shot;
   ;; register-profiles! itself is idempotent so re-invocation in
@@ -108,7 +114,6 @@
   (do (register-profiles!) true))
 
 ;------------------------------------------------------------------------------ Rich Comment
-
 (comment
   ;; Inspect the registered profiles
   (pd/all-tool-ids)

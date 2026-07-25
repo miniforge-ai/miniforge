@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.policy-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.gate.messages :as msg]
             [ai.miniforge.gate.policy :as policy]
             [ai.miniforge.policy-pack.interface :as policy-pack]))
+
+;------------------------------------------------------------------------------ Layer 0
 
 ;; -------------------------------------------------------------------------- check-review-approved
 ;; Cross-component contract: the reviewer agent (components/agent) produces an
@@ -32,8 +33,7 @@
 ;; :rejected. The gate side has always been correct; pin the contract from
 ;; this side so a future "fix" can't loosen check-review-approved into a
 ;; false positive.
-
-(deftest check-review-approved-passes-on-explicit-approved
+(deftest ^{:stratum 0} check-review-approved-passes-on-explicit-approved
   (testing ":review/decision :approved → :passed? true"
     (is (= {:passed? true}
            (policy/check-review-approved
@@ -42,27 +42,27 @@
               :review/issues []}
              {})))))
 
-(deftest check-review-approved-passes-on-conditionally-approved
+(deftest ^{:stratum 0} check-review-approved-passes-on-conditionally-approved
   (testing ":review/decision :conditionally-approved → :passed? true"
     (is (= {:passed? true}
            (policy/check-review-approved
              {:review/decision :conditionally-approved}
              {})))))
 
-(deftest check-review-approved-fails-on-changes-requested
+(deftest ^{:stratum 0} check-review-approved-fails-on-changes-requested
   (let [result (policy/check-review-approved
                  {:review/decision :changes-requested}
                  {})]
     (is (false? (:passed? result)))
     (is (= :not-approved (-> result :errors first :type)))))
 
-(deftest check-review-approved-fails-on-rejected
+(deftest ^{:stratum 0} check-review-approved-fails-on-rejected
   (let [result (policy/check-review-approved
                  {:review/decision :rejected}
                  {})]
     (is (false? (:passed? result)))))
 
-(deftest check-review-approved-fossil-paths-no-longer-honored
+(deftest ^{:stratum 0} check-review-approved-fossil-paths-no-longer-honored
   (testing "legacy metadata-flag shapes are NO LONGER accepted — the verdict
             must be at the one canonical :review/decision location. A legacy
             :approved boolean without :review/decision fails closed (it can no
@@ -71,7 +71,7 @@
     (is (false? (:passed? (policy/check-review-approved {:artifact/metadata {:approved true}} {}))))
     (is (false? (:passed? (policy/check-review-approved {:review {:approved true}} {}))))))
 
-(deftest check-review-approved-no-signal-fails-closed
+(deftest ^{:stratum 0} check-review-approved-no-signal-fails-closed
   (testing "artifact with no decision and no metadata flag → :passed? false"
     (let [result (policy/check-review-approved {} {})]
       (is (false? (:passed? result))))))
@@ -81,8 +81,7 @@
 ;; fail-open bug that let every artifact through whenever the policy loader
 ;; or evaluation crashed. Pin that it is now fail-closed and returns the
 ;; full docstring-promised result shape.
-
-(deftest check-policy-pack-fails-closed-on-empty-packs
+(deftest ^{:stratum 0} check-policy-pack-fails-closed-on-empty-packs
   (testing "no packs at the deploy gate blocks (fail-closed) — zero deploy policy
             is a misconfiguration, not a silent pass"
     (let [result (policy/check-policy-pack {:artifact/content "x"} {:policy-packs []})]
@@ -93,7 +92,7 @@
       (let [result (policy/check-policy-pack {:artifact/content "x"} {})]
         (is (false? (:passed? result)))))))
 
-(deftest check-policy-pack-fails-closed-on-exception
+(deftest ^{:stratum 0} check-policy-pack-fails-closed-on-exception
   (testing "any exception during evaluation blocks the artifact"
     (with-redefs [policy-pack/check-artifact
                   (fn [_packs _artifact _context]
@@ -111,8 +110,7 @@
 ;; Regression: the gate must classify by :rule/enforcement :action, not severity.
 ;; A :high/:low rule and every content-scan violation (which carries no
 ;; :severity) previously fell through a severity cascade to a silent pass.
-
-(def ^:private hard-halt-high-pack
+(def ^{:stratum 0} ^:private hard-halt-high-pack
   "One rule: :high severity, :hard-halt enforcement, content-scan detection (so
    the violation carries no :severity key). Must block the gate."
   {:pack/id      "test-deploy-block"
@@ -123,12 +121,14 @@
                    :rule/enforcement {:action  :hard-halt
                                       :message "Danger token present"}}]})
 
-(defn- warn-high-pack
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} warn-high-pack
   "As hard-halt-high-pack, but :warn enforcement — must pass (advisory)."
   []
   (assoc-in hard-halt-high-pack [:pack/rules 0 :rule/enforcement :action] :warn))
 
-(deftest check-policy-pack-blocks-high-hard-halt-rule
+(deftest ^{:stratum 1} check-policy-pack-blocks-high-hard-halt-rule
   (testing ":high :hard-halt content-scan rule blocks the deploy gate"
     (let [result (policy/check-policy-pack
                   {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
@@ -138,17 +138,7 @@
       (is (= :no-danger-token (-> result :errors first :code)))
       (is (empty? (:approval-required result))))))
 
-(deftest check-policy-pack-passes-high-warn-rule
-  (testing ":high :warn rule passes with a warning — severity does not gate"
-    (let [result (policy/check-policy-pack
-                  {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
-                  {:policy-packs [(warn-high-pack)]})]
-      (is (true? (:passed? result)))
-      (is (empty? (:errors result)))
-      (is (= 1 (count (:warnings result))))
-      (is (= :no-danger-token (-> result :warnings first :code))))))
-
-(deftest check-policy-pack-clean-artifact-passes
+(deftest ^{:stratum 1} check-policy-pack-clean-artifact-passes
   (testing "no rule fires → gate passes clean"
     (let [result (policy/check-policy-pack
                   {:artifact/content "nothing to see here" :artifact/path "main.tf"}
@@ -156,7 +146,7 @@
       (is (true? (:passed? result)))
       (is (empty? (:errors result))))))
 
-(deftest check-policy-pack-blocks-require-approval-with-detail
+(deftest ^{:stratum 1} check-policy-pack-blocks-require-approval-with-detail
   (testing ":require-approval blocks the gate AND lands in :errors, so the
             failure carries detail (check-gate emits failure events from :errors)"
     (let [pack   (assoc-in hard-halt-high-pack
@@ -168,3 +158,15 @@
       (is (= 1 (count (:errors result))))
       (is (= :no-danger-token (-> result :errors first :code)))
       (is (= 1 (count (:approval-required result)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} check-policy-pack-passes-high-warn-rule
+  (testing ":high :warn rule passes with a warning — severity does not gate"
+    (let [result (policy/check-policy-pack
+                  {:artifact/content "a line with DANGER in it" :artifact/path "main.tf"}
+                  {:policy-packs [(warn-high-pack)]})]
+      (is (true? (:passed? result)))
+      (is (empty? (:errors result)))
+      (is (= 1 (count (:warnings result))))
+      (is (= :no-danger-token (-> result :warnings first :code))))))

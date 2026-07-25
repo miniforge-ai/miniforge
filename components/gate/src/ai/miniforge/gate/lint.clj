@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.lint
   "Lint validation gate.
 
@@ -25,9 +24,9 @@
             [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Content extraction helpers
 
-(defn extract-content-str
+;; Content extraction helpers
+(defn ^{:stratum 0} extract-content-str
   "Extract content string from an artifact."
   [artifact]
   (let [content (or (:content artifact)
@@ -36,15 +35,14 @@
     (if (string? content) content (pr-str content))))
 
 ;; Lint checking (simplified - real impl would call clj-kondo)
-
-(defn check-unused-vars
+(defn ^{:stratum 0} check-unused-vars
   "Check for obvious unused variable patterns."
   [code-str]
   (let [_bindings (re-seq #"\[([a-z_][a-z0-9_-]*)\s+" code-str)]
     ;; Simplified: just check if binding is used after definition
     []))
 
-(defn run-policy-pack-check
+(defn ^{:stratum 0} run-policy-pack-check
   "Delegate lint checking to policy-pack when policy packs are configured.
    Returns nil when no policy packs are configured.
    Returns a failure result (fail-closed) on any exception — never silently
@@ -80,7 +78,19 @@
                    :data    (ex-data e)}]
        :warnings []})))
 
-(defn check-lint
+(defn ^{:stratum 0} repair-lint
+  "Attempt to repair lint errors.
+
+   Currently returns failure - lint repair requires LLM."
+  [artifact errors _ctx]
+  {:success? false
+   :artifact artifact
+   :errors errors
+   :message "Lint repair requires LLM agent"})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} check-lint
   "Check lint rules on artifact content.
 
    Delegates to policy-pack when available, falls back to basic checks.
@@ -119,27 +129,17 @@
           {:passed? true  :warnings warnings}
           {:passed? false :errors errors :warnings warnings})))))
 
-(defn repair-lint
-  "Attempt to repair lint errors.
+;------------------------------------------------------------------------------ Layer 2
 
-   Currently returns failure - lint repair requires LLM."
-  [artifact errors _ctx]
-  {:success? false
-   :artifact artifact
-   :errors errors
-   :message "Lint repair requires LLM agent"})
-
-;------------------------------------------------------------------------------ Layer 1
-;; Registry
-
-(registry/register-gate! :lint)
-
-(defmethod registry/get-gate :lint
+(defmethod ^{:stratum 2} registry/get-gate :lint
   [_]
   {:name :lint
    :description "Validates code passes linting rules (clj-kondo)"
    :check check-lint
    :repair repair-lint})
+
+;; Registry
+(registry/register-gate! :lint)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -25,6 +25,7 @@
    [clojure.test :refer [deftest testing is]]
    [clojure.java.io :as io]
    [clojure.string :as str]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.release-executor.files :as files]
    [babashka.fs :as fs]))
 
@@ -285,32 +286,28 @@
           (cleanup-temp-dir temp-dir))))))
 
 (deftest invalid-path-handling-test
-  (testing "assert-within-worktree! rejects path traversal (../)"
+  (testing "path-traversal-anomaly returns an anomaly for path traversal (../)"
     (let [temp-dir (create-temp-dir)]
       (try
-        (let [worktree   (fs/path temp-dir)
-              escape-path (fs/path temp-dir "../outside/repo.clj")]
-          (is (thrown-with-msg?
-               clojure.lang.ExceptionInfo
-               #"Path traversal rejected"
-               (files/assert-within-worktree! worktree escape-path))
-              "assert-within-worktree! should throw for ../outside/repo.clj")
-          (is (= :path-traversal
-                 (:type (ex-data (try
-                                   (files/assert-within-worktree! worktree escape-path)
-                                   nil
-                                   (catch clojure.lang.ExceptionInfo e e)))))
-              "ex-data :type should be :path-traversal"))
+        (let [worktree    (fs/path temp-dir)
+              escape-path (fs/path temp-dir "../outside/repo.clj")
+              result      (files/path-traversal-anomaly worktree escape-path)]
+          (is (anomaly/anomaly? result)
+              "path-traversal-anomaly should return an anomaly for ../outside/repo.clj")
+          (is (= :invalid-input (:anomaly/type result))
+              ":anomaly/type should be :invalid-input")
+          (is (re-find #"Path traversal rejected" (:anomaly/message result))
+              ":anomaly/message should mention path traversal"))
         (finally
           (cleanup-temp-dir temp-dir)))))
 
-  (testing "assert-within-worktree! accepts paths inside the worktree"
+  (testing "path-traversal-anomaly returns nil for paths inside the worktree"
     (let [temp-dir (create-temp-dir)]
       (try
         (let [worktree    (fs/path temp-dir)
               inside-path (fs/path temp-dir "src/feature.clj")]
-          (is (nil? (files/assert-within-worktree! worktree inside-path))
-              "assert-within-worktree! should return nil for valid path"))
+          (is (nil? (files/path-traversal-anomaly worktree inside-path))
+              "path-traversal-anomaly should return nil for valid path"))
         (finally
           (cleanup-temp-dir temp-dir)))))
 

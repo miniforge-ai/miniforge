@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.format-test
   "Tests for the LSP format gate.
 
@@ -34,7 +33,9 @@
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest check-format-returns-canonical-success
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} check-format-returns-canonical-success
   (testing "check-format returns response/success and gate/passed? accepts it"
     (let [artifact {:code/files [{:path "src/foo.clj"}]}
           result (format-gate/check-format artifact {})]
@@ -49,14 +50,14 @@
       (is (gate/passed? (assoc result :gate :format)))
       (is (= [] (get-in result [:output :formattable-files]))))))
 
-(deftest check-format-reports-formattable-files
+(deftest ^{:stratum 0} check-format-reports-formattable-files
   (testing "Formattable files are listed in the result output"
     (let [artifact {:code/files [{:path "a.clj"} {:path "b.md"}]}
           result (format-gate/check-format artifact {})]
       (is (response/success? result))
       (is (vector? (get-in result [:output :formattable-files]))))))
 
-(deftest repair-format-applies-lsp-text-edits
+(deftest ^{:stratum 0} repair-format-applies-lsp-text-edits
   (testing "repair-format writes successful LSP format edits to disk"
     (let [dir (java.nio.file.Files/createTempDirectory
                "format-gate-test" (make-array java.nio.file.attribute.FileAttribute 0))

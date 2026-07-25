@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.gate.capabilities
   "Inject the mechanical tool gates into the policy-pack capability registry.
 
@@ -54,9 +53,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Tool-gate result adaptation
 
-(defn gate-failed?
+;; Tool-gate result adaptation
+(defn ^{:stratum 0} gate-failed?
   "True when a gate result indicates failure. Mirrors
    `gate.interface/passed?`: accepts the legacy `:passed?` shape and the
    canonical `response/success` / `response/error` shapes."
@@ -67,7 +66,33 @@
     (response/error? result)    true
     :else                       true))
 
-(defn gate-result->violation
+(defn- ^{:stratum 0} artifact-content
+  [artifact]
+  (cond
+    (contains? artifact :artifact/content) (get artifact :artifact/content)
+    (contains? artifact :content)          (get artifact :content)
+    :else                                  ""))
+
+(defn- ^{:stratum 0} expected-formatted-content
+  [artifact]
+  (or (get artifact :artifact/formatted-content)
+      (get artifact :formatted-content)))
+
+(defn- ^{:stratum 0} format-drift-violation
+  [artifact message]
+  {:type          :capability
+   :capability    :format
+   :artifact-path (or (:artifact/path artifact) (:path artifact))
+   :message       message})
+
+(defn- ^{:stratum 0} injected-format-result
+  [artifact context]
+  (when-let [check-fn (:format-check-fn context)]
+    (check-fn artifact context)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} gate-result->violation
   "Adapt a gate result into the policy-pack capability violation shape, or
    nil when the gate passed. `capability` keys the violation; `artifact`
    supplies the path. Preserves diagnostics from BOTH the legacy
@@ -88,7 +113,15 @@
                             (or (some-> errors first :message)
                                 "tool reported a violation"))})))
 
-(defn- run-gate-capability
+(defn- ^{:stratum 1} artifact-format-result
+  [artifact]
+  (when-let [formatted (expected-formatted-content artifact)]
+    {:passed? (= formatted (artifact-content artifact))
+     :errors  [{:message "Artifact content is not formatted"}]}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} run-gate-capability
   "Run the named `gate-kw` gate's `:check` on `artifact`/`context` and adapt
    the result into a capability violation (or nil on pass). Tagged
    `capability` for the violation shape.
@@ -108,55 +141,7 @@
                                                       (ex-message e))}]}))]
     (gate-result->violation capability result artifact)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Built-in mechanical capability checks (each: (fn [artifact context] -> violation-or-nil))
-
-(defn check-lint
-  "Lint capability — wraps the clj-kondo lint gate."
-  [artifact context]
-  (run-gate-capability :lint :lint artifact context))
-
-(defn check-syntax
-  "Syntax capability — wraps the reader/syntax gate."
-  [artifact context]
-  (run-gate-capability :syntax :syntax artifact context))
-
-(defn check-no-secrets
-  "No-secrets capability — wraps the policy no-secrets gate."
-  [artifact context]
-  (run-gate-capability :no-secrets :no-secrets artifact context))
-
-(defn- artifact-content
-  [artifact]
-  (cond
-    (contains? artifact :artifact/content) (get artifact :artifact/content)
-    (contains? artifact :content)          (get artifact :content)
-    :else                                  ""))
-
-(defn- expected-formatted-content
-  [artifact]
-  (or (get artifact :artifact/formatted-content)
-      (get artifact :formatted-content)))
-
-(defn- format-drift-violation
-  [artifact message]
-  {:type          :capability
-   :capability    :format
-   :artifact-path (or (:artifact/path artifact) (:path artifact))
-   :message       message})
-
-(defn- injected-format-result
-  [artifact context]
-  (when-let [check-fn (:format-check-fn context)]
-    (check-fn artifact context)))
-
-(defn- artifact-format-result
-  [artifact]
-  (when-let [formatted (expected-formatted-content artifact)]
-    {:passed? (= formatted (artifact-content artifact))
-     :errors  [{:message "Artifact content is not formatted"}]}))
-
-(defn check-format
+(defn ^{:stratum 2} check-format
   "Format capability — performs a pure formatting check.
 
    The existing :format gate repairs via LSP and intentionally reports pass for
@@ -173,10 +158,28 @@
       (format-drift-violation artifact
                               "Format capability requires :format-check-fn or :artifact/formatted-content"))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Injection
+;------------------------------------------------------------------------------ Layer 3
 
-(def ^:private mechanical-capabilities
+;; Built-in mechanical capability checks (each: (fn [artifact context] -> violation-or-nil))
+(defn ^{:stratum 3} check-lint
+  "Lint capability — wraps the clj-kondo lint gate."
+  [artifact context]
+  (run-gate-capability :lint :lint artifact context))
+
+(defn ^{:stratum 3} check-syntax
+  "Syntax capability — wraps the reader/syntax gate."
+  [artifact context]
+  (run-gate-capability :syntax :syntax artifact context))
+
+(defn ^{:stratum 3} check-no-secrets
+  "No-secrets capability — wraps the policy no-secrets gate."
+  [artifact context]
+  (run-gate-capability :no-secrets :no-secrets artifact context))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Injection
+(def ^{:stratum 4} ^:private mechanical-capabilities
   "Capability keyword -> {:meta {...} :check fn} for the mechanical tool
    gates. Injected into the policy-pack registry by
    `register-mechanical-capabilities!`."
@@ -197,7 +200,9 @@
                         :description "Detect hardcoded secrets via the policy gate"}
                 :check check-no-secrets}})
 
-(defn register-mechanical-capabilities!
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} register-mechanical-capabilities!
   "Inject the mechanical tool gates into the policy-pack capability registry.
 
    Idempotent: each call (re)registers :lint, :format, :syntax and
@@ -207,7 +212,9 @@
     (policy-pack/register-capability! capability-kw entry))
   (policy-pack/list-capabilities))
 
-(defonce ^{:doc "Ensures mechanical capabilities are registered exactly once
+;------------------------------------------------------------------------------ Layer 6
+
+(defonce ^{:stratum 6} ^{:doc "Ensures mechanical capabilities are registered exactly once
    at namespace load, so pack-gate evaluation sees them without an explicit
    caller. Callers may still invoke `register-mechanical-capabilities!`
    directly; it is idempotent."}
