@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.path-traversal-test
   "Security: analyze-file must reject relative-path values that escape repo-root.
    A caller supplying \"../../../etc/passwd\" must receive [] — not file contents."
@@ -24,7 +23,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(defn- with-temp-root
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} with-temp-root
   "Create a temp directory, call (f root-path), then delete the tree."
   [f]
   (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
@@ -34,7 +35,9 @@
          (finally (doseq [^java.io.File ff (reverse (file-seq root))]
                     (.delete ff))))))
 
-(deftest path-traversal-via-dotdot-is-rejected
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} path-traversal-via-dotdot-is-rejected
   (testing "relative-path with .. segments that escape repo-root returns []"
     (with-temp-root
      (fn [root]
@@ -44,7 +47,7 @@
          (is (= [] result)
              "analyze-file must return [] when relative-path escapes repo-root"))))))
 
-(deftest path-traversal-via-absolute-path-is-rejected
+(deftest ^{:stratum 1} path-traversal-via-absolute-path-is-rejected
   (testing "absolute path that is outside repo-root returns []"
     (with-temp-root
      (fn [root]
@@ -60,7 +63,7 @@
          (is (= [] result)
              "analyze-file must return [] when path resolves outside repo-root"))))))
 
-(deftest legitimate-path-inside-root-is-allowed
+(deftest ^{:stratum 1} legitimate-path-inside-root-is-allowed
   (testing "a path that stays inside repo-root is analyzed normally"
     (with-temp-root
      (fn [root]

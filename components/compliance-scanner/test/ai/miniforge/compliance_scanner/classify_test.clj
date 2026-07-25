@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.classify-test
   "Tests for the classify phase — pack-driven classification."
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.compliance-scanner.classify :as classify]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Test fixtures — pack-enriched violations
-
-(def ^:private base-210
+(def ^{:stratum 0} ^:private base-210
   {:rule/id       :std/clojure
    :rule/category "210"
    :rule/title    "Clojure Map Access"
@@ -36,7 +36,7 @@
    :exclude-contexts [{:path-contains "server/"}
                        {:current-contains [":type" ":priority" ":status" ";; JSON"]}]})
 
-(def ^:private base-730
+(def ^{:stratum 0} ^:private base-730
   {:rule/id       :std/datever
    :rule/category "730"
    :rule/title    "Version Format (SemVer vs DateVer)"
@@ -46,7 +46,7 @@
    ;; Pack enrichment
    :auto-fixable-default false})
 
-(def ^:private base-810
+(def ^{:stratum 0} ^:private base-810
   {:rule/id       :std/header-copyright
    :rule/category "810"
    :rule/title    "Copyright Header (Markdown)"
@@ -59,53 +59,8 @@
    :remediation-template "<!--\n  Copyright header\n-->"})
 
 ;; ---------------------------------------------------------------------------
-;; Dewey 210 classification
-
-(deftest classify-210-standard-is-auto-fixable
-  (testing "ordinary 210 violation in a component src file is auto-fixable"
-    (let [v    (assoc base-210 :file "components/foo/src/ai/miniforge/foo/core.clj")
-          [r]  (classify/classify-violations [v])]
-      (is (true? (:auto-fixable? r)))
-      (is (re-find #"Literal default" (:rationale r))))))
-
-(deftest classify-210-server-file-is-needs-review
-  (testing "210 violation in a server/ file is excluded by context rule"
-    (let [v   (assoc base-210 :file "server/handler.clj")
-          [r] (classify/classify-violations [v])]
-      (is (false? (:auto-fixable? r)))
-      (is (re-find #"JSON" (:rationale r))))))
-
-(deftest classify-210-json-signal-key-is-needs-review
-  (testing "210 violation with a JSON-signal key (:status) is excluded"
-    (let [v   (-> base-210
-                  (assoc :file "components/foo/src/ai/miniforge/foo/core.clj")
-                  (assoc :current "(or (:status m) :active)"))
-          [r] (classify/classify-violations [v])]
-      (is (false? (:auto-fixable? r))))))
-
-;; ---------------------------------------------------------------------------
-;; Dewey 730 classification
-
-(deftest classify-730-always-needs-review
-  (testing "Dewey 730 violations always need review — declared not auto-fixable"
-    (let [v   (assoc base-730 :file "build.clj")
-          [r] (classify/classify-violations [v])]
-      (is (false? (:auto-fixable? r)))
-      (is (string? (:rationale r))))))
-
-;; ---------------------------------------------------------------------------
-;; Dewey 810 classification
-
-(deftest classify-810-missing-header-is-auto-fixable
-  (testing "810 violation for absent header is auto-fixable"
-    (let [v   (assoc base-810 :file "docs/guide.md")
-          [r] (classify/classify-violations [v])]
-      (is (true? (:auto-fixable? r))))))
-
-;; ---------------------------------------------------------------------------
 ;; Manual-review rules (auto-fixable-default false)
-
-(deftest classify-manual-review-uses-rule-title
+(deftest ^{:stratum 0} classify-manual-review-uses-rule-title
   (testing "rules with auto-fixable-default false use rule title in rationale"
     (let [v   {:rule/id :foundations/no-unsafe-rust
                :rule/category "001"
@@ -119,10 +74,52 @@
       (is (clojure.string/includes? (:rationale r) "No Unsafe Rust"))
       (is (not (clojure.string/includes? (:rationale r) "SemVer"))))))
 
+;------------------------------------------------------------------------------ Layer 1
+
+;; ---------------------------------------------------------------------------
+;; Dewey 210 classification
+(deftest ^{:stratum 1} classify-210-standard-is-auto-fixable
+  (testing "ordinary 210 violation in a component src file is auto-fixable"
+    (let [v    (assoc base-210 :file "components/foo/src/ai/miniforge/foo/core.clj")
+          [r]  (classify/classify-violations [v])]
+      (is (true? (:auto-fixable? r)))
+      (is (re-find #"Literal default" (:rationale r))))))
+
+(deftest ^{:stratum 1} classify-210-server-file-is-needs-review
+  (testing "210 violation in a server/ file is excluded by context rule"
+    (let [v   (assoc base-210 :file "server/handler.clj")
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r)))
+      (is (re-find #"JSON" (:rationale r))))))
+
+(deftest ^{:stratum 1} classify-210-json-signal-key-is-needs-review
+  (testing "210 violation with a JSON-signal key (:status) is excluded"
+    (let [v   (-> base-210
+                  (assoc :file "components/foo/src/ai/miniforge/foo/core.clj")
+                  (assoc :current "(or (:status m) :active)"))
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r))))))
+
+;; ---------------------------------------------------------------------------
+;; Dewey 730 classification
+(deftest ^{:stratum 1} classify-730-always-needs-review
+  (testing "Dewey 730 violations always need review — declared not auto-fixable"
+    (let [v   (assoc base-730 :file "build.clj")
+          [r] (classify/classify-violations [v])]
+      (is (false? (:auto-fixable? r)))
+      (is (string? (:rationale r))))))
+
+;; ---------------------------------------------------------------------------
+;; Dewey 810 classification
+(deftest ^{:stratum 1} classify-810-missing-header-is-auto-fixable
+  (testing "810 violation for absent header is auto-fixable"
+    (let [v   (assoc base-810 :file "docs/guide.md")
+          [r] (classify/classify-violations [v])]
+      (is (true? (:auto-fixable? r))))))
+
 ;; ---------------------------------------------------------------------------
 ;; Batch classification
-
-(deftest classify-batch-returns-all-violations
+(deftest ^{:stratum 1} classify-batch-returns-all-violations
   (testing "classify-violations returns same count as input"
     (let [viols [base-210 base-730 base-810]
           result (classify/classify-violations

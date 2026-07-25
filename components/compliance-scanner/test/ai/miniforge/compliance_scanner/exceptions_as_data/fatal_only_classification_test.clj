@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.fatal-only-classification-test
   "Programmer-error guards (`unknown` / `unsupported` / `required`)
    are classified as :fatal-only — informational, not actionable."
@@ -23,7 +22,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(deftest unknown-message-classified-fatal-only
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} unknown-message-classified-fatal-only
   (testing "throw whose message contains 'Unknown' is :fatal-only"
     (let [src "(ns ai.miniforge.foo.core)
               (defn lookup [m k]
@@ -33,7 +34,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest unsupported-is-fatal-only
+(deftest ^{:stratum 0} unsupported-is-fatal-only
   (testing "'Unsupported X' messages are :fatal-only"
     (let [src "(ns ai.miniforge.foo.core)
               (defn dispatch [k]
@@ -44,7 +45,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest required-config-is-fatal-only
+(deftest ^{:stratum 0} required-config-is-fatal-only
   (testing "'X is required' programmer-error messages are :fatal-only"
     (let [src "(ns ai.miniforge.foo.core)
               (defn check [opts]
@@ -54,7 +55,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest registry-contract-message-key-is-fatal-only
+(deftest ^{:stratum 0} registry-contract-message-key-is-fatal-only
   (testing "localized registry contract keys are programmer-error guards"
     (let [src "(ns ai.miniforge.foo.registry)
               (defn register-widget! [widget-key f]
@@ -70,7 +71,7 @@
       (is (= 2 (count violations)))
       (is (every? #(= :fatal-only (:classification %)) violations)))))
 
-(deftest registry-resolution-invariant-is-fatal-only
+(deftest ^{:stratum 0} registry-resolution-invariant-is-fatal-only
   (testing "validated-but-missing registry resolution keys are fatal-only"
     (let [src "(ns ai.miniforge.foo.registry)
               (defn resolve-widget [k]
@@ -82,7 +83,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest no-matching-reflection-helper-is-fatal-only
+(deftest ^{:stratum 0} no-matching-reflection-helper-is-fatal-only
   (testing "reflection helper arity misses are programmer errors"
     (let [src "(ns ai.miniforge.foo.reflect)
               (defn construct [ctor]
@@ -92,7 +93,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest unmapped-dispatch-table-category-is-fatal-only
+(deftest ^{:stratum 0} unmapped-dispatch-table-category-is-fatal-only
   (testing "unmapped category guards protect closed dispatch tables"
     (let [src "(ns ai.miniforge.foo.dispatch)
               (defn category-type [category]
@@ -103,7 +104,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest nested-invalid-config-marker-is-fatal-only
+(deftest ^{:stratum 0} nested-invalid-config-marker-is-fatal-only
   (testing "nested invalid-config ex-data marks fail-fast config guards"
     (let [src "(ns ai.miniforge.foo.config)
               (defn read-config [path]
@@ -114,7 +115,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest localized-not-function-message-key-is-fatal-only
+(deftest ^{:stratum 0} localized-not-function-message-key-is-fatal-only
   (testing "localized non-callable function guards are programmer errors"
     (let [src "(ns ai.miniforge.foo.gate)
               (defn check [provided]
@@ -126,7 +127,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest interrupted-exception-rethrow-is-fatal-only
+(deftest ^{:stratum 0} interrupted-exception-rethrow-is-fatal-only
   (testing "InterruptedException rethrows preserve cancellation"
     (let [src "(ns ai.miniforge.foo.loop)
               (defn poll []
@@ -139,7 +140,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest cleanup-preserving-rethrow-is-fatal-only
+(deftest ^{:stratum 0} cleanup-preserving-rethrow-is-fatal-only
   (testing "resource cleanup followed by same-binding rethrow is informational"
     (let [src "(ns ai.miniforge.foo.scheduler)
               (defn schedule [executor task]
@@ -152,7 +153,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest future-cancel-rethrow-is-fatal-only
+(deftest ^{:stratum 0} future-cancel-rethrow-is-fatal-only
   (testing "future cancellation before rethrow preserves task cleanup"
     (let [src "(ns ai.miniforge.foo.batch)
               (defn await-all [futures]
@@ -166,7 +167,7 @@
       (is (= 1 (count violations)))
       (is (= :fatal-only (:classification (first violations)))))))
 
-(deftest log-only-rethrow-remains-cleanup-needed
+(deftest ^{:stratum 0} log-only-rethrow-remains-cleanup-needed
   (testing "logging before rethrow does not make the site informational"
     (let [src "(ns ai.miniforge.foo.runner)
               (defn run []
@@ -179,7 +180,7 @@
       (is (= 1 (count violations)))
       (is (= :cleanup-needed (:classification (first violations)))))))
 
-(deftest plain-failure-is-cleanup-needed
+(deftest ^{:stratum 0} plain-failure-is-cleanup-needed
   (testing "messages without programmer-error markers are :cleanup-needed"
     (let [src "(ns ai.miniforge.foo.core)
               (defn fetch! [url]

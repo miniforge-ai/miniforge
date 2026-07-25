@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.schema
   "Malli schemas for compliance-scanner domain types.
 
    Layer 0 — pure data definitions, no dependencies.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Violation — one detected instance of a rule breach
 
-(def Violation
+;; Violation — one detected instance of a rule breach
+(def ^{:stratum 0} Violation
   [:map
    [:rule/id       :keyword]
    [:rule/category [:string {:min 1}]]
@@ -36,31 +35,8 @@
    [:auto-fixable? :boolean]
    [:rationale     :string]])
 
-;------------------------------------------------------------------------------ Layer 0
-;; ScanResult — output of the scan phase
-
-(def ScanResult
-  [:map
-   [:violations       [:vector Violation]]
-   [:rules-scanned    [:vector :keyword]]
-   [:files-scanned    :int]
-   [:scan-duration-ms :int]])
-
-;------------------------------------------------------------------------------ Layer 0
-;; PlanTask — one DAG task node
-
-(def PlanTask
-  [:map
-   [:task/id         uuid?]
-   [:task/deps       [:set uuid?]]
-   [:task/file       :string]
-   [:task/rule-id    :keyword]
-   [:task/violations [:vector Violation]]])
-
-;------------------------------------------------------------------------------ Layer 0
 ;; PlanSummary — aggregate counts
-
-(def PlanSummary
+(def ^{:stratum 0} PlanSummary
   [:map
    [:total-violations :int]
    [:auto-fixable     :int]
@@ -68,25 +44,42 @@
    [:files-affected   :int]
    [:rules-violated   :int]])
 
-;------------------------------------------------------------------------------ Layer 0
-;; Plan — output of the plan phase
+;------------------------------------------------------------------------------ Layer 1
 
-(def Plan
+;; ScanResult — output of the scan phase
+(def ^{:stratum 1} ScanResult
   [:map
-   [:dag-tasks [:vector PlanTask]]
-   [:work-spec :string]
-   [:summary   PlanSummary]])
+   [:violations       [:vector Violation]]
+   [:rules-scanned    [:vector :keyword]]
+   [:files-scanned    :int]
+   [:scan-duration-ms :int]])
 
-;------------------------------------------------------------------------------ Layer 0
+;; PlanTask — one DAG task node
+(def ^{:stratum 1} PlanTask
+  [:map
+   [:task/id         uuid?]
+   [:task/deps       [:set uuid?]]
+   [:task/file       :string]
+   [:task/rule-id    :keyword]
+   [:task/violations [:vector Violation]]])
+
 ;; DeltaReport — final serialisable output
-
-(def DeltaReport
+(def ^{:stratum 1} DeltaReport
   [:map
    [:repo-path       :string]
    [:standards-path  :string]
    [:scan-timestamp  :string]
    [:summary         PlanSummary]
    [:violations      [:vector Violation]]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Plan — output of the plan phase
+(def ^{:stratum 2} Plan
+  [:map
+   [:dag-tasks [:vector PlanTask]]
+   [:work-spec :string]
+   [:summary   PlanSummary]])
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

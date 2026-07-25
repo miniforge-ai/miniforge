@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.local-boundary-classification-test
   "Local boundary throwers retained for compatibility are informational, while
    ordinary throwers in component code remain actionable."
@@ -23,7 +22,9 @@
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest documented-boundary-wrapper-is-local-boundary
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} documented-boundary-wrapper-is-local-boundary
   (testing "defn docstrings can mark retained component-local boundary throwers"
     (let [src "(ns ai.miniforge.foo.core)
               (defn make-widget [request]
@@ -45,7 +46,7 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
-(deftest malformed-documentation-is-not-boundary-evidence
+(deftest ^{:stratum 0} malformed-documentation-is-not-boundary-evidence
   (testing "absent and malformed function documentation is treated as empty text"
     (doseq [context [{}
                      {:defn-doc nil}
@@ -55,7 +56,7 @@
       (is (false? (#'exc/local-boundary-wrapper? context))
           (str "ignored " (pr-str (:defn-doc context)))))))
 
-(deftest throwing-boundary-with-data-equivalent-is-local-boundary
+(deftest ^{:stratum 0} throwing-boundary-with-data-equivalent-is-local-boundary
   (testing "response/throw-anomaly! bridges with anomaly-returning equivalents are local boundaries"
     (let [src "(ns ai.miniforge.foo.core
                 (:require [ai.miniforge.response.interface :as response]))
@@ -77,7 +78,7 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
-(deftest deprecated-exceptions-as-data-wrapper-is-local-boundary
+(deftest ^{:stratum 0} deprecated-exceptions-as-data-wrapper-is-local-boundary
   (testing "deprecated throwers with exceptions-as-data metadata are local boundaries"
     (let [src "(ns ai.miniforge.foo.core)
               (defn unwrap-anomaly [result]
@@ -96,7 +97,7 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
-(deftest response-chain-execute-with-handling-throw-anomaly-is-local-boundary
+(deftest ^{:stratum 0} response-chain-execute-with-handling-throw-anomaly-is-local-boundary
   (testing "throw-anomaly inside response-chain handling is captured into returned data"
     (let [src "(ns ai.miniforge.foo.core
                 (:require [ai.miniforge.response.interface :as response]))
@@ -115,7 +116,7 @@
       (is (= 1 (count violations)))
       (is (= :local-boundary (:classification (first violations)))))))
 
-(deftest undocumented-bang-thrower-remains-cleanup-needed
+(deftest ^{:stratum 0} undocumented-bang-thrower-remains-cleanup-needed
   (testing "a bang name alone is not enough to exempt a throw"
     (let [src "(ns ai.miniforge.foo.core)
               (defn fetch!

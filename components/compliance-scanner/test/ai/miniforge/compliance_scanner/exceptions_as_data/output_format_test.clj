@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.compliance-scanner.exceptions-as-data.output-format-test
   "Output shape: violations carry the canonical scanner Violation keys plus
    the linter-specific fields (`:severity`, `:column`, `:classification`)."
@@ -24,7 +23,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]))
 
-(defn- make-fixture-file!
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} make-fixture-file!
   "Create a small synthetic file under a temp directory and return its
    relative path."
   [^java.io.File root rel content]
@@ -33,7 +34,7 @@
     (spit f content)
     rel))
 
-(defn- with-temp-repo
+(defn- ^{:stratum 0} with-temp-repo
   "Run `f` against a fresh temp directory; cleans up afterward.
    Uses random-uuid to keep parallel test runs from colliding."
   [f]
@@ -44,7 +45,9 @@
          (finally (doseq [^java.io.File ff (reverse (file-seq root))]
                     (.delete ff))))))
 
-(deftest violation-shape-matches-scanner-canonical-keys
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} violation-shape-matches-scanner-canonical-keys
   (with-temp-repo
    (fn [root]
      (let [rel (make-fixture-file!
@@ -70,7 +73,7 @@
          (is (contains? #{:cleanup-needed :fatal-only :local-boundary}
                         (:classification v))))))))
 
-(deftest empty-repo-yields-zero-violations
+(deftest ^{:stratum 1} empty-repo-yields-zero-violations
   (with-temp-repo
    (fn [root]
      (let [result (exc/scan-repo (.getAbsolutePath root))]
@@ -79,7 +82,7 @@
        (is (= {:cleanup-needed 0 :fatal-only 0 :local-boundary 0}
               (:counts result)))))))
 
-(deftest summary-counts-match-classifications
+(deftest ^{:stratum 1} summary-counts-match-classifications
   (with-temp-repo
    (fn [root]
      (make-fixture-file!

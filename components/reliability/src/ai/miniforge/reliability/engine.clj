@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.engine
   "ReliabilityEngine — periodic SLI computation, SLO checking, and budget tracking.
 
@@ -33,12 +32,71 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config loading
 
-(def ^:private defaults
+;; Config loading
+(def ^{:stratum 0} ^:private defaults
   (-> (io/resource "config/reliability/defaults.edn") slurp edn/read-string))
 
-(defn- merge-engine-config
+;; Engine record
+(defrecord ^{:stratum 0} ReliabilityEngine
+  [event-stream   ; event stream atom for emitting events
+   state          ; atom: {:slis [...] :slo-checks [...] :budgets {...} :mode :nominal}
+   config])
+
+;; Pipeline stages
+(defn- ^{:stratum 0} check-all-slos-across-tiers
+  "Check SLOs for all SLI results across all tier/window combinations."
+  [all-slis tiers windows slo-targets]
+  (vec
+   (for [tier tiers
+         window windows
+         :let [window-slis (filter #(= window (:sli/window %)) all-slis)
+               checks (slo/check-all-slos window-slis tier slo-targets)]
+         check checks]
+     (assoc check :slo/tier tier))))
+
+(defn- ^{:stratum 0} compute-budgets
+  "Compute error budgets for all enforced SLO checks."
+  [all-slo-checks]
+  (into {}
+        (for [{:keys [sli/name slo/actual slo/target slo/tier slo/window]}
+              all-slo-checks
+              :let [{:keys [error-budget/remaining error-budget/burn-rate]}
+                    (budget/compute-error-budget actual target
+                                                (contains? slo/inverted-slis name))]]
+          [[name tier window]
+           (budget/error-budget remaining burn-rate tier name window)])))
+
+(defn- ^{:stratum 0} dependency-health-delta
+  [prior-projection current-projection]
+  (keep (fn [[dependency-id projection]]
+          (let [prior (get prior-projection dependency-id)]
+            (when (not= prior projection)
+              {:dependency/id dependency-id
+               :previous prior
+               :current projection})))
+        current-projection))
+
+(defn- ^{:stratum 0} recovered-from-unhealthy?
+  "True when `previous-status` was a non-nil non-healthy state and
+   `current-status` is `:healthy`. The first observation of a
+   dependency (no prior status) is not a recovery."
+  [previous-status current-status]
+  (and previous-status
+       (not= :healthy previous-status)
+       (= :healthy current-status)))
+
+(defn ^{:stratum 0} current-state
+  [engine]
+  @(:state engine))
+
+(defn ^{:stratum 0} current-mode
+  [engine]
+  (:mode @(:state engine)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} merge-engine-config
   [config]
   (let [base-config {:windows (:default-windows defaults)
                      :tiers (:default-tiers defaults)
@@ -54,15 +112,17 @@
            (merge (:dependency-health base-config)
                   (:dependency-health config)))))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Engine record
+(defn- ^{:stratum 1} dependency-health-event
+  "Pick the right event constructor for a transition."
+  [event-stream current previous-status]
+  (if (recovered-from-unhealthy? previous-status (:dependency/status current))
+    (events/dependency-recovered event-stream current previous-status)
+    (events/dependency-health-updated event-stream current previous-status)))
 
-(defrecord ReliabilityEngine
-  [event-stream   ; event stream atom for emitting events
-   state          ; atom: {:slis [...] :slo-checks [...] :budgets {...} :mode :nominal}
-   config])       ; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
+;------------------------------------------------------------------------------ Layer 2
 
-(defn create-engine
+; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
+(defn ^{:stratum 2} create-engine
   "Create a ReliabilityEngine.
 
    Arguments:
@@ -83,69 +143,17 @@
           :last-computed-at nil})
    (merge-engine-config config)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Pipeline stages
-
-(defn- check-all-slos-across-tiers
-  "Check SLOs for all SLI results across all tier/window combinations."
-  [all-slis tiers windows slo-targets]
-  (vec
-   (for [tier tiers
-         window windows
-         :let [window-slis (filter #(= window (:sli/window %)) all-slis)
-               checks (slo/check-all-slos window-slis tier slo-targets)]
-         check checks]
-     (assoc check :slo/tier tier))))
-
-(defn- compute-budgets
-  "Compute error budgets for all enforced SLO checks."
-  [all-slo-checks]
-  (into {}
-        (for [{:keys [sli/name slo/actual slo/target slo/tier slo/window]}
-              all-slo-checks
-              :let [{:keys [error-budget/remaining error-budget/burn-rate]}
-                    (budget/compute-error-budget actual target
-                                                (contains? slo/inverted-slis name))]]
-          [[name tier window]
-           (budget/error-budget remaining burn-rate tier name window)])))
-
-(defn- dependency-health-delta
-  [prior-projection current-projection]
-  (keep (fn [[dependency-id projection]]
-          (let [prior (get prior-projection dependency-id)]
-            (when (not= prior projection)
-              {:dependency/id dependency-id
-               :previous prior
-               :current projection})))
-        current-projection))
-
-(defn- recovered-from-unhealthy?
-  "True when `previous-status` was a non-nil non-healthy state and
-   `current-status` is `:healthy`. The first observation of a
-   dependency (no prior status) is not a recovery."
-  [previous-status current-status]
-  (and previous-status
-       (not= :healthy previous-status)
-       (= :healthy current-status)))
-
-(defn- dependency-health-event
-  "Pick the right event constructor for a transition."
-  [event-stream current previous-status]
-  (if (recovered-from-unhealthy? previous-status (:dependency/status current))
-    (events/dependency-recovered event-stream current previous-status)
-    (events/dependency-health-updated event-stream current previous-status)))
-
-(defn- emit-dependency-health-events!
+(defn- ^{:stratum 2} emit-dependency-health-events!
   [event-stream prior-projection current-projection]
   (doseq [{:keys [previous current]} (dependency-health-delta prior-projection current-projection)]
     (let [previous-status (:dependency/status previous)]
       (stream/publish! event-stream
                        (dependency-health-event event-stream current previous-status)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Compute cycle
+;------------------------------------------------------------------------------ Layer 3
 
-(defn compute-cycle!
+;; Compute cycle
+(defn ^{:stratum 3} compute-cycle!
   "Execute one reliability computation cycle.
 
    1. Compute all SLIs for each configured window
@@ -224,14 +232,6 @@
      :dependency-health dependency-health-projection
      :breaches breaches
      :recommendation recommendation}))
-
-(defn current-state
-  [engine]
-  @(:state engine))
-
-(defn current-mode
-  [engine]
-  (:mode @(:state engine)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
