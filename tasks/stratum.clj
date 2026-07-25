@@ -37,7 +37,7 @@
    included — never fetch the sibling repo; only the pre-commit gate
    pays the one-time clone."
   (pr-str {:deps {'io.github.miniforge-ai/stratum-lint
-                  {:git/sha "acd82a2f5c0155cb03d92ce1f4465cc064125895"
+                  {:git/sha "8a40bdeaf2897e2cc13f61e056a1882af7d811ab"
                    :deps/root "clojure"}}}))
 
 (defn ^{:stratum 0} restage!
