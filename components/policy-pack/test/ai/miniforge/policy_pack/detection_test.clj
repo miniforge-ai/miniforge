@@ -296,6 +296,27 @@
       (is (clojure.string/includes? (:message error) "5000 is a magic number")
           "the judge's specific per-instance message reaches the agent")))
 
+  (testing "A missing/0 judge line is normalized to nil, not a bogus :0 site"
+    (let [violation {:rule {:rule/id :std/localization
+                            :rule/severity :high
+                            :rule/enforcement {:action :hard-halt
+                                               :message "Raw string."}}
+                     :violation {:type :semantic
+                                 :rule-id :std/localization
+                                 :message "Raw string."
+                                 :violations [{:rule/id :std/localization
+                                               :file "a.clj"
+                                               :line 0
+                                               :current "\"hi\""
+                                               :rationale "raw literal"}]}}
+          error (detection/violation->error violation)]
+      (is (nil? (get-in error [:location :matches 0 :line]))
+          "line 0 becomes nil in the location")
+      (is (not (clojure.string/includes? (:message error) "a.clj:0"))
+          "no bogus :0 site in the message")
+      (is (clojure.string/includes? (:message error) "raw literal")
+          "the specific message still reaches the agent")))
+
   (testing "Converts violation to warning"
     (let [violation {:rule {:rule/id :test-rule
                             :rule/severity :low}

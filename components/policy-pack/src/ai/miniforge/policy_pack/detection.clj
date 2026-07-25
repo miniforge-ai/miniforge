@@ -684,6 +684,14 @@ depending on ambient namespace loading or raw var resolution."}
   (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
           violations))
 
+(defn- normalize-line
+  "A finding's line number, or nil when the judge omitted it. The
+   semantic-analyzer's raw->violation defaults a missing `:line` to 0,
+   which is not a valid editor line — carrying it forward would point the
+   agent/tooling at an impossible location."
+  [line]
+  (when (and (integer? line) (pos? line)) line))
+
 (defn- violation-location
   "Location for a gate finding, spanning both detector shapes. Content-scan
    / diff detectors carry top-level `:matches` + `:artifact-path`. The
@@ -696,7 +704,9 @@ depending on ambient namespace loading or raw var resolution."}
    finding names concrete sites like the mechanical detectors do."
   [violation]
   (if-let [hits (seq (:violations violation))]
-    {:matches (mapv #(select-keys % [:file :line :current :rationale]) hits)
+    {:matches (mapv #(-> (select-keys % [:file :line :current :rationale])
+                         (update :line normalize-line))
+                    hits)
      :path    (:file (first hits))}
     {:matches (:matches violation)
      :path    (:artifact-path violation)}))
@@ -718,7 +728,7 @@ depending on ambient namespace loading or raw var resolution."}
           "\n"
           (map (fn [{:keys [file line current rationale]}]
                  (str "  - " file
-                      (when line (str ":" line))
+                      (when-let [l (normalize-line line)] (str ":" l))
                       (when-not (str/blank? rationale) (str " — " rationale))
                       (when-not (str/blank? current) (str "  [" current "]"))))
                hits)))
