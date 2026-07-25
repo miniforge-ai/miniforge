@@ -22,6 +22,12 @@
   :pr/reuse-unresolved "A PR already exists for this branch but could not be resolved via gh pr view: {error}"
   :pr/reuse-no-url "gh pr view returned no PR URL"
 
+  ;; push HTTPS+token fallback
+  :push/https-fallback-restore-failed
+  "Pushed via HTTPS token fallback but could not restore the origin remote URL; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Restore error: {restore-error}"
+  :push/https-fallback-push-and-restore-failed
+  "HTTPS token-fallback push failed and the origin remote URL could not be restored; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Push error: {push-error}. Restore error: {restore-error}"
+
   ;; pipeline steps
   :step/metadata-generation-failed "Releaser agent failed to generate release metadata"
   :step/no-files-to-stage "No modified files in executor environment to stage for release"

@@ -351,6 +351,66 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
+(defn- with-https-token-fallback!
+  "Run `push!` (a 0-arg thunk returning a shell-result). On failure with a
+   token present, retry once over HTTPS+token auth: rewrite origin to an https
+   URL embedding the token, re-run `push!`, then restore the original URL so
+   the token never persists in git config. If the restore itself fails, fail
+   loud — even when the push succeeded — with the scrub command and
+   :push-succeeded?, rather than report a clean success while a credential
+   lingers in git config. Covers an SSH `origin` that GH_TOKEN alone can't
+   authenticate. Shared by push-branch! and force-push!; mirrors
+   sandbox/push-branch!."
+  [worktree-path github-token push!]
+  (let [result (push!)]
+    (if (or (result/succeeded? result) (not github-token))
+      result
+      (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
+            remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
+            https-url  (ssh->https-with-token remote-url github-token)]
+        (if https-url
+          (do
+            (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
+            (let [retry     (push!)
+                  ;; Restore the original remote URL so the token never
+                  ;; persists in the worktree's git config.
+                  restore-r (exec! worktree-path
+                                   ["git" "remote" "set-url" "origin" remote-url])]
+              (if (result/succeeded? restore-r)
+                retry
+                ;; The restore failed — origin may still embed the token.
+                ;; Fail loud (even when the push itself succeeded) with the
+                ;; scrub command, rather than report a clean success while a
+                ;; credential is persisted in git config. When the retry push
+                ;; also failed, carry its error too so the root cause isn't
+                ;; lost.
+                (let [pushed? (result/succeeded? retry)]
+                  (result/shell-failure
+                   (if pushed?
+                     (msg/t :push/https-fallback-restore-failed
+                            {:remote-url    remote-url
+                             :restore-error (:error restore-r)})
+                     (msg/t :push/https-fallback-push-and-restore-failed
+                            {:remote-url    remote-url
+                             :push-error    (:error retry)
+                             :restore-error (:error restore-r)}))
+                   {:push-succeeded? pushed?})))))
+          result)))))
+
+(defn- raw-force-push!
+  "One `git push --force-with-lease` with GH_TOKEN injected. Returns a
+   shell-result."
+  [worktree-path github-token]
+  (try
+    (let [r (process/shell
+             (gh-shell-opts worktree-path github-token)
+             "git" "push" "--force-with-lease")]
+      (if (zero? (:exit r))
+        (result/shell-success {:output (get r :out "")})
+        (result/shell-failure (get r :err ""))))
+    (catch Exception e
+      (result/shell-failure (.getMessage e)))))
+
 (defn push-branch!
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
@@ -368,49 +428,22 @@
   ([worktree-path branch-name github-token]
    (or
     (validate-safe-branch-name branch-name)
-    (let [result (raw-push! worktree-path branch-name github-token)]
-      (if (or (result/succeeded? result) (not github-token))
-        result
-        (let [url-r      (exec! worktree-path ["git" "remote" "get-url" "origin"])
-              remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
-              https-url  (ssh->https-with-token remote-url github-token)]
-          (if https-url
-            (do
-              (exec! worktree-path ["git" "remote" "set-url" "origin" https-url])
-              (let [retry     (raw-push! worktree-path branch-name github-token)
-                    ;; Restore the original remote URL so the token never
-                    ;; persists in the worktree's git config.
-                    restore-r (exec! worktree-path
-                                     ["git" "remote" "set-url" "origin" remote-url])]
-                (if (result/succeeded? restore-r)
-                  retry
-                  ;; The restore failed — origin may still embed the token.
-                  ;; Fail loud (even if the push itself succeeded) with the
-                  ;; scrub command, rather than report a clean success while a
-                  ;; credential is persisted in git config.
-                  (result/shell-failure
-                   (str "Pushed via HTTPS token fallback but could not restore the "
-                        "origin remote URL; it may still embed the GitHub token. "
-                        "Scrub it: git remote set-url origin " remote-url ". "
-                        "Restore error: " (:error restore-r))
-                   {:push-succeeded? (result/succeeded? retry)}))))
-            result)))))))
+    (with-https-token-fallback!
+     worktree-path github-token
+     #(raw-push! worktree-path branch-name github-token)))))
 
 (defn force-push!
   "Force-push the current branch with --force-with-lease, injecting
    `github-token` as GH_TOKEN so gh's git credential helper authenticates
-   with the pipeline credential (the PR-doc amend path uses this). Returns a
-   shell-result."
+   with the pipeline credential (the PR-doc amend path uses this). If the push
+   fails and a token is present, retries over HTTPS + token auth via the same
+   with-https-token-fallback! that push-branch! uses — an SSH `origin` can't be
+   authenticated by GH_TOKEN alone, so without this the PR-doc amend push would
+   fail in a token-only local run. Returns a shell-result."
   [worktree-path github-token]
-  (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "git" "push" "--force-with-lease")]
-      (if (zero? (:exit r))
-        (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
-    (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+  (with-https-token-fallback!
+   worktree-path github-token
+   #(raw-force-push! worktree-path github-token)))
 
 (defn- inside-worktree?
   "True when `file` resolves inside `worktree-path` after canonicalization
