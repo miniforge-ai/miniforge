@@ -41,8 +41,7 @@
 (defrecord ^{:stratum 0} ReliabilityEngine
   [event-stream   ; event stream atom for emitting events
    state          ; atom: {:slis [...] :slo-checks [...] :budgets {...} :mode :nominal}
-   config])
-; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
+   config])  ; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
 
 ;; Pipeline stages
 (defn- ^{:stratum 0} check-all-slos-across-tiers
