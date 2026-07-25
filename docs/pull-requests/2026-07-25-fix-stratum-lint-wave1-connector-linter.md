@@ -52,12 +52,13 @@ attached to the same def/group it always described.
 3. Read the full diff for all 4 changed files. Confirmed the only changes
    are heading text, `^{:stratum n}` metadata, and def reordering — no
    logic changes, no comment misattachment.
-4. `clj-kondo --lint components/connector-linter`: 0 errors. 1 warning
-   (unused binding `column` in `etl.clj`'s `record->violation`, now at line
-   65 after reordering). Confirmed via `git stash` comparison against the
-   pre-fix file that this warning predates this PR (same warning, line 54
-   before reordering) — pre-existing and unrelated to the stratum-lint
-   change, not fixed here to keep this PR mechanical-only.
+4. `clj-kondo --lint components/connector-linter`: 0 errors, 0 warnings.
+   `record->violation` originally had an unused `column` binding (pre-
+   existing, confirmed via `git stash` comparison against the pre-fix
+   file — same warning present before this PR) — removed during review,
+   along with a stale section header and two stale docstring layer
+   summaries Copilot caught on later passes. See commit history for the
+   review-fix commits.
 5. Plain lint re-run post-fix: 1 `SL003` remains (`etl.clj`, 4 real layers
    against the 3-layer budget) — Wave 2 scope, documented above.
 6. Ran the component's test namespace directly:
@@ -86,8 +87,8 @@ order only.
 - [x] Idempotency verified directly (two `--fix` passes, zero diff)
 - [x] Full diff read for all 4 changed files; no comment misattachment
       (none existed pre-fix)
-- [x] `clj-kondo` clean except one pre-existing, unrelated warning
-      (confirmed via `git stash` comparison)
+- [x] `clj-kondo` clean (0 errors, 0 warnings) — one pre-existing unused
+      binding removed during review
 - [x] Plain lint re-run post-fix: `SL003` remains on `etl.clj`, documented
       as Wave 2 scope
 - [x] Tests pass: 11 tests / 33 assertions, 0 failures, 0 errors
