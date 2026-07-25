@@ -20,7 +20,7 @@
    namespace wanting a fourth real layer is the signal to split it).
    `lint/stratum-staged` is the dispatcher; it calls `autofix-and-restage!`
    for fully-staged files or `lint-only-and-fail!` for partially-staged
-   ones. `autofix-and-restage!` composes `restage!` and `advisory-lint!`,
+   ones. `autofix-and-restage!` composes `restage!` and `post-fix-lint!`,
    which both read `stratum-lint-deps` — the genuine 3-deep layer chain
    that no longer fits alongside the dispatcher in one file."
   (:require
@@ -50,6 +50,17 @@
         (println "❌ Failed to re-stage" f "after autofix:" err)
         (System/exit exit)))))
 
+(def ^{:stratum 0} ^:private budget-mode-env
+  "Env var toggling how a remaining stratum-lint finding after autofix
+   (in practice always SL003 — over the layer budget, needs a namespace
+   split, since --fix resolves everything else) is treated: unset or any
+   value other than \"warn\" blocks the commit; \"warn\" prints and
+   continues. Blocking is the default — every rule 210 violation gets
+   real enforcement, not a decorative print — with an explicit opt-out
+   for a team mid-way through clearing a backlog of pre-existing
+   over-budget files."
+  "MINIFORGE_STRATUM_BUDGET_MODE")
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} lint-only-and-fail!
@@ -71,24 +82,34 @@
                "allow autofix, or fix headings by hand. Exit code:" exit)
       (System/exit exit))))
 
-(defn ^{:stratum 1} advisory-lint!
-  "Plain (non-fix) lint pass over already-fixed `files`; prints any
-   remaining findings (in practice always SL003 — over the layer budget,
-   needs a namespace split — since --fix resolves everything else) as a
-   non-blocking advisory. Only a genuinely unexpected exit (neither clean
-   nor findings-present) fails the commit — a broken tool invocation
-   should never pass silently."
+(defn ^{:stratum 1} post-fix-lint!
+  "Plain (non-fix) lint pass over already-fixed `files`; any remaining
+   finding (in practice always SL003 — over the layer budget, needs a
+   namespace split — since --fix resolves everything else) fails the
+   commit by default, same as any other rule 210 violation — set
+   `MINIFORGE_STRATUM_BUDGET_MODE=warn` to print and continue instead,
+   e.g. while working through a backlog of pre-existing over-budget
+   files. A genuinely unexpected exit (neither clean nor
+   findings-present) always fails the commit regardless of mode — a
+   broken tool invocation should never pass silently."
   [files]
   (let [{:keys [exit out err]} (apply p/sh {:out :string :err :string}
                                       "bb" "-Sdeps" stratum-lint-deps
                                       "-m" "stratum-lint.interface"
-                                      files)]
+                                      files)
+        warn? (= "warn" (System/getenv budget-mode-env))]
     (when-not (str/blank? out)
-      (println "⚠️  Stratified-design findings remain after autofix (often a namespace split needed for an over-budget file):")
+      (println (if warn? "⚠️" "❌")
+               "Stratified-design findings remain after autofix (often a namespace split needed for an over-budget file):")
       (println out))
     (when-not (str/blank? err) (binding [*out* *err*] (println err)))
-    (when-not (contains? #{0 1} exit)
-      (println "❌ Post-fix advisory lint pass could not run — exit code:" exit)
+    (cond
+      (not (contains? #{0 1} exit))
+      (do
+        (println "❌ Post-fix lint pass could not run — exit code:" exit)
+        (System/exit exit))
+
+      (and (= 1 exit) (not warn?))
       (System/exit exit))))
 
 ;------------------------------------------------------------------------------ Layer 2
@@ -112,4 +133,4 @@
         (System/exit exit))
       (do
         (restage! files)
-        (advisory-lint! files)))))
+        (post-fix-lint! files)))))

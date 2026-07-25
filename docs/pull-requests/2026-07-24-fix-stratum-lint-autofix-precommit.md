@@ -23,11 +23,11 @@ normal development, not just in dedicated cleanup PRs.
 ## Changes in Detail
 
 - `tasks/stratum.clj` (new): the autofix mechanics — `stratum-lint-deps`,
-  `restage!`, `lint-only-and-fail!`, `advisory-lint!`,
+  `restage!`, `lint-only-and-fail!`, `post-fix-lint!`,
   `autofix-and-restage!`. Split out of `tasks/lint.clj` because this PR's
   own dogfooding caught it tripping the very rule it enforces: the real
   call chain (`stratum-lint-deps`/`restage!` → `lint-only-and-fail!`/
-  `advisory-lint!` → `autofix-and-restage!` → the dispatcher) is 4 real
+  `post-fix-lint!` → `autofix-and-restage!` → the dispatcher) is 4 real
   layers deep, one over budget (rule 210's "a file wanting a fourth band
   is the signal to split the namespace"). `tasks/lint.clj`'s dispatcher
   calls into it via a qualified `stratum/...` reference, which the
@@ -52,11 +52,11 @@ normal development, not just in dedicated cleanup PRs.
   - A fully-staged file goes through `autofix-and-restage!`: run `--fix`,
     then `restage!` (re-`git add`, mirrors `fmt/md-staged`'s re-stage
     step, but checks `git add`'s own exit code — no longer possible for
-    the fixed content to fail to stage silently), then `advisory-lint!`.
+    the fixed content to fail to stage silently), then `post-fix-lint!`.
     `autofix-and-restage!` only fails the commit when `--fix`'s own exit
     code says it couldn't resolve the file (a parse failure, or a genuine
     same-file reference cycle — SL000/SL007).
-  - `advisory-lint!` runs one more plain (non-fix) lint pass over the
+  - `post-fix-lint!` runs one more plain (non-fix) lint pass over the
     fixed files and prints any remaining findings — in practice always
     SL003 (over the 3-layer budget), since `--fix` resolves everything
     else, but the message doesn't presume that's the only possibility —
@@ -127,6 +127,15 @@ cleared most of the tree's debt before most developers hit it organically.
   (comment-block preservation, found while validating this PR)
 - Baseline: `work/stratum-lint-baseline-2026-07-24.md` (Wave 0)
 - Follow-on: Waves 1-4, per-component fix PRs
+
+**Update (#1471):** the "non-blocking advisory" described above for a
+remaining post-fix finding (in practice always SL003) is no longer
+current — it now fails the commit by default, same as any other rule 210
+violation, with `MINIFORGE_STRATUM_BUDGET_MODE=warn` as an explicit
+opt-out. `advisory-lint!` was renamed to `post-fix-lint!` accordingly;
+this doc's function-name references above have been updated to match,
+but the "non-blocking" framing in the surrounding prose reflects this
+PR's original design, not current behavior.
 
 ## Checklist
 
