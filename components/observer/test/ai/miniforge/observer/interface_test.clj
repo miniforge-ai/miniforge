@@ -77,13 +77,14 @@
       ;; analysis must treat these as unusable data, not crash trying to
       ;; sum a sequence containing nils.
       (dotimes [_ 4]
-        (observer/collect-workflow-metrics
-         obs (random-uuid)
-         {:workflow/id (random-uuid)
-          :workflow/status :initial-state
-          :workflow/metrics {}
-          :workflow/history []
-          :workflow/errors []}))
+        (let [workflow-id (random-uuid)]
+          (observer/collect-workflow-metrics
+           obs workflow-id
+           {:workflow/id workflow-id
+            :workflow/status :initial-state
+            :workflow/metrics {}
+            :workflow/history []
+            :workflow/errors []})))
 
       (let [analysis (observer/analyze-metrics obs :trends {})]
         (is (= :trends (:analysis-type analysis)) "Analysis type should match")

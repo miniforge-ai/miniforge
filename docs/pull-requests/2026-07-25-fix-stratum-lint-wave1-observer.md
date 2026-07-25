@@ -86,18 +86,35 @@ workflows with an empty `:metrics` map (no `:duration-ms`/`:cost-usd`)
 and asserts `analyze-metrics :trends` returns nil trend data and the
 "Insufficient data" summary rather than throwing. Verified the test
 actually catches the bug: reverted the `core.clj` fix, reran, got 1
-error (the reproduced crash); restored the fix, reran, 0 errors.
+error (the reproduced crash); restored the fix, reran, 0 errors. That
+new test's fixture originally generated two different UUIDs for the
+same workflow (one passed as `collect-workflow-metrics`' id argument,
+a different one embedded in `:workflow/id`), a review comment on this
+fixture's realism — fixed to generate one UUID and reuse it in both
+places.
+
+A third review comment found a second real bug in the same function:
+`analyze-trends`' summary string divides by each trend's `:first-avg` to
+compute percent change, with no guard for a zero baseline — a workflow
+whose first-half average duration or cost is genuinely `0.0` would
+produce "Infinity% change" or "NaN% change" in the summary instead of a
+number. Added `pct-change` (Layer 0, alongside `calculate-percentile`):
+returns `0.0` when `before` is zero rather than dividing by it. Both
+`analyze-trends` call sites now go through it.
 
 ## Testing Plan
 
 1. Ran `--fix` a second time over the already-fixed tree — zero diff,
    confirming idempotency.
-2. Read every changed file's full diff (not `--stat`). Confirmed the
-   only changes are heading text, `^{:stratum n}` metadata, and def
-   reordering. Grepped the diff for the same-line trailing-comment
+2. Read every changed file's full diff (not `--stat`). The mechanical
+   `--fix` pass itself is heading text, `^{:stratum n}` metadata, and def
+   reordering only. Grepped the diff for the same-line trailing-comment
    pattern the tool is known to sometimes mis-attach across a move
    (`foo])  ; comment`); none present in any of the 8 files either
-   before or after the fix, so no hand-fix was needed.
+   before or after the fix, so no hand-fix was needed. Review follow-up
+   passes on top of that mechanical fix introduced two real behavior
+   changes — see "Review follow-up" below and the checklist — so this PR
+   as a whole is not purely mechanical, only its initial commit was.
 3. `clj-kondo --lint components/observer`: 0 errors, 0 warnings.
 4. Plain (non-`--fix`) `stratum-lint` over `components/observer`
    afterward: 2 findings remain, both `SL003` (`alerts.clj` and
@@ -119,9 +136,16 @@ error (the reproduced crash); restored the fix, reran, 0 errors.
 
 ## Deployment Plan
 
-Merges to `main`. Pure source-formatting normalization (headings +
-metadata) with no behavior change and no callers outside
-`components/observer` — nothing to roll out or monitor.
+Merges to `main`. The stratum-lint pass itself is source-formatting
+normalization only, but this PR also carries two real behavior changes
+from review follow-up (see below): `analyze-trends` no longer throws on
+metrics missing `:duration-ms`/`:cost-usd`, and no longer reports
+Infinity/NaN percent-change when a trend's first-half average is zero.
+Both are bug fixes with no external contract change — `analyze-trends`'
+documented return shape is unchanged, callers see either correct numbers
+or the existing "Insufficient data" fallback instead of an exception or
+a nonsensical percentage. No callers outside `components/observer` —
+nothing to roll out or monitor beyond normal merge-to-main.
 
 ## Related Issues/PRs
 
@@ -136,8 +160,9 @@ metadata) with no behavior change and no callers outside
 ## Checklist
 
 - [x] Idempotency verified: second `--fix` run produced zero diff
-- [x] Full diff read for all 8 changed files; confirmed mechanical
-      (headings + `^{:stratum n}` metadata + reordering only)
+- [x] Full diff read for all 8 changed files; the initial mechanical
+      commit is headings + `^{:stratum n}` metadata + reordering only —
+      later review-follow-up commits add the two real bug fixes below
 - [x] Checked for the known same-line trailing-comment mis-attachment
       failure mode; none present, no hand-fix required
 - [x] `clj-kondo`: 0 errors, 0 warnings
@@ -153,3 +178,8 @@ metadata) with no behavior change and no callers outside
 - [x] Review follow-up: `analyze-trends` nil-safety bug fixed (filter
       nils before `reduce +`); new regression test verified to actually
       catch the bug (fails without the fix, passes with it)
+- [x] Review follow-up: that regression test's fixture generated two
+      different UUIDs for what should be the same workflow id — fixed
+      to reuse one
+- [x] Review follow-up: `analyze-trends` zero-baseline division bug
+      fixed (`pct-change` helper, returns 0.0 instead of Infinity/NaN)

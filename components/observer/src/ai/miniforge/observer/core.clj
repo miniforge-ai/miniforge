@@ -88,7 +88,48 @@
     (let [idx (int (* (/ percentile 100.0) (count sorted-values)))]
       (nth sorted-values (min idx (dec (count sorted-values)))))))
 
-(defn ^{:stratum 0} analyze-trends
+(defn ^{:stratum 0} pct-change
+  "Percent change from `before` to `after`. Returns 0.0 when `before` is
+   zero instead of Infinity/NaN, since a zero baseline has no meaningful
+   percent change to report."
+  [before after]
+  (if (zero? before)
+    0.0
+    (* 100.0 (/ (- after before) before))))
+
+(defn ^{:stratum 0} generate-detailed-report
+  "Generate a detailed metrics breakdown report."
+  [observer opts]
+  (let [output-format (get opts :format :edn)
+        limit (get opts :limit 50)
+
+        all-metrics (proto/get-all-metrics observer {:limit limit})
+        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
+
+        report-data {:workflows all-metrics
+                     :phase-breakdown phase-analysis
+                     :total-workflows (count all-metrics)
+                     :generated-at (java.util.Date.)}]
+
+    (case output-format
+      :edn report-data
+      :markdown (str "# Detailed Workflow Metrics\n\n"
+                     "**Generated:** " (:generated-at report-data) "\n"
+                     "**Total Workflows:** " (:total-workflows report-data) "\n\n"
+                     "## Phase Performance\n"
+                     (:summary phase-analysis) "\n\n"
+                     "## Recent Workflows\n"
+                     (str/join "\n" (map #(format "- %s: %s (%.0fms, $%.4f)"
+                                                   (:workflow-id %)
+                                                   (:status %)
+                                                   (get-in % [:metrics :duration-ms])
+                                                   (get-in % [:metrics :cost-usd]))
+                                         (take 10 all-metrics))))
+      report-data)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} analyze-trends
   "Analyze metrics trends over time."
   [observer opts]
   (let [limit (get opts :limit 100)
@@ -132,47 +173,13 @@
                  (format "Duration %.0f -> %.0fms (%.1f%% change), Cost $%.4f -> $%.4f (%.1f%% change)"
                          (:first-avg duration-trend)
                          (:second-avg duration-trend)
-                         (* 100.0 (/ (- (:second-avg duration-trend) (:first-avg duration-trend))
-                                    (:first-avg duration-trend)))
+                         (pct-change (:first-avg duration-trend) (:second-avg duration-trend))
                          (:first-avg cost-trend)
                          (:second-avg cost-trend)
-                         (* 100.0 (/ (- (:second-avg cost-trend) (:first-avg cost-trend))
-                                    (:first-avg cost-trend))))
+                         (pct-change (:first-avg cost-trend) (:second-avg cost-trend)))
 
                  :else
                  "Insufficient data for trend analysis")})))
-
-(defn ^{:stratum 0} generate-detailed-report
-  "Generate a detailed metrics breakdown report."
-  [observer opts]
-  (let [output-format (get opts :format :edn)
-        limit (get opts :limit 50)
-
-        all-metrics (proto/get-all-metrics observer {:limit limit})
-        phase-analysis (proto/analyze-metrics observer :phase-stats {:limit limit})
-
-        report-data {:workflows all-metrics
-                     :phase-breakdown phase-analysis
-                     :total-workflows (count all-metrics)
-                     :generated-at (java.util.Date.)}]
-
-    (case output-format
-      :edn report-data
-      :markdown (str "# Detailed Workflow Metrics\n\n"
-                     "**Generated:** " (:generated-at report-data) "\n"
-                     "**Total Workflows:** " (:total-workflows report-data) "\n\n"
-                     "## Phase Performance\n"
-                     (:summary phase-analysis) "\n\n"
-                     "## Recent Workflows\n"
-                     (str/join "\n" (map #(format "- %s: %s (%.0fms, $%.4f)"
-                                                   (:workflow-id %)
-                                                   (:status %)
-                                                   (get-in % [:metrics :duration-ms])
-                                                   (get-in % [:metrics :cost-usd]))
-                                         (take 10 all-metrics))))
-      report-data)))
-
-;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} failure-attribution
   [failure]
