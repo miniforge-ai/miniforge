@@ -3,8 +3,7 @@
 ## Overview
 
 Runs `stratum-lint --fix` over the whole `dag-primitives` component (`src`
-
-+ `test`) to replace decorative `Layer N` headings with headings that
+and `test`) to replace decorative `Layer N` headings with headings that
 reflect each file's real same-file reference graph, tagging every
 `def`/`defn`/`deftest` with `^{:stratum n}` metadata. Purely mechanical: no
 logic changes. Part of the per-component Wave 1 series from
@@ -13,8 +12,9 @@ logic changes. Part of the per-component Wave 1 series from
 ## Motivation
 
 `dag-primitives` carried exactly one finding in the baseline —
-`components/dag_primitives/result.clj:99:1: SL003 file uses 4 distinct
-layers (max 3)` — and zero `SL001` (upward-reference) findings, so no
+`components/dag-primitives/src/ai/miniforge/dag_primitives/result.clj:99:1:
+SL003 file uses 4 distinct layers (max 3)` — and zero `SL001`
+(upward-reference) findings, so no
 cycle/upward-call risk to reason about before running the mechanical
 fixer.
 
@@ -70,12 +70,16 @@ autofixer keeps this component clean going forward.
 
 + Baseline: `work/stratum-lint-baseline-2026-07-24.md` (Wave 1 —
   mechanical relabeling via `--fix`, decorative-heading files only)
-+ Sibling Wave 1 PRs: `2026-07-24-fix-stratum-lint-wave1-compliance-scanner.md`,
-  `-reliability.md`, `-gate.md`, `-decision.md`, `-adapter-claude-code.md`
++ Sibling Wave 1 PR docs:
+  `docs/pull-requests/2026-07-24-fix-stratum-lint-wave1-compliance-scanner.md`,
+  `docs/pull-requests/2026-07-24-fix-stratum-lint-wave1-reliability.md`,
+  `docs/pull-requests/2026-07-24-fix-stratum-lint-wave1-gate.md`,
+  `docs/pull-requests/2026-07-24-fix-stratum-lint-wave1-decision.md`,
+  `docs/pull-requests/2026-07-24-fix-stratum-lint-wave1-adapter-claude-code.md`
 
 ## Checklist
 
-+ [x] `--fix` run over the whole component (`src` + `test`)
++ [x] `--fix` run over the whole component (`src` and `test`)
 + [x] Idempotency verified (second `--fix` pass: zero diff)
 + [x] Diff reviewed file-by-file; mechanical-only (heading + metadata +
       reorder); no comment-attachment issue found (none existed to break)
