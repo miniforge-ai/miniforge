@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.slo
   "SLO target checking per workflow tier per N1 §5.5.3.
 
@@ -26,32 +25,43 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
 
-(def default-targets
+;; Configuration
+(def ^{:stratum 0} default-targets
   (-> (io/resource "config/reliability/slo-targets.edn")
       slurp
       edn/read-string))
 
-(def ^:private defaults
+(def ^{:stratum 0} ^:private defaults
   (-> (io/resource "config/reliability/defaults.edn")
       slurp
       edn/read-string))
 
-(def inverted-slis
+(defn ^{:stratum 0} breached?
+  "Returns true if an SLO check result indicates a breach."
+  [slo-check]
+  (:breached? slo-check))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} inverted-slis
   "SLIs where lower is better (the target is a ceiling, not a floor)."
   (:inverted-slis defaults))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; SLO checking (pure)
-
-(defn get-target
+(defn ^{:stratum 1} get-target
   "Get the SLO target for an SLI at a given tier. Returns nil if advisory-only."
   ([sli-name tier] (get-target sli-name tier default-targets))
   ([sli-name tier targets]
    (get-in targets [sli-name tier])))
 
-(defn check-slo
+(defn ^{:stratum 1} breached-slos
+  [slo-checks]
+  (filter breached? slo-checks))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check-slo
   ([sli-result tier] (check-slo sli-result tier default-targets))
   ([sli-result tier targets]
    (let [{:keys [sli/name sli/value sli/window]} sli-result
@@ -67,22 +77,15 @@
           :slo/tier tier
           :slo/window window})))))
 
-(defn check-all-slos
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} check-all-slos
   ([sli-results tier] (check-all-slos sli-results tier default-targets))
   ([sli-results tier targets]
    (->> sli-results
         (map #(check-slo % tier targets))
         (filter some?)
         vec)))
-
-(defn breached?
-  "Returns true if an SLO check result indicates a breach."
-  [slo-check]
-  (:breached? slo-check))
-
-(defn breached-slos
-  [slo-checks]
-  (filter breached? slo-checks))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

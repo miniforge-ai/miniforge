@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.interface
   "Public API for the reliability component per N1 §5.5.
 
@@ -37,57 +36,57 @@
    [ai.miniforge.reliability.degradation :as degradation]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas
 
-(def WorkflowTier
+;; Schemas
+(def ^{:stratum 0} WorkflowTier
   "Malli `[:enum ...]` schema of workflow tiers (:best-effort :standard
    :critical). Tier determines SLO targets and degradation behavior."
   schema/WorkflowTier)
 
-(def SliName
+(def ^{:stratum 0} SliName
   "Malli `[:enum ...]` schema of the seven SLI identifiers (:SLI-1 through
    :SLI-7)."
   schema/SliName)
 
-(def Window
+(def ^{:stratum 0} Window
   "Malli `[:enum ...]` schema of rolling measurement windows (:1h :7d :30d)."
   schema/Window)
 
-(def DegradationMode
+(def ^{:stratum 0} DegradationMode
   "Malli `[:enum ...]` schema of degradation modes (:nominal :degraded
    :safe-mode)."
   schema/DegradationMode)
 
-(def SliResult
+(def ^{:stratum 0} SliResult
   "Malli `[:map ...]` schema for a single computed SLI result. Required keys:
    :sli/name (SliName), :sli/value (double), :sli/window (Window). Optional:
    :sli/tier (WorkflowTier), :sli/dimensions (map)."
   schema/SliResult)
 
-(def SloCheck
+(def ^{:stratum 0} SloCheck
   "Malli `[:map ...]` schema for an SLO check outcome. Keys: :breached?
    (boolean), :sli/name (SliName), :slo/target (double), :slo/actual (double),
    :slo/tier (WorkflowTier), :slo/window (Window)."
   schema/SloCheck)
 
-(def ErrorBudget
+(def ^{:stratum 0} ErrorBudget
   "Malli `[:map ...]` schema for a computed error budget. Keys:
    :error-budget/tier (WorkflowTier), :error-budget/sli (SliName),
    :error-budget/window (Window), :error-budget/remaining (double),
    :error-budget/burn-rate (double), :error-budget/computed-at (inst)."
   schema/ErrorBudget)
 
-(def DependencyKind
+(def ^{:stratum 0} DependencyKind
   "Malli `[:enum ...]` schema of dependency kinds (:provider :platform
    :environment)."
   schema/DependencyKind)
 
-(def DependencyHealthStatus
+(def ^{:stratum 0} DependencyHealthStatus
   "Malli `[:enum ...]` schema of dependency health statuses (:healthy
    :degraded :unavailable :misconfigured :operator-action-required)."
   schema/DependencyHealthStatus)
 
-(def DependencyHealth
+(def ^{:stratum 0} DependencyHealth
   "Malli `[:map ...]` schema for a projected dependency-health entity.
    Required keys include :dependency/id, :dependency/source, :dependency/kind
    (DependencyKind), :dependency/status (DependencyHealthStatus),
@@ -96,40 +95,38 @@
    optional keys carry vendor/class/retryability and observation timestamps."
   schema/DependencyHealth)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; SLI computation (pure)
-
-(def compute-workflow-success-rate
+(def ^{:stratum 0} compute-workflow-success-rate
   "SLI-1. (workflow-metrics window) -> double in [0.0, 1.0]: fraction of
    terminal workflows that completed or escalated. Returns 0.0 when no
    terminal workflows fall in the window. Pure."
   sli/compute-workflow-success-rate)
 
-(def compute-phase-latency
+(def ^{:stratum 0} compute-phase-latency
   "SLI-2. (phase-metrics window) -> map {:p50 :p95 :p99} of phase duration-ms
    percentiles (doubles). Percentiles are 0.0 when no durations fall in the
    window. Pure."
   sli/compute-phase-latency)
 
-(def compute-inner-loop-convergence
+(def ^{:stratum 0} compute-inner-loop-convergence
   "SLI-3. (phase-metrics window) -> double in [0.0, 1.0]: fraction of inner
    loops (entries carrying :iterations) that converged (:success?). Returns
    0.0 when no loops fall in the window. Pure."
   sli/compute-inner-loop-convergence)
 
-(def compute-gate-pass-rate
+(def ^{:stratum 0} compute-gate-pass-rate
   "SLI-4. (gate-metrics window) -> double in [0.0, 1.0]: fraction of gate
    evaluations that :passed?. Returns 0.0 when no gate events fall in the
    window. Pure."
   sli/compute-gate-pass-rate)
 
-(def compute-tool-success-rate
+(def ^{:stratum 0} compute-tool-success-rate
   "SLI-5. (tool-metrics window) -> double in [0.0, 1.0]: fraction of tool
    invocations that report :success?. Returns 0.0 when no invocations fall in
    the window. Pure."
   sli/compute-tool-success-rate)
 
-(def compute-failure-distribution
+(def ^{:stratum 0} compute-failure-distribution
   "SLI-6 (full). (failure-events window) -> map keyed by each distinct
    :failure/class VALUE found in the windowed events (e.g.
    :failure.class/unknown), with that class's fraction (double) of all
@@ -138,61 +135,57 @@
    Pure."
   sli/compute-failure-distribution)
 
-(def compute-unknown-failure-rate
+(def ^{:stratum 0} compute-unknown-failure-rate
   "SLI-6 (scalar). (failure-events window) -> double in [0.0, 1.0]: the
    :failure.class/unknown fraction from the distribution, or 0.0 if absent. A
    high rate signals insufficient failure instrumentation. Pure."
   sli/compute-unknown-failure-rate)
 
-(def compute-context-staleness-rate
+(def ^{:stratum 0} compute-context-staleness-rate
   "SLI-7. (context-metrics window) -> double in [0.0, 1.0]: fraction of
    context packs flagged :stale?. Returns 0.0 when no records fall in the
    window. Pure."
   sli/compute-context-staleness-rate)
 
-(def compute-all-slis
+(def ^{:stratum 0} compute-all-slis
   "(metrics window) -> vector of seven SliResult maps (one per SLI), each
    {:sli/name :sli/value :sli/window}. metrics is a map of per-source metric
    vectors (:workflow-metrics :phase-metrics :gate-metrics :tool-metrics
    :failure-events :context-metrics); missing sources default to empty. Pure."
   sli/compute-all-slis)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; SLO checking (pure)
-
-(def default-slo-targets
+(def ^{:stratum 0} default-slo-targets
   "Nested map of SLO targets {SliName -> {WorkflowTier -> target-double}},
    loaded from config/reliability/slo-targets.edn. A nil entry means
    advisory-only (no enforcement for that SLI/tier)."
   slo/default-targets)
 
-(def check-slo
+(def ^{:stratum 0} check-slo
   "(sli-result tier [targets]) -> SloCheck map, or nil if the SLI is
    advisory-only for the tier. :breached? is true when the actual value
    crosses the target (below a floor, or above the ceiling for inverted SLIs
    such as SLI-6). Pure."
   slo/check-slo)
 
-(def check-all-slos
+(def ^{:stratum 0} check-all-slos
   "(sli-results tier [targets]) -> vector of SloCheck maps. Excludes
    advisory-only SLIs (those with no target for the tier). Pure."
   slo/check-all-slos)
 
-(def breached-slos
+(def ^{:stratum 0} breached-slos
   "(slo-checks) -> lazy seq of the SloCheck maps whose :breached? is true.
    Pure."
   slo/breached-slos)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Error budgets (pure)
-
-(def error-budget
+(def ^{:stratum 0} error-budget
   "Factory: create an error budget map.
    (error-budget remaining burn-rate) or
    (error-budget remaining burn-rate tier sli window)"
   budget/error-budget)
 
-(def compute-error-budget
+(def ^{:stratum 0} compute-error-budget
   "(sli-value slo-target inverted?) -> ErrorBudget map with
    :error-budget/remaining (double 0.0-1.0 fraction left) and
    :error-budget/burn-rate (double; 1.0 = nominal, >1.0 = over-consuming).
@@ -200,36 +193,33 @@
    Pure."
   budget/compute-error-budget)
 
-(def budget-exhausted?
+(def ^{:stratum 0} budget-exhausted?
   "(budget) -> boolean: true when :error-budget/remaining is at or below 0.0."
   budget/budget-exhausted?)
 
-(def budget-critical?
+(def ^{:stratum 0} budget-critical?
   "(budget [threshold]) -> boolean: true when :error-budget/remaining is below
    threshold (default 0.25, i.e. under 25% remaining)."
   budget/budget-critical?)
 
 ;------------------------------------------------------------------------------ Layer 3b
 ;; Dependency health projection (pure)
-
-(def dependency-incident?
+(def ^{:stratum 0} dependency-incident?
   "Returns true when the classified failure contributes to dependency-health
    projection."
   dependency-health/dependency-incident?)
 
-(def apply-dependency-signals
+(def ^{:stratum 0} apply-dependency-signals
   "Apply classified dependency incidents and recovery signals to rolling
    dependency-health state."
   dependency-health/apply-signals)
 
-(def project-dependency-health
+(def ^{:stratum 0} project-dependency-health
   "Project rolling dependency-health state into canonical dependency entities."
   dependency-health/project-health)
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Engine (stateful)
-
-(def create-engine
+(def ^{:stratum 0} create-engine
   "Create a ReliabilityEngine.
 
    Arguments:
@@ -240,7 +230,7 @@
                               :degradation-policy {...}}"
   engine/create-engine)
 
-(def compute-cycle!
+(def ^{:stratum 0} compute-cycle!
   "Execute one reliability computation cycle.
    Computes SLIs, checks SLOs, updates budgets, emits events.
 
@@ -253,18 +243,16 @@
     :recommendation}"
   engine/compute-cycle!)
 
-(def current-state
+(def ^{:stratum 0} current-state
   "Get the current reliability state."
   engine/current-state)
 
-(def current-mode
+(def ^{:stratum 0} current-mode
   "Get the current degradation mode recommendation."
   engine/current-mode)
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Degradation mode manager (stateful, N1 §5.5.5, N8 §3.4)
-
-(def create-degradation-manager
+(def ^{:stratum 0} create-degradation-manager
   "Create a DegradationManager with FSM for :nominal → :degraded → :safe-mode.
 
    Arguments:
@@ -272,11 +260,11 @@
      config       - optional {:unknown-failure-threshold 3}"
   degradation/create-manager)
 
-(def degradation-mode
+(def ^{:stratum 0} degradation-mode
   "Get the current degradation mode (:nominal, :degraded, or :safe-mode)."
   degradation/current-mode)
 
-(def evaluate-degradation!
+(def ^{:stratum 0} evaluate-degradation!
   "Evaluate budget state and trigger mode transition if warranted.
 
    Arguments:
@@ -287,7 +275,7 @@
    Returns: current degradation mode."
   degradation/evaluate-and-transition!)
 
-(def enter-safe-mode!
+(def ^{:stratum 0} enter-safe-mode!
   "Force entry to safe-mode from any state.
 
    Arguments:
@@ -296,7 +284,7 @@
      details - string"
   degradation/enter-safe-mode!)
 
-(def exit-safe-mode!
+(def ^{:stratum 0} exit-safe-mode!
   "Exit safe-mode (requires justification per N8 §3.4.3).
 
    Arguments:

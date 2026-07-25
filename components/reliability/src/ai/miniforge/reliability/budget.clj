@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reliability.budget
   "Error budget computation per N1 §5.5.4.
 
@@ -29,19 +28,13 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:private defaults
+;; Constants
+(def ^{:stratum 0} ^:private defaults
   (-> (io/resource "config/reliability/defaults.edn") slurp edn/read-string))
 
-(def ^:const default-critical-threshold
-  "Budget fraction below which the budget is considered critical."
-  (:budget-critical-threshold defaults))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Factory
-
-(defn error-budget
+(defn ^{:stratum 0} error-budget
   ([remaining burn-rate]
    {:error-budget/remaining remaining
     :error-budget/burn-rate burn-rate})
@@ -53,10 +46,19 @@
     :error-budget/window      window
     :error-budget/computed-at (java.util.Date.)}))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Budget computation
+;; Predicates
+(defn ^{:stratum 0} budget-exhausted?
+  [budget]
+  (<= (:error-budget/remaining budget) 0.0))
 
-(defn compute-error-budget
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:const default-critical-threshold
+  "Budget fraction below which the budget is considered critical."
+  (:budget-critical-threshold defaults))
+
+;; Budget computation
+(defn ^{:stratum 1} compute-error-budget
   [sli-value slo-target inverted?]
   (let [[remaining burn-rate]
         (if inverted?
@@ -80,19 +82,7 @@
                0.0)]))]
     (error-budget remaining burn-rate)))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Predicates
-
-(defn budget-exhausted?
-  [budget]
-  (<= (:error-budget/remaining budget) 0.0))
-
-(defn budget-critical?
-  ([budget] (budget-critical? budget default-critical-threshold))
-  ([budget threshold]
-   (< (:error-budget/remaining budget) threshold)))
-
-(defn critical-budget-exhausted?
+(defn ^{:stratum 1} critical-budget-exhausted?
   "Returns true if any critical-tier budget in the budget map is exhausted.
    budget-state is a map of {[sli tier window] -> budget-map}."
   [budget-state]
@@ -101,7 +91,16 @@
                (budget-exhausted? b)))
         budget-state))
 
-(defn critical-budget-low?
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} budget-critical?
+  ([budget] (budget-critical? budget default-critical-threshold))
+  ([budget threshold]
+   (< (:error-budget/remaining budget) threshold)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} critical-budget-low?
   "Returns true if any critical-tier budget in the budget map is below threshold.
    budget-state is a map of {[sli tier window] -> budget-map}."
   [budget-state]
