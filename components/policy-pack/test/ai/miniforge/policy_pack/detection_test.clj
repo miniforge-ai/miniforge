@@ -264,7 +264,58 @@
       (is (= :test-rule (:code error)))
       (is (= "Error!" (:message error)))
       (is (= :high (:severity error)))
-      (is (= "Fix it" (:remediation error)))))
+      (is (= "Fix it" (:remediation error)))
+      (is (= "main.py" (get-in error [:location :path]))
+          "content-scan path still surfaces from :artifact-path")))
+
+  (testing "Semantic violation surfaces the judge's nested file/line/snippet
+            (not {:matches nil :path nil}) so the finding is actionable"
+    (let [violation {:rule {:rule/id :std/named-constants
+                            :rule/severity :high
+                            :rule/enforcement {:action :hard-halt
+                                               :message "Magic number."}}
+                     :violation {:type :semantic
+                                 :rule-id :std/named-constants
+                                 :message "Magic number."
+                                 :violations [{:rule/id :std/named-constants
+                                               :file "components/x/src/x.clj"
+                                               :line 42
+                                               :current "(Thread/sleep 5000)"
+                                               :rationale "5000 is a magic number"}]}}
+          error (detection/violation->error violation)]
+      (is (= "components/x/src/x.clj" (get-in error [:location :path]))
+          "path comes from the judge's :file")
+      (is (= 42 (get-in error [:location :matches 0 :line]))
+          "line is preserved from the nested violation")
+      (is (= "(Thread/sleep 5000)" (get-in error [:location :matches 0 :current]))
+          "the offending snippet reaches the agent")
+      (is (clojure.string/includes? (:message error) "Magic number.")
+          "the generic rule statement is retained")
+      (is (clojure.string/includes? (:message error) "components/x/src/x.clj:42")
+          "the specific site is folded into the message")
+      (is (clojure.string/includes? (:message error) "5000 is a magic number")
+          "the judge's specific per-instance message reaches the agent")))
+
+  (testing "A missing/0 judge line is normalized to nil, not a bogus :0 site"
+    (let [violation {:rule {:rule/id :std/localization
+                            :rule/severity :high
+                            :rule/enforcement {:action :hard-halt
+                                               :message "Raw string."}}
+                     :violation {:type :semantic
+                                 :rule-id :std/localization
+                                 :message "Raw string."
+                                 :violations [{:rule/id :std/localization
+                                               :file "a.clj"
+                                               :line 0
+                                               :current "\"hi\""
+                                               :rationale "raw literal"}]}}
+          error (detection/violation->error violation)]
+      (is (nil? (get-in error [:location :matches 0 :line]))
+          "line 0 becomes nil in the location")
+      (is (not (clojure.string/includes? (:message error) "a.clj:0"))
+          "no bogus :0 site in the message")
+      (is (clojure.string/includes? (:message error) "raw literal")
+          "the specific message still reaches the agent")))
 
   (testing "Converts violation to warning"
     (let [violation {:rule {:rule/id :test-rule

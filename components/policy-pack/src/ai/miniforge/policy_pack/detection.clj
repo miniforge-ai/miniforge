@@ -684,13 +684,62 @@ depending on ambient namespace loading or raw var resolution."}
   (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
           violations))
 
+(defn- normalize-line
+  "A finding's line number, or nil when the judge omitted it. The
+   semantic-analyzer's raw->violation defaults a missing `:line` to 0,
+   which is not a valid editor line — carrying it forward would point the
+   agent/tooling at an impossible location."
+  [line]
+  (when (and (integer? line) (pos? line)) line))
+
+(defn- violation-location
+  "Location for a gate finding, spanning both detector shapes. Content-scan
+   / diff detectors carry top-level `:matches` + `:artifact-path`. The
+   semantic (LLM-judge) detector instead nests its per-file hits — each
+   `{:file :line :current}` from `semantic-analyzer` — under `:violations`,
+   with no top-level `:matches`/`:artifact-path`. Reading only the top-level
+   keys collapsed every semantic finding to `{:matches nil :path nil}`,
+   dropping the file/line/snippet the judge produced and leaving the
+   redirect agent nothing to act on. Surface the nested hits so a semantic
+   finding names concrete sites like the mechanical detectors do."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    {:matches (mapv #(-> (select-keys % [:file :line :current :rationale])
+                         (update :line normalize-line))
+                    hits)
+     :path    (:file (first hits))}
+    {:matches (:matches violation)
+     :path    (:artifact-path violation)}))
+
+(defn- violation-message
+  "Finding message shown to the redirect/review agent. A semantic
+   violation's top-level `:message` is only the generic rule statement; the
+   judge's specific per-instance findings (what/where) live in `:violations`
+   (each `:rationale` is the judge's message for that site). Fold each hit
+   into the message as `path:line — rationale [snippet]` so the agent sees
+   the concrete instances to change, not just the rule — the other half of
+   why unlocalized semantic findings couldn't be acted on. Non-semantic
+   detectors keep their single `:message` unchanged."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    (str (:message violation)
+         "\n"
+         (str/join
+          "\n"
+          (map (fn [{:keys [file line current rationale]}]
+                 (str "  - " file
+                      (when-let [l (normalize-line line)] (str ":" l))
+                      (when-not (str/blank? rationale) (str " — " rationale))
+                      (when-not (str/blank? current) (str "  [" current "]"))))
+               hits)))
+    (:message violation)))
+
 (defn violation->error
   [{:keys [rule violation]}]
   {:code (:rule/id rule)
-   :message (:message violation)
+   :message (violation-message violation)
    :severity (:rule/severity rule)
-   :location {:matches (:matches violation)
-              :path (:artifact-path violation)}
+   :location (violation-location violation)
    :remediation (get-in rule [:rule/enforcement :remediation])})
 
 (defn violation->warning
