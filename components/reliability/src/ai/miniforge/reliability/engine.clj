@@ -42,8 +42,8 @@
   [event-stream   ; event stream atom for emitting events
    state          ; atom: {:slis [...] :slo-checks [...] :budgets {...} :mode :nominal}
    config])
-; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
 
+; {:windows [:7d] :tiers [:standard :critical] :dependency-health {...}}
 ;; Pipeline stages
 (defn- ^{:stratum 0} check-all-slos-across-tiers
   "Check SLOs for all SLI results across all tier/window combinations."
