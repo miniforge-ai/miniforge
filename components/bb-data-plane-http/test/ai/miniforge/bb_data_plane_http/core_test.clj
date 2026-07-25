@@ -15,23 +15,23 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-data-plane-http.core-test
-  "Layer 0 + Layer 2 tested here. Layer 1 (process lifecycle) is exercised
-   by consumer repos running `bb test:signals:fixtures` or equivalent."
+  "Exercises core's resolution and HTTP-helper layers. Process lifecycle
+   (`build!`/`start!`) is exercised by consumer repos running
+   `bb test:signals:fixtures` or equivalent."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [babashka.process :as p]
             [clojure.test :refer [deftest testing is]]
             [ai.miniforge.bb-data-plane-http.core :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Base-URL resolution.
 
-(deftest test-resolve-base-url-falls-back-to-default
+;; Base-URL resolution.
+(deftest ^{:stratum 0} test-resolve-base-url-falls-back-to-default
   (testing "given an empty cfg → default URL"
     (is (= "http://127.0.0.1:8787" (sut/resolve-base-url {})))))
 
-(deftest test-resolve-base-url-honors-explicit-cfg
+(deftest ^{:stratum 0} test-resolve-base-url-honors-explicit-cfg
   (testing "given :base-url in cfg → returned as-is when env unset"
     ;; We can't easily set/unset env in JVM tests; rely on a var that
     ;; we know is unset (long random name) for the env-var slot.
@@ -40,37 +40,35 @@
             {:base-url "http://other:9000"
              :base-url-env "UNLIKELY_TO_EXIST_ENV_VAR_NAME_12345"})))))
 
-(deftest test-binary-path-resolves-relative
+(deftest ^{:stratum 0} test-binary-path-resolves-relative
   (testing "given :root + :binary → joined path"
     (is (= "/tmp/root/bin/dp"
            (sut/binary-path {:root "/tmp/root" :binary "bin/dp"})))))
 
-(deftest test-binary-path-honors-absolute
+(deftest ^{:stratum 0} test-binary-path-honors-absolute
   (testing "given absolute :binary → returned as-is"
     (is (= "/abs/bin/dp"
            (sut/binary-path {:root "/tmp/root" :binary "/abs/bin/dp"})))))
 
-(deftest test-manifest-path-resolves-relative
+(deftest ^{:stratum 0} test-manifest-path-resolves-relative
   (testing "given :root + :manifest → joined path"
     (is (= "/tmp/root/Cargo.toml"
            (sut/manifest-path {:root "/tmp/root" :manifest "Cargo.toml"})))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; HTTP helpers.
-
-(deftest test-http-get-body-returns-body
+(deftest ^{:stratum 0} test-http-get-body-returns-body
   (testing "given http-fn returning {:body 'x'} → 'x'"
     (is (= "raw-bytes"
            (sut/http-get-body "http://example"
                               {:http-fn (fn [_] {:status 200 :body "raw-bytes"})})))))
 
-(deftest test-http-get-json-parses-on-200
+(deftest ^{:stratum 0} test-http-get-json-parses-on-200
   (testing "given 200 response with JSON body → keywordized parsed map"
     (is (= {:a 1 :b "c"}
            (sut/http-get-json "http://example"
                               {:http-fn (fn [_] {:status 200 :body "{\"a\":1,\"b\":\"c\"}"})})))))
 
-(deftest test-http-get-json-returns-anomaly-on-non-200
+(deftest ^{:stratum 0} test-http-get-json-returns-anomaly-on-non-200
   (testing "given 500 response → anomaly"
     (let [result (sut/http-get-json "http://example"
                                     {:http-fn (fn [_] {:status 500 :body "err"})})]
@@ -78,7 +76,7 @@
       (is (= :fault (:anomaly/type result)))
       (is (= {:status 500 :body "err"} (:anomaly/data result))))))
 
-(deftest test-http-get-json-returns-anomaly-on-invalid-json
+(deftest ^{:stratum 0} test-http-get-json-returns-anomaly-on-invalid-json
   (testing "given 200 response with invalid JSON → anomaly"
     (let [result (sut/http-get-json "http://example"
                                     {:http-fn (fn [_] {:status 200 :body "{bad"})})]
@@ -88,7 +86,7 @@
       (is (= "com.fasterxml.jackson.core.JsonParseException"
              (get-in result [:anomaly/data :anomaly/ex-class]))))))
 
-(deftest test-http-get-json-returns-anomaly-on-transport-error
+(deftest ^{:stratum 0} test-http-get-json-returns-anomaly-on-transport-error
   (testing "given http-fn that throws → anomaly"
     (let [result (sut/http-get-json "http://example"
                                     {:http-fn (fn [_] (throw (Exception. "offline")))})]
@@ -96,7 +94,7 @@
       (is (= :fault (:anomaly/type result)))
       (is (= "offline" (get-in result [:anomaly/data :anomaly/ex-message]))))))
 
-(deftest test-http-post-json-sends-body-and-parses
+(deftest ^{:stratum 0} test-http-post-json-sends-body-and-parses
   (testing "given http-fn capturing args → body serialized, response parsed"
     (let [captured (atom nil)
           http    (fn [url opts]
@@ -111,7 +109,7 @@
       (is (= "{\"scenario\":\"live\"}"
              (get-in @captured [:opts :body]))))))
 
-(deftest test-http-post-json-returns-anomaly-on-non-200
+(deftest ^{:stratum 0} test-http-post-json-returns-anomaly-on-non-200
   (testing "given 400 response → anomaly"
     (let [result (sut/http-post-json "http://example" {}
                                      {:http-fn (fn [_ _] {:status 400 :body "bad"})})]
@@ -119,7 +117,7 @@
       (is (= :fault (:anomaly/type result)))
       (is (= {:status 400 :body "bad"} (:anomaly/data result))))))
 
-(deftest test-http-post-json-returns-anomaly-on-invalid-json
+(deftest ^{:stratum 0} test-http-post-json-returns-anomaly-on-invalid-json
   (testing "given 200 response with invalid JSON → anomaly"
     (let [result (sut/http-post-json "http://example" {:scenario "live"}
                                      {:http-fn (fn [_ _] {:status 200 :body "{bad"})})]
@@ -129,7 +127,7 @@
       (is (= "com.fasterxml.jackson.core.JsonParseException"
              (get-in result [:anomaly/data :anomaly/ex-class]))))))
 
-(deftest test-http-post-json-returns-anomaly-on-transport-error
+(deftest ^{:stratum 0} test-http-post-json-returns-anomaly-on-transport-error
   (testing "given http-fn that throws → anomaly"
     (let [result (sut/http-post-json "http://example" {:scenario "live"}
                                      {:http-fn (fn [_ _] (throw (Exception. "offline")))})]
@@ -139,8 +137,7 @@
 
 ;------------------------------------------------------------------------------ wait-ready!
 ;; Uses injected http + sleep so it's deterministic.
-
-(deftest test-wait-ready-returns-ready-on-first-success
+(deftest ^{:stratum 0} test-wait-ready-returns-ready-on-first-success
   (testing "given http-fn returning 200 on first call → :ready"
     (is (= :ready
            (sut/wait-ready! "http://example"
@@ -148,7 +145,7 @@
                              :sleep-fn (fn [] nil)
                              :max-attempts 1})))))
 
-(deftest test-wait-ready-exhausts-attempts
+(deftest ^{:stratum 0} test-wait-ready-exhausts-attempts
   (testing "given http-fn that always fails → anomaly with :attempts"
     (let [result (sut/wait-ready! "http://example"
                                   {:http-fn (fn [_] (throw (Exception. "nope")))
@@ -158,7 +155,7 @@
       (is (= :fault (:anomaly/type result)))
       (is (= 3 (get-in result [:anomaly/data :attempts]))))))
 
-(deftest test-wait-ready-reports-process-death
+(deftest ^{:stratum 0} test-wait-ready-reports-process-death
   (testing "given a dead process handle before readiness → anomaly"
     (with-redefs [p/alive? (constantly false)]
       (let [result (sut/wait-ready! "http://example"

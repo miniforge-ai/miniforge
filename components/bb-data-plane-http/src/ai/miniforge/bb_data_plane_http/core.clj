@@ -15,13 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-data-plane-http.core
   "Implementation.
 
-   Layer 0: pure config resolution + URL/cmd builders.
-   Layer 1: lifecycle side effects (build, start, wait-ready, destroy).
-   Layer 2: HTTP helpers that take an injectable `:http-fn`."
+   Layer 0: pure resolution (`resolve-base-url`, `under-root`, cargo-cmd
+   building), `wait-ready!`/`destroy!`, and the injectable HTTP helpers —
+   no same-file dependencies.
+   Layer 1: `binary-path`/`manifest-path`, built on `under-root`.
+   Layer 2: `build!`/`start!` (process lifecycle), built on the Layer 1
+   path builders."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.bb-paths.interface :as paths]
             [ai.miniforge.bb-proc.interface :as proc]
@@ -29,58 +31,32 @@
             [babashka.process :as p]
             [cheshire.core :as json]))
 
-(def ^:const default-base-url     "http://127.0.0.1:8787")
-(def ^:const default-base-url-env "THESIUM_DATA_PLANE_BASE_URL")
-
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure resolution.
 
-(defn- under-root
+(def ^{:stratum 0} ^:const default-base-url     "http://127.0.0.1:8787")
+
+(def ^{:stratum 0} ^:const default-base-url-env "THESIUM_DATA_PLANE_BASE_URL")
+
+;; Pure resolution.
+(defn- ^{:stratum 0} under-root
   [root p]
   (cond
     (nil? p)                     nil
     (.startsWith ^String p "/")  p
     :else                        (str (or root (paths/repo-root)) "/" p)))
 
-(defn resolve-base-url
+(defn ^{:stratum 0} resolve-base-url
   [{:keys [base-url base-url-env]
     :or   {base-url     default-base-url
            base-url-env default-base-url-env}}]
   (or (System/getenv base-url-env) base-url))
 
-(defn binary-path
-  [{:keys [root binary]}]
-  (under-root root binary))
-
-(defn manifest-path
-  [{:keys [root manifest]}]
-  (under-root root manifest))
-
-(defn- build-cargo-cmd
+(defn- ^{:stratum 0} build-cargo-cmd
   [manifest quiet?]
   (cond-> ["cargo" "build" "--release" "--manifest-path" manifest]
     quiet? (conj "--quiet")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Process lifecycle.
-
-(defn build!
-  [cfg {:keys [run-fn quiet?] :or {run-fn proc/run!}}]
-  (apply run-fn (build-cargo-cmd (manifest-path cfg) quiet?))
-  (binary-path cfg))
-
-(defn start!
-  [cfg {:keys [env state-dir state-dir-env log-path bg-fn]
-        :or   {bg-fn proc/run-bg!}}]
-  (let [env* (cond-> (or env {})
-               (and state-dir state-dir-env) (assoc state-dir-env state-dir))
-        opts (cond-> {}
-               (seq env*) (assoc :extra-env env*)
-               log-path   (assoc :out (java.io.File. ^String log-path)
-                                 :err (java.io.File. ^String log-path)))]
-    (bg-fn opts (binary-path cfg))))
-
-(defn wait-ready!
+(defn ^{:stratum 0} wait-ready!
   [health-url {:keys [max-attempts http-fn sleep-fn proc-handle]
                :or   {max-attempts 60
                       http-fn      #(http/get % {:throw false :timeout 1000})
@@ -102,21 +78,20 @@
                                                     :health-url health-url})
         :else                     (do (sleep-fn) (recur (inc attempt)))))))
 
-(defn destroy!
+(defn ^{:stratum 0} destroy!
   [proc]
   (proc/destroy! proc))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; HTTP helpers.
+(defn- ^{:stratum 0} default-http-get  [url]      (http/get  url {:throw false}))
 
-(defn- default-http-get  [url]      (http/get  url {:throw false}))
-(defn- default-http-post [url opts] (http/post url opts))
+(defn- ^{:stratum 0} default-http-post [url opts] (http/post url opts))
 
-(defn http-get-body
+(defn ^{:stratum 0} http-get-body
   [url {:keys [http-fn] :or {http-fn default-http-get}}]
   (:body (http-fn url)))
 
-(defn http-get-json
+(defn ^{:stratum 0} http-get-json
   [url {:keys [http-fn] :or {http-fn default-http-get}}]
   (try
     (let [resp (http-fn url)]
@@ -131,7 +106,7 @@
                                  {:url url}
                                  e))))
 
-(defn http-post-json
+(defn ^{:stratum 0} http-post-json
   [url body-map {:keys [http-fn] :or {http-fn default-http-post}}]
   (try
     (let [resp (http-fn url
@@ -148,6 +123,35 @@
                                  (str "POST " url " failed")
                                  {:url url}
                                  e))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} binary-path
+  [{:keys [root binary]}]
+  (under-root root binary))
+
+(defn ^{:stratum 1} manifest-path
+  [{:keys [root manifest]}]
+  (under-root root manifest))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Process lifecycle.
+(defn ^{:stratum 2} build!
+  [cfg {:keys [run-fn quiet?] :or {run-fn proc/run!}}]
+  (apply run-fn (build-cargo-cmd (manifest-path cfg) quiet?))
+  (binary-path cfg))
+
+(defn ^{:stratum 2} start!
+  [cfg {:keys [env state-dir state-dir-env log-path bg-fn]
+        :or   {bg-fn proc/run-bg!}}]
+  (let [env* (cond-> (or env {})
+               (and state-dir state-dir-env) (assoc state-dir-env state-dir))
+        opts (cond-> {}
+               (seq env*) (assoc :extra-env env*)
+               log-path   (assoc :out (java.io.File. ^String log-path)
+                                 :err (java.io.File. ^String log-path)))]
+    (bg-fn opts (binary-path cfg))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
