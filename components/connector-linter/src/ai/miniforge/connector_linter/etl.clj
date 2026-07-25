@@ -47,7 +47,7 @@
     (get severity-map key
          (get severity-map raw-value :low))))
 
-;; Format-specific record extraction
+;; JSON parsing
 (defn- ^{:stratum 0} parse-json-safe
   "Parse JSON string, returning nil on failure."
   [s]
