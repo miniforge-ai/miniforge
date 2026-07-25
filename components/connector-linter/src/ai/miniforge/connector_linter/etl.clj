@@ -8,9 +8,10 @@
    violation shape using declarative mapping specs loaded from EDN.
    No parser code per linter — all extraction is driven by data.
 
-   Layer 0: Field extraction and severity mapping
-   Layer 1: Format-specific record extraction
-   Layer 2: Apply mapping spec to produce violations"
+   Layer 0: Field extraction, severity mapping, and parsing utilities
+   Layer 1: Record-to-violation transformation and mapping registry
+   Layer 2: Format-specific record extraction dispatch
+   Layer 3: Apply mapping spec to produce violations"
   (:require
    [ai.miniforge.compliance-scanner.interface :as factory]
    [cheshire.core :as json]
