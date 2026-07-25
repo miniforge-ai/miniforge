@@ -65,11 +65,20 @@
 (defn- ^{:stratum 0} phase-keyword
   "Coerce a details value to a phase keyword, or nil when it carries no
    usable phase. Blank strings are nil rather than `:` — an empty
-   request must fail as a missing phase, not resolve to a phantom one."
+   request must fail as a missing phase, not resolve to a phantom one.
+
+   The string is trimmed first: a wire detail of `\"plan \"` should
+   resolve to `:plan` and match a real phase, not become `:plan `
+   (trailing space) and get spuriously rejected as `:unknown-phase`.
+   (`keyword` does not throw on odd strings — it just interns them
+   verbatim — so trimming is about resolving to the intended phase, not
+   about avoiding an exception.)"
   [v]
   (cond
     (keyword? v) v
-    (and (string? v) (not (str/blank? v))) (keyword v)
+    (string? v) (let [trimmed (str/trim v)]
+                  (when-not (str/blank? trimmed)
+                    (keyword trimmed)))
     :else nil))
 
 ;; ── Phase history — the resume mechanism's own record of what ran ──────────
