@@ -11,7 +11,7 @@ order only.
 
 ## Motivation
 
-`work/stratum-lint-baseline-2026-07-24.md` (Wave 0) found rule 210's
+`work/stratum-lint-baseline-2026-07-24.md`'s diagnosis found rule 210's
 stratified-design headings had been cargo-culted across most of the tree
 into decorative section banners that don't track a real dependency DAG.
 `components/pr-scoring` carried 2 reported findings, both in `core.clj` —
