@@ -83,6 +83,20 @@
       (is (= :unstable (pd/tool-determinism :tool/SomeMcpTool registry))
           "unknown tool defaults to :unstable per tool-profile API"))))
 
+;; load-profiles — fail-fast config loading
+(deftest ^{:stratum 0} load-profiles-throws-on-missing-resource-test
+  (testing "Absent classpath resource raises an ex-info, not a silent nil"
+    (with-redefs-fn {#'sut/profiles-resource-path
+                     "config/adapter_claude_code/does-not-exist.edn"}
+      (fn []
+        (let [ex (try
+                   (#'sut/load-profiles)
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (instance? clojure.lang.ExceptionInfo ex))
+          (is (= "config/adapter_claude_code/does-not-exist.edn"
+                 (:config/resource (ex-data ex)))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; Profile-data shape

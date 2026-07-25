@@ -62,7 +62,7 @@
     (when (nil? res)
       (throw (ex-info (str "Missing config resource on classpath: " profiles-resource-path)
                       {:config/resource profiles-resource-path})))
-    (-> res slurp edn/read-string (get profiles-section-key))))
+    (-> (slurp res :encoding "UTF-8") edn/read-string (get profiles-section-key))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

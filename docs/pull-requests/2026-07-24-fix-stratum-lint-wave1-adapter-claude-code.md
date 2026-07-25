@@ -134,12 +134,19 @@ verified by reading full diffs, not just `--stat`.
    `MINIFORGE_STRATUM_BUDGET_MODE=warn` for these 3 pre-existing files,
    same reason as `gate`'s and `reliability`'s Wave 1 redos.
 
-6. **`load-profiles` fail-fast**: no existing test called `load-profiles`
-   directly or asserted on its nil-return behavior, so nothing to update.
-   `clj-kondo` clean after the change. The classpath resource is present
-   in this repo, so `claude-cli-profiles` still resolves normally at
-   namespace load — the change only affects the already-broken-packaging
-   case, which previously loaded silently as `nil`.
+6. **`load-profiles` fail-fast**: added
+   `load-profiles-throws-on-missing-resource-test` (mirrors
+   `discovery/load-config`'s existing coverage), redefining
+   `profiles-resource-path` to a nonexistent path via `with-redefs-fn`
+   (needed since `load-profiles` takes no argument, unlike
+   `load-config`) and asserting the thrown `ExceptionInfo`'s
+   `:config/resource` matches. Also switched the `slurp` call to force
+   `:encoding "UTF-8"`, matching `load-config` — previously platform-
+   default-charset-dependent. `clj-kondo` clean after both changes; the
+   classpath resource is present in this repo, so `claude-cli-profiles`
+   still resolves normally at namespace load — these changes only affect
+   the already-broken-packaging case, which previously loaded silently
+   as `nil`.
 
 7. **Full test suite for the touched namespaces**:
    `ai.miniforge.adapter-claude-code.interface-test` and
