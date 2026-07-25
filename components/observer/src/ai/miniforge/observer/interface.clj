@@ -182,10 +182,11 @@
    - :recommendations - Recommendations for improvements
 
    Options:
-   - :format - Output format (:edn, :markdown, :json) - default :markdown
+   - :format - :edn or :markdown; any other value falls through to :edn.
+     Default :markdown for :summary/:recommendations, :edn for :detailed.
    - :limit - Number of workflows to analyze (default: 100 for summary, 50 for detailed)
 
-   Returns: Report string (markdown/json) or data structure (edn)
+   Returns: Report string (:markdown) or data structure (:edn)
 
    Example:
      (generate-report obs :summary {:format :markdown})

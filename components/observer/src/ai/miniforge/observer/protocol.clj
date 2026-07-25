@@ -96,7 +96,7 @@
      - :recommendations - Recommendations for improvements
 
      Options:
-     - :format - Output format (:edn, :markdown, :json)
+     - :format - :edn or :markdown; any other value falls through to :edn
      - :limit - Number of workflows to analyze
 
      Returns: Report string or data structure")
