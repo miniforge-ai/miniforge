@@ -36,7 +36,7 @@
       (f path)
       (finally (fs/delete-if-exists path)))))
 
-;; Pure reader
+;; Pure reader / map-only get (no IO)
 (deftest ^{:stratum 0} test-read-edn-returns-empty-for-missing-file
   (testing "given a non-existent path → `{}`"
     (is (= {} (sut/read-edn "/nonexistent/bb-tasks.edn")))))
