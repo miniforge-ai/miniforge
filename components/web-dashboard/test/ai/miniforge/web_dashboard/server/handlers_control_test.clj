@@ -44,6 +44,19 @@
     (testing "the legacy `stop` command name is gone with the .edn poller"
       (is (not (contains? sut/control-intervention-by-command "stop"))))))
 
+(deftest ^{:stratum 0} structured-action-ignores-a-body-supplied-requester
+  (testing "build-control-action derives the requester server-side"
+    (let [action (sut/build-control-action
+                  {:action/type "cancel"
+                   :action/requester {:principal "ceo@example.com" :role :admin}}
+                  "wf-1")
+          requester (:action/requester action)]
+      ;; whatever the body claimed, the recorded/authorized requester is
+      ;; the surface's, so it cannot spoof the audit event or self-grant
+      ;; a role to authorize-action.
+      (is (not= "ceo@example.com" (:principal requester)))
+      (is (= "dashboard" (:principal requester))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} each-command-writes-its-intervention

@@ -268,12 +268,6 @@
    "resume" :resume
    "cancel" :cancel})
 
-(defn ^{:stratum 0} handle-api-workflow-commands-poll
-  "API: Poll and dequeue pending commands for a workflow."
-  [state workflow-id]
-  (let [commands (state/dequeue-commands! state workflow-id)]
-    (responses/json-response {:commands commands})))
-
 ;; Evidence/Artifact API handlers (N5)
 (defn- ^{:stratum 0} artifact-id-value
   "Normalize URI artifact ids for artifact stores that key by UUID."
@@ -378,12 +372,20 @@
 
 ;; Structured control action handler (N8)
 (defn ^{:stratum 1} build-control-action
-  "Build a control action map from parsed request data."
+  "Build a control action map from parsed request data.
+
+   The requester is derived SERVER-SIDE and the body's
+   `:action/requester` is ignored — same rule, and same reason, as
+   `command-requester` (miniforge#1460). Trusting it here would let a
+   caller both spoof the `:control-action/*` audit identity AND name the
+   role that `authorize-action` checks, so an unauthenticated request
+   could self-authorize. Until an authenticated session identity is
+   threaded through, the surface is the only honest requester."
   [data workflow-id]
   (event-stream/create-control-action
    (keyword (:action/type data))
    {:target-type :workflow :target-id workflow-id}
-   (or (:action/requester data) default-dashboard-requester)
+   default-dashboard-requester
    {:justification (:action/justification data)
     :parameters (:action/parameters data)}))
 
@@ -721,15 +723,11 @@
                                                  (command-requester))]
       (if (anomaly/anomaly? result)
         (anomaly-http-response result)
-        (do
-          ;; Console-local mirror of what the operator asked for; the
-          ;; authoritative record is the intervention lifecycle.
-          (state/enqueue-command! state workflow-id command)
-          (responses/json-response
-           {:status "requested"
-            :command command
-            :workflow-id workflow-id
-            :intervention-id (str (:intervention/id result))}))))
+        (responses/json-response
+         {:status "requested"
+          :command command
+          :workflow-id workflow-id
+          :intervention-id (str (:intervention/id result))})))
     (catch Exception e
       (anomaly-http-response
        (make-anomaly :anomalies/incorrect
@@ -753,7 +751,6 @@
                 (command-requester))]
     (when (anomaly/anomaly? result)
       (throw (ex-info (:anomaly/message result) (:anomaly/data result))))
-    (state/enqueue-command! state workflow-id cmd)
     {:command cmd
      :workflow-id workflow-id
      :intervention-id (str (:intervention/id result))}))
