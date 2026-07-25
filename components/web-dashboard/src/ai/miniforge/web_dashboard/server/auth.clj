@@ -176,6 +176,23 @@
       (.startsWith uri "/js/")
       (.startsWith uri "/img/")))
 
+(def ^:private mutating-methods
+  "HTTP methods that change server state. The dashboard's every write
+   route answers one of these; read-only views use GET/HEAD."
+  #{:post :put :patch :delete})
+
+(defn mutating-request?
+  "True for state-changing requests that must carry an authenticated
+   operator session regardless of the global browse-auth toggle
+   (issue #1460). A request mutates when it uses a non-idempotent HTTP
+   method and is not one of the intentionally public machine/login
+   endpoints (event ingest, agent register/heartbeat, login/logout).
+   Read-only GET/HEAD views are never mutating, so browsing a no-auth
+   dashboard stays open; only the controls need identity."
+  [{:keys [request-method] :as req}]
+  (and (contains? mutating-methods request-method)
+       (not (public-request? req))))
+
 (defn current-session
   "Return the current valid session map from the request cookie."
   [auth-state req]
@@ -273,3 +290,23 @@
                  "HX-Redirect" (str "/login?return-to="
                                     (java.net.URLEncoder/encode return-to "UTF-8"))}
        :body (json/generate-string {:error "authentication-required"})})))
+
+(defn control-unauthorized-response
+  "Auth challenge for a state-mutating request that arrived without a
+   session (issue #1460). When browse-auth is enabled this is the same
+   challenge browsing gets — a redirect / HX-Redirect to the login page,
+   so an operator can sign in. When browse-auth is disabled there is no
+   login page to send anyone to, so return a plain JSON 401 that names
+   the remedy: configure operator credentials. Read-only views stay
+   open in both modes; only mutations reach here."
+  [auth-state req]
+  (if (enabled? auth-state)
+    (unauthorized-response auth-state req)
+    {:status 401
+     :headers {"Content-Type" "application/json"}
+     :body (json/generate-string
+            {:error "authentication-required"
+             :message (str "Control actions require an authenticated operator "
+                           "session. Set MINIFORGE_WEB_USERNAME and "
+                           "MINIFORGE_WEB_PASSWORD (or configure a :users list) "
+                           "to enable operator login.")})}))
