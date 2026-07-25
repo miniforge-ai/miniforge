@@ -68,6 +68,26 @@ separately from the stratum-lint mechanics above:
   canonical form, `;------------------------------------------------------------------------------ Layer N`,
   same as every other Wave 1 PR's real output). Fixed the wording here.
 
+A second review comment reported a real bug in `core.clj`'s
+`analyze-trends`, surfaced (not introduced) by the mechanical relocation
+this PR performs on that function. `first-durations`/`second-durations`/
+`first-costs`/`second-costs` were built with plain `map` over
+`get-in` on `[:metrics :duration-ms]`/`[:metrics :cost-usd]`; any entry
+whose `:metrics`
+map is missing that key (e.g. an `:initial-state` workflow with no
+recorded duration/cost yet) produces a `nil` in the sequence. The `(seq
+...)` guard only checks non-emptiness, not absence of nils, so a single
+such entry reaches `(reduce + ...)` and throws. Fixed by wrapping each of
+the four `map` calls in `remove nil?` before the guard, so an
+all-or-partially-nil sequence collapses to empty and correctly falls
+through to the existing "insufficient data" branch instead of crashing.
+Added `analyze-trends-missing-metric-fields-test`, which collects four
+workflows with an empty `:metrics` map (no `:duration-ms`/`:cost-usd`)
+and asserts `analyze-metrics :trends` returns nil trend data and the
+"Insufficient data" summary rather than throwing. Verified the test
+actually catches the bug: reverted the `core.clj` fix, reran, got 1
+error (the reproduced crash); restored the fix, reran, 0 errors.
+
 ## Testing Plan
 
 1. Ran `--fix` a second time over the already-fixed tree — zero diff,
@@ -84,12 +104,18 @@ separately from the stratum-lint mechanics above:
    `core.clj`, 5 real layers each) — expected Wave 2 work per above, not
    a defect in this PR.
 5. Ran the component's test suite directly (`clojure -A:test`,
-   requiring and running all 3 observer test namespaces): 23 tests, 104
+   requiring and running all 3 observer test namespaces): 24 tests, 108
    assertions, 0 failures, 0 errors (post review-follow-up removal of
-   the one no-op test). Also ran the relocated integration test
-   (`projects/miniforge`, `observer.interface-integration-test`)
-   directly to confirm the real WorkflowObserver protocol coverage is
-   intact: 1 test, 7 assertions, 0 failures, 0 errors.
+   the one no-op test, plus the new `analyze-trends` nil-safety test).
+   Also ran the relocated integration test (`projects/miniforge`,
+   `observer.interface-integration-test`) directly to confirm the real
+   WorkflowObserver protocol coverage is intact: 1 test, 7 assertions,
+   0 failures, 0 errors.
+6. Re-ran `--fix` after the `analyze-trends` fix and new test — the new
+   test relocated to its inferred stratum (a leaf, no cross-refs), no
+   other file changed; a second `--fix` run after that was zero diff.
+   `clj-kondo` and the plain lint re-run both unchanged (0/0; same 2
+   pre-existing `SL003` findings).
 
 ## Deployment Plan
 
@@ -115,7 +141,7 @@ metadata) with no behavior change and no callers outside
 - [x] Checked for the known same-line trailing-comment mis-attachment
       failure mode; none present, no hand-fix required
 - [x] `clj-kondo`: 0 errors, 0 warnings
-- [x] Component test suite green: 23/23, 104 assertions, 0 failures,
+- [x] Component test suite green: 24/24, 108 assertions, 0 failures,
       0 errors; relocated integration test also verified (1/1, 7
       assertions)
 - [x] Post-fix plain lint: `interface.clj` clean; `SL003` remainder on
@@ -124,3 +150,6 @@ metadata) with no behavior change and no callers outside
 - [x] Review follow-up: stale header + no-op test removed from
       `interface_test.clj` after confirming via git history that no
       coverage was lost; doc wording for the heading syntax corrected
+- [x] Review follow-up: `analyze-trends` nil-safety bug fixed (filter
+      nils before `reduce +`); new regression test verified to actually
+      catch the bug (fails without the fix, passes with it)

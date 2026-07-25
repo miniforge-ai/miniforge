@@ -102,12 +102,17 @@
         first-half (take (quot n 2) sorted-metrics)
         second-half (drop (quot n 2) sorted-metrics)
 
-        ;; Calculate stats for each half
-        first-durations (map #(get-in % [:metrics :duration-ms]) first-half)
-        second-durations (map #(get-in % [:metrics :duration-ms]) second-half)
+        ;; Calculate stats for each half. Filter nils: an entry whose
+        ;; :metrics map is missing :duration-ms/:cost-usd (e.g. an
+        ;; :initial-state workflow with no recorded metrics yet) would
+        ;; otherwise leave a nil in the sequence -- (seq ...) below only
+        ;; checks non-emptiness, not absence of nils, so an unfiltered
+        ;; nil reaches (reduce + ...) and throws.
+        first-durations (remove nil? (map #(get-in % [:metrics :duration-ms]) first-half))
+        second-durations (remove nil? (map #(get-in % [:metrics :duration-ms]) second-half))
 
-        first-costs (map #(get-in % [:metrics :cost-usd]) first-half)
-        second-costs (map #(get-in % [:metrics :cost-usd]) second-half)
+        first-costs (remove nil? (map #(get-in % [:metrics :cost-usd]) first-half))
+        second-costs (remove nil? (map #(get-in % [:metrics :cost-usd]) second-half))
 
         duration-trend (when (and (seq first-durations) (seq second-durations))
                         {:first-avg (double (/ (reduce + first-durations) (count first-durations)))

@@ -69,6 +69,28 @@
     (let [obs (observer/create-observer {:initial-state {:custom-key :custom-value}})]
       (is (some? obs) "Observer with initial state should be created"))))
 
+(deftest ^{:stratum 0} analyze-trends-missing-metric-fields-test
+  (testing "Analyzing trends when entries lack duration/cost fields does not throw"
+    (let [obs (observer/create-observer)]
+      ;; An :initial-state (or otherwise in-flight) workflow can have an
+      ;; empty :metrics map -- no :duration-ms, no :cost-usd. Trend
+      ;; analysis must treat these as unusable data, not crash trying to
+      ;; sum a sequence containing nils.
+      (dotimes [_ 4]
+        (observer/collect-workflow-metrics
+         obs (random-uuid)
+         {:workflow/id (random-uuid)
+          :workflow/status :initial-state
+          :workflow/metrics {}
+          :workflow/history []
+          :workflow/errors []}))
+
+      (let [analysis (observer/analyze-metrics obs :trends {})]
+        (is (= :trends (:analysis-type analysis)) "Analysis type should match")
+        (is (nil? (get-in analysis [:data :duration-trend])) "No usable duration data")
+        (is (nil? (get-in analysis [:data :cost-trend])) "No usable cost data")
+        (is (= "Insufficient data for trend analysis" (:summary analysis)))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
