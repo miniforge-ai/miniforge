@@ -551,6 +551,28 @@
                  (:policy-eval/id (first evals)))
               "the verified outcome names the record that was written"))))))
 
+(deftest re-evaluate-with-an-invalid-verdict-fails-and-publishes-nothing
+  (testing "a nil / non-map / verdict-less evaluator result is not a verdict"
+    (doseq [bad [nil
+                 "not-a-map"
+                 {}                                  ; missing :evaluation/passed?
+                 {:evaluation/passed? "true"}        ; non-boolean verdict
+                 {:evaluation/violations []}]]       ; violations but no verdict
+      (with-policy-evaluator
+        (fn [_request] bad)
+        (fn []
+          (let [stream (memory-stream)
+                result (application/apply-intervention!
+                        stream (approved :re-evaluate golden-pr-target-id))]
+            (is (= :failed (:intervention/state result))
+                (str "invalid evaluator result must fail the intervention: "
+                     (pr-str bad)))
+            (is (= :invalid-policy-evaluation (failure-code result)))
+            (is (empty? (events-of-type stream :gate/failed))
+                "no bogus :gate/failed record is minted")
+            (is (empty? (policy-evals stream))
+                "no PolicyEvaluation is materialized from a non-verdict")))))))
+
 (deftest re-evaluation-adds-a-record-rather-than-mutating-one
   (testing "N5-delta-1 §12.2: completed evaluations are immutable"
     (with-policy-evaluator

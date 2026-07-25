@@ -71,6 +71,9 @@
   :application/no-policy-evaluator
   "No process policy evaluator is available"
 
+  :application/invalid-policy-evaluation
+  "Policy evaluator returned no usable verdict"
+
   :application/no-resume-context
   "The target workflow has no reconstructable resume context"
 

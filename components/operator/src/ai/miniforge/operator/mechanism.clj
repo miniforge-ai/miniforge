@@ -105,11 +105,19 @@
 ;; Resume plan
 
 (defn resume-plan
-  "The launcher payload for a retry.
+  "The launcher payload for a retry: the resume inputs a run needs, under
+   stable `:resume/*` keys.
 
-   Deliberately shaped around the same *semantic inputs* a resume run needs
-   (phase results, workspace checkpoint, optional FSM snapshot, DAG state),
-   so a launcher can be a thin adapter rather than a large translation layer.
+   It carries the same *semantic inputs* a resume run needs — phase
+   results, workspace checkpoint, optional FSM snapshot, DAG state — but
+   NOT under the option keys the resume path ultimately threads into
+   `run-pipeline`. Those are non-namespaced
+   (`:resume-machine-snapshot`, `:resume-phase-results`,
+   `:resume-workspace`, `:pre-completed-dag-tasks`, … — see
+   `cli/main/commands/resume.clj`). The registered launcher maps this
+   namespaced payload onto them: a thin adapter, one job. Keeping the
+   contract a stable `:resume/*` shape is what lets the CLI's internal
+   option names change without touching this layer.
 
    `from-phase` nil (plain `:retry`) keeps the FSM machine snapshot: the
    mapping table's \"resume path with FSM snapshot dispatch\". A
@@ -248,8 +256,22 @@
                :gate/packs (pack-ids (:evaluation/packs-applied evaluation))
                :gate/violations (vec (:evaluation/violations evaluation))))))
 
+(defn valid-evaluation?
+  "A usable evaluator result: a map carrying a boolean
+   `:evaluation/passed?`. Anything else — nil, a non-map, or a map
+   whose verdict is missing or non-boolean — is NOT an evaluation and
+   must never be published as one. Without this check a nil/garbage
+   result coerces to `passed? false` and mints a bogus `:gate/failed`
+   PolicyEvaluation, breaking the \"never publishes a verdict it did
+   not receive\" guarantee."
+  [evaluation]
+  (and (map? evaluation)
+       (boolean? (:evaluation/passed? evaluation))))
+
 (defn record-policy-evaluation!
   "Publish the evaluator's verdict and read the entity table back.
+   Caller MUST gate on [[valid-evaluation?]] first — this fn assumes a
+   well-formed evaluation and does not re-check.
 
    Returns the readback the verification step asserts:
    `{:verb :re-evaluate :policy-eval/id <id> :observed <bool>

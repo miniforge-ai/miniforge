@@ -99,6 +99,7 @@
    :control-state-readback-mismatch :application/control-state-readback-mismatch
    :missing-phase :application/missing-phase
    :no-degradation-manager :application/no-degradation-manager
+   :invalid-policy-evaluation :application/invalid-policy-evaluation
    :no-live-runner :application/no-live-runner
    :no-policy-evaluator :application/no-policy-evaluator
    :no-resume-context :application/no-resume-context
@@ -372,12 +373,17 @@
   [stream dispatched evaluate interv]
   (if-not evaluate
     (fail! stream dispatched :no-policy-evaluator)
-    (let [evaluation (evaluate (mechanism/evaluation-request interv))
-          readback (mechanism/record-policy-evaluation! stream interv evaluation)]
-      (when-let [applied (advance! stream dispatched
-                                   intervention/apply-result readback)]
-        (verify-readback! stream applied readback
-                          :policy-evaluation-readback-mismatch)))))
+    (let [evaluation (evaluate (mechanism/evaluation-request interv))]
+      ;; Validate BEFORE publishing: a nil/garbage result would otherwise
+      ;; coerce to `passed? false`, mint a bogus :gate/failed record, and
+      ;; verify — a verdict we never received. Fail typed, publish nothing.
+      (if-not (mechanism/valid-evaluation? evaluation)
+        (fail! stream dispatched :invalid-policy-evaluation)
+        (let [readback (mechanism/record-policy-evaluation! stream interv evaluation)]
+          (when-let [applied (advance! stream dispatched
+                                       intervention/apply-result readback)]
+            (verify-readback! stream applied readback
+                              :policy-evaluation-readback-mismatch)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 ;; The applier hook
