@@ -64,17 +64,33 @@
   [request]
   (remove #(some? (get request %)) required-request-keys))
 
+(defn- target-uuid
+  "The target id as a UUID, or nil when it is not one. `parse-uuid`
+   returns nil (never throws) for a malformed string on our Clojure, so
+   this stays total."
+  [target-id]
+  (if (uuid? target-id)
+    target-id
+    (some-> target-id str parse-uuid)))
+
+(defn- invalid-workflow-target?
+  "True when a `:workflow`-targeted request carries a target id that is
+   not a UUID. Such a request cannot route to a run's audit trail, so it
+   is rejected as `:invalid-input` rather than written with no
+   `:workflow/id` (a silent soft-failure) — honouring the fn contract."
+  [request]
+  (and (= :workflow (:intervention/target-type request))
+       (nil? (target-uuid (:intervention/target-id request)))))
+
 (defn- request-workflow-id
   "The `:workflow/id` the envelope routes on: present only for
    workflow-targeted interventions whose target id is a UUID. Mirrors
    the consumer's `intervention-workflow-id` so the request and its
-   lifecycle events land in the same run's audit trail."
+   lifecycle events land in the same run's audit trail. Assumes the
+   target has already passed [[invalid-workflow-target?]]."
   [request]
   (when (= :workflow (:intervention/target-type request))
-    (let [target-id (:intervention/target-id request)]
-      (if (uuid? target-id)
-        target-id
-        (some-> target-id str parse-uuid)))))
+    (target-uuid (:intervention/target-id request))))
 
 (defn- proposed-intervention
   "The InterventionRequest body of the wire event. `:proposed` state and
@@ -114,12 +130,23 @@
 
    Pure apart from the id/timestamp stamps: no IO."
   [request]
-  (if-let [missing (seq (missing-request-keys request))]
+  (cond
+    (seq (missing-request-keys request))
+    (let [missing (vec (missing-request-keys request))]
+      (anomaly/anomaly :invalid-input
+                       (messages/t :operator-request/missing-fields
+                                   {:fields (pr-str missing)})
+                       {:intervention/type (:intervention/type request)
+                        :missing-fields missing}))
+
+    (invalid-workflow-target? request)
     (anomaly/anomaly :invalid-input
-                     (messages/t :operator-request/missing-fields
-                                 {:fields (pr-str (vec missing))})
+                     (messages/t :operator-request/invalid-workflow-target
+                                 {:target-id (pr-str (:intervention/target-id request))})
                      {:intervention/type (:intervention/type request)
-                      :missing-fields (vec missing)})
+                      :intervention/target-id (:intervention/target-id request)})
+
+    :else
     (let [intervention (proposed-intervention request)]
       (core/intervention-requested (core/create-event-stream {:sinks []})
                                    (request-workflow-id request)

@@ -103,6 +103,32 @@
              (set (get-in result [:anomaly/data :missing-fields]))))
       (is (empty? (operator-files events-dir))))))
 
+(deftest ^{:stratum 1} a-non-uuid-workflow-target-is-an-anomaly-not-a-write
+  (testing "a workflow-targeted request whose id is not a UUID is rejected"
+    (let [events-dir (temp-events-dir)
+          result (sut/request-intervention!
+                  {:intervention/type :pause
+                   :intervention/target-type :workflow
+                   :intervention/target-id "not-a-uuid"
+                   :intervention/requested-by "operator@example.invalid"
+                   :intervention/request-source :dashboard
+                   :events-dir events-dir})]
+      (is (anomaly/anomaly? result)
+          "must be a structured anomaly, not a throw or a workflow-id-less write")
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (empty? (operator-files events-dir))
+          "nothing is written for an unroutable workflow intervention")))
+  (testing "a non-workflow target (e.g. degradation) needs no UUID"
+    (let [events-dir (temp-events-dir)
+          event (sut/intervention-request-event
+                 {:intervention/type :force-safe-mode
+                  :intervention/target-type :degradation
+                  :intervention/target-id "process"
+                  :intervention/requested-by "operator@example.invalid"
+                  :intervention/request-source :dashboard})]
+      (is (not (anomaly/anomaly? event)))
+      (is (nil? (:workflow/id event))))))
+
 ;; Publication
 (deftest ^{:stratum 1} request-lands-one-readable-file-in-the-operator-dir
   (testing "the written file parses back through the event reader"
