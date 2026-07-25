@@ -102,6 +102,31 @@ number. Added `pct-change` (Layer 0, alongside `calculate-percentile`):
 returns `0.0` when `before` is zero rather than dividing by it. Both
 `analyze-trends` call sites now go through it.
 
+A fourth found a third bug, same family, different function:
+`generate-detailed-report`'s `:markdown` branch formats each workflow's
+duration/cost with `%.0f`/`%.4f` straight from `get-in`, with no guard
+for a missing `:metrics` entry. Confirmed empirically this doesn't throw
+(Java's `Formatter` renders a `nil` `%f` argument as the literal string
+`"null"`, truncated to the conversion's precision — `%.0f` silently
+prints nothing, `%.4f` prints `"null"` in full) — but it does produce
+garbage report content for exactly the `:initial-state`/partial-metrics
+case this PR's own new tests exercise. Fixed by defaulting a missing
+duration/cost to `0` before formatting. Added
+`generate-detailed-report-markdown-missing-metrics-test`, verified to
+actually catch the bug the same way as the earlier one (fails without
+the fix — `str/includes? report "null"` is true — passes with it).
+Also caught the `generate-detailed-report-test` gap this exposed: the
+existing test only ever exercised `:format :edn`, never `:markdown`.
+
+Two review docstring/protocol corrections from a later pass, unrelated
+to the bugs above: `generate-report`'s docstring (in both `interface.clj`
+and `protocol.clj`) claimed `:format` accepts `:json` and described the
+return as "markdown/json" — but every `case` dispatch in `core.clj`
+handles only `:edn`/`:markdown`, with any other value (including
+`:json`) falling through to the same branch as `:edn`. Also corrected
+the claimed default: `:detailed` defaults to `:edn`, not `:markdown`
+like `:summary`/`:recommendations`.
+
 ## Testing Plan
 
 1. Ran `--fix` a second time over the already-fixed tree — zero diff,
@@ -121,9 +146,10 @@ returns `0.0` when `before` is zero rather than dividing by it. Both
    `core.clj`, 5 real layers each) — expected Wave 2 work per above, not
    a defect in this PR.
 5. Ran the component's test suite directly (`clojure -A:test`,
-   requiring and running all 3 observer test namespaces): 24 tests, 108
+   requiring and running all 3 observer test namespaces): 25 tests, 110
    assertions, 0 failures, 0 errors (post review-follow-up removal of
-   the one no-op test, plus the new `analyze-trends` nil-safety test).
+   the one no-op test, plus the two new regression tests for the
+   nil-safety and zero-baseline-division bugs above).
    Also ran the relocated integration test (`projects/miniforge`,
    `observer.interface-integration-test`) directly to confirm the real
    WorkflowObserver protocol coverage is intact: 1 test, 7 assertions,
@@ -162,11 +188,11 @@ nothing to roll out or monitor beyond normal merge-to-main.
 - [x] Idempotency verified: second `--fix` run produced zero diff
 - [x] Full diff read for all 8 changed files; the initial mechanical
       commit is headings + `^{:stratum n}` metadata + reordering only —
-      later review-follow-up commits add the two real bug fixes below
+      later review-follow-up commits add the three real bug fixes below
 - [x] Checked for the known same-line trailing-comment mis-attachment
       failure mode; none present, no hand-fix required
 - [x] `clj-kondo`: 0 errors, 0 warnings
-- [x] Component test suite green: 24/24, 108 assertions, 0 failures,
+- [x] Component test suite green: 25/25, 110 assertions, 0 failures,
       0 errors; relocated integration test also verified (1/1, 7
       assertions)
 - [x] Post-fix plain lint: `interface.clj` clean; `SL003` remainder on
@@ -183,3 +209,9 @@ nothing to roll out or monitor beyond normal merge-to-main.
       to reuse one
 - [x] Review follow-up: `analyze-trends` zero-baseline division bug
       fixed (`pct-change` helper, returns 0.0 instead of Infinity/NaN)
+- [x] Review follow-up: `generate-detailed-report`'s markdown branch no
+      longer prints the literal string "null" for missing duration/cost;
+      new regression test verified to actually catch the bug
+- [x] Review follow-up: `generate-report`'s `:format` docstring in both
+      `interface.clj` and `protocol.clj` corrected (no `:json` support,
+      `:detailed` defaults to `:edn` not `:markdown`)

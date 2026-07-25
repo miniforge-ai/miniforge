@@ -18,6 +18,7 @@
 (ns ai.miniforge.observer.interface-test
   "Tests for the Observer component."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.observer.interface :as observer]
    [ai.miniforge.workflow.interface.protocols.workflow-observer :as wf-proto]))
@@ -91,6 +92,23 @@
         (is (nil? (get-in analysis [:data :duration-trend])) "No usable duration data")
         (is (nil? (get-in analysis [:data :cost-trend])) "No usable cost data")
         (is (= "Insufficient data for trend analysis" (:summary analysis)))))))
+
+(deftest ^{:stratum 0} generate-detailed-report-markdown-missing-metrics-test
+  (testing "Markdown detailed report on a workflow missing duration/cost does not print \"null\""
+    (let [obs (observer/create-observer)
+          workflow-id (random-uuid)]
+      (observer/collect-workflow-metrics
+       obs workflow-id
+       {:workflow/id workflow-id
+        :workflow/status :initial-state
+        :workflow/metrics {}
+        :workflow/history []
+        :workflow/errors []})
+
+      (let [report (observer/generate-report obs :detailed {:format :markdown})]
+        (is (string? report) "Report should be a string")
+        (is (not (str/includes? report "null"))
+            "Missing metrics should render as 0, not the literal string \"null\"")))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

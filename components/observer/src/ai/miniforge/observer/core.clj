@@ -122,8 +122,8 @@
                      (str/join "\n" (map #(format "- %s: %s (%.0fms, $%.4f)"
                                                    (:workflow-id %)
                                                    (:status %)
-                                                   (get-in % [:metrics :duration-ms])
-                                                   (get-in % [:metrics :cost-usd]))
+                                                   (double (or (get-in % [:metrics :duration-ms]) 0))
+                                                   (double (or (get-in % [:metrics :cost-usd]) 0)))
                                          (take 10 all-metrics))))
       report-data)))
 
