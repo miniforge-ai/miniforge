@@ -33,7 +33,7 @@
 
    Returns:
      {:ok? true  :data [node-ids in topological order]}
-     {:ok? false :error {:code :cycle-detected :cycle-nodes #{...}}}"
+     {:ok? false :error {:code :cycle-detected :message \"...\" :data {:cycle-nodes #{...}}}}"
   ([dep-map]
    (kahn/topological-sort dep-map))
   ([dep-map ordered-nodes]
