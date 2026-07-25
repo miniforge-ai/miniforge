@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.operator-requests-test
   "Writer side of the operator control channel (Phase D D-4).
 
@@ -36,33 +35,23 @@
    [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(def ^:const max-workspace-walk-hops
+;; Helpers
+(def ^{:stratum 0} ^:const max-workspace-walk-hops
   "Upper bound on parent-directory hops when locating workspace.edn."
   8)
 
-(defn- find-workspace-root
-  []
-  (loop [dir (io/file (System/getProperty "user.dir")) hops 0]
-    (cond
-      (.exists (io/file dir "workspace.edn")) dir
-      (or (nil? (.getParentFile dir)) (>= hops max-workspace-walk-hops))
-      (throw (ex-info "workspace.edn not found walking up from user.dir"
-                      {:user-dir (System/getProperty "user.dir")}))
-      :else (recur (.getParentFile dir) (inc hops)))))
-
-(defn- temp-events-dir
+(defn- ^{:stratum 0} temp-events-dir
   ^java.io.File []
   (.toFile (Files/createTempDirectory "operator-requests-test"
                                       (make-array FileAttribute 0))))
 
-(defn- operator-files
+(defn- ^{:stratum 0} operator-files
   [events-dir]
   (let [d (io/file events-dir "operator")]
     (vec (or (.listFiles d) []))))
 
-(defn- pause-request
+(defn- ^{:stratum 0} pause-request
   [events-dir target-id]
   {:intervention/type :pause
    :intervention/target-type :workflow
@@ -72,25 +61,18 @@
    :events-dir events-dir})
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Wire shape
 
-(deftest request-carries-the-golden-fixture-field-set
-  (testing "the Clojure writer emits the same fields as the Rust client"
-    (let [golden (reader/read-event-file
-                  (io/file (find-workspace-root)
-                           "contracts" "operator-events" "golden"
-                           "pause.transit.json"))
-          written (sut/intervention-request-event
-                   (dissoc (pause-request nil (random-uuid)) :events-dir))]
-      (is (= :supervisory/intervention-requested (:event/type written)))
-      ;; `:intervention/approval-required?` is optional on the schema and
-      ;; server-derived by the consumer, so the writer omits it; every
-      ;; other field the contract fixture carries must be present.
-      (is (empty? (remove #(contains? written %)
-                          (disj (set (keys golden))
-                                :intervention/approval-required?)))))))
+(defn- ^{:stratum 1} find-workspace-root
+  []
+  (loop [dir (io/file (System/getProperty "user.dir")) hops 0]
+    (cond
+      (.exists (io/file dir "workspace.edn")) dir
+      (or (nil? (.getParentFile dir)) (>= hops max-workspace-walk-hops))
+      (throw (ex-info "workspace.edn not found walking up from user.dir"
+                      {:user-dir (System/getProperty "user.dir")}))
+      :else (recur (.getParentFile dir) (inc hops)))))
 
-(deftest workflow-targets-route-on-workflow-id
+(deftest ^{:stratum 1} workflow-targets-route-on-workflow-id
   (testing "a workflow-targeted request stamps :workflow/id from the target"
     (let [wid (random-uuid)
           event (sut/intervention-request-event
@@ -106,7 +88,7 @@
                   :intervention/request-source :dashboard})]
       (is (nil? (:workflow/id event))))))
 
-(deftest missing-fields-are-an-anomaly-not-a-write
+(deftest ^{:stratum 1} missing-fields-are-an-anomaly-not-a-write
   (testing "an incomplete request is rejected at the call site"
     (let [events-dir (temp-events-dir)
           result (sut/request-intervention!
@@ -121,10 +103,8 @@
              (set (get-in result [:anomaly/data :missing-fields]))))
       (is (empty? (operator-files events-dir))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Publication
-
-(deftest request-lands-one-readable-file-in-the-operator-dir
+(deftest ^{:stratum 1} request-lands-one-readable-file-in-the-operator-dir
   (testing "the written file parses back through the event reader"
     (let [events-dir (temp-events-dir)
           wid (random-uuid)
@@ -139,7 +119,7 @@
         (is (= (str wid) (:intervention/target-id parsed)))
         (is (= :tui (:intervention/request-source parsed)))))))
 
-(deftest each-request-gets-its-own-intervention-id
+(deftest ^{:stratum 1} each-request-gets-its-own-intervention-id
   (testing "two gestures are two auditable interventions, not one"
     (let [events-dir (temp-events-dir)
           wid (random-uuid)
@@ -147,3 +127,25 @@
           b (sut/request-intervention! (pause-request events-dir wid))]
       (is (not= (:intervention/id a) (:intervention/id b)))
       (is (= 2 (count (operator-files events-dir)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Wire shape
+(deftest ^{:stratum 2} request-carries-the-golden-fixture-field-set
+  (testing "the Clojure writer emits the same fields as the Rust client"
+    (let [golden (reader/read-event-file
+                  (io/file (find-workspace-root)
+                           "contracts" "operator-events" "golden"
+                           "pause.transit.json"))
+          written (sut/intervention-request-event
+                   (dissoc (pause-request nil (random-uuid)) :events-dir))]
+      (is (= :supervisory/intervention-requested (:event/type written)))
+      ;; Full set equality, not a subset check: the writer must carry
+      ;; EXACTLY the fixture's fields — no missing key, and no extra key
+      ;; that would let the two producers drift silently.
+      ;; `:intervention/approval-required?` is the one sanctioned
+      ;; difference: optional on the schema and server-derived by the
+      ;; consumer, so the writer omits it.
+      (is (= (disj (set (keys golden)) :intervention/approval-required?)
+             (set (keys written)))
+          "writer field set must equal the golden fixture's (approval flag aside)"))))
