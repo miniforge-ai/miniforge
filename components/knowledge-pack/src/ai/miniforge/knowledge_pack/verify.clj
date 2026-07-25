@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge-pack.verify
   "Pack manifest verification — the boundary that turns a stored
    pack back into a trusted citation.
@@ -49,9 +48,9 @@
    [ai.miniforge.knowledge-pack.pack :as pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Discrepancy factory + per-ref verification.
 
-(defn- discrepancy
+;; Discrepancy factory + per-ref verification.
+(defn- ^{:stratum 0} discrepancy
   "Pure factory: build a discrepancy map. `extras` is an optional
    map merged onto the `{:reason :detail}` base; per-ref callers
    pass `{:ref ref :stored-digest ...}` and manifest-level callers
@@ -61,7 +60,9 @@
   ([reason detail extras]
    (merge {:reason reason :detail detail} extras)))
 
-(defn- verify-ref
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} verify-ref
   "Pure: compare a single `:pack/zettels` entry against what the
    store currently holds. Returns nil on success or a structured
    discrepancy map on failure."
@@ -88,10 +89,8 @@
                    "lookup returned a zettel with a different :zettel/revision-id (lookup-fn invariant violation)"
                    {:ref ref}))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Manifest-level verification.
-
-(defn- verify-manifest-digest
+(defn- ^{:stratum 1} verify-manifest-digest
   "Pure: recompute the pack's digest from the current content
    projection, compare against the stamped digest, AND verify the
    stamped `:pack/revision-id` is the UUID derived from that
@@ -131,7 +130,9 @@
                    {:stamped-revision-id stamped-rev
                     :derived-revision-id derived-rev}))))
 
-(defn verify-pack
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} verify-pack
   "Verify a pack against a zettel store.
 
    Arguments:
