@@ -221,8 +221,9 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (decision/create-checkpoint {}))))
   (testing "decision-response throws when authority-role somehow becomes invalid.
-            (Pure-fn path doesn't normally produce this; we exercise via spec/validate
-            directly to confirm the schema contract is enforced.)"
+            (Pure-fn path doesn't normally produce this; we exercise via
+            decision/validate, which delegates to spec/validate, to confirm
+            the schema contract is enforced.)"
     (is (thrown? clojure.lang.ExceptionInfo
                  (decision/validate spec/DecisionResponse
                                     {:type :approve :authority-role :alien})))))

@@ -75,7 +75,8 @@ breaks across most of the tree rather than true strata boundaries.
   `(comment ...)` block is now genuinely the file's last form. Content of
   that block is byte-identical, only its relative position changed.
 
-No file outside `components/decision` touched.
+No component or test file outside `components/decision` touched (this
+PR doc itself is the only file outside that directory).
 
 ## Testing Plan
 
