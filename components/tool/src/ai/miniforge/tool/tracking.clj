@@ -15,39 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tool.tracking
   "Tool invocation tracking helpers.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Invocation records
 
-(defn instant-from-ms
+;; Invocation records
+(defn ^{:stratum 0} instant-from-ms
   "Create an Instant from epoch millis."
   [millis]
   (java.time.Instant/ofEpochMilli millis))
 
-(defn build-invocation
-  "Build a tool invocation record from execution inputs and result."
-  [tool-id params start-ms end-ms result]
-  (let [duration (- end-ms start-ms)]
-    (cond-> {:tool/id tool-id
-             :tool/invoked-at (instant-from-ms start-ms)
-             :tool/duration-ms (max 0 duration)
-             :tool/args (or params {})}
-      (contains? result :result)
-      (assoc :tool/result (:result result))
-
-      (contains? result :exit-code)
-      (assoc :tool/exit-code (:exit-code result))
-
-      (contains? result :error)
-      (assoc :tool/error (:error result)))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Context helpers
-
-(defn attach-invocation-tracking
+(defn ^{:stratum 0} attach-invocation-tracking
   "Attach invocation tracking to a context map.
    Adds :tool/invocations (atom) and :tool/record-invocation when missing."
   [context]
@@ -63,7 +43,7 @@
                :tool/invocations store
                :tool/record-invocation record-fn)))))
 
-(defn tool-invocations
+(defn ^{:stratum 0} tool-invocations
   "Return tool invocations from a context map."
   [context]
   (let [store (:tool/invocations context)]
@@ -72,7 +52,7 @@
       (sequential? store) (vec store)
       :else [])))
 
-(defn record-invocation
+(defn ^{:stratum 0} record-invocation
   "Record a tool invocation using context if tracking is configured."
   [context invocation]
   (let [record-fn (:tool/record-invocation context)
@@ -86,6 +66,25 @@
 
       :else nil))
   invocation)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-invocation
+  "Build a tool invocation record from execution inputs and result."
+  [tool-id params start-ms end-ms result]
+  (let [duration (- end-ms start-ms)]
+    (cond-> {:tool/id tool-id
+             :tool/invoked-at (instant-from-ms start-ms)
+             :tool/duration-ms (max 0 duration)
+             :tool/args (or params {})}
+      (contains? result :result)
+      (assoc :tool/result (:result result))
+
+      (contains? result :exit-code)
+      (assoc :tool/exit-code (:exit-code result))
+
+      (contains? result :error)
+      (assoc :tool/error (:error result)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

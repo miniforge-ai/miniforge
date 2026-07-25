@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tool.interface
   "Public API for the tool component.
    Provides tool definition, registration, and execution.
@@ -29,20 +28,18 @@
    [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Re-export protocols for extension
 
-(def Tool
+;; Re-export protocols for extension
+(def ^{:stratum 0} Tool
   "Tool protocol for implementing custom tools."
   core/Tool)
 
-(def ToolRegistry
+(def ^{:stratum 0} ToolRegistry
   "ToolRegistry protocol for implementing custom registries."
   core/ToolRegistry)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Tool creation
-
-(defn create-tool
+(defn ^{:stratum 0} create-tool
   "Create a function-based tool.
 
    Options:
@@ -66,8 +63,7 @@
   (core/create-function-tool opts))
 
 ;; Registry creation and management
-
-(defn create-registry
+(defn ^{:stratum 0} create-registry
   "Create a new tool registry.
 
    Options:
@@ -79,37 +75,35 @@
   ([] (core/create-registry))
   ([opts] (core/create-registry opts)))
 
-(defn register!
+(defn ^{:stratum 0} register!
   "Register a tool in a registry. Returns the tool ID."
   [registry tool]
   (core/register-tool registry tool))
 
-(defn unregister!
+(defn ^{:stratum 0} unregister!
   "Remove a tool from a registry. Returns the tool ID."
   [registry tool-id]
   (core/unregister-tool registry tool-id))
 
-(defn get-tool
+(defn ^{:stratum 0} get-tool
   "Retrieve a tool by ID from a registry.
    Returns nil if not found."
   [registry tool-id]
   (core/get-tool registry tool-id))
 
-(defn list-tools
+(defn ^{:stratum 0} list-tools
   "List all registered tools in a registry."
   [registry]
   (core/list-tools registry))
 
-(defn find-tools
+(defn ^{:stratum 0} find-tools
   "Find tools matching a query string.
    Searches tool names and descriptions."
   [registry query]
   (core/find-tools registry query))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Tool execution
-
-(defn execute
+(defn ^{:stratum 0} execute
   "Execute a tool directly.
 
    Arguments:
@@ -123,7 +117,7 @@
   [tool params context]
   (core/execute tool params context))
 
-(defn execute-by-id
+(defn ^{:stratum 0} execute-by-id
   "Execute a tool from a registry by ID.
 
    Arguments:
@@ -139,19 +133,18 @@
   (core/execute-tool registry tool-id params context))
 
 ;; Tool introspection
-
-(defn tool-id
+(defn ^{:stratum 0} tool-id
   "Get the ID of a tool."
   [tool]
   (core/tool-id tool))
 
-(defn tool-info
+(defn ^{:stratum 0} tool-info
   "Get information about a tool.
    Returns map with :id, :name, :description, :parameters, :metadata."
   [tool]
   (core/tool-info tool))
 
-(defn validate-args
+(defn ^{:stratum 0} validate-args
   "Validate arguments against tool schema.
    Returns {:valid? boolean :errors [...]}
    
@@ -160,7 +153,7 @@
   [tool args]
   (core/validate-args tool args))
 
-(defn get-schema
+(defn ^{:stratum 0} get-schema
   "Get the parameter schema for a tool.
    Returns the tool's parameter specification map.
    
@@ -171,31 +164,28 @@
   (core/get-schema tool))
 
 ;; Response helpers
-
-(defn success?
+(defn ^{:stratum 0} success?
   "Check if an execution result was successful."
   [result]
   (:success result))
 
-(defn get-result
+(defn ^{:stratum 0} get-result
   "Extract the result from a successful execution."
   [result]
   (:result result))
 
-(defn get-error
+(defn ^{:stratum 0} get-error
   "Extract error details from a failed execution."
   [result]
   (:error result))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Invocation tracking
-
-(defn attach-invocation-tracking
+(defn ^{:stratum 0} attach-invocation-tracking
   "Attach tool invocation tracking to a context map."
   [context]
   (tracking/attach-invocation-tracking context))
 
-(defn tool-invocations
+(defn ^{:stratum 0} tool-invocations
   "Get tool invocation records from a context map."
   [context]
   (tracking/tool-invocations context))
