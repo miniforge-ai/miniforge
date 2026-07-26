@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.core
   "Core reporting implementation."
   (:require
@@ -26,9 +25,9 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helper functions
 
-(defn safe-get
+;; Helper functions
+(defn ^{:stratum 0} safe-get
   "Returns nil on error; logs at WARN when a logger is supplied.
   Call as (safe-get f arg…) or (safe-get logger f arg…)."
   [maybe-logger-or-fn & rest]
@@ -45,7 +44,7 @@
                      :data {:fn (str f)}})
           nil)))))
 
-(defn count-by-status
+(defn ^{:stratum 0} count-by-status
   "Count workflows by status."
   [workflows status]
   (count (filter #(= status (:workflow/status %)) workflows)))
@@ -55,11 +54,8 @@
     "Count workflows by phase."
     [workflows phase]
     (count (filter #(= phase (:workflow/phase %)) workflows)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Subscription management (polling-based for BB compatibility)
-
-(defn create-subscription
+(defn ^{:stratum 0} create-subscription
   "Create a new subscription record."
   [topics callback]
   {:subscription/id (random-uuid)
@@ -69,6 +65,29 @@
    :subscription/last-poll 0
    :subscription/event-queue (atom [])})
 
+;; Workflow detail aggregation
+(defn ^{:stratum 0} build-workflow-timeline
+  "Build timeline of phase transitions."
+  [workflow-state]
+  (let [history (:workflow/history workflow-state [])]
+    (mapv (fn [entry]
+            {:phase (:phase entry)
+             :status (:status entry)
+             :started-at (:started-at entry)
+             :completed-at (:completed-at entry)})
+          history)))
+
+(defn ^{:stratum 0} get-workflow-logs
+  "Get logs for a workflow."
+  [logger _workflow-id]
+  (if logger
+    ;; In real implementation, would query logger with context filter
+    ;; For now, return empty as logger doesn't expose query API
+    []
+    []))
+
+;------------------------------------------------------------------------------ Layer 1
+
 ;; Note: Keep for future event broadcasting support
 #_(defn add-event-to-subscriptions
     "Add event to relevant subscriptions."
@@ -76,11 +95,8 @@
     (doseq [[_id sub] @subscriptions]
       (when (contains? (:subscription/topics sub) (:event/topic event))
         (swap! (:subscription/event-queue sub) conj event))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; System status aggregation
-
-(defn aggregate-workflow-stats
+(defn ^{:stratum 1} aggregate-workflow-stats
   "Aggregate workflow statistics."
   [workflow-component logger]
   (if-let [all-workflows (safe-get logger wf/get-state workflow-component :all)]
@@ -90,7 +106,7 @@
      :failed (count-by-status all-workflows :failed)}
     {:active 0 :pending 0 :completed 0 :failed 0}))
 
-(defn aggregate-resource-metrics
+(defn ^{:stratum 1} aggregate-resource-metrics
   "Aggregate resource usage metrics."
   [workflow-component logger]
   (if-let [all-workflows (safe-get logger wf/get-state workflow-component :all)]
@@ -103,7 +119,7 @@
      all-workflows)
     {:tokens-used 0 :cost-usd 0.0}))
 
-(defn aggregate-meta-loop-status
+(defn ^{:stratum 1} aggregate-meta-loop-status
   "Aggregate meta-loop status."
   [operator-component logger]
   (if operator-component
@@ -114,7 +130,7 @@
     {:status :not-configured
      :pending-improvements 0}))
 
-(defn collect-alerts
+(defn ^{:stratum 1} collect-alerts
   "Collect system alerts."
   [workflow-stats operator-component logger]
   (let [alerts []]
@@ -130,21 +146,7 @@
              :severity :warning
              :message "Multiple pending improvements awaiting review"}))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Workflow detail aggregation
-
-(defn build-workflow-timeline
-  "Build timeline of phase transitions."
-  [workflow-state]
-  (let [history (:workflow/history workflow-state [])]
-    (mapv (fn [entry]
-            {:phase (:phase entry)
-             :status (:status entry)
-             :started-at (:started-at entry)
-             :completed-at (:completed-at entry)})
-          history)))
-
-(defn get-workflow-artifacts
+(defn ^{:stratum 1} get-workflow-artifacts
   "Get artifacts for a workflow."
   [artifact-store workflow-id logger]
   (if artifact-store
@@ -156,19 +158,10 @@
             (or artifacts [])))
     []))
 
-(defn get-workflow-logs
-  "Get logs for a workflow."
-  [logger _workflow-id]
-  (if logger
-    ;; In real implementation, would query logger with context filter
-    ;; For now, return empty as logger doesn't expose query API
-    []
-    []))
+;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 4
 ;; ReportingService implementation
-
-(defrecord ReportingServiceImpl [workflow-component
+(defrecord ^{:stratum 2} ReportingServiceImpl [workflow-component
                                   orchestrator-component
                                   operator-component
                                   artifact-store
@@ -271,10 +264,10 @@
         events)
       [])))
 
-;------------------------------------------------------------------------------ Layer 5
-;; Constructor
+;------------------------------------------------------------------------------ Layer 3
 
-(defn create-reporting-service
+;; Constructor
+(defn ^{:stratum 3} create-reporting-service
   ([] (create-reporting-service {}))
   ([{:keys [workflow-component
             orchestrator-component

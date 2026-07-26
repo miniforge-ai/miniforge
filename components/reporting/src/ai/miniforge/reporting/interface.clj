@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.interface
   "Public API for the reporting component.
    Provides system status monitoring and workflow reporting."
@@ -28,9 +27,9 @@
    [ai.miniforge.reporting.views.edn :as view-edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol re-exports
 
-(def ReportingService
+;; Protocol re-exports
+(def ^{:stratum 0} ReportingService
   "Protocol satisfied by reporting service instances.
 
    Defines the monitoring/aggregation contract: get-system-status,
@@ -40,10 +39,8 @@
    are produced by create-reporting-service."
   proto/ReportingService)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Service creation
-
-(def create-reporting-service
+(def ^{:stratum 0} create-reporting-service
   "Create a reporting service.
 
    The reporting service aggregates data from multiple components
@@ -63,10 +60,8 @@
                       :logger logger}))"
   core/create-reporting-service)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Status queries
-
-(defn get-system-status
+(defn ^{:stratum 0} get-system-status
   "Get overall system status.
 
    Returns:
@@ -80,7 +75,7 @@
   [reporting-service]
   (proto/get-system-status reporting-service))
 
-(defn get-workflow-list
+(defn ^{:stratum 0} get-workflow-list
   "Get list of workflows with optional filtering.
 
    criteria:
@@ -97,7 +92,7 @@
   ([reporting-service criteria]
    (proto/get-workflow-list reporting-service criteria)))
 
-(defn get-workflow-detail
+(defn ^{:stratum 0} get-workflow-detail
   "Get detailed information about a specific workflow.
 
    Returns:
@@ -114,7 +109,7 @@
   [reporting-service workflow-id]
   (proto/get-workflow-detail reporting-service workflow-id))
 
-(defn get-meta-loop-status
+(defn ^{:stratum 0} get-meta-loop-status
   "Get meta-loop (operator) status.
 
    Returns:
@@ -127,10 +122,8 @@
   [reporting-service]
   (proto/get-meta-loop-status reporting-service))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Event subscriptions (polling-based for BB compatibility)
-
-(defn subscribe
+(defn ^{:stratum 0} subscribe
   "Subscribe to events for polling-based updates.
 
    topics: Set of topic keywords
@@ -153,7 +146,7 @@
   [reporting-service topics callback]
   (proto/subscribe reporting-service topics callback))
 
-(defn unsubscribe
+(defn ^{:stratum 0} unsubscribe
   "Unsubscribe from events.
 
    Returns true if subscription was removed.
@@ -163,7 +156,7 @@
   [reporting-service subscription-id]
   (proto/unsubscribe reporting-service subscription-id))
 
-(defn poll-events
+(defn ^{:stratum 0} poll-events
   "Poll for events on a subscription.
 
    Returns sequence of events since last poll.
@@ -174,10 +167,8 @@
   [reporting-service subscription-id]
   (proto/poll-events reporting-service subscription-id))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Rendering functions
-
-(defn render-system-overview
+(defn ^{:stratum 0} render-system-overview
   "Render system overview with status information.
 
    See ai.miniforge.reporting.views.system for full documentation.
@@ -187,7 +178,7 @@
   [system-data]
   (view-system/render-system-overview system-data))
 
-(defn render-workflow-list
+(defn ^{:stratum 0} render-workflow-list
   "Render a list of workflows as a table.
 
    See ai.miniforge.reporting.views.workflow for full documentation.
@@ -197,7 +188,7 @@
   [workflows]
   (view-workflow/render-workflow-list workflows))
 
-(defn render-workflow-detail
+(defn ^{:stratum 0} render-workflow-detail
   "Render detailed workflow information.
 
    See ai.miniforge.reporting.views.workflow for full documentation.
@@ -207,7 +198,7 @@
   [workflow]
   (view-workflow/render-workflow-detail workflow))
 
-(defn render-meta-loop
+(defn ^{:stratum 0} render-meta-loop
   "Render meta-loop status and optimization information.
 
    See ai.miniforge.reporting.views.meta for full documentation.
@@ -217,7 +208,7 @@
   [meta-data]
   (view-meta/render-meta-loop meta-data))
 
-(defn render-edn
+(defn ^{:stratum 0} render-edn
   "Render arbitrary data as pretty-printed EDN.
 
    See ai.miniforge.reporting.views.edn for full documentation.

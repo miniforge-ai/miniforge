@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.protocol
   "Reporting protocols for system status and monitoring.
 
@@ -23,9 +22,9 @@
    and operator components to provide unified views of system state.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Core reporting protocol
 
-(defprotocol ReportingService
+;; Core reporting protocol
+(defprotocol ^{:stratum 0} ReportingService
   "Protocol for reporting and monitoring service.
    Aggregates data from multiple components for unified status views."
 
