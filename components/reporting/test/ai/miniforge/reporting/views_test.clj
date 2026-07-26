@@ -80,7 +80,7 @@
     (let [colored (fmt/ansi :green "test")]
       (is (str/includes? colored "test"))
       (is (str/includes? colored "\033["))))
-  
+
   (testing "status-color returns appropriate color"
     (is (= :green (fmt/status-color :completed)))
     (is (= :yellow (fmt/status-color :pending)))
@@ -110,7 +110,7 @@
           rows [["A" "B" "C"]
                 ["Long" "Longer" "Longest"]]
           table (fmt/format-table headers rows)]
-      
+
       (is (str/includes? table "Col1"))
       (is (str/includes? table "Col2"))
       (is (str/includes? table "Col3"))
@@ -121,13 +121,13 @@
 (deftest ^{:stratum 0} test-render-workflow-list-empty
   (testing "render-workflow-list handles empty list"
     (let [output (wf/render-workflow-list [])]
-      
+
       (is (str/includes? output "No workflows found")))))
 
 (deftest ^{:stratum 0} test-render-workflow-detail-not-found
   (testing "render-workflow-detail handles nil"
     (let [output (wf/render-workflow-detail nil)]
-      
+
       (is (str/includes? output "Workflow not found")))))
 
 (deftest ^{:stratum 0} test-render-meta-loop-empty
@@ -136,7 +136,7 @@
                   :pending-improvements []
                   :recent-improvements []}
           output (meta/render-meta-loop status)]
-      
+
       (is (str/includes? output "No recent signals"))
       (is (str/includes? output "No pending improvements"))
       (is (str/includes? output "No recent improvements")))))
@@ -146,12 +146,12 @@
   (testing "render-edn outputs valid EDN"
     (let [data {:foo "bar" :baz 42}
           output (edn/render-edn data)]
-      
+
       (is (str/includes? output ":foo"))
       (is (str/includes? output "bar"))
       (is (str/includes? output ":baz"))
       (is (str/includes? output "42"))
-      
+
       ;; Verify it's parseable EDN
       (is (map? (read-string output))))))
 
@@ -161,12 +161,12 @@
 (deftest ^{:stratum 1} test-render-system-overview
   (testing "render-system-overview creates formatted output"
     (let [output (sys/render-system-overview sample-system-status)]
-      
+
       (is (str/includes? output "WORKFLOWS"))
       (is (str/includes? output "RESOURCES"))
       (is (str/includes? output "META-LOOP"))
       (is (str/includes? output "ALERTS"))
-      
+
       (is (str/includes? output "Active:"))
       (is (str/includes? output "2"))
       (is (str/includes? output "Tokens Used:"))
@@ -177,19 +177,19 @@
   (testing "render-system-overview handles empty alerts"
     (let [status (assoc sample-system-status :alerts [])
           output (sys/render-system-overview status)]
-      
+
       (is (str/includes? output "No alerts")))))
 
 ;; Workflow list renderer tests
 (deftest ^{:stratum 1} test-render-workflow-list
   (testing "render-workflow-list creates table"
     (let [output (wf/render-workflow-list sample-workflows)]
-      
+
       (is (str/includes? output "ID"))
       (is (str/includes? output "Status"))
       (is (str/includes? output "Phase"))
       (is (str/includes? output "Created"))
-      
+
       (is (str/includes? output "12345678"))
       (is (str/includes? output "running"))
       (is (str/includes? output "implement")))))
@@ -198,12 +198,12 @@
 (deftest ^{:stratum 1} test-render-workflow-detail
   (testing "render-workflow-detail creates detailed view"
     (let [output (wf/render-workflow-detail sample-workflow-detail)]
-      
+
       (is (str/includes? output "WORKFLOW HEADER"))
       (is (str/includes? output "TIMELINE"))
       (is (str/includes? output "CURRENT TASK"))
       (is (str/includes? output "ARTIFACTS"))
-      
+
       (is (str/includes? output "12345678-1234-1234-1234-123456789012"))
       (is (str/includes? output "running"))
       (is (str/includes? output "implement"))
@@ -213,11 +213,11 @@
 (deftest ^{:stratum 1} test-render-meta-loop
   (testing "render-meta-loop creates dashboard"
     (let [output (meta/render-meta-loop sample-meta-loop)]
-      
+
       (is (str/includes? output "RECENT SIGNALS"))
       (is (str/includes? output "PENDING IMPROVEMENTS"))
       (is (str/includes? output "RECENT IMPROVEMENTS"))
-      
+
       (is (str/includes? output "workflow-failed"))
       (is (str/includes? output "rule-addition"))
       (is (str/includes? output "0.85")))))

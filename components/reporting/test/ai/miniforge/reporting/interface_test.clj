@@ -73,7 +73,7 @@
   (testing "get-system-status handles missing components gracefully"
     (let [reporting (reporting/create-reporting-service {})
           status (reporting/get-system-status reporting)]
-      
+
       (is (map? status))
       (is (= 0 (get-in status [:workflows :active])))
       (is (= 0 (get-in status [:resources :tokens-used])))
@@ -83,7 +83,7 @@
   (testing "get-meta-loop-status handles missing operator"
     (let [reporting (reporting/create-reporting-service {})
           status (reporting/get-meta-loop-status reporting)]
-      
+
       (is (map? status))
       (is (empty? (:signals status)))
       (is (empty? (:pending-improvements status))))))
@@ -96,15 +96,15 @@
           events (atom [])
           callback (fn [event] (swap! events conj event))
           sub-id (reporting/subscribe reporting #{:workflow-events} callback)]
-      
+
       (is (uuid? sub-id))
-      
+
       ;; Check subscription logged
       (is (some #(= :reporting/subscription-created (:log/event %)) @entries))
-      
+
       ;; Unsubscribe
       (is (true? (reporting/unsubscribe reporting sub-id)))
-      
+
       ;; Check unsubscribe logged
       (is (some #(= :reporting/subscription-removed (:log/event %)) @entries)))))
 
@@ -114,14 +114,14 @@
           callback (fn [_event] nil)
           sub-id (reporting/subscribe reporting #{:workflow-events} callback)
           events (reporting/poll-events reporting sub-id)]
-      
+
       (is (empty? events)))))
 
 (deftest ^{:stratum 0} test-poll-events-nonexistent-subscription
   (testing "poll-events returns empty for nonexistent subscription"
     (let [reporting (reporting/create-reporting-service {})
           events (reporting/poll-events reporting (random-uuid))]
-      
+
       (is (empty? events)))))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -137,22 +137,22 @@
                       :operator-component op-component
                       :logger logger})
           status (reporting/get-system-status reporting)]
-      
+
       (is (map? status))
       (is (contains? status :workflows))
       (is (contains? status :resources))
       (is (contains? status :meta-loop))
       (is (contains? status :alerts))
-      
+
       ;; Check workflow counts
       (is (= 1 (get-in status [:workflows :active])))
       (is (= 1 (get-in status [:workflows :completed])))
       (is (= 1 (get-in status [:workflows :failed])))
-      
+
       ;; Check resource metrics
       (is (= 1700 (get-in status [:resources :tokens-used])))
       (is (= 0.085 (get-in status [:resources :cost-usd])))
-      
+
       ;; Check meta-loop status
       (is (= 1 (get-in status [:meta-loop :pending-improvements]))))))
 
@@ -163,7 +163,7 @@
           reporting (reporting/create-reporting-service
                      {:workflow-component wf-component})
           workflows (reporting/get-workflow-list reporting)]
-      
+
       (is (= 3 (count workflows)))
       (is (every? #(contains? % :workflow/id) workflows))
       (is (every? #(contains? % :workflow/status) workflows))
@@ -175,16 +175,16 @@
           reporting (reporting/create-reporting-service
                      {:workflow-component wf-component})
           running-workflows (reporting/get-workflow-list reporting {:status :running})]
-      
+
       (is (= 1 (count running-workflows)))
       (is (= :running (:workflow/status (first running-workflows))))))
-  
+
   (testing "get-workflow-list filters by phase"
     (let [wf-component (create-mock-workflow-component)
           reporting (reporting/create-reporting-service
                      {:workflow-component wf-component})
           impl-workflows (reporting/get-workflow-list reporting {:phase :implement})]
-      
+
       (is (= 1 (count impl-workflows)))
       (is (= :implement (:workflow/phase (first impl-workflows)))))))
 
@@ -194,7 +194,7 @@
           reporting (reporting/create-reporting-service
                      {:workflow-component wf-component})
           workflows (reporting/get-workflow-list reporting {:limit 2})]
-      
+
       (is (= 2 (count workflows))))))
 
 ;; Workflow detail tests
@@ -206,7 +206,7 @@
           workflows (reporting/get-workflow-list reporting)
           workflow-id (:workflow/id (first workflows))
           detail (reporting/get-workflow-detail reporting workflow-id)]
-      
+
       (is (map? detail))
       (is (contains? detail :header))
       (is (contains? detail :timeline))
@@ -220,7 +220,7 @@
           reporting (reporting/create-reporting-service
                      {:workflow-component wf-component})
           detail (reporting/get-workflow-detail reporting (random-uuid))]
-      
+
       (is (nil? detail)))))
 
 ;; Meta-loop status tests
@@ -230,11 +230,11 @@
           reporting (reporting/create-reporting-service
                      {:operator-component op-component})
           status (reporting/get-meta-loop-status reporting)]
-      
+
       (is (map? status))
       (is (contains? status :signals))
       (is (contains? status :pending-improvements))
       (is (contains? status :recent-improvements))
-      
+
       (is (= 1 (count (:signals status))))
       (is (= 1 (count (:pending-improvements status)))))))
