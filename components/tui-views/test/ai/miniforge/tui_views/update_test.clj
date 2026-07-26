@@ -516,6 +516,13 @@
       (is (= :sync-prs (:type (:side-effect m))))
       (is (str/includes? (:flash-message m) "Syncing")))))
 
+(deftest ^{:stratum 1} agent-started-routes-through-root-update-test
+  (testing "Agent started message is routed through the root update"
+    (let [m (util/apply-updates (util/fresh-model)
+              [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
+               [:msg/agent-started {:workflow-id wf-id-1 :agent :planner}]])]
+      (is (= :started (get-in m [:workflows 0 :agents :planner :status]))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} navigation-test
@@ -925,9 +932,3 @@
       ;; Active detail should be unchanged
       (is (= 1 (count (get-in m [:detail :phases]))))
       (is (= :plan (:phase (first (get-in m [:detail :phases]))))))))
-
-(testing "Agent started message is routed through the root update"
-    (let [m (util/apply-updates (util/fresh-model)
-              [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
-               [:msg/agent-started {:workflow-id wf-id-1 :agent :planner}]])]
-      (is (= :started (get-in m [:workflows 0 :agents :planner :status])))))
