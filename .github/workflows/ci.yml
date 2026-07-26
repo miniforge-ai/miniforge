@@ -229,7 +229,7 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Install Clojure + bb (Windows)
+      - name: Install bb (Windows)
         uses: DeLaGuardo/setup-clojure@12.5
         with:
           bb: latest
