@@ -71,11 +71,10 @@ way, so the invariant check fires exactly as before. Left as-is.
    comment-reattachment risk this wave watches for does not apply. No
    stale double-semicolon `;;---- Layer N: <description>` banners survived
    anywhere (`grep -rn ";;----"` over the component: zero matches).
-3. `clj-kondo --lint components/boundary`: 0 errors. 1 warning
-   (`Unresolved namespace clojure.string` in
-   `exception_to_anomaly_test.clj`) — confirmed pre-existing on
-   `origin/main` before this fix (same warning, different line number
-   pre-reorder) and unrelated to stratum-lint.
+3. `clj-kondo --lint components/boundary`: 0 errors, 0 warnings.
+   The `Unresolved namespace clojure.string` warning in
+   `exception_to_anomaly_test.clj` has been resolved by adding an
+   explicit `[clojure.string :as str]` require in that namespace.
 4. Re-ran plain (non-`--fix`) `stratum-lint` over the component after the
    fix: one finding remains — `core.clj` `SL003`, 4 real layers (down from
    the baseline's reported 6, see Changes in Detail). Real over-budget
