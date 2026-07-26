@@ -18,7 +18,7 @@
 (ns ai.miniforge.repo-index.repo-map
   "Generate token-budgeted repo maps from a repo index.
 
-   Layer 1 — depends on factory (Layer 0)."
+   Depends on factory."
   (:require [clojure.string :as str]
             [ai.miniforge.repo-index.factory :as factory]
             [ai.miniforge.repo-index.messages :as messages]))

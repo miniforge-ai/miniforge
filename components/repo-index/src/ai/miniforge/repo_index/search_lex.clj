@@ -21,7 +21,7 @@
    Pure Clojure implementation — no JNI dependencies. Suitable for
    single-repo indexing (thousands of files, not millions).
 
-   Layer 1 — depends on factory (Layer 0)."
+   Depends on factory."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]

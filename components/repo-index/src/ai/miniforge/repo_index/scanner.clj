@@ -18,7 +18,7 @@
 (ns ai.miniforge.repo-index.scanner
   "Walk git tree via `git ls-tree` to build a repo index.
 
-   Layer 1 — config-driven language detection and generated-file patterns."
+   Config-driven language detection and generated-file patterns."
   (:require [ai.miniforge.repo-index.factory :as factory]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
