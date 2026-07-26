@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.policy-lookup
   "Pure query functions for searching loaded policy-pack rules.
 
@@ -23,16 +22,18 @@
    or policy packs). All criteria are optional; omitting all returns all rules.
    Multiple criteria are ANDed.
 
-   Layer 0: query translation + result projection
-   Layer 1: lookup orchestration"
+   Layer 0: pure predicates + result projection (dewey-prefixes,
+     normalise-query-string, zettel->policy-result)
+   Layer 1: query-map translation (build-store-query, over Layer 0)
+   Layer 2: lookup orchestration (lookup-policy-rules, over Layer 1)"
   (:require
    [ai.miniforge.knowledge.store :as store]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Query translation and result projection
 
-(defn- dewey-prefixes
+;; Query translation and result projection
+(defn- ^{:stratum 0} dewey-prefixes
   "Coerce a scalar dewey-prefix string into the list form the store expects.
    Returns nil when the prefix is nil, blank, or whitespace-only."
   [dewey-prefix]
@@ -40,14 +41,22 @@
     (when (seq trimmed)
       [trimmed])))
 
-(defn- normalise-query-string
+(defn- ^{:stratum 0} normalise-query-string
   "Return nil for nil/blank query, otherwise the trimmed string.
    Ensures the store text-search filter is skipped when no keyword was given."
   [q]
   (let [trimmed (str/trim (or q ""))]
     (when (seq trimmed) trimmed)))
 
-(defn- build-store-query
+(defn- ^{:stratum 0} zettel->policy-result
+  "Project a zettel into the compact {:rule/title :rule/content} shape."
+  [zettel]
+  {:rule/title   (:zettel/title zettel)
+   :rule/content (:zettel/content zettel)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} build-store-query
   "Translate a PolicyQuery map to the KnowledgeStore query map.
    Always restricts to :rule type so only policy-pack rules are searched."
   [{:keys [query tags dewey-prefix]}]
@@ -58,16 +67,10 @@
       (seq tags)  (assoc :tags (vec tags))
       prefixes    (assoc :dewey-prefixes prefixes))))
 
-(defn- zettel->policy-result
-  "Project a zettel into the compact {:rule/title :rule/content} shape."
-  [zettel]
-  {:rule/title   (:zettel/title zettel)
-   :rule/content (:zettel/content zettel)})
+;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Lookup orchestration
-
-(defn lookup-policy-rules
+(defn ^{:stratum 2} lookup-policy-rules
   [knowledge-store policy-query]
   (if (nil? knowledge-store)
     []
