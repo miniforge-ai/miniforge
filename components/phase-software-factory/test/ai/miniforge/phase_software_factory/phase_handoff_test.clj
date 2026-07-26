@@ -15,51 +15,54 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.phase-handoff-test
   (:require
    [clojure.test :refer [deftest is]]
    [ai.miniforge.phase-software-factory.phase-handoff :as handoff]))
 
-(def ^:private review-issue
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private review-issue
   {:severity :blocking
    :description "GROUP 3 is missing the events show CLI"
    :suggestion "Add miniforge events show coverage"})
 
-(def ^:private acceptance-group-phrase
+(def ^{:stratum 0} ^:private acceptance-group-phrase
   "Acceptance Group 4 is missing the export command")
 
-(def ^:private abbreviated-acceptance-group-phrase
+(def ^{:stratum 0} ^:private abbreviated-acceptance-group-phrase
   "AG-5 is missing the import command")
 
-(def ^:private acceptance-criterion-phrase
+(def ^{:stratum 0} ^:private acceptance-criterion-phrase
   "AC 6 is missing the resume command")
 
-(def ^:private expected-acceptance-group
+(def ^{:stratum 0} ^:private expected-acceptance-group
   "GROUP 3")
 
-(def ^:private expected-acceptance-group-from-phrase
+(def ^{:stratum 0} ^:private expected-acceptance-group-from-phrase
   "GROUP 4")
 
-(def ^:private expected-abbreviated-acceptance-group
+(def ^{:stratum 0} ^:private expected-abbreviated-acceptance-group
   "AG 5")
 
-(def ^:private expected-acceptance-criterion
+(def ^{:stratum 0} ^:private expected-acceptance-criterion
   "AC 6")
 
-(def ^:private repair-attempt
+(def ^{:stratum 0} ^:private repair-attempt
   2)
 
-(def ^:private first-repair-attempt
+(def ^{:stratum 0} ^:private first-repair-attempt
   1)
 
-(def ^:private implement-feedback-summary
+(def ^{:stratum 0} ^:private implement-feedback-summary
   "fix implement")
 
-(def ^:private release-feedback-summary
+(def ^{:stratum 0} ^:private release-feedback-summary
   "fix release")
 
-(deftest repair-request-normalizes-review-findings-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} repair-request-normalizes-review-findings-test
   (let [workflow-id (random-uuid)
         request (handoff/repair-request {:workflow-id workflow-id
                                          :source-phase :review
@@ -79,7 +82,7 @@
     (is (not (contains? finding :finding/raw)))
     (is (not (contains? (:frame/body request) :repair/raw-feedback)))))
 
-(deftest repair-request-omits-absent-optional-ids-test
+(deftest ^{:stratum 1} repair-request-omits-absent-optional-ids-test
   (let [request (handoff/repair-request {:source-phase :review
                                          :target-phase :implement
                                          :feedback [review-issue]})]
@@ -87,7 +90,7 @@
     (is (not (contains? request :phase/attempt)))
     (is (not (contains? (:frame/body request) :repair/attempt)))))
 
-(deftest normalize-findings-detects-configured-group-forms-test
+(deftest ^{:stratum 1} normalize-findings-detects-configured-group-forms-test
   (let [findings (handoff/normalize-findings [acceptance-group-phrase
                                               abbreviated-acceptance-group-phrase
                                               acceptance-criterion-phrase])]
@@ -96,7 +99,7 @@
             expected-acceptance-criterion]
            (mapv :finding/group-id findings)))))
 
-(deftest latest-repair-request-filters-by-target-test
+(deftest ^{:stratum 1} latest-repair-request-filters-by-target-test
   (let [implement-request (handoff/repair-request {:source-phase :review
                                                    :target-phase :implement
                                                    :phase-attempt first-repair-attempt

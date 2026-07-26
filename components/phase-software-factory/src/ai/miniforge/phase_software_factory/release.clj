@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.release
   "Release phase interceptor.
 
@@ -40,19 +39,14 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :release))
 
-;; Register defaults on load
-(phase/register-phase-defaults! :release default-config)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
-
-(defn- log-already-implemented!
+(defn- ^{:stratum 0} log-already-implemented!
   "Log when implement phase reports work already done."
   [ctx impl-status]
   (when (= :already-implemented impl-status)
@@ -72,13 +66,12 @@
 ;; real work to release. Removed — the env-based `:release/zero-files`
 ;; check below is the authoritative gate, matching what verify and review
 ;; already do.
-
-(defn- ctx-worktree-path
+(defn- ^{:stratum 0} ctx-worktree-path
   "Resolve the working directory from phase context."
   [ctx]
   (workspace/resolve-execution-workdir ctx "release"))
 
-(defn- git-dirty-files
+(defn- ^{:stratum 0} git-dirty-files
   "Scan git working tree for new/modified/deleted files; return as :code/files entries.
    Used as fallback when the implement phase wrote files directly to disk
    (design docs, specs, UX assets, etc.) rather than returning them in a
@@ -108,7 +101,7 @@
            vec))
     (catch Exception _ [])))
 
-(defn- git-dirty-files-capsule
+(defn- ^{:stratum 0} git-dirty-files-capsule
   "Scan git working tree inside a task capsule via execute-fn (N11 §9.3).
    Used for K8s executors where the filesystem is not locally accessible.
    execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
@@ -145,7 +138,7 @@
            vec))
     (catch Exception _ [])))
 
-(defn- rehydrate-committed-files
+(defn- ^{:stratum 0} rehydrate-committed-files
   "Read content for the `:code/file-paths` recorded by the implement
    phase. Used when implement's boundary commit has cleaned the
    worktree — `git-dirty-files` then returns empty even though the
@@ -179,7 +172,7 @@
            (filter agent/substantive-file?)
            vec))))
 
-(defn- unresolved-known-issues
+(defn- ^{:stratum 0} unresolved-known-issues
   "The review's unresolved non-blocking issues to record on the PR. Prefer the
    structured `:review/issues` (severity :warning/:nit — these carry file/line);
    fall back to the legacy `:review/warnings` description strings when no
@@ -191,14 +184,69 @@
       structured
       (vec (get review-output :review/warnings [])))))
 
-(defn- zero-files-data
+(defn- ^{:stratum 0} zero-files-data
   [impl-result worktree-path]
   {:type           :release/zero-files
    :phase          :release
    :environment-id (:environment-id impl-result)
    :worktree-path  worktree-path})
 
-(defn- release-files-result
+(defn- ^{:stratum 0} resolve-github-token
+  "Resolve GitHub token for capsule PR operations.
+   Mirrors the resolution order from docker.clj's resolve-git-token:
+   1. Execution context (passed by task runner)
+   2. MINIFORGE_GIT_TOKEN env var (universal override)
+   3. GH_TOKEN env var (GitHub-specific)
+   4. `gh auth token` CLI fallback (host-side only, pre-capsule)"
+  [ctx]
+  (or (get-in ctx [:execution/opts :github-token])
+      (get-in ctx [:execution/github-token])
+      (System/getenv "MINIFORGE_GIT_TOKEN")
+      (System/getenv "GH_TOKEN")
+      (try (let [r (shell/sh "gh" "auth" "token")]
+             (when (zero? (:exit r))
+               (str/trim (:out r))))
+           (catch Exception _ nil))))
+
+(defn- ^{:stratum 0} compute-verdict
+  "Pick the verdict that should flow on the phase result.
+
+   `:release/zero-files` pre-empts `:repair-requested` — when the curator
+   reports an empty diff, retrying the implementer is wasted work: the
+   next pass would just produce another empty diff. Make this FSM-visible
+   so the verdict-driven guarded array terminates the loop."
+  [{:keys [phase-failed? on-fail-configured? zero-files?]}]
+  (cond
+    zero-files?
+    :release/zero-files
+
+    (and phase-failed? on-fail-configured?)
+    :repair-requested
+
+    phase-failed?
+    :exhausted
+
+    :else
+    :approved))
+
+(defn- ^{:stratum 0} attach-error-verdict
+  "Phase 3b: when error-release fails terminally, attach the verdict to
+   the result so the FSM's guarded :phase/fail array reads it. The
+   `:release/zero-files` case is terminal; everything else is either
+   :repair-requested (on-fail set, FSM will redirect) or :exhausted
+   (no on-fail target)."
+  [ctx zero-files? on-fail-configured?]
+  (let [verdict (cond
+                  zero-files?            :release/zero-files
+                  on-fail-configured?    :repair-requested
+                  :else                  :exhausted)]
+    (-> ctx
+        (assoc-in [:phase :verdict] verdict)
+        (assoc-in [:phase :result :output :phase/verdict] verdict))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} release-files-result
   "Return release file data or a canonical anomaly when there is no
    substantive work to release."
   [committed dirty impl-result worktree-path]
@@ -209,7 +257,169 @@
                            (messages/t :release/zero-files)
                            (zero-files-data impl-result worktree-path))))
 
-(defn- release-files!
+(defn ^{:stratum 1} build-executor-context
+  "Build context for the release executor from phase context.
+   Includes :github-token so the release executor can inject GH_TOKEN
+   into the capsule's environment for gh CLI authentication.
+
+   The phase-local `logger` is threaded in so the release executor's
+   log calls (phase-started / fail / phase-completed) are emitted
+   even when the workflow ctx lacks :execution/logger — observed in
+   the 2026-05-03 dogfood, where release failed in 0ms with zero
+   visible log lines because the executor's logger was nil.
+
+   Also computes the phase-filtered policy-pack behavior addendum via
+   `phase/load-and-filter-behaviors :release` and threads it as
+   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
+   forward it into the agent input. Mirrors the wiring review (#945)
+   and plan use; closes the gap where the releaser ran without the
+   compiled standards pack."
+  [ctx config logger]
+  (let [on-chunk (phase/create-streaming-callback ctx :release)
+        input (get-in ctx [:execution/input])
+        behavior-addendum (phase/load-and-filter-behaviors
+                            :release {:task {:task/intent (:intent input)}})]
+    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
+             ;; win over config; the blessed resolver is the LAST resort,
+             ;; adding the opts key + the governed-fail / CWD decision (no
+             ;; silent user.dir downgrade) in place of the old bare fallback.
+             :worktree-path (or (get-in ctx [:execution/worktree-path])
+                                (get-in ctx [:worktree-path])
+                                (get-in config [:worktree-path])
+                                (workspace/resolve-execution-workdir ctx "release"))
+             :executor (get-in ctx [:execution/executor])
+             :environment-id (get-in ctx [:execution/environment-id])
+             :logger (or (get-in ctx [:execution/logger]) logger)
+             :llm-backend (get-in ctx [:execution/llm-backend])
+             :artifact-store (get-in ctx [:execution/artifact-store])
+             :event-stream (:event-stream ctx)
+             ;; Allow disabling PR creation via config or execution opts
+             :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
+                             (get config :create-pr? true))
+             ;; PR base override for a dependency-chained DAG task: the DAG
+             ;; orchestrator passes the parent task's branch so this task's PR
+             ;; STACKS on the parent (base = parent branch) instead of opening
+             ;; against the default branch with a cumulative diff. Absent (root
+             ;; tasks / non-DAG runs) → executor falls back to the default branch.
+             :base-branch (get-in ctx [:execution/opts :release/base-branch])
+             ;; PR provenance → rendered as YAML frontmatter on the PR body so
+             ;; a PR maps deterministically back to its workflow run + spec.
+             ;; :workflow is the PARENT run id for a DAG sub-task (shared across
+             ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
+             :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
+                                        (get-in ctx [:execution/id]))
+                          :spec     (get-in ctx [:execution/input :spec/path])
+                          :task     (get-in ctx [:execution/input :task/id])}
+             ;; Resolve and inject GitHub token for capsule gh CLI auth
+             :github-token (resolve-github-token ctx)}
+      on-chunk (assoc :on-chunk on-chunk)
+      behavior-addendum (assoc :task/behavior-addendum behavior-addendum))))
+
+(defn ^{:stratum 1} leave-release
+  "Post-processing for release phase.
+
+   Records release metrics and PR info.
+
+   Phase 3b: attaches a `:phase/verdict` to the phase result so the
+   FSM's verdict-driven guarded `:phase/fail` array picks the right
+   target. `:release/zero-files` is a TERMINAL verdict — the FSM
+   bypasses `:on-fail` and lands on `:failed` because the curator's
+   empty-diff signal means the implementer has nothing left to do."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at])
+        end-time (System/currentTimeMillis)
+        duration-ms (if start-time (- end-time start-time) 0)
+        result (get-in ctx [:phase :result])
+        release-data (when (phase/result-succeeded? result) (:output result))
+        release-metrics (get release-data :release/metrics {})
+        metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
+        agent-status (:status result)
+        iterations (get-in ctx [:phase :iterations] 1)
+        max-iterations (get-in ctx [:phase :budget :iterations]
+                               (get-in default-config [:budget :iterations]))
+        zero-files? (= :release/zero-files
+                       (get-in result [:error :data :type]))
+        phase-status (if zero-files?
+                       :failed
+                       (phase/determine-phase-status
+                        agent-status iterations max-iterations))
+        on-fail (get-in ctx [:phase-config :on-fail])
+        ;; Verdict is only meaningful for terminal phase statuses
+        ;; (:completed → :approved; :failed → one of the failure
+        ;; verdicts). For :retrying the runner handles the in-phase
+        ;; loop and the FSM never sees a transition, so skip the
+        ;; verdict attachment — leaving the prior verdict in place if
+        ;; the phase has been around the loop before, else nothing.
+        verdict (when (contains? #{:completed :failed} phase-status)
+                  (compute-verdict {:phase-failed?       (= :failed phase-status)
+                                    :on-fail-configured? (some? on-fail)
+                                    :zero-files?         zero-files?}))
+        updated-ctx (cond-> ctx
+                      true
+                      (-> (assoc-in [:phase :ended-at] end-time)
+                          (assoc-in [:phase :duration-ms] duration-ms)
+                          (assoc-in [:phase :status] phase-status)
+                          (assoc-in [:phase :metrics] metrics))
+                      verdict
+                      (-> (assoc-in [:phase :verdict] verdict)
+                          (assoc-in [:phase :result :output :phase/verdict] verdict)))
+        updated-ctx (-> updated-ctx
+                        (assoc-in [:metrics :release :duration-ms] duration-ms)
+                        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
+                        (update-in [:execution :phases-completed] (fnil conj []) :release)
+                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+    (doto (cond-> updated-ctx
+            (phase/retrying? (:phase updated-ctx))
+            (-> (update-in [:phase :iterations] (fnil inc 1))
+                (assoc-in [:phase :last-error]
+                          (get-in result [:error :message] (messages/t :release/phase-failed)))))
+      (phase/emit-phase-completed! :release
+        (merge {:outcome     (phase/outcome result (= :completed phase-status))
+                :duration-ms duration-ms
+                :tokens      (:tokens metrics 0)}
+               (phase-terminal/derive-termination-reason result nil))))))
+
+(defn ^{:stratum 1} error-release
+  "Handle release phase errors.
+
+   Phase 3b: failures no longer call `phase/fail-and-request-redirect`
+   — the FSM's verdict-driven guarded :phase/fail array routes via
+   `:on-fail` if configured, or to `:failed` otherwise. error-release
+   stays responsible for the phase-level retry budget; once that's
+   exhausted it just attaches the verdict + error and lets the FSM
+   dispatch."
+  [ctx ex]
+  (let [iterations (get-in ctx [:phase :iterations] 0)
+        max-iterations (get-in ctx [:phase :budget :iterations] 2)
+        on-fail (get-in ctx [:phase-config :on-fail])
+        error-map (phase/exception-error ex)
+        zero-files? (= :release/zero-files (get (ex-data ex) :type))]
+    (cond
+      zero-files?
+      (-> ctx
+          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
+          (attach-error-verdict true (some? on-fail)))
+
+      ;; Within phase-level retry budget — retry in place. The FSM
+      ;; doesn't see this as a transition.
+      (< iterations max-iterations)
+      (-> ctx
+          (update-in [:phase :iterations] (fnil inc 0))
+          (assoc-in [:phase :last-error] (ex-message ex))
+          (assoc-in [:phase :status] :retrying))
+
+      ;; Out of retries — attach verdict and let the FSM dispatch
+      ;; (:repair-requested when on-fail set, :exhausted otherwise).
+      :else
+      (-> ctx
+          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
+          (attach-error-verdict false (some? on-fail))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} release-files!
   "Boundary wrapper around the anomaly-returning `release-files-result`;
    retained for release phase control flow that treats `:release/zero-files`
    as a terminal exception."
@@ -220,7 +430,9 @@
                       (:anomaly/data result)))
       result)))
 
-(defn build-workflow-state
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} build-workflow-state
   "Build workflow state from phase context for the release executor.
 
    In the new environment model, code changes live in the execution
@@ -289,82 +501,9 @@
                                                  (messages/t :default/task-description))}
        :workflow/artifacts (into code-artifacts review-artifacts)})))
 
-(defn- resolve-github-token
-  "Resolve GitHub token for capsule PR operations.
-   Mirrors the resolution order from docker.clj's resolve-git-token:
-   1. Execution context (passed by task runner)
-   2. MINIFORGE_GIT_TOKEN env var (universal override)
-   3. GH_TOKEN env var (GitHub-specific)
-   4. `gh auth token` CLI fallback (host-side only, pre-capsule)"
-  [ctx]
-  (or (get-in ctx [:execution/opts :github-token])
-      (get-in ctx [:execution/github-token])
-      (System/getenv "MINIFORGE_GIT_TOKEN")
-      (System/getenv "GH_TOKEN")
-      (try (let [r (shell/sh "gh" "auth" "token")]
-             (when (zero? (:exit r))
-               (str/trim (:out r))))
-           (catch Exception _ nil))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn build-executor-context
-  "Build context for the release executor from phase context.
-   Includes :github-token so the release executor can inject GH_TOKEN
-   into the capsule's environment for gh CLI authentication.
-
-   The phase-local `logger` is threaded in so the release executor's
-   log calls (phase-started / fail / phase-completed) are emitted
-   even when the workflow ctx lacks :execution/logger — observed in
-   the 2026-05-03 dogfood, where release failed in 0ms with zero
-   visible log lines because the executor's logger was nil.
-
-   Also computes the phase-filtered policy-pack behavior addendum via
-   `phase/load-and-filter-behaviors :release` and threads it as
-   `:task/behavior-addendum` so `release-executor/invoke-releaser` can
-   forward it into the agent input. Mirrors the wiring review (#945)
-   and plan use; closes the gap where the releaser ran without the
-   compiled standards pack."
-  [ctx config logger]
-  (let [on-chunk (phase/create-streaming-callback ctx :release)
-        input (get-in ctx [:execution/input])
-        behavior-addendum (phase/load-and-filter-behaviors
-                            :release {:task {:task/intent (:intent input)}})]
-    (cond-> {;; Preserve the original precedence — explicit ctx worktree paths
-             ;; win over config; the blessed resolver is the LAST resort,
-             ;; adding the opts key + the governed-fail / CWD decision (no
-             ;; silent user.dir downgrade) in place of the old bare fallback.
-             :worktree-path (or (get-in ctx [:execution/worktree-path])
-                                (get-in ctx [:worktree-path])
-                                (get-in config [:worktree-path])
-                                (workspace/resolve-execution-workdir ctx "release"))
-             :executor (get-in ctx [:execution/executor])
-             :environment-id (get-in ctx [:execution/environment-id])
-             :logger (or (get-in ctx [:execution/logger]) logger)
-             :llm-backend (get-in ctx [:execution/llm-backend])
-             :artifact-store (get-in ctx [:execution/artifact-store])
-             :event-stream (:event-stream ctx)
-             ;; Allow disabling PR creation via config or execution opts
-             :create-pr? (or (get-in ctx [:execution/opts :create-pr?])
-                             (get config :create-pr? true))
-             ;; PR base override for a dependency-chained DAG task: the DAG
-             ;; orchestrator passes the parent task's branch so this task's PR
-             ;; STACKS on the parent (base = parent branch) instead of opening
-             ;; against the default branch with a cumulative diff. Absent (root
-             ;; tasks / non-DAG runs) → executor falls back to the default branch.
-             :base-branch (get-in ctx [:execution/opts :release/base-branch])
-             ;; PR provenance → rendered as YAML frontmatter on the PR body so
-             ;; a PR maps deterministically back to its workflow run + spec.
-             ;; :workflow is the PARENT run id for a DAG sub-task (shared across
-             ;; the run's PRs) else this run's id; :task distinguishes DAG tasks.
-             :provenance {:workflow (or (get-in ctx [:execution/input :workflow/parent-id])
-                                        (get-in ctx [:execution/id]))
-                          :spec     (get-in ctx [:execution/input :spec/path])
-                          :task     (get-in ctx [:execution/input :task/id])}
-             ;; Resolve and inject GitHub token for capsule gh CLI auth
-             :github-token (resolve-github-token ctx)}
-      on-chunk (assoc :on-chunk on-chunk)
-      behavior-addendum (assoc :task/behavior-addendum behavior-addendum))))
-
-(defn enter-release
+(defn ^{:stratum 4} enter-release
   "Execute release phase.
 
    Uses the workflow release executor to:
@@ -476,148 +615,10 @@
         (cond-> (phase/result-succeeded? result)
           (assoc :workflow/pr-info (response/release-pr-info {:result result}))))))))
 
-(defn- compute-verdict
-  "Pick the verdict that should flow on the phase result.
+;------------------------------------------------------------------------------ Layer 5
 
-   `:release/zero-files` pre-empts `:repair-requested` — when the curator
-   reports an empty diff, retrying the implementer is wasted work: the
-   next pass would just produce another empty diff. Make this FSM-visible
-   so the verdict-driven guarded array terminates the loop."
-  [{:keys [phase-failed? on-fail-configured? zero-files?]}]
-  (cond
-    zero-files?
-    :release/zero-files
-
-    (and phase-failed? on-fail-configured?)
-    :repair-requested
-
-    phase-failed?
-    :exhausted
-
-    :else
-    :approved))
-
-(defn leave-release
-  "Post-processing for release phase.
-
-   Records release metrics and PR info.
-
-   Phase 3b: attaches a `:phase/verdict` to the phase result so the
-   FSM's verdict-driven guarded `:phase/fail` array picks the right
-   target. `:release/zero-files` is a TERMINAL verdict — the FSM
-   bypasses `:on-fail` and lands on `:failed` because the curator's
-   empty-diff signal means the implementer has nothing left to do."
-  [ctx]
-  (let [start-time (get-in ctx [:phase :started-at])
-        end-time (System/currentTimeMillis)
-        duration-ms (if start-time (- end-time start-time) 0)
-        result (get-in ctx [:phase :result])
-        release-data (when (phase/result-succeeded? result) (:output result))
-        release-metrics (get release-data :release/metrics {})
-        metrics (merge {:tokens 0 :duration-ms duration-ms} release-metrics)
-        agent-status (:status result)
-        iterations (get-in ctx [:phase :iterations] 1)
-        max-iterations (get-in ctx [:phase :budget :iterations]
-                               (get-in default-config [:budget :iterations]))
-        zero-files? (= :release/zero-files
-                       (get-in result [:error :data :type]))
-        phase-status (if zero-files?
-                       :failed
-                       (phase/determine-phase-status
-                        agent-status iterations max-iterations))
-        on-fail (get-in ctx [:phase-config :on-fail])
-        ;; Verdict is only meaningful for terminal phase statuses
-        ;; (:completed → :approved; :failed → one of the failure
-        ;; verdicts). For :retrying the runner handles the in-phase
-        ;; loop and the FSM never sees a transition, so skip the
-        ;; verdict attachment — leaving the prior verdict in place if
-        ;; the phase has been around the loop before, else nothing.
-        verdict (when (contains? #{:completed :failed} phase-status)
-                  (compute-verdict {:phase-failed?       (= :failed phase-status)
-                                    :on-fail-configured? (some? on-fail)
-                                    :zero-files?         zero-files?}))
-        updated-ctx (cond-> ctx
-                      true
-                      (-> (assoc-in [:phase :ended-at] end-time)
-                          (assoc-in [:phase :duration-ms] duration-ms)
-                          (assoc-in [:phase :status] phase-status)
-                          (assoc-in [:phase :metrics] metrics))
-                      verdict
-                      (-> (assoc-in [:phase :verdict] verdict)
-                          (assoc-in [:phase :result :output :phase/verdict] verdict)))
-        updated-ctx (-> updated-ctx
-                        (assoc-in [:metrics :release :duration-ms] duration-ms)
-                        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
-                        (update-in [:execution :phases-completed] (fnil conj []) :release)
-                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
-    (doto (cond-> updated-ctx
-            (phase/retrying? (:phase updated-ctx))
-            (-> (update-in [:phase :iterations] (fnil inc 1))
-                (assoc-in [:phase :last-error]
-                          (get-in result [:error :message] (messages/t :release/phase-failed)))))
-      (phase/emit-phase-completed! :release
-        (merge {:outcome     (phase/outcome result (= :completed phase-status))
-                :duration-ms duration-ms
-                :tokens      (:tokens metrics 0)}
-               (phase-terminal/derive-termination-reason result nil))))))
-
-(defn- attach-error-verdict
-  "Phase 3b: when error-release fails terminally, attach the verdict to
-   the result so the FSM's guarded :phase/fail array reads it. The
-   `:release/zero-files` case is terminal; everything else is either
-   :repair-requested (on-fail set, FSM will redirect) or :exhausted
-   (no on-fail target)."
-  [ctx zero-files? on-fail-configured?]
-  (let [verdict (cond
-                  zero-files?            :release/zero-files
-                  on-fail-configured?    :repair-requested
-                  :else                  :exhausted)]
-    (-> ctx
-        (assoc-in [:phase :verdict] verdict)
-        (assoc-in [:phase :result :output :phase/verdict] verdict))))
-
-(defn error-release
-  "Handle release phase errors.
-
-   Phase 3b: failures no longer call `phase/fail-and-request-redirect`
-   — the FSM's verdict-driven guarded :phase/fail array routes via
-   `:on-fail` if configured, or to `:failed` otherwise. error-release
-   stays responsible for the phase-level retry budget; once that's
-   exhausted it just attaches the verdict + error and lets the FSM
-   dispatch."
-  [ctx ex]
-  (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 2)
-        on-fail (get-in ctx [:phase-config :on-fail])
-        error-map (phase/exception-error ex)
-        zero-files? (= :release/zero-files (get (ex-data ex) :type))]
-    (cond
-      zero-files?
-      (-> ctx
-          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
-          (attach-error-verdict true (some? on-fail)))
-
-      ;; Within phase-level retry budget — retry in place. The FSM
-      ;; doesn't see this as a transition.
-      (< iterations max-iterations)
-      (-> ctx
-          (update-in [:phase :iterations] (fnil inc 0))
-          (assoc-in [:phase :last-error] (ex-message ex))
-          (assoc-in [:phase :status] :retrying))
-
-      ;; Out of retries — attach verdict and let the FSM dispatch
-      ;; (:repair-requested when on-fail set, :exhausted otherwise).
-      :else
-      (-> ctx
-          (assoc :phase (phase/fail-phase (:phase ctx) error-map))
-          (attach-error-verdict false (some? on-fail))))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Registry methods
-
-(defmethod phase/get-phase-interceptor-method :release
+(defmethod ^{:stratum 5} phase/get-phase-interceptor-method :release
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::release
@@ -626,6 +627,9 @@
               (enter-release (assoc ctx :phase-config merged)))
      :leave leave-release
      :error error-release}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :release default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

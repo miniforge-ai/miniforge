@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.explore
   "Explore phase interceptor.
 
@@ -31,9 +30,9 @@
             [ai.miniforge.knowledge.interface :as knowledge]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   {:agent nil
    :gates []
    :budget {:tokens 5000
@@ -43,13 +42,46 @@
    :max-lines-per-file 500
    :model-hint :haiku-4.5})
 
-;; Register defaults on load
-(phase/register-phase-defaults! :explore default-config)
+(defn ^{:stratum 0} leave-explore
+  "Post-processing for exploration phase.
+
+   Records metrics (file count, load time)."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at])
+        end-time (System/currentTimeMillis)
+        duration-ms (- end-time start-time)
+        result (get-in ctx [:phase :result])
+        file-count (get-in result [:output :exploration/file-count] 0)]
+    (-> ctx
+        (assoc-in [:phase :ended-at] end-time)
+        (assoc-in [:phase :duration-ms] duration-ms)
+        (assoc-in [:phase :status] :completed)
+        (assoc-in [:phase :metrics] {:file-count file-count
+                                     :duration-ms duration-ms})
+        (update-in [:execution :phases-completed] (fnil conj []) :explore)
+        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
+
+(defn ^{:stratum 0} error-explore
+  "Handle exploration phase errors.
+
+   Simple retry within budget."
+  [ctx ex]
+  (let [iterations (get-in ctx [:phase :iterations] 0)
+        max-iterations (get-in ctx [:phase :budget :iterations] 1)]
+    (if (< iterations max-iterations)
+      (-> ctx
+          (update-in [:phase :iterations] (fnil inc 0))
+          (assoc-in [:phase :last-error] (ex-message ex))
+          (assoc-in [:phase :status] :retrying))
+      (-> ctx
+          (assoc-in [:phase :status] :failed)
+          (assoc-in [:phase :error] {:message (ex-message ex)
+                                     :data (ex-data ex)})))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Interceptor implementation
 
-(defn enter-explore
+;; Interceptor implementation
+(defn ^{:stratum 1} enter-explore
   "Execute exploration phase.
 
    Reads files-in-scope from execution input, loads their contents
@@ -86,46 +118,10 @@
     (phase/enter-context ctx :explore nil [] (:budget default-config) start-time
                                 {:status :success :output exploration})))
 
-(defn leave-explore
-  "Post-processing for exploration phase.
-
-   Records metrics (file count, load time)."
-  [ctx]
-  (let [start-time (get-in ctx [:phase :started-at])
-        end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
-        result (get-in ctx [:phase :result])
-        file-count (get-in result [:output :exploration/file-count] 0)]
-    (-> ctx
-        (assoc-in [:phase :ended-at] end-time)
-        (assoc-in [:phase :duration-ms] duration-ms)
-        (assoc-in [:phase :status] :completed)
-        (assoc-in [:phase :metrics] {:file-count file-count
-                                     :duration-ms duration-ms})
-        (update-in [:execution :phases-completed] (fnil conj []) :explore)
-        (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
-
-(defn error-explore
-  "Handle exploration phase errors.
-
-   Simple retry within budget."
-  [ctx ex]
-  (let [iterations (get-in ctx [:phase :iterations] 0)
-        max-iterations (get-in ctx [:phase :budget :iterations] 1)]
-    (if (< iterations max-iterations)
-      (-> ctx
-          (update-in [:phase :iterations] (fnil inc 0))
-          (assoc-in [:phase :last-error] (ex-message ex))
-          (assoc-in [:phase :status] :retrying))
-      (-> ctx
-          (assoc-in [:phase :status] :failed)
-          (assoc-in [:phase :error] {:message (ex-message ex)
-                                     :data (ex-data ex)})))))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Registry method
 
-(defmethod phase/get-phase-interceptor-method :explore
+;; Registry method
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :explore
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::explore
@@ -134,6 +130,9 @@
               (enter-explore (assoc ctx :phase-config merged)))
      :leave leave-explore
      :error error-explore}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :explore default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

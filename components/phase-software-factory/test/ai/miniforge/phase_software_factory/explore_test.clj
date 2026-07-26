@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.explore-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.explore :as sut]))
 
-(deftest enter-explore-uses-context-files-in-scope-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} enter-explore-uses-context-files-in-scope-test
   (testing "explore reads files-in-scope from nested execution input context"
     (let [captured (atom nil)
           loaded-files [{:path "components/workflow/src/foo.clj"

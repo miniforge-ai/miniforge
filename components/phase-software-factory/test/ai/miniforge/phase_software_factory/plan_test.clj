@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.plan-test
   "Tests for the plan phase — specifically the policy-pack wiring that
    was added so the planner agent sees the same compiled standards
@@ -27,44 +26,15 @@
    [ai.miniforge.response.interface :as response]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ leave-plan: cost + outcome reporting (regression for 2026-05-27 $0/double-emit)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- leave-plan-ctx
+;------------------------------------------------------------------------------ leave-plan: cost + outcome reporting (regression for 2026-05-27 $0/double-emit)
+(defn- ^{:stratum 0} leave-plan-ctx
   [result]
   {:phase {:started-at (- (System/currentTimeMillis) 1000) :result result}
    :execution/metrics {}})
 
-(deftest leave-plan-failure-merges-tokens-and-emits-failure-test
-  (testing "a FAILED plan result still merges spent tokens into :execution/metrics
-            (no more $0.0000 on failure) and marks the phase :failed, not a false :completed"
-    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
-      (let [out (plan/leave-plan (leave-plan-ctx
-                                  (response/failure "plan failed"
-                                                    {:tokens 4242 :metrics {:tokens 4242}})))]
-        (is (= :failed (get-in out [:phase :status])))
-        (is (= 4242 (get-in out [:execution/metrics :tokens]))
-            "spent tokens MUST be merged even on failure")
-        (is (not (some #{:plan} (get-in out [:execution :phases-completed])))
-            "a failed plan is not counted as completed")))))
-
-(deftest leave-plan-failure-merges-top-level-tokens-test
-  (testing "tokens are recovered from a top-level :tokens when :metrics is absent"
-    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
-      (let [out (plan/leave-plan (leave-plan-ctx
-                                  (response/failure "boom" {:tokens 99})))]
-        (is (= 99 (get-in out [:execution/metrics :tokens])))))))
-
-(deftest leave-plan-success-merges-tokens-test
-  (testing "a successful plan merges tokens, marks :completed, and counts as completed"
-    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
-      (let [out (plan/leave-plan (leave-plan-ctx
-                                  (response/success {:plan/id (random-uuid) :plan/tasks []}
-                                                    {:tokens 100 :metrics {:tokens 100}})))]
-        (is (= :completed (get-in out [:phase :status])))
-        (is (= 100 (get-in out [:execution/metrics :tokens])))
-        (is (some #{:plan} (get-in out [:execution :phases-completed])))))))
-
-(deftest build-planner-task-threads-behavior-addendum-test
+(deftest ^{:stratum 0} build-planner-task-threads-behavior-addendum-test
   (testing "build-planner-task computes and attaches :task/behavior-addendum"
     (let [stub-addendum "\n\n## Policy Rules — Required Behaviors\n\n1. Plan rule body."]
       (with-redefs [phase/load-guidance-addendum
@@ -83,7 +53,7 @@
           (is (= stub-addendum (:task/behavior-addendum task))
               "planner task must carry the phase-filtered addendum so create-planner can append it to the system prompt"))))))
 
-(deftest build-planner-task-omits-behavior-addendum-when-filter-returns-nil-test
+(deftest ^{:stratum 0} build-planner-task-omits-behavior-addendum-when-filter-returns-nil-test
   (testing "no :task/behavior-addendum key when phase/load-guidance-addendum yields nil"
     (with-redefs [phase/load-guidance-addendum (fn [_phase _ctx] nil)
                   kb-helpers/inject-with-manifest
@@ -98,3 +68,35 @@
                             nil)]
         (is (not (contains? task :task/behavior-addendum))
             "no addendum key when filter yields nothing — avoids nil-valued task entries")))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} leave-plan-failure-merges-tokens-and-emits-failure-test
+  (testing "a FAILED plan result still merges spent tokens into :execution/metrics
+            (no more $0.0000 on failure) and marks the phase :failed, not a false :completed"
+    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
+      (let [out (plan/leave-plan (leave-plan-ctx
+                                  (response/failure "plan failed"
+                                                    {:tokens 4242 :metrics {:tokens 4242}})))]
+        (is (= :failed (get-in out [:phase :status])))
+        (is (= 4242 (get-in out [:execution/metrics :tokens]))
+            "spent tokens MUST be merged even on failure")
+        (is (not (some #{:plan} (get-in out [:execution :phases-completed])))
+            "a failed plan is not counted as completed")))))
+
+(deftest ^{:stratum 1} leave-plan-failure-merges-top-level-tokens-test
+  (testing "tokens are recovered from a top-level :tokens when :metrics is absent"
+    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
+      (let [out (plan/leave-plan (leave-plan-ctx
+                                  (response/failure "boom" {:tokens 99})))]
+        (is (= 99 (get-in out [:execution/metrics :tokens])))))))
+
+(deftest ^{:stratum 1} leave-plan-success-merges-tokens-test
+  (testing "a successful plan merges tokens, marks :completed, and counts as completed"
+    (with-redefs [phase/emit-phase-completed! (fn [_ctx _phase _data] nil)]
+      (let [out (plan/leave-plan (leave-plan-ctx
+                                  (response/success {:plan/id (random-uuid) :plan/tasks []}
+                                                    {:tokens 100 :metrics {:tokens 100}})))]
+        (is (= :completed (get-in out [:phase :status])))
+        (is (= 100 (get-in out [:execution/metrics :tokens])))
+        (is (some #{:plan} (get-in out [:execution :phases-completed])))))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.review
   "Review phase interceptor.
 
@@ -36,34 +35,25 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Phase config — convergence decision logic lives in the review-convergence ns
 
-(def default-config
+;; Phase config — convergence decision logic lives in the review-convergence ns
+(def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :review))
 
-;; Fail fast on a bad defaults.edn at load (rule 004) rather than surfacing a
-;; ClassCastException deep inside the review phase.
-(conv/validate-convergence-config! default-config)
-
-;; Register defaults on load
-(phase/register-phase-defaults! :review default-config)
-
-(defn- record-warning-cycle-count
+(defn- ^{:stratum 0} record-warning-cycle-count
   "Persist the warning-only cycle count at [:execution :review-warning-only-cycles].
    Survives phase re-entries because it lives on :execution, not :phase."
   [ctx count]
   (assoc-in ctx [:execution :review-warning-only-cycles] count))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
-
-(defn- create-streaming-callback
+(defn- ^{:stratum 0} create-streaming-callback
   "Create a streaming callback for agent output if event-stream is available."
   [ctx phase-name]
   (phase/create-streaming-callback ctx phase-name))
 
-(defn- rehydrate-from-paths
+(defn- ^{:stratum 0} rehydrate-from-paths
   "Reconstitute `:code/files` for an outer-artifact that was persisted as
    paths-only metadata by `lightweight-curated-artifact`.
 
@@ -87,7 +77,127 @@
       (when (seq files)
         (assoc outer-artifact :code/files files)))))
 
-(defn- resolve-implement-artifact
+(defn- ^{:stratum 0} build-verify-review-input
+  "Build a stable verify summary for the reviewer prompt from the full verify phase result."
+  [verify-phase-result]
+  (when verify-phase-result
+    {:phase/status (get verify-phase-result :status)
+     :result/status (get-in verify-phase-result [:result :status])
+     :summary (or (get-in verify-phase-result [:result :summary])
+                  (get-in verify-phase-result [:result :output :summary]))
+     :metrics (get verify-phase-result :metrics
+                   (get-in verify-phase-result [:result :metrics]))}))
+
+(defn- ^{:stratum 0} attach-stagnated-anomaly
+  "Phase 2b: attach the stagnation anomaly to the phase result so the
+   workflow runner / evidence bundle can report what didn't move.
+   No more :stagnated? flag bit on the result — the FSM reads the
+   verdict directly."
+  [ctx fingerprint-history]
+  (let [msg (messages/t :review/stagnation)]
+    (assoc-in ctx [:phase :error]
+              (anomaly/sub-anomaly
+               :exhausted
+               :anomalies.review/stagnation
+               msg
+               {:review/fingerprint-history (vec fingerprint-history)}))))
+
+(defn- ^{:stratum 0} attach-needs-decomposition-anomaly
+  "Phase 2b: attach the needs-decomposition anomaly to the phase result.
+   No more :needs-decomposition? flag bit — verdict carries the signal."
+  [ctx fingerprint-history review-cycle-count]
+  (let [msg (messages/t :review/needs-decomposition {:iterations review-cycle-count})]
+    (assoc-in ctx [:phase :error]
+              {:message msg
+               :anomaly/category :anomalies.review/needs-decomposition
+               :anomaly/message  msg
+               :review/cycle-count review-cycle-count
+               :review/fingerprint-history (vec fingerprint-history)
+               ;; Blocking-count trend across cycles — shows whether this
+               ;; was a flat/growing non-convergence or a slow shrink that
+               ;; hit the absolute ceiling.
+               :review/blocking-counts (get-in ctx [:execution :review-blocking-counts] [])})))
+
+(defn- ^{:stratum 0} attach-backend-timeout-anomaly
+  "PR-B of phase-timeout stack: attach the backend-timeout anomaly to the
+   phase result so the workflow runner / evidence bundle can surface that
+   the reviewer LLM hit its adaptive timeout — the same pattern
+   `attach-stagnated-anomaly` and `attach-needs-decomposition-anomaly`
+   use for their terminal verdicts. Pulls the timeout message verbatim
+   from the agent's error result so operators see the actual
+   `stream-idle` / `stagnation` / etc. detail in post-mortem."
+  [ctx]
+  (let [agent-error-message (get-in ctx [:phase :result :error :message])
+        msg (or agent-error-message
+                (messages/t :review/backend-timeout))]
+    (assoc-in ctx [:phase :error]
+              {:message msg
+               :anomaly/category :anomalies.review/backend-timeout
+               :anomaly/message  msg})))
+
+(defn- ^{:stratum 0} attach-repair-handoff
+  "Phase 2b: attach repair feedback + a typed handoff so the implementer
+   can pick up the work. Does NOT call `phase/request-redirect` anymore
+   — the FSM's guarded `:phase/fail` array (registered at compile time
+   in `build-phase-state`) decides between on-fail redirect and
+   terminal :failed, with `:redirect/inc-count` as the single accounting
+   site. `leave-review` just attaches the verdict + feedback to the
+   result; the workflow engine handles routing."
+  [updated-ctx feedback]
+  (let [repair-attempt (inc (get-in updated-ctx [:phase :iterations] 0))
+        handoff (phase-handoff/repair-request
+                 {:workflow-id (:execution/id updated-ctx)
+                  :source-phase :review
+                  :target-phase :implement
+                  :phase-attempt repair-attempt
+                  :feedback feedback})
+        phase-result (-> (:phase updated-ctx)
+                         (assoc :iterations repair-attempt)
+                         (assoc :review-feedback feedback)
+                         (assoc :phase/handoff handoff))]
+    (-> updated-ctx
+        (assoc :phase phase-result)
+        (phase-handoff/append-execution-handoff handoff))))
+
+(defn- ^{:stratum 0} record-fingerprint
+  "Append the latest review fingerprint to [:execution :review-fingerprints]."
+  [ctx fingerprint]
+  (update-in ctx [:execution :review-fingerprints] (fnil conj []) fingerprint))
+
+(defn- ^{:stratum 0} record-blocking-count
+  "Append this cycle's blocking-issue count to
+   [:execution :review-blocking-counts] — the convergence trend signal
+   (shrinking across cycles = making progress)."
+  [ctx blocking-count]
+  (update-in ctx [:execution :review-blocking-counts] (fnil conj []) blocking-count))
+
+(defn- ^{:stratum 0} mark-completed
+  "Mark the review phase as completed in the execution-level
+   phases-completed list. Only called on the :complete branch."
+  [ctx]
+  (update-in ctx [:execution :phases-completed] (fnil conj []) :review))
+
+(defn- ^{:stratum 0} attach-verdict
+  "Phase 2b: attach the verdict to both the phase-internal `:phase
+   :verdict` slot (so phase callers / tests can inspect it) AND the
+   phase result's `:output :phase/verdict` slot, where
+   `determine-phase-event` reads it before constructing the FSM event."
+  [ctx verdict]
+  (-> ctx
+      (assoc-in [:phase :verdict] verdict)
+      (assoc-in [:phase :result :output :phase/verdict] verdict)))
+
+(defn ^{:stratum 0} error-review
+  "Handle review phase errors. Retries within budget; on exhaustion
+   redirects via `:on-fail` (typically to `:implement`) when set,
+   otherwise propagates. Delegates to the shared `phase/handle-error`
+   helper."
+  [ctx ex]
+  (phase/handle-error ctx ex 2))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} resolve-implement-artifact
   "Resolve the implement-phase artifact using ordered strategies, from
    most-direct (full content already in the result) to last-resort
    (rebuild from the worktree).
@@ -130,18 +240,63 @@
        (merge worktree-artifact outer-artifact))
      worktree-artifact)))
 
-(defn- build-verify-review-input
-  "Build a stable verify summary for the reviewer prompt from the full verify phase result."
-  [verify-phase-result]
-  (when verify-phase-result
-    {:phase/status (get verify-phase-result :status)
-     :result/status (get-in verify-phase-result [:result :status])
-     :summary (or (get-in verify-phase-result [:result :summary])
-                  (get-in verify-phase-result [:result :output :summary]))
-     :metrics (get verify-phase-result :metrics
-                   (get-in verify-phase-result [:result :metrics]))}))
+(defn- ^{:stratum 1} apply-verdict
+  "Carry out the side-effects implied by a verdict — attach anomalies
+   for terminal verdicts, attach handoff feedback for repair-requested,
+   mark completed for approved and accept-with-warnings. The FSM drives
+   the actual phase transition; this fn only enriches the ctx with
+   payload data that evidence-bundle / downstream phases consume."
+  [verdict updated-ctx feedback fingerprint-history review-cycle-count]
+  (case verdict
+    :stagnated
+    (attach-stagnated-anomaly updated-ctx fingerprint-history)
 
-(defn- build-review-task
+    :needs-decomposition
+    (attach-needs-decomposition-anomaly updated-ctx fingerprint-history review-cycle-count)
+
+    :repair-requested
+    (attach-repair-handoff updated-ctx feedback)
+
+    :exhausted
+    updated-ctx
+
+    :review/backend-timeout
+    (attach-backend-timeout-anomaly updated-ctx)
+
+    :accept-with-warnings
+    (let [review-artifact (get-in updated-ctx [:phase :result :output])
+          warnings        (get review-artifact :review/warnings [])]
+      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
+      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
+      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
+      (-> (mark-completed updated-ctx)
+          (assoc-in [:phase :status] :completed)
+          (assoc-in [:phase :unresolved-warnings] warnings)))
+
+    :approved
+    (mark-completed updated-ctx)))
+
+(defn- ^{:stratum 1} accumulate-base-ctx
+  "Apply the always-on context updates: phase metadata, metrics,
+   execution-level rollups, the new fingerprint, and the cycle's
+   blocking-issue count (convergence trend)."
+  [ctx end-time duration-ms phase-status metrics iterations current-fp current-blocking-count]
+  (-> ctx
+      (assoc-in [:phase :ended-at] end-time)
+      (assoc-in [:phase :duration-ms] duration-ms)
+      (assoc-in [:phase :status] phase-status)
+      (assoc-in [:phase :metrics] metrics)
+      (assoc-in [:metrics :review :duration-ms] duration-ms)
+      (assoc-in [:metrics :review :repair-cycles] (dec iterations))
+      (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+      (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
+      (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0))
+      (record-fingerprint current-fp)
+      (record-blocking-count current-blocking-count)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} build-review-task
   "Build the task map for the reviewer agent from execution context.
 
    The reviewer now receives the same `:task/behavior-addendum` that
@@ -186,190 +341,7 @@
     {:task task
      :rules-manifest manifest}))
 
-(defn enter-review
-  "Execute review phase.
-
-   Runs code review, quality checks, and policy validation."
-  [ctx]
-  (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [gates budget]} config
-        start-time (System/currentTimeMillis)
-        ;; Emit phase-started telemetry event
-        _ (phase/emit-phase-started! ctx :review)
-        reviewer-agent (agent/create-reviewer
-                        (select-keys ctx [:llm-backend]))
-        {:keys [task rules-manifest]} (build-review-task ctx)
-        on-chunk (create-streaming-callback ctx :review)
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-
-        ;; Emit agent-started telemetry event
-        _ (phase/emit-agent-started! agent-ctx :review :reviewer)
-
-        result (try
-                 (agent/invoke reviewer-agent task agent-ctx)
-                 (catch Exception e
-                   (response/failure e)))
-
-        ;; Emit agent-completed telemetry event
-        _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
-
-    (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
-        (assoc-in [:phase :rules-manifest] rules-manifest))))
-
-(defn- attach-stagnated-anomaly
-  "Phase 2b: attach the stagnation anomaly to the phase result so the
-   workflow runner / evidence bundle can report what didn't move.
-   No more :stagnated? flag bit on the result — the FSM reads the
-   verdict directly."
-  [ctx fingerprint-history]
-  (let [msg (messages/t :review/stagnation)]
-    (assoc-in ctx [:phase :error]
-              (anomaly/sub-anomaly
-               :exhausted
-               :anomalies.review/stagnation
-               msg
-               {:review/fingerprint-history (vec fingerprint-history)}))))
-
-(defn- attach-needs-decomposition-anomaly
-  "Phase 2b: attach the needs-decomposition anomaly to the phase result.
-   No more :needs-decomposition? flag bit — verdict carries the signal."
-  [ctx fingerprint-history review-cycle-count]
-  (let [msg (messages/t :review/needs-decomposition {:iterations review-cycle-count})]
-    (assoc-in ctx [:phase :error]
-              {:message msg
-               :anomaly/category :anomalies.review/needs-decomposition
-               :anomaly/message  msg
-               :review/cycle-count review-cycle-count
-               :review/fingerprint-history (vec fingerprint-history)
-               ;; Blocking-count trend across cycles — shows whether this
-               ;; was a flat/growing non-convergence or a slow shrink that
-               ;; hit the absolute ceiling.
-               :review/blocking-counts (get-in ctx [:execution :review-blocking-counts] [])})))
-
-(defn- attach-backend-timeout-anomaly
-  "PR-B of phase-timeout stack: attach the backend-timeout anomaly to the
-   phase result so the workflow runner / evidence bundle can surface that
-   the reviewer LLM hit its adaptive timeout — the same pattern
-   `attach-stagnated-anomaly` and `attach-needs-decomposition-anomaly`
-   use for their terminal verdicts. Pulls the timeout message verbatim
-   from the agent's error result so operators see the actual
-   `stream-idle` / `stagnation` / etc. detail in post-mortem."
-  [ctx]
-  (let [agent-error-message (get-in ctx [:phase :result :error :message])
-        msg (or agent-error-message
-                (messages/t :review/backend-timeout))]
-    (assoc-in ctx [:phase :error]
-              {:message msg
-               :anomaly/category :anomalies.review/backend-timeout
-               :anomaly/message  msg})))
-
-(defn- attach-repair-handoff
-  "Phase 2b: attach repair feedback + a typed handoff so the implementer
-   can pick up the work. Does NOT call `phase/request-redirect` anymore
-   — the FSM's guarded `:phase/fail` array (registered at compile time
-   in `build-phase-state`) decides between on-fail redirect and
-   terminal :failed, with `:redirect/inc-count` as the single accounting
-   site. `leave-review` just attaches the verdict + feedback to the
-   result; the workflow engine handles routing."
-  [updated-ctx feedback]
-  (let [repair-attempt (inc (get-in updated-ctx [:phase :iterations] 0))
-        handoff (phase-handoff/repair-request
-                 {:workflow-id (:execution/id updated-ctx)
-                  :source-phase :review
-                  :target-phase :implement
-                  :phase-attempt repair-attempt
-                  :feedback feedback})
-        phase-result (-> (:phase updated-ctx)
-                         (assoc :iterations repair-attempt)
-                         (assoc :review-feedback feedback)
-                         (assoc :phase/handoff handoff))]
-    (-> updated-ctx
-        (assoc :phase phase-result)
-        (phase-handoff/append-execution-handoff handoff))))
-
-(defn- record-fingerprint
-  "Append the latest review fingerprint to [:execution :review-fingerprints]."
-  [ctx fingerprint]
-  (update-in ctx [:execution :review-fingerprints] (fnil conj []) fingerprint))
-
-(defn- record-blocking-count
-  "Append this cycle's blocking-issue count to
-   [:execution :review-blocking-counts] — the convergence trend signal
-   (shrinking across cycles = making progress)."
-  [ctx blocking-count]
-  (update-in ctx [:execution :review-blocking-counts] (fnil conj []) blocking-count))
-
-(defn- mark-completed
-  "Mark the review phase as completed in the execution-level
-   phases-completed list. Only called on the :complete branch."
-  [ctx]
-  (update-in ctx [:execution :phases-completed] (fnil conj []) :review))
-
-(defn- attach-verdict
-  "Phase 2b: attach the verdict to both the phase-internal `:phase
-   :verdict` slot (so phase callers / tests can inspect it) AND the
-   phase result's `:output :phase/verdict` slot, where
-   `determine-phase-event` reads it before constructing the FSM event."
-  [ctx verdict]
-  (-> ctx
-      (assoc-in [:phase :verdict] verdict)
-      (assoc-in [:phase :result :output :phase/verdict] verdict)))
-
-(defn- apply-verdict
-  "Carry out the side-effects implied by a verdict — attach anomalies
-   for terminal verdicts, attach handoff feedback for repair-requested,
-   mark completed for approved and accept-with-warnings. The FSM drives
-   the actual phase transition; this fn only enriches the ctx with
-   payload data that evidence-bundle / downstream phases consume."
-  [verdict updated-ctx feedback fingerprint-history review-cycle-count]
-  (case verdict
-    :stagnated
-    (attach-stagnated-anomaly updated-ctx fingerprint-history)
-
-    :needs-decomposition
-    (attach-needs-decomposition-anomaly updated-ctx fingerprint-history review-cycle-count)
-
-    :repair-requested
-    (attach-repair-handoff updated-ctx feedback)
-
-    :exhausted
-    updated-ctx
-
-    :review/backend-timeout
-    (attach-backend-timeout-anomaly updated-ctx)
-
-    :accept-with-warnings
-    (let [review-artifact (get-in updated-ctx [:phase :result :output])
-          warnings        (get review-artifact :review/warnings [])]
-      ;; Override :phase :status from :failed (set by accumulate-base-ctx because
-      ;; reviewer-blocked? was true) back to :completed — the phase succeeds despite
-      ;; the warning-only rejection; the PR proceeds with warnings surfaced.
-      (-> (mark-completed updated-ctx)
-          (assoc-in [:phase :status] :completed)
-          (assoc-in [:phase :unresolved-warnings] warnings)))
-
-    :approved
-    (mark-completed updated-ctx)))
-
-(defn- accumulate-base-ctx
-  "Apply the always-on context updates: phase metadata, metrics,
-   execution-level rollups, the new fingerprint, and the cycle's
-   blocking-issue count (convergence trend)."
-  [ctx end-time duration-ms phase-status metrics iterations current-fp current-blocking-count]
-  (-> ctx
-      (assoc-in [:phase :ended-at] end-time)
-      (assoc-in [:phase :duration-ms] duration-ms)
-      (assoc-in [:phase :status] phase-status)
-      (assoc-in [:phase :metrics] metrics)
-      (assoc-in [:metrics :review :duration-ms] duration-ms)
-      (assoc-in [:metrics :review :repair-cycles] (dec iterations))
-      (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-      (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
-      (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0))
-      (record-fingerprint current-fp)
-      (record-blocking-count current-blocking-count)))
-
-(defn leave-review
+(defn ^{:stratum 2} leave-review
   "Post-processing for review phase.
 
    Records review metrics: issues found, approval status.
@@ -441,18 +413,42 @@
              (when review-cause {:review/cause review-cause})))
     next-ctx))
 
-(defn error-review
-  "Handle review phase errors. Retries within budget; on exhaustion
-   redirects via `:on-fail` (typically to `:implement`) when set,
-   otherwise propagates. Delegates to the shared `phase/handle-error`
-   helper."
-  [ctx ex]
-  (phase/handle-error ctx ex 2))
+;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 2
+(defn ^{:stratum 3} enter-review
+  "Execute review phase.
+
+   Runs code review, quality checks, and policy validation."
+  [ctx]
+  (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+        ;; Emit phase-started telemetry event
+        _ (phase/emit-phase-started! ctx :review)
+        reviewer-agent (agent/create-reviewer
+                        (select-keys ctx [:llm-backend]))
+        {:keys [task rules-manifest]} (build-review-task ctx)
+        on-chunk (create-streaming-callback ctx :review)
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+
+        ;; Emit agent-started telemetry event
+        _ (phase/emit-agent-started! agent-ctx :review :reviewer)
+
+        result (try
+                 (agent/invoke reviewer-agent task agent-ctx)
+                 (catch Exception e
+                   (response/failure e)))
+
+        ;; Emit agent-completed telemetry event
+        _ (phase/emit-agent-completed! agent-ctx :review :reviewer result)]
+
+    (-> (phase/enter-context ctx :review :reviewer gates budget start-time result)
+        (assoc-in [:phase :rules-manifest] rules-manifest))))
+
+;------------------------------------------------------------------------------ Layer 4
+
 ;; Registry method
-
-(defmethod phase/get-phase-interceptor-method :review
+(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :review
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::review
@@ -461,6 +457,13 @@
               (enter-review (assoc ctx :phase-config merged)))
      :leave leave-review
      :error error-review}))
+
+;; Fail fast on a bad defaults.edn at load (rule 004) rather than surfacing a
+;; ClassCastException deep inside the review phase.
+(conv/validate-convergence-config! default-config)
+
+;; Register defaults on load
+(phase/register-phase-defaults! :review default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

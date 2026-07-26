@@ -15,18 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.messages
   "Component-level message catalog for phase-software-factory.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} t
   "Look up a phase message by key, with optional param substitution."
   (messages/create-translator "config/phase/messages/en-US.edn"
                               :phase/messages))
 
-(def ts
+(def ^{:stratum 0} ts
   "Look up a system-locale phase message by key (operator-facing: logs, startup
    errors, observability pipelines — never rendered directly to a user)."
   (messages/create-translator "config/phase/messages/system.edn"

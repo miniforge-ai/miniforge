@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.review-cause-event-test
   "Tests for :review/cause enrichment on terminal review verdicts.
 
@@ -30,32 +29,24 @@
    [ai.miniforge.phase-software-factory.review-convergence]
    [ai.miniforge.phase-software-factory.implement]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Layer 0 — factories and shared constants
-
-(def ^:private phase-test-config-resource
+(def ^{:stratum 0} ^:private phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (try
-      (binding [loader/phase-loader-config-resource phase-test-config-resource]
-        (f))
-      (finally
-        (phase/reset-phase-loader!)))))
-
 ;; Private helper accessed directly for pure-function unit tests.
-(def ^:private build-review-cause
+(def ^{:stratum 0} ^:private build-review-cause
   #'ai.miniforge.phase-software-factory.review-convergence/build-review-cause)
 
-(def ^:private blocking-cause-map
+(def ^{:stratum 0} ^:private blocking-cause-map
   {:cause/type :blocking-defect :warning-only-count 0})
 
-(def ^:private warning-cause-map
+(def ^{:stratum 0} ^:private warning-cause-map
   {:cause/type :warning-churn :warning-only-count 2})
 
-(defn- make-leave-review-ctx
+(defn- ^{:stratum 0} make-leave-review-ctx
   "Minimal context for leave-review, matching the shape used in
    review-repair-loop-test."
   [decision iterations max-iterations review-output]
@@ -70,23 +61,24 @@
      :execution/input {:description "test task"}
      :execution/metrics {}}))
 
-(defn- run-leave-review
+(defn- ^{:stratum 0} run-leave-review
   "Invoke the leave-review interceptor function and return the updated context."
   [ctx]
   (let [interceptor (phase/get-phase-interceptor {:phase :review})
         leave-fn    (:leave interceptor)]
     (leave-fn ctx)))
 
+;------------------------------------------------------------------------------ Layer 1
+
 ;; ---------------------------------------------------------------------------
 ;; Layer 1 — build-review-cause unit tests (pure function, no event-stream)
-
-(deftest build-review-cause-returns-nil-for-non-terminal-verdicts
+(deftest ^{:stratum 1} build-review-cause-returns-nil-for-non-terminal-verdicts
   (testing "non-terminal verdicts produce no cause map"
     (doseq [v [:repair-requested :approved :review/backend-timeout]]
       (is (nil? (build-review-cause v blocking-cause-map 0 1 {}))
           (str "verdict " v " should not produce a cause map")))))
 
-(deftest build-review-cause-stagnated
+(deftest ^{:stratum 1} build-review-cause-stagnated
   (testing "stagnated verdict — correct shape, no unresolved-warning-count"
     (let [cause (build-review-cause :stagnated blocking-cause-map 0 3 {})]
       (is (= :stagnated       (:review/verdict cause)))
@@ -96,7 +88,7 @@
       (is (not (contains? cause :review/unresolved-warning-count))
           "stagnated should not carry unresolved-warning-count"))))
 
-(deftest build-review-cause-needs-decomposition
+(deftest ^{:stratum 1} build-review-cause-needs-decomposition
   (testing "needs-decomposition verdict — correct shape, no unresolved-warning-count"
     (let [cause (build-review-cause :needs-decomposition blocking-cause-map 1 4 {})]
       (is (= :needs-decomposition (:review/verdict cause)))
@@ -106,7 +98,7 @@
       (is (not (contains? cause :review/unresolved-warning-count))
           "needs-decomposition should not carry unresolved-warning-count"))))
 
-(deftest build-review-cause-exhausted
+(deftest ^{:stratum 1} build-review-cause-exhausted
   (testing "exhausted verdict — correct shape, no unresolved-warning-count"
     (let [cause (build-review-cause :exhausted blocking-cause-map 0 2 {})]
       (is (= :exhausted       (:review/verdict cause)))
@@ -116,7 +108,7 @@
       (is (not (contains? cause :review/unresolved-warning-count))
           "exhausted should not carry unresolved-warning-count"))))
 
-(deftest build-review-cause-accept-with-warnings-includes-count
+(deftest ^{:stratum 1} build-review-cause-accept-with-warnings-includes-count
   (testing "accept-with-warnings — includes :review/unresolved-warning-count"
     (let [warnings [{:text "nit: rename x to foo"}
                     {:text "nit: add docstring"}]
@@ -129,13 +121,13 @@
       (is (= 2 (:review/unresolved-warning-count cause))
           "should count the warnings in the review artifact"))))
 
-(deftest build-review-cause-accept-with-warnings-no-warnings
+(deftest ^{:stratum 1} build-review-cause-accept-with-warnings-no-warnings
   (testing "accept-with-warnings with no warnings in artifact → count is 0"
     (let [cause (build-review-cause :accept-with-warnings warning-cause-map 2 2 {})]
       (is (= 0 (:review/unresolved-warning-count cause))
           "absent :review/warnings → count 0, not nil or exception"))))
 
-(deftest build-review-cause-defaults-to-blocking-defect-when-cause-map-nil
+(deftest ^{:stratum 1} build-review-cause-defaults-to-blocking-defect-when-cause-map-nil
   (testing "nil cause-map falls back to :blocking-defect"
     (let [cause (build-review-cause :exhausted nil 0 1 {})]
       (is (= :blocking-defect (:cause/type cause))
@@ -143,8 +135,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Layer 2 — integration tests via emit-phase-completed! capture
-
-(deftest exhausted-verdict-emits-review-cause-in-phase-completed
+(deftest ^{:stratum 1} exhausted-verdict-emits-review-cause-in-phase-completed
   (testing "exhausted: :review/cause appears in emit-phase-completed! payload"
     (let [captured (atom nil)
           ctx      (make-leave-review-ctx :rejected 4 4 {})]
@@ -162,7 +153,7 @@
                (get-in @captured [:review/cause :review/total-cycles]))
             "first review cycle → total-cycles = 1")))))
 
-(deftest approved-verdict-does-not-emit-review-cause
+(deftest ^{:stratum 1} approved-verdict-does-not-emit-review-cause
   (testing "approved: :review/cause is absent from emit-phase-completed! payload"
     (let [captured (atom nil)
           ctx      (make-leave-review-ctx :approved 1 4 {})]
@@ -173,7 +164,7 @@
         (is (nil? (:review/cause @captured))
             "approved verdict must not include :review/cause")))))
 
-(deftest repair-requested-does-not-emit-review-cause
+(deftest ^{:stratum 1} repair-requested-does-not-emit-review-cause
   (testing "repair-requested (within budget): :review/cause is absent from payload"
     (let [captured (atom nil)
           ctx      (make-leave-review-ctx
@@ -185,6 +176,15 @@
         (run-leave-review ctx)
         (is (nil? (:review/cause @captured))
             "repair-requested is not a terminal verdict; no :review/cause")))))
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 (comment
   ;; REPL: run individual cause map assertions

@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.pr-monitor-test
   (:require
    [ai.miniforge.phase-software-factory.pr-monitor :as sut]
    [ai.miniforge.workflow.interface.dag-prs :as dag-prs]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest enter-pr-monitor-returns-structured-failure-data
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} enter-pr-monitor-returns-structured-failure-data
   (testing "monitor failure is a response value, not a synthetic exception"
     (let [failed-prs [{:pr/number 42 :reason :ci-failed}]
           train-state {:train-id "train-1"}]
@@ -43,7 +44,7 @@
           (is (= failed-prs (get-in phase-result [:error :data :failed-prs])))
           (is (= train-state (:execution/train result))))))))
 
-(deftest enter-pr-monitor-defaults-missing-failed-prs
+(deftest ^{:stratum 0} enter-pr-monitor-defaults-missing-failed-prs
   (testing "monitor failure keeps failed-prs as a vector when the monitor omits it"
     (let [train-state {:train-id "train-1"}]
       (with-redefs [dag-prs/create-train-from-dag-result

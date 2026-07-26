@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.pr-monitor
   "PR monitoring phase interceptor.
 
@@ -29,22 +28,17 @@
             [ai.miniforge.workflow.interface.dag-prs :as dag-prs]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   {:agent nil
    :gates []
    :budget {:tokens 0
             :iterations 1
-            :time-seconds 7200}}) ; 2 hour default for monitoring
+            :time-seconds 7200}})  ; 2 hour default for monitoring
 
-;; Register defaults on load
-(phase/register-phase-defaults! :pr-monitor default-config)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Interceptor implementation
-
-(defn enter-pr-monitor
+(defn ^{:stratum 0} enter-pr-monitor
   "Execute PR monitoring phase.
 
    Reads :execution/dag-pr-infos from context, assembles a PR train,
@@ -98,7 +92,7 @@
                                           {:data {:failed-prs (:failed-prs monitor-result [])}})))
             (assoc :execution/train train-state))))))
 
-(defn leave-pr-monitor
+(defn ^{:stratum 0} leave-pr-monitor
   "Post-processing for PR monitoring phase. Records merge results."
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at] (System/currentTimeMillis))
@@ -111,7 +105,7 @@
         (update-in [:execution :phases-completed] (fnil conj []) :pr-monitor)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn error-pr-monitor
+(defn ^{:stratum 0} error-pr-monitor
   "Handle PR monitoring phase errors."
   [ctx ex]
   (-> ctx
@@ -119,10 +113,10 @@
       (assoc-in [:phase :error] {:message (ex-message ex)
                                   :data (ex-data ex)})))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registry methods
+;------------------------------------------------------------------------------ Layer 1
 
-(defmethod phase/get-phase-interceptor-method :pr-monitor
+;; Registry methods
+(defmethod ^{:stratum 1} phase/get-phase-interceptor-method :pr-monitor
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::pr-monitor
@@ -131,6 +125,9 @@
               (enter-pr-monitor (assoc ctx :phase-config merged)))
      :leave leave-pr-monitor
      :error error-pr-monitor}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :pr-monitor default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
