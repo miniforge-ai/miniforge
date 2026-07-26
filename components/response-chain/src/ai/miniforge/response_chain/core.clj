@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.core
   "Implementation of the response-chain primitive.
 
@@ -30,9 +29,9 @@
    [ai.miniforge.response-chain.contract :as contract]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Step construction
 
-(defn- build-step
+;; Step construction
+(defn- ^{:stratum 0} build-step
   "Build a canonical step map. `an` may be nil. The step's
    `:succeeded?` is true iff `an` is nil. When `request` is non-nil it
    is attached as an optional `:request` key; when nil the key is
@@ -47,21 +46,55 @@
             :response   response}
      (some? request) (assoc :request request))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Operation-key coercion
 ;;
 ;; The Chain and Step schemas require `:operation` to be a keyword. The
 ;; component is a non-throwing boundary helper, so we coerce non-keyword
 ;; operations to a sentinel and surface the bad input as an anomaly
 ;; rather than producing a chain that fails its own schema.
-
-(def ^:private invalid-operation-sentinel
+(def ^{:stratum 0} ^:private invalid-operation-sentinel
   "Sentinel operation key used when caller supplies a non-keyword
    operation. Keeps the chain/step schema invariant intact even when
    input is malformed."
   :response-chain/invalid)
 
-(defn- coerce-operation
+;; Append
+(defn- ^{:stratum 0} recompute-succeeded?
+  "Return true iff every step in `steps` has `:succeeded?` true."
+  [steps]
+  (every? :succeeded? steps))
+
+;; Predicate
+(defn ^{:stratum 0} succeeded?
+  "True when `step-or-chain` is recorded as successful.
+
+   - A step succeeds iff `:succeeded?` is true.
+   - A chain succeeds iff every appended step succeeded (an empty chain
+     is vacuously successful)."
+  [step-or-chain]
+  (boolean (:succeeded? step-or-chain)))
+
+;; Accessors
+(defn ^{:stratum 0} steps
+  "Return the vector of step maps from `chain`."
+  [chain]
+  (get chain :response-chain []))
+
+(defn ^{:stratum 0} last-response
+  "Return the `:response` of the most recently appended step, or nil
+   when the chain has no steps."
+  [chain]
+  (some-> chain :response-chain peek :response))
+
+(defn ^{:stratum 0} last-anomaly
+  "Return the `:anomaly` of the most recently appended step, or nil
+   when the chain has no steps or the last step succeeded."
+  [chain]
+  (some-> chain :response-chain peek :anomaly))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} coerce-operation
   "Return `operation` when it is already a keyword; otherwise return
    the canonical sentinel. Callers use this to ensure the chain/step
    schema is preserved even when input is malformed."
@@ -70,10 +103,30 @@
     operation
     invalid-operation-sentinel))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Chain construction
+(defn- ^{:stratum 1} conj-step
+  "Append `step` to `chain` and recompute the chain's `:succeeded?`
+   invariant from the resulting step vector."
+  [chain step]
+  (let [steps (conj (:response-chain chain) step)]
+    (assoc chain
+           :response-chain steps
+           :succeeded? (recompute-succeeded? steps))))
 
-(defn create-chain
+(defn ^{:stratum 1} last-successful-or
+  "Return the `:response` of the most recently appended *successful*
+   step, or `default` when the chain has no successful steps."
+  [chain default]
+  (let [step (->> (steps chain)
+                  (filter :succeeded?)
+                  last)]
+    (if step
+      (:response step)
+      default)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Chain construction
+(defn ^{:stratum 2} create-chain
   "Return a fresh chain for the named `operation`.
 
    When `operation` is a keyword, the chain is empty and vacuously
@@ -98,24 +151,9 @@
          :succeeded?     false
          :response-chain [step]}))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Append
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- recompute-succeeded?
-  "Return true iff every step in `steps` has `:succeeded?` true."
-  [steps]
-  (every? :succeeded? steps))
-
-(defn- conj-step
-  "Append `step` to `chain` and recompute the chain's `:succeeded?`
-   invariant from the resulting step vector."
-  [chain step]
-  (let [steps (conj (:response-chain chain) step)]
-    (assoc chain
-           :response-chain steps
-           :succeeded? (recompute-succeeded? steps))))
-
-(defn- guarded-append
+(defn- ^{:stratum 3} guarded-append
   "Append `step` to `chain` after validating both inputs against the
    schema. If validation fails we still produce a step — but it carries
    an `:invalid-input` anomaly and flips the chain's `:succeeded?` false.
@@ -141,7 +179,9 @@
     :else
     (conj-step chain step)))
 
-(defn append-step
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} append-step
   "Append a step to `chain` for `operation`.
 
    - 3-arity: a successful step carrying `response`.
@@ -172,46 +212,3 @@
                         {:operation         operation
                          :original-anomaly  an}))]
      (guarded-append chain op (build-step op eff-anomaly response request)))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Predicate
-
-(defn succeeded?
-  "True when `step-or-chain` is recorded as successful.
-
-   - A step succeeds iff `:succeeded?` is true.
-   - A chain succeeds iff every appended step succeeded (an empty chain
-     is vacuously successful)."
-  [step-or-chain]
-  (boolean (:succeeded? step-or-chain)))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Accessors
-
-(defn steps
-  "Return the vector of step maps from `chain`."
-  [chain]
-  (get chain :response-chain []))
-
-(defn last-response
-  "Return the `:response` of the most recently appended step, or nil
-   when the chain has no steps."
-  [chain]
-  (some-> chain :response-chain peek :response))
-
-(defn last-anomaly
-  "Return the `:anomaly` of the most recently appended step, or nil
-   when the chain has no steps or the last step succeeded."
-  [chain]
-  (some-> chain :response-chain peek :anomaly))
-
-(defn last-successful-or
-  "Return the `:response` of the most recently appended *successful*
-   step, or `default` when the chain has no successful steps."
-  [chain default]
-  (let [step (->> (steps chain)
-                  (filter :succeeded?)
-                  last)]
-    (if step
-      (:response step)
-      default)))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.malli-validation-test
   "Boundary validation. Malformed input must be rejected — but as data,
    not as a thrown exception. The component records an `:invalid-input`
@@ -26,23 +25,25 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest fresh-chain-validates
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} fresh-chain-validates
   (testing "the canonical fresh chain validates against the Chain schema"
     (is (m/validate chain/Chain (chain/create-chain :x)))))
 
-(deftest valid-step-validates
+(deftest ^{:stratum 0} valid-step-validates
   (testing "a step produced by append-step matches the Step schema"
     (let [c (-> (chain/create-chain :x)
                 (chain/append-step :a {:ok true}))]
       (is (every? #(m/validate chain/Step %) (chain/steps c))))))
 
-(deftest append-on-malformed-chain-does-not-throw
+(deftest ^{:stratum 0} append-on-malformed-chain-does-not-throw
   (testing "passing a non-chain to append-step returns a chain, not an exception"
     (let [result (chain/append-step {:not "a chain"} :op "value")]
       (is (map? result))
       (is (m/validate chain/Chain result)))))
 
-(deftest append-on-malformed-chain-records-invalid-input-anomaly
+(deftest ^{:stratum 0} append-on-malformed-chain-records-invalid-input-anomaly
   (testing "the recovery chain carries an :invalid-input anomaly step"
     (let [result (chain/append-step {:not "a chain"} :op "value")
           last-step (last (chain/steps result))]
@@ -50,7 +51,7 @@
       (is (= :invalid-input (some-> last-step :anomaly :anomaly/type)))
       (is (anomaly/anomaly? (:anomaly last-step))))))
 
-(deftest four-arity-with-non-anomaly-second-arg-is-rejected
+(deftest ^{:stratum 0} four-arity-with-non-anomaly-second-arg-is-rejected
   (testing "a non-Anomaly value in the anomaly slot is treated as malformed input"
     (let [c0 (chain/create-chain :x)
           result (chain/append-step c0 :op "not-an-anomaly" "value")
@@ -59,7 +60,7 @@
       (is (false? (chain/succeeded? result)))
       (is (= :invalid-input (some-> last-step :anomaly :anomaly/type))))))
 
-(deftest invalid-input-recovery-keeps-chain-well-formed
+(deftest ^{:stratum 0} invalid-input-recovery-keeps-chain-well-formed
   (testing "even after recovery the resulting chain validates"
     (let [result (-> (chain/create-chain :x)
                      (chain/append-step :a 1)
@@ -67,7 +68,7 @@
       (is (m/validate chain/Chain result))
       (is (false? (chain/succeeded? result))))))
 
-(deftest non-keyword-operation-on-append-step-records-invalid-input
+(deftest ^{:stratum 0} non-keyword-operation-on-append-step-records-invalid-input
   (testing "append-step coerces non-keyword operation to the sentinel"
     (let [result    (chain/append-step (chain/create-chain :x) "op" {:any "thing"})
           last-step (last (chain/steps result))]
@@ -77,7 +78,7 @@
       (is (= :invalid-input (some-> last-step :anomaly :anomaly/type)))
       (is (= "op" (some-> last-step :anomaly :anomaly/data :operation))))))
 
-(deftest non-keyword-operation-on-create-chain-records-invalid-input
+(deftest ^{:stratum 0} non-keyword-operation-on-create-chain-records-invalid-input
   (testing "create-chain coerces non-keyword operation to the sentinel and seeds an :invalid-input step"
     (let [result    (chain/create-chain "not-a-keyword")
           first-step (first (chain/steps result))]

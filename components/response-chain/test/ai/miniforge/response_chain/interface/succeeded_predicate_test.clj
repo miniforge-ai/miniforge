@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.succeeded-predicate-test
   "Predicate semantics. `succeeded?` must work uniformly for steps and
    for chains, and must always return a boolean."
@@ -24,11 +23,13 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest succeeded?-for-empty-chain-is-true
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} succeeded?-for-empty-chain-is-true
   (testing "empty chain is vacuously successful"
     (is (true? (chain/succeeded? (chain/create-chain :x))))))
 
-(deftest succeeded?-for-all-success-chain-is-true
+(deftest ^{:stratum 0} succeeded?-for-all-success-chain-is-true
   (testing "chain with only successful steps reports true"
     (let [c (-> (chain/create-chain :x)
                 (chain/append-step :a 1)
@@ -36,7 +37,7 @@
                 (chain/append-step :c 3))]
       (is (true? (chain/succeeded? c))))))
 
-(deftest succeeded?-for-any-failed-chain-is-false
+(deftest ^{:stratum 0} succeeded?-for-any-failed-chain-is-false
   (testing "any failed step makes the chain unsuccessful"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :x)
@@ -44,7 +45,7 @@
                 (chain/append-step :b a nil))]
       (is (false? (chain/succeeded? c))))))
 
-(deftest succeeded?-of-individual-steps
+(deftest ^{:stratum 0} succeeded?-of-individual-steps
   (testing "succeeded? reads :succeeded? off a single step"
     (let [a (anomaly/anomaly :timeout "slow" {})
           c (-> (chain/create-chain :x)
@@ -54,7 +55,7 @@
       (is (true?  (chain/succeeded? ok-step)))
       (is (false? (chain/succeeded? nope-step))))))
 
-(deftest succeeded?-always-returns-a-boolean
+(deftest ^{:stratum 0} succeeded?-always-returns-a-boolean
   (testing "result is true or false, never nil or a truthy non-boolean"
     (is (boolean? (chain/succeeded? (chain/create-chain :x))))
     (is (boolean? (chain/succeeded? {:succeeded? nil})))

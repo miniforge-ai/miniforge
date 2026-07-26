@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.multi-step-composition-test
   "Threading semantics. The chain is a linear accumulator: order is
    preserved, the chain stays well-formed across many appends, and the
@@ -26,7 +25,9 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest steps-preserve-append-order
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} steps-preserve-append-order
   (testing "operations come back in the order they were appended"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :a 1)
@@ -36,7 +37,7 @@
       (is (= [:a :b :c :d]
              (mapv :operation (chain/steps c)))))))
 
-(deftest responses-are-paired-with-their-operations
+(deftest ^{:stratum 0} responses-are-paired-with-their-operations
   (testing "each step's :response is the value passed at append time"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :a "first")
@@ -47,7 +48,7 @@
               ["third"  :c]]
              (mapv (juxt :response :operation) (chain/steps c)))))))
 
-(deftest chain-shape-stays-valid-through-many-appends
+(deftest ^{:stratum 0} chain-shape-stays-valid-through-many-appends
   (testing "after each append the chain still validates against the schema"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :flow)
@@ -57,7 +58,7 @@
       (is (m/validate chain/Chain c))
       (is (every? #(m/validate chain/Step %) (chain/steps c))))))
 
-(deftest succeeded-invariant-recomputed-each-append
+(deftest ^{:stratum 0} succeeded-invariant-recomputed-each-append
   (testing "chain :succeeded? equals the AND of all step :succeeded? after each append"
     (let [a (anomaly/anomaly :fault "boom" {})
           c0 (chain/create-chain :flow)
@@ -69,7 +70,7 @@
       (is (false? (:succeeded? c2)))
       (is (false? (:succeeded? c3))))))
 
-(deftest threading-is-pure-and-non-mutating
+(deftest ^{:stratum 0} threading-is-pure-and-non-mutating
   (testing "each append returns a new chain; the original is unchanged"
     (let [c0 (chain/create-chain :flow)
           c1 (chain/append-step c0 :a 1)]

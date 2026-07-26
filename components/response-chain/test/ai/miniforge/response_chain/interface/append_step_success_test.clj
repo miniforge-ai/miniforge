@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.append-step-success-test
   "Successful-step append. The 3-arity overload must record a step
    with `:succeeded? true`, no anomaly, and the carried response, while
@@ -24,7 +23,9 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest append-step-3-arity-marks-step-successful
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} append-step-3-arity-marks-step-successful
   (testing "appended step has succeeded? true and nil anomaly"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :db/lookup {:id 1}))
@@ -34,14 +35,14 @@
       (is (= :db/lookup (:operation s)))
       (is (= {:id 1} (:response s))))))
 
-(deftest append-step-3-arity-keeps-chain-successful
+(deftest ^{:stratum 0} append-step-3-arity-keeps-chain-successful
   (testing "chain :succeeded? remains true after an all-success run"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :a 1)
                 (chain/append-step :b 2))]
       (is (chain/succeeded? c)))))
 
-(deftest append-step-preserves-operation-and-grows-step-vector
+(deftest ^{:stratum 0} append-step-preserves-operation-and-grows-step-vector
   (testing "the chain's :operation is preserved and steps grow by one"
     (let [c0 (chain/create-chain :flow)
           c1 (chain/append-step c0 :a 1)
@@ -51,7 +52,7 @@
       (is (= 1 (count (chain/steps c1))))
       (is (= 2 (count (chain/steps c2)))))))
 
-(deftest append-step-accepts-nil-response
+(deftest ^{:stratum 0} append-step-accepts-nil-response
   (testing "nil is a valid response value"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :a nil))
