@@ -38,10 +38,26 @@ alias with no same-file dependency on another def in the file.
 chain: `matching-labels`/`workflow-applies?`/`ancestor-via-shell`/
 `workflow-summary` at Layer 0, `load-registry`/`make-ancestor?-fn`/
 `build-match-payload` at Layer 1 (each composes a Layer-0 def), and
-`match` at Layer 2 (composes both). `core_test.clj`'s `deftest` forms
-were regrouped by which layer of `core.clj` they exercise. No line of
-executable code changed; diffs are heading text, metadata, and
-def/deftest reordering only.
+`match` at Layer 2 (composes both).
+
+`core_test.clj`'s layers are **not** a mirror of `core.clj`'s — each
+file's strata come from its own same-file reference graph only, computed
+independently. In the test file: the fixtures (`dogfood-fix-action`,
+`wf-old`, `wf-recent`, `wf-no-base-sha`, `merge-event`,
+`ancestry-table-fn`) sit at Layer 0; `test-registry`, which references
+`dogfood-fix-action`, sits at Layer 1; each `deftest` then lands one
+layer above the highest-layer same-file fixture/helper it references (or
+at Layer 0 if it references none — most tests call `sut/...` functions,
+which are cross-namespace and don't count). This is why the layers don't
+line up with `core.clj` at all: `load-registry` is Layer 1 in `core.clj`
+but its tests are Layer 0 in `core_test.clj` (they call no same-file
+fixture); `matching-labels` is Layer 0 in `core.clj` but its tests are
+Layer 2 (they reference `test-registry`, which is Layer 1). The one
+place layer numbers happen to coincide — `match` at Layer 2 in both
+files — is coincidental: both files' own dependency chains happen to run
+3 deep, not a deliberate correspondence. No line of executable code
+changed; diffs are heading text, metadata, and def/deftest reordering
+only.
 
 One hand-fix beyond the mechanical run, in `core_test.clj`: five
 old single-semicolon `;---- Layer N: <description>` banners (grouping
