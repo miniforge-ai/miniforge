@@ -91,7 +91,6 @@
            (nil? (:workflow/failure-reason event)))
       (assoc :workflow/failure-reason "unknown"))))
 
-;------------------------------------------------------------------------------ Layer 1b
 ;; Compact summary helpers (pure)
 (defn- ^{:stratum 0} phase-outcome-symbol
   "Return a display symbol for a phase outcome keyword."

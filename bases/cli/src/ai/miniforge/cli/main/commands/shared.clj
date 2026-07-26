@@ -99,7 +99,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; Composes Layer 0.
+;; Composes Layer 1.
 (defn ^{:stratum 2} call-optional-provider
   "Look up optional provider `fn-sym` and immediately apply it to `args`.
    Returns nil when no provider is registered or the provider fails."
