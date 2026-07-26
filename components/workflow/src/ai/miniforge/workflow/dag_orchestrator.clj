@@ -94,10 +94,15 @@
      :metrics {}}))
 
 ;--- Layer 0: Level Traversal
-(defn ^{:stratum 0} build-deps-map [tasks]
-  (->> tasks
-       (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
-       (into {})))
+(defn ^{:stratum 0} normalize-task-id
+  "Preserve task IDs in their domain-native form.
+   UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
+  [x]
+  (cond
+    (uuid? x) x
+    (string? x) (or (parse-uuid x) x)
+    (keyword? x) x
+    :else x))
 
 (defn ^{:stratum 0} traverse-levels
   "BFS the dependency graph in ready-batches (\"levels\"), tracking the
@@ -125,23 +130,16 @@
           (anomaly/sub-anomaly
            :conflict :anomalies/dag-unschedulable
            "Plan has unschedulable tasks: a dependency cycle, or a task dependency id absent from the plan's own task ids"
-           {:unresolved-task-ids (vec remaining)})
+           ;; sort-by str so heterogeneous task-id types (UUID/keyword/
+           ;; string) still produce a total order — `sort` would throw
+           ;; on a mixed set.
+           {:unresolved-task-ids (vec (sort-by str remaining))})
           (recur (apply disj remaining ready)
                  (into completed ready)
                  (inc level-count)
                  (max max-width width)))))))
 
 ;--- Layer 1: Plan to DAG Conversion
-(defn ^{:stratum 0} normalize-task-id
-  "Preserve task IDs in their domain-native form.
-   UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
-  [x]
-  (cond
-    (uuid? x) x
-    (string? x) (or (parse-uuid x) x)
-    (keyword? x) x
-    :else x))
-
 (defn ^{:stratum 0} validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
   [task-id raw-deps valid-task-ids logger]
@@ -801,6 +799,18 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} build-deps-map
+  "Normalizes ids and dep ids the same way `plan->dag-tasks` does — a plan
+   whose tasks mix string/UUID id representations must resolve identically
+   here as it will once `plan->dag-tasks` normalizes it, or
+   `traverse-levels` sees a dependency id that never matches a `completed`
+   entry and misreports a perfectly schedulable plan as unschedulable."
+  [tasks]
+  (->> tasks
+       (map (fn [t] [(normalize-task-id (:task/id t))
+                     (set (map normalize-task-id (:task/dependencies t [])))]))
+       (into {})))
+
 (defn ^{:stratum 1} workflow-success [artifact metrics]
   {:success? true
    :artifact artifact
@@ -810,37 +820,6 @@
   {:success? false
    :error error
    :metrics (or metrics zero-metrics)})
-
-(defn ^{:stratum 1} compute-max-level-width
-  "Widest ready-batch across the plan's dependency graph, or the
-   `:anomalies/dag-unschedulable` anomaly from `traverse-levels` when the
-   graph can't be fully traversed."
-  [tasks]
-  (let [result (-> tasks
-                   ((juxt #(map :task/id %) build-deps-map))
-                   ((fn [[ids deps]] (traverse-levels ids deps))))]
-    (if (anomaly/anomaly? result)
-      result
-      (:max-width result))))
-
-(defn ^{:stratum 1} estimate-parallel-speedup [plan]
-  (let [tasks (:plan/tasks plan [])
-        task-count (count tasks)
-        deps-map (build-deps-map tasks)
-        result (traverse-levels (map :task/id tasks) deps-map)]
-    (if (anomaly/anomaly? result)
-      {:parallelizable? false
-       :task-count task-count
-       :max-parallel 0
-       :levels 0
-       :estimated-speedup 1.0
-       :anomaly result}
-      (let [{:keys [levels max-width]} result]
-        {:parallelizable? (> max-width 1)
-         :task-count task-count
-         :max-parallel max-width
-         :levels levels
-         :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))))
 
 (defn ^{:stratum 1} plan-task->dag-task
   "Convert a single plan task to a DAG task with validated deps."
@@ -1166,13 +1145,36 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;--- Layer 0: Plan Analysis
-(defn ^{:stratum 2} parallelizable-plan? [plan]
-  (let [tasks (:plan/tasks plan [])]
-    (when (> (count tasks) 1)
-      (let [width (compute-max-level-width tasks)]
-        (when-not (anomaly/anomaly? width)
-          (> width 1))))))
+(defn ^{:stratum 2} compute-max-level-width
+  "Widest ready-batch across the plan's dependency graph, or the
+   `:anomalies/dag-unschedulable` anomaly from `traverse-levels` when the
+   graph can't be fully traversed."
+  [tasks]
+  (let [result (-> tasks
+                   ((juxt #(map (comp normalize-task-id :task/id) %) build-deps-map))
+                   ((fn [[ids deps]] (traverse-levels ids deps))))]
+    (if (anomaly/anomaly? result)
+      result
+      (:max-width result))))
+
+(defn ^{:stratum 2} estimate-parallel-speedup [plan]
+  (let [tasks (:plan/tasks plan [])
+        task-count (count tasks)
+        deps-map (build-deps-map tasks)
+        result (traverse-levels (map (comp normalize-task-id :task/id) tasks) deps-map)]
+    (if (anomaly/anomaly? result)
+      {:parallelizable? false
+       :task-count task-count
+       :max-parallel 0
+       :levels 0
+       :estimated-speedup 1.0
+       :anomaly result}
+      (let [{:keys [levels max-width]} result]
+        {:parallelizable? (> max-width 1)
+         :task-count task-count
+         :max-parallel max-width
+         :levels levels
+         :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))))
 
 (defn ^{:stratum 2} plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
@@ -1298,6 +1300,14 @@
       (:worktree-paths metrics-agg) (assoc :worktree-paths (:worktree-paths metrics-agg)))))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+;--- Layer 0: Plan Analysis
+(defn ^{:stratum 3} parallelizable-plan? [plan]
+  (let [tasks (:plan/tasks plan [])]
+    (when (> (count tasks) 1)
+      (let [width (compute-max-level-width tasks)]
+        (when-not (anomaly/anomaly? width)
+          (> width 1))))))
 
 (defn- ^{:stratum 3} run-git-merge!
   "The :git-merge strategy: a single git merge invocation against the

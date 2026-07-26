@@ -279,6 +279,16 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(deftest ^{:stratum 1} test-estimate-speedup-mixed-uuid-string-ids
+  (testing "a dependency given as a UUID string against a UUID :task/id is schedulable, not unschedulable"
+    (let [a (random-uuid)
+          plan (make-plan [(make-task a "Task A" [])
+                           (make-task (random-uuid) "Task B" [(str a)])])
+          result (dag-orch/estimate-parallel-speedup plan)]
+      (is (nil? (:anomaly result)))
+      (is (= 2 (:task-count result)))
+      (is (= 2 (:levels result))))))
+
 (deftest ^{:stratum 1} test-parallelizable-plan-single-task
   (testing "single task plan is not parallelizable"
     (let [plan (make-plan [(make-task :a)])]
