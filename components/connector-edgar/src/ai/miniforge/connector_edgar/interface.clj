@@ -15,17 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-edgar.interface
   "Public API for the EDGAR connector component."
   (:require [ai.miniforge.connector-edgar.core :as core]))
 
-(defn create-edgar-connector
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} create-edgar-connector
   "Create a new EdgarConnector instance."
   []
   (core/->EdgarConnector))
 
-(def connector-metadata
+(def ^{:stratum 0} connector-metadata
   "Registration metadata for the EDGAR connector."
   {:connector/name         "SEC EDGAR Connector"
    :connector/type         :source
