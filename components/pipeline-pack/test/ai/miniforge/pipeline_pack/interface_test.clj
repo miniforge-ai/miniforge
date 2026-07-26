@@ -15,23 +15,26 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pipeline-pack.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.pipeline-pack.interface :as pp]
             [clojure.java.io :as io]))
 
-(def ^:private simple-pack-dir
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private simple-pack-dir
   (-> (io/resource "test-packs/simple-pack/pack.edn")
       io/file .getParentFile .getPath))
 
-(deftest interface-load-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} interface-load-test
   (testing "Load pack via interface"
     (let [result (pp/load-pack simple-pack-dir)]
       (is (:success? result))
       (is (= "simple-pack" (get-in result [:pack :pack/manifest :pack/id]))))))
 
-(deftest interface-registry-test
+(deftest ^{:stratum 1} interface-registry-test
   (testing "Full registry workflow via interface"
     (let [result (pp/load-pack simple-pack-dir)
           pack (:pack result)
@@ -44,7 +47,7 @@
       (pp/unregister-pack! reg "simple-pack")
       (is (= 0 (pp/pack-count reg))))))
 
-(deftest interface-trust-test
+(deftest ^{:stratum 1} interface-trust-test
   (testing "Trust validation via interface"
     (let [result (pp/load-pack simple-pack-dir)
           pack (:pack result)]

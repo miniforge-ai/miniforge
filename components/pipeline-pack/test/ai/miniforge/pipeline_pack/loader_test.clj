@@ -15,24 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pipeline-pack.loader-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.pipeline-pack.loader :as loader]
             [ai.miniforge.pipeline-pack.schema :as pack-schema]
             [clojure.java.io :as io]))
 
-(def ^:private simple-pack-dir
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private simple-pack-dir
   (-> (io/resource "test-packs/simple-pack/pack.edn")
       io/file .getParentFile .getPath))
 
-(def ^:private test-packs-dir
+(def ^{:stratum 0} ^:private test-packs-dir
   (-> (io/resource "test-packs/simple-pack/pack.edn")
       io/file .getParentFile .getParentFile .getPath))
 
 ;; -- Schema validation --
-
-(deftest validate-manifest-test
+(deftest ^{:stratum 0} validate-manifest-test
   (testing "Valid manifest passes"
     (let [manifest {:pack/id "test" :pack/name "Test" :pack/version "1.0"
                     :pack/description "Test pack" :pack/author "test"
@@ -55,9 +55,23 @@
                   :pack/created-at (java.time.Instant/now)
                   :pack/updated-at (java.time.Instant/now)})))))
 
-;; -- Loader --
+;; -- Normalization --
+(deftest ^{:stratum 0} normalize-defaults-test
+  (testing "Defaults applied to minimal manifest"
+    (let [minimal {:pack/id "x" :pack/name "X" :pack/version "1"
+                   :pack/description "d" :pack/author "a"
+                   :pack/created-at #inst "2026-03-17"
+                   :pack/updated-at #inst "2026-03-17"}
+          normalized (loader/normalize-manifest minimal)]
+      (is (= :untrusted (:pack/trust-level normalized)))
+      (is (= :authority/data (:pack/authority normalized)))
+      (is (= [] (:pack/pipelines normalized)))
+      (is (= [] (:pack/envs normalized))))))
 
-(deftest load-pack-from-directory-test
+;------------------------------------------------------------------------------ Layer 1
+
+;; -- Loader --
+(deftest ^{:stratum 1} load-pack-from-directory-test
   (testing "Load valid pack from test fixtures"
     (let [result (loader/load-pack-from-directory simple-pack-dir)]
       (is (:success? result))
@@ -83,23 +97,8 @@
     (let [result (loader/load-pack-from-directory test-packs-dir)]
       (is (not (:success? result))))))
 
-;; -- Normalization --
-
-(deftest normalize-defaults-test
-  (testing "Defaults applied to minimal manifest"
-    (let [minimal {:pack/id "x" :pack/name "X" :pack/version "1"
-                   :pack/description "d" :pack/author "a"
-                   :pack/created-at #inst "2026-03-17"
-                   :pack/updated-at #inst "2026-03-17"}
-          normalized (loader/normalize-manifest minimal)]
-      (is (= :untrusted (:pack/trust-level normalized)))
-      (is (= :authority/data (:pack/authority normalized)))
-      (is (= [] (:pack/pipelines normalized)))
-      (is (= [] (:pack/envs normalized))))))
-
 ;; -- Discovery --
-
-(deftest discover-packs-test
+(deftest ^{:stratum 1} discover-packs-test
   (testing "Discovers packs in test directory"
     (let [packs (loader/discover-packs test-packs-dir)]
       (is (= 1 (count packs)))
@@ -108,7 +107,7 @@
   (testing "Returns nil for nonexistent directory"
     (is (nil? (loader/discover-packs "/nonexistent")))))
 
-(deftest load-all-packs-test
+(deftest ^{:stratum 1} load-all-packs-test
   (testing "Loads all discovered packs"
     (let [result (loader/load-all-packs test-packs-dir)]
       (is (= 1 (count (:loaded result))))
