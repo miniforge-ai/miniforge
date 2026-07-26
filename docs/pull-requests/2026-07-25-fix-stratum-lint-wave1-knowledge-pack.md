@@ -53,8 +53,8 @@ All 6 files rewritten: `interface.clj`, `pack.clj`, `schema.clj`,
   4→2 respectively (most `deftest` forms don't reference each other, so
   they land on the same real layer as the helpers or the first consumer).
 
-No line of executable code changed; diffs are heading text,
-`^{:stratum n}` metadata, def/deftest reordering, and (in `interface.clj`
+No change in runtime behavior — diffs are heading text,
+`^{:stratum n}` metadata, and def/deftest reordering, and (in `interface.clj`
 and `pack.clj` only) the two docstring corrections above.
 
 ## Testing Plan

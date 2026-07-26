@@ -49,7 +49,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Discrepancy factory + per-ref verification.
+;; Discrepancy factory.
 (defn- ^{:stratum 0} discrepancy
   "Pure factory: build a discrepancy map. `extras` is an optional
    map merged onto the `{:reason :detail}` base; per-ref callers

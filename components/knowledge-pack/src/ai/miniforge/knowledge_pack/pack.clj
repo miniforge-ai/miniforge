@@ -62,7 +62,7 @@
    zettel-side spoof guard."
   #{:pack/digest :pack/revision-id})
 
-;; Public constructors + projection.
+;; Zettel-to-reference projection.
 (defn ^{:stratum 0} zettel->ref
   "Pure: project a zettel map down to the `(zettel/id,
    zettel/revision-id, zettel/digest)` triple a pack manifest holds.
