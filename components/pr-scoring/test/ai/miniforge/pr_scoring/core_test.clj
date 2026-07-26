@@ -34,9 +34,11 @@
 (defn- ^{:stratum 0} scored-events [events]
   (filter #(= :pr/scored (:event/type %)) events))
 
-(defn- ^{:stratum 0} pr-created-event [stream repo number]
+(defn- ^{:stratum 0} pr-created-event [_stream repo number]
   ;; pr/created isn't an event-stream constructor yet, so hand-build a
   ;; minimal envelope matching the producer shape other components use.
+  ;; `_stream` kept unused for call-site symmetry with the real
+  ;; event-stream producer signature (every call site passes `s`).
   {:event/type            :pr/created
    :event/id              (random-uuid)
    :event/timestamp       (java.util.Date.)

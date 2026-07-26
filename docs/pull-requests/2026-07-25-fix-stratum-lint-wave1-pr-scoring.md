@@ -82,13 +82,17 @@ comment on a closing form, and moved as a unit with the function.
 3. Read the full diff for all 3 changed files. Confirmed the only changes
    are heading placement, def reordering, and `^{:stratum n}` metadata —
    no executable code changed.
-4. `clj-kondo --lint components/pr-scoring`: 0 errors, 1 warning
-   (`unused binding stream` in `core_test.clj`'s `pr-created-event`).
-   Confirmed via `git stash` against the pre-fix file that this exact
-   warning (same message) already existed before this PR, just at a
-   different line number (46 → 37) because of reordering. Pre-existing,
-   unrelated to stratum-lint, out of scope for a mechanical single-purpose
-   PR — left untouched.
+4. `clj-kondo --lint components/pr-scoring`: found 1 pre-existing warning
+   (`unused binding stream` in `core_test.clj`'s `pr-created-event`),
+   confirmed via `git stash` against the pre-fix file to already exist
+   before this PR at a different line number (46 → 37, from reordering).
+   Unrelated to stratum-lint, but cheap and risk-free to fold in here
+   (Copilot review flagged it independently): renamed the unused param to
+   `_stream` to document the intent — kept for call-site symmetry with the
+   real event-stream producer signature, every call site passes `s`. No
+   behavior change. Re-ran `--fix` after the rename: zero diff (no
+   rewrite), confirming it didn't disturb the stratum computation.
+   `clj-kondo` now reports 0 errors, 0 warnings.
 5. Re-ran plain `stratum-lint` after the fix: `SL003` remains on
    `core.clj`, now reporting **5** real layers instead of the 4 distinct
    decorative ones originally flagged — surfaced by `--fix`'s honest
@@ -122,8 +126,8 @@ Wave 2 splits it.
 - [x] Checked for stale `Layer N`-labeled decorative banners contradicting
       the new real headings: none present (old non-"Layer" banners in
       `core_test.clj` remain accurate where they sit; left as-is)
-- [x] `clj-kondo`: 0 errors, 1 pre-existing warning (unrelated to this
-      fix, verified via stash-diff against the pre-fix file)
+- [x] `clj-kondo`: 0 errors, 0 warnings (one pre-existing unused-binding
+      warning fixed in passing — `_stream` rename, no behavior change)
 - [x] Component tests pass (11 tests, 26 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: `SL003` remains on `core.clj` (5 real
       layers, up from 4 decorative — documented, Wave 2 scope)
