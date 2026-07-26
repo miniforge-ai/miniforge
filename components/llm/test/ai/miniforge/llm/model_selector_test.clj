@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.model-selector-test
   (:require
    [clojure.test :refer [deftest is testing use-fixtures]]
@@ -28,7 +27,9 @@
                       (with-redefs [selector/get-env-var (constantly "test-key")]
                         (f))))
 
-(deftest test-model-available
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} test-model-available
   (testing "cloud model available when API key env var is set"
     ;; fixture already sets get-env-var -> "test-key" for the outer cases
     (is (selector/model-available? :sonnet-4.6))
@@ -46,20 +47,20 @@
   (testing "unregistered model key returns falsy"
     (is (not (selector/model-available? :nonexistent-model-xyz)))))
 
-(deftest test-meets-context-requirement
+(deftest ^{:stratum 0} test-meets-context-requirement
   (testing "Context requirement checks"
     (is (selector/meets-context-requirement? :opus-4.6 100000))
     (is (selector/meets-context-requirement? :gemini-2.5-pro 500000))
     (is (not (selector/meets-context-requirement? :qwen-2.5-coder-32b 100000)))))
 
-(deftest test-meets-cost-constraint
+(deftest ^{:stratum 0} test-meets-cost-constraint
   (testing "Cost constraint checks"
     (is (selector/meets-cost-constraint? :haiku-4.5 0.01))
     (is (selector/meets-cost-constraint? :sonnet-4.6 0.05))
     (is (selector/meets-cost-constraint? :opus-4.6 0.10))
     (is (selector/meets-cost-constraint? :codellama-34b 0.01))))
 
-(deftest test-select-by-automatic
+(deftest ^{:stratum 0} test-select-by-automatic
   (testing "Automatic selection for thinking-heavy"
     (let [selected (selector/select-by-automatic :thinking-heavy {})]
       (is (some #{selected} [:opus-4.7 :opus-4.6 :gpt-5.4-pro :gpt-5.4]))))
@@ -76,18 +77,18 @@
     (let [selected (selector/select-by-automatic :execution-focused {:require-local true})]
       (is (some #{selected} [:qwen-2.5-coder-32b :deepseek-coder-33b :codellama-34b])))))
 
-(deftest test-select-by-cost-optimized
+(deftest ^{:stratum 0} test-select-by-cost-optimized
   (testing "Cost-optimized selection prefers free models"
     (let [selected (selector/select-by-cost-optimized :execution-focused {})]
       ;; Should prefer local/free models or cheap cloud models
       (is (keyword? selected)))))
 
-(deftest test-select-by-speed
+(deftest ^{:stratum 0} test-select-by-speed
   (testing "Speed-optimized selection prefers fast models"
     (let [selected (selector/select-by-speed :execution-focused {})]
       (is (keyword? selected)))))
 
-(deftest test-select-model
+(deftest ^{:stratum 0} test-select-model
   (testing "Select model for thinking-heavy task"
     (let [classification {:type :thinking-heavy
                           :confidence 0.9
@@ -147,7 +148,7 @@
           model (registry/get-model (:model selection))]
       (is (>= (get-in model [:capabilities :context-window]) 500000)))))
 
-(deftest test-select-model-for-phase
+(deftest ^{:stratum 0} test-select-model-for-phase
   (testing "Plan phase selects thinking model"
     (let [selection (selector/select-model-for-phase :plan)]
       (is (= :thinking-heavy (:task-type selection)))
@@ -163,7 +164,7 @@
       (is (= :simple-validation (:task-type selection)))
       (is (:model selection)))))
 
-(deftest test-build-selection-rationale
+(deftest ^{:stratum 0} test-build-selection-rationale
   (testing "Rationale is human-readable"
     (let [classification {:type :thinking-heavy
                           :confidence 0.9
@@ -175,7 +176,7 @@
       (is (re-find #"Task:" rationale))
       (is (re-find #"Selected Model:" rationale)))))
 
-(deftest test-explain-selection
+(deftest ^{:stratum 0} test-explain-selection
   (testing "Explanation is user-friendly"
     (let [classification {:type :execution-focused
                           :confidence 0.85
@@ -187,7 +188,7 @@
       (is (re-find #"Model Auto-Selected:" explanation))
       (is (re-find #"Override:" explanation)))))
 
-(deftest test-selection-strategies
+(deftest ^{:stratum 0} test-selection-strategies
   (testing "Automatic strategy"
     (let [classification {:type :execution-focused
                           :confidence 0.8
@@ -212,7 +213,7 @@
                                            {:strategy :speed})]
       (is (= :speed (:strategy selection))))))
 
-(deftest test-fallback-behavior
+(deftest ^{:stratum 0} test-fallback-behavior
   (testing "Fallback to safe default when no model matches"
     ;; Test with valid task type - even with unknown types, system should return a model
     ;; Using execution-focused as a safe default case

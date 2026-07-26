@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.context-overflow-test
   "Context-overflow is classified as a distinct terminal error type from the
    structured usage token counts (locale- and backend-independent), NOT from
@@ -25,10 +24,12 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
-(defn- private-fn [sym]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client sym)))
 
-(deftest total-input-tokens-test
+(deftest ^{:stratum 0} total-input-tokens-test
   (testing "sums prompt + cache-creation + cache-read; the real prompt size
             lives mostly in cache-creation, not :input-tokens"
     (is (= 204282 (impl/total-input-tokens
@@ -50,7 +51,7 @@
                :cache-creation-input-tokens :unknown
                :cache-read-input-tokens []})))))
 
-(deftest context-overflow-by-usage?-test
+(deftest ^{:stratum 0} context-overflow-by-usage?-test
   (testing "true once total input tokens reach the model's context window"
     ;; the actual adhoc-2135293220 shape: 204,282 input vs a 200k window
     (is (impl/context-overflow-by-usage?
@@ -63,7 +64,7 @@
     (is (not (impl/context-overflow-by-usage? {} 200000)))
     (is (not (impl/context-overflow-by-usage? nil 200000)))))
 
-(deftest streaming-error-response-classifies-overflow-test
+(deftest ^{:stratum 0} streaming-error-response-classifies-overflow-test
   (testing "input tokens >= window => terminal context_overflow type, not cli_error"
     (let [resp (impl/streaming-error-response
                 "Prompt is too long" 0 nil "Prompt is too long"
@@ -92,7 +93,9 @@
                 "" -1 "process died" "" nil nil nil 5 nil)]
       (is (= "cli_error" (get-in resp [:error :type]))))))
 
-(deftest parsed-usage-omits-absent-fields-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} parsed-usage-omits-absent-fields-test
   (testing "a cache-only usage frame produces NO nil :input-tokens key, so
             downstream `(get usage :input-tokens 0)` defaulting still works
             (would otherwise NPE in llm-success's :tokens sum)"

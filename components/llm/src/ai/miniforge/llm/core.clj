@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.core
   "LLM client implementation using CLI backends.
 
@@ -30,20 +29,28 @@
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.llm.protocols.records.llm-client :as records]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Re-export protocol for backward compatibility
-(def LLMClient p/LLMClient)
+(def ^{:stratum 0} LLMClient p/LLMClient)
 
 ;; Re-export protocol methods
-(def complete* p/complete*)
-(def get-config p/get-config)
+(def ^{:stratum 0} complete* p/complete*)
+
+(def ^{:stratum 0} get-config p/get-config)
 
 ;; Re-export implementation functions
-(def backends impl/backends)
-(def build-messages-prompt impl/build-messages-prompt)
-(def parse-cli-output impl/parse-cli-output)
-(def default-exec-fn impl/default-exec-fn)
-(def mock-exec-fn impl/mock-exec-fn)
-(def mock-exec-fn-multi impl/mock-exec-fn-multi)
+(def ^{:stratum 0} backends impl/backends)
+
+(def ^{:stratum 0} build-messages-prompt impl/build-messages-prompt)
+
+(def ^{:stratum 0} parse-cli-output impl/parse-cli-output)
+
+(def ^{:stratum 0} default-exec-fn impl/default-exec-fn)
+
+(def ^{:stratum 0} mock-exec-fn impl/mock-exec-fn)
+
+(def ^{:stratum 0} mock-exec-fn-multi impl/mock-exec-fn-multi)
 
 ;; Re-export factory functions
-(def create-client records/create-client)
+(def ^{:stratum 0} create-client records/create-client)
