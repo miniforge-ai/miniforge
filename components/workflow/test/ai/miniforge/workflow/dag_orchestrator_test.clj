@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.dag-orchestrator-test
   "Tests for DAG orchestrator: stratum wiring, conflict-aware batching,
    plan-to-DAG conversion with new decomposition fields, per-task base
@@ -30,23 +29,104 @@
    [ai.miniforge.workflow.dag-resilience :as resilience]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def id-a (random-uuid))
-(def id-b (random-uuid))
-(def id-c (random-uuid))
-(def id-d (random-uuid))
+;; Test fixtures
+(def ^{:stratum 0} id-a (random-uuid))
+
+(def ^{:stratum 0} id-b (random-uuid))
+
+(def ^{:stratum 0} id-c (random-uuid))
+
+(def ^{:stratum 0} id-d (random-uuid))
+
+;; Per-task base branch chaining — `task-sub-opts` resolves the right
+;; base branch from the per-workflow registry so a downstream task's
+;; sub-workflow forks off its dependency's persisted branch instead of
+;; the spec branch.
+(defn- ^{:stratum 0} registry-context
+  "Build a context with a populated branch registry. `entries` is a map of
+   `task-id → {:branch ...}`. Returns the context map (not the atom) so
+   tests reuse it for `task-sub-opts` calls."
+  [entries default-branch]
+  (let [reg (atom (reduce-kv dag/register-branch
+                             (dag/create-branch-registry)
+                             entries))]
+    {:dag/branch-registry reg
+     :execution/opts {:branch default-branch}}))
+
+(defn- ^{:stratum 0} make-task-def
+  "Build a task-def map for `task-sub-opts` tests.
+   `:task/deps` defaults to #{} for root (no-dependency) tasks."
+  ([id description] (make-task-def id description #{}))
+  ([id description deps]
+   {:task/id          id
+    :task/description description
+    :task/deps        deps}))
+
+(defn- ^{:stratum 0} make-plan-task
+  "Build a plan-task map for `execute-plan-as-dag` tests.
+   `:task/type` is always `:implement`; `:task/dependencies` defaults to []."
+  ([id description] (make-plan-task id description []))
+  ([id description dependencies]
+   {:task/id           id
+    :task/description  description
+    :task/type         :implement
+    :task/dependencies dependencies}))
+
+;------------------------------------------------------------------------------ aggregate-results — metrics rollup across ok + err
+;; Cost-USD assertions tolerate IEEE-754 rounding because :cost-usd is
+;; a double in this layer. 0.01 + 0.03 in IEEE doubles ≈
+;; 0.039999999999999994 — direct = comparison flakes per host. A
+;; sub-cent epsilon is well below any rollup precision a caller
+;; relies on.
+(def ^{:stratum 0} ^:private cost-usd-epsilon 1.0e-6)
+
+;; Test fixtures lifted into named data so the assertion shape and
+;; the input shape can be read together. Lets each row's metrics
+;; carry semantic meaning beyond raw integers in deftest body.
+(def ^{:stratum 0} ^:private aggregate-rollup-fixture
+  {:ok    {:tokens 1000 :cost-usd 0.01 :duration-ms 5000}
+   :err   {:tokens 2500 :cost-usd 0.03 :duration-ms 12000}
+   :sum   {:tokens 3500 :cost-usd 0.04 :duration-ms 17000}})
+
+(deftest ^{:stratum 0} aggregate-results-handles-missing-metrics-gracefully-test
+  (testing "Tasks with no :metrics key on either ok or err shape
+            contribute zero rather than throwing or producing nil
+            sums. Older callers that build dag/ok without :metrics
+            (placeholder paths) must keep working."
+    (let [no-metrics-ok  (dag/ok  {:status :implemented :artifacts []})
+          no-metrics-err (dag/err :task-execution-failed "boom" {})
+          mixed          {:t1 no-metrics-ok :t2 no-metrics-err}
+          agg            (dag-orch/aggregate-results mixed)]
+      (is (= 0 (:total-tokens agg)))
+      (is (= 0.0 (:total-cost agg)))
+      (is (= 0 (:total-duration agg))))))
+
+;; emit-batch-events! per-task event emission
+;;
+;; Stub at the resilience emit fns rather than the event-stream
+;; interface — the orchestrator's contract is "call the right emit
+;; fn with the right args"; what those fns do with publish! is the
+;; resilience namespace's concern.
+;; Number of tasks in the all-success and all-failure emit-batch test fixtures.
+;; Both tests build a results map of {id-a ..., id-b ...} — two tasks — so
+;; "all tasks completed" and "all tasks failed" both expect this count.
+(def ^{:stratum 0} ^:private emit-batch-task-count 2)
+
+;; Sentinel for the complementary side of a one-sided batch (i.e. when all
+;; tasks succeed the failure count is zero, and vice-versa).
+(def ^{:stratum 0} ^:private emit-batch-no-calls 0)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; wire-stratum-deps tests
 
-(deftest wire-stratum-deps-no-strata-test
+;; wire-stratum-deps tests
+(deftest ^{:stratum 1} wire-stratum-deps-no-strata-test
   (testing "no-op when no tasks have :task/stratum"
     (let [tasks [{:task/id id-a :task/deps #{}}
                  {:task/id id-b :task/deps #{}}]]
       (is (= tasks (dag-orch/wire-stratum-deps tasks))))))
 
-(deftest wire-stratum-deps-wires-across-strata-test
+(deftest ^{:stratum 1} wire-stratum-deps-wires-across-strata-test
   (testing "stratum-1 tasks auto-depend on all stratum-0 tasks"
     (let [tasks [{:task/id id-a :task/deps #{} :task/stratum 0}
                  {:task/id id-b :task/deps #{} :task/stratum 0}
@@ -55,7 +135,7 @@
           c-deps (:task/deps (nth result 2))]
       (is (= #{id-a id-b} c-deps)))))
 
-(deftest wire-stratum-deps-preserves-explicit-deps-test
+(deftest ^{:stratum 1} wire-stratum-deps-preserves-explicit-deps-test
   (testing "tasks with explicit deps are not overwritten"
     (let [tasks [{:task/id id-a :task/deps #{} :task/stratum 0}
                  {:task/id id-b :task/deps #{id-a} :task/stratum 1}]
@@ -63,7 +143,7 @@
           b-deps (:task/deps (nth result 1))]
       (is (= #{id-a} b-deps)))))
 
-(deftest wire-stratum-deps-three-strata-test
+(deftest ^{:stratum 1} wire-stratum-deps-three-strata-test
   (testing "stratum-2 depends on stratum-1, not stratum-0"
     (let [tasks [{:task/id id-a :task/deps #{} :task/stratum 0}
                  {:task/id id-b :task/deps #{} :task/stratum 1}
@@ -72,10 +152,8 @@
       (is (= #{id-a} (:task/deps (nth result 1))))
       (is (= #{id-b} (:task/deps (nth result 2)))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; select-non-conflicting-batch tests
-
-(deftest select-non-conflicting-batch-no-files-test
+(deftest ^{:stratum 1} select-non-conflicting-batch-no-files-test
   (testing "selects all when no exclusive-files declared"
     (let [tasks [[id-a {:task/id id-a}]
                  [id-b {:task/id id-b}]
@@ -83,7 +161,7 @@
           batch (dag-orch/select-non-conflicting-batch tasks 4)]
       (is (= 3 (count batch))))))
 
-(deftest select-non-conflicting-batch-respects-max-test
+(deftest ^{:stratum 1} select-non-conflicting-batch-respects-max-test
   (testing "respects max-parallel limit"
     (let [tasks [[id-a {:task/id id-a}]
                  [id-b {:task/id id-b}]
@@ -91,7 +169,7 @@
           batch (dag-orch/select-non-conflicting-batch tasks 2)]
       (is (= 2 (count batch))))))
 
-(deftest select-non-conflicting-batch-skips-conflicts-test
+(deftest ^{:stratum 1} select-non-conflicting-batch-skips-conflicts-test
   (testing "skips tasks with overlapping exclusive-files"
     (let [tasks [[id-a {:task/id id-a
                         :task/exclusive-files ["src/foo.clj" "src/bar.clj"]}]
@@ -106,7 +184,7 @@
       (is (not (contains? selected-ids id-b)))
       (is (contains? selected-ids id-c)))))
 
-(deftest select-non-conflicting-batch-mixed-declared-test
+(deftest ^{:stratum 1} select-non-conflicting-batch-mixed-declared-test
   (testing "tasks without exclusive-files don't conflict with anything"
     (let [tasks [[id-a {:task/id id-a
                         :task/exclusive-files ["src/foo.clj"]}]
@@ -120,10 +198,8 @@
       (is (contains? selected-ids id-b))
       (is (not (contains? selected-ids id-c))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; plan->dag-tasks integration tests
-
-(deftest plan-to-dag-tasks-forwards-new-fields-test
+(deftest ^{:stratum 1} plan-to-dag-tasks-forwards-new-fields-test
   (testing "component and exclusive-files are forwarded to DAG tasks"
     (let [plan {:plan/id (random-uuid)
                 :plan/name "test"
@@ -139,7 +215,7 @@
       (is (= ["components/agent/src/foo.clj"] (:task/exclusive-files task)))
       (is (= 0 (:task/stratum task))))))
 
-(deftest plan-to-dag-tasks-stratum-wiring-integration-test
+(deftest ^{:stratum 1} plan-to-dag-tasks-stratum-wiring-integration-test
   (testing "stratum deps are auto-wired during plan->dag-tasks conversion"
     (let [plan {:plan/id (random-uuid)
                 :plan/name "multi-stratum"
@@ -155,7 +231,7 @@
           task-b (second dag-tasks)]
       (is (contains? (:task/deps task-b) id-a)))))
 
-(deftest plan-to-dag-tasks-backward-compat-test
+(deftest ^{:stratum 1} plan-to-dag-tasks-backward-compat-test
   (testing "plan without new fields still converts correctly"
     (let [plan {:plan/id (random-uuid)
                 :plan/name "old-style"
@@ -168,43 +244,7 @@
       (is (nil? (:task/component task)))
       (is (nil? (:task/exclusive-files task))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Per-task base branch chaining — `task-sub-opts` resolves the right
-;; base branch from the per-workflow registry so a downstream task's
-;; sub-workflow forks off its dependency's persisted branch instead of
-;; the spec branch.
-
-(defn- registry-context
-  "Build a context with a populated branch registry. `entries` is a map of
-   `task-id → {:branch ...}`. Returns the context map (not the atom) so
-   tests reuse it for `task-sub-opts` calls."
-  [entries default-branch]
-  (let [reg (atom (reduce-kv dag/register-branch
-                             (dag/create-branch-registry)
-                             entries))]
-    {:dag/branch-registry reg
-     :execution/opts {:branch default-branch}}))
-
-(defn- make-task-def
-  "Build a task-def map for `task-sub-opts` tests.
-   `:task/deps` defaults to #{} for root (no-dependency) tasks."
-  ([id description] (make-task-def id description #{}))
-  ([id description deps]
-   {:task/id          id
-    :task/description description
-    :task/deps        deps}))
-
-(defn- make-plan-task
-  "Build a plan-task map for `execute-plan-as-dag` tests.
-   `:task/type` is always `:implement`; `:task/dependencies` defaults to []."
-  ([id description] (make-plan-task id description []))
-  ([id description dependencies]
-   {:task/id           id
-    :task/description  description
-    :task/type         :implement
-    :task/dependencies dependencies}))
-
-(deftest task-sub-opts-no-registry-resolves-to-default-test
+(deftest ^{:stratum 1} task-sub-opts-no-registry-resolves-to-default-test
   (testing "absent :dag/branch-registry on context is treated as an empty
             registry — `:branch` still resolves deterministically.
 
@@ -224,7 +264,7 @@
       (is (= "main" (:branch opts))
           "no registry + no spec branch on context → default 'main'"))))
 
-(deftest task-sub-opts-zero-deps-uses-default-test
+(deftest ^{:stratum 1} task-sub-opts-zero-deps-uses-default-test
   (testing "root task: with registry but no deps, base = default branch.
             The opts SHOULD carry :branch so the sub-workflow's
             acquire-environment is explicit about the fork point — even
@@ -236,7 +276,7 @@
       (is (= "feat/spec" (:branch opts))
           "zero-dep tasks fork from the spec branch resolved off context"))))
 
-(deftest task-sub-input-threads-pr-provenance-test
+(deftest ^{:stratum 1} task-sub-input-threads-pr-provenance-test
   (testing "2-arity threads the parent run id + spec path into the sub-input
             so a DAG task's PR frontmatter maps back to its workflow + spec"
     (let [ctx {:execution/id "parent-run-1"
@@ -250,7 +290,7 @@
       (is (not (contains? in :workflow/parent-id)))
       (is (not (contains? in :spec/path))))))
 
-(deftest task-sub-opts-single-dep-uses-deps-branch-test
+(deftest ^{:stratum 1} task-sub-opts-single-dep-uses-deps-branch-test
   (testing "single dep registered: base = the dep's persisted branch.
             This is the whole point of the chaining feature — the
             downstream sub-workflow sees its parent's work on disk."
@@ -260,7 +300,7 @@
       (is (= "task-a" (:branch opts))
           "single-dep base resolves to the dep's branch, NOT the spec branch"))))
 
-(deftest task-sub-opts-release-base-is-parent-pushed-branch-test
+(deftest ^{:stratum 1} task-sub-opts-release-base-is-parent-pushed-branch-test
   (testing "the release PR base is the dep's PUSHED branch (:pr-branch), so a
             chained task stacks on the parent's PUBLISHED branch — distinct
             from :branch, the LOCAL worktree fork point. Root tasks base on
@@ -293,7 +333,7 @@
     (let [opts (dag-orch/task-sub-opts (registry-context {} "feat/spec"))]
       (is (not (contains? opts :release/base-branch))))))
 
-(deftest task-sub-opts-single-dep-unregistered-falls-back-test
+(deftest ^{:stratum 1} task-sub-opts-single-dep-unregistered-falls-back-test
   (testing "single dep not yet registered: fall back to default branch.
             Defensive: scheduler shouldn't allow this in practice (deps
             run first) but failing-soft beats blocking when the prior
@@ -304,7 +344,7 @@
       (is (= "main" (:branch opts))
           "unregistered dep falls back to spec branch — no block"))))
 
-(deftest task-sub-opts-multi-dep-attempts-merge-test
+(deftest ^{:stratum 1} task-sub-opts-multi-dep-attempts-merge-test
   (testing "Multi-parent task: v2 invokes merge-parent-branches! instead of
             rejecting at plan time. In a test context whose host repo
             doesn't have these branches, the merge attempt fails fast with
@@ -330,7 +370,7 @@
           "branch-unresolvable is the right category — branches don't exist in
            the test repo, so rev-parse fails before any merge is attempted"))))
 
-(deftest task-sub-opts-multi-dep-rejects-invalid-branch-name-test
+(deftest ^{:stratum 1} task-sub-opts-multi-dep-rejects-invalid-branch-name-test
   (testing "Multi-parent task: a parent whose registered branch starts with '-'
             is rejected before git is invoked, surfacing a typed
             :anomalies/dag-multi-parent-branch-name-invalid anomaly."
@@ -347,7 +387,7 @@
              (get-in opts [:dag/merge-anomaly :anomaly/category]))
           "leading-dash branch returns branch-name-invalid before any git invocation"))))
 
-(deftest task-sub-opts-multi-dep-rejects-all-invalid-ref-shapes-test
+(deftest ^{:stratum 1} task-sub-opts-multi-dep-rejects-all-invalid-ref-shapes-test
   ;; Coverage extension after Copilot review on PR #1048: the
   ;; strengthened `valid-ref-name?` rejects more than just leading-dash
   ;; (revision operators, whitespace, ref-format-forbidden sequences,
@@ -381,15 +421,13 @@
                (get-in opts [:dag/merge-anomaly :anomaly/category]))
             (str label ": surfaces branch-name-invalid before git invocation"))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; v2 multi-parent: forest gate is dropped (informational logging only).
 ;; Diamond plans run end-to-end via merge-parent-branches!. With no
 ;; llm-backend in the test context, sub-workflows resolve to placeholder
 ;; results and don't actually invoke the merge path; the test below pins
 ;; that the gate is dropped and the run reaches completion. Real merge
 ;; behavior is exercised by the integration tests.
-
-(deftest execute-plan-as-dag-accepts-forest-test
+(deftest ^{:stratum 1} execute-plan-as-dag-accepts-forest-test
   (testing "linear chain is a forest — orchestrator runs to completion"
     (let [[logger _] (log/collecting-logger)
           plan {:plan/id (random-uuid)
@@ -400,7 +438,7 @@
       (is (:success? result) "forest plan should run to success")
       (is (= 2 (:tasks-completed result))))))
 
-(deftest execute-plan-as-dag-accepts-diamond-test-v2
+(deftest ^{:stratum 1} execute-plan-as-dag-accepts-diamond-test-v2
   (testing "v2: diamond (multi-parent) plan is no longer rejected at plan
             time. The forest gate is dropped; multi-parent tasks run
             through `merge-parent-branches!`. With placeholder execution
@@ -425,65 +463,10 @@
           "the multi-parent detection is logged for plan-quality observability —
            dashboard surfaces fan-in even though it doesn't reject"))))
 
-;------------------------------------------------------------------------------ aggregate-results — metrics rollup across ok + err
-
-;; Cost-USD assertions tolerate IEEE-754 rounding because :cost-usd is
-;; a double in this layer. 0.01 + 0.03 in IEEE doubles ≈
-;; 0.039999999999999994 — direct = comparison flakes per host. A
-;; sub-cent epsilon is well below any rollup precision a caller
-;; relies on.
-(def ^:private cost-usd-epsilon 1.0e-6)
-
-(defn- approx=
+(defn- ^{:stratum 1} approx=
   [expected actual]
   (< (Math/abs (double (- expected actual))) cost-usd-epsilon))
 
-;; Test fixtures lifted into named data so the assertion shape and
-;; the input shape can be read together. Lets each row's metrics
-;; carry semantic meaning beyond raw integers in deftest body.
-(def ^:private aggregate-rollup-fixture
-  {:ok    {:tokens 1000 :cost-usd 0.01 :duration-ms 5000}
-   :err   {:tokens 2500 :cost-usd 0.03 :duration-ms 12000}
-   :sum   {:tokens 3500 :cost-usd 0.04 :duration-ms 17000}})
-
-(deftest aggregate-results-sums-metrics-from-ok-and-err-test
-  (testing "Both dag/ok and dag/err results contribute to the
-            aggregate :total-tokens / :total-cost / :total-duration.
-            Pre-fix the rollup only inspected `[:data :metrics ...]`
-            which silently dropped every failed task — for a dogfood
-            run with all tasks failing, total-tokens reported zero
-            despite a per-task implementer carrying real token counts.
-            With the fix, dag/err's `[:error :data :metrics ...]`
-            shape is also picked up so failed tasks contribute to the
-            rollup the same way completed ones do."
-    (let [{:keys [ok err sum]} aggregate-rollup-fixture
-          ok-result  (dag/ok  {:metrics ok})
-          err-result (dag/err :task-execution-failed "boom"
-                              {:metrics err})
-          mixed      {:t-ok ok-result :t-err err-result}
-          agg        (dag-orch/aggregate-results mixed)]
-      (is (= (:tokens sum) (:total-tokens agg))
-          "ok + err token contributions both flow into the rollup")
-      (is (approx= (:cost-usd sum) (:total-cost agg))
-          ":cost-usd from both results sums correctly via the ok/err-
-           aware accessor (within IEEE-double rounding)")
-      (is (= (:duration-ms sum) (:total-duration agg))
-          ":duration-ms also rolls up from both shapes"))))
-
-(deftest aggregate-results-handles-missing-metrics-gracefully-test
-  (testing "Tasks with no :metrics key on either ok or err shape
-            contribute zero rather than throwing or producing nil
-            sums. Older callers that build dag/ok without :metrics
-            (placeholder paths) must keep working."
-    (let [no-metrics-ok  (dag/ok  {:status :implemented :artifacts []})
-          no-metrics-err (dag/err :task-execution-failed "boom" {})
-          mixed          {:t1 no-metrics-ok :t2 no-metrics-err}
-          agg            (dag-orch/aggregate-results mixed)]
-      (is (= 0 (:total-tokens agg)))
-      (is (= 0.0 (:total-cost agg)))
-      (is (= 0 (:total-duration agg))))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Artifact-of-record selection across repair iterations.
 ;;
 ;; `:execution/artifacts` accumulates across every phase invocation
@@ -494,8 +477,7 @@
 ;; entry so the `:dag/task-completed` event reports the artifact
 ;; that actually shipped — not an early failing iteration that was
 ;; later repaired. Bug observed 2026-05-12 on PR #861.
-
-(deftest run-mini-workflow-selects-last-artifact-test
+(deftest ^{:stratum 1} run-mini-workflow-selects-last-artifact-test
   (testing "When :execution/artifacts has multiple entries from repair
             iterations, the wf-result :artifact must be the LAST entry
             (the final iteration's), not the first (an earlier failing
@@ -524,7 +506,7 @@
            `(first artifacts)` would surface the iter-1 'core change is absent'
            summary even though iter 3 shipped the fix"))))
 
-(deftest run-mini-workflow-single-artifact-still-selected-test
+(deftest ^{:stratum 1} run-mini-workflow-single-artifact-still-selected-test
   (testing "Single-iteration happy path: with exactly one artifact in the
             vector, `(last artifacts)` selects it just as `(first artifacts)`
             would. Confirms the fix doesn't regress the no-repair case."
@@ -543,24 +525,35 @@
       (is (= only-artifact (:artifact wf-result))
           "single-artifact case still works"))))
 
-;------------------------------------------------------------------------------ Layer 5
-;; emit-batch-events! per-task event emission
+;------------------------------------------------------------------------------ Layer 4.5
+;; extract-pr-info-from-result :deps extraction.
 ;;
-;; Stub at the resilience emit fns rather than the event-stream
-;; interface — the orchestrator's contract is "call the right emit
-;; fn with the right args"; what those fns do with publish! is the
-;; resilience namespace's concern.
+;; DAG task-defs (produced by `plan->dag-tasks`) carry validated
+;; dependencies under `:task/deps`, not the raw plan-level `:task/dependencies`
+;; key. `extract-pr-info-from-result` must read `:task/deps` — reading
+;; `:task/dependencies` off a DAG task-def always returns an empty set.
+(deftest ^{:stratum 1} extract-pr-info-from-result-reads-task-deps-test
+  (testing "pr-info's :deps reflects the task-def's actual :task/deps,
+            not the raw plan-level :task/dependencies key (which DAG
+            task-defs never carry)"
+    (let [deps           #{id-a id-b}
+          task-def       (make-task-def id-c "Downstream task" deps)
+          release-result {:result {:output {:workflow/pr-info {:pr-number 42
+                                                                :branch "task-c"}}}}
+          result         {:execution/phase-results {:release release-result}}
+          pr-info        (dag-orch/extract-pr-info-from-result result task-def)]
+      (is (= deps (:deps pr-info))
+          "must equal the task-def's :task/deps, not an empty set"))))
 
-;; Number of tasks in the all-success and all-failure emit-batch test fixtures.
-;; Both tests build a results map of {id-a ..., id-b ...} — two tasks — so
-;; "all tasks completed" and "all tasks failed" both expect this count.
-(def ^:private emit-batch-task-count 2)
+(deftest ^{:stratum 1} extract-pr-info-from-result-no-deps-test
+  (testing "root task (no deps) yields an empty :deps set"
+    (let [task-def       (make-task-def id-a "Root task")
+          release-result {:result {:output {:workflow/pr-info {:pr-number 1}}}}
+          result         {:execution/phase-results {:release release-result}}
+          pr-info        (dag-orch/extract-pr-info-from-result result task-def)]
+      (is (= #{} (:deps pr-info))))))
 
-;; Sentinel for the complementary side of a one-sided batch (i.e. when all
-;; tasks succeed the failure count is zero, and vice-versa).
-(def ^:private emit-batch-no-calls 0)
-
-(deftest emit-batch-events-emits-task-completed-for-success-test
+(deftest ^{:stratum 1} emit-batch-events-emits-task-completed-for-success-test
   (testing ":dag/task-completed fires for every dag/ok? result in batch"
     (let [completed-calls (atom [])
           failed-calls    (atom [])]
@@ -575,7 +568,7 @@
           (is (= emit-batch-no-calls (count @failed-calls)))
           (is (= #{id-a id-b} (set (map first @completed-calls)))))))))
 
-(deftest emit-batch-events-emits-task-failed-for-failures-test
+(deftest ^{:stratum 1} emit-batch-events-emits-task-failed-for-failures-test
   (testing ":dag/task-failed fires for every dag/err? result in batch"
     (let [completed-calls (atom [])
           failed-calls    (atom [])]
@@ -592,7 +585,7 @@
           (is (= #{"boom a" "boom b"}
                  (set (map #(get-in (second %) [:error :message]) @failed-calls)))))))))
 
-(deftest emit-batch-events-emits-both-events-for-mixed-batch-test
+(deftest ^{:stratum 1} emit-batch-events-emits-both-events-for-mixed-batch-test
   (testing "mixed batch produces completed for ok and failed for err.
             Asserts set membership not vector order — results is a hash-map
             and iteration order is not guaranteed across JVM / Clojure
@@ -608,6 +601,32 @@
           (dag-orch/emit-batch-events! results ::stream "wf-1")
           (is (= #{id-a} (set @completed-calls)))
           (is (= #{id-b} (set @failed-calls))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} aggregate-results-sums-metrics-from-ok-and-err-test
+  (testing "Both dag/ok and dag/err results contribute to the
+            aggregate :total-tokens / :total-cost / :total-duration.
+            Pre-fix the rollup only inspected `[:data :metrics ...]`
+            which silently dropped every failed task — for a dogfood
+            run with all tasks failing, total-tokens reported zero
+            despite a per-task implementer carrying real token counts.
+            With the fix, dag/err's `[:error :data :metrics ...]`
+            shape is also picked up so failed tasks contribute to the
+            rollup the same way completed ones do."
+    (let [{:keys [ok err sum]} aggregate-rollup-fixture
+          ok-result  (dag/ok  {:metrics ok})
+          err-result (dag/err :task-execution-failed "boom"
+                              {:metrics err})
+          mixed      {:t-ok ok-result :t-err err-result}
+          agg        (dag-orch/aggregate-results mixed)]
+      (is (= (:tokens sum) (:total-tokens agg))
+          "ok + err token contributions both flow into the rollup")
+      (is (approx= (:cost-usd sum) (:total-cost agg))
+          ":cost-usd from both results sums correctly via the ok/err-
+           aware accessor (within IEEE-double rounding)")
+      (is (= (:duration-ms sum) (:total-duration agg))
+          ":duration-ms also rolls up from both shapes"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
