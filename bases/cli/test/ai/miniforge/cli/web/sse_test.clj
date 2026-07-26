@@ -24,6 +24,7 @@
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
    [org.httpkit.server :as http]
+   [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.cli.web.sse :as sse]))
 
 (use-fixtures :each
@@ -86,3 +87,15 @@
       (sse/unregister! "wf-5")
       (is (nil? (sse/get-stream "wf-5")))
       (is (nil? (get @sse/subscriptions "wf-5"))))))
+
+(deftest ^{:stratum 0} unregister-unsubscribes-still-open-channels-before-dropping-state-test
+  (testing "channels never closed via on-close still get es/unsubscribe! called on unregister!"
+    (with-redefs [http/send! (constantly true)]
+      (sse/on-open "wf-7" :channel-a)
+      (sse/on-open "wf-7" :channel-b)
+      (let [unsubscribed (atom #{})]
+        (with-redefs [es/unsubscribe! (fn [_stream sub-id] (swap! unsubscribed conj sub-id) nil)]
+          (let [expected-sub-ids (set (vals (get @sse/subscriptions "wf-7")))]
+            (sse/unregister! "wf-7")
+            (is (= expected-sub-ids @unsubscribed)
+                "both still-open channels' subscriber ids must be unsubscribed, not silently orphaned")))))))

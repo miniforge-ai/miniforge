@@ -63,6 +63,9 @@
   workflow-id)
 
 (defn ^{:stratum 1} unregister! [workflow-id]
+  (when-let [event-stream (get @streams workflow-id)]
+    (doseq [[_channel sub-id] (get @subscriptions workflow-id)]
+      (es/unsubscribe! event-stream sub-id)))
   (swap! streams dissoc workflow-id)
   (swap! subscriptions dissoc workflow-id)
   nil)
