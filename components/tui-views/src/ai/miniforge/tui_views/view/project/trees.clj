@@ -15,13 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.project.trees
   "Tree node primitives and builders for readiness, risk, policy,
    CI, gates, evidence, and PR detail trees.
 
    Layer 0: Pure tree-node constructors.
-   Layer 1: Composite tree builders that assemble node sequences."
+   Layer 1: Composite tree builders that assemble node sequences.
+   Layer 2: Section builders (CI, packs, violations) and top-level projections.
+   Layer 3: policy-tree / project-readiness-tree (compose Layer 2 section builders).
+   Layer 4: project-gate-list (dispatches to policy-tree/gates-tree).
+   (Over the 3-layer budget; Wave 2 namespace-split candidate.)"
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.messages :as msg]
@@ -29,9 +32,9 @@
    [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Tree node primitives and semantic status colors
 
-(defn tree-node
+;; Tree node primitives and semantic status colors
+(defn ^{:stratum 0} tree-node
   "Build a tree node for the tree widget.
    Optional :fg sets per-node color (theme-independent status color)."
   ([label depth] {:label label :depth depth :expandable? false})
@@ -39,12 +42,130 @@
   ([label depth expandable? fg] {:label label :depth depth :expandable? expandable? :fg fg}))
 
 ;; Re-export palette colors for backward compatibility (tests reference sut/status-pass etc.)
-(def status-pass    palette/status-pass)
-(def status-fail    palette/status-fail)
-(def status-warning palette/status-warning)
-(def status-info    palette/status-info)
+(def ^{:stratum 0} status-pass    palette/status-pass)
 
-(defn readiness-state-color
+(def ^{:stratum 0} status-fail    palette/status-fail)
+
+(def ^{:stratum 0} status-warning palette/status-warning)
+
+(def ^{:stratum 0} status-info    palette/status-info)
+
+(defn ^{:stratum 0} factor-label
+  "Format a readiness/risk factor for display."
+  [{:keys [factor weight score contribution]}]
+  (str (msg/t :readiness/factor-label
+              {:factor  (name factor)
+               :score   (int (* 100 (or score 0)))
+               :weight  (int (* 100 (or weight 0)))})
+       (when contribution (msg/t :readiness/factor-contribution
+                                 {:contribution (format "%.2f" (double contribution))}))
+       ")"))
+
+(defn ^{:stratum 0} risk-factor-label
+  "Format a risk factor for display."
+  [{:keys [factor explanation weight score]}]
+  (str (name factor) ": " (or explanation "")
+       (when weight
+         (msg/t :risk/factor-weight
+                {:weight (int (* 100 weight)) :score (int (* 100 (or score 0)))}))))
+
+(defn ^{:stratum 0} severity-prefix [severity]
+  (case severity
+    :critical (msg/t :violation/severity-critical) :high (msg/t :violation/severity-high)
+    :medium   (msg/t :violation/severity-medium)   :low  (msg/t :violation/severity-low)
+    :info     (msg/t :violation/severity-info) "\u26a0 "))
+
+(defn ^{:stratum 0} intent-nodes
+  "Build intent section nodes for evidence tree."
+  [evidence]
+  [{:label (msg/t :evidence/intent) :depth 0 :expandable? true}
+   {:label (or (get-in evidence [:intent :description])
+               (msg/t :evidence/no-intent))
+    :depth 1 :expandable? false}])
+
+(defn ^{:stratum 0} phase-nodes
+  "Build phase section nodes for evidence tree."
+  [phases]
+  (into [{:label (msg/t :evidence/phases) :depth 0 :expandable? true}]
+        (mapv (fn [{:keys [phase status]}]
+                {:label (str (name phase)
+                             (case status
+                               :running  (msg/t :phase/running)
+                               :success  (msg/t :phase/passed)
+                               :failed   (msg/t :phase/failed)
+                               ""))
+                 :depth 1 :expandable? false})
+              phases)))
+
+(defn ^{:stratum 0} validation-nodes
+  "Build validation section nodes for evidence tree."
+  [evidence]
+  [{:label (msg/t :evidence/validation) :depth 0 :expandable? true}
+   {:label (if (get-in evidence [:validation :passed?])
+             (msg/t :evidence/all-gates-passed)
+             (msg/t :evidence/error-count
+                    {:count (count (get-in evidence [:validation :errors] []))}))
+    :depth 1 :expandable? false}])
+
+(defn ^{:stratum 0} policy-evidence-nodes
+  "Build policy section nodes for evidence tree."
+  [evidence]
+  [{:label (msg/t :evidence/policy) :depth 0 :expandable? true}
+   {:label (if (get-in evidence [:policy :compliant?])
+             (msg/t :evidence/policy-compliant)
+             (msg/t :evidence/policy-violations))
+    :depth 1 :expandable? false}])
+
+;; Composite tree projections (model -> tree nodes)
+(defn ^{:stratum 0} resolve-detail-enrichment
+  "Resolve enrichment data for the detail view's selected PR.
+   Falls back to naive derivation when enrichment is absent."
+  [model]
+  (let [pr-data (get-in model [:detail :selected-pr])
+        enrichment (when pr-data (helpers/resolve-enrichment pr-data))]
+    {:pr        pr-data
+     :readiness (:readiness enrichment)
+     :risk      (:risk enrichment)
+     :policy    (:pr/policy pr-data)
+     :gates     (get pr-data :pr/gate-results [])}))
+
+(defn ^{:stratum 0} project-phase-tree
+  "Project workflow phases as tree nodes for the detail view."
+  [model]
+  (let [detail (:detail model)
+        phases (:phases detail)
+        wf-id (:workflow-id detail)
+        wf (some #(when (= (:id %) wf-id) %) (:workflows model []))]
+    (if (empty? phases)
+      [{:label (msg/t :phase/workflow-no-phases
+                      {:name (or (:name wf) (some-> wf-id str (subs 0 8)))})
+        :depth 0 :expandable? false}]
+      (mapv (fn [{:keys [phase status]}]
+              {:label (str (name (or phase "?"))
+                           (case status
+                             :running  (msg/t :phase/running)
+                             :success  (msg/t :phase/passed)
+                             :failed   (msg/t :phase/failed)
+                             :skipped  (msg/t :phase/skipped)
+                             ""))
+               :depth 0 :expandable? false})
+            phases))))
+
+(defn ^{:stratum 0} clean-agent-content
+  "Clean raw agent content for display:
+   - Unescape literal \\n sequences to real newlines
+   - Remove JSON SSE event lines (lines starting with '{\"type\":')
+   - Strip markdown link syntax [text](url) → text"
+  [content]
+  (->> (-> (or content "")
+           (str/replace "\\n" "\n"))
+       str/split-lines
+       (remove #(str/starts-with? (str/trim %) "{\"type\":"))
+       (map #(str/replace % #"\[([^\]]+)\]\([^)]+\)" "$1"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} readiness-state-color
   "Map readiness state to fixed status color."
   [state]
   (case state
@@ -60,7 +181,7 @@
     :merge-conflicts status-fail
     nil))
 
-(defn risk-level-color
+(defn ^{:stratum 1} risk-level-color
   "Map risk level to fixed status color."
   [level]
   (case level
@@ -71,7 +192,7 @@
     :unevaluated nil
     nil))
 
-(defn recommend-action-color
+(defn ^{:stratum 1} recommend-action-color
   "Map recommendation action to fixed status color."
   [action]
   (case action
@@ -85,38 +206,14 @@
     :wait         status-warning
     nil))
 
-(defn factor-label
-  "Format a readiness/risk factor for display."
-  [{:keys [factor weight score contribution]}]
-  (str (msg/t :readiness/factor-label
-              {:factor  (name factor)
-               :score   (int (* 100 (or score 0)))
-               :weight  (int (* 100 (or weight 0)))})
-       (when contribution (msg/t :readiness/factor-contribution
-                                 {:contribution (format "%.2f" (double contribution))}))
-       ")"))
-
-(defn ci-check-node
+(defn ^{:stratum 1} ci-check-node
   "Build a tree node for a single CI check result."
   [{:keys [name conclusion]}]
   (let [icon (case conclusion :success "\u2713" :failure "\u2718" :neutral "\u2500" "\u25cb")
         fg   (case conclusion :success status-pass :failure status-fail nil)]
     (tree-node (str icon " " name) 2 false fg)))
 
-(defn ci-section-nodes
-  "Build CI status header + individual check nodes."
-  [ci-status ci-checks]
-  (let [ci-fg (case ci-status :passed status-pass :failed status-fail status-warning)]
-    (into [(tree-node (msg/t :ci/status
-                             {:status (case ci-status
-                                        :passed  (msg/t :ci/passed)
-                                        :failed  (msg/t :ci/failed)
-                                        :running (msg/t :ci/running)
-                                        (msg/t :ci/pending))})
-                      1 true ci-fg)]
-          (mapv ci-check-node ci-checks))))
-
-(defn behind-main-node
+(defn ^{:stratum 1} behind-main-node
   "Build the behind-main indicator node."
   [behind? merge-st]
   (tree-node (if behind?
@@ -125,7 +222,7 @@
                (msg/t :readiness/behind-main-no))
              1 false (if behind? status-fail status-pass)))
 
-(defn review-node
+(defn ^{:stratum 1} review-node
   "Build the review/approval status node."
   [pr-status]
   (let [[review-label review-fg]
@@ -137,7 +234,7 @@
                               [(msg/t :review/pending)            status-warning])]
     (tree-node (msg/t :review/label {:status review-label}) 1 false review-fg)))
 
-(defn gates-section-nodes
+(defn ^{:stratum 1} gates-section-nodes
   "Build gate status header + individual gate nodes."
   [gates]
   (if (seq gates)
@@ -151,15 +248,7 @@
                   gates)))
     [(tree-node (msg/t :gates/none) 1)]))
 
-(defn risk-factor-label
-  "Format a risk factor for display."
-  [{:keys [factor explanation weight score]}]
-  (str (name factor) ": " (or explanation "")
-       (when weight
-         (msg/t :risk/factor-weight
-                {:weight (int (* 100 weight)) :score (int (* 100 (or score 0)))}))))
-
-(defn risk-factor-detail-nodes
+(defn ^{:stratum 1} risk-factor-detail-nodes
   "Build expandable detail nodes for a risk factor."
   [{:keys [factor value explanation]}]
   (case factor
@@ -201,19 +290,13 @@
     ;; Default: show explanation
     [(tree-node (str (name factor) ": " (or explanation "")) 1)]))
 
-(defn severity-prefix [severity]
-  (case severity
-    :critical (msg/t :violation/severity-critical) :high (msg/t :violation/severity-high)
-    :medium   (msg/t :violation/severity-medium)   :low  (msg/t :violation/severity-low)
-    :info     (msg/t :violation/severity-info) "\u26a0 "))
-
-(defn severity-color [severity]
+(defn ^{:stratum 1} severity-color [severity]
   (case severity
     :critical status-fail :high status-fail
     :medium   status-warning :low status-warning
     :info status-info nil))
 
-(defn pack-detail-nodes
+(defn ^{:stratum 1} pack-detail-nodes
   "Build detail child nodes for a pack at depth 3.
    Packs may be strings (name only) or maps with :name, :version, :description."
   [pack]
@@ -223,21 +306,7 @@
       (:description pack) (conj (tree-node (str "  " (:description pack)) 3)))
     []))
 
-(defn packs-applied-nodes
-  "Build tree nodes for policy packs applied.
-   Each pack is expandable if it has version or description detail."
-  [packs]
-  (when (seq packs)
-    (into [(tree-node (msg/t :policy/packs-applied {:count (count packs)}) 1 true)]
-          (mapcat (fn [pack]
-                    (let [pack-name (if (map? pack) (or (:name pack) (str pack)) (str pack))
-                          details   (pack-detail-nodes pack)
-                          expandable? (seq details)]
-                      (into [(tree-node (str "  " pack-name) 2 (boolean expandable?))]
-                            details)))
-                  packs))))
-
-(defn severity-summary-nodes
+(defn ^{:stratum 1} severity-summary-nodes
   "Build a summary node listing violation counts by severity."
   [summary]
   (when summary
@@ -250,7 +319,7 @@
       (when (seq parts)
         [(tree-node (msg/t :violation/summary {:parts (str/join ", " parts)}) 1)]))))
 
-(defn violation-detail-nodes
+(defn ^{:stratum 1} violation-detail-nodes
   "Build detail child nodes for a single violation at depth 3."
   [v]
   (let [artifact  (:artifact-path v)
@@ -270,38 +339,7 @@
                                3))
                   matches)))))
 
-(defn violation-nodes
-  "Build tree nodes for individual policy violations.
-   Each violation is expandable with detail children showing artifact path,
-   rule ID, detection type, and match locations."
-  [violations]
-  (when (seq violations)
-    (into [(tree-node (msg/t :violation/header {:count (count violations)}) 1 true)]
-          (mapcat (fn [v]
-                    (let [details (violation-detail-nodes v)
-                          expandable? (seq details)]
-                      (into [(tree-node (str (severity-prefix (:severity v))
-                                             (or (:message v) (name (get v :rule-id "")))
-                                             (when (:auto-fixable? v) (msg/t :violation/auto-fix)))
-                                        2 (boolean expandable?) (severity-color (:severity v)))]
-                            details)))
-                  violations))))
-
-(defn policy-tree [policy]
-  (let [summary    (:evaluation/summary policy)
-        violations (:evaluation/violations policy [])
-        packs      (:evaluation/packs-applied policy [])
-        passed?    (:evaluation/passed? policy)]
-    (into [(tree-node (msg/t :policy/tree-header
-                             {:status (if passed? (msg/t :policy/passed) (msg/t :policy/failed))
-                              :count  (:total summary 0)})
-                      0 true (if passed? status-pass status-fail))]
-          (concat
-           (packs-applied-nodes packs)
-           (severity-summary-nodes summary)
-           (violation-nodes violations)))))
-
-(defn gates-tree [gates]
+(defn ^{:stratum 1} gates-tree [gates]
   (let [passed (count (filter :gate/passed? gates))
         total  (count gates)
         all?   (= passed total)]
@@ -317,171 +355,7 @@
                               [(tree-node (str "  " (:gate/message g)) 2)]))))
                   gates))))
 
-(defn intent-nodes
-  "Build intent section nodes for evidence tree."
-  [evidence]
-  [{:label (msg/t :evidence/intent) :depth 0 :expandable? true}
-   {:label (or (get-in evidence [:intent :description])
-               (msg/t :evidence/no-intent))
-    :depth 1 :expandable? false}])
-
-(defn phase-nodes
-  "Build phase section nodes for evidence tree."
-  [phases]
-  (into [{:label (msg/t :evidence/phases) :depth 0 :expandable? true}]
-        (mapv (fn [{:keys [phase status]}]
-                {:label (str (name phase)
-                             (case status
-                               :running  (msg/t :phase/running)
-                               :success  (msg/t :phase/passed)
-                               :failed   (msg/t :phase/failed)
-                               ""))
-                 :depth 1 :expandable? false})
-              phases)))
-
-(defn validation-nodes
-  "Build validation section nodes for evidence tree."
-  [evidence]
-  [{:label (msg/t :evidence/validation) :depth 0 :expandable? true}
-   {:label (if (get-in evidence [:validation :passed?])
-             (msg/t :evidence/all-gates-passed)
-             (msg/t :evidence/error-count
-                    {:count (count (get-in evidence [:validation :errors] []))}))
-    :depth 1 :expandable? false}])
-
-(defn policy-evidence-nodes
-  "Build policy section nodes for evidence tree."
-  [evidence]
-  [{:label (msg/t :evidence/policy) :depth 0 :expandable? true}
-   {:label (if (get-in evidence [:policy :compliant?])
-             (msg/t :evidence/policy-compliant)
-             (msg/t :evidence/policy-violations))
-    :depth 1 :expandable? false}])
-
-;------------------------------------------------------------------------------ Layer 1
-;; Composite tree projections (model -> tree nodes)
-
-(defn resolve-detail-enrichment
-  "Resolve enrichment data for the detail view's selected PR.
-   Falls back to naive derivation when enrichment is absent."
-  [model]
-  (let [pr-data (get-in model [:detail :selected-pr])
-        enrichment (when pr-data (helpers/resolve-enrichment pr-data))]
-    {:pr        pr-data
-     :readiness (:readiness enrichment)
-     :risk      (:risk enrichment)
-     :policy    (:pr/policy pr-data)
-     :gates     (get pr-data :pr/gate-results [])}))
-
-(defn project-readiness-tree
-  "Build readiness tree nodes for the tree widget.
-   Each factor is expandable with detail nodes at depth 1+."
-  [model]
-  (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
-        score     (get readiness :readiness/score 0)
-        ready?    (:readiness/ready? readiness)
-        recommend (when pr (helpers/derive-recommendation pr))]
-    (into
-     (cond-> [(tree-node (str (msg/t :readiness/score {:score (int (* 100 score))})
-                               (when ready? (msg/t :readiness/ready-suffix)))
-                          0 true (if ready? status-pass status-warning))]
-       recommend
-       (conj (tree-node (msg/t :readiness/recommend
-                              {:label (:label recommend) :reason (:reason recommend)})
-                         0 false (recommend-action-color (:action recommend)))))
-     (concat
-      (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
-      [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
-      [(review-node (:pr/status pr))]
-      (when (seq (get pr :pr/depends-on []))
-        [(tree-node (msg/t :readiness/dependent-prs {:count (count (get pr :pr/depends-on))}) 1 true)])
-      (gates-section-nodes (get pr :pr/gate-results []))))))
-
-(defn project-risk-tree
-  "Build risk tree nodes for the tree widget.
-   Shows agent risk assessment (when available) and mechanical risk factors."
-  [model]
-  (let [{:keys [risk]} (resolve-detail-enrichment model)
-        pr      (get-in model [:detail :selected-pr])
-        pr-id   (when pr [(:pr/repo pr) (:pr/number pr)])
-        agent-r (when pr-id (get-in model [:agent-risk pr-id]))
-        wf-id   (:pr/workflow-id pr)
-        level   (get risk :risk/level :unevaluated)
-        score   (:risk/score risk)
-        factors (:risk/factors risk [])]
-    (concat
-      ;; Provenance indicator
-      (when wf-id
-        [(tree-node (msg/t :risk/miniforge-sourced) 0 false status-info)])
-      ;; Agent risk assessment (if available)
-      (when agent-r
-        [(tree-node (msg/t :risk/agent-risk {:level (name (:level agent-r))})
-                    0 true (risk-level-color (:level agent-r)))
-         (tree-node (str "  " (:reason agent-r)) 1)])
-      ;; Mechanical risk with factors
-      [(tree-node (str (msg/t :risk/mechanical-risk {:level (name level)})
-                       (when score (str " (" (format "%.2f" (double score)) ")")))
-                  0 true (risk-level-color level))]
-      (mapcat risk-factor-detail-nodes factors))))
-
-(defn project-gate-list
-  "Build gate/policy result list for the tree widget."
-  [model]
-  (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
-    (cond
-      policy      (policy-tree policy)
-      (seq gates) (gates-tree gates)
-      :else       [(tree-node (msg/t :policy/not-evaluated) 0)
-                   (tree-node (msg/t :policy/evaluate-hint) 1)])))
-
-(defn project-pr-summary
-  "Build summary tree nodes for the PR detail top pane.
-   Shows PR metadata, status, and linked workflow at a glance."
-  [model]
-  (let [{:keys [pr readiness risk]} (resolve-detail-enrichment model)
-        r-state  (get readiness :readiness/state :unknown)
-        risk-lvl (get risk :risk/level :unevaluated)
-        recommend (when pr (helpers/derive-recommendation pr))
-        ;; Find linked workflow: direct lookup via workflow-id, fallback to branch name match
-        wf-id    (:pr/workflow-id pr)
-        branch   (:pr/branch pr)
-        wfs      (get model :workflows [])
-        linked-wf (helpers/find-linked-workflow wfs wf-id branch)
-        additions (get pr :pr/additions 0)
-        deletions (get pr :pr/deletions 0)
-        total     (+ additions deletions)
-        files     (get pr :pr/changed-files-count 0)]
-    (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
-                        0 false status-info)
-             (tree-node (str "  " (:pr/title pr "")) 0)
-             (tree-node (str (msg/t :readiness/branch {:branch (or branch "?")})
-                             (when-let [author (:pr/author pr)]
-                               (when (seq author) (msg/t :readiness/branch-author {:author author}))))
-                        0)
-             (tree-node (msg/t :readiness/state-status
-                               {:state     (helpers/pr-state-label (:pr/status pr))
-                                :indicator (helpers/readiness-indicator r-state)})
-                        0 false (readiness-state-color r-state))
-             (tree-node (str (msg/t :readiness/risk-score
-                                    {:level (name risk-lvl)
-                                     :score (int (* 100 (get readiness :readiness/score 0)))})
-                             (when (pos? total)
-                               (str (msg/t :readiness/diff-stat {:additions additions :deletions deletions})
-                                    (when (pos? files) (msg/t :readiness/files-count {:files files})))))
-                        0 false (risk-level-color risk-lvl))]
-      recommend
-      (conj (tree-node (msg/t :readiness/action
-                              {:label (:label recommend) :reason (:reason recommend)})
-                       0 false (recommend-action-color (:action recommend))))
-      linked-wf
-      (conj (tree-node (msg/t :readiness/workflow-linked
-                              {:name   (:name linked-wf)
-                               :status (name (get linked-wf :status :unknown))})
-                       0 false status-info))
-      (not linked-wf)
-      (conj (tree-node (msg/t :readiness/workflow-not-linked) 0)))))
-
-(defn- aggregate-evidence-nodes
+(defn- ^{:stratum 1} aggregate-evidence-nodes
   "Build evidence summary nodes across all workflows for the top-level view."
   [workflows]
   (if (empty? workflows)
@@ -508,59 +382,7 @@
                     :depth 1 :expandable? false}]))
               workflows))))
 
-(defn project-evidence-tree
-  "Build evidence tree nodes.
-   When a workflow is selected (leaf context), shows that workflow's evidence detail.
-   At the top-level aggregate view (no workflow selected), shows a summary across all workflows."
-  [model]
-  (let [workflow-id (get-in model [:detail :workflow-id])]
-    (if workflow-id
-      (let [detail   (:detail model)
-            evidence (:evidence detail)
-            phases   (:phases detail)]
-        (into []
-          (concat
-           (intent-nodes evidence)
-           (phase-nodes phases)
-           (validation-nodes evidence)
-           (policy-evidence-nodes evidence))))
-      (aggregate-evidence-nodes (get model :workflows [])))))
-
-(defn project-phase-tree
-  "Project workflow phases as tree nodes for the detail view."
-  [model]
-  (let [detail (:detail model)
-        phases (:phases detail)
-        wf-id (:workflow-id detail)
-        wf (some #(when (= (:id %) wf-id) %) (:workflows model []))]
-    (if (empty? phases)
-      [{:label (msg/t :phase/workflow-no-phases
-                      {:name (or (:name wf) (some-> wf-id str (subs 0 8)))})
-        :depth 0 :expandable? false}]
-      (mapv (fn [{:keys [phase status]}]
-              {:label (str (name (or phase "?"))
-                           (case status
-                             :running  (msg/t :phase/running)
-                             :success  (msg/t :phase/passed)
-                             :failed   (msg/t :phase/failed)
-                             :skipped  (msg/t :phase/skipped)
-                             ""))
-               :depth 0 :expandable? false})
-            phases))))
-
-(defn clean-agent-content
-  "Clean raw agent content for display:
-   - Unescape literal \\n sequences to real newlines
-   - Remove JSON SSE event lines (lines starting with '{\"type\":')
-   - Strip markdown link syntax [text](url) → text"
-  [content]
-  (->> (-> (or content "")
-           (str/replace "\\n" "\n"))
-       str/split-lines
-       (remove #(str/starts-with? (str/trim %) "{\"type\":"))
-       (map #(str/replace % #"\[([^\]]+)\]\([^)]+\)" "$1"))))
-
-(defn project-chat-messages
+(defn ^{:stratum 1} project-chat-messages
   "Project chat messages as tree nodes for the agent panel.
    Shows conversation history with role-based styling and numbered actions.
    Uses :_panel-cols (injected by interpreter) for word-wrapping."
@@ -609,6 +431,196 @@
         (if pending?
           (conj nodes (tree-node label 0 false status-warning))
           nodes)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} ci-section-nodes
+  "Build CI status header + individual check nodes."
+  [ci-status ci-checks]
+  (let [ci-fg (case ci-status :passed status-pass :failed status-fail status-warning)]
+    (into [(tree-node (msg/t :ci/status
+                             {:status (case ci-status
+                                        :passed  (msg/t :ci/passed)
+                                        :failed  (msg/t :ci/failed)
+                                        :running (msg/t :ci/running)
+                                        (msg/t :ci/pending))})
+                      1 true ci-fg)]
+          (mapv ci-check-node ci-checks))))
+
+(defn ^{:stratum 2} packs-applied-nodes
+  "Build tree nodes for policy packs applied.
+   Each pack is expandable if it has version or description detail."
+  [packs]
+  (when (seq packs)
+    (into [(tree-node (msg/t :policy/packs-applied {:count (count packs)}) 1 true)]
+          (mapcat (fn [pack]
+                    (let [pack-name (if (map? pack) (or (:name pack) (str pack)) (str pack))
+                          details   (pack-detail-nodes pack)
+                          expandable? (seq details)]
+                      (into [(tree-node (str "  " pack-name) 2 (boolean expandable?))]
+                            details)))
+                  packs))))
+
+(defn ^{:stratum 2} violation-nodes
+  "Build tree nodes for individual policy violations.
+   Each violation is expandable with detail children showing artifact path,
+   rule ID, detection type, and match locations."
+  [violations]
+  (when (seq violations)
+    (into [(tree-node (msg/t :violation/header {:count (count violations)}) 1 true)]
+          (mapcat (fn [v]
+                    (let [details (violation-detail-nodes v)
+                          expandable? (seq details)]
+                      (into [(tree-node (str (severity-prefix (:severity v))
+                                             (or (:message v) (name (get v :rule-id "")))
+                                             (when (:auto-fixable? v) (msg/t :violation/auto-fix)))
+                                        2 (boolean expandable?) (severity-color (:severity v)))]
+                            details)))
+                  violations))))
+
+(defn ^{:stratum 2} project-risk-tree
+  "Build risk tree nodes for the tree widget.
+   Shows agent risk assessment (when available) and mechanical risk factors."
+  [model]
+  (let [{:keys [risk]} (resolve-detail-enrichment model)
+        pr      (get-in model [:detail :selected-pr])
+        pr-id   (when pr [(:pr/repo pr) (:pr/number pr)])
+        agent-r (when pr-id (get-in model [:agent-risk pr-id]))
+        wf-id   (:pr/workflow-id pr)
+        level   (get risk :risk/level :unevaluated)
+        score   (:risk/score risk)
+        factors (:risk/factors risk [])]
+    (concat
+      ;; Provenance indicator
+      (when wf-id
+        [(tree-node (msg/t :risk/miniforge-sourced) 0 false status-info)])
+      ;; Agent risk assessment (if available)
+      (when agent-r
+        [(tree-node (msg/t :risk/agent-risk {:level (name (:level agent-r))})
+                    0 true (risk-level-color (:level agent-r)))
+         (tree-node (str "  " (:reason agent-r)) 1)])
+      ;; Mechanical risk with factors
+      [(tree-node (str (msg/t :risk/mechanical-risk {:level (name level)})
+                       (when score (str " (" (format "%.2f" (double score)) ")")))
+                  0 true (risk-level-color level))]
+      (mapcat risk-factor-detail-nodes factors))))
+
+(defn ^{:stratum 2} project-pr-summary
+  "Build summary tree nodes for the PR detail top pane.
+   Shows PR metadata, status, and linked workflow at a glance."
+  [model]
+  (let [{:keys [pr readiness risk]} (resolve-detail-enrichment model)
+        r-state  (get readiness :readiness/state :unknown)
+        risk-lvl (get risk :risk/level :unevaluated)
+        recommend (when pr (helpers/derive-recommendation pr))
+        ;; Find linked workflow: direct lookup via workflow-id, fallback to branch name match
+        wf-id    (:pr/workflow-id pr)
+        branch   (:pr/branch pr)
+        wfs      (get model :workflows [])
+        linked-wf (helpers/find-linked-workflow wfs wf-id branch)
+        additions (get pr :pr/additions 0)
+        deletions (get pr :pr/deletions 0)
+        total     (+ additions deletions)
+        files     (get pr :pr/changed-files-count 0)]
+    (cond-> [(tree-node (str (:pr/repo pr "") " #" (:pr/number pr "?"))
+                        0 false status-info)
+             (tree-node (str "  " (:pr/title pr "")) 0)
+             (tree-node (str (msg/t :readiness/branch {:branch (or branch "?")})
+                             (when-let [author (:pr/author pr)]
+                               (when (seq author) (msg/t :readiness/branch-author {:author author}))))
+                        0)
+             (tree-node (msg/t :readiness/state-status
+                               {:state     (helpers/pr-state-label (:pr/status pr))
+                                :indicator (helpers/readiness-indicator r-state)})
+                        0 false (readiness-state-color r-state))
+             (tree-node (str (msg/t :readiness/risk-score
+                                    {:level (name risk-lvl)
+                                     :score (int (* 100 (get readiness :readiness/score 0)))})
+                             (when (pos? total)
+                               (str (msg/t :readiness/diff-stat {:additions additions :deletions deletions})
+                                    (when (pos? files) (msg/t :readiness/files-count {:files files})))))
+                        0 false (risk-level-color risk-lvl))]
+      recommend
+      (conj (tree-node (msg/t :readiness/action
+                              {:label (:label recommend) :reason (:reason recommend)})
+                       0 false (recommend-action-color (:action recommend))))
+      linked-wf
+      (conj (tree-node (msg/t :readiness/workflow-linked
+                              {:name   (:name linked-wf)
+                               :status (name (get linked-wf :status :unknown))})
+                       0 false status-info))
+      (not linked-wf)
+      (conj (tree-node (msg/t :readiness/workflow-not-linked) 0)))))
+
+(defn ^{:stratum 2} project-evidence-tree
+  "Build evidence tree nodes.
+   When a workflow is selected (leaf context), shows that workflow's evidence detail.
+   At the top-level aggregate view (no workflow selected), shows a summary across all workflows."
+  [model]
+  (let [workflow-id (get-in model [:detail :workflow-id])]
+    (if workflow-id
+      (let [detail   (:detail model)
+            evidence (:evidence detail)
+            phases   (:phases detail)]
+        (into []
+          (concat
+           (intent-nodes evidence)
+           (phase-nodes phases)
+           (validation-nodes evidence)
+           (policy-evidence-nodes evidence))))
+      (aggregate-evidence-nodes (get model :workflows [])))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} policy-tree [policy]
+  (let [summary    (:evaluation/summary policy)
+        violations (:evaluation/violations policy [])
+        packs      (:evaluation/packs-applied policy [])
+        passed?    (:evaluation/passed? policy)]
+    (into [(tree-node (msg/t :policy/tree-header
+                             {:status (if passed? (msg/t :policy/passed) (msg/t :policy/failed))
+                              :count  (:total summary 0)})
+                      0 true (if passed? status-pass status-fail))]
+          (concat
+           (packs-applied-nodes packs)
+           (severity-summary-nodes summary)
+           (violation-nodes violations)))))
+
+(defn ^{:stratum 3} project-readiness-tree
+  "Build readiness tree nodes for the tree widget.
+   Each factor is expandable with detail nodes at depth 1+."
+  [model]
+  (let [{:keys [pr readiness]} (resolve-detail-enrichment model)
+        score     (get readiness :readiness/score 0)
+        ready?    (:readiness/ready? readiness)
+        recommend (when pr (helpers/derive-recommendation pr))]
+    (into
+     (cond-> [(tree-node (str (msg/t :readiness/score {:score (int (* 100 score))})
+                               (when ready? (msg/t :readiness/ready-suffix)))
+                          0 true (if ready? status-pass status-warning))]
+       recommend
+       (conj (tree-node (msg/t :readiness/recommend
+                              {:label (:label recommend) :reason (:reason recommend)})
+                         0 false (recommend-action-color (:action recommend)))))
+     (concat
+      (ci-section-nodes (:pr/ci-status pr) (get pr :pr/ci-checks []))
+      [(behind-main-node (:pr/behind-main? pr) (:pr/merge-state pr))]
+      [(review-node (:pr/status pr))]
+      (when (seq (get pr :pr/depends-on []))
+        [(tree-node (msg/t :readiness/dependent-prs {:count (count (get pr :pr/depends-on))}) 1 true)])
+      (gates-section-nodes (get pr :pr/gate-results []))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} project-gate-list
+  "Build gate/policy result list for the tree widget."
+  [model]
+  (let [{:keys [policy gates]} (resolve-detail-enrichment model)]
+    (cond
+      policy      (policy-tree policy)
+      (seq gates) (gates-tree gates)
+      :else       [(tree-node (msg/t :policy/not-evaluated) 0)
+                   (tree-node (msg/t :policy/evaluate-hint) 1)])))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

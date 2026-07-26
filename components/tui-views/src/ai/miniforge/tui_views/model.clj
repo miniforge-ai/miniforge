@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.model
   "Application model shape and initialization.
 
@@ -25,9 +24,9 @@
   (:require [ai.miniforge.tui-views.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Model shape
 
-(defn init-model
+;; Model shape
+(defn ^{:stratum 0} init-model
   "Create the initial application model.
 
    Model shape:
@@ -120,10 +119,8 @@
    ;; Terminal sizing for responsive rendering
    :terminal/cols           120})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Workflow data shape
-
-(defn make-workflow
+(defn ^{:stratum 0} make-workflow
   "Create a workflow summary map for the model."
   [{:keys [id name status phase progress started-at gate-results]}]
   {:id           id
@@ -135,45 +132,22 @@
    :agents       {}
    :gate-results (or gate-results [])})
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Repo manager helpers
-
-(defn fleet-repos
+(defn ^{:stratum 0} fleet-repos
   "Configured repositories in fleet."
   [model]
   (vec (get model :fleet-repos [])))
 
-(defn browse-candidate-repos
-  "Remote browse candidates that are NOT already configured in fleet."
-  [model]
-  (let [fleet (set (fleet-repos model))]
-    (->> (get model :browse-repos [])
-         (remove fleet)
-         vec)))
-
-(defn repo-manager-items
-  "Visible repository rows for repo-manager based on :repo-manager-source."
-  [model]
-  (if (= :browse (:repo-manager-source model))
-    (vec (get model :browse-repos []))
-    (fleet-repos model)))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; View predicates
-
-(def top-level-views
+(def ^{:stratum 0} top-level-views
   "Top-level aggregate views reachable by Tab cycling."
   [:monitor :pr-fleet :workflow-list :evidence :artifact-browser :dag-kanban :repo-manager])
 
-(def detail-views
+(def ^{:stratum 0} detail-views
   "Detail views entered via Enter from an aggregate."
   [:workflow-detail :pr-detail :train-view])
 
-(def views
-  "All available views in canonical order."
-  (vec (concat top-level-views detail-views)))
-
-(defn view-labels
+(defn ^{:stratum 0} view-labels
   "View-keyword -> localized display label. A fn (not a def-map) so the catalog
    lookups resolve at call time, keeping namespace load free of catalog I/O."
   []
@@ -187,6 +161,27 @@
    :workflow-detail  (msg/t :view-label/workflow-detail)
    :pr-detail        (msg/t :detail/title-fallback)
    :train-view       (msg/t :view-label/train-view)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} browse-candidate-repos
+  "Remote browse candidates that are NOT already configured in fleet."
+  [model]
+  (let [fleet (set (fleet-repos model))]
+    (->> (get model :browse-repos [])
+         (remove fleet)
+         vec)))
+
+(defn ^{:stratum 1} repo-manager-items
+  "Visible repository rows for repo-manager based on :repo-manager-source."
+  [model]
+  (if (= :browse (:repo-manager-source model))
+    (vec (get model :browse-repos []))
+    (fleet-repos model)))
+
+(def ^{:stratum 1} views
+  "All available views in canonical order."
+  (vec (concat top-level-views detail-views)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

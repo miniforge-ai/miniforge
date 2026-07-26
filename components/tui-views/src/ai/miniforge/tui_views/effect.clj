@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.effect
   "Side-effect constructors for the Elm runtime.
 
@@ -26,79 +25,72 @@
    Layer 0 — no dependencies on other tui-views namespaces.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Side-effect constructors
 
-(defn sync-prs
+;; Side-effect constructors
+(defn ^{:stratum 0} sync-prs
   "Sync PRs from all fleet repos. Optionally filter by state."
   ([] {:type :sync-prs})
   ([state] {:type :sync-prs :state state}))
 
-(defn discover-repos
+(defn ^{:stratum 0} discover-repos
   "Discover repositories from a GitHub org/user and add to fleet."
   [owner]
   {:type :discover-repos :owner owner})
 
-(defn browse-repos
+(defn ^{:stratum 0} browse-repos
   "Browse remote repositories (read-only, no config change).
    opts may include :owner, :provider, :source, :limit."
   [opts]
   (merge {:type :browse-repos} opts))
 
-(defn open-url
+(defn ^{:stratum 0} open-url
   "Open a URL in the system browser."
   [url]
   {:type :open-url :url url})
 
-(defn evaluate-policy
+(defn ^{:stratum 0} evaluate-policy
   "Evaluate policy packs against a PR."
   [pr-id pr]
   {:type :evaluate-policy :pr-id pr-id :pr pr})
 
-(defn batch-evaluate-policy
+(defn ^{:stratum 0} batch-evaluate-policy
   "Evaluate policy for multiple PRs that don't have evaluation results."
   [prs]
   {:type :batch-evaluate-policy :prs prs})
 
-(defn create-train
+(defn ^{:stratum 0} create-train
   "Create a new merge train with the given name."
   [train-name]
   {:type :create-train :name train-name})
 
-(defn add-to-train
+(defn ^{:stratum 0} add-to-train
   "Add PRs to an existing train."
   [train-id prs]
   {:type :add-to-train :train-id train-id :prs prs})
 
-(defn merge-next
+(defn ^{:stratum 0} merge-next
   "Merge the next ready PR in a train."
   [train-id]
   {:type :merge-next :train-id train-id})
 
-(defn review-prs
+(defn ^{:stratum 0} review-prs
   "Run policy review on a set of PRs."
   [prs]
   {:type :review-prs :prs prs})
 
-(defn remediate-prs
+(defn ^{:stratum 0} remediate-prs
   "Attempt auto-remediation of policy violations on PRs."
   [prs]
   {:type :remediate-prs :prs prs})
 
-(defn unavailable-decompose-fn
+(defn ^{:stratum 0} unavailable-decompose-fn
   "Explicit no-op decomposer for TUI builds without a PR decomposition component."
   [_pr _diff _files _llm-fn]
   {:ok? false
    :error {:code :decomposition/not-configured
            :message "No :decompose-fn configured for :decompose-pr effect"}})
 
-(defn decompose-pr
-  "Analyze a PR for decomposition into sub-PRs."
-  ([pr]
-   (decompose-pr pr unavailable-decompose-fn))
-  ([pr decompose-fn]
-   {:type :decompose-pr :pr pr :decompose-fn decompose-fn}))
-
-(defn control-action
+(defn ^{:stratum 0} control-action
   "Create a control action effect to pause/resume/cancel a workflow.
    The effect handler writes a `:supervisory/intervention-requested`
    event into `{events-dir}/operator/`, where the runner's
@@ -108,34 +100,43 @@
    :action action-type
    :workflow-id workflow-id})
 
-(defn chat-send
+(defn ^{:stratum 0} chat-send
   "Send a chat message to the orchestrator."
   [context message history]
   {:type :chat-send :context context :message message :history history})
 
-(defn fleet-risk-triage
+(defn ^{:stratum 0} fleet-risk-triage
   "Request LLM risk triage across all fleet PRs.
    pr-summaries is a vector of {:id [repo num] :summary str} maps."
   [pr-summaries]
   {:type :fleet-risk-triage :pr-summaries pr-summaries})
 
-(defn archive-workflows
+(defn ^{:stratum 0} archive-workflows
   "Persistently archive workflows by moving their event files to archive/."
   [workflow-ids]
   {:type :archive-workflows :workflow-ids workflow-ids})
 
-(defn cache-policy-result
+(defn ^{:stratum 0} cache-policy-result
   "Persist a single PR's policy evaluation result to the disk cache."
   [pr-id result prs]
   {:type :cache-policy-result :pr-id pr-id :result result :prs prs})
 
-(defn cache-risk-triage
+(defn ^{:stratum 0} cache-risk-triage
   "Persist fleet risk triage results to the disk cache."
   [risk-map prs]
   {:type :cache-risk-triage :risk-map risk-map :prs prs})
 
-(defn reload-workflow-detail
+(defn ^{:stratum 0} reload-workflow-detail
   "Reload workflow detail from the event file on disk.
    Used when entering detail view to ensure data is fresh."
   [workflow-id]
   {:type :reload-workflow-detail :workflow-id workflow-id})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} decompose-pr
+  "Analyze a PR for decomposition into sub-PRs."
+  ([pr]
+   (decompose-pr pr unavailable-decompose-fn))
+  ([pr decompose-fn]
+   {:type :decompose-pr :pr pr :decompose-fn decompose-fn}))

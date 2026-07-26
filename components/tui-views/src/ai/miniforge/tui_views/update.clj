@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update
   "Pure update function: (model, msg) -> model'.
 
@@ -27,7 +26,8 @@
    Each key maps to a semantic :action/* token, and action tokens
    resolve to handler fns via the action registry (parser pattern).
 
-   Layers 4-5: Input handling + root update function."
+   Layers 0-6 (over the 3-layer budget; Wave 2 namespace-split candidate) —
+   input handling and root update dispatch build on the imported handlers."
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -44,52 +44,42 @@
    [ai.miniforge.tui-views.update.selection :as sel]
    [ai.miniforge.tui-views.update.chat :as chat]))
 
-;------------------------------------------------------------------------------ Layer 4
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Keybinding configuration (EDN-driven parser pattern)
 ;;
 ;; Flow: raw char → key token (input.clj) → action token (keybindings.edn)
 ;;       → handler fn (action registry below)
-
-(def keybindings
+(def ^{:stratum 0} keybindings
   "Keybinding config loaded from EDN. Maps key tokens to action tokens,
    grouped by mode (:help, :normal, :command, :search, :number-keys)."
   (-> (io/resource "config/tui/keybindings.edn")
       slurp
       edn/read-string))
 
-(def normal-keybindings  (:normal keybindings))
-(def help-keybindings    (:help keybindings))
-(def command-keybindings (:command keybindings))
-(def search-keybindings  (:search keybindings))
-(def filter-keybindings  (:filter keybindings))
-(def chat-keybindings    (:chat keybindings))
-(def number-key->index   (:number-keys keybindings))
-
 ;; ── Input event helpers ──
-
-(defn extract-key
+(defn ^{:stratum 0} extract-key
   "Extract the semantic key from a normalized input event.
    Maps return :key, bare keywords pass through."
   [key]
   (if (map? key) (:key key) key))
 
-(defn extract-char
+(defn ^{:stratum 0} extract-char
   "Extract the raw character from a normalized input event.
    Maps return :char, bare keywords return nil."
   [key]
   (when (map? key) (:char key)))
 
 ;; ── Repo manager helpers ──
-
-(defn in-repo-manager?
+(defn ^{:stratum 0} in-repo-manager?
   [model]
   (= :repo-manager (:view model)))
 
-(defn repo-manager-source
+(defn ^{:stratum 0} repo-manager-source
   [model]
   (if (= :browse (:repo-manager-source model)) :browse :fleet))
 
-(defn reset-repo-manager-state
+(defn ^{:stratum 0} reset-repo-manager-state
   [model source]
   (assoc model
          :repo-manager-source source
@@ -103,14 +93,176 @@
                          #{})
          :visual-anchor nil))
 
-(defn selected-repos
+(defn ^{:stratum 0} selected-repos
   [model]
   (->> (sel/effective-ids model)
        (filter string?)
        distinct
        vec))
 
-(defn repo-manager-open-browse
+(defn ^{:stratum 0} clear-detail-context
+  [model]
+  (-> model
+      (assoc-in [:detail :workflow-id] nil)
+      (assoc-in [:detail :selected-pr] nil)
+      (assoc-in [:detail :selected-train] nil)))
+
+;; ── Navigation with visual selection ──
+(defn ^{:stratum 0} nav-down-with-visual  [m] (-> (nav/navigate-down m)   sel/update-visual-selection))
+
+(defn ^{:stratum 0} nav-up-with-visual    [m] (-> (nav/navigate-up m)     sel/update-visual-selection))
+
+(defn ^{:stratum 0} nav-top-with-visual   [m] (-> (nav/navigate-top m)    sel/update-visual-selection))
+
+(defn ^{:stratum 0} nav-bottom-with-visual [m] (-> (nav/navigate-bottom m) sel/update-visual-selection))
+
+(def ^{:stratum 0} selectable-views
+  #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
+
+;; ── Extracted action handlers ──
+(defn ^{:stratum 0} nav-to-evidence [model]
+  (nav/switch-view model :evidence model/views))
+
+(defn ^{:stratum 0} handle-quit [model]
+  (assoc model :quit? true))
+
+(defn ^{:stratum 0} handle-chat [model]
+  (if (#{:pr-fleet :pr-detail} (:view model))
+    (chat/enter model)
+    model))
+
+(defn ^{:stratum 0} handle-train-view [model]
+  (if (:active-train-id model)
+    (command/execute-command model ":train")
+    (assoc model :flash-message (msg/t :flash/no-active-train-create))))
+
+(defn ^{:stratum 0} handle-refresh-or-sync [model]
+  (if (#{:pr-fleet :repo-manager} (:view model))
+    (command/execute-command model ":sync")
+    (nav/refresh model)))
+
+(defn ^{:stratum 0} handle-sync [model]
+  (if (#{:pr-fleet :repo-manager} (:view model))
+    (command/execute-command model ":sync")
+    model))
+
+(defn ^{:stratum 0} handle-open-in-browser [model]
+  (let [url (case (:view model)
+              :pr-fleet  (let [prs (:pr-items model [])
+                               visible (if-let [fi (:filtered-indices model)]
+                                         (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
+                                         prs)]
+                           (:pr/url (get visible (:selected-idx model))))
+              :pr-detail (get-in model [:detail :selected-pr :pr/url])
+              nil)]
+    (if url
+      (assoc model :side-effect (effect/open-url url)
+                   :flash-message (msg/t :flash/opening-url {:url url}))
+      (assoc model :flash-message (msg/t :flash/no-url-available)))))
+
+(defn ^{:stratum 0} handle-cycle-tab [model]
+  (cond
+    (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane model)
+    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
+    :else                                          (nav/cycle-top-level-view model)))
+
+(defn ^{:stratum 0} handle-cycle-tab-reverse [model]
+  (cond
+    (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane-reverse model)
+    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
+    :else                                          (nav/cycle-top-level-view-reverse model)))
+
+;; ── Command mode input ──
+(defn ^{:stratum 0} command-escape
+  "Escape in command mode: dismiss completions if open, else exit."
+  [model]
+  (if (:completing? model)
+    (completion/dismiss model)
+    (mode/exit-mode model)))
+
+(defn ^{:stratum 0} command-enter
+  "Enter in command mode: accept completion, open arg picker, or execute."
+  [model]
+  (if (and (:completing? model) (:completion-idx model))
+    (completion/accept model)
+    (let [buf (:command-buf model)
+          cmd-name (subs buf 1)
+          exact-cmd? (and (not (str/blank? cmd-name))
+                          (not (str/includes? cmd-name " "))
+                          (some #{cmd-name} (command/complete-command-name cmd-name)))
+          arg-completion? (when exact-cmd?
+                            (let [result (command/compute-completions model (str ":" cmd-name " "))]
+                              (or (seq (:completions result))
+                                  (:side-effect result))))]
+      (if arg-completion?
+        (completion/handle-tab model)
+        (-> (command/execute-command model buf)
+            mode/exit-mode)))))
+
+(def ^{:stratum 0} search-action-handlers
+  "Action token → handler for search-mode actions."
+  {:action/exit-mode        mode/exit-mode
+   :action/confirm-search   mode/confirm-search
+   :action/search-backspace mode/command-backspace})
+
+;; ── Filter mode input ──
+(def ^{:stratum 0} filter-action-handlers
+  "Action token → handler for filter-mode actions."
+  {:action/filter-escape    mode/filter-escape
+   :action/filter-confirm   mode/filter-confirm
+   :action/filter-backspace mode/filter-backspace})
+
+;; ── Chat mode input ──
+(def ^{:stratum 0} chat-action-handlers
+  "Action token → handler for chat-mode actions."
+  {:action/chat-escape        chat/escape
+   :action/chat-send          chat/send-message
+   :action/chat-backspace     chat/backspace
+   :action/chat-scroll-up     chat/scroll-up
+   :action/chat-scroll-down   chat/scroll-down
+   :action/chat-scroll-bottom chat/scroll-bottom})
+
+(defn ^{:stratum 0} refresh-add-repo-completions-if-active
+  "If command-mode add-repo picker is currently open, refresh its options."
+  [model]
+  (try
+    (let [active? (and (= :command (:mode model))
+                       (:completing? model)
+                       (str/starts-with? (:command-buf model "") ":add-repo "))]
+      (if-not active?
+        model
+        (let [result (command/compute-completions model (:command-buf model))
+              completions (vec (get result :completions []))
+              n (count completions)
+              prior-idx (get model :completion-idx 0)]
+          (assoc model
+                 :completions completions
+                 :completion-idx (when (pos? n) (min prior-idx (dec n)))
+                 :completing? (pos? n)))))
+    (catch Exception _
+      model)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} normal-keybindings  (:normal keybindings))
+
+(def ^{:stratum 1} help-keybindings    (:help keybindings))
+
+(def ^{:stratum 1} command-keybindings (:command keybindings))
+
+(def ^{:stratum 1} search-keybindings  (:search keybindings))
+
+(def ^{:stratum 1} filter-keybindings  (:filter keybindings))
+
+(def ^{:stratum 1} chat-keybindings    (:chat keybindings))
+
+(def ^{:stratum 1} number-key->index   (:number-keys keybindings))
+
+(defn ^{:stratum 1} repo-manager-open-browse
   [model provider]
   (let [m (reset-repo-manager-state model :browse)]
     (if (:browse-repos-loading? model)
@@ -121,7 +273,7 @@
              :browse-repos-loading? true
              :flash-message (msg/t :flash/browsing-provider-repos {:provider (name provider)})))))
 
-(defn repo-manager-add-selected
+(defn ^{:stratum 1} repo-manager-add-selected
   [model]
   (let [all-selected (selected-repos model)
         fleet-set (set (:fleet-repos model))
@@ -137,7 +289,7 @@
             (assoc :side-effect (effect/sync-prs)
                    :flash-message (msg/t :flash/repos-added {:count added})))))))
 
-(defn repo-manager-request-remove
+(defn ^{:stratum 1} repo-manager-request-remove
   [model]
   (let [repos (selected-repos model)]
     (if (empty? repos)
@@ -147,51 +299,7 @@
               :label (msg/t :confirm/remove-repositories)
               :ids (set repos)}))))
 
-(defn clear-detail-context
-  [model]
-  (-> model
-      (assoc-in [:detail :workflow-id] nil)
-      (assoc-in [:detail :selected-pr] nil)
-      (assoc-in [:detail :selected-train] nil)))
-
-(defn switch-numbered-view
-  "Switch view by number within the current abstraction level (1-0)."
-  [model key]
-  (if-let [idx (number-key->index key)]
-    (let [level-views (nav/current-level-views model)
-          target (nth level-views idx nil)]
-      (if target
-        (let [m (nav/switch-view model target model/views)]
-          (if (= level-views model/top-level-views)
-            (clear-detail-context m)
-            m))
-        model))
-    model))
-
-;; ── Navigation with visual selection ──
-
-(defn nav-down-with-visual  [m] (-> (nav/navigate-down m)   sel/update-visual-selection))
-(defn nav-up-with-visual    [m] (-> (nav/navigate-up m)     sel/update-visual-selection))
-(defn nav-top-with-visual   [m] (-> (nav/navigate-top m)    sel/update-visual-selection))
-(defn nav-bottom-with-visual [m] (-> (nav/navigate-bottom m) sel/update-visual-selection))
-
-(def selectable-views
-  #{:workflow-list :pr-fleet :artifact-browser :train-view :repo-manager})
-
-;; ── Extracted action handlers ──
-
-(defn nav-to-evidence [model]
-  (nav/switch-view model :evidence model/views))
-
-(defn handle-quit [model]
-  (assoc model :quit? true))
-
-(defn handle-enter-or-confirm [model]
-  (if (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
-    (repo-manager-add-selected model)
-    (nav/enter-detail model)))
-
-(defn handle-escape-cascade [model]
+(defn ^{:stratum 1} handle-escape-cascade [model]
   (cond
     ;; In repo-manager browse mode, Esc goes back to fleet mode
     (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
@@ -205,103 +313,18 @@
     (seq (:search-matches model)) (assoc model :search-matches [] :search-match-idx nil)
     :else                         (nav/go-back model)))
 
-(defn handle-toggle-or-expand [model]
+(defn ^{:stratum 1} handle-toggle-or-expand [model]
   (if (selectable-views (:view model))
     (sel/toggle-selection model)
     (nav/toggle-expand model)))
 
-(defn handle-chat [model]
-  (if (#{:pr-fleet :pr-detail} (:view model))
-    (chat/enter model)
-    model))
-
-(defn handle-train-view [model]
-  (if (:active-train-id model)
-    (command/execute-command model ":train")
-    (assoc model :flash-message (msg/t :flash/no-active-train-create))))
-
-(defn handle-refresh-or-sync [model]
-  (if (#{:pr-fleet :repo-manager} (:view model))
-    (command/execute-command model ":sync")
-    (nav/refresh model)))
-
-(defn handle-sync [model]
-  (if (#{:pr-fleet :repo-manager} (:view model))
-    (command/execute-command model ":sync")
-    model))
-
-(defn handle-browse-or-kanban [model]
-  (if (in-repo-manager? model)
-    (repo-manager-open-browse model :all)
-    (nav/switch-view model :dag-kanban model/views)))
-
-(defn handle-fleet-view [model]
+(defn ^{:stratum 1} handle-fleet-view [model]
   (if (in-repo-manager? model)
     (-> (reset-repo-manager-state model :fleet)
         (assoc :flash-message (msg/t :flash/showing-configured-repos)))
     model))
 
-(defn handle-open-browse [model]
-  (if (in-repo-manager? model)
-    (repo-manager-open-browse model :all)
-    model))
-
-(defn handle-open-in-browser [model]
-  (let [url (case (:view model)
-              :pr-fleet  (let [prs (:pr-items model [])
-                               visible (if-let [fi (:filtered-indices model)]
-                                         (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
-                                         prs)]
-                           (:pr/url (get visible (:selected-idx model))))
-              :pr-detail (get-in model [:detail :selected-pr :pr/url])
-              nil)]
-    (if url
-      (assoc model :side-effect (effect/open-url url)
-                   :flash-message (msg/t :flash/opening-url {:url url}))
-      (assoc model :flash-message (msg/t :flash/no-url-available)))))
-
-(defn handle-cycle-tab [model]
-  (cond
-    (nav/in-detail-subview? model)                (nav/cycle-detail-subview model)
-    (and (some #{(:view model)} model/detail-views)
-         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane model)
-    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view model)
-    :else                                          (nav/cycle-top-level-view model)))
-
-(defn handle-cycle-tab-reverse [model]
-  (cond
-    (nav/in-detail-subview? model)                (nav/cycle-detail-subview-reverse model)
-    (and (some #{(:view model)} model/detail-views)
-         (> (pane/pane-count (:view model)) 1))   (nav/cycle-pane-reverse model)
-    (some #{(:view model)} model/top-level-views) (nav/cycle-top-level-view-reverse model)
-    :else                                          (nav/cycle-top-level-view-reverse model)))
-
-(defn handle-add-or-select-all [model]
-  (cond
-    ;; Repo-manager browse: add selected repos to fleet
-    (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
-    (repo-manager-add-selected model)
-
-    ;; Repo-manager fleet: open :add-repo command prompt
-    (in-repo-manager? model)
-    (-> model
-        (assoc :mode :command :command-buf ":add-repo ")
-        (assoc :completing? false :completions [] :completion-idx nil))
-
-    ;; Elsewhere: select-all (only when selection already started)
-    (and (selectable-views (:view model)) (sel/has-selection? model))
-    (sel/select-all model)
-
-    :else model))
-
-(defn handle-delete-or-noop [model]
-  (if (in-repo-manager? model)
-    (if (= :fleet (repo-manager-source model))
-      (repo-manager-request-remove model)
-      (assoc model :flash-message (msg/t :flash/switch-to-fleet-to-remove)))
-    model))
-
-(defn handle-enter-visual-mode [model]
+(defn ^{:stratum 1} handle-enter-visual-mode [model]
   (if (and (selectable-views (:view model)) (sel/has-selection? model))
     (sel/enter-visual-mode model)
     model))
@@ -311,8 +334,7 @@
 ;; Maps :action/* tokens → handler (fn [model] -> model').
 ;; The keybinding EDN maps key tokens → action tokens; these registries
 ;; resolve action tokens to concrete handler functions.
-
-(def action-handlers
+(def ^{:stratum 1} action-handlers
   "Action token → handler function registry.
    Actions that are context-free (same behavior regardless of view)."
   {:action/navigate-down      nav-down-with-visual
@@ -334,7 +356,136 @@
    :action/toggle-help        nav/toggle-help
    :action/quit               handle-quit})
 
-(def context-action-handlers
+(def ^{:stratum 1} command-action-handlers
+  "Action token → handler for command-mode actions."
+  {:action/command-escape       command-escape
+   :action/command-enter        command-enter
+   :action/completion-tab       completion/handle-tab
+   :action/completion-shift-tab completion/handle-shift-tab
+   :action/command-backspace    #(-> (mode/command-backspace %) completion/dismiss)
+   :action/completion-next      completion/next-completion
+   :action/completion-prev      completion/prev-completion})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} switch-numbered-view
+  "Switch view by number within the current abstraction level (1-0)."
+  [model key]
+  (if-let [idx (number-key->index key)]
+    (let [level-views (nav/current-level-views model)
+          target (nth level-views idx nil)]
+      (if target
+        (let [m (nav/switch-view model target model/views)]
+          (if (= level-views model/top-level-views)
+            (clear-detail-context m)
+            m))
+        model))
+    model))
+
+(defn ^{:stratum 2} handle-enter-or-confirm [model]
+  (if (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+    (repo-manager-add-selected model)
+    (nav/enter-detail model)))
+
+(defn ^{:stratum 2} handle-browse-or-kanban [model]
+  (if (in-repo-manager? model)
+    (repo-manager-open-browse model :all)
+    (nav/switch-view model :dag-kanban model/views)))
+
+(defn ^{:stratum 2} handle-open-browse [model]
+  (if (in-repo-manager? model)
+    (repo-manager-open-browse model :all)
+    model))
+
+(defn ^{:stratum 2} handle-add-or-select-all [model]
+  (cond
+    ;; Repo-manager browse: add selected repos to fleet
+    (and (in-repo-manager? model) (= :browse (repo-manager-source model)))
+    (repo-manager-add-selected model)
+
+    ;; Repo-manager fleet: open :add-repo command prompt
+    (in-repo-manager? model)
+    (-> model
+        (assoc :mode :command :command-buf ":add-repo ")
+        (assoc :completing? false :completions [] :completion-idx nil))
+
+    ;; Elsewhere: select-all (only when selection already started)
+    (and (selectable-views (:view model)) (sel/has-selection? model))
+    (sel/select-all model)
+
+    :else model))
+
+(defn ^{:stratum 2} handle-delete-or-noop [model]
+  (if (in-repo-manager? model)
+    (if (= :fleet (repo-manager-source model))
+      (repo-manager-request-remove model)
+      (assoc model :flash-message (msg/t :flash/switch-to-fleet-to-remove)))
+    model))
+
+(defn ^{:stratum 2} handle-command-input [model key]
+  (let [k (extract-key key)]
+    (if-let [action (command-keybindings k)]
+      (let [handler (command-action-handlers action)]
+        (cond
+          ;; Completion arrow keys only active when completing
+          (and (#{:action/completion-next :action/completion-prev} action)
+               (not (:completing? model)))
+          model
+
+          handler
+          (handler model)
+
+          :else model))
+      ;; No keybinding — character input
+      (if-let [ch (extract-char key)]
+        (-> (mode/command-append model ch)
+            completion/dismiss)
+        model))))
+
+(defn ^{:stratum 2} handle-search-input [model key]
+  (let [k (extract-key key)]
+    (if-let [action (search-keybindings k)]
+      (if-let [handler (search-action-handlers action)]
+        (handler model)
+        model)
+      ;; Character input — all chars (mapped and unmapped) carry :char
+      (if-let [ch (extract-char key)]
+        (-> model
+            (mode/command-append ch)
+            mode/compute-search-results)
+        model))))
+
+(defn ^{:stratum 2} handle-filter-input [model key]
+  (let [k (extract-key key)]
+    (if-let [action (filter-keybindings k)]
+      (if-let [handler (filter-action-handlers action)]
+        (handler model)
+        model)
+      ;; Character input — append and live-filter
+      (if-let [ch (extract-char key)]
+        (mode/filter-append model ch)
+        model))))
+
+(defn ^{:stratum 2} handle-chat-input [model key]
+  (let [k (extract-key key)
+        pending? (get-in model [:chat :pending?] false)]
+    (if-let [action (chat-keybindings k)]
+      (if-let [handler (chat-action-handlers action)]
+        (handler model)
+        model)
+      ;; Number keys 1-9 → execute suggested action (only when not typing/pending)
+      (if-let [action-idx (and (not pending?)
+                               (empty? (get-in model [:chat :input-buf] ""))
+                               (get number-key->index k))]
+        (chat/execute-action model action-idx)
+        ;; Character input — append to chat buffer
+        (if-let [ch (extract-char key)]
+          (chat/append model ch)
+          model)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} context-action-handlers
   "Action token → handler for actions that depend on view context."
   {:action/enter-or-confirm   handle-enter-or-confirm
    :action/escape-cascade     handle-escape-cascade
@@ -353,15 +504,18 @@
    :action/delete-or-noop     handle-delete-or-noop
    :action/enter-visual-mode  handle-enter-visual-mode})
 
-(defn resolve-action
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} resolve-action
   "Look up handler fn for an action token."
   [action]
   (or (action-handlers action)
       (context-action-handlers action)))
 
-;; ── Normal mode input ──
+;------------------------------------------------------------------------------ Layer 5
 
-(defn handle-normal-input [model key]
+;; ── Normal mode input ──
+(defn ^{:stratum 5} handle-normal-input [model key]
   (let [k (extract-key key)]
     (if (:help-visible? model)
       ;; Help overlay: only help-keybinding actions accepted
@@ -383,154 +537,10 @@
             (switch-numbered-view model k))
           model)))))
 
-;; ── Command mode input ──
+;------------------------------------------------------------------------------ Layer 6
 
-(defn command-escape
-  "Escape in command mode: dismiss completions if open, else exit."
-  [model]
-  (if (:completing? model)
-    (completion/dismiss model)
-    (mode/exit-mode model)))
-
-(defn command-enter
-  "Enter in command mode: accept completion, open arg picker, or execute."
-  [model]
-  (if (and (:completing? model) (:completion-idx model))
-    (completion/accept model)
-    (let [buf (:command-buf model)
-          cmd-name (subs buf 1)
-          exact-cmd? (and (not (str/blank? cmd-name))
-                          (not (str/includes? cmd-name " "))
-                          (some #{cmd-name} (command/complete-command-name cmd-name)))
-          arg-completion? (when exact-cmd?
-                            (let [result (command/compute-completions model (str ":" cmd-name " "))]
-                              (or (seq (:completions result))
-                                  (:side-effect result))))]
-      (if arg-completion?
-        (completion/handle-tab model)
-        (-> (command/execute-command model buf)
-            mode/exit-mode)))))
-
-(def command-action-handlers
-  "Action token → handler for command-mode actions."
-  {:action/command-escape       command-escape
-   :action/command-enter        command-enter
-   :action/completion-tab       completion/handle-tab
-   :action/completion-shift-tab completion/handle-shift-tab
-   :action/command-backspace    #(-> (mode/command-backspace %) completion/dismiss)
-   :action/completion-next      completion/next-completion
-   :action/completion-prev      completion/prev-completion})
-
-(defn handle-command-input [model key]
-  (let [k (extract-key key)]
-    (if-let [action (command-keybindings k)]
-      (let [handler (command-action-handlers action)]
-        (cond
-          ;; Completion arrow keys only active when completing
-          (and (#{:action/completion-next :action/completion-prev} action)
-               (not (:completing? model)))
-          model
-
-          handler
-          (handler model)
-
-          :else model))
-      ;; No keybinding — character input
-      (if-let [ch (extract-char key)]
-        (-> (mode/command-append model ch)
-            completion/dismiss)
-        model))))
-
-(def search-action-handlers
-  "Action token → handler for search-mode actions."
-  {:action/exit-mode        mode/exit-mode
-   :action/confirm-search   mode/confirm-search
-   :action/search-backspace mode/command-backspace})
-
-(defn handle-search-input [model key]
-  (let [k (extract-key key)]
-    (if-let [action (search-keybindings k)]
-      (if-let [handler (search-action-handlers action)]
-        (handler model)
-        model)
-      ;; Character input — all chars (mapped and unmapped) carry :char
-      (if-let [ch (extract-char key)]
-        (-> model
-            (mode/command-append ch)
-            mode/compute-search-results)
-        model))))
-
-;; ── Filter mode input ──
-
-(def filter-action-handlers
-  "Action token → handler for filter-mode actions."
-  {:action/filter-escape    mode/filter-escape
-   :action/filter-confirm   mode/filter-confirm
-   :action/filter-backspace mode/filter-backspace})
-
-(defn handle-filter-input [model key]
-  (let [k (extract-key key)]
-    (if-let [action (filter-keybindings k)]
-      (if-let [handler (filter-action-handlers action)]
-        (handler model)
-        model)
-      ;; Character input — append and live-filter
-      (if-let [ch (extract-char key)]
-        (mode/filter-append model ch)
-        model))))
-
-;; ── Chat mode input ──
-
-(def chat-action-handlers
-  "Action token → handler for chat-mode actions."
-  {:action/chat-escape        chat/escape
-   :action/chat-send          chat/send-message
-   :action/chat-backspace     chat/backspace
-   :action/chat-scroll-up     chat/scroll-up
-   :action/chat-scroll-down   chat/scroll-down
-   :action/chat-scroll-bottom chat/scroll-bottom})
-
-(defn handle-chat-input [model key]
-  (let [k (extract-key key)
-        pending? (get-in model [:chat :pending?] false)]
-    (if-let [action (chat-keybindings k)]
-      (if-let [handler (chat-action-handlers action)]
-        (handler model)
-        model)
-      ;; Number keys 1-9 → execute suggested action (only when not typing/pending)
-      (if-let [action-idx (and (not pending?)
-                               (empty? (get-in model [:chat :input-buf] ""))
-                               (get number-key->index k))]
-        (chat/execute-action model action-idx)
-        ;; Character input — append to chat buffer
-        (if-let [ch (extract-char key)]
-          (chat/append model ch)
-          model)))))
-
-(defn refresh-add-repo-completions-if-active
-  "If command-mode add-repo picker is currently open, refresh its options."
-  [model]
-  (try
-    (let [active? (and (= :command (:mode model))
-                       (:completing? model)
-                       (str/starts-with? (:command-buf model "") ":add-repo "))]
-      (if-not active?
-        model
-        (let [result (command/compute-completions model (:command-buf model))
-              completions (vec (get result :completions []))
-              n (count completions)
-              prior-idx (get model :completion-idx 0)]
-          (assoc model
-                 :completions completions
-                 :completion-idx (when (pos? n) (min prior-idx (dec n)))
-                 :completing? (pos? n)))))
-    (catch Exception _
-      model)))
-
-;------------------------------------------------------------------------------ Layer 5
 ;; Root update function
-
-(defn update-model
+(defn ^{:stratum 6} update-model
   "Root update function for the TUI application.
    Pure: (model, msg) -> model'
 

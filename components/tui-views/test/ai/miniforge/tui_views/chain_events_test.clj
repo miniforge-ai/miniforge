@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.chain-events-test
   "Tests for chain event translation and TUI model handlers."
   (:require
@@ -26,9 +25,9 @@
    [ai.miniforge.tui-views.update.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; translate-event tests
 
-(deftest translate-chain-started-test
+;; translate-event tests
+(deftest ^{:stratum 0} translate-chain-started-test
   (testing "chain/started event translates to msg/chain-started"
     (let [event {:event/type :chain/started
                  :chain/id :plan-then-implement
@@ -38,7 +37,7 @@
       (is (= :plan-then-implement (:chain-id payload)))
       (is (= 3 (:step-count payload))))))
 
-(deftest translate-chain-step-started-test
+(deftest ^{:stratum 0} translate-chain-step-started-test
   (testing "chain/step-started event translates correctly"
     (let [event {:event/type :chain/step-started
                  :chain/id :my-chain
@@ -52,7 +51,7 @@
       (is (= 0 (:step-index payload)))
       (is (= :planning-v1 (:workflow-id payload))))))
 
-(deftest translate-chain-step-completed-test
+(deftest ^{:stratum 0} translate-chain-step-completed-test
   (testing "chain/step-completed event translates correctly"
     (let [event {:event/type :chain/step-completed
                  :chain/id :my-chain
@@ -63,7 +62,7 @@
       (is (= :plan (:step-id payload)))
       (is (= 0 (:step-index payload))))))
 
-(deftest translate-chain-step-failed-test
+(deftest ^{:stratum 0} translate-chain-step-failed-test
   (testing "chain/step-failed event translates correctly"
     (let [event {:event/type :chain/step-failed
                  :chain/id :my-chain
@@ -75,7 +74,7 @@
       (is (= :implement (:step-id payload)))
       (is (= "LLM timeout" (:error payload))))))
 
-(deftest translate-chain-completed-test
+(deftest ^{:stratum 0} translate-chain-completed-test
   (testing "chain/completed event translates correctly"
     (let [event {:event/type :chain/completed
                  :chain/id :my-chain
@@ -86,7 +85,7 @@
       (is (= 5000 (:duration-ms payload)))
       (is (= 3 (:step-count payload))))))
 
-(deftest translate-chain-failed-test
+(deftest ^{:stratum 0} translate-chain-failed-test
   (testing "chain/failed event translates correctly"
     (let [event {:event/type :chain/failed
                  :chain/id :my-chain
@@ -97,10 +96,8 @@
       (is (= :implement (:failed-step payload)))
       (is (= "Step execution failed" (:error payload))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Event handler tests
-
-(deftest handle-chain-started-test
+(deftest ^{:stratum 0} handle-chain-started-test
   (testing "chain-started sets active-chain in model"
     (let [model (model/init-model)
           result (events/handle-chain-started model
@@ -111,7 +108,7 @@
       (is (nil? (get-in result [:active-chain :current-step])))
       (is (some? (:last-updated result))))))
 
-(deftest handle-chain-step-started-test
+(deftest ^{:stratum 0} handle-chain-step-started-test
   (testing "chain-step-started updates current step"
     (let [model (-> (model/init-model)
                     (assoc :active-chain {:chain-id :my-chain
@@ -125,7 +122,7 @@
       (is (= 0 (get-in result [:active-chain :current-step :step-index])))
       (is (= :planning-v1 (get-in result [:active-chain :current-step :workflow-id]))))))
 
-(deftest handle-chain-step-failed-test
+(deftest ^{:stratum 0} handle-chain-step-failed-test
   (testing "chain-step-failed marks chain as failed"
     (let [model (-> (model/init-model)
                     (assoc :active-chain {:chain-id :my-chain
@@ -137,7 +134,7 @@
       (is (= :failed (get-in result [:active-chain :status])))
       (is (str/includes? (:flash-message result) "FAILED")))))
 
-(deftest handle-chain-completed-test
+(deftest ^{:stratum 0} handle-chain-completed-test
   (testing "chain-completed clears active-chain"
     (let [model (-> (model/init-model)
                     (assoc :active-chain {:chain-id :my-chain
@@ -148,7 +145,7 @@
       (is (nil? (:active-chain result)))
       (is (str/includes? (:flash-message result) "completed")))))
 
-(deftest handle-chain-failed-test
+(deftest ^{:stratum 0} handle-chain-failed-test
   (testing "chain-failed marks chain as failed with error"
     (let [model (-> (model/init-model)
                     (assoc :active-chain {:chain-id :my-chain
@@ -161,19 +158,15 @@
       (is (str/includes? (:flash-message result) "FAILED"))
       (is (str/includes? (:flash-message result) "LLM timeout")))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Model initialization test
-
-(deftest init-model-has-active-chain-test
+(deftest ^{:stratum 0} init-model-has-active-chain-test
   (testing "init-model includes :active-chain nil"
     (let [model (model/init-model)]
       (is (contains? model :active-chain))
       (is (nil? (:active-chain model))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Chain instance linking and view indicator tests
-
-(deftest workflow-added-links-chain-instance-test
+(deftest ^{:stratum 0} workflow-added-links-chain-instance-test
   (testing "workflow-added during active chain step links instance-id"
     (let [wf-id (random-uuid)
           model (-> (model/init-model)
@@ -188,7 +181,7 @@
       (is (= wf-id (get-in result [:active-chain :current-step :instance-id])))
       (is (= 1 (count (:workflows result)))))))
 
-(deftest workflow-added-no-chain-leaves-model-unchanged-test
+(deftest ^{:stratum 0} workflow-added-no-chain-leaves-model-unchanged-test
   (testing "workflow-added without active chain does not add chain info"
     (let [wf-id (random-uuid)
           model (model/init-model)
@@ -197,7 +190,7 @@
       (is (nil? (:active-chain result)))
       (is (= 1 (count (:workflows result)))))))
 
-(deftest workflow-added-does-not-overwrite-instance-id-test
+(deftest ^{:stratum 0} workflow-added-does-not-overwrite-instance-id-test
   (testing "second workflow-added does not overwrite existing instance-id"
     (let [wf-id-1 (random-uuid)
           wf-id-2 (random-uuid)
