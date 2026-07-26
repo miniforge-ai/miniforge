@@ -184,4 +184,4 @@
 (defn ^{:stratum 1} query-bundles-impl
   "Query bundles by criteria."
   [bundles criteria]
-  (filter #(matches-criteria? % criteria) (vals @bundles)))
+  (vec (filter #(matches-criteria? % criteria) (vals @bundles))))

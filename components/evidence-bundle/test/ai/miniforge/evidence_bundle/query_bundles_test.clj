@@ -67,7 +67,8 @@
           results (impl/query-bundles-impl
                    bundles
                    {:time-range [(.minusSeconds now 60) (.plusSeconds now 60)]})]
-      (is (= [good-bundle] results)))))
+      (is (= [good-bundle] results))
+      (is (vector? results) "query-bundles-impl must return a vector per its documented contract"))))
 
 (comment
   (clojure.test/run-tests)

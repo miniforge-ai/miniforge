@@ -50,7 +50,8 @@
           bundles (atom {(:evidence-bundle/id bundle) bundle})
           results (prov/query-intent-mismatches-impl
                    bundles {:time-range [(.minusSeconds now 60) (.plusSeconds now 60)]})]
-      (is (= 1 (count results)))))
+      (is (= 1 (count results)))
+      (is (vector? results) "query-intent-mismatches-impl must return a vector per its documented contract")))
 
   (testing "Bundle with :evidence-bundle/created-at outside the range is excluded"
     (let [now (java.time.Instant/now)

@@ -53,20 +53,21 @@
                               all-bundles))
                            all-bundles)]
 
-    (keep
-     (fn [bundle]
-       (let [sem-val (:evidence/semantic-validation bundle)
-             declared (:semantic-validation/declared-intent sem-val)
-             actual (:semantic-validation/actual-behavior sem-val)
-             passed? (:semantic-validation/passed? sem-val)]
+    (vec
+     (keep
+      (fn [bundle]
+        (let [sem-val (:evidence/semantic-validation bundle)
+              declared (:semantic-validation/declared-intent sem-val)
+              actual (:semantic-validation/actual-behavior sem-val)
+              passed? (:semantic-validation/passed? sem-val)]
 
-         (when (and declared actual (not passed?))
-           {:workflow-id (:evidence-bundle/workflow-id bundle)
-            :declared-intent declared
-            :actual-behavior actual
-            :violation-details sem-val
-            :created-at (:evidence-bundle/created-at bundle)})))
-     filtered-bundles)))
+          (when (and declared actual (not passed?))
+            {:workflow-id (:evidence-bundle/workflow-id bundle)
+             :declared-intent declared
+             :actual-behavior actual
+             :violation-details sem-val
+             :created-at (:evidence-bundle/created-at bundle)})))
+      filtered-bundles))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
