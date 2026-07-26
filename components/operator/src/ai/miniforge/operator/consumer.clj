@@ -87,8 +87,16 @@
    which routes the console's and the CLI's pause/resume/cancel
    controls through this channel — a click or a typed command is the
    same human gesture, and parking them at `:pending-human` with no
-   approver UI would make the control silently do nothing. Delegated
-   sources (`:meta-agent`, `:api`) are NOT here — they park at
+   approver UI would make the control silently do nothing.
+
+   Auto-approving these leans on each surface carrying operator
+   identity before it ever writes a request. `:tui` / `:native-app` /
+   `:cli` are local processes with no network listener. `:dashboard`
+   is HTTP-exposed, so it is only safe here because the dashboard's
+   control endpoints now require an authenticated operator session even
+   when browse-auth is disabled (issue #1460); an unauthenticated caller
+   is refused at the HTTP boundary and never reaches this table.
+   Delegated sources (`:meta-agent`, `:api`) are NOT here — they park at
    `:pending-human`."
   #{:cli :dashboard :native-app :tui})
 

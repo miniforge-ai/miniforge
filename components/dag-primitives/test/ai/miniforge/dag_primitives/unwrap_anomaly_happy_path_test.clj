@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.unwrap-anomaly-happy-path-test
   "Happy-path coverage for `dag-primitives/unwrap-anomaly`: ok results
    surface their wrapped data unchanged."
@@ -23,15 +22,17 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.dag-primitives.interface :as dp]))
 
-(deftest unwrap-anomaly-returns-data-on-ok
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} unwrap-anomaly-returns-data-on-ok
   (testing "ok result surfaces its data"
     (is (= 42 (dp/unwrap-anomaly (dp/ok 42))))))
 
-(deftest unwrap-anomaly-preserves-nested-data
+(deftest ^{:stratum 0} unwrap-anomaly-preserves-nested-data
   (testing "complex data structures pass through unchanged"
     (let [payload {:nodes [:a :b :c] :edges #{[:a :b]}}]
       (is (= payload (dp/unwrap-anomaly (dp/ok payload)))))))
 
-(deftest unwrap-anomaly-ok-result-not-an-anomaly
+(deftest ^{:stratum 0} unwrap-anomaly-ok-result-not-an-anomaly
   (testing "ok unwrap result is not flagged as anomaly"
     (is (not (anomaly/anomaly? (dp/unwrap-anomaly (dp/ok :anything)))))))

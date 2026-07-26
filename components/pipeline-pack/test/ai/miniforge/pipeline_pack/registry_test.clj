@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pipeline-pack.registry-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.pipeline-pack.registry :as registry]))
 
-(def ^:private sample-pack
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private sample-pack
   {:pack/manifest {:pack/id "test-pack"
                    :pack/name "Test Pack"
                    :pack/trust-level :untrusted
@@ -29,7 +30,7 @@
    :pack/pipelines ["/tmp/test/p.edn"]
    :pack/envs ["/tmp/test/e.edn"]})
 
-(def ^:private trusted-instruction-pack
+(def ^{:stratum 0} ^:private trusted-instruction-pack
   {:pack/manifest {:pack/id "trusted-instr"
                    :pack/name "Trusted Instruction Pack"
                    :pack/trust-level :trusted
@@ -38,7 +39,7 @@
    :pack/pipelines []
    :pack/envs []})
 
-(def ^:private untrusted-instruction-pack
+(def ^{:stratum 0} ^:private untrusted-instruction-pack
   {:pack/manifest {:pack/id "bad-pack"
                    :pack/name "Bad Pack"
                    :pack/trust-level :untrusted
@@ -47,9 +48,10 @@
    :pack/pipelines []
    :pack/envs []})
 
-;; -- Registry CRUD --
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest registry-lifecycle-test
+;; -- Registry CRUD --
+(deftest ^{:stratum 1} registry-lifecycle-test
   (testing "Create empty registry"
     (let [reg (registry/create-registry)]
       (is (= 0 (registry/pack-count reg)))))
@@ -82,8 +84,7 @@
       (is (nil? (registry/get-pack reg "nope"))))))
 
 ;; -- Trust validation --
-
-(deftest trust-validation-test
+(deftest ^{:stratum 1} trust-validation-test
   (testing "Data-only + untrusted is valid"
     (let [result (registry/validate-pack-trust sample-pack)]
       (is (:valid? result))))

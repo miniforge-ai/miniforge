@@ -15,11 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.alerts
   (:require [clojure.string :as str]))
 
-(def AlertRule
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} AlertRule
   [:multi {:dispatch :alert/type}
    [:phase-gap [:map [:alert/id keyword?] [:alert/type [:= :phase-gap]]
                 [:alert/threshold [:map [:threshold-ms pos-int?]]]
@@ -34,24 +35,24 @@
                       [:alert/severity {:optional true} [:enum :info :warning :critical]]
                       [:alert/message-template {:optional true} string?]]]])
 
-(def AlertMap [:map [:alert/rule-id keyword?]
+(def ^{:stratum 0} AlertMap [:map [:alert/rule-id keyword?]
                [:alert/type [:enum :phase-gap :tool-call-timeout :tool-error-rate]]
                [:alert/severity [:enum :info :warning :critical]]
                [:alert/message string?] [:alert/data map?] [:alert/timestamp inst?]])
 
-(def AlertFired [:map [:event/type [:= :observer/alert-fired]]
+(def ^{:stratum 0} AlertFired [:map [:event/type [:= :observer/alert-fired]]
                  [:event/workflow-id some?] [:event/timestamp inst?]
                  [:alert/rule-id keyword?]
                  [:alert/type [:enum :phase-gap :tool-call-timeout :tool-error-rate]]
                  [:alert/severity [:enum :info :warning :critical]]
                  [:alert/message string?] [:alert/data map?] [:alert/timestamp inst?]])
 
-(def ^:private window-size 100)
+(def ^{:stratum 0} ^:private window-size 100)
 
-(defn create-alert-state []
+(defn ^{:stratum 0} create-alert-state []
   (atom {:outstanding-calls {} :tool-outcomes []}))
 
-(defn- event-ms [event]
+(defn- ^{:stratum 0} event-ms [event]
   (try
     (let [ts (:event/timestamp event)]
       (cond
@@ -61,7 +62,19 @@
         :else (System/currentTimeMillis)))
     (catch Exception _ (System/currentTimeMillis))))
 
-(defn- update-state! [state event]
+(defn- ^{:stratum 0} template [s data]
+  (str/replace s #"\{\{([\w][\w/-]*)\}\}" #(str (get data (keyword (second %)) ""))))
+
+(defn ^{:stratum 0} alert-fired [_stream workflow-id alert-map]
+  (merge {:event/type :observer/alert-fired
+          :event/workflow-id workflow-id
+          :event/timestamp (java.util.Date.)}
+         (select-keys alert-map [:alert/rule-id :alert/type :alert/severity
+                                 :alert/message :alert/data :alert/timestamp])))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} update-state! [state event]
   (case (:event/type event)
     :agent/tool-call-started
     (when-let [call-id (:tool/call-id event)]
@@ -81,10 +94,7 @@
                                xs'))))))))
     nil))
 
-(defn- template [s data]
-  (str/replace s #"\{\{([\w][\w/-]*)\}\}" #(str (get data (keyword (second %)) ""))))
-
-(defn- message [rule data]
+(defn- ^{:stratum 1} message [rule data]
   (if-let [s (:alert/message-template rule)]
     (template s data)
     (case (:alert/type rule)
@@ -93,7 +103,9 @@
       :tool-error-rate (format "Tool error rate %.1f%% exceeds threshold"
                                (* 100.0 (double (:error-rate data)))))))
 
-(defn- alert [rule data]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} alert [rule data]
   {:alert/rule-id (:alert/id rule)
    :alert/type (:alert/type rule)
    :alert/severity (get rule :alert/severity :warning)
@@ -101,14 +113,16 @@
    :alert/data data
    :alert/timestamp (java.util.Date.)})
 
-(defn- phase-gap [rule event]
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} phase-gap [rule event]
   (when (= :workflow/phase-heartbeat (:event/type event))
     (let [gap (:phase/gap-since-last-event-ms event)
           threshold (get-in rule [:alert/threshold :threshold-ms])]
       (when (and gap threshold (> gap threshold))
         (alert rule {:gap-ms gap :threshold-ms threshold})))))
 
-(defn- timeouts [rule event state]
+(defn- ^{:stratum 3} timeouts [rule event state]
   (when (= :workflow/phase-heartbeat (:event/type event))
     (let [threshold (get-in rule [:alert/threshold :threshold-ms])
           now (event-ms event)]
@@ -121,7 +135,7 @@
                                     :threshold-ms threshold})))))
            vec))))
 
-(defn- error-rate [rule event state]
+(defn- ^{:stratum 3} error-rate [rule event state]
   (when (= :workflow/phase-heartbeat (:event/type event))
     (let [xs (:tool-outcomes @state)
           threshold (get-in rule [:alert/threshold :threshold-pct])]
@@ -134,7 +148,9 @@
                          :total-count (count xs)
                          :threshold-pct threshold})))))))
 
-(defn evaluate-rules [rules event state]
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} evaluate-rules [rules event state]
   (update-state! state event)
   (into []
         (mapcat (fn [rule]
@@ -145,10 +161,3 @@
                             nil)]
                     (cond (nil? x) [] (sequential? x) x :else [x]))))
         rules))
-
-(defn alert-fired [_stream workflow-id alert-map]
-  (merge {:event/type :observer/alert-fired
-          :event/workflow-id workflow-id
-          :event/timestamp (java.util.Date.)}
-         (select-keys alert-map [:alert/rule-id :alert/type :alert/severity
-                                 :alert/message :alert/data :alert/timestamp])))
