@@ -59,8 +59,13 @@
 (def ^{:stratum 0} override-marker-re
   "Matches `MINIFORGE_PR_BUDGET_OVERRIDE: <rationale>` (or `=`) anywhere
    in the PR description, case-sensitive on the marker itself so it
-   can't be triggered by incidental prose. Captures the rationale."
-  #"(?m)^MINIFORGE_PR_BUDGET_OVERRIDE\s*[:=]\s*(.+)$")
+   can't be triggered by incidental prose. Captures the rationale.
+   Tolerates leading whitespace and a single markdown list/quote/emphasis
+   prefix (`-`, `*`, `>`, `_`) before the marker, since GitHub's editor
+   readily produces `  MINIFORGE_PR_BUDGET_OVERRIDE: ...` (indented) or
+   `> MINIFORGE_PR_BUDGET_OVERRIDE: ...` (blockquoted) without the
+   author intending anything other than a plain override line."
+  #"(?m)^\s*[-*>_]?\s*MINIFORGE_PR_BUDGET_OVERRIDE\s*[:=]\s*(.+)$")
 
 ;; git wrapper (composes Layer 0 + commit-budget's pure parse/count fns)
 (defn ^{:stratum 0} pr-diff
