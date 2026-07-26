@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.fsm.core
   "Core FSM implementation wrapping clj-statecharts.
 
@@ -39,9 +38,9 @@
    [statecharts.core :as sc]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Internal helpers
 
-(defn compile-transitions
+;; Internal helpers
+(defn ^{:stratum 0} compile-transitions
   "Compile transition definitions.
 
    Supports shorthand and full forms:
@@ -58,7 +57,93 @@
    {}
    transitions))
 
-(defn compile-state
+;; Machine definition
+(defn ^{:stratum 0} extract-final-states
+  "Extract the set of states marked as :type :final."
+  [states]
+  (into #{}
+        (comp (filter (fn [[_ v]] (= :final (:type v))))
+              (map first))
+        states))
+
+;; State operations
+(defn ^{:stratum 0} initialize
+  "Initialize a state machine, returning the initial state.
+
+   Arguments:
+     machine - Compiled machine definition
+
+   Returns:
+     Initial state map with :_state and context."
+  [machine]
+  (sc/initialize machine))
+
+(defn- ^{:stratum 0} event-map
+  [event]
+  (if (keyword? event)
+    {:type event}
+    event))
+
+(defn- ^{:stratum 0} unknown-event-message
+  [state event-map]
+  (str "FSM unknown event " (pr-str (:type event-map))
+       " at state " (pr-str (get state :_state state))))
+
+(defn- ^{:stratum 0} unknown-event-data
+  [state event-map]
+  {:anomaly/category :anomalies/fsm-unknown-event
+   :fsm/state state
+   :fsm/event event-map})
+
+(defn ^{:stratum 0} current-state
+  "Get the current state value from a state map.
+
+   Arguments:
+     state - State map from initialize or transition
+
+   Returns:
+     Current state keyword."
+  [state]
+  (:_state state))
+
+(defn ^{:stratum 0} context
+  "Get the context from a state map.
+
+   Arguments:
+     state - State map
+
+   Returns:
+     Context map (everything except internal state keys)."
+  [state]
+  (dissoc state :_state))
+
+(defn ^{:stratum 0} all-guards
+  "Combine multiple guards with AND logic.
+
+   Arguments:
+     guards - Sequence of guard functions
+
+   Returns:
+     Combined guard that passes only if all pass."
+  [& guards]
+  (fn [state event]
+    (every? #(% state event) guards)))
+
+(defn ^{:stratum 0} any-guard
+  "Combine multiple guards with OR logic.
+
+   Arguments:
+     guards - Sequence of guard functions
+
+   Returns:
+     Combined guard that passes if any pass."
+  [& guards]
+  (fn [state event]
+    (some #(% state event) guards)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} compile-state
   "Compile a state definition to clj-statecharts format.
 
    Supports:
@@ -74,18 +159,100 @@
       entry (assoc :entry entry)
       exit  (assoc :exit exit))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Machine definition
+(defn- ^{:stratum 1} statechart-transition-result
+  "Boundary wrapper around clj-statecharts transition, returning a canonical
+   unknown-event anomaly while preserving unexpected statechart failures as
+   exceptions."
+  [machine state event-map]
+  (try
+    (sc/transition machine state event-map)
+    (catch clojure.lang.ExceptionInfo e
+      (if (re-find #"got unknown event" (ex-message e))
+        (with-meta
+          (anomaly/sub-anomaly :invalid-input
+                               :anomalies/fsm-unknown-event
+                               (unknown-event-message state event-map)
+                               (unknown-event-data state event-map))
+          {:cause e})
+        (throw e)))))
 
-(defn extract-final-states
-  "Extract the set of states marked as :type :final."
-  [states]
-  (into #{}
-        (comp (filter (fn [[_ v]] (= :final (:type v))))
-              (map first))
-        states))
+(defn ^{:stratum 1} in-state?
+  "Check if the machine is in a specific state.
 
-(defn define-machine
+   Arguments:
+     state    - State map
+     state-id - State keyword to check
+
+   Returns:
+     Boolean."
+  [state state-id]
+  (= state-id (current-state state)))
+
+(defn ^{:stratum 1} final?
+  "Check if the current state is a final state.
+
+   Arguments:
+     machine - Compiled machine definition
+     state   - Current state map
+
+   Returns:
+     Boolean."
+  [machine state]
+  (let [current (current-state state)
+        final-states (:miniforge/final-states machine #{})]
+    (contains? final-states current)))
+
+;; Context manipulation
+(defn ^{:stratum 1} assign
+  "Create an action that assigns values to context.
+
+   Arguments:
+     assignments - Map of context keys to values or functions
+                   Functions receive (context, event) and return new value
+
+   Returns:
+     Action function for use in :entry/:exit/:actions."
+  [assignments]
+  (fn [state event]
+    (reduce-kv
+     (fn [s k v]
+       (assoc s k (if (fn? v)
+                    (v (context s) event)
+                    v)))
+     state
+     assignments)))
+
+(defn ^{:stratum 1} update-context
+  "Update context in a state map.
+
+   Arguments:
+     state - Current state map
+     f     - Function to apply to context
+     args  - Additional args to f
+
+   Returns:
+     Updated state map."
+  [state f & args]
+  (let [ctx (context state)
+        new-ctx (apply f ctx args)]
+    (merge state new-ctx)))
+
+;; Guard helpers
+(defn ^{:stratum 1} guard
+  "Create a guard function from a predicate.
+
+   Arguments:
+     pred - Predicate fn (context, event) -> boolean
+
+   Returns:
+     Guard function for use in transitions."
+  [pred]
+  (fn [state event]
+    (pred (context state) event)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} define-machine
   "Create a state machine definition from miniforge config.
 
    Arguments:
@@ -111,55 +278,7 @@
     ;; Attach final states as metadata
     (assoc machine :miniforge/final-states final-states)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; State operations
-
-(defn initialize
-  "Initialize a state machine, returning the initial state.
-
-   Arguments:
-     machine - Compiled machine definition
-
-   Returns:
-     Initial state map with :_state and context."
-  [machine]
-  (sc/initialize machine))
-
-(defn- event-map
-  [event]
-  (if (keyword? event)
-    {:type event}
-    event))
-
-(defn- unknown-event-message
-  [state event-map]
-  (str "FSM unknown event " (pr-str (:type event-map))
-       " at state " (pr-str (get state :_state state))))
-
-(defn- unknown-event-data
-  [state event-map]
-  {:anomaly/category :anomalies/fsm-unknown-event
-   :fsm/state state
-   :fsm/event event-map})
-
-(defn- statechart-transition-result
-  "Boundary wrapper around clj-statecharts transition, returning a canonical
-   unknown-event anomaly while preserving unexpected statechart failures as
-   exceptions."
-  [machine state event-map]
-  (try
-    (sc/transition machine state event-map)
-    (catch clojure.lang.ExceptionInfo e
-      (if (re-find #"got unknown event" (ex-message e))
-        (with-meta
-          (anomaly/sub-anomaly :invalid-input
-                               :anomalies/fsm-unknown-event
-                               (unknown-event-message state event-map)
-                               (unknown-event-data state event-map))
-          {:cause e})
-        (throw e)))))
-
-(defn transition-result
+(defn ^{:stratum 2} transition-result
   "Transition the machine given an event, returning the new state or a
    canonical anomaly for a state-local unknown event.
 
@@ -168,7 +287,9 @@
   [machine state event]
   (statechart-transition-result machine state (event-map event)))
 
-(defn transition
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} transition
   "Boundary wrapper around the anomaly-returning `transition-result`.
 
    Transition the machine given an event.
@@ -194,130 +315,6 @@
                       (:anomaly/data result)
                       (:cause (meta result))))
       result)))
-
-(defn current-state
-  "Get the current state value from a state map.
-
-   Arguments:
-     state - State map from initialize or transition
-
-   Returns:
-     Current state keyword."
-  [state]
-  (:_state state))
-
-(defn context
-  "Get the context from a state map.
-
-   Arguments:
-     state - State map
-
-   Returns:
-     Context map (everything except internal state keys)."
-  [state]
-  (dissoc state :_state))
-
-(defn in-state?
-  "Check if the machine is in a specific state.
-
-   Arguments:
-     state    - State map
-     state-id - State keyword to check
-
-   Returns:
-     Boolean."
-  [state state-id]
-  (= state-id (current-state state)))
-
-(defn final?
-  "Check if the current state is a final state.
-
-   Arguments:
-     machine - Compiled machine definition
-     state   - Current state map
-
-   Returns:
-     Boolean."
-  [machine state]
-  (let [current (current-state state)
-        final-states (:miniforge/final-states machine #{})]
-    (contains? final-states current)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Context manipulation
-
-(defn assign
-  "Create an action that assigns values to context.
-
-   Arguments:
-     assignments - Map of context keys to values or functions
-                   Functions receive (context, event) and return new value
-
-   Returns:
-     Action function for use in :entry/:exit/:actions."
-  [assignments]
-  (fn [state event]
-    (reduce-kv
-     (fn [s k v]
-       (assoc s k (if (fn? v)
-                    (v (context s) event)
-                    v)))
-     state
-     assignments)))
-
-(defn update-context
-  "Update context in a state map.
-
-   Arguments:
-     state - Current state map
-     f     - Function to apply to context
-     args  - Additional args to f
-
-   Returns:
-     Updated state map."
-  [state f & args]
-  (let [ctx (context state)
-        new-ctx (apply f ctx args)]
-    (merge state new-ctx)))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Guard helpers
-
-(defn guard
-  "Create a guard function from a predicate.
-
-   Arguments:
-     pred - Predicate fn (context, event) -> boolean
-
-   Returns:
-     Guard function for use in transitions."
-  [pred]
-  (fn [state event]
-    (pred (context state) event)))
-
-(defn all-guards
-  "Combine multiple guards with AND logic.
-
-   Arguments:
-     guards - Sequence of guard functions
-
-   Returns:
-     Combined guard that passes only if all pass."
-  [& guards]
-  (fn [state event]
-    (every? #(% state event) guards)))
-
-(defn any-guard
-  "Combine multiple guards with OR logic.
-
-   Arguments:
-     guards - Sequence of guard functions
-
-   Returns:
-     Combined guard that passes if any pass."
-  [& guards]
-  (fn [state event]
-    (some #(% state event) guards)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
