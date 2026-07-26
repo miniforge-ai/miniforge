@@ -265,6 +265,32 @@ functional change. Re-ran `--fix` (zero diff), `clj-kondo` (0
 errors/warnings), and `sinks_test.clj` directly (15 tests, 60
 assertions, 0 failures/errors) after the change.
 
+### Review-round fix: per-event set reallocation in the listener filter path
+
+GitHub Copilot's fifth review pass flagged `matches-workflow?` and
+`matches-event-type?`: both called `(set wf-ids)` / `(set event-types)`
+internally, but their only call site (`register-listener!`'s
+`user-filter-fn` closure) invokes them once per dispatched event, for
+the entire lifetime of a listener subscription — reallocating the set
+on every event instead of once at registration time. Verified the
+call graph directly: grepped `components/event-stream` (`src` and
+`test`) for every caller of either function — the one call site inside
+`listeners.clj` itself is the only one, no re-export in `interface.clj`
+or `interface/listeners.clj`, and no test calls either function
+directly with a raw collection (`web-dashboard/state/workflows.clj`
+has unrelated private functions of the same name, different arity, a
+naming coincidence in a different component). Safe to change the
+contract: `wf-ids`/`event-types` are now converted to sets once when
+`user-filter-fn` is built (`register-listener!`), and
+`matches-workflow?`/`matches-event-type?` now expect an already-built
+set (`empty?`/`contains?` only — no more `set` call per event).
+Semantics unchanged: `(set nil)` still produces `#{}`, so the
+no-filter case still short-circuits via `empty?` exactly as before.
+Re-ran `--fix` (zero diff), `clj-kondo` (0 errors/warnings), and both
+`listeners_test.clj` and `anomaly/listeners_anomaly_test.clj` (12
+tests, 35 assertions, 0 failures/errors) plus the full component suite
+(349 tests, 1747 assertions, 0 failures/errors) after the change.
+
 ## Testing Plan
 
 1. Confirmed the stratum-lint pin in `tasks/stratum.clj`
@@ -374,6 +400,13 @@ assertions, 0 failures/errors) after the change.
     Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
     warnings), and `sinks_test.clj` directly (15 tests, 60 assertions,
     0 failures/errors).
+15. Fifth Copilot review pass (after the `sinks_test.clj` push) flagged
+    `listeners.clj`'s per-event set reallocation above. Verified the
+    full call graph before changing the function contract (see detail
+    above), fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
+    warnings), `listeners_test.clj` + `anomaly/listeners_anomaly_test.clj`
+    (12 tests, 35 assertions), and the full component suite (349
+    tests, 1747 assertions, 0 failures/errors).
 
 ## Deployment Plan
 
@@ -522,4 +555,9 @@ time for these 12 files until Wave 2 splits them.
 - [x] Fourth Copilot review pass comment (`sinks_test.clj`'s
       `sinks`-local-shadows-`sinks`-alias) verified directly and fixed
       in all three affected `testing` blocks
+- [x] Fifth Copilot review pass comment (`listeners.clj`'s per-event
+      `matches-workflow?`/`matches-event-type?` set reallocation)
+      verified directly, call graph confirmed safe to change (single
+      call site, no re-exports, no direct tests), fixed, full
+      component suite re-run clean (349 tests, 1747 assertions)
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
