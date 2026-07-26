@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.messages
   "Resource-backed message catalog for shared CLI user-facing copy."
   (:require
@@ -24,27 +23,51 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Catalog loading
+(def ^{:stratum 0} default-locale "en-US")
 
-(def default-locale "en-US")
-
-(defn- locale-resource
+(defn- ^{:stratum 0} locale-resource
   [locale]
   (str "config/cli/messages/" locale ".edn"))
 
-(defn- lang->locale
+(defn- ^{:stratum 0} lang->locale
   "Convert POSIX LANG (e.g. 'en_US.UTF-8') to BCP 47 tag (e.g. 'en-US')."
   [lang]
   (when-let [base (some-> lang (str/split #"\.") first not-empty)]
     (str/replace base "_" "-")))
 
-(defn active-locale
+;; Template rendering
+(defn- ^{:stratum 0} render-string
+  [template params]
+  (reduce-kv (fn [rendered key value]
+               (str/replace rendered
+                            (str "{" (name key) "}")
+                            (str value)))
+             template
+             params))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} active-locale
   []
   (or (some-> (System/getenv "MINIFORGE_LOCALE") str/trim not-empty)
       (lang->locale (System/getenv "LANG"))
       default-locale))
 
-(defn catalog
+(defn- ^{:stratum 1} render-value
+  [value params]
+  (cond
+    (string? value) (render-string value params)
+    (vector? value) (mapv #(render-value % params) value)
+    (map? value) (into {} (map (fn [[key entry]]
+                                 [key (render-value entry params)]))
+                     value)
+    :else value))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} catalog
   "Load the active message catalog, falling back to English."
   ([] (catalog (active-locale)))
   ([locale]
@@ -55,29 +78,9 @@
        catalog-data
        (catalog default-locale)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Template rendering
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- render-string
-  [template params]
-  (reduce-kv (fn [rendered key value]
-               (str/replace rendered
-                            (str "{" (name key) "}")
-                            (str value)))
-             template
-             params))
-
-(defn- render-value
-  [value params]
-  (cond
-    (string? value) (render-string value params)
-    (vector? value) (mapv #(render-value % params) value)
-    (map? value) (into {} (map (fn [[key entry]]
-                                 [key (render-value entry params)]))
-                     value)
-    :else value))
-
-(defn t
+(defn ^{:stratum 3} t
   "Return a rendered message value for `message-key`.
 
    Supports strings, vectors, and maps loaded from EDN resources."

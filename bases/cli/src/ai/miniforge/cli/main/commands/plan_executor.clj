@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.plan-executor
   "Execute pre-planned DAG or plan files directly, skipping explore/plan phases."
   (:require
@@ -30,14 +29,34 @@
    [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Format normalization
 
-(defn deterministic-uuid
+;; Format normalization
+(defn ^{:stratum 0} deterministic-uuid
   "Generate a deterministic UUID from a string id (for DAG task-id → UUID conversion)."
   [s]
   (UUID/nameUUIDFromBytes (.getBytes (str s) "UTF-8")))
 
-(defn normalize-dag-task
+(defn ^{:stratum 0} detect-plan-format
+  "Detect whether input is already plan format or needs conversion."
+  [parsed]
+  (cond
+    (:plan/id parsed) :plan
+    (:dag-id parsed)  :dag
+    :else             nil))
+
+;; Execution context setup
+(defn ^{:stratum 0} build-execution-workflow
+  "Build a workflow definition for plan execution (implement → verify → done)."
+  [plan-id]
+  {:workflow/id (keyword (str "plan-exec-" plan-id))
+   :workflow/version "2.0.0"
+   :workflow/name (str "Plan execution: " plan-id)
+   :workflow/pipeline [{:phase :implement} {:phase :verify} {:phase :done}]
+   :workflow/config {:max-tokens 20000 :max-iterations 50}})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} normalize-dag-task
   "Normalize a DAG-format task to plan-format task."
   [task]
   (let [task-id (if (uuid? (:task/id task))
@@ -60,37 +79,19 @@
      :task/acceptance-criteria criteria
      :task/type (:task/type task :implement)}))
 
-(defn normalize-dag-to-plan
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} normalize-dag-to-plan
   "Convert DAG format ({:dag-id, :tasks}) to plan format ({:plan/id, :plan/tasks})."
   [dag]
   {:plan/id (:dag-id dag)
    :plan/title (or (:description dag) (:dag-id dag))
    :plan/tasks (mapv normalize-dag-task (:tasks dag))})
 
-(defn detect-plan-format
-  "Detect whether input is already plan format or needs conversion."
-  [parsed]
-  (cond
-    (:plan/id parsed) :plan
-    (:dag-id parsed)  :dag
-    :else             nil))
+;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 1
-;; Execution context setup
-
-(defn build-execution-workflow
-  "Build a workflow definition for plan execution (implement → verify → done)."
-  [plan-id]
-  {:workflow/id (keyword (str "plan-exec-" plan-id))
-   :workflow/version "2.0.0"
-   :workflow/name (str "Plan execution: " plan-id)
-   :workflow/pipeline [{:phase :implement} {:phase :verify} {:phase :done}]
-   :workflow/config {:max-tokens 20000 :max-iterations 50}})
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Public API
-
-(defn execute-plan
+(defn ^{:stratum 3} execute-plan
   "Execute a pre-planned DAG or plan file directly via dag-orchestrator.
 
    Normalizes DAG format to plan format if needed, sets up execution context,

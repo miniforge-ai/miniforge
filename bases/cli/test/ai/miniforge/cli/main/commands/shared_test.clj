@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.shared-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.main.commands.shared :as sut]))
 
-(deftest optional-provider-registry-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} optional-provider-registry-test
   (testing "registered optional providers are available by symbol"
     (let [provider (fn [x] [:ok x])]
       (with-redefs [sut/optional-functions {}]

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.etl-test
   "Unit tests for ETL CLI commands."
   (:require
@@ -25,18 +24,18 @@
    [ai.miniforge.cli.main.commands.etl :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
-;------------------------------------------------------------------------------ Layer 0: Factory helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn make-etl-opts
+;------------------------------------------------------------------------------ Layer 0: Factory helpers
+(defn ^{:stratum 0} make-etl-opts
   "Build a minimal ETL opts map for testing."
   ([]
    (make-etl-opts {}))
   ([overrides]
    (merge {:url "https://github.com/example/repo"} overrides)))
 
-;------------------------------------------------------------------------------ Layer 1: Tests
-
-(deftest validate-git-url-test
+;; Tests
+(deftest ^{:stratum 0} validate-git-url-test
   (testing "HTTPS URL is valid"
     (is (true? (sut/validate-git-url "https://github.com/org/repo"))))
 
@@ -55,21 +54,21 @@
   (testing "empty string is invalid"
     (is (false? (sut/validate-git-url "")))))
 
-(deftest etl-repo-cmd-missing-url-test
+(deftest ^{:stratum 0} etl-repo-cmd-missing-url-test
   (testing "command exits with error when no url provided"
     (let [exited? (atom false)]
       (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/etl-repo-cmd {}))
         (is @exited?)))))
 
-(deftest etl-repo-cmd-invalid-url-test
+(deftest ^{:stratum 0} etl-repo-cmd-invalid-url-test
   (testing "command exits with error for invalid URL"
     (let [exited? (atom false)]
       (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/etl-repo-cmd {:url "bad-url"}))
         (is @exited?)))))
 
-(deftest etl-repo-cmd-analyzes-repo-directly-test
+(deftest ^{:stratum 0} etl-repo-cmd-analyzes-repo-directly-test
   (testing "valid repo URLs use the direct repo-analyzer interface"
     (let [repo-dir (.toFile
                     (java.nio.file.Files/createTempDirectory
@@ -100,7 +99,7 @@
                   [:analyze (.getAbsolutePath repo-dir)]]
                  @calls)))))))
 
-(deftest etl-repo-cmd-exits-on-clone-failure-test
+(deftest ^{:stratum 0} etl-repo-cmd-exits-on-clone-failure-test
   (testing "clone failures become a non-zero command exit"
     (let [exit-code (atom nil)]
       (with-redefs-fn {#'sut/git-clone-temp
@@ -114,7 +113,7 @@
             (sut/etl-repo-cmd {:url "https://github.com/example/repo"}))
           (is (= 1 @exit-code)))))))
 
-(deftest etl-repo-cmd-exits-on-analysis-failure-test
+(deftest ^{:stratum 0} etl-repo-cmd-exits-on-analysis-failure-test
   (testing "repo-analyzer failures become a non-zero command exit"
     (let [repo-dir (.toFile
                     (java.nio.file.Files/createTempDirectory

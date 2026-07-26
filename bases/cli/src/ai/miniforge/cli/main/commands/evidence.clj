@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.evidence
   "Evidence bundle commands: show, export, list.
 
@@ -32,20 +31,12 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- evidence-dir []
+;; Helpers
+(defn- ^{:stratum 0} evidence-dir []
   (str (app-config/home-dir) "/evidence"))
 
-(defn- scan-evidence-dir []
-  (let [dir (io/file (evidence-dir))]
-    (when (.exists dir)
-      (->> (.listFiles dir)
-           (filter #(.isFile %))
-           (sort-by #(.lastModified %) >)
-           vec))))
-
-(defn load-bundle-from-file
+(defn ^{:stratum 0} load-bundle-from-file
   "Load an evidence bundle from an EDN file. Returns nil on failure."
   [file]
   (try
@@ -53,10 +44,8 @@
       (edn/read-string (slurp file)))
     (catch Exception _ nil)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Display helpers
-
-(def ^:private bundle-detail-spec
+(def ^{:stratum 0} ^:private bundle-detail-spec
   {:header   :evidence/show-header
    :fields   [[:bundle/workflow-id :evidence/show-workflow {:default "—"}]
               [:bundle/status      :evidence/show-status   {:default "unknown"}]
@@ -69,7 +58,7 @@
                                    :id   (get a :artifact/id "")})}
               {:key :bundle/phases :header :evidence/show-phases}]})
 
-(def ^:private phase-evidence-keys
+(def ^{:stratum 0} ^:private phase-evidence-keys
   [:evidence/plan
    :evidence/design
    :evidence/implement
@@ -78,12 +67,12 @@
    :evidence/release
    :evidence/observe])
 
-(defn- active-dependency?
+(defn- ^{:stratum 0} active-dependency?
   [dependency]
   (contains? #{:degraded :unavailable :misconfigured :operator-action-required}
              (:dependency/status dependency)))
 
-(defn- label
+(defn- ^{:stratum 0} label
   [value]
   (cond
     (keyword? value) (name value)
@@ -91,14 +80,36 @@
     (nil? value) "unknown"
     :else (str value)))
 
-(defn- dependency-issue-count
+;; Command implementations
+(defn- ^{:stratum 0} display-component-bundles
+  "Render bundles returned from the evidence-bundle component interface."
+  [bundles]
+  (if (seq bundles)
+    (doseq [bundle bundles]
+      (println (messages/t :evidence/bundle-entry
+                          {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
+                           :workflow-id (get bundle :bundle/workflow-id "—")
+                           :status      (get bundle :bundle/status "unknown")})))
+    (println (messages/t :evidence/none))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} scan-evidence-dir []
+  (let [dir (io/file (evidence-dir))]
+    (when (.exists dir)
+      (->> (.listFiles dir)
+           (filter #(.isFile %))
+           (sort-by #(.lastModified %) >)
+           vec))))
+
+(defn- ^{:stratum 1} dependency-issue-count
   [dependency-health]
   (->> dependency-health
        vals
        (filter active-dependency?)
        count))
 
-(defn- failure-attribution-summary
+(defn- ^{:stratum 1} failure-attribution-summary
   [failure-attribution]
   (when (seq failure-attribution)
     (let [source (or (:failure/source failure-attribution)
@@ -112,13 +123,33 @@
                             :unknown)]
       (str (label source) " / " (label vendor) " / " (label failure-class)))))
 
-(defn- canonical-phase-names
+(defn- ^{:stratum 1} canonical-phase-names
   [bundle]
   (->> phase-evidence-keys
        (filter #(contains? bundle %))
        (mapv (comp keyword name))))
 
-(defn- normalize-bundle-detail
+(defn- ^{:stratum 1} load-bundle-for-show
+  "Load a bundle from the component interface or the filesystem."
+  [id]
+  (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
+      (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
+        (when (.exists f) (load-bundle-from-file f)))))
+
+(defn- ^{:stratum 1} export-bundle-fallback
+  "Copy the raw EDN bundle file as-is when the export component is unavailable."
+  [id fmt]
+  (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
+    (if (.exists src)
+      (let [dest (str (evidence-dir) "/" id "-export." fmt)]
+        (fs/copy (str src) dest {:replace-existing true})
+        (display/print-success (messages/t :evidence/export-raw {:path dest})))
+      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
+          (shared/exit! 1)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} normalize-bundle-detail
   [bundle]
   (let [dependency-health (or (:evidence/dependency-health bundle) {})
         artifacts (or (:bundle/artifacts bundle) [])
@@ -139,34 +170,7 @@
      :bundle/failure-attribution (failure-attribution-summary
                                   (:evidence/failure-attribution bundle))}))
 
-(defn- display-bundle-detail
-  "Render the detail view for a single evidence bundle."
-  [id bundle]
-  (display/render-detail (assoc bundle-detail-spec :header-params {:id id})
-                         (normalize-bundle-detail bundle)))
-
-(defn- load-bundle-for-show
-  "Load a bundle from the component interface or the filesystem."
-  [id]
-  (or (shared/call-optional-provider 'ai.miniforge.evidence-bundle.interface/get-bundle id)
-      (let [f (io/file (str (evidence-dir) "/" id ".edn"))]
-        (when (.exists f) (load-bundle-from-file f)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Command implementations
-
-(defn- display-component-bundles
-  "Render bundles returned from the evidence-bundle component interface."
-  [bundles]
-  (if (seq bundles)
-    (doseq [bundle bundles]
-      (println (messages/t :evidence/bundle-entry
-                          {:id          (display/style (get bundle :bundle/id "unknown") :foreground :bold)
-                           :workflow-id (get bundle :bundle/workflow-id "—")
-                           :status      (get bundle :bundle/status "unknown")})))
-    (println (messages/t :evidence/none))))
-
-(defn- display-filesystem-bundles
+(defn- ^{:stratum 2} display-filesystem-bundles
   "Render bundles discovered via filesystem scan."
   []
   (let [files (scan-evidence-dir)]
@@ -188,49 +192,7 @@
         (println (messages/t :evidence/none))
         (println (messages/t :evidence/evidence-dir {:dir (evidence-dir)}))))))
 
-(defn evidence-list-cmd
-  "List all available evidence bundles.
-
-   Shows bundles from the evidence-bundle component if available,
-   otherwise scans ~/.miniforge/evidence/."
-  [_opts]
-  (println)
-  (println (display/style (messages/t :evidence/header) :foreground :cyan :bold true))
-  (println)
-  (let [component-result (shared/call-optional-provider
-                          'ai.miniforge.evidence-bundle.interface/list-bundles)]
-    (if component-result
-      (display-component-bundles component-result)
-      (display-filesystem-bundles)))
-  (println))
-
-(defn evidence-show-cmd
-  "Show the contents of an evidence bundle by ID."
-  [opts]
-  (let [{:keys [id]} opts]
-    (if-not id
-      (shared/usage-error! :evidence/show-usage "evidence show <id>")
-      (let [bundle (load-bundle-for-show id)]
-        (if-not bundle
-          (do (display/print-error
-               (messages/t :evidence/not-found
-                          {:id id
-                           :command (app-config/command-string "evidence list")}))
-              (shared/exit! 1))
-          (display-bundle-detail id bundle))))))
-
-(defn- export-bundle-fallback
-  "Copy the raw EDN bundle file as-is when the export component is unavailable."
-  [id fmt]
-  (let [src (io/file (str (evidence-dir) "/" id ".edn"))]
-    (if (.exists src)
-      (let [dest (str (evidence-dir) "/" id "-export." fmt)]
-        (fs/copy (str src) dest {:replace-existing true})
-        (display/print-success (messages/t :evidence/export-raw {:path dest})))
-      (do (display/print-error (messages/t :evidence/export-not-found {:id id}))
-          (shared/exit! 1)))))
-
-(defn evidence-export-cmd
+(defn ^{:stratum 2} evidence-export-cmd
   "Export an evidence bundle to a file in the requested format.
 
    Supported formats: edn (default), json, html."
@@ -248,6 +210,47 @@
             (when-let [path (:path result)]
               (println (messages/t :evidence/export-path {:path path}))))
           (export-bundle-fallback id fmt))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} display-bundle-detail
+  "Render the detail view for a single evidence bundle."
+  [id bundle]
+  (display/render-detail (assoc bundle-detail-spec :header-params {:id id})
+                         (normalize-bundle-detail bundle)))
+
+(defn ^{:stratum 3} evidence-list-cmd
+  "List all available evidence bundles.
+
+   Shows bundles from the evidence-bundle component if available,
+   otherwise scans ~/.miniforge/evidence/."
+  [_opts]
+  (println)
+  (println (display/style (messages/t :evidence/header) :foreground :cyan :bold true))
+  (println)
+  (let [component-result (shared/call-optional-provider
+                          'ai.miniforge.evidence-bundle.interface/list-bundles)]
+    (if component-result
+      (display-component-bundles component-result)
+      (display-filesystem-bundles)))
+  (println))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} evidence-show-cmd
+  "Show the contents of an evidence bundle by ID."
+  [opts]
+  (let [{:keys [id]} opts]
+    (if-not id
+      (shared/usage-error! :evidence/show-usage "evidence show <id>")
+      (let [bundle (load-bundle-for-show id)]
+        (if-not bundle
+          (do (display/print-error
+               (messages/t :evidence/not-found
+                          {:id id
+                           :command (app-config/command-string "evidence list")}))
+              (shared/exit! 1))
+          (display-bundle-detail id bundle))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

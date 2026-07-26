@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-selection-config
   "Resource-driven workflow selection profile resolution."
   (:require
@@ -23,19 +22,33 @@
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Resource loading
 
-(def selection-profiles-resource
+;; Resource loading
+(def ^{:stratum 0} selection-profiles-resource
   "Classpath resource path for workflow selection profile mappings."
   "config/workflow/selection-profiles.edn")
 
-(defn- read-selection-profile-config
+(defn- ^{:stratum 0} read-selection-profile-config
   "Read a single selection profile config resource."
   [resource]
   (let [config (-> resource slurp edn/read-string)]
     (get config :workflow-selection/profiles {})))
 
-(defn configured-selection-profiles
+;; Generic fallback resolution
+(defn- ^{:stratum 0} workflow-characteristics
+  "Resolve workflow characteristics through the workflow interface."
+  [workflow-def]
+  (workflow/workflow-characteristics workflow-def))
+
+(defn- ^{:stratum 0} available-workflow-definitions
+  "Return full workflow definitions from the registry for fallback scoring."
+  []
+  (workflow/ensure-initialized!)
+  (keep workflow/get-workflow (workflow/list-workflow-ids)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} configured-selection-profiles
   "Merge workflow selection profile mappings from all matching classpath resources."
   []
   (->> (enumeration-seq (.getResources (clojure.lang.RT/baseLoader)
@@ -43,21 +56,7 @@
        (map read-selection-profile-config)
        (apply merge {})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Generic fallback resolution
-
-(defn- workflow-characteristics
-  "Resolve workflow characteristics through the workflow interface."
-  [workflow-def]
-  (workflow/workflow-characteristics workflow-def))
-
-(defn- available-workflow-definitions
-  "Return full workflow definitions from the registry for fallback scoring."
-  []
-  (workflow/ensure-initialized!)
-  (keep workflow/get-workflow (workflow/list-workflow-ids)))
-
-(defn- simplest-workflow-id
+(defn- ^{:stratum 1} simplest-workflow-id
   "Choose the simplest available workflow by phase count and max iterations."
   [available-workflows]
   (->> available-workflows
@@ -67,7 +66,7 @@
        first
        :workflow/id))
 
-(defn- most-comprehensive-workflow-id
+(defn- ^{:stratum 1} most-comprehensive-workflow-id
   "Choose the most comprehensive available workflow by phase count."
   [available-workflows]
   (->> available-workflows
@@ -77,7 +76,9 @@
        first
        :workflow/id))
 
-(defn- resolve-profile-fallback
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} resolve-profile-fallback
   "Resolve a profile via generic workflow characteristics when no config is present."
   [profile available-workflows]
   (case profile
@@ -87,10 +88,10 @@
                  (most-comprehensive-workflow-id available-workflows))
     nil))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public API
+;------------------------------------------------------------------------------ Layer 3
 
-(defn resolve-selection-profile
+;; Public API
+(defn ^{:stratum 3} resolve-selection-profile
   "Resolve a logical selection profile to a concrete workflow id.
 
    Profiles are app-owned configuration. If a configured profile points at a

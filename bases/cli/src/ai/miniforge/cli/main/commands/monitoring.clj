@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.monitoring
   "Web dashboard and TUI monitoring commands."
   (:require
@@ -26,20 +25,29 @@
    [ai.miniforge.cli.main.display :as display]
    [ai.miniforge.cli.messages :as messages]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Web dashboard command
+;------------------------------------------------------------------------------ Layer 0
 
-(defn exit!
+;; Web dashboard command
+(defn ^{:stratum 0} exit!
   [code]
   (System/exit code))
 
-(def ^:dynamic *web-available?* false)
+(def ^{:stratum 0} ^:dynamic *web-available?* false)
 
-(def ^:dynamic *start-web-dashboard!*
+(def ^{:stratum 0} ^:dynamic *start-web-dashboard!*
   "Injected JVM dashboard launcher. Nil when the dashboard component is not on the classpath."
   nil)
 
-(defn web-cmd
+;; TUI availability and launcher are composed by the parent CLI namespace.
+(def ^{:stratum 0} ^:dynamic *tui-available?* false)
+
+(def ^{:stratum 0} ^:dynamic *start-standalone-tui!*
+  "Injected JVM TUI launcher. Nil when the TUI component is not on the classpath."
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} web-cmd
   "Start web dashboard for workflow monitoring."
   [opts]
   (let [{:keys [port open]} opts
@@ -89,14 +97,7 @@
                                            {:error (ex-message e)}))
           (exit! 1))))))
 
-;; TUI availability and launcher are composed by the parent CLI namespace.
-(def ^:dynamic *tui-available?* false)
-
-(def ^:dynamic *start-standalone-tui!*
-  "Injected JVM TUI launcher. Nil when the TUI component is not on the classpath."
-  nil)
-
-(defn tui-cmd
+(defn ^{:stratum 1} tui-cmd
   "Start terminal UI for workflow monitoring.
    Launches standalone TUI that tail-follows app event files."
   [opts]

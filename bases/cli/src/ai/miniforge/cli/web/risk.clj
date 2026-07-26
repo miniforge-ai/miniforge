@@ -15,25 +15,26 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web.risk
   "PR risk analysis - pure functions."
   (:require [clojure.string :as str]))
 
-(def colors
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} colors
   {:low "#22c55e"
    :medium "#eab308"
    :high "#ef4444"})
 
-(def bg-colors
+(def ^{:stratum 0} bg-colors
   {:low "rgba(34, 197, 94, 0.1)"
    :medium "rgba(234, 179, 8, 0.1)"
    :high "rgba(239, 68, 68, 0.1)"})
 
-(defn title-contains? [title-lower & terms]
+(defn ^{:stratum 0} title-contains? [title-lower & terms]
   (some #(str/includes? title-lower %) terms))
 
-(defn classify-risk [total-changes file-count is-docs? is-deps? is-refactor?]
+(defn ^{:stratum 0} classify-risk [total-changes file-count is-docs? is-deps? is-refactor?]
   (cond
     (and is-docs? (< total-changes 100)) :low
     (and is-deps? (< file-count 3)) :low
@@ -43,14 +44,14 @@
     (and is-refactor? (> total-changes 200)) :high
     :else :medium))
 
-(defn classify-complexity [total-changes]
+(defn ^{:stratum 0} classify-complexity [total-changes]
   (cond
     (< total-changes 20) :trivial
     (< total-changes 100) :simple
     (< total-changes 300) :moderate
     :else :complex))
 
-(defn summarize-type [is-docs? is-deps? is-fix? is-refactor? is-feature?]
+(defn ^{:stratum 0} summarize-type [is-docs? is-deps? is-fix? is-refactor? is-feature?]
   (cond
     is-docs? "Documentation update"
     is-deps? "Dependency version bump"
@@ -59,13 +60,15 @@
     is-feature? "New feature"
     :else "Code changes"))
 
-(defn build-reasons [total-changes file-count is-refactor?]
+(defn ^{:stratum 0} build-reasons [total-changes file-count is-refactor?]
   (cond-> []
     (> total-changes 300) (conj (str total-changes " lines changed"))
     (> file-count 10) (conj (str file-count " files modified"))
     is-refactor? (conj "Refactoring changes")))
 
-(defn analyze-pr [{:keys [title additions deletions changedFiles]}]
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} analyze-pr [{:keys [title additions deletions changedFiles]}]
   (let [total-changes (+ (or additions 0) (or deletions 0))
         file-count (or changedFiles 0)
         title-lower (str/lower-case (or title ""))

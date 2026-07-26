@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.control
   "Governed control-path wiring shared by every CLI runner path
    (Phase D D-3/D-4).
@@ -41,20 +40,20 @@
    [ai.miniforge.supervisory-state.interface :as supervisory]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Process-scoped singletons
 
-(defonce ^:private meta-loop-ctx
+;; Process-scoped singletons
+(defonce ^{:stratum 0} ^:private meta-loop-ctx
   ;; Lazily initialized when the first governed workflow starts.
   ;; Uses a dedicated operator-level event stream (no workflow-id → operator.edn).
   (atom nil))
 
-(defonce ^:private operator-consumer-handle
+(defonce ^{:stratum 0} ^:private operator-consumer-handle
   ;; Exactly one operator-directory consumer per process. Starting one per
   ;; workflow races the shared on-disk cursor and can publish a target
   ;; workflow's audit trail through the wrong workflow stream.
   (atom nil))
 
-(defn- create-meta-loop-ctx!
+(defn- ^{:stratum 0} create-meta-loop-ctx!
   []
   (let [operator-stream (es/create-event-stream)
         _supervisor (supervisory/attach! operator-stream)
@@ -65,7 +64,16 @@
         _correlator (correlator/attach! operator-stream)]
     (agent/create-meta-loop-context operator-stream)))
 
-(defn meta-loop-context!
+(defn ^{:stratum 0} release-workflow-control!
+  "Drop `workflow-id` from the live-runner registry. Interventions
+   aimed at it stop being applicable the moment the runner is gone —
+   which is the honest answer, not a silent no-op. Idempotent."
+  [workflow-id]
+  (operator/deregister-live-runner! workflow-id))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} meta-loop-context!
   "The process-wide meta-loop context, created on first use."
   []
   ;; Double-checked locking. The inner `or` is NOT the outer one repeated:
@@ -80,10 +88,8 @@
         (or @meta-loop-ctx
             (reset! meta-loop-ctx (create-meta-loop-ctx!))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Consumer lifecycle
-
-(defn- ensure-operator-consumer!
+(defn- ^{:stratum 1} ensure-operator-consumer!
   [ctx]
   ;; Double-checked locking (see meta-loop-context!). The inner re-check
   ;; matters more here: without it a race would `start-operator-consumer!`
@@ -100,9 +106,9 @@
                       :stream-for operator/live-intervention-stream}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Runner registration
 
-(defn register-workflow-control!
+;; Runner registration
+(defn ^{:stratum 2} register-workflow-control!
   "Make `workflow-id` controllable from the governed operator channel:
    publish this runner's control handles and guarantee the process
    consumer is polling. Call inside the runner's `try`, after every
@@ -119,10 +125,3 @@
       (catch Throwable e
         (operator/deregister-live-runner! workflow-id)
         (throw e)))))
-
-(defn release-workflow-control!
-  "Drop `workflow-id` from the live-runner registry. Interventions
-   aimed at it stop being applicable the moment the runner is gone —
-   which is the honest answer, not a silent no-op. Idempotent."
-  [workflow-id]
-  (operator/deregister-live-runner! workflow-id))

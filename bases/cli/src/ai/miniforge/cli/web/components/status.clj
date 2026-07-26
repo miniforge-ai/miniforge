@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web.components.status
   "Status-oriented dashboard fragments."
   (:require
@@ -23,16 +22,18 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.web.fleet :as fleet]))
 
-(def ^:const no-workflows-style
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:const no-workflows-style
   "color: var(--text-muted); font-size: 12px; text-align: center;")
 
-(defn- t
+(defn- ^{:stratum 0} t
   ([message-key]
    (messages/t message-key))
   ([message-key params]
    (messages/t message-key params)))
 
-(defn- overall-status-key
+(defn- ^{:stratum 0} overall-status-key
   [overall]
   (case overall
     :healthy :web-ui/status-healthy
@@ -41,12 +42,24 @@
     :error :web-ui/status-error
     :web-ui/status-unknown))
 
-(defn- workflow-stat
+(defn- ^{:stratum 0} workflow-stat
   [class-name value]
   [:span {:class class-name}
    [:span value]])
 
-(defn status-indicator
+(defn ^{:stratum 0} workflow-status-icon
+  [run]
+  (let [status (get run :status)
+        conclusion (get run :conclusion)]
+    (cond
+      (= status "in_progress") "⏳"
+      (= conclusion "success") "✓"
+      (#{"failure" "timed_out" "startup_failure"} conclusion) "✗"
+      :else "○")))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} status-indicator
   [status]
   (let [overall (get status :overall)
         status-class (name overall)
@@ -59,31 +72,25 @@
       [:span.status-dot]
       [:span status-text]])))
 
-(defn workflow-status-icon
-  [run]
-  (let [status (get run :status)
-        conclusion (get run :conclusion)]
-    (cond
-      (= status "in_progress") "⏳"
-      (= conclusion "success") "✓"
-      (#{"failure" "timed_out" "startup_failure"} conclusion) "✗"
-      :else "○")))
-
-(defn- workflow-run
+(defn- ^{:stratum 1} workflow-run
   [{:keys [workflowName createdAt] :as run}]
   [:div.workflow-run
    [:span.workflow-run-status (workflow-status-icon run)]
    [:span.workflow-run-name workflowName]
    [:span.workflow-run-time (fleet/format-time-ago createdAt)]])
 
-(defn- workflow-runs
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} workflow-runs
   [runs]
   (if (seq runs)
     (map workflow-run runs)
     [[:div {:style no-workflows-style}
       (t :web-ui/workflow-status-none)]]))
 
-(defn workflow-status
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} workflow-status
   [repos]
   (let [{:keys [running failed succeeded runs]} (fleet/get-workflow-status repos)
         running-value (str running " ⏳")

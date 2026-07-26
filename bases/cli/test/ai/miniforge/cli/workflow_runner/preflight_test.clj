@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.preflight-test
   (:require
    [babashka.fs :as fs]
@@ -25,23 +24,18 @@
    [ai.miniforge.llm.interface :as llm]
    [ai.miniforge.cli.workflow-runner :as sut]))
 
-(defn- temp-repo-root []
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} temp-repo-root []
   (let [root (str (fs/create-temp-dir {:prefix "mf-preflight-"}))]
     (fs/create-dirs (fs/path root ".git"))
     root))
 
-(defn- shell-path []
+(defn- ^{:stratum 0} shell-path []
   (or (some-> (fs/which "sh") str)
       "/bin/sh"))
 
-(deftest run-cli-command-captures-short-lived-process-output-test
-  (testing "probe helper captures stdout, stderr, and exit code for short-lived commands"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
-      (is (= "ok" (:out result)))
-      (is (= "warn" (:err result)))
-      (is (= 0 (:exit result))))))
-
-(deftest await-stream-waits-for-reader-completion-test
+(deftest ^{:stratum 0} await-stream-waits-for-reader-completion-test
   (testing "stream join waits for a completed reader instead of dropping late output"
     (let [started-at (System/currentTimeMillis)
           result (#'sut/await-stream (future
@@ -51,44 +45,7 @@
       (is (= "late-output" result))
       (is (<= 1000 elapsed-ms)))))
 
-(deftest run-cli-command-times-out-fast-test
-  (testing "probe helper returns a timeout result instead of hanging the caller"
-    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
-      (is (= -1 (:exit result)))
-      (is (= 10 (:timeout-ms result)))
-      (is (str/includes? (:err result) "10")))))
-
-(deftest assert-runtime-alignment-rejects-worktree-mismatch-test
-  (testing "explicit execution worktree must survive into runtime context"
-    (let [source-root (temp-repo-root)
-          source-dir (str (fs/path source-root "work"))]
-      (try+
-        (#'sut/assert-runtime-alignment!
-         {:spec/source-dir source-dir}
-         {:source-root source-root
-          :worktree-path "/tmp/runtime-worktree"
-          :execution/opts {:worktree-path "/tmp/expected-worktree"}})
-        (is false "expected execution worktree mismatch anomaly")
-        (catch [:anomaly/category :anomalies/incorrect]
-               {:keys [expected-worktree actual-worktree]}
-          (is (= "/tmp/expected-worktree" expected-worktree))
-          (is (= "/tmp/runtime-worktree" actual-worktree)))))))
-
-(deftest assert-runtime-alignment-rejects-source-dir-outside-root-test
-  (testing "spec source directory must stay under the resolved source root"
-    (let [source-root (temp-repo-root)]
-      (try+
-        (#'sut/assert-runtime-alignment!
-         {:spec/source-dir "/tmp/outside-spec-root"}
-         {:source-root source-root
-          :worktree-path "/tmp/runtime-worktree"
-          :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
-        (is false "expected source-dir alignment anomaly")
-        (catch [:anomaly/category :anomalies/incorrect]
-               {:keys [source-dir]}
-          (is (= "/tmp/outside-spec-root" source-dir)))))))
-
-(deftest print-runtime-provenance-includes-startup-warnings-test
+(deftest ^{:stratum 0} print-runtime-provenance-includes-startup-warnings-test
   (testing "startup provenance prints upstream and source checkout warnings"
     (let [output (with-out-str
                    (#'sut/print-runtime-provenance!
@@ -106,19 +63,7 @@
       (is (str/includes? output "detached HEAD"))
       (is (str/includes? output "uncommitted changes")))))
 
-(deftest assert-runtime-alignment-normalizes-parent-segments-test
-  (testing "source-dir alignment accepts normalized paths under the source root"
-    (let [source-root (temp-repo-root)
-          nested-work (str (fs/path source-root "work" "nested"))]
-      (fs/create-dirs nested-work)
-      (#'sut/assert-runtime-alignment!
-       {:spec/source-dir (str (fs/path nested-work ".."))}
-       {:source-root source-root
-        :worktree-path "/tmp/runtime-worktree"
-        :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
-      (is true))))
-
-(deftest run-backend-preflight-stamps-resolved-cli-and-version-test
+(deftest ^{:stratum 0} run-backend-preflight-stamps-resolved-cli-and-version-test
   (testing "backend preflight resolves the inherited CLI path and prints the stamp"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           preflight-client (atom nil)
@@ -144,7 +89,7 @@
       (is (str/includes? output "Backend Version: 2.1.126"))
       (is (nil? @preflight-client)))))
 
-(deftest run-backend-preflight-fails-closed-on-bad-cli-health-test
+(deftest ^{:stratum 0} run-backend-preflight-fails-closed-on-bad-cli-health-test
   (testing "backend preflight carries the resolved path and version when the probe fails"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
@@ -168,7 +113,7 @@
           (is (= "2.1.89" cmd-version))
           (is (= "backend_preflight_timeout" (get-in probe-response [:error :type]))))))))
 
-(deftest run-backend-preflight-accepts-claude-result-wrapper-test
+(deftest ^{:stratum 0} run-backend-preflight-accepts-claude-result-wrapper-test
   (testing "Claude preflight accepts success envelopes whose result field contains the canonical payload"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})
           output (with-out-str
@@ -187,7 +132,7 @@
       (is (str/includes? output "Backend Path: /opt/homebrew/bin/claude"))
       (is (str/includes? output "Backend Version: 2.1.118 (Claude Code)")))))
 
-(deftest run-backend-preflight-rejects-claude-error-wrapper-test
+(deftest ^{:stratum 0} run-backend-preflight-rejects-claude-error-wrapper-test
   (testing "Claude preflight rejects wrapped payloads when the outer result envelope is not successful"
     (let [llm-client (llm/mock-client {:output "{\"ok\":true}"})]
       (try+
@@ -209,7 +154,7 @@
                  (get-in probe-response [:error :data :type])))
           (is (nil? (:content probe-response))))))))
 
-(deftest run-backend-preflight-exercises-generic-cli-success-path-test
+(deftest ^{:stratum 0} run-backend-preflight-exercises-generic-cli-success-path-test
   (testing "non-Claude CLI backends decode streamed CLI output and accept the canonical ok payload"
     (let [llm-client (llm/create-client {:backend :codex})
           seen-cmd (atom nil)
@@ -238,3 +183,61 @@
       (is (= "Reply with exactly {\"ok\":true}" (last @seen-cmd)))
       (is (= 30000 @seen-timeout))
       (is (= "/tmp/runtime-worktree" @seen-workdir)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} run-cli-command-captures-short-lived-process-output-test
+  (testing "probe helper captures stdout, stderr, and exit code for short-lived commands"
+    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "printf ok; printf warn >&2"] 5000)]
+      (is (= "ok" (:out result)))
+      (is (= "warn" (:err result)))
+      (is (= 0 (:exit result))))))
+
+(deftest ^{:stratum 1} run-cli-command-times-out-fast-test
+  (testing "probe helper returns a timeout result instead of hanging the caller"
+    (let [result (#'sut/run-cli-command [(shell-path) "-lc" "sleep 1"] 10)]
+      (is (= -1 (:exit result)))
+      (is (= 10 (:timeout-ms result)))
+      (is (str/includes? (:err result) "10")))))
+
+(deftest ^{:stratum 1} assert-runtime-alignment-rejects-worktree-mismatch-test
+  (testing "explicit execution worktree must survive into runtime context"
+    (let [source-root (temp-repo-root)
+          source-dir (str (fs/path source-root "work"))]
+      (try+
+        (#'sut/assert-runtime-alignment!
+         {:spec/source-dir source-dir}
+         {:source-root source-root
+          :worktree-path "/tmp/runtime-worktree"
+          :execution/opts {:worktree-path "/tmp/expected-worktree"}})
+        (is false "expected execution worktree mismatch anomaly")
+        (catch [:anomaly/category :anomalies/incorrect]
+               {:keys [expected-worktree actual-worktree]}
+          (is (= "/tmp/expected-worktree" expected-worktree))
+          (is (= "/tmp/runtime-worktree" actual-worktree)))))))
+
+(deftest ^{:stratum 1} assert-runtime-alignment-rejects-source-dir-outside-root-test
+  (testing "spec source directory must stay under the resolved source root"
+    (let [source-root (temp-repo-root)]
+      (try+
+        (#'sut/assert-runtime-alignment!
+         {:spec/source-dir "/tmp/outside-spec-root"}
+         {:source-root source-root
+          :worktree-path "/tmp/runtime-worktree"
+          :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
+        (is false "expected source-dir alignment anomaly")
+        (catch [:anomaly/category :anomalies/incorrect]
+               {:keys [source-dir]}
+          (is (= "/tmp/outside-spec-root" source-dir)))))))
+
+(deftest ^{:stratum 1} assert-runtime-alignment-normalizes-parent-segments-test
+  (testing "source-dir alignment accepts normalized paths under the source root"
+    (let [source-root (temp-repo-root)
+          nested-work (str (fs/path source-root "work" "nested"))]
+      (fs/create-dirs nested-work)
+      (#'sut/assert-runtime-alignment!
+       {:spec/source-dir (str (fs/path nested-work ".."))}
+       {:source-root source-root
+        :worktree-path "/tmp/runtime-worktree"
+        :execution/opts {:worktree-path "/tmp/runtime-worktree"}})
+      (is true))))

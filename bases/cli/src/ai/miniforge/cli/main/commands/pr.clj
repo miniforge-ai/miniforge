@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr
   "PR operations using GitHub CLI."
   (:require
@@ -33,23 +32,13 @@
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Shell helpers
 
-(defn- sh! [& args]
+;; Shell helpers
+(defn- ^{:stratum 0} sh! [& args]
   (apply process/sh args))
 
-(defn- checkout-pr! [pr-number]
-  (let [r (sh! "gh" "pr" "checkout" (str pr-number))]
-    (when (zero? (:exit r))
-      (str/trim (:out (sh! "git" "branch" "--show-current"))))))
-
-(defn- push! []
-  (zero? (:exit (sh! "git" "push"))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; PR commands
-
-(defn pr-list-cmd
+(defn ^{:stratum 0} pr-list-cmd
   "List PRs using GitHub CLI."
   [opts load-config-fn]
   (let [{:keys [repo config]} opts
@@ -91,7 +80,34 @@
                     (display/print-error (messages/t :pr/list-failed {:error (:err result2)}))))))
             (display/print-error (messages/t :pr/query-failed {:error (:err result)}))))))))
 
-(defn- gh-pr-base-ref
+(defn ^{:stratum 0} pr-merge-cmd
+  [opts]
+  (let [{:keys [url]} opts]
+    (if-not url
+      (display/print-error (messages/t :pr/merge-usage {:command (app-config/command-string "pr merge <pr-url>")}))
+      (do
+        (display/print-info (messages/t :pr/merging {:url url}))
+        (println (messages/t :pr/merge-todo))))))
+
+;; PR Monitor (continuous loop)
+(defn ^{:stratum 0} pr-monitor-cmd
+  "Delegates to pr-monitor/pr-monitor-cmd, which supports both a fresh
+   `--author` start and resuming from the persisted work-list (written by
+   the observe phase). See that namespace for full docs."
+  [opts]
+  (pr-monitor/pr-monitor-cmd opts))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} checkout-pr! [pr-number]
+  (let [r (sh! "gh" "pr" "checkout" (str pr-number))]
+    (when (zero? (:exit r))
+      (str/trim (:out (sh! "git" "branch" "--show-current"))))))
+
+(defn- ^{:stratum 1} push! []
+  (zero? (:exit (sh! "git" "push"))))
+
+(defn- ^{:stratum 1} gh-pr-base-ref
   "Resolve the base-branch ref for `pr-number` via the GitHub CLI.
    Returns a remote-prefixed ref like \"origin/main\", or nil on failure."
   [pr-number]
@@ -102,7 +118,9 @@
         (when (seq base-name)
           (str "origin/" base-name))))))
 
-(defn pr-review-cmd
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} pr-review-cmd
   "N13 §2.2 Standards Reviewer entry point.
 
    Checks out the given PR URL, derives the base ref, and runs the
@@ -163,7 +181,7 @@
        (messages/t :pr/review-usage
                    {:command (app-config/command-string "pr review <pr-url>")})))))
 
-(defn pr-respond-cmd
+(defn ^{:stratum 2} pr-respond-cmd
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
@@ -197,22 +215,3 @@
                             :pushed   (if (:pushed? result)
                                         (messages/t :pr/respond-pushed)
                                         "")})))))))))
-
-(defn pr-merge-cmd
-  [opts]
-  (let [{:keys [url]} opts]
-    (if-not url
-      (display/print-error (messages/t :pr/merge-usage {:command (app-config/command-string "pr merge <pr-url>")}))
-      (do
-        (display/print-info (messages/t :pr/merging {:url url}))
-        (println (messages/t :pr/merge-todo))))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; PR Monitor (continuous loop)
-
-(defn pr-monitor-cmd
-  "Delegates to pr-monitor/pr-monitor-cmd, which supports both a fresh
-   `--author` start and resuming from the persisted work-list (written by
-   the observe phase). See that namespace for full docs."
-  [opts]
-  (pr-monitor/pr-monitor-cmd opts))
