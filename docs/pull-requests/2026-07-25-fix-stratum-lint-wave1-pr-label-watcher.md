@@ -78,6 +78,18 @@ surviving comments (e.g. `;; Ancestry predicate`). Re-ran `--fix` after
 the edit: zero diff, confirming the hand-fix didn't destabilize the
 tool's own output.
 
+A second hand-fix, in `core.clj`: `--fix` left a single Layer-1 group
+comment, `;; Pure registry helpers`, ahead of all three Layer-1 defs
+(`load-registry`, `make-ancestor?-fn`, `build-match-payload`) — accurate
+for the first, wrong for the other two (`make-ancestor?-fn` builds a
+git-ancestry/shell predicate; `build-match-payload` assembles the output
+payload, neither is registry-related). Split it into three group
+comments, one per def, matching this same file's own Layer-0 convention
+(which already carries one short comment per def-group: `;; Tuning
+constants + resource paths`, `;; Ancestry predicate`, `;; Match payload
+assembly`): `;; Registry loading`, `;; Ancestor predicate factory`, `;;
+Payload assembly`. Re-ran `--fix` after the edit: zero diff.
+
 No `SL003` (over-budget) risk here: `core.clj` tops out at 3 real
 layers, exactly at budget.
 
@@ -99,6 +111,10 @@ layers, exactly at budget.
    surfaced).
 6. Ran `ai.miniforge.pr-label-watcher.core-test` directly via
    `clojure -A:test -e`: 18 tests, 36 assertions, 0 failures, 0 errors.
+7. After review flagged the `core.clj` Layer-1 header and the
+   `core_test.clj` regrouping claim (below), re-ran `--fix` again post
+   hand-fix: zero diff. Re-ran `clj-kondo`, plain `stratum-lint`, and the
+   test suite: unchanged — 0/0, zero findings, 18 tests/36 assertions.
 
 ## Deployment Plan
 
@@ -114,11 +130,12 @@ autofixer keeps this component clean going forward.
 ## Checklist
 
 - [x] `--fix` run over the whole component (`src` + `test`)
-- [x] Second and third `--fix` passes confirm idempotency (zero diff),
-      the second after this PR's one hand-fix
-- [x] Diff read in full for all 3 changed files; mechanical except one
-      hand-fix (stale, now-contradictory `Layer N:` banner text in
-      `core_test.clj`, reworded — no code or test-assertion changes)
+- [x] Repeated `--fix` passes confirm idempotency (zero diff) after each
+      of this PR's two hand-fixes and one doc correction
+- [x] Diff read in full for all 3 changed files; mechanical except two
+      hand-fixes (stale, now-contradictory `Layer N:` banner text in
+      `core_test.clj`; an inaccurate multi-def group comment in
+      `core.clj`) — no code or test-assertion changes
 - [x] `clj-kondo` clean before/after (0 errors, 0 warnings)
 - [x] Component tests pass (18 tests, 36 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings, no `SL003` remains

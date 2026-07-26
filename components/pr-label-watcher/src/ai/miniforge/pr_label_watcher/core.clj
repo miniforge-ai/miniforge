@@ -103,7 +103,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Pure registry helpers
+;; Registry loading
 (defn ^{:stratum 1} load-registry
   "Read the label-actions registry from the M1 resource. Returns the
    string-keyed map under `:pr-label-actions/registry`.
@@ -124,6 +124,7 @@
         edn/read-string
         :pr-label-actions/registry)))
 
+;; Ancestor predicate factory
 (defn ^{:stratum 1} make-ancestor?-fn
   "Build the ancestor predicate `(fn [base-sha merge-sha] -> bool)`.
 
@@ -144,6 +145,7 @@
       (or (nil? base-sha) (nil? merge-sha)) false
       :else (ancestor-via-shell shell-fn base-sha merge-sha))))
 
+;; Payload assembly
 (defn ^{:stratum 1} build-match-payload
   "Build the structured payload that the meta-agent consumes on hit.
 
