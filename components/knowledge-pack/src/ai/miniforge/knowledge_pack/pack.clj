@@ -15,28 +15,26 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge-pack.pack
   "Knowledge pack operations: build, update, project to a content-
    addressed reference triple, derive the manifest digest +
    revision-id.
 
-   Two strata mirror the zettel module:
-     Layer 0 — content-bearing subset + digest / revision-id
-               derivation. Pure; no I/O.
-     Layer 1 — public constructors: `build-pack`, `update-pack`,
-               plus the `zettel->ref` projection callers use to
-               build the `:pack/zettels` triples from existing
-               zettel maps."
+   Six strata (over the rule-210 budget of 3 — a namespace-split
+   candidate, not resolved here): field lists and pure derivations
+   at Layer 0, rising through the projection/digest/stamp chain to
+   the public constructors (`build-pack`, `update-pack`) at Layer 4
+   and the manifest mutators (`add-zettel`, `remove-zettel`) at
+   Layer 5, which call back into `update-pack`."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash])
   (:import
    [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Content-bearing subset + revision identity.
 
-(def ^:private content-bearing-fields
+;; Content-bearing subset + revision identity.
+(def ^{:stratum 0} ^:private content-bearing-fields
   "Fields whose value affects a pack's revision identity. Operational
    metadata (`:pack/id`, `:pack/created`, `:pack/modified`,
    `:pack/author`, `:fleet/*`, `:privacy/*`) is excluded — same
@@ -50,47 +48,22 @@
    :pack/zettels
    :pack/dependencies])
 
-(defn- content-projection
-  "Pure: project a pack down to the content-bearing subset that feeds
-   the digest. Stable across additions of operational metadata."
-  [pack]
-  (select-keys pack content-bearing-fields))
-
-(defn compute-digest
-  "Pure: SHA-256 hex of the pack's canonical-EDN content-projection.
-   Stable across map-key reorderings and across non-content metadata
-   changes; rotates whenever a content-bearing field changes."
-  [pack]
-  (content-hash/content-hash (content-projection pack)))
-
-(defn revision-id-from-digest
+(defn ^{:stratum 0} revision-id-from-digest
   "Pure: derive a stable UUID from a digest hex string. Two packs
    with identical content-projections land on the same
    `:pack/revision-id`."
   ^UUID [^String digest]
   (UUID/nameUUIDFromBytes (.getBytes digest "UTF-8")))
 
-(defn- stamp-revision
-  "Pure: stamp a pack with `:pack/digest` + `:pack/revision-id`
-   derived from its current content projection. Idempotent for an
-   already-stamped pack whose content has not changed."
-  [pack]
-  (let [d (compute-digest pack)]
-    (assoc pack
-           :pack/digest      d
-           :pack/revision-id (revision-id-from-digest d))))
-
-(def ^:private derived-fields
+(def ^{:stratum 0} ^:private derived-fields
   "Fields the constructor / updater own — callers cannot override
    them via `update-pack`. Ensures the relationship between content
    and revision identity stays tamper-evident, mirroring the
    zettel-side spoof guard."
   #{:pack/digest :pack/revision-id})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Public constructors + projection.
-
-(defn zettel->ref
+;; Zettel-to-reference projection.
+(defn ^{:stratum 0} zettel->ref
   "Pure: project a zettel map down to the `(zettel/id,
    zettel/revision-id, zettel/digest)` triple a pack manifest holds.
 
@@ -111,7 +84,38 @@
      :zettel/revision-id revision-id
      :zettel/digest      digest}))
 
-(defn build-pack
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} content-projection
+  "Pure: project a pack down to the content-bearing subset that feeds
+   the digest. Stable across additions of operational metadata."
+  [pack]
+  (select-keys pack content-bearing-fields))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} compute-digest
+  "Pure: SHA-256 hex of the pack's canonical-EDN content-projection.
+   Stable across map-key reorderings and across non-content metadata
+   changes; rotates whenever a content-bearing field changes."
+  [pack]
+  (content-hash/content-hash (content-projection pack)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} stamp-revision
+  "Pure: stamp a pack with `:pack/digest` + `:pack/revision-id`
+   derived from its current content projection. Idempotent for an
+   already-stamped pack whose content has not changed."
+  [pack]
+  (let [d (compute-digest pack)]
+    (assoc pack
+           :pack/digest      d
+           :pack/revision-id (revision-id-from-digest d))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} build-pack
   "Construct a fresh content-addressed pack manifest.
 
    Required arguments:
@@ -165,7 +169,7 @@
                oss-version            (assoc :fleet/oss-version oss-version))]
     (stamp-revision pack)))
 
-(defn update-pack
+(defn ^{:stratum 4} update-pack
   "Update a pack with new values, setting the modified timestamp.
 
    `:pack/digest` and `:pack/revision-id` are DERIVED — any value
@@ -192,7 +196,9 @@
                       (assoc :pack/modified (java.util.Date.)))]
     (stamp-revision merged)))
 
-(defn add-zettel
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} add-zettel
   "Add a zettel reference to a pack's manifest. The zettel is
    projected via `zettel->ref` (so callers can pass the zettel map
    directly) and the pack revision rotates via `update-pack`."
@@ -201,7 +207,7 @@
         existing (vec (:pack/zettels pack))]
     (update-pack pack {:pack/zettels (conj existing ref)})))
 
-(defn remove-zettel
+(defn ^{:stratum 5} remove-zettel
   "Remove every reference to `zettel-id` from the pack's manifest.
    Pack revision rotates if any reference was actually removed."
   [pack zettel-id]

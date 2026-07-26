@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.app-config-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.app-config :as app-config]
    [ai.miniforge.cli.resource-config :as resource-config]))
 
-(deftest default-app-profile-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} default-app-profile-test
   (let [profile (app-config/app-profile)]
     (testing "base CLI exposes a resource-backed profile"
       (is (= (:name profile) (app-config/binary-name)))
@@ -35,7 +36,7 @@
       (is (.endsWith (app-config/events-dir)
                      (str "/" (:home-dir-name profile) "/events"))))))
 
-(deftest app-profile-loads-resource-backed-config-test
+(deftest ^{:stratum 0} app-profile-loads-resource-backed-config-test
   (testing "app profile delegates to the resource-backed config loader"
     (with-redefs [resource-config/merged-resource-config
                   (fn [_resource _key _default]
@@ -45,7 +46,7 @@
         (is (= "miniforge-core" (:name profile)))
         (is (= ["run demo" "doctor"] (:help-examples profile)))))))
 
-(deftest home-dir-prefers-miniforge-home-env-test
+(deftest ^{:stratum 0} home-dir-prefers-miniforge-home-env-test
   (testing "MINIFORGE_HOME overrides the default CLI home path"
     (with-redefs [app-config/getenv (fn [var-name]
                                       (when (= "MINIFORGE_HOME" var-name)
@@ -54,7 +55,7 @@
       (is (= "/tmp/mf-home" (app-config/home-dir)))
       (is (= "/tmp/mf-home/events" (app-config/events-dir))))))
 
-(deftest home-dir-falls-back-to-profile-based-default-test
+(deftest ^{:stratum 0} home-dir-falls-back-to-profile-based-default-test
   (testing "default CLI home path stays profile-derived when MINIFORGE_HOME is unset"
     (with-redefs [app-config/getenv (constantly nil)
                   app-config/default-home-dir (constantly "/Users/test/.miniforge-core")]

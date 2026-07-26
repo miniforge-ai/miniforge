@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.callbacks
   "Streaming callback helpers for the event-stream public API."
   (:require
@@ -28,9 +27,9 @@
    [java.util.concurrent TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Convenience callbacks
 
-(defn- tool-use-line
+;; Convenience callbacks
+(defn- ^{:stratum 0} tool-use-line
   "Render a short terminal-visible line for a tool-use streaming event."
   [{:keys [tool-name tool-names]}]
   (let [names (or (seq tool-names)
@@ -38,7 +37,7 @@
     (when (seq names)
       (messages/t :stream/tool-use-line {:names (str/join ", " names)}))))
 
-(defn- maybe-digest
+(defn- ^{:stratum 0} maybe-digest
   "Apply digest-content to `content` only when content is non-nil.
    digest-content handles the 1KB threshold internally (preview is always
    capped; SHA-256 is always computed). We guard only against nil so the
@@ -47,7 +46,9 @@
   (when (some? content)
     (digest/digest-content content)))
 
-(defn create-streaming-callback
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-streaming-callback
   "Callback invoked by the LLM client for each parsed stream event.
 
    Expected parsed-event keys:

@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.store-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.knowledge.store :as sut]))
 
-(deftest default-agent-manifests-no-dewey-prefixes-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} default-agent-manifests-no-dewey-prefixes-test
   (testing "default agent manifests no longer constrain retrieval by dewey prefixes"
     (doseq [[role manifest] sut/default-agent-manifests]
       (is (not (contains? manifest :dewey-prefixes))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-edgar.anomaly.edgar-anomaly-test
   "Coverage for `impl/do-connect` and `impl/do-extract` boundary
    escalation via `response/throw-anomaly!`.
@@ -26,7 +25,9 @@
             [ai.miniforge.connector-edgar.impl :as impl])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest do-connect-missing-form-type-throws-anomaly
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} do-connect-missing-form-type-throws-anomaly
   (testing "missing :edgar/form-type raises :anomalies/incorrect"
     (try
       (impl/do-connect {:edgar/user-agent "ua" :edgar/aggregation :monthly-buy-sell-ratio} nil)
@@ -35,7 +36,7 @@
         (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))
         (is (some? (:config (ex-data e))))))))
 
-(deftest do-connect-missing-user-agent-throws-anomaly
+(deftest ^{:stratum 0} do-connect-missing-user-agent-throws-anomaly
   (testing "missing :edgar/user-agent raises :anomalies/incorrect"
     (try
       (impl/do-connect {:edgar/form-type "10-K" :edgar/aggregation :monthly-buy-sell-ratio} nil)
@@ -43,7 +44,7 @@
       (catch ExceptionInfo e
         (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
 
-(deftest do-connect-missing-aggregation-throws-anomaly
+(deftest ^{:stratum 0} do-connect-missing-aggregation-throws-anomaly
   (testing "missing :edgar/aggregation raises :anomalies/incorrect"
     (try
       (impl/do-connect {:edgar/form-type "10-K" :edgar/user-agent "ua"} nil)
@@ -51,7 +52,7 @@
       (catch ExceptionInfo e
         (is (= :anomalies/incorrect (:anomaly/category (ex-data e))))))))
 
-(deftest do-extract-unknown-aggregation-throws-anomaly
+(deftest ^{:stratum 0} do-extract-unknown-aggregation-throws-anomaly
   (testing "do-extract with unknown :edgar/aggregation raises :anomalies/unsupported"
     (let [connect-result (impl/do-connect
                           {:edgar/form-type "10-K"

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.palette
   "Shared RGB color palette for TUI views.
 
@@ -26,10 +25,14 @@
    All view namespaces that need status or accent colors should reference
    these defs rather than inlining RGB literals.")
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ─────────────────────────────────────────────────────────────────────────────
 ;; Semantic status colors — fixed RGB values
+(def ^{:stratum 0} status-pass    [0 180 80])  ;; medium green
 
-(def status-pass    [0 180 80])      ;; medium green
-(def status-fail    [220 50 40])     ;; medium red
-(def status-warning [200 160 0])     ;; darker yellow/gold
-(def status-info    [0 150 180])     ;; teal/darker cyan
+(def ^{:stratum 0} status-fail    [220 50 40])  ;; medium red
+
+(def ^{:stratum 0} status-warning [200 160 0])  ;; darker yellow/gold
+
+(def ^{:stratum 0} status-info    [0 150 180])  ;; teal/darker cyan

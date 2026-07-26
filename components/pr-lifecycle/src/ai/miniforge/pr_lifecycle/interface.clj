@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.interface
   "Public API for the PR lifecycle component.
 
@@ -56,16 +55,16 @@
    [ai.miniforge.pr-lifecycle.responder :as responder]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Events
 
-(def event-types
+;; Events
+(def ^{:stratum 0} event-types
   "Valid PR lifecycle event types.
    :pr/opened :pr/ci-passed :pr/ci-failed :pr/review-approved
    :pr/review-changes-requested :pr/comment-actionable :pr/merged
    :pr/closed :pr/rebase-needed :pr/conflict :pr/fix-pushed"
   events/event-types)
 
-(def create-event-bus
+(def ^{:stratum 0} create-event-bus
   "Create an event bus for publishing and subscribing to PR events.
 
    Example:
@@ -73,11 +72,11 @@
      (subscribe! bus :my-handler (fn [e] (println e)))"
   events/create-event-bus)
 
-(def publish!
+(def ^{:stratum 0} publish!
   "Publish an event to the event bus."
   events/publish!)
 
-(def subscribe!
+(def ^{:stratum 0} subscribe!
   "Subscribe to events on the event bus.
 
    Example:
@@ -86,20 +85,20 @@
                  (fn [e] (#{:pr/ci-passed :pr/ci-failed} (:event/type e))))"
   events/subscribe!)
 
-(def unsubscribe!
+(def ^{:stratum 0} unsubscribe!
   "Unsubscribe from events."
   events/unsubscribe!)
 
-(def events-for-task
+(def ^{:stratum 0} events-for-task
   "Get all events for a specific task."
   events/events-for-task)
 
-(def events-for-pr
+(def ^{:stratum 0} events-for-pr
   "Get all events for a specific PR."
   events/events-for-pr)
 
 ;; Event constructors
-(def pr-opened
+(def ^{:stratum 0} pr-opened
   "Build a `:pr/opened` event map.
    Args: [dag-id run-id task-id pr-id pr-url branch sha].
    Returns an event map with `:event/id` `:event/type :pr/opened`
@@ -107,42 +106,42 @@
    :pr/branch :pr/sha`. Pure constructor — never throws."
   events/pr-opened)
 
-(def ci-passed
+(def ^{:stratum 0} ci-passed
   "Build a `:pr/ci-passed` event map.
    Args: [dag-id run-id task-id pr-id sha]. Returns an event map with
    `:event/type :pr/ci-passed` plus `:dag/id :run/id :task/id :pr/id
    :pr/sha`. Pure constructor."
   events/ci-passed)
 
-(def ci-failed
+(def ^{:stratum 0} ci-failed
   "Build a `:pr/ci-failed` event map.
    Args: [dag-id run-id task-id pr-id sha logs]. Returns an event map
    with `:event/type :pr/ci-failed` plus `:dag/id :run/id :task/id
    :pr/id :pr/sha :ci/logs`. Pure constructor."
   events/ci-failed)
 
-(def review-approved
+(def ^{:stratum 0} review-approved
   "Build a `:pr/review-approved` event map.
    Args: [dag-id run-id task-id pr-id approvers]. Returns an event map
    with `:event/type :pr/review-approved` plus `:dag/id :run/id
    :task/id :pr/id :review/approvers`. Pure constructor."
   events/review-approved)
 
-(def review-changes-requested
+(def ^{:stratum 0} review-changes-requested
   "Build a `:pr/review-changes-requested` event map.
    Args: [dag-id run-id task-id pr-id comments]. Returns an event map
    with `:event/type :pr/review-changes-requested` plus `:dag/id
    :run/id :task/id :pr/id :review/comments`. Pure constructor."
   events/review-changes-requested)
 
-(def comment-actionable
+(def ^{:stratum 0} comment-actionable
   "Build a `:pr/comment-actionable` event map.
    Args: [dag-id run-id task-id pr-id comment-data]. Returns an event
    map with `:event/type :pr/comment-actionable` plus `:dag/id :run/id
    :task/id :pr/id :comment`. Pure constructor."
   events/comment-actionable)
 
-(def merged
+(def ^{:stratum 0} merged
   "Build a `:pr/merged` event map.
    Arities: [dag-id run-id task-id pr-id merge-sha] (labels default to
    an empty set) and [... merge-sha labels] where `labels` is a
@@ -151,14 +150,14 @@
    :task/id :pr/id :pr/merge-sha :pr/labels`. Pure constructor."
   events/merged)
 
-(def rebase-needed
+(def ^{:stratum 0} rebase-needed
   "Build a `:pr/rebase-needed` event map.
    Args: [dag-id run-id task-id pr-id base-sha]. Returns an event map
    with `:event/type :pr/rebase-needed` plus `:dag/id :run/id :task/id
    :pr/id :pr/base-sha`. Pure constructor."
   events/rebase-needed)
 
-(def fix-pushed
+(def ^{:stratum 0} fix-pushed
   "Build a `:pr/fix-pushed` event map.
    Args: [dag-id run-id task-id pr-id sha fix-type] where `fix-type`
    is one of `:ci-fix` `:review-fix` `:conflict-fix`. Returns an event
@@ -166,10 +165,8 @@
    :task/id :pr/id :pr/sha :fix/type`. Pure constructor."
   events/fix-pushed)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Comment triage
-
-(def classify-comment
+(def ^{:stratum 0} classify-comment
   "Classify a comment as actionable or non-actionable.
 
    Arguments:
@@ -186,7 +183,7 @@
      ; => {:actionable? true :reason :actionable-indicators ...}"
   triage/classify-comment)
 
-(def triage-comments
+(def ^{:stratum 0} triage-comments
   "Triage a collection of comments.
 
    Options:
@@ -200,29 +197,27 @@
      (triage-comments [\"LGTM\" \"Please add tests\"])"
   triage/triage-comments)
 
-(def parse-ci-failure
+(def ^{:stratum 0} parse-ci-failure
   "Parse CI failure logs into structured actionable items.
 
    Returns {:test-failures [...] :lint-errors [...] :build-errors [...]
             :actionable-summary string}"
   triage/parse-ci-failure)
 
-(def extract-failing-files
+(def ^{:stratum 0} extract-failing-files
   "Extract file paths mentioned in CI failures."
   triage/extract-failing-files)
 
-(def extract-requested-changes
+(def ^{:stratum 0} extract-requested-changes
   "Extract specific requested changes from review comments."
   triage/extract-requested-changes)
 
-(def group-changes-by-file
+(def ^{:stratum 0} group-changes-by-file
   "Group requested changes by file for efficient processing."
   triage/group-changes-by-file)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; CI monitoring
-
-(def create-ci-monitor
+(def ^{:stratum 0} create-ci-monitor
   "Create a CI monitor for a PR.
 
    Options:
@@ -234,12 +229,12 @@
      (def monitor (create-ci-monitor dag-id run-id task-id 123 \"/path/to/repo\"))"
   ci/create-ci-monitor)
 
-(def poll-ci-status
+(def ^{:stratum 0} poll-ci-status
   "Poll CI status once.
    Returns {:status keyword :checks [...] :event event-or-nil}"
   ci/poll-ci-status)
 
-(def run-ci-monitor
+(def ^{:stratum 0} run-ci-monitor
   "Run the CI monitor until checks complete or timeout.
 
    Options:
@@ -249,19 +244,17 @@
    Returns final status map."
   ci/run-ci-monitor)
 
-(def stop-ci-monitor
+(def ^{:stratum 0} stop-ci-monitor
   "Stop a running CI monitor."
   ci/stop-ci-monitor)
 
-(def compute-ci-status
+(def ^{:stratum 0} compute-ci-status
   "Compute overall CI status from individual checks.
    Returns {:status keyword :passed [] :failed [] :pending []}"
   ci/compute-ci-status)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Review monitoring
-
-(def create-review-monitor
+(def ^{:stratum 0} create-review-monitor
   "Create a review monitor for a PR.
 
    Options:
@@ -275,12 +268,12 @@
                                          :required-approvals 2))"
   review/create-review-monitor)
 
-(def poll-review-status
+(def ^{:stratum 0} poll-review-status
   "Poll review status once.
    Returns {:status keyword :reviews {...} :new-comments [...] :events [...]}"
   review/poll-review-status)
 
-(def run-review-monitor
+(def ^{:stratum 0} run-review-monitor
   "Run the review monitor.
 
    Options:
@@ -290,19 +283,17 @@
    Returns final status map."
   review/run-review-monitor)
 
-(def stop-review-monitor
+(def ^{:stratum 0} stop-review-monitor
   "Stop a running review monitor."
   review/stop-review-monitor)
 
-(def compute-review-status
+(def ^{:stratum 0} compute-review-status
   "Compute overall review status from reviews.
    Returns {:status keyword :approvers [...] :changes-requested-by [...]}"
   review/compute-review-status)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; GitHub conversation management
-
-(def get-thread-id
+(def ^{:stratum 0} get-thread-id
   "Get GraphQL thread ID from a comment ID.
 
    GitHub review comments have both a REST API comment ID and a
@@ -320,7 +311,7 @@
      ; => {:success true :data {:thread-id \"PRRT_...\" :is-resolved false}}"
   github/get-thread-id)
 
-(def reply-to-comment
+(def ^{:stratum 0} reply-to-comment
   "Post a reply to a review comment thread.
 
    Arguments:
@@ -336,7 +327,7 @@
      ; => {:success true :data {:reply-id ... :url \"https://...\"}}"
   github/reply-to-comment)
 
-(def resolve-conversation
+(def ^{:stratum 0} resolve-conversation
   "Mark a conversation thread as resolved via GraphQL.
 
    Arguments:
@@ -350,7 +341,7 @@
      ; => {:success true :data {:thread-id \"PRRT_...\" :resolved true}}"
   github/resolve-conversation)
 
-(def link-fix-pr-to-comment
+(def ^{:stratum 0} link-fix-pr-to-comment
   "Link a fix PR to a review comment and resolve the conversation.
 
    This is the main entry point for conversation resolution after
@@ -376,13 +367,13 @@
      ; => {:success true :data {:reply-posted true :resolved true :thread-id \"PRRT_...\"}}"
   github/link-fix-pr-to-comment)
 
-(def git-head-sha
+(def ^{:stratum 0} git-head-sha
   "Return the full HEAD SHA of `worktree-path`, or nil. Convenience
    helper for callers of `post-review!` that need a `commit-id` after
    a `gh pr checkout`."
   github/git-head-sha)
 
-(def post-review!
+(def ^{:stratum 0} post-review!
   "Post a single PR review batching multiple inline comments
    (N13 §2.2 Standards Reviewer end-cap).
 
@@ -417,33 +408,31 @@
      ; => {:ok? true :data {:review-id ... :url \"https://...\" ...}}"
   github/post-review!)
 
-(def review-marker
+(def ^{:stratum 0} review-marker
   "Invisible HTML comment appended to every review body posted via
    `post-review!`. Lets `existing-review-shas` recognize prior posts
    authored by the N13 Standards Reviewer."
   github/review-marker)
 
-;------------------------------------------------------------------------------ Layer 2.5
 ;; Review scheduling (N13 §2.2 auto-trigger)
-
-(def existing-review-shas
+(def ^{:stratum 0} existing-review-shas
   "Return `(dag/ok #{sha …})` of head SHAs for which we've already
    posted a marker-bearing standards review on `pr-number`.
    Pages through `gh api .../reviews --paginate`."
   review-scheduler/existing-review-shas)
 
-(def pr-needs-review?
+(def ^{:stratum 0} pr-needs-review?
   "Pure predicate: true when `pr` (a `:pr/sha`-bearing map from
    `pr-poller/poll-open-prs`) has no entry in `existing-shas`."
   review-scheduler/pr-needs-review?)
 
-(def partition-needs-review
+(def ^{:stratum 0} partition-needs-review
   "Split a vector of `pr-poller`-shaped PR maps into
    `{:needs-review [...] :already-reviewed [...]}` against the
    `existing-shas-by-pr` map (keyed by `:pr/number`)."
   review-scheduler/partition-needs-review)
 
-(def with-pr-worktree
+(def ^{:stratum 0} with-pr-worktree
   "Bracketing helper: fetch PR head, create an ephemeral detached
    worktree at `sha` under `/tmp/mf-review-<sha>`, invoke `f` with
    `{:worktree-path string :sha string}`, then clean up. Returns
@@ -451,23 +440,21 @@
    failing DAG result on setup failure."
   review-scheduler/with-pr-worktree)
 
-(def fetch-pr-head!
+(def ^{:stratum 0} fetch-pr-head!
   "Fetch the PR head into `refs/miniforge-review/pr-<n>`. DAG result."
   review-scheduler/fetch-pr-head!)
 
-;------------------------------------------------------------------------------ Layer 2.7
 ;; Listener registry (N13 §2.7)
-
-(def listener-registry-default-storage-path
+(def ^{:stratum 0} listener-registry-default-storage-path
   "Default on-disk path for the listener registry artifact, relative
    to the worktree root."
   listener-registry/default-storage-path)
 
-(def listener-registry-default-ttl-seconds
+(def ^{:stratum 0} listener-registry-default-ttl-seconds
   "Default `:ttl-seconds` per spec §Lifecycle (7 days)."
   listener-registry/default-ttl-seconds)
 
-(def register-listener!
+(def ^{:stratum 0} register-listener!
   "Persist a new listener entry per N13 §2.7. Required `params` keys:
    `:pr/url :pr/repo-id :pr/number :agent/id :runtime :resume-channel
    :registered-by`. Returns DAG result `(dag/ok {:listener-id <uuid>
@@ -478,101 +465,97 @@
    `:workflow`) per spec §Registration moments."
   listener-registry/register!)
 
-(def unregister-listener!
+(def ^{:stratum 0} unregister-listener!
   "Transition `listener-id` (under `pr-url`) to `:cancelled`. Returns
    `(dag/err :listener-registry/listener-not-found ...)` if no such
    entry exists."
   listener-registry/unregister!)
 
-(def mark-listener-dispatched!
+(def ^{:stratum 0} mark-listener-dispatched!
   "Transition `listener-id` to `:dispatched`, recording
    `:resume/dispatched-at` and `:resume/dispatch-id`. Called by the
    Resume Signal Dispatcher (separate component) on a successful
    primer delivery."
   listener-registry/mark-dispatched!)
 
-(def cancel-listeners-on-pr-close!
+(def ^{:stratum 0} cancel-listeners-on-pr-close!
   "Transition every `:active` listener for `pr-url` to `:cancelled`.
    Called when `pull_request.closed` arrives with `merged: false`."
   listener-registry/mark-cancelled-on-pr-close!)
 
-(def sweep-expired-listeners!
+(def ^{:stratum 0} sweep-expired-listeners!
   "Transition every `:active` entry whose TTL has elapsed to
    `:expired`. Idempotent."
   listener-registry/sweep-expired!)
 
-(def read-listener-registry
+(def ^{:stratum 0} read-listener-registry
   "Load the registry from `worktree-path`'s `.miniforge/listener-registry.edn`.
    Returns `(dag/ok <registry>)` (empty registry on missing file) or
    typed error on parse failure."
   listener-registry/read-registry)
 
-(def listeners-for-pr
+(def ^{:stratum 0} listeners-for-pr
   "Pure: return all entries (any status) for `pr-url`."
   listener-registry/entries-for-pr)
 
-(def active-listeners-for-pr
+(def ^{:stratum 0} active-listeners-for-pr
   "Pure: return entries with `:status :active` for `pr-url`."
   listener-registry/active-entries-for-pr)
 
-(def listeners-for-agent
+(def ^{:stratum 0} listeners-for-agent
   "Pure: return all entries (any status) bound to `agent-id` across
    all PRs."
   listener-registry/entries-for-agent)
 
-;------------------------------------------------------------------------------ Layer 2.8
 ;; Resume Signal Dispatcher (N13 §2.7 §Dispatch)
-
-(def resume-dispatcher-supported-channel-kinds
+(def ^{:stratum 0} resume-dispatcher-supported-channel-kinds
   "Channel kinds with a real handler in v0 (`#{:webhook}`)."
   resume-dispatcher/supported-channel-kinds)
 
-(def build-resume-primer
+(def ^{:stratum 0} build-resume-primer
   "Pure: build the N13 §2.7 resume primer from a merged-PR record
    + a single listener entry. See `resume-dispatcher/build-primer`."
   resume-dispatcher/build-primer)
 
-(def channel-supported?
+(def ^{:stratum 0} channel-supported?
   "Pure predicate: true when the listener's channel kind has a real
    handler in v0."
   resume-dispatcher/channel-supported?)
 
-(def dispatch-resume-listener!
+(def ^{:stratum 0} dispatch-resume-listener!
   "Build primer + dispatch via the listener's channel + mark
    `:dispatched` on success. Returns DAG result. Channel-side
    failures decorate `:error :data` with `:listener/id` for
    correlation."
   resume-dispatcher/dispatch-listener!)
 
-(def dispatch-pr-merge!
+(def ^{:stratum 0} dispatch-pr-merge!
   "Walk every `:active` listener for `pr-url` and dispatch each.
    Returns `{:pr-url :listener-count :dispatched [...] :failed [...]}`.
    Per-listener failures don't abort — they're collected."
   resume-dispatcher/dispatch-pr-merge!)
 
-;------------------------------------------------------------------------------ Layer 2.9
 ;; Comment Response Agent — policy-eval path (N13 §2.5)
-
-(def policy-eval-author
+(def ^{:stratum 0} policy-eval-author
   "GitHub login the N13 Standards Reviewer posts under
    (`miniforge-policy-evaluator[bot]`)."
   policy-eval-responder/policy-eval-author)
 
-(def policy-eval-comment?
+(def ^{:stratum 0} policy-eval-comment?
   "True when `comment` was posted by the N13 Standards Reviewer."
   policy-eval-responder/policy-eval-comment?)
 
-(def classify-policy-eval-fix
+(def ^{:stratum 0} classify-policy-eval-fix
   "Pure: decide what to do with one policy-eval comment. Returns
    `{:action :apply | :escalate | :skip :reason ... :payload ...}`."
   policy-eval-responder/classify-fix)
 
-(def plan-policy-eval-fixes
+(def ^{:stratum 0} plan-policy-eval-fixes
   "Pure: partition a vector of comments into
    `{:to-apply [...] :to-escalate [...] :to-skip [...]}`."
   policy-eval-responder/plan-fixes)
 
-(def respond-to-policy-comments!
+(def ^{:stratum 0} respond-to-policy-comments!
   "Top-level entry: filter to policy-eval comments, plan, apply
    single-line `:violation/suggested-fix` patches in-place, commit
    + push, reply + resolve on each fixed thread.
@@ -584,10 +567,8 @@
    Returns DAG result with the full per-pass summary."
   policy-eval-responder/respond-to-policy-comments!)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Fix loop
-
-(def create-fix-context
+(def ^{:stratum 0} create-fix-context
   "Build context pack for fix generation.
 
    Arguments:
@@ -601,16 +582,16 @@
    - :previous-fixes - Previous fix attempts"
   fix/create-fix-context)
 
-(def build-fix-prompt
+(def ^{:stratum 0} build-fix-prompt
   "Build a prompt for the fix agent based on failure type."
   fix/build-fix-prompt)
 
-(def generate-fix
+(def ^{:stratum 0} generate-fix
   "Generate a fix using the inner loop.
    Returns {:success? bool :artifact patch-artifact :metrics {...}}"
   fix/generate-fix)
 
-(def run-fix-loop
+(def ^{:stratum 0} run-fix-loop
   "Run the complete fix loop for a failure.
 
    Options:
@@ -621,30 +602,28 @@
    Returns {:success? bool :commit-sha string :attempts int :metrics {...}}"
   fix/run-fix-loop)
 
-(def fix-ci-failure
+(def ^{:stratum 0} fix-ci-failure
   "Convenience function for fixing CI failures."
   fix/fix-ci-failure)
 
-(def fix-review-feedback
+(def ^{:stratum 0} fix-review-feedback
   "Convenience function for fixing review feedback."
   fix/fix-review-feedback)
 
-(def fix-merge-conflict
+(def ^{:stratum 0} fix-merge-conflict
   "Convenience function for fixing merge conflicts."
   fix/fix-merge-conflict)
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Merge
-
-(def default-merge-policy
+(def ^{:stratum 0} default-merge-policy
   "Default merge policy configuration."
   merge/default-merge-policy)
 
-(def merge-methods
+(def ^{:stratum 0} merge-methods
   "Supported merge methods: :merge :squash :rebase"
   merge/merge-methods)
 
-(def evaluate-merge-readiness
+(def ^{:stratum 0} evaluate-merge-readiness
   "Evaluate if a PR is ready to merge according to policy.
    Returns {:ready? bool :checks {...} :blocking [...]}
 
@@ -652,7 +631,7 @@
      (evaluate-merge-readiness \"/path/to/repo\" 123 default-merge-policy)"
   merge/evaluate-merge-readiness)
 
-(def merge-pr!
+(def ^{:stratum 0} merge-pr!
   "Merge a PR using gh CLI.
 
    Options:
@@ -662,27 +641,25 @@
      (merge-pr! \"/path/to/repo\" 123 :policy {:method :squash})"
   merge/merge-pr!)
 
-(def enable-auto-merge!
+(def ^{:stratum 0} enable-auto-merge!
   "Enable auto-merge for a PR."
   merge/enable-auto-merge!)
 
-(def disable-auto-merge!
+(def ^{:stratum 0} disable-auto-merge!
   "Disable auto-merge for a PR."
   merge/disable-auto-merge!)
 
-(def rebase-pr!
+(def ^{:stratum 0} rebase-pr!
   "Rebase a PR onto the latest base branch."
   merge/rebase-pr!)
 
-(def attempt-merge
+(def ^{:stratum 0} attempt-merge
   "Attempt to merge a PR, handling common failure cases.
    Returns result with merge status and events."
   merge/attempt-merge)
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Controller (full lifecycle orchestration)
-
-(def create-controller
+(def ^{:stratum 0} create-controller
   "Create a PR lifecycle controller for a task.
 
    Arguments:
@@ -705,32 +682,32 @@
                                   :generate-fn my-generator))"
   controller/create-controller)
 
-(def create-pr!
+(def ^{:stratum 0} create-pr!
   "Create a PR for the task.
    Returns result with PR info."
   controller/create-pr!)
 
-(def start-ci-monitoring!
+(def ^{:stratum 0} start-ci-monitoring!
   "Start CI monitoring for the PR."
   controller/start-ci-monitoring!)
 
-(def start-review-monitoring!
+(def ^{:stratum 0} start-review-monitoring!
   "Start review monitoring for the PR."
   controller/start-review-monitoring!)
 
-(def handle-ci-failure!
+(def ^{:stratum 0} handle-ci-failure!
   "Handle a CI failure by running the fix loop."
   controller/handle-ci-failure!)
 
-(def handle-review-feedback!
+(def ^{:stratum 0} handle-review-feedback!
   "Handle review feedback by running the fix loop."
   controller/handle-review-feedback!)
 
-(def attempt-merge!
+(def ^{:stratum 0} attempt-merge!
   "Attempt to merge the PR."
   controller/attempt-merge!)
 
-(def run-lifecycle!
+(def ^{:stratum 0} run-lifecycle!
   "Run the full PR lifecycle for a task.
 
    This is the main entry point that orchestrates:
@@ -755,10 +732,8 @@
                      :on-event #(println \"Event:\" %))"
   controller/run-lifecycle!)
 
-;------------------------------------------------------------------------------ Layer 1.5
 ;; Comment classification (category-based, complements triage)
-
-(def categorize-comment
+(def ^{:stratum 0} categorize-comment
   "Classify a comment into a category: :change-request :question :approval
    :bot-comment :noise.
 
@@ -776,7 +751,7 @@
      ; => {:category :change-request :confidence :medium :method :heuristic ...}"
   classifier/classify-comment)
 
-(def categorize-comments
+(def ^{:stratum 0} categorize-comments
   "Classify a batch of comments into categories.
 
    Returns {:change-requests [...] :questions [...] :approvals [...]
@@ -788,41 +763,37 @@
                           :self-author \"miniforge[bot]\")"
   classifier/classify-comments)
 
-;------------------------------------------------------------------------------ Layer 5.5
 ;; PR Poller (GitHub adapter)
-
-(def poll-open-prs
+(def ^{:stratum 0} poll-open-prs
   "Poll GitHub for open PRs authored by a given login.
    Returns DAG result with :prs vector of PR info maps."
   poller/poll-open-prs)
 
-(def current-github-login
+(def ^{:stratum 0} current-github-login
   "Resolve the authenticated GitHub login (default :self-author for PR
    monitoring), or nil. See `pr-poller/current-github-login`."
   poller/current-github-login)
 
-(def fetch-pr-comments
+(def ^{:stratum 0} fetch-pr-comments
   "Fetch all comments for a PR (review + issue comments).
    Returns DAG result with :comments vector."
   poller/fetch-pr-comments)
 
-(def post-pr-comment
+(def ^{:stratum 0} post-pr-comment
   "Post an issue comment on a PR.
    Returns DAG result with :comment-posted true."
   poller/post-comment)
 
-(def load-watermarks
+(def ^{:stratum 0} load-watermarks
   "Load polling watermarks from persistent storage."
   poller/load-watermarks)
 
-(def save-watermarks!
+(def ^{:stratum 0} save-watermarks!
   "Persist polling watermarks to disk."
   poller/save-watermarks!)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR Monitor Loop (autonomous comment resolution)
-
-(def create-pr-monitor
+(def ^{:stratum 0} create-pr-monitor
   "Create a PR monitor loop state.
 
    Required config keys:
@@ -846,7 +817,7 @@
                                 :generate-fn my-llm-fn}))"
   monitor/create-monitor)
 
-(def run-pr-monitor-loop
+(def ^{:stratum 0} run-pr-monitor-loop
   "Run the PR monitor loop continuously.
 
    Polls open PRs, classifies comments, routes to handlers.
@@ -859,53 +830,45 @@
    Returns evidence summary when loop completes."
   monitor/run-monitor-loop)
 
-(def stop-pr-monitor-loop
+(def ^{:stratum 0} stop-pr-monitor-loop
   "Stop a running PR monitor loop gracefully."
   monitor/stop-monitor-loop)
 
-(def pr-monitor-evidence
+(def ^{:stratum 0} pr-monitor-evidence
   "Get current evidence from the PR monitor."
   monitor/monitor-evidence)
 
-(def pr-monitor-running?
+(def ^{:stratum 0} pr-monitor-running?
   "Check if the PR monitor loop is currently running."
   monitor/monitor-running?)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR Monitor Budget
-
-(def create-pr-budget
+(def ^{:stratum 0} create-pr-budget
   "Create a budget tracker for a PR.
    Returns budget state map."
   mbudget/create-budget)
 
-(def budget-summary
+(def ^{:stratum 0} budget-summary
   "Get budget status summary for events and logging."
   mbudget/budget-summary)
 
-(def any-budget-exhausted?
+(def ^{:stratum 0} any-budget-exhausted?
   "Check if any budget dimension is exhausted.
    Returns nil if OK, or :comment-limit :pr-limit :time-limit."
   mbudget/any-budget-exhausted?)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR Monitor Events
-
-(def monitor-event-types
+(def ^{:stratum 0} monitor-event-types
   "Valid PR monitor loop event types (:pr-monitor/*)."
   mevents/monitor-event-types)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR Monitor Config
-
-(def monitor-defaults
+(def ^{:stratum 0} monitor-defaults
   "Return the shared PR monitor defaults map."
   mconfig/monitor-defaults)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR Monitor Worklist
-
-(def WorklistEntry
+(def ^{:stratum 0} WorklistEntry
   "Malli schema for the persisted work-list EDN written to disk.
 
    - :worklist/repo-key   — 12-hex-char prefix of SHA-256(remote-origin-url)
@@ -917,7 +880,7 @@
    in the component (rule 8)."
   mworklist/WorklistEntry)
 
-(def worklist-path
+(def ^{:stratum 0} worklist-path
   "Compute the absolute path for the work-list EDN file.
 
    Arguments:
@@ -927,14 +890,14 @@
    Returns: <home-dir>/pr-monitor/<rkey>.edn"
   mworklist/worklist-path)
 
-(def worklist-repo-key
+(def ^{:stratum 0} worklist-repo-key
   "Derive a stable, filesystem-safe key from `remote-url` (e.g. the
    value of `git remote get-url origin`).
 
    Returns a 12-character lowercase hex prefix of the SHA-256 digest."
   mworklist/repo-key)
 
-(def persist-worklist!
+(def ^{:stratum 0} persist-worklist!
   "Validate `entry` against WorklistEntry and write it as EDN to `path`.
    Creates parent directories as needed.
 
@@ -943,7 +906,7 @@
    - `(schema/failure :worklist <msg>)` on validation or I/O failure."
   mworklist/persist-worklist!)
 
-(def load-worklist
+(def ^{:stratum 0} load-worklist
   "Read and validate a WorklistEntry EDN from `path`.
 
    Returns:
@@ -952,7 +915,7 @@
      or content does not satisfy WorklistEntry."
   mworklist/load-worklist)
 
-(def prune-closed-prs
+(def ^{:stratum 0} prune-closed-prs
   "Remove merged or closed PR entries from `entry` by querying GitHub.
 
    For each PR in `:worklist/prs`, shells `gh pr view <number> --repo
@@ -964,6 +927,41 @@
    - An anomaly map if any `gh` invocation fails — worklist is left
      unchanged rather than silently dropping unchecked PRs."
   mworklist/prune-closed-prs)
+
+;; PR Comment Responder
+(def ^{:stratum 0} parse-pr-url
+  "Extract owner, repo, and PR number from a GitHub PR URL.
+   Returns {:owner :repo :number} or nil."
+  responder/parse-pr-url)
+
+(def ^{:stratum 0} respond-to-comments!
+  "Fetch review comments, fix them, push, reply, and resolve.
+
+   Arguments:
+   - pr-url: GitHub PR URL
+   - worktree-path: Path to local git checkout on the PR branch
+   - run-fix-fn: (fn [spec opts] result) — runs a fix workflow
+   - push-fn: (fn [] bool) — pushes changes to remote
+   - opts: Additional options passed to run-fix-fn
+
+   Returns:
+   {:pr-number :comments-found :files-processed :fixes :pushed?}
+
+   Returns an anomaly map unchanged when the PR URL is invalid or PR
+   comment fetching fails.
+
+   Example:
+     (respond-to-comments!
+       \"https://github.com/org/repo/pull/123\"
+       \"/path/to/worktree\"
+       (fn [spec opts] (run-workflow-from-spec! spec opts))
+       (fn [] (zero? (:exit (sh \"git\" \"push\"))))
+       {:quiet true})"
+  responder/respond-to-comments!)
+
+(def ^{:stratum 0} build-fix-spec
+  "Build a workflow spec from a group of review comments on a file."
+  responder/build-fix-spec)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
@@ -1046,40 +1044,3 @@
   ; => {:success? true :worklist {...}}
 
   :leave-this-here)
-
-;------------------------------------------------------------------------------ Layer 7
-;; PR Comment Responder
-
-(def parse-pr-url
-  "Extract owner, repo, and PR number from a GitHub PR URL.
-   Returns {:owner :repo :number} or nil."
-  responder/parse-pr-url)
-
-(def respond-to-comments!
-  "Fetch review comments, fix them, push, reply, and resolve.
-
-   Arguments:
-   - pr-url: GitHub PR URL
-   - worktree-path: Path to local git checkout on the PR branch
-   - run-fix-fn: (fn [spec opts] result) — runs a fix workflow
-   - push-fn: (fn [] bool) — pushes changes to remote
-   - opts: Additional options passed to run-fix-fn
-
-   Returns:
-   {:pr-number :comments-found :files-processed :fixes :pushed?}
-
-   Returns an anomaly map unchanged when the PR URL is invalid or PR
-   comment fetching fails.
-
-   Example:
-     (respond-to-comments!
-       \"https://github.com/org/repo/pull/123\"
-       \"/path/to/worktree\"
-       (fn [spec opts] (run-workflow-from-spec! spec opts))
-       (fn [] (zero? (:exit (sh \"git\" \"push\"))))
-       {:quiet true})"
-  responder/respond-to-comments!)
-
-(def build-fix-spec
-  "Build a workflow spec from a group of review comments on a file."
-  responder/build-fix-spec)

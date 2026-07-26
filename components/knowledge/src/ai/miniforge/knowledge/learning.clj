@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.learning
   "Learning capture from agent execution.
-   Layer 0: Learning capture
-   Layer 1: Learning promotion (learning -> rule)
-   Layer 2: Pattern detection"
+   Layer 0: capture-learning, promote-learning, detect-recurring-patterns,
+     list-learnings — no same-file dependents among them
+   Layer 1: capture-inner-loop-learning / capture-meta-loop-learning
+     (both call capture-learning)
+   Layer 2: synthesize-recurring-patterns! (calls detect-recurring-patterns)"
   (:require
    [ai.miniforge.knowledge.schema :as schema]
    [ai.miniforge.knowledge.zettel :as zettel]
@@ -30,9 +31,9 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Learning capture
 
-(defn capture-learning
+;; Learning capture
+(defn ^{:stratum 0} capture-learning
   "Capture a new learning from agent execution.
 
    Arguments:
@@ -104,43 +105,8 @@
 
     (store/put-zettel knowledge-store z)))
 
-(defn capture-inner-loop-learning
-  "Convenience function to capture learning from inner loop execution.
-
-   This is typically called when a repair cycle discovers something useful."
-  [knowledge-store {:keys [agent task-id title content tags related-to]}]
-  (capture-learning knowledge-store
-                    {:type :inner-loop
-                     :agent agent
-                     :task-id task-id
-                     :title title
-                     :content content
-                     :tags tags
-                     :links (when related-to
-                              [{:target related-to
-                                :type :extends
-                                :rationale (messages/t :learning/implementation-rationale)}])
-                     :confidence 0.7}))
-
-(defn capture-meta-loop-learning
-  "Convenience function to capture learning from meta loop (patterns across executions).
-
-   This is typically called when the system observes recurring patterns."
-  [knowledge-store {:keys [title content tags confidence related-tasks]}]
-  (capture-learning knowledge-store
-                    {:type :meta-loop
-                     :title title
-                     :content content
-                     :tags tags
-                     :confidence (or confidence 0.85)
-                     :context (when (seq related-tasks)
-                                (messages/t :learning/observed-across
-                                            {:tasks (str/join ", " (map str related-tasks))}))}))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Learning promotion
-
-(defn promote-learning
+(defn ^{:stratum 0} promote-learning
   "Promote a learning to a rule after validation.
 
    This upgrades the zettel type from `:learning` to `:rule` AND
@@ -211,10 +177,8 @@
         (store/delete-zettel knowledge-store learning-id)
         (store/put-zettel knowledge-store rule)))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detection
-
-(defn detect-recurring-patterns
+(defn ^{:stratum 0} detect-recurring-patterns
   "Detect recurring patterns among learnings by grouping on tags.
 
    Scans all learnings in the store and groups them by their tags.
@@ -258,7 +222,59 @@
                       vec)]
     patterns))
 
-(defn synthesize-recurring-patterns!
+(defn ^{:stratum 0} list-learnings
+  [knowledge-store & [{:keys [min-confidence agent promotable?]}]]
+  (let [all-learnings (store/query knowledge-store {:include-types [:learning]})
+        filtered (cond->> all-learnings
+                   min-confidence
+                   (filter #(>= (get-in % [:zettel/source :source/confidence] 0)
+                                min-confidence))
+
+                   agent
+                   (filter #(= agent (get-in % [:zettel/source :source/agent])))
+
+                   promotable?
+                   (filter #(>= (get-in % [:zettel/source :source/confidence] 0) 0.8)))]
+    (vec filtered)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} capture-inner-loop-learning
+  "Convenience function to capture learning from inner loop execution.
+
+   This is typically called when a repair cycle discovers something useful."
+  [knowledge-store {:keys [agent task-id title content tags related-to]}]
+  (capture-learning knowledge-store
+                    {:type :inner-loop
+                     :agent agent
+                     :task-id task-id
+                     :title title
+                     :content content
+                     :tags tags
+                     :links (when related-to
+                              [{:target related-to
+                                :type :extends
+                                :rationale (messages/t :learning/implementation-rationale)}])
+                     :confidence 0.7}))
+
+(defn ^{:stratum 1} capture-meta-loop-learning
+  "Convenience function to capture learning from meta loop (patterns across executions).
+
+   This is typically called when the system observes recurring patterns."
+  [knowledge-store {:keys [title content tags confidence related-tasks]}]
+  (capture-learning knowledge-store
+                    {:type :meta-loop
+                     :title title
+                     :content content
+                     :tags tags
+                     :confidence (or confidence 0.85)
+                     :context (when (seq related-tasks)
+                                (messages/t :learning/observed-across
+                                            {:tasks (str/join ", " (map str related-tasks))}))}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} synthesize-recurring-patterns!
   [knowledge-store]
   (let [patterns (detect-recurring-patterns knowledge-store)
         new-count (atom 0)]
@@ -283,21 +299,6 @@
               :related-tasks (mapv :id learnings)})
             (swap! new-count inc)))))
     @new-count))
-
-(defn list-learnings
-  [knowledge-store & [{:keys [min-confidence agent promotable?]}]]
-  (let [all-learnings (store/query knowledge-store {:include-types [:learning]})
-        filtered (cond->> all-learnings
-                   min-confidence
-                   (filter #(>= (get-in % [:zettel/source :source/confidence] 0)
-                                min-confidence))
-
-                   agent
-                   (filter #(= agent (get-in % [:zettel/source :source/agent])))
-
-                   promotable?
-                   (filter #(>= (get-in % [:zettel/source :source/confidence] 0) 0.8)))]
-    (vec filtered)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-github.impl-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-github.impl :as impl]
@@ -24,7 +23,9 @@
             [ai.miniforge.response.interface :as response]
             [ai.miniforge.schema.interface :as schema]))
 
-(deftest resource-schemas-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} resource-schemas-test
   (testing "resource-schemas returns all known resources"
     (let [schemas (resources/resource-schemas)]
       (is (= 6 (count schemas)))
@@ -38,7 +39,7 @@
       (is (some #(= "comments" (:schema/name %)) schemas))
       (is (some #(= "reviews" (:schema/name %)) schemas)))))
 
-(deftest build-url-test
+(deftest ^{:stratum 0} build-url-test
   (testing "builds org repos URL"
     (let [resource-def (resources/get-resource :repos)
           config       {:github/org "myorg"}
@@ -69,7 +70,7 @@
           url          (resources/build-url "https://api.github.com" resource-def config)]
       (is (= "https://api.github.com/repos/myuser/myrepo/pulls/42/reviews" url)))))
 
-(deftest build-query-params-test
+(deftest ^{:stratum 0} build-query-params-test
   (testing "includes default params and per_page"
     (let [resource-def (resources/get-resource :issues)
           params       (resources/build-query-params resource-def nil {})]
@@ -94,13 +95,13 @@
           params       (resources/build-query-params resource-def nil {})]
       (is (nil? (get params "since"))))))
 
-(deftest connect-validates-config-test
+(deftest ^{:stratum 0} connect-validates-config-test
   (testing "do-connect requires org or owner"
     (let [result (impl/do-connect {} nil)]
       (is (response/anomaly-map? result))
       (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest connect-close-lifecycle-test
+(deftest ^{:stratum 0} connect-close-lifecycle-test
   (testing "connect and close work with org"
     (let [config {:github/org "test-org"}
           result (impl/do-connect config nil)]
@@ -116,7 +117,7 @@
       (is (= :connected (:connector/status result)))
       (impl/do-close (:connection/handle result)))))
 
-(deftest discover-test
+(deftest ^{:stratum 0} discover-test
   (testing "discover returns all resource schemas"
     (let [config {:github/org "test-org"}
           handle (:connection/handle (impl/do-connect config nil))
@@ -125,7 +126,7 @@
       (is (= 6 (count (:schemas result))))
       (impl/do-close handle))))
 
-(deftest extract-follows-link-pagination-test
+(deftest ^{:stratum 0} extract-follows-link-pagination-test
   (testing "do-extract drains paginated GitHub responses before returning"
     (let [config {:github/owner "test-user" :github/repo "test-repo"}
           handle (:connection/handle (impl/do-connect config nil))
@@ -149,7 +150,7 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest extract-reviews-fans-out-across-pulls-test
+(deftest ^{:stratum 0} extract-reviews-fans-out-across-pulls-test
   (testing "review extraction enumerates pull reviews and preserves parent linkage"
     (let [handle (:connection/handle (impl/do-connect {:github/owner "test-user"
                                                        :github/repo "test-repo"} nil))
@@ -203,7 +204,7 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest extract-reviews-filters-by-cursor-test
+(deftest ^{:stratum 0} extract-reviews-filters-by-cursor-test
   (testing "review extraction filters out reviews at or before the prior cursor"
     (let [handle (:connection/handle (impl/do-connect {:github/owner "test-user"
                                                        :github/repo "test-repo"} nil))
@@ -246,17 +247,15 @@
         (finally
           (impl/do-close handle))))))
 
-(deftest checkpoint-test
+(deftest ^{:stratum 0} checkpoint-test
   (testing "checkpoint returns committed result"
     (let [cursor {:cursor/type :timestamp-watermark :cursor/value "2026-01-01T00:00:00Z"}
           result (impl/do-checkpoint cursor)]
       (is (= :committed (:checkpoint/status result)))
       (is (= cursor (:checkpoint/cursor result))))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Issue filtering tests
-
-(deftest issue-filtering-test
+(deftest ^{:stratum 0} issue-filtering-test
   (testing "issue-not-pr? returns true for plain issues"
     (is (true? (#'impl/issue-not-pr? {:number 1 :title "Bug"}))))
 
@@ -277,10 +276,8 @@
           result (#'impl/filter-issues :pulls records)]
       (is (= 2 (count result))))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Rate limit header integration tests
-
-(deftest rate-limit-header-capture-test
+(deftest ^{:stratum 0} rate-limit-header-capture-test
   (testing "update-rate-limits! stores parsed rate info in handle"
     (let [handle "test-handle"
           ;; Manually store a handle
@@ -294,10 +291,8 @@
         (is (= 1711468800 (get-in state [:rate-limit :reset-epoch]))))
       (impl/remove-handle! handle))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; ETag integration tests
-
-(deftest etag-integration-test
+(deftest ^{:stratum 0} etag-integration-test
   (testing "ETag cache starts empty for unknown URLs"
     (etag/clear-cache!)
     (is (nil? (etag/get-etag "https://api.github.com/repos/test/test/issues"))))
@@ -313,24 +308,22 @@
     (let [headers (etag/add-etag-header {} "https://example.com")]
       (is (= "W/\"test-etag\"" (get headers "If-None-Match"))))))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Migrated validation helpers — connector boundaries return anomalies.
-
-(deftest discover-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} discover-returns-anomaly-on-unknown-handle-test
   (testing "do-discover returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-discover "no-such-handle")]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} extract-returns-anomaly-on-unknown-handle-test
   (testing "do-extract returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-extract "no-such-handle" "issues" {})]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest connect-rejects-malformed-auth-test
+(deftest ^{:stratum 0} connect-rejects-malformed-auth-test
   (testing "do-connect returns an anomaly when auth credential-ref is malformed"
     (let [result (impl/do-connect {:github/owner "owner" :github/repo "repo"}
                                   {:auth/method :api-key
@@ -340,7 +333,7 @@
       (is (= :anomalies/incorrect (:anomaly/category result)))
       (is (some? (:errors result))))))
 
-(deftest connect-accepts-valid-auth-test
+(deftest ^{:stratum 0} connect-accepts-valid-auth-test
   (testing "do-connect succeeds when auth credential-ref validates"
     (let [result (impl/do-connect {:github/owner "owner" :github/repo "repo"}
                                   {:auth/method        :api-key

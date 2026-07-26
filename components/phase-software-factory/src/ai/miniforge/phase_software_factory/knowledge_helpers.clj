@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.knowledge-helpers
   "Shared utilities for knowledge injection with manifest capture across phases.
 
@@ -23,7 +22,9 @@
    splitting the result into formatted prompt text + manifest for evidence."
   (:require [ai.miniforge.knowledge.interface :as knowledge]))
 
-(defn inject-with-manifest
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} inject-with-manifest
   "Inject knowledge for an agent role and return both formatted text and manifest.
 
    Arguments:

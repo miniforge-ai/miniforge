@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.trust-test
   "Tests for transitive trust rules (N1 §2.10.2).
 
@@ -30,9 +29,9 @@
    [ai.miniforge.knowledge.trust :as trust]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Trust level ordering tests
 
-(deftest trust-level-order-test
+;; Trust level ordering tests
+(deftest ^{:stratum 0} trust-level-order-test
   (testing "Trust levels have correct ordering"
     (is (= 0 (trust/trust-level-order :tainted)))
     (is (= 1 (trust/trust-level-order :untrusted)))
@@ -41,7 +40,7 @@
   (testing "Invalid trust level returns nil"
     (is (nil? (trust/trust-level-order :invalid)))))
 
-(deftest lowest-trust-level-test
+(deftest ^{:stratum 0} lowest-trust-level-test
   (testing "Returns lowest trust level from collection"
     (is (= :tainted (trust/lowest-trust-level [:tainted :untrusted :trusted])))
     (is (= :untrusted (trust/lowest-trust-level [:untrusted :trusted])))
@@ -60,10 +59,8 @@
   (testing "All invalid levels defaults to :untrusted"
     (is (= :untrusted (trust/lowest-trust-level [:invalid :bad])))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack reference creation and validation tests
-
-(deftest make-pack-ref-test
+(deftest ^{:stratum 0} make-pack-ref-test
   (testing "Creates pack reference with required fields"
     (let [pack-ref (trust/make-pack-ref "pack-a" :trusted :authority/instruction)]
       (is (= "pack-a" (:pack-id pack-ref)))
@@ -76,7 +73,7 @@
                                        :dependencies ["pack-b" "pack-c"])]
       (is (= ["pack-b" "pack-c"] (:dependencies pack-ref))))))
 
-(deftest valid-pack-ref-test
+(deftest ^{:stratum 0} valid-pack-ref-test
   (testing "Valid pack reference passes validation"
     (let [pack-ref (trust/make-pack-ref "pack-a" :trusted :authority/instruction)]
       (is (trust/valid-pack-ref? pack-ref))))
@@ -86,10 +83,8 @@
     (is (not (trust/valid-pack-ref? {:pack-id "a"})))
     (is (not (trust/valid-pack-ref? {:pack-id "a" :trust-level :invalid})))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Rule 1: Instruction authority is not transitive
-
-(deftest instruction-authority-not-transitive-test
+(deftest ^{:stratum 0} instruction-authority-not-transitive-test
   (testing "Trusted pack can reference untrusted data pack"
     (let [trusted-pack (trust/make-pack-ref "pack-a" :trusted :authority/instruction)
           untrusted-pack (trust/make-pack-ref "pack-b" :untrusted :authority/data)
@@ -121,10 +116,8 @@
                   data-pack-a data-pack-b)]
       (is (:valid? result)))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Rule 2: Trust level inheritance
-
-(deftest trust-level-inheritance-test
+(deftest ^{:stratum 0} trust-level-inheritance-test
   (testing "Combines trusted packs as trusted"
     (let [pack-a (trust/make-pack-ref "pack-a" :trusted :authority/instruction)
           pack-b (trust/make-pack-ref "pack-b" :trusted :authority/data)
@@ -150,10 +143,8 @@
           result (trust/compute-inherited-trust-level [pack-a pack-b])]
       (is (= :untrusted result)))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Rule 3: Cross-trust references
-
-(deftest cross-trust-references-valid-test
+(deftest ^{:stratum 0} cross-trust-references-valid-test
   (testing "Linear dependency chain is valid"
     (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/instruction
                                                :dependencies ["pack-b"])
@@ -180,7 +171,7 @@
           result (trust/validate-cross-trust-references graph)]
       (is (:valid? result)))))
 
-(deftest cross-trust-references-circular-test
+(deftest ^{:stratum 0} cross-trust-references-circular-test
   (testing "INVALID: Direct circular dependency"
     (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/data
                                                :dependencies ["pack-b"])
@@ -202,7 +193,7 @@
       (is (not (:valid? result)))
       (is (re-find #"circular" (clojure.string/lower-case (:error result)))))))
 
-(deftest cross-trust-references-missing-dep-test
+(deftest ^{:stratum 0} cross-trust-references-missing-dep-test
   (testing "INVALID: Missing dependency"
     (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/instruction
                                                :dependencies ["pack-missing"])}
@@ -210,10 +201,8 @@
       (is (not (:valid? result)))
       (is (re-find #"missing" (clojure.string/lower-case (:error result)))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Rule 4: Tainted isolation
-
-(deftest tainted-isolation-test
+(deftest ^{:stratum 0} tainted-isolation-test
   (testing "Data pack with tainted dependency is OK"
     (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/data
                                                :dependencies ["pack-b"])
@@ -251,10 +240,8 @@
           result (trust/validate-tainted-isolation "pack-a" graph)]
       (is (:valid? result)))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Combined validation
-
-(deftest validate-transitive-trust-complete-test
+(deftest ^{:stratum 0} validate-transitive-trust-complete-test
   (testing "Valid pack graph passes all rules"
     (let [graph {"pack-a" (trust/make-pack-ref "pack-a" :trusted :authority/instruction
                                                :dependencies ["pack-b"])

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.github-test
   "Tests for the github.clj batched-review posting (N13 §2.2)."
   (:require [babashka.process :as process]
@@ -25,9 +24,10 @@
             [ai.miniforge.dag-executor.interface :as dag]
             [ai.miniforge.pr-lifecycle.github :as github]))
 
-;; ── helpers ──────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- capture-shell
+;; ── helpers ──────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} capture-shell
   "Replace `process/shell` with a stub that records every invocation
    (args + stdin) into `calls-atom` and returns `result`. Returns a
    no-arg fn suitable for `with-redefs`."
@@ -36,14 +36,14 @@
     (swap! calls-atom conj {:opts opts :args (vec args)})
     result))
 
-(def ^:private fake-review-success
+(def ^{:stratum 0} ^:private fake-review-success
   (json/generate-string
    {:id 999001 :html_url "https://github.com/o/r/pull/42#pullrequestreview-999001"
     :state "COMMENTED"}))
 
-(def ^:private fixture-sha "deadbeefcafef00ddeadbeefcafef00ddeadbeef")
+(def ^{:stratum 0} ^:private fixture-sha "deadbeefcafef00ddeadbeefcafef00ddeadbeef")
 
-(def ^:private comment-renderer-shape
+(def ^{:stratum 0} ^:private comment-renderer-shape
   [{:comment/author "miniforge-policy-evaluator[bot]"
     :comment/path   "components/agent/src/foo.clj"
     :comment/line   42
@@ -53,12 +53,13 @@
     :comment/line   7
     :comment/body   "**Rule Y**"}])
 
-(def ^:private flat-shape
+(def ^{:stratum 0} ^:private flat-shape
   [{:path "src/baz.clj" :line 1 :body "flat-shape body"}])
 
-;; ── tests ────────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest post-review-uses-create-review-endpoint-via-stdin
+;; ── tests ────────────────────────────────────────────────────────────
+(deftest ^{:stratum 1} post-review-uses-create-review-endpoint-via-stdin
   (testing "post-review! shells out to the right gh api endpoint with --input -"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -77,7 +78,7 @@
           (is (= true (get-in call [:opts :continue]))
               "exit codes returned, not thrown"))))))
 
-(deftest post-review-translates-renderer-shape-to-github-comments
+(deftest ^{:stratum 1} post-review-translates-renderer-shape-to-github-comments
   (testing "stdin JSON has comments[] with path/line/side/body keys per render record + commit_id"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -99,7 +100,7 @@
                 :body (-> comment-renderer-shape first :comment/body)}
                (first (:comments payload))))))))
 
-(deftest post-review-marker-is-idempotent
+(deftest ^{:stratum 1} post-review-marker-is-idempotent
   (testing "supplied body that already contains the marker isn't double-tagged"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -113,7 +114,7 @@
             n (count (re-seq (re-pattern (java.util.regex.Pattern/quote github/review-marker)) body))]
         (is (= 1 n) "marker appears exactly once even when caller pre-marked")))))
 
-(deftest post-review-rejects-missing-commit-id
+(deftest ^{:stratum 1} post-review-rejects-missing-commit-id
   (testing "missing/blank commit-id short-circuits with :missing-commit-id, never shells out"
     (let [calls (atom [])
           stub  (capture-shell calls {:exit 0 :out "" :err ""})]
@@ -126,7 +127,7 @@
       (is (zero? (count @calls))
           "no shell invocation when commit-id missing — fail fast"))))
 
-(deftest post-review-accepts-flat-shape-too
+(deftest ^{:stratum 1} post-review-accepts-flat-shape-too
   (testing "{:path :line :body} also flows through unchanged"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -139,7 +140,7 @@
         (is (= {:path "src/baz.clj" :line 1 :side "RIGHT" :body "flat-shape body"}
                (first (:comments payload))))))))
 
-(deftest post-review-success-shape
+(deftest ^{:stratum 1} post-review-success-shape
   (testing "successful gh response is parsed into {:review-id :url :state :comment-count}"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -152,7 +153,7 @@
           (is (= 2 (-> r :data :comment-count)))
           (is (re-find #"#pullrequestreview-999001" (-> r :data :url))))))))
 
-(deftest post-review-gh-failure-returns-typed-error
+(deftest ^{:stratum 1} post-review-gh-failure-returns-typed-error
   (testing "non-zero gh exit yields :gh-command-failed with stderr + exit code"
     (let [calls (atom [])
           stub  (capture-shell calls
@@ -164,7 +165,7 @@
           (is (re-find #"422" (get-in r [:error :message])))
           (is (= 1 (get-in r [:error :data :exit-code]))))))))
 
-(deftest post-review-shell-exception-returns-typed-error
+(deftest ^{:stratum 1} post-review-shell-exception-returns-typed-error
   (testing "process/shell throwing yields :gh-exception"
     (let [stub (fn [& _] (throw (ex-info "boom" {})))]
       (with-redefs [process/shell stub]

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence-test
   "Tests for workflow detail loading and EDN resilience.
 
@@ -29,26 +28,27 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update :as update]))
 
-;; -------------------------------------------------------------------------- Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn temp-dir []
+;; -------------------------------------------------------------------------- Helpers
+(defn ^{:stratum 0} temp-dir []
   (doto (io/file (System/getProperty "java.io.tmpdir")
                  (str "miniforge-persistence-test-" (System/nanoTime)))
     .mkdirs))
 
-(defn cleanup! [dir]
+(defn ^{:stratum 0} cleanup! [dir]
   (doseq [f (when (.isDirectory dir) (.listFiles dir))]
     (.delete f))
   (.delete dir))
 
-(defn write-event-lines!
+(defn ^{:stratum 0} write-event-lines!
   "Write raw EDN strings (one per line) into an event file."
   [dir workflow-id lines]
   (let [file (io/file dir (str workflow-id ".edn"))]
     (spit file (clojure.string/join "\n" lines))
     file))
 
-(defn write-events!
+(defn ^{:stratum 0} write-events!
   "Write event maps (via pr-str) into an event file."
   [dir workflow-id events]
   (let [file (io/file dir (str workflow-id ".edn"))]
@@ -59,26 +59,45 @@
     file))
 
 ;; -------------------------------------------------------------------------- Sample data
+(def ^{:stratum 0} sample-wf-id (java.util.UUID/fromString "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
 
-(def sample-wf-id (java.util.UUID/fromString "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
+(def ^{:stratum 0} sample-spec {:name "Decompose Large Test Files" :version "2.0.0"})
 
-(def sample-spec {:name "Decompose Large Test Files" :version "2.0.0"})
+;; Raw EDN line with #object tag — reproduces real miniforge event-stream output
+(def ^{:stratum 0} failed-event-with-object-tags
+  (str "{:event/type :workflow/failed, "
+       ":workflow/id #uuid \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\", "
+       ":workflow/failure-reason \"NullPointerException in verify phase\", "
+       ":workflow/error-details {:message \"NPE\", "
+       ":anomaly {:anomaly/timestamp #object[java.time.Instant 0x25d0a742 \"2026-03-08T18:14:28.466693Z\"]}}}"))
 
-(def sample-started-event
+;; -------------------------------------------------------------------------- Tests
+(deftest ^{:stratum 0} safe-read-edn-handles-standard-tags
+  (testing "parses #uuid and #inst correctly"
+    (let [result (persistence/safe-read-edn
+                  (pr-str {:event/type :workflow/started
+                           :workflow/id #uuid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+                           :event/timestamp #inst "2026-03-08T18:15:46.570-00:00"}))]
+      (is (= :workflow/started (:event/type result)))
+      (is (uuid? (:workflow/id result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} sample-started-event
   {:event/type :workflow/started
    :event/id (random-uuid)
    :event/timestamp #inst "2026-03-08T18:15:46.570-00:00"
    :workflow/id sample-wf-id
    :workflow/spec sample-spec})
 
-(def sample-phase-started-event
+(def ^{:stratum 1} sample-phase-started-event
   {:event/type :workflow/phase-started
    :event/id (random-uuid)
    :event/timestamp #inst "2026-03-08T18:16:00.000-00:00"
    :workflow/id sample-wf-id
    :workflow/phase :analyze})
 
-(def sample-agent-status-event
+(def ^{:stratum 1} sample-agent-status-event
   {:event/type :agent/status
    :event/id (random-uuid)
    :workflow/id sample-wf-id
@@ -86,7 +105,7 @@
    :status/type :running
    :message "Analyzing test file structure"})
 
-(def sample-phase-completed-event
+(def ^{:stratum 1} sample-phase-completed-event
   {:event/type :workflow/phase-completed
    :event/id (random-uuid)
    :event/timestamp #inst "2026-03-08T18:20:00.000-00:00"
@@ -98,7 +117,7 @@
    :phase/tokens 5000
    :phase/cost-usd 0.05})
 
-(def sample-completed-event
+(def ^{:stratum 1} sample-completed-event
   {:event/type :workflow/completed
    :event/id (random-uuid)
    :event/timestamp #inst "2026-03-08T18:30:00.000-00:00"
@@ -106,34 +125,15 @@
    :workflow/status :success
    :workflow/duration-ms 900000})
 
-;; Raw EDN line with #object tag — reproduces real miniforge event-stream output
-(def failed-event-with-object-tags
-  (str "{:event/type :workflow/failed, "
-       ":workflow/id #uuid \"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee\", "
-       ":workflow/failure-reason \"NullPointerException in verify phase\", "
-       ":workflow/error-details {:message \"NPE\", "
-       ":anomaly {:anomaly/timestamp #object[java.time.Instant 0x25d0a742 \"2026-03-08T18:14:28.466693Z\"]}}}"))
-
 ;; A failed event using java.util.Date (the fix) — serializes cleanly as #inst
-(def clean-failed-event
+(def ^{:stratum 1} clean-failed-event
   {:event/type :workflow/failed
    :workflow/id sample-wf-id
    :workflow/failure-reason "NullPointerException in verify phase"
    :workflow/error-details {:message "NPE"
                             :anomaly {:anomaly/timestamp (java.util.Date.)}}})
 
-;; -------------------------------------------------------------------------- Tests
-
-(deftest safe-read-edn-handles-standard-tags
-  (testing "parses #uuid and #inst correctly"
-    (let [result (persistence/safe-read-edn
-                  (pr-str {:event/type :workflow/started
-                           :workflow/id #uuid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-                           :event/timestamp #inst "2026-03-08T18:15:46.570-00:00"}))]
-      (is (= :workflow/started (:event/type result)))
-      (is (uuid? (:workflow/id result))))))
-
-(deftest safe-read-edn-handles-object-tags
+(deftest ^{:stratum 1} safe-read-edn-handles-object-tags
   (testing "#object tags are parsed via tolerant reader instead of failing"
     (let [result (persistence/safe-read-edn failed-event-with-object-tags)]
       (is (some? result) "#object should parse now")
@@ -142,7 +142,9 @@
       (is (= "NullPointerException in verify phase"
              (:workflow/failure-reason result))))))
 
-(deftest read-events-parses-object-tags
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} read-events-parses-object-tags
   (testing "both standard and #object-containing lines are parsed"
     (let [dir (temp-dir)]
       (try
@@ -156,7 +158,7 @@
           (is (= :workflow/failed (:event/type (second events)))))
         (finally (cleanup! dir))))))
 
-(deftest detail-from-full-lifecycle
+(deftest ^{:stratum 2} detail-from-full-lifecycle
   (testing "detail-from-events builds phases, agents, artifacts from events"
     (let [events [sample-started-event
                   sample-phase-started-event
@@ -174,7 +176,7 @@
       (is (pos? (:tokens detail)))
       (is (some? (get-in detail [:evidence :intent :description]))))))
 
-(deftest detail-from-started-only
+(deftest ^{:stratum 2} detail-from-started-only
   (testing "started-only workflow has intent but empty phases"
     (let [detail (persistence/detail-from-events sample-wf-id [sample-started-event])]
       (is (= sample-wf-id (:workflow-id detail)))
@@ -182,7 +184,7 @@
       (is (= "Decompose Large Test Files"
              (get-in detail [:evidence :intent :description]))))))
 
-(deftest detail-from-failed-with-object-tags
+(deftest ^{:stratum 2} detail-from-failed-with-object-tags
   (testing "#object tags in failed event are now parsed — error is preserved"
     (let [dir (temp-dir)]
       (try
@@ -195,7 +197,7 @@
           (is (empty? (:phases detail)) "still no phase data"))
         (finally (cleanup! dir))))))
 
-(deftest load-workflow-detail-full-lifecycle
+(deftest ^{:stratum 2} load-workflow-detail-full-lifecycle
   (testing "load-workflow-detail from disk returns populated detail"
     (let [dir (temp-dir)]
       (try
@@ -213,7 +215,7 @@
           (is (= 900000 (:duration-ms detail))))
         (finally (cleanup! dir))))))
 
-(deftest load-workflows-populates-detail-snapshot
+(deftest ^{:stratum 2} load-workflows-populates-detail-snapshot
   (testing "load-workflows includes :detail-snapshot on each workflow"
     (let [dir (temp-dir)]
       (try
@@ -230,7 +232,7 @@
               "snapshot should have phases"))
         (finally (cleanup! dir))))))
 
-(deftest indexed-loader-preserves-enough-for-detail
+(deftest ^{:stratum 2} indexed-loader-preserves-enough-for-detail
   (testing "load-workflows-indexed retains data for detail navigation"
     (let [dir (temp-dir)]
       (try
@@ -253,7 +255,7 @@
             (is (= 1 (count (:phases detail))))))
         (finally (cleanup! dir))))))
 
-(deftest workflow-detail-loaded-merges-into-model
+(deftest ^{:stratum 2} workflow-detail-loaded-merges-into-model
   (testing ":msg/workflow-detail-loaded updates active detail in model"
     (let [;; Build a model with a workflow, then simulate being in detail view
           base-model (-> (model/init-model)
@@ -285,7 +287,7 @@
           "detail should have merged phases from loaded data")
       (is (= :analyze (:phase (first (get-in updated [:detail :phases]))))))))
 
-(deftest derive-status-with-unparseable-terminal
+(deftest ^{:stratum 2} derive-status-with-unparseable-terminal
   (testing "workflow with only started event derives :running status"
     (let [events [sample-started-event]]
       (is (= :running (persistence/derive-status events)))))
@@ -294,7 +296,7 @@
     (let [events [sample-started-event sample-completed-event]]
       (is (= :success (persistence/derive-status events))))))
 
-(deftest event-file-to-workflow-roundtrip
+(deftest ^{:stratum 2} event-file-to-workflow-roundtrip
   (testing "event-file->workflow builds a complete workflow summary"
     (let [dir (temp-dir)]
       (try
@@ -313,7 +315,7 @@
           (is (some? (:detail-snapshot wf))))
         (finally (cleanup! dir))))))
 
-(deftest clean-failed-event-roundtrips-through-edn
+(deftest ^{:stratum 2} clean-failed-event-roundtrips-through-edn
   (testing "failed events with java.util.Date timestamps serialize as clean EDN"
     (let [serialized (pr-str clean-failed-event)
           parsed (persistence/safe-read-edn serialized)]

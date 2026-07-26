@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.github
   "GitHub API operations for PR conversation management.
 
@@ -29,9 +28,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; GitHub CLI helpers
 
-(defn run-gh-command
+;; GitHub CLI helpers
+(defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result.
 
    Arguments:
@@ -56,7 +55,71 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn graphql-query
+;; Batched review posting (N13 §2.2 Standards Reviewer)
+(def ^{:stratum 0} review-marker
+  "Invisible HTML comment appended to every review body posted via
+   `post-review!`. Lets `review-scheduler/existing-review-shas`
+   recognize prior posts authored by the N13 Standards Reviewer
+   (GitHub doesn't surface a stable bot identity for reviews posted
+   under a personal access token, so we tag the body instead).
+   Renders as nothing in PR Markdown."
+  "<!-- miniforge:policy-eval -->")
+
+(defn- ^{:stratum 0} run-gh-with-stdin
+  "Run a `gh` command piping `stdin-body` over stdin. Returns the
+   same DAG-shaped result as `run-gh-command`. Used for `gh api ...
+   --input -` invocations where the JSON body is too large or too
+   nested to fit `-f`/`-F` field-pair encoding."
+  [args worktree-path stdin-body]
+  (try
+    (let [result (apply process/shell
+                        {:dir (str worktree-path)
+                         :in stdin-body
+                         :out :string
+                         :err :string
+                         :continue true}
+                        args)]
+      (if (zero? (:exit result))
+        (dag/ok {:output (str/trim (:out result ""))})
+        (dag/err :gh-command-failed
+                 (str/trim (:err result ""))
+                 {:exit-code (:exit result)
+                  :command args})))
+    (catch Exception e
+      (dag/err :gh-exception (.getMessage e)))))
+
+(defn- ^{:stratum 0} review-comment->github-comment
+  "Translate one comment record from `compliance-scanner.comments`
+   (`{:comment/path :comment/line :comment/body ...}`) to the inline-
+   comment shape GitHub's create-review API expects."
+  [c]
+  (let [path (or (:comment/path c) (:path c))
+        line (or (:comment/line c) (:line c))
+        body (or (:comment/body c) (:body c))]
+    {:path path
+     :line line
+     :side "RIGHT"
+     :body body}))
+
+(defn ^{:stratum 0} git-head-sha
+  "Return the full HEAD SHA of `worktree-path`, or nil if `git
+   rev-parse` fails. Used to populate `commit_id` for the create-review
+   API, which 422s on inline `comments[]` payloads without it."
+  [worktree-path]
+  (try
+    (let [r (process/shell {:dir (str worktree-path)
+                            :out :string
+                            :err :string
+                            :continue true}
+                           "git" "rev-parse" "HEAD")]
+      (when (zero? (:exit r))
+        (let [sha (str/trim (:out r ""))]
+          (when (seq sha) sha))))
+    (catch Throwable _ nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} graphql-query
   "Execute a GraphQL query via gh CLI.
 
    Arguments:
@@ -86,7 +149,44 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
-(defn graphql-mutation
+(defn ^{:stratum 1} reply-to-comment
+  "Post a reply to a review comment thread.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: Pull request number
+   - comment-id: Comment ID to reply to
+   - message: Reply message text
+
+   Returns DAG result with reply info or error"
+  [worktree-path pr-number comment-id message]
+  (let [;; Use gh API to post reply to PR review comment
+        args ["gh" "api"
+              (str "repos/{owner}/{repo}/pulls/" pr-number "/comments/" comment-id "/replies")
+              "-X" "POST"
+              "-f" (str "body=" message)]
+        result (run-gh-command args worktree-path)]
+    (if (dag/ok? result)
+      (try
+        (let [parsed (json/parse-string (:output (:data result)) true)]
+          (dag/ok {:reply-id (:id parsed)
+                   :url (:html_url parsed)
+                   :body (:body parsed)}))
+        (catch Exception e
+          (dag/err :json-parse-error (.getMessage e))))
+      result)))
+
+(defn- ^{:stratum 1} ensure-marker
+  "Append `review-marker` to `body` if not already present.
+   Idempotent. Used unconditionally by `post-review!`."
+  [body]
+  (if (and (string? body) (str/includes? body review-marker))
+    body
+    (str (or body "") "\n\n" review-marker)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} graphql-mutation
   "Execute a GraphQL mutation via gh CLI.
 
    Arguments:
@@ -100,10 +200,8 @@
   [mutation worktree-path & {:keys [variables]}]
   (graphql-query mutation worktree-path :variables variables))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; GitHub API operations
-
-(defn get-thread-id
+(defn ^{:stratum 2} get-thread-id
   "Get GraphQL thread ID from a comment ID.
 
    GitHub review comments have both a REST API comment ID and a
@@ -165,135 +263,7 @@
                             :pr-number pr-number})))
               result)))))))
 
-(defn reply-to-comment
-  "Post a reply to a review comment thread.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: Pull request number
-   - comment-id: Comment ID to reply to
-   - message: Reply message text
-
-   Returns DAG result with reply info or error"
-  [worktree-path pr-number comment-id message]
-  (let [;; Use gh API to post reply to PR review comment
-        args ["gh" "api"
-              (str "repos/{owner}/{repo}/pulls/" pr-number "/comments/" comment-id "/replies")
-              "-X" "POST"
-              "-f" (str "body=" message)]
-        result (run-gh-command args worktree-path)]
-    (if (dag/ok? result)
-      (try
-        (let [parsed (json/parse-string (:output (:data result)) true)]
-          (dag/ok {:reply-id (:id parsed)
-                   :url (:html_url parsed)
-                   :body (:body parsed)}))
-        (catch Exception e
-          (dag/err :json-parse-error (.getMessage e))))
-      result)))
-
-(defn resolve-conversation
-  "Mark a conversation thread as resolved via GraphQL.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - thread-id: GraphQL thread ID (starts with 'PRRT_' or 'RT_')
-
-   Returns DAG result with resolution status or error"
-  [worktree-path thread-id]
-  (let [mutation (str "mutation {
-  resolveReviewThread(input: {threadId: \"" thread-id "\"}) {
-    thread {
-      id
-      isResolved
-    }
-  }
-}")
-        result (graphql-mutation mutation worktree-path)]
-    (if (dag/ok? result)
-      (let [thread (get-in (:data result) [:data :resolveReviewThread :thread])
-            is-resolved (:isResolved thread)]
-        (if is-resolved
-          (dag/ok {:thread-id (:id thread)
-                   :resolved true})
-          (dag/err :resolution-failed
-                   "Thread resolution returned false"
-                   {:thread-id thread-id :thread thread})))
-      result)))
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; Batched review posting (N13 §2.2 Standards Reviewer)
-
-(def review-marker
-  "Invisible HTML comment appended to every review body posted via
-   `post-review!`. Lets `review-scheduler/existing-review-shas`
-   recognize prior posts authored by the N13 Standards Reviewer
-   (GitHub doesn't surface a stable bot identity for reviews posted
-   under a personal access token, so we tag the body instead).
-   Renders as nothing in PR Markdown."
-  "<!-- miniforge:policy-eval -->")
-
-(defn- ensure-marker
-  "Append `review-marker` to `body` if not already present.
-   Idempotent. Used unconditionally by `post-review!`."
-  [body]
-  (if (and (string? body) (str/includes? body review-marker))
-    body
-    (str (or body "") "\n\n" review-marker)))
-
-(defn- run-gh-with-stdin
-  "Run a `gh` command piping `stdin-body` over stdin. Returns the
-   same DAG-shaped result as `run-gh-command`. Used for `gh api ...
-   --input -` invocations where the JSON body is too large or too
-   nested to fit `-f`/`-F` field-pair encoding."
-  [args worktree-path stdin-body]
-  (try
-    (let [result (apply process/shell
-                        {:dir (str worktree-path)
-                         :in stdin-body
-                         :out :string
-                         :err :string
-                         :continue true}
-                        args)]
-      (if (zero? (:exit result))
-        (dag/ok {:output (str/trim (:out result ""))})
-        (dag/err :gh-command-failed
-                 (str/trim (:err result ""))
-                 {:exit-code (:exit result)
-                  :command args})))
-    (catch Exception e
-      (dag/err :gh-exception (.getMessage e)))))
-
-(defn- review-comment->github-comment
-  "Translate one comment record from `compliance-scanner.comments`
-   (`{:comment/path :comment/line :comment/body ...}`) to the inline-
-   comment shape GitHub's create-review API expects."
-  [c]
-  (let [path (or (:comment/path c) (:path c))
-        line (or (:comment/line c) (:line c))
-        body (or (:comment/body c) (:body c))]
-    {:path path
-     :line line
-     :side "RIGHT"
-     :body body}))
-
-(defn git-head-sha
-  "Return the full HEAD SHA of `worktree-path`, or nil if `git
-   rev-parse` fails. Used to populate `commit_id` for the create-review
-   API, which 422s on inline `comments[]` payloads without it."
-  [worktree-path]
-  (try
-    (let [r (process/shell {:dir (str worktree-path)
-                            :out :string
-                            :err :string
-                            :continue true}
-                           "git" "rev-parse" "HEAD")]
-      (when (zero? (:exit r))
-        (let [sha (str/trim (:out r ""))]
-          (when (seq sha) sha))))
-    (catch Throwable _ nil)))
-
-(defn post-review!
+(defn ^{:stratum 2} post-review!
   "Post a single PR review batching multiple inline comments.
 
    Uses the create-a-review REST endpoint
@@ -347,10 +317,41 @@
             (dag/err :json-parse-error (.getMessage e))))
         result))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; High-level conversation operations
+;------------------------------------------------------------------------------ Layer 3
 
-(defn link-fix-pr-to-comment
+(defn ^{:stratum 3} resolve-conversation
+  "Mark a conversation thread as resolved via GraphQL.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - thread-id: GraphQL thread ID (starts with 'PRRT_' or 'RT_')
+
+   Returns DAG result with resolution status or error"
+  [worktree-path thread-id]
+  (let [mutation (str "mutation {
+  resolveReviewThread(input: {threadId: \"" thread-id "\"}) {
+    thread {
+      id
+      isResolved
+    }
+  }
+}")
+        result (graphql-mutation mutation worktree-path)]
+    (if (dag/ok? result)
+      (let [thread (get-in (:data result) [:data :resolveReviewThread :thread])
+            is-resolved (:isResolved thread)]
+        (if is-resolved
+          (dag/ok {:thread-id (:id thread)
+                   :resolved true})
+          (dag/err :resolution-failed
+                   "Thread resolution returned false"
+                   {:thread-id thread-id :thread thread})))
+      result)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; High-level conversation operations
+(defn ^{:stratum 4} link-fix-pr-to-comment
   "Link a fix PR to a review comment and resolve the conversation.
 
    This is the main entry point for conversation resolution after

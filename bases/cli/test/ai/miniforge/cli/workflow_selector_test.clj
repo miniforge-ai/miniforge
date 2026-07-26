@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-selector-test
   "Tests for intelligent workflow selection."
   (:require
@@ -23,9 +22,10 @@
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.workflow-selector :as ws]))
 
-;------------------------------------------------------------------------------ Test Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def multi-phase-refactor-spec
+;------------------------------------------------------------------------------ Test Data
+(def ^{:stratum 0} multi-phase-refactor-spec
   "Emojui-style spec with 6 PRs and stratified design"
   {:spec/title "Memento Views Refactor"
    :spec/description "Multi-phase refactor of 5 memory view pages to follow stratified design"
@@ -40,52 +40,78 @@
      :pr-7-heatmap-view {:branch "feature/memento-heatmap-view"}}}
    :spec/constraints ["Follow stratified design" "≤400 lines per file (Rule 720)"]})
 
-(def bugfix-spec
+(def ^{:stratum 0} bugfix-spec
   "Simple bug fix spec"
   {:spec/title "Fix authentication timeout"
    :spec/description "Fix bug where auth token expires too quickly"
    :spec/intent {:type :bugfix}})
 
-(def docs-spec
+(def ^{:stratum 0} docs-spec
   "Documentation-only spec"
   {:spec/title "Update API documentation"
    :spec/description "Update API docs only"
    :spec/intent {:type :docs}})
 
-(def large-feature-spec
+(def ^{:stratum 0} large-feature-spec
   "Large feature without explicit phases"
   {:spec/title "Add new payment system"
    :spec/description "Large comprehensive payment processing system with Stripe integration"
    :spec/raw-data {:type :feature}})
 
-(def small-feature-spec
+(def ^{:stratum 0} small-feature-spec
   "Small feature spec"
   {:spec/title "Add tooltip"
    :spec/description "Add simple tooltip to button"
    :spec/raw-data {:type :feature}})
 
-(def explicit-workflow-spec
+(def ^{:stratum 0} explicit-workflow-spec
   "Spec with explicit workflow-type"
   {:spec/title "Custom workflow"
    :spec/workflow-type :simple-test-v1
    :spec/description "Test with explicit workflow"})
 
-(def refactor-with-rule-210-spec
+(def ^{:stratum 0} refactor-with-rule-210-spec
   "Refactoring spec mentioning Rule 210"
   {:spec/title "Stratified refactor"
    :spec/description "Refactor to use layered architecture"
    :spec/raw-data {:type :refactoring}
    :spec/constraints ["≤3 layers (Rule 210)" "Stratified design"]})
 
-(def unknown-spec
+(def ^{:stratum 0} unknown-spec
   "Spec with minimal information"
   {:spec/title "Do something"
    :spec/description "Something needs to be done"})
 
-;------------------------------------------------------------------------------ Layer 0 Tests
-;; Spec analysis
+(deftest ^{:stratum 0} explain-selection-test
+  (testing "explain-selection generates user-facing explanation"
+    (let [reason (messages/t :selector/reason-multi-phase {:pr-count 6})
+          selection {:workflow-type :canonical-sdlc
+                     :confidence :high
+                     :reason reason}
+          explanation (ws/explain-selection selection)]
+      (is (string? explanation))
+      (is (.contains explanation "canonical-sdlc"))
+      (is (.contains explanation reason))
+      (is (.contains explanation (messages/t :selector/override-hint)))))
 
-(deftest analyze-spec-test
+  (testing "explain-selection shows confidence markers"
+    (let [high-conf (ws/explain-selection {:workflow-type :canonical-sdlc
+                                           :confidence :high
+                                           :reason "Test"})
+          medium-conf (ws/explain-selection {:workflow-type :quick-fix
+                                             :confidence :medium
+                                             :reason "Test"})
+          low-conf (ws/explain-selection {:workflow-type :quick-fix
+                                          :confidence :low
+                                          :reason "Test"})]
+      (is (not (.contains high-conf "confidence")))
+      (is (.contains medium-conf (messages/t :selector/confidence-medium)))
+      (is (.contains low-conf (messages/t :selector/confidence-low))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Spec analysis
+(deftest ^{:stratum 1} analyze-spec-test
   (testing "analyze-spec extracts features from multi-phase refactor"
     (let [features (ws/analyze-spec multi-phase-refactor-spec)]
       (is (= :refactoring (:type features)))
@@ -120,8 +146,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1 Tests
 ;; Rule matching
-
-(deftest match-rule-test
+(deftest ^{:stratum 1} match-rule-test
   (testing "Multi-phase implementation rule matches"
     (let [features (ws/analyze-spec multi-phase-refactor-spec)
           result (ws/match-rule features)]
@@ -165,10 +190,8 @@
       (is (= :default (:selection-profile result)))
       (is (= :low (:confidence result))))))
 
-;------------------------------------------------------------------------------ Layer 2 Tests
 ;; Workflow selection with reasoning
-
-(deftest select-workflow-test
+(deftest ^{:stratum 1} select-workflow-test
   (testing "select-workflow returns complete result for multi-phase refactor"
     (let [result (ws/select-workflow multi-phase-refactor-spec)]
       (is (= :canonical-sdlc (:workflow-type result)))
@@ -202,36 +225,9 @@
       (is (= :default (:selection-profile result)))
       (is (= :low (:confidence result))))))
 
-(deftest explain-selection-test
-  (testing "explain-selection generates user-facing explanation"
-    (let [reason (messages/t :selector/reason-multi-phase {:pr-count 6})
-          selection {:workflow-type :canonical-sdlc
-                     :confidence :high
-                     :reason reason}
-          explanation (ws/explain-selection selection)]
-      (is (string? explanation))
-      (is (.contains explanation "canonical-sdlc"))
-      (is (.contains explanation reason))
-      (is (.contains explanation (messages/t :selector/override-hint)))))
-
-  (testing "explain-selection shows confidence markers"
-    (let [high-conf (ws/explain-selection {:workflow-type :canonical-sdlc
-                                           :confidence :high
-                                           :reason "Test"})
-          medium-conf (ws/explain-selection {:workflow-type :quick-fix
-                                             :confidence :medium
-                                             :reason "Test"})
-          low-conf (ws/explain-selection {:workflow-type :quick-fix
-                                          :confidence :low
-                                          :reason "Test"})]
-      (is (not (.contains high-conf "confidence")))
-      (is (.contains medium-conf (messages/t :selector/confidence-medium)))
-      (is (.contains low-conf (messages/t :selector/confidence-low))))))
-
 ;------------------------------------------------------------------------------ Integration Tests
 ;; End-to-end workflow selection
-
-(deftest workflow-selection-integration-test
+(deftest ^{:stratum 1} workflow-selection-integration-test
   (testing "Emojui-style multi-phase refactor selects canonical-sdlc-v1"
     (let [result (ws/select-workflow multi-phase-refactor-spec)]
       (is (= :canonical-sdlc (:workflow-type result)))
@@ -250,8 +246,7 @@
       (is (not= :simple-test-v1 (:workflow-type result))))))
 
 ;------------------------------------------------------------------------------ Edge Cases
-
-(deftest edge-cases-test
+(deftest ^{:stratum 1} edge-cases-test
   (testing "Empty spec defaults to canonical-sdlc (default profile)"
     (let [result (ws/select-workflow {})]
       (is (= :canonical-sdlc (:workflow-type result)))

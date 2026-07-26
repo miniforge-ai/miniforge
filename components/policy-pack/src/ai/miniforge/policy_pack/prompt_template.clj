@@ -15,24 +15,32 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.prompt-template
   "Pack-bundled prompt template interpolation.
 
    Templates use {{variable}} syntax. Variables are replaced with values
    from a context map. Unknown variables are left as-is.
 
-   Layer 0: Interpolation engine
-   Layer 1: Default templates (built-in fallbacks)
-   Layer 2: Template resolution (rule → pack → default)"
+   Layer 0: interpolate, default-templates-resource
+   Layer 1: loaded-defaults (reads default-templates-resource)
+   Layer 2: default-template (looks up loaded-defaults)
+   Layer 3: default-repair-prompt/behavior-section/knowledge-section
+     (over default-template)
+   Layer 4: resolve-repair/behavior/knowledge-template (rule → pack →
+     Layer 3 default)
+   Layer 5: render-repair-prompt/behavior-section/knowledge-section
+     (interpolate over the resolved Layer 4 template)
+
+   6 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Interpolation
 
-(defn interpolate
+;; Interpolation
+(defn ^{:stratum 0} interpolate
   "Replace {{variable}} placeholders in a template string with values
    from the bindings map. Keys can be strings or keywords.
    Unknown variables are replaced with empty string.
@@ -53,14 +61,14 @@
                             (get bindings s)
                             ""))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Default templates (loaded from EDN resource)
-
-(def ^:private default-templates-resource
+(def ^{:stratum 0} ^:private default-templates-resource
   "Classpath resource path for default prompt templates."
   "policy_pack/templates/defaults.edn")
 
-(def ^:private loaded-defaults
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private loaded-defaults
   "Default templates loaded from classpath EDN resource. Delay for lazy loading."
   (delay
     (try
@@ -68,27 +76,31 @@
         (edn/read-string (slurp resource)))
       (catch Exception _ {}))))
 
-(defn- default-template
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} default-template
   "Get a default template by key. Returns empty string if not found."
   [k]
   (get @loaded-defaults k ""))
 
-(def default-repair-prompt
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} default-repair-prompt
   "Default prompt template for LLM-based semantic repair."
   (delay (default-template :repair-prompt)))
 
-(def default-behavior-section
+(def ^{:stratum 3} default-behavior-section
   "Default template for the behavior rules section."
   (delay (default-template :behavior-section)))
 
-(def default-knowledge-section
+(def ^{:stratum 3} default-knowledge-section
   "Default template for the reference material section."
   (delay (default-template :knowledge-section)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Template resolution
+;------------------------------------------------------------------------------ Layer 4
 
-(defn resolve-repair-template
+;; Template resolution
+(defn ^{:stratum 4} resolve-repair-template
   "Resolve the repair prompt template for a violation.
 
    Priority:
@@ -106,7 +118,7 @@
   (get rule :rule/repair-prompt-template
        (get-in pack [:pack/prompt-templates :repair-prompt] @default-repair-prompt)))
 
-(defn resolve-behavior-template
+(defn ^{:stratum 4} resolve-behavior-template
   "Resolve the behavior section template.
 
    Priority:
@@ -121,7 +133,7 @@
   [pack]
   (get-in pack [:pack/prompt-templates :behavior-section] @default-behavior-section))
 
-(defn resolve-knowledge-template
+(defn ^{:stratum 4} resolve-knowledge-template
   "Resolve the knowledge section template.
 
    Priority:
@@ -136,7 +148,9 @@
   [pack]
   (get-in pack [:pack/prompt-templates :knowledge-section] @default-knowledge-section))
 
-(defn render-repair-prompt
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} render-repair-prompt
   "Render a complete repair prompt for a violation.
 
    Arguments:
@@ -157,7 +171,7 @@
     {:role    :user
      :content (interpolate template bindings)}))
 
-(defn render-behavior-section
+(defn ^{:stratum 5} render-behavior-section
   "Render the behavior rules section for prompt injection.
 
    Arguments:
@@ -174,7 +188,7 @@
                         (str/join "\n"))]
       (interpolate template {:behaviors numbered}))))
 
-(defn render-knowledge-section
+(defn ^{:stratum 5} render-knowledge-section
   "Render the reference material section for prompt injection.
 
    Arguments:

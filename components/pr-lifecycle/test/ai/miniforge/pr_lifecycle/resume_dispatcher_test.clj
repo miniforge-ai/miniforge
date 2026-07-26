@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.resume-dispatcher-test
   "Tests for the N13 §2.7 Resume Signal Dispatcher."
   (:require [babashka.fs :as fs]
@@ -28,17 +27,16 @@
             [ai.miniforge.pr-lifecycle.listener-registry :as registry]
             [ai.miniforge.pr-lifecycle.resume-dispatcher :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ── fixture: ephemeral worktree ──────────────────────────────────────
+(def ^{:stratum 0} ^:dynamic *worktree* nil)
 
-(def ^:dynamic *worktree* nil)
-
-(defn worktree-fixture [f]
+(defn ^{:stratum 0} worktree-fixture [f]
   (let [w (str (fs/create-temp-dir {:prefix "resume-dispatcher-test-"}))]
     (try
       (binding [*worktree* w] (f))
       (finally (try (fs/delete-tree w) (catch Throwable _ nil))))))
-
-(use-fixtures :each worktree-fixture)
 
 ;; ── fixtures ─────────────────────────────────────────────────────────
 ;; Loaded from `resources/test-fixtures/resume-dispatcher/fixtures.edn`
@@ -47,60 +45,23 @@
 ;; `resources/test-fixtures/` convention compliance-scanner uses —
 ;; placing the file under `resources/` keeps it on the workspace
 ;; classpath without per-component test-alias tweaks.
-
-(def ^:private fixtures
+(def ^{:stratum 0} ^:private fixtures
   (-> (io/resource "test-fixtures/resume-dispatcher/fixtures.edn")
       slurp
       edn/read-string))
 
-(def ^:private pr-url               (:pr-url fixtures))
-(def ^:private base-listener-params (:base-listener-params fixtures))
-(def ^:private merged-pr            (:merged-pr fixtures))
-
-(defn- register-listener!
-  [overrides]
-  (let [r (registry/register! *worktree* (merge base-listener-params overrides))]
-    (assert (dag/ok? r))
-    (-> r :data :listener-id)))
-
-(defn- capture-shell
+(defn- ^{:stratum 0} capture-shell
   [calls-atom result]
   (fn [opts & args]
     (swap! calls-atom conj {:opts opts :args (vec args)})
     result))
 
-(defn- entry-by-id
-  "Read registry from disk, find entry by listener-id."
-  [listener-id]
-  (let [reg (-> (registry/read-registry *worktree*) :data)
-        bucket (registry/entries-for-pr reg pr-url)]
-    (first (filter #(= listener-id (:listener/id %)) bucket))))
-
-;; ── build-primer (pure) ──────────────────────────────────────────────
-
-(deftest build-primer-shape
-  (testing "primer has all spec-required keys + omits :session/id when absent"
-    (let [listener (assoc base-listener-params :session/id nil :listener/id (random-uuid))
-          primer (sut/build-primer merged-pr listener)]
-      (is (= pr-url (:resume/pr-url primer)))
-      (is (= "abc1234deadbeef" (:resume/merge-sha primer)))
-      (is (= #inst "2026-05-10T20:54:45.000-00:00" (:resume/merged-at primer)))
-      (is (= "+50 / -12 across 3 files" (:resume/diff-summary primer)))
-      (is (= "agent-A" (get-in primer [:resume/listener :agent/id])))
-      (is (not (contains? (:resume/listener primer) :session/id))
-          "session/id is dropped when nil — spec marks it optional"))))
-
-(deftest build-primer-includes-session-when-present
-  (let [listener (assoc base-listener-params :session/id "sess-001" :listener/id (random-uuid))
-        primer (sut/build-primer merged-pr listener)]
-    (is (= "sess-001" (get-in primer [:resume/listener :session/id])))))
-
-(deftest validate-primer-throws-on-bad-shape
+(deftest ^{:stratum 0} validate-primer-throws-on-bad-shape
   (testing "validate-primer! throws ex-info with anomaly tag on missing required keys"
     (is (thrown? clojure.lang.ExceptionInfo
                  (sut/validate-primer! {:resume/pr-url "x"})))))
 
-(deftest validate-primer-result-returns-dag-error-on-bad-shape
+(deftest ^{:stratum 0} validate-primer-result-returns-dag-error-on-bad-shape
   (testing "validate-primer-result returns a DAG error instead of throwing"
     (let [result (sut/validate-primer-result {:resume/pr-url "x"})]
       (is (false? (get result :ok?)))
@@ -112,9 +73,49 @@
              (get-in result [:error :data :primer])))
       (is (some? (get-in result [:error :data :errors]))))))
 
-;; ── channel-supported? + not-yet-wired ───────────────────────────────
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest channel-supported-only-webhook-in-v0
+(def ^{:stratum 1} ^:private pr-url               (:pr-url fixtures))
+
+(def ^{:stratum 1} ^:private base-listener-params (:base-listener-params fixtures))
+
+(def ^{:stratum 1} ^:private merged-pr            (:merged-pr fixtures))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} register-listener!
+  [overrides]
+  (let [r (registry/register! *worktree* (merge base-listener-params overrides))]
+    (assert (dag/ok? r))
+    (-> r :data :listener-id)))
+
+(defn- ^{:stratum 2} entry-by-id
+  "Read registry from disk, find entry by listener-id."
+  [listener-id]
+  (let [reg (-> (registry/read-registry *worktree*) :data)
+        bucket (registry/entries-for-pr reg pr-url)]
+    (first (filter #(= listener-id (:listener/id %)) bucket))))
+
+;; ── build-primer (pure) ──────────────────────────────────────────────
+(deftest ^{:stratum 2} build-primer-shape
+  (testing "primer has all spec-required keys + omits :session/id when absent"
+    (let [listener (assoc base-listener-params :session/id nil :listener/id (random-uuid))
+          primer (sut/build-primer merged-pr listener)]
+      (is (= pr-url (:resume/pr-url primer)))
+      (is (= "abc1234deadbeef" (:resume/merge-sha primer)))
+      (is (= #inst "2026-05-10T20:54:45.000-00:00" (:resume/merged-at primer)))
+      (is (= "+50 / -12 across 3 files" (:resume/diff-summary primer)))
+      (is (= "agent-A" (get-in primer [:resume/listener :agent/id])))
+      (is (not (contains? (:resume/listener primer) :session/id))
+          "session/id is dropped when nil — spec marks it optional"))))
+
+(deftest ^{:stratum 2} build-primer-includes-session-when-present
+  (let [listener (assoc base-listener-params :session/id "sess-001" :listener/id (random-uuid))
+        primer (sut/build-primer merged-pr listener)]
+    (is (= "sess-001" (get-in primer [:resume/listener :session/id])))))
+
+;; ── channel-supported? + not-yet-wired ───────────────────────────────
+(deftest ^{:stratum 2} channel-supported-only-webhook-in-v0
   (is (true?  (sut/channel-supported?
                (assoc base-listener-params
                       :resume-channel {:channel/kind :webhook
@@ -128,7 +129,7 @@
                       :resume-channel {:channel/kind :miniforge-ipc
                                        :channel/target "topic-x"})))))
 
-(deftest dispatch-to-channel-pty-returns-not-yet-wired
+(deftest ^{:stratum 2} dispatch-to-channel-pty-returns-not-yet-wired
   (testing ":pty listener gets :resume-dispatcher/not-yet-wired with kind in :data"
     (let [listener (assoc base-listener-params
                           :listener/id (random-uuid)
@@ -140,7 +141,7 @@
       (is (= :resume-dispatcher/not-yet-wired (get-in r [:error :code])))
       (is (= :pty (get-in r [:error :data :channel/kind]))))))
 
-(deftest dispatch-to-channel-miniforge-ipc-returns-not-yet-wired
+(deftest ^{:stratum 2} dispatch-to-channel-miniforge-ipc-returns-not-yet-wired
   (let [listener (assoc base-listener-params
                         :listener/id (random-uuid)
                         :resume-channel {:channel/kind :miniforge-ipc
@@ -150,8 +151,7 @@
     (is (= :miniforge-ipc (get-in r [:error :data :channel/kind])))))
 
 ;; ── webhook handler ──────────────────────────────────────────────────
-
-(deftest dispatch-webhook-happy-path
+(deftest ^{:stratum 2} dispatch-webhook-happy-path
   (testing "successful webhook POST shells out to curl with the right args + JSON body"
     (let [calls (atom [])
           stub  (capture-shell calls {:exit 0 :out "" :err ""})]
@@ -171,7 +171,7 @@
             (is (= pr-url (:resume/pr-url payload)))
             (is (= "abc1234deadbeef" (:resume/merge-sha payload)))))))))
 
-(deftest dispatch-webhook-passes-fractional-seconds-to-curl
+(deftest ^{:stratum 2} dispatch-webhook-passes-fractional-seconds-to-curl
   (testing "curl --max-time receives fractional seconds (so a sub-1000ms timeout doesn't truncate to 0)"
     (let [calls (atom [])
           stub  (capture-shell calls {:exit 0 :out "" :err ""})]
@@ -189,7 +189,7 @@
             (is (not= "0" seconds-str)
                 "--max-time 0 would disable the timeout entirely (would let dispatcher hang)")))))))
 
-(deftest dispatch-webhook-rejects-blank-target
+(deftest ^{:stratum 2} dispatch-webhook-rejects-blank-target
   (let [listener (assoc base-listener-params
                         :listener/id (random-uuid)
                         :resume-channel {:channel/kind :webhook :channel/target ""})
@@ -198,7 +198,7 @@
     (is (not (dag/ok? r)))
     (is (= :resume-dispatcher/missing-target (get-in r [:error :code])))))
 
-(deftest dispatch-webhook-retries-on-failure
+(deftest ^{:stratum 2} dispatch-webhook-retries-on-failure
   (testing "transient failure is retried up to webhook-max-attempts; success on retry → ok"
     (let [calls (atom 0)
           ;; Fail twice, succeed on third.
@@ -216,7 +216,7 @@
           (is (dag/ok? r))
           (is (= 3 @calls) "retried twice before success"))))))
 
-(deftest dispatch-webhook-backoff-schedule
+(deftest ^{:stratum 2} dispatch-webhook-backoff-schedule
   (testing "backoff sleeps after attempts 0 + 1 (with backoff-ms 0 + 1) but NOT after attempt 2 (last)"
     (let [sleeps (atom [])
           ;; Always fail so we exhaust all attempts.
@@ -232,7 +232,7 @@
                  @sleeps)
               "backoff schedule: base*1 then base*2; no sleep after the final attempt"))))))
 
-(deftest dispatch-webhook-exhausts-attempts
+(deftest ^{:stratum 2} dispatch-webhook-exhausts-attempts
   (testing "persistent failure exhausts webhook-max-attempts and returns the last error"
     (let [calls (atom 0)
           stub (fn [_opts & _args]
@@ -248,9 +248,25 @@
               "called exactly webhook-max-attempts times")
           (is (= :resume-dispatcher/webhook-http-failed (get-in r [:error :code]))))))))
 
-;; ── dispatch-listener! (delivery + mark) ─────────────────────────────
+(deftest ^{:stratum 2} dispatch-pr-merge-bubbles-registry-read-failure-as-dag-err
+  (testing "registry read failure bubbles up as the same DAG error shape (not a partial summary)"
+    (with-redefs [registry/read-registry
+                  (fn [_]
+                    {:ok? false
+                     :error {:code :listener-registry/read-failed
+                             :message "synthetic disk failure"
+                             :data {:path "/dev/null"}}})]
+      (let [r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
+        (is (not (dag/ok? r))
+            "registry-read failure bubbles as DAG err, not a half-built summary")
+        (is (= :listener-registry/read-failed (get-in r [:error :code])))
+        (is (nil? (:dispatched r))
+            "no summary keys present on the err return — caller branches on dag/ok?")))))
 
-(deftest dispatch-listener-marks-on-success
+;------------------------------------------------------------------------------ Layer 3
+
+;; ── dispatch-listener! (delivery + mark) ─────────────────────────────
+(deftest ^{:stratum 3} dispatch-listener-marks-on-success
   (testing "successful delivery transitions listener :active → :dispatched and stamps dispatch-id"
     (let [stub (capture-shell (atom []) {:exit 0 :out "" :err ""})]
       (with-redefs [process/shell stub]
@@ -265,7 +281,7 @@
             (is (= (-> r :data :dispatch-id) (:resume/dispatch-id post)))
             (is (inst? (:resume/dispatched-at post)))))))))
 
-(deftest dispatch-listener-decorates-failure-with-listener-id
+(deftest ^{:stratum 3} dispatch-listener-decorates-failure-with-listener-id
   (testing "delivery failure surfaces :listener/id on :error :data for diagnostics"
     (let [stub (capture-shell (atom []) {:exit 22 :out "" :err "boom"})]
       (with-redefs [process/shell stub]
@@ -279,8 +295,7 @@
                 "listener stays :active when delivery fails — next pass retries")))))))
 
 ;; ── dispatch-pr-merge! (whole-PR pass) ───────────────────────────────
-
-(deftest dispatch-pr-merge-walks-only-active-listeners
+(deftest ^{:stratum 3} dispatch-pr-merge-walks-only-active-listeners
   (testing "dispatch-pr-merge! processes :active listeners; skips already-dispatched/cancelled"
     (let [stub (capture-shell (atom []) {:exit 0 :out "" :err ""})]
       (with-redefs [process/shell stub]
@@ -301,7 +316,7 @@
           (is (= 0 (count (:failed summary))))
           (is (= a (-> summary :dispatched first :listener/id))))))))
 
-(deftest dispatch-pr-merge-collects-failures-without-aborting
+(deftest ^{:stratum 3} dispatch-pr-merge-collects-failures-without-aborting
   (testing "per-listener failures don't abort the pass — they're collected"
     ;; Stub by URL match so per-listener outcomes are deterministic.
     ;; agent-A targets the failing endpoint; agent-B targets the OK one.
@@ -334,7 +349,7 @@
           (is (= 1 (count (:dispatched summary)))
               "agent-B success despite agent-A failure"))))))
 
-(deftest dispatch-pr-merge-pty-listener-not-yet-wired
+(deftest ^{:stratum 3} dispatch-pr-merge-pty-listener-not-yet-wired
   (testing ":pty listener flows through as a :failed entry with not-yet-wired"
     (let [pty-listener-id (register-listener!
                            {:agent/id "pty-agent"
@@ -348,17 +363,4 @@
              (get-in (first (:failed summary)) [:error :code])))
       (is (= pty-listener-id (get-in (first (:failed summary)) [:error :data :listener/id]))))))
 
-(deftest dispatch-pr-merge-bubbles-registry-read-failure-as-dag-err
-  (testing "registry read failure bubbles up as the same DAG error shape (not a partial summary)"
-    (with-redefs [registry/read-registry
-                  (fn [_]
-                    {:ok? false
-                     :error {:code :listener-registry/read-failed
-                             :message "synthetic disk failure"
-                             :data {:path "/dev/null"}}})]
-      (let [r (sut/dispatch-pr-merge! *worktree* pr-url merged-pr)]
-        (is (not (dag/ok? r))
-            "registry-read failure bubbles as DAG err, not a half-built summary")
-        (is (= :listener-registry/read-failed (get-in r [:error :code])))
-        (is (nil? (:dispatched r))
-            "no summary keys present on the err return — caller branches on dag/ok?")))))
+(use-fixtures :each worktree-fixture)

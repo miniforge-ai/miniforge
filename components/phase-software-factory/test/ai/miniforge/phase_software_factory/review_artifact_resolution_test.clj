@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.review-artifact-resolution-test
   "Tests for resolve-implement-artifact in the review phase.
 
@@ -27,13 +26,13 @@
    [ai.miniforge.phase-software-factory.review]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Factories
 
-(def ^:private resolve-implement-artifact
+;; Factories
+(def ^{:stratum 0} ^:private resolve-implement-artifact
   "Direct var reference to the private function under test."
   #'ai.miniforge.phase-software-factory.review/resolve-implement-artifact)
 
-(defn- make-serialized-artifact
+(defn- ^{:stratum 0} make-serialized-artifact
   "Factory: implement result with an explicit :artifact key (strategy 2)."
   []
   {:code/files [{:path "src/core.clj"
@@ -41,13 +40,7 @@
                  :action :create}]
    :code/summary "serialized artifact"})
 
-(defn- make-implement-result-with-artifact
-  "Factory: implement result carrying a serialized :artifact."
-  []
-  {:artifact (make-serialized-artifact)
-   :some-other-key "metadata"})
-
-(defn- make-code-files-result
+(defn- ^{:stratum 0} make-code-files-result
   "Factory: implement result that IS the artifact (has :code/files, strategy 4)."
   []
   {:code/files [{:path "src/widget.clj"
@@ -55,13 +48,13 @@
                  :action :create}]
    :code/summary "code files result"})
 
-(defn- make-bare-result
+(defn- ^{:stratum 0} make-bare-result
   "Factory: implement result with no artifact and no :code/files (strategy 7 fallback)."
   []
   {:status :success
    :metrics {:tokens 500}})
 
-(defn- make-ctx
+(defn- ^{:stratum 0} make-ctx
   "Factory: minimal execution context.
    Accepts optional overrides for :execution/worktree-path and :worktree-path."
   ([]
@@ -70,21 +63,14 @@
    (merge {:execution/worktree-path "/tmp/test-worktree"} overrides)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Tests
 
-(deftest resolve-serialized-artifact-test
-  (testing "Strategy 2: when implement-result has :artifact key, returns that artifact"
-    (let [impl-result (make-implement-result-with-artifact)
-          ctx (make-ctx)
-          resolved (resolve-implement-artifact impl-result ctx)]
-      (is (some? resolved)
-          "Should resolve an artifact")
-      (is (= (make-serialized-artifact) resolved)
-          "Should return the value of the :artifact key")
-      (is (= "serialized artifact" (:code/summary resolved))
-          "Should preserve the artifact's summary"))))
+(defn- ^{:stratum 1} make-implement-result-with-artifact
+  "Factory: implement result carrying a serialized :artifact."
+  []
+  {:artifact (make-serialized-artifact)
+   :some-other-key "metadata"})
 
-(deftest resolve-outer-phase-artifact-test
+(deftest ^{:stratum 1} resolve-outer-phase-artifact-test
   (testing "metadata-only outer phase artifact rehydrates file contents from the worktree"
     (let [impl-phase-result {:status :completed
                              :artifact {:code/summary "serialized artifact"
@@ -101,7 +87,7 @@
       (is (= ["docs/out-of-scope.md"] (:code/scope-deviations resolved)))
       (is (= 1 (count (:code/files resolved)))))))
 
-(deftest resolve-inner-output-artifact-test
+(deftest ^{:stratum 1} resolve-inner-output-artifact-test
   (testing "environment-model implement phase can carry artifact under [:result :output]"
     (let [artifact (make-code-files-result)
           impl-phase-result {:status :completed
@@ -111,7 +97,7 @@
           resolved (resolve-implement-artifact impl-phase-result ctx)]
       (is (= artifact resolved)))))
 
-(deftest resolve-code-files-artifact-test
+(deftest ^{:stratum 1} resolve-code-files-artifact-test
   (testing "Strategy 4: when implement-result has :code/files, returns the result itself"
     (let [impl-result (make-code-files-result)
           ctx (make-ctx)
@@ -123,7 +109,7 @@
       (is (= "code files result" (:code/summary resolved))
           "Should preserve the original summary"))))
 
-(deftest resolve-strategy-2-takes-precedence-over-strategy-4-test
+(deftest ^{:stratum 1} resolve-strategy-2-takes-precedence-over-strategy-4-test
   (testing "Strategy 2 wins over strategy 4 when both :artifact and :code/files present"
     (let [inner-artifact {:code/files [{:path "inner.clj" :content "inner" :action :create}]
                           :code/summary "inner"}
@@ -135,7 +121,7 @@
       (is (= inner-artifact resolved)
           ":artifact key should take precedence over :code/files on result"))))
 
-(deftest resolve-worktree-fallback-test
+(deftest ^{:stratum 1} resolve-worktree-fallback-test
   (testing "Strategy 7: when no artifact source has files, falls back to worktree diff"
     (let [fake-artifact {:code/files [{:path "src/new.clj"
                                        :content "(ns new)"
@@ -154,7 +140,7 @@
           (is (= fake-artifact resolved)
               "Should return the artifact from collect-written-files"))))))
 
-(deftest resolve-worktree-fallback-uses-worktree-path-key-test
+(deftest ^{:stratum 1} resolve-worktree-fallback-uses-worktree-path-key-test
   (testing "Strategy 7 falls back to :worktree-path when :execution/worktree-path is nil"
     (let [fake-artifact {:code/files [] :code/summary "alt path"}
           impl-result (make-bare-result)
@@ -169,7 +155,7 @@
           (is (some? resolved)
               "Should resolve via :worktree-path fallback"))))))
 
-(deftest resolve-nil-everything-test
+(deftest ^{:stratum 1} resolve-nil-everything-test
   (testing "Returns nil when no strategy succeeds"
     ;; No worktree path means strategy 7 won't even call collect-written-files
     (let [impl-result (make-bare-result)
@@ -179,14 +165,14 @@
       (is (nil? resolved)
           "Should return nil when no artifact source is available"))))
 
-(deftest resolve-nil-implement-result-test
+(deftest ^{:stratum 1} resolve-nil-implement-result-test
   (testing "Handles nil implement-result gracefully"
     (let [ctx (make-ctx {:execution/worktree-path nil})
           resolved (resolve-implement-artifact nil ctx)]
       (is (nil? resolved)
           "Should return nil when implement-result is nil"))))
 
-(deftest resolve-rehydrate-from-paths-test
+(deftest ^{:stratum 1} resolve-rehydrate-from-paths-test
   (testing "Strategy 1: paths-only outer artifact rehydrates content from worktree"
     (let [outer-artifact {:code/summary "lightweight artifact"
                           :code/file-paths ["src/core.clj" "src/util.clj"]
@@ -237,6 +223,21 @@
           "Strategy 6 (worktree merge) takes over when strategy 1 returns nothing")
       (is (= "lightweight artifact" (:code/summary resolved))
           "Outer-artifact metadata still wins on the merge"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Tests
+(deftest ^{:stratum 2} resolve-serialized-artifact-test
+  (testing "Strategy 2: when implement-result has :artifact key, returns that artifact"
+    (let [impl-result (make-implement-result-with-artifact)
+          ctx (make-ctx)
+          resolved (resolve-implement-artifact impl-result ctx)]
+      (is (some? resolved)
+          "Should resolve an artifact")
+      (is (= (make-serialized-artifact) resolved)
+          "Should return the value of the :artifact key")
+      (is (= "serialized artifact" (:code/summary resolved))
+          "Should preserve the artifact's summary"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.anomaly.add-edge-test
   "Coverage for `dag/add-edge-anomaly` and its stable alias
    `dag/add-edge`. Seven failure modes:
@@ -32,10 +31,13 @@
             [ai.miniforge.repo-dag.interface :as dag]
             [ai.miniforge.repo-dag.schema :as schema]))
 
-(def ^:dynamic *manager* nil)
-(def ^:dynamic *dag-id* nil)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn manager-and-dag-fixture [f]
+(def ^{:stratum 0} ^:dynamic *manager* nil)
+
+(def ^{:stratum 0} ^:dynamic *dag-id* nil)
+
+(defn ^{:stratum 0} manager-and-dag-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (let [d (dag/create-dag *manager* "test-dag")]
       (dag/add-repo-anomaly *manager* (:dag/id d)
@@ -49,11 +51,10 @@
       (binding [*dag-id* (:dag/id d)]
         (f)))))
 
-(use-fixtures :each manager-and-dag-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ Happy path
-
-(deftest add-edge-anomaly-returns-updated-dag
+(deftest ^{:stratum 1} add-edge-anomaly-returns-updated-dag
   (testing "successful add returns the updated DAG, not an anomaly"
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "repo-a" "repo-b"
@@ -62,8 +63,7 @@
       (is (= 1 (count (:dag/edges result)))))))
 
 ;------------------------------------------------------------------------------ Failure: DAG not found
-
-(deftest add-edge-anomaly-not-found-when-dag-missing
+(deftest ^{:stratum 1} add-edge-anomaly-not-found-when-dag-missing
   (testing "missing DAG yields :not-found anomaly"
     (let [missing-id (random-uuid)
           result (dag/add-edge-anomaly *manager* missing-id
@@ -74,8 +74,7 @@
       (is (= missing-id (get-in result [:anomaly/data :dag-id]))))))
 
 ;------------------------------------------------------------------------------ Failure: from-repo not found
-
-(deftest add-edge-anomaly-not-found-when-from-repo-missing
+(deftest ^{:stratum 1} add-edge-anomaly-not-found-when-from-repo-missing
   (testing "missing from-repo yields :not-found anomaly"
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "ghost" "repo-b"
@@ -85,8 +84,7 @@
       (is (= "ghost" (get-in result [:anomaly/data :repo-name]))))))
 
 ;------------------------------------------------------------------------------ Failure: to-repo not found
-
-(deftest add-edge-anomaly-not-found-when-to-repo-missing
+(deftest ^{:stratum 1} add-edge-anomaly-not-found-when-to-repo-missing
   (testing "missing to-repo yields :not-found anomaly"
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "repo-a" "ghost"
@@ -96,8 +94,7 @@
       (is (= "ghost" (get-in result [:anomaly/data :repo-name]))))))
 
 ;------------------------------------------------------------------------------ Failure: self-loop
-
-(deftest add-edge-anomaly-invalid-input-on-self-loop
+(deftest ^{:stratum 1} add-edge-anomaly-invalid-input-on-self-loop
   (testing "self-loop yields :invalid-input anomaly — input shape rejected"
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "repo-a" "repo-a"
@@ -107,8 +104,7 @@
       (is (= "repo-a" (get-in result [:anomaly/data :repo-name]))))))
 
 ;------------------------------------------------------------------------------ Failure: schema-invalid edge payload
-
-(deftest add-edge-anomaly-invalid-input-on-unknown-constraint
+(deftest ^{:stratum 1} add-edge-anomaly-invalid-input-on-unknown-constraint
   (testing "unknown :edge/constraint yields :invalid-input anomaly — schema rejection
             short-circuits via make-repo-edge-anomaly before the edge is appended."
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
@@ -119,7 +115,7 @@
       (is (some? (get-in result [:anomaly/data :errors])))
       (is (= schema/RepoEdge (get-in result [:anomaly/data :schema]))))))
 
-(deftest add-edge-anomaly-invalid-input-on-unknown-merge-ordering
+(deftest ^{:stratum 1} add-edge-anomaly-invalid-input-on-unknown-merge-ordering
   (testing "unknown :edge/merge-ordering yields :invalid-input anomaly"
     (let [result (dag/add-edge-anomaly *manager* *dag-id*
                                        "repo-a" "repo-b"
@@ -128,8 +124,7 @@
       (is (= :invalid-input (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ Failure: duplicate edge
-
-(deftest add-edge-anomaly-conflict-on-duplicate
+(deftest ^{:stratum 1} add-edge-anomaly-conflict-on-duplicate
   (testing "duplicate edge yields :conflict anomaly"
     (dag/add-edge-anomaly *manager* *dag-id*
                           "repo-a" "repo-b"
@@ -143,8 +138,7 @@
       (is (= "repo-b" (get-in result [:anomaly/data :to]))))))
 
 ;------------------------------------------------------------------------------ Failure: cycle
-
-(deftest add-edge-anomaly-conflict-on-cycle
+(deftest ^{:stratum 1} add-edge-anomaly-conflict-on-cycle
   (testing "cycle-introducing edge yields :conflict anomaly carrying cycle-nodes"
     (dag/add-edge-anomaly *manager* *dag-id*
                           "repo-a" "repo-b"
@@ -157,8 +151,7 @@
       (is (set? (get-in result [:anomaly/data :cycle-nodes]))))))
 
 ;------------------------------------------------------------------------------ Alias compatibility
-
-(deftest add-edge-returns-anomaly-on-missing-from-repo
+(deftest ^{:stratum 1} add-edge-returns-anomaly-on-missing-from-repo
   (testing "stable alias returns anomaly data on missing from-repo"
     (let [result (dag/add-edge *manager* *dag-id* "ghost" "repo-b"
                                :library-before-consumer :sequential)]
@@ -166,7 +159,7 @@
       (is (= :not-found (:anomaly/type result)))
       (is (= "ghost" (get-in result [:anomaly/data :repo-name]))))))
 
-(deftest add-edge-returns-anomaly-on-self-loop
+(deftest ^{:stratum 1} add-edge-returns-anomaly-on-self-loop
   (testing "stable alias returns anomaly data on self-loop"
     (let [result (dag/add-edge *manager* *dag-id* "repo-a" "repo-a"
                                :library-before-consumer :sequential)]
@@ -174,7 +167,7 @@
       (is (= :invalid-input (:anomaly/type result)))
       (is (= "repo-a" (get-in result [:anomaly/data :repo-name]))))))
 
-(deftest add-edge-returns-anomaly-on-cycle
+(deftest ^{:stratum 1} add-edge-returns-anomaly-on-cycle
   (testing "stable alias returns anomaly data on cycle introduction"
     (dag/add-edge *manager* *dag-id* "repo-a" "repo-b"
                   :library-before-consumer :sequential)
@@ -183,3 +176,5 @@
       (is (anomaly/anomaly? result))
       (is (= :conflict (:anomaly/type result)))
       (is (set? (get-in result [:anomaly/data :cycle-nodes]))))))
+
+(use-fixtures :each manager-and-dag-fixture)

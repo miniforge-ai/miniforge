@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.error-classifier.patterns
   "Error pattern definitions and matching logic.
 
@@ -29,10 +28,10 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Pattern loading from configuration
+;------------------------------------------------------------------------------ Layer 0
 
-(defn load-pattern-config
+;; Pattern loading from configuration
+(defn ^{:stratum 0} load-pattern-config
   "Load error pattern configuration from resource file.
 
    Arguments:
@@ -46,7 +45,7 @@
       (catch Exception _e
         nil))))
 
-(defn compile-pattern
+(defn ^{:stratum 0} compile-pattern
   "Compile a pattern map with regex string to a case-insensitive regex.
 
    Arguments:
@@ -67,7 +66,22 @@
                :rate-limit? rate-limit?)
         (update :regex #(re-pattern (str "(?i)" %))))))
 
-(defn load-patterns
+;; Pattern matching
+(defn ^{:stratum 0} matches-pattern?
+  "Check if error message matches a pattern.
+
+   Arguments:
+     error - Error message string
+     pattern - Pattern map with :regex key
+
+   Returns: Boolean indicating if pattern matches"
+  [error pattern]
+  (when error
+    (boolean (re-find (:regex pattern) error))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} load-patterns
   "Load and compile patterns from a config file.
 
    Arguments:
@@ -81,45 +95,32 @@
       (mapv #(compile-pattern % type vendor) (:patterns config)))
     []))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Pattern definitions (loaded from config)
+;------------------------------------------------------------------------------ Layer 2
 
-(def agent-backend-patterns
+;; Pattern definitions (loaded from config)
+(def ^{:stratum 2} agent-backend-patterns
   "Patterns that indicate agent system bugs (Claude Code internal errors).
    Loaded from resources/error-patterns/agent-backend.edn"
   (load-patterns "agent-backend"))
 
-(def task-code-patterns
+(def ^{:stratum 2} task-code-patterns
   "Patterns that indicate user code errors.
    Loaded from resources/error-patterns/task-code.edn"
   (load-patterns "task-code"))
 
-(def external-patterns
+(def ^{:stratum 2} external-patterns
   "Patterns that indicate external service errors.
    Loaded from resources/error-patterns/external.edn"
   (load-patterns "external"))
 
-(def backend-setup-patterns
+(def ^{:stratum 2} backend-setup-patterns
   "Patterns that indicate backend setup/configuration errors.
    Loaded from resources/error-patterns/backend-setup.edn"
   (load-patterns "backend-setup"))
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Pattern matching
+;------------------------------------------------------------------------------ Layer 3
 
-(defn matches-pattern?
-  "Check if error message matches a pattern.
-
-   Arguments:
-     error - Error message string
-     pattern - Pattern map with :regex key
-
-   Returns: Boolean indicating if pattern matches"
-  [error pattern]
-  (when error
-    (boolean (re-find (:regex pattern) error))))
-
-(defn classify-by-patterns
+(defn ^{:stratum 3} classify-by-patterns
   "Classify error by matching against pattern lists.
 
    Arguments:

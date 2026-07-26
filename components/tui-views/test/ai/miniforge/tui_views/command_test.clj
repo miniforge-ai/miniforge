@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.command-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -23,7 +22,9 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.command :as command]))
 
-(deftest quit-command-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} quit-command-test
   (testing ":q sets quit flag"
     (let [m (command/execute-command (model/init-model) ":q")]
       (is (:quit? m))))
@@ -32,7 +33,7 @@
     (let [m (command/execute-command (model/init-model) ":quit")]
       (is (:quit? m)))))
 
-(deftest view-command-test
+(deftest ^{:stratum 0} view-command-test
   (testing ":view evidence switches to evidence"
     (let [m (command/execute-command (model/init-model) ":view evidence")]
       (is (= :evidence (:view m)))
@@ -50,18 +51,18 @@
     (let [m (command/execute-command (model/init-model) ":view nonexistent")]
       (is (some? (:flash-message m))))))
 
-(deftest refresh-command-test
+(deftest ^{:stratum 0} refresh-command-test
   (testing ":refresh sets flash and timestamp"
     (let [m (command/execute-command (model/init-model) ":refresh")]
       (is (= "Refreshed" (:flash-message m)))
       (is (some? (:last-updated m))))))
 
-(deftest help-command-test
+(deftest ^{:stratum 0} help-command-test
   (testing ":help shows help overlay"
     (let [m (command/execute-command (model/init-model) ":help")]
       (is (:help-visible? m)))))
 
-(deftest theme-command-test
+(deftest ^{:stratum 0} theme-command-test
   (testing ":theme dark switches theme"
     (let [m (command/execute-command (model/init-model) ":theme dark")]
       (is (= :dark (:theme m)))))
@@ -70,22 +71,20 @@
     (let [m (command/execute-command (model/init-model) ":theme")]
       (is (some? (:flash-message m))))))
 
-(deftest unknown-command-test
+(deftest ^{:stratum 0} unknown-command-test
   (testing "Unknown command sets error flash"
     (let [m (command/execute-command (model/init-model) ":foobar")]
       (is (some? (:flash-message m))))))
 
-(deftest command-mode-integration-test
+(deftest ^{:stratum 0} command-mode-integration-test
   (testing "Full command mode flow: colon, type, enter"
     (let [m (model/init-model)
           m (assoc m :mode :command :command-buf ":q")
           result (command/execute-command m (:command-buf m))]
       (is (:quit? result)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Control action effect tests
-
-(deftest control-action-effect-test
+(deftest ^{:stratum 0} control-action-effect-test
   (testing "control-action creates correct map shape"
     (let [eff (effect/control-action :pause (java.util.UUID/randomUUID))]
       (is (= :control-action (:type eff)))
@@ -103,10 +102,8 @@
     (let [eff (effect/control-action :cancel (java.util.UUID/randomUUID))]
       (is (= :cancel (:action eff))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pause/resume command handler tests
-
-(deftest pause-command-test
+(deftest ^{:stratum 0} pause-command-test
   (testing ":pause with single workflow selected produces control-action"
     (let [wf-id (java.util.UUID/randomUUID)
           m (-> (model/init-model)
@@ -124,7 +121,7 @@
       (is (some? (:flash-message result)))
       (is (nil? (:side-effect result))))))
 
-(deftest resume-command-test
+(deftest ^{:stratum 0} resume-command-test
   (testing ":resume with single workflow selected produces control-action"
     (let [wf-id (java.util.UUID/randomUUID)
           m (-> (model/init-model)

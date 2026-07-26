@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.snowflake
   "Twitter-Snowflake-style sortable event-id generator (BD-2b RFC v3/v4).
 
@@ -60,6 +59,8 @@
    [clojure.java.io :as io]
    [ai.miniforge.logging.interface :as log]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; NOTE: The worker-id lease path constructs java.io.RandomAccessFile,
 ;; calls .getChannel (FileChannel), .tryLock (returning FileLock), and
 ;; wraps bytes via java.nio.ByteBuffer. Those references appear FQN
@@ -67,44 +68,31 @@
 ;; loads in Babashka (which doesn't ship java.nio.channels.FileLock).
 ;; Worker-id leasing is JVM-only — the BB-runtime test loads the
 ;; namespace but never calls it, keeping event-stream BB-compatible.
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Constants
-
-(def ^:const ^long miniforge-epoch-ms
+(def ^{:stratum 0} ^:const ^long miniforge-epoch-ms
   "ms since unix epoch for 2026-01-01T00:00:00Z. The 41-bit timestamp
    field is computed as (now - epoch). 41 bits ≈ 69.7 years from this
    epoch — comfortable headroom."
   1767225600000)
 
-(def ^:const ^long max-seq
+(def ^{:stratum 0} ^:const ^long max-seq
   "12-bit sequence — 4096 distinct ids per (ms × worker)."
   4095)
 
-(def ^:const ^long max-workers
+(def ^{:stratum 0} ^:const ^long max-workers
   "10-bit worker space — 1024 concurrent workers per host."
   1024)
 
-(def ^:const ^long worker-shift 12)
-(def ^:const ^long ts-shift 22)
+(def ^{:stratum 0} ^:const ^long worker-shift 12)
 
-;------------------------------------------------------------------------------ Layer 0
-;; Pure id-composition
+(def ^{:stratum 0} ^:const ^long ts-shift 22)
 
-(defn compose-id
-  "Compose a 64-bit snowflake from (ts-since-epoch-ms, worker-id, seq).
-   Pure: no clock or state."
-  ^long [^long ts-since-epoch ^long worker ^long sequence]
-  (bit-or (bit-shift-left ts-since-epoch ts-shift)
-          (bit-shift-left worker worker-shift)
-          sequence))
-
-(defn format-hex
+(defn ^{:stratum 0} format-hex
   "Render a 64-bit id as a 16-char lowercase hex string."
   ^String [^long id]
   (format "%016x" id))
 
-(defn long->uuid
+(defn ^{:stratum 0} long->uuid
   "Embed a 64-bit snowflake id into a `java.util.UUID` as the
    most-significant bits, with the low 64 bits zero. Keeps `:event/id`
    typed as uuid for existing consumers while making the leading hex
@@ -112,22 +100,106 @@
   ^java.util.UUID [^long id]
   (java.util.UUID. id 0))
 
-(defn uuid->hex
-  "Extract the 16-char lowercase hex of the snowflake bits from a UUID
-   created by `long->uuid`. Inverse of long->uuid for filename use."
-  ^String [^java.util.UUID uuid]
-  (format-hex (.getMostSignificantBits uuid)))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Generator state
-
-(defn- initial-state
+(defn- ^{:stratum 0} initial-state
   [worker-id]
   {:last-ts -1
    :last-seq -1
    :worker-id worker-id})
 
-(defn- next-state
+;; Worker-id leasing (FileLock-based)
+(defn- ^{:stratum 0} default-workers-dir
+  []
+  (io/file (config/miniforge-home) "events" ".workers"))
+
+(defn- ^{:stratum 0} lease-io-anomaly
+  [workers-dir lease-path id error]
+  (cond-> (response/make-anomaly
+           :anomalies/unavailable
+           (messages/t :snowflake/lease-io-failure
+                       {:worker-id id
+                        :lease-path (.getAbsolutePath lease-path)})
+           {:reason :lease-io-failure
+            :worker-id id
+            :lease-path (.getAbsolutePath lease-path)
+            :workers-dir (.getAbsolutePath workers-dir)})
+    error (assoc :anomaly/ex-message (ex-message error)
+                 :anomaly/ex-class (str (class error)))
+    (ex-data error) (assoc :anomaly/ex-data (ex-data error))))
+
+(defn- ^{:stratum 0} write-lease-metadata!
+  "Truncate `channel` and write the worker-id + acquire timestamp as
+   EDN. Force to disk. Metadata is informational only — the OS-level
+   FileLock release on JVM exit is what guarantees correctness, so
+   pid/host fields are not load-bearing and are deliberately omitted
+   to keep this namespace Babashka-loadable
+   (java.lang.management is not in BB)."
+  [channel worker-id]
+  (.truncate channel 0)
+  (let [meta  {:worker-id   worker-id
+               :acquired-at (System/currentTimeMillis)}
+        bytes (.getBytes (str (pr-str meta) "\n") "UTF-8")]
+    (.write channel (java.nio.ByteBuffer/wrap bytes))
+    (.force channel false)))
+
+(defn ^{:stratum 0} release-lease!
+  "Release a worker-id lease. Idempotent. The OS would release on JVM
+   exit anyway; this is for explicit teardown (tests, shutdown hooks)."
+  [{:keys [lock channel raf]}]
+  (when lock
+    (try (.release lock) (catch Exception _)))
+  (when channel
+    (try (.close channel) (catch Exception _)))
+  (when raf
+    (try (.close raf) (catch Exception _))))
+
+;; Id generation
+(defn- ^{:stratum 0} log-rollback!
+  [logger details]
+  (when logger
+    (log/warn logger :event-stream :snowflake/clock-rollback
+              {:message "Snowflake generator detected clock rollback; stalling"
+               :data    details})))
+
+(def ^{:stratum 0} ^:private ^:const ^long park-budget-nanos
+  "Park budget for the wait loop on clock-rollback / sequence-exhausted.
+   100µs is short enough to wake well before the next ms tick (so the
+   loop spins ~10× per ms in the worst case) but long enough to avoid
+   a CPU-burning busy-spin. `parkNanos` may wake earlier on signal —
+   that's fine, the outer loop simply re-checks the wall clock."
+  100000)
+
+(def ^{:stratum 0} ^:private park-nanos-method
+  "Lazily-resolved `java.util.concurrent.locks.LockSupport/parkNanos`
+   via `Class/forName` + reflection. The id-generation path only
+   executes on the JVM, but this namespace is transitively loaded
+   from Babashka-runtime bricks and BB does not ship
+   `java.util.concurrent.locks`. A static method call would force
+   compile-time class resolution and break BB load; this delay
+   defers it to the first JVM invocation."
+  (delay
+    (.getMethod (Class/forName "java.util.concurrent.locks.LockSupport")
+                "parkNanos"
+                (into-array Class [Long/TYPE]))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Pure id-composition
+(defn ^{:stratum 1} compose-id
+  "Compose a 64-bit snowflake from (ts-since-epoch-ms, worker-id, seq).
+   Pure: no clock or state."
+  ^long [^long ts-since-epoch ^long worker ^long sequence]
+  (bit-or (bit-shift-left ts-since-epoch ts-shift)
+          (bit-shift-left worker worker-shift)
+          sequence))
+
+(defn ^{:stratum 1} uuid->hex
+  "Extract the 16-char lowercase hex of the snowflake bits from a UUID
+   created by `long->uuid`. Inverse of long->uuid for filename use."
+  ^String [^java.util.UUID uuid]
+  (format-hex (.getMostSignificantBits uuid)))
+
+(defn- ^{:stratum 1} next-state
   "Pure: compute the next state from `state` and the current wall ms.
    Returns either a new state (advanced) or one of the sentinels:
      ::pre-epoch        wall ms is before the miniforge epoch — the
@@ -148,29 +220,7 @@
     :else
     (assoc state :last-ts now-ms :last-seq 0)))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Worker-id leasing (FileLock-based)
-
-(defn- default-workers-dir
-  []
-  (io/file (config/miniforge-home) "events" ".workers"))
-
-(defn- lease-io-anomaly
-  [workers-dir lease-path id error]
-  (cond-> (response/make-anomaly
-           :anomalies/unavailable
-           (messages/t :snowflake/lease-io-failure
-                       {:worker-id id
-                        :lease-path (.getAbsolutePath lease-path)})
-           {:reason :lease-io-failure
-            :worker-id id
-            :lease-path (.getAbsolutePath lease-path)
-            :workers-dir (.getAbsolutePath workers-dir)})
-    error (assoc :anomaly/ex-message (ex-message error)
-                 :anomaly/ex-class (str (class error)))
-    (ex-data error) (assoc :anomaly/ex-data (ex-data error))))
-
-(defn- workers-exhausted-anomaly
+(defn- ^{:stratum 1} workers-exhausted-anomaly
   [workers-dir]
   (response/make-anomaly
    :anomalies/busy
@@ -180,22 +230,7 @@
     :max    max-workers
     :workers-dir (.getAbsolutePath workers-dir)}))
 
-(defn- write-lease-metadata!
-  "Truncate `channel` and write the worker-id + acquire timestamp as
-   EDN. Force to disk. Metadata is informational only — the OS-level
-   FileLock release on JVM exit is what guarantees correctness, so
-   pid/host fields are not load-bearing and are deliberately omitted
-   to keep this namespace Babashka-loadable
-   (java.lang.management is not in BB)."
-  [channel worker-id]
-  (.truncate channel 0)
-  (let [meta  {:worker-id   worker-id
-               :acquired-at (System/currentTimeMillis)}
-        bytes (.getBytes (str (pr-str meta) "\n") "UTF-8")]
-    (.write channel (java.nio.ByteBuffer/wrap bytes))
-    (.force channel false)))
-
-(defn- try-acquire-slot
+(defn- ^{:stratum 1} try-acquire-slot
   "Try to acquire an exclusive FileLock on `{workers-dir}/{id}.lease`.
    Returns a map `{:channel ... :lock ... :worker-id id}` on success,
    `nil` if the slot is held by another holder. Does not retry.
@@ -240,7 +275,38 @@
       (catch Exception e
         (lease-io-anomaly workers-dir lease-path id e)))))
 
-(defn acquire-worker-lease!
+(defn ^{:stratum 1} close!
+  "Release the generator's worker-id lease. Idempotent."
+  [generator]
+  (when-let [lease (:lease generator)]
+    (release-lease! lease)))
+
+(defn- ^{:stratum 1} park-briefly!
+  "Park the calling thread for up to `park-budget-nanos`. Used by the
+   id-generation loop in place of `Thread/sleep` so there's no
+   millisecond-rounded delay and the call surface stays
+   `LockSupport`-style rather than the deprecated sleep idiom. The
+   thread can wake earlier on spurious signal; callers must re-check
+   their condition."
+  []
+  (.invoke @park-nanos-method
+           nil
+           (into-array Object [(Long/valueOf park-budget-nanos)])))
+
+(defn- ^{:stratum 1} pre-epoch-anomaly
+  [now-ms worker-id]
+  (response/make-anomaly
+   :anomalies/incorrect
+   (messages/t :snowflake/pre-epoch-clock
+               {:now-ms now-ms :epoch-ms miniforge-epoch-ms})
+   {:reason     :pre-epoch-clock
+    :now-ms     now-ms
+    :epoch-ms   miniforge-epoch-ms
+    :worker-id  worker-id}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} acquire-worker-lease!
   "Walk slots 0..1023 and acquire the first whose lease file is
    unlocked.
 
@@ -275,21 +341,30 @@
           lease lease
           :else (recur (inc id)))))))
 
-(defn release-lease!
-  "Release a worker-id lease. Idempotent. The OS would release on JVM
-   exit anyway; this is for explicit teardown (tests, shutdown hooks)."
-  [{:keys [lock channel raf]}]
-  (when lock
-    (try (.release lock) (catch Exception _)))
-  (when channel
-    (try (.close channel) (catch Exception _)))
-  (when raf
-    (try (.close raf) (catch Exception _))))
+(defn- ^{:stratum 2} handle-rollback!
+  "Side-effect: warn once on first rollback observation. Park before
+   the outer loop retries. Returns the new `warned?` value."
+  [{:keys [logger ^long worker-id]} now-ms last-ts warned?]
+  (when (not warned?)
+    (log-rollback! logger {:now-ms    now-ms
+                           :last-ts   last-ts
+                           :worker-id worker-id}))
+  (park-briefly!)
+  true)
 
-;------------------------------------------------------------------------------ Layer 1
+(defn- ^{:stratum 2} emit-id
+  "CAS the new state and return the composed id long. nil on CAS loss
+   (caller retries the outer loop)."
+  [state old new-state ^long worker-id]
+  (when (compare-and-set! state old new-state)
+    (compose-id (- ^long (:last-ts new-state) miniforge-epoch-ms)
+                worker-id
+                ^long (:last-seq new-state))))
+
+;------------------------------------------------------------------------------ Layer 3
+
 ;; Generator handle
-
-(defn create-generator
+(defn ^{:stratum 3} create-generator
   "Allocate a new snowflake generator. Acquires a worker-id lease under
    `:workers-dir` (default `~/.miniforge/events/.workers/`).
 
@@ -315,87 +390,7 @@
          :now-fn    now-fn
          :logger    logger}))))
 
-(defn close!
-  "Release the generator's worker-id lease. Idempotent."
-  [generator]
-  (when-let [lease (:lease generator)]
-    (release-lease! lease)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Id generation
-
-(defn- log-rollback!
-  [logger details]
-  (when logger
-    (log/warn logger :event-stream :snowflake/clock-rollback
-              {:message "Snowflake generator detected clock rollback; stalling"
-               :data    details})))
-
-(def ^:private ^:const ^long park-budget-nanos
-  "Park budget for the wait loop on clock-rollback / sequence-exhausted.
-   100µs is short enough to wake well before the next ms tick (so the
-   loop spins ~10× per ms in the worst case) but long enough to avoid
-   a CPU-burning busy-spin. `parkNanos` may wake earlier on signal —
-   that's fine, the outer loop simply re-checks the wall clock."
-  100000)
-
-(def ^:private park-nanos-method
-  "Lazily-resolved `java.util.concurrent.locks.LockSupport/parkNanos`
-   via `Class/forName` + reflection. The id-generation path only
-   executes on the JVM, but this namespace is transitively loaded
-   from Babashka-runtime bricks and BB does not ship
-   `java.util.concurrent.locks`. A static method call would force
-   compile-time class resolution and break BB load; this delay
-   defers it to the first JVM invocation."
-  (delay
-    (.getMethod (Class/forName "java.util.concurrent.locks.LockSupport")
-                "parkNanos"
-                (into-array Class [Long/TYPE]))))
-
-(defn- park-briefly!
-  "Park the calling thread for up to `park-budget-nanos`. Used by the
-   id-generation loop in place of `Thread/sleep` so there's no
-   millisecond-rounded delay and the call surface stays
-   `LockSupport`-style rather than the deprecated sleep idiom. The
-   thread can wake earlier on spurious signal; callers must re-check
-   their condition."
-  []
-  (.invoke @park-nanos-method
-           nil
-           (into-array Object [(Long/valueOf park-budget-nanos)])))
-
-(defn- pre-epoch-anomaly
-  [now-ms worker-id]
-  (response/make-anomaly
-   :anomalies/incorrect
-   (messages/t :snowflake/pre-epoch-clock
-               {:now-ms now-ms :epoch-ms miniforge-epoch-ms})
-   {:reason     :pre-epoch-clock
-    :now-ms     now-ms
-    :epoch-ms   miniforge-epoch-ms
-    :worker-id  worker-id}))
-
-(defn- handle-rollback!
-  "Side-effect: warn once on first rollback observation. Park before
-   the outer loop retries. Returns the new `warned?` value."
-  [{:keys [logger ^long worker-id]} now-ms last-ts warned?]
-  (when (not warned?)
-    (log-rollback! logger {:now-ms    now-ms
-                           :last-ts   last-ts
-                           :worker-id worker-id}))
-  (park-briefly!)
-  true)
-
-(defn- emit-id
-  "CAS the new state and return the composed id long. nil on CAS loss
-   (caller retries the outer loop)."
-  [state old new-state ^long worker-id]
-  (when (compare-and-set! state old new-state)
-    (compose-id (- ^long (:last-ts new-state) miniforge-epoch-ms)
-                worker-id
-                ^long (:last-seq new-state))))
-
-(defn next-id-long!
+(defn ^{:stratum 3} next-id-long!
   "Internal: generate the next snowflake as a long. Parks on
    clock rollback or sequence exhaustion (≤100µs per retry via
    `LockSupport/parkNanos` rather than `Thread/sleep`).
@@ -417,7 +412,9 @@
             ;; Lost CAS race against another thread — retry with fresh state.
             (recur warned?))))))
 
-(defn next-id!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} next-id!
   "Generate the next snowflake event id as a `java.util.UUID`. The
    snowflake bits live in the UUID's most-significant 64 bits; low 64
    bits are zero. The UUID's string form sorts lexically by creation
@@ -428,7 +425,7 @@
       id
       (long->uuid id))))
 
-(defn next-id-hex!
+(defn ^{:stratum 4} next-id-hex!
   "Generate the next snowflake event id as a 16-char lowercase hex
    string. Use this for filenames and other places where the UUID's
    hyphens are inconvenient."

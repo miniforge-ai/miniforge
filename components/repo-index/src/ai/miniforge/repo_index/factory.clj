@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.factory
   "Factory functions for repo-index domain maps.
 
@@ -25,9 +24,9 @@
    Layer 0 — pure data construction, no I/O or side effects.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; FileRecord
 
-(defn ->file-record
+;; FileRecord
+(defn ^{:stratum 0} ->file-record
   "Create a FileRecord map."
   [path blob-sha size lines language generated?]
   {:path path
@@ -37,10 +36,8 @@
    :language language
    :generated? generated?})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; RepoIndex
-
-(defn ->repo-index
+(defn ^{:stratum 0} ->repo-index
   "Create a RepoIndex map from entries and computed language frequencies."
   [tree-sha repo-root entries languages]
   {:tree-sha tree-sha
@@ -51,10 +48,8 @@
    :languages languages
    :indexed-at (java.util.Date.)})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; RepoMapEntry
-
-(defn ->repo-map-entry
+(defn ^{:stratum 0} ->repo-map-entry
   "Create a RepoMapEntry map from a FileRecord."
   [{:keys [path language lines size]}]
   {:path path
@@ -62,10 +57,8 @@
    :lines lines
    :size size})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; RepoMapSlice
-
-(defn ->repo-map-slice
+(defn ^{:stratum 0} ->repo-map-slice
   "Create a RepoMapSlice result map."
   [tree-sha entries text total-files shown-files truncated? token-estimate]
   {:tree-sha tree-sha
@@ -76,10 +69,8 @@
    :truncated? truncated?
    :token-estimate token-estimate})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; FileContent (returned by get-file)
-
-(defn ->file-content
+(defn ^{:stratum 0} ->file-content
   "Create a file-content result map."
   [path content lines truncated?]
   {:path path
@@ -87,37 +78,33 @@
    :lines lines
    :truncated? truncated?})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Render accumulator (used internally by repo-map generation)
-
-(defn ->render-acc
+(defn ^{:stratum 0} ->render-acc
   "Create the initial render accumulator."
   []
   {:text "" :tokens 0 :shown 0 :truncated? false})
 
-(defn render-acc-with
+(defn ^{:stratum 0} render-acc-with
   "Create a render accumulator with updated fields."
   [text tokens shown truncated?]
   {:text text :tokens tokens :shown shown :truncated? truncated?})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Search domain maps
-
-(defn ->snippet
+(defn ^{:stratum 0} ->snippet
   "Create a search result snippet map."
   [start-line end-line text]
   {:start-line start-line
    :end-line end-line
    :text text})
 
-(defn ->search-hit
+(defn ^{:stratum 0} ->search-hit
   "Create a search hit result map."
   [path score snippets]
   {:path path
    :score score
    :snippets snippets})
 
-(defn ->doc-entry
+(defn ^{:stratum 0} ->doc-entry
   "Create a document entry for the search inverted index."
   [path token-count term-freqs content]
   {:path path
@@ -125,13 +112,13 @@
    :term-freqs term-freqs
    :content content})
 
-(defn ->inverted-index
+(defn ^{:stratum 0} ->inverted-index
   "Create an empty inverted index accumulator."
   []
   {:term->doc-ids {}
    :doc-freq {}})
 
-(defn ->search-index
+(defn ^{:stratum 0} ->search-index
   "Create a SearchIndex map from docs, corpus stats, and inverted index."
   [doc-map doc-count avg-doc-length term->doc-ids doc-freq]
   {:docs doc-map

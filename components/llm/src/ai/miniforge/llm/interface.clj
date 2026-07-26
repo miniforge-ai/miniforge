@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.interface
   "Public API for LLM client using CLI backends.
    Supports claude CLI, cursor CLI, and mock backends."
@@ -29,14 +28,14 @@
    [ai.miniforge.llm.model-selector :as selector]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Backend information
 
-(def backends
+;; Backend information
+(def ^{:stratum 0} backends
   "Available CLI backends."
   impl/backends)
 
 ;; Re-export protocol for public API
-(def LLMClient
+(def ^{:stratum 0} LLMClient
   "Protocol clients implement for LLM interaction; the public extensibility
    point for custom backends. Methods: complete* [this request] -> result
    map ({:success true :content :usage} or {:success false :error :anomaly});
@@ -46,10 +45,8 @@
    -> the client's config map."
   p/LLMClient)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Client creation
-
-(defn create-client
+(defn ^{:stratum 0} create-client
   "Create a new LLM client.
 
    Options:
@@ -71,7 +68,7 @@
   ([] (records/create-client))
   ([opts] (records/create-client opts)))
 
-(defn backend-for-model
+(defn ^{:stratum 0} backend-for-model
   "Look up the backend keyword for a model-id string.
    Returns :claude, :codex, :gemini, :ollama, etc. based on the model catalog.
    Falls back to :codex for unknown models."
@@ -83,7 +80,7 @@
            :backend)
       :codex))
 
-(defn client-backend
+(defn ^{:stratum 0} client-backend
   "Return the backend keyword configured for an LLM client."
   [client]
   (when client
@@ -91,13 +88,7 @@
         p/get-config
         :backend)))
 
-(defn create-client-for-model
-  "Create a new LLM client using the appropriate backend for a model-id.
-   Looks up the model in the catalog to determine backend."
-  [model-id]
-  (create-client {:backend (backend-for-model model-id)}))
-
-(defn mock-client
+(defn ^{:stratum 0} mock-client
   "Create a mock client for testing.
 
    Options:
@@ -114,10 +105,8 @@
                   (impl/mock-exec-fn (or output "Mock response") :exit exit))]
     (records/create-client {:backend :claude :exec-fn exec-fn})))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Completion API
-
-(defn complete
+(defn ^{:stratum 0} complete
   "Send a completion request to the LLM.
 
    Arguments:
@@ -141,23 +130,7 @@
   [client request]
   (p/complete* client request))
 
-(defn chat
-  "Convenience function for simple single-turn chat.
-
-   Arguments:
-   - client  - Client created by create-client
-   - prompt  - User message string
-   - opts    - Optional map with :system, :max-tokens
-
-   Example:
-     (chat client \"What is 2+2?\")
-     (chat client \"Explain monads\" {:system \"Be concise.\"})"
-  ([client prompt]
-   (chat client prompt {}))
-  ([client prompt opts]
-   (complete client (assoc opts :prompt prompt))))
-
-(defn complete-stream
+(defn ^{:stratum 0} complete-stream
   "Send a streaming completion request to the LLM.
 
    Arguments:
@@ -181,50 +154,29 @@
   [client request on-chunk]
   (p/complete-stream* client request on-chunk))
 
-(defn chat-stream
-  "Convenience function for streaming single-turn chat.
-
-   Arguments:
-   - client   - Client created by create-client
-   - prompt   - User message string
-   - on-chunk - Callback for streaming chunks
-   - opts     - Optional map with :system, :max-tokens
-
-   Example:
-     (chat-stream client
-                  \"Tell me a story\"
-                  (fn [{:keys [delta]}] (print delta)))"
-  ([client prompt on-chunk]
-   (chat-stream client prompt on-chunk {}))
-  ([client prompt on-chunk opts]
-   (complete-stream client (assoc opts :prompt prompt) on-chunk)))
-
 ;; Response helpers
-
-(defn success?
+(defn ^{:stratum 0} success?
   "Check if a response was successful."
   [response]
   (:success response))
 
-(defn get-content
+(defn ^{:stratum 0} get-content
   "Extract content from a successful response."
   [response]
   (:content response))
 
-(defn get-error
+(defn ^{:stratum 0} get-error
   "Extract error details from a failed response."
   [response]
   (:error response))
 
-(defn rate-limited?
+(defn ^{:stratum 0} rate-limited?
   "Check if a response indicates the provider rate-limited the request."
   [response]
   (= :anomalies.agent/rate-limited (:anomaly response)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Progress Monitoring
-
-(defn create-progress-monitor
+(defn ^{:stratum 0} create-progress-monitor
   "Create a progress monitor for tracking workflow activity.
 
    Options:
@@ -240,7 +192,7 @@
   [opts]
   (pm/create-progress-monitor opts))
 
-(defn record-chunk!
+(defn ^{:stratum 0} record-chunk!
   "Record a streaming chunk as activity.
 
    Arguments:
@@ -254,7 +206,7 @@
   [monitor chunk-content]
   (pm/record-chunk! monitor chunk-content))
 
-(defn record-file-write!
+(defn ^{:stratum 0} record-file-write!
   "Record a file write as activity.
 
    Arguments:
@@ -266,7 +218,7 @@
   [monitor file-path]
   (pm/record-file-write! monitor file-path))
 
-(defn check-timeout
+(defn ^{:stratum 0} check-timeout
   "Check if monitor has timed out.
 
    Arguments:
@@ -285,7 +237,7 @@
   [monitor]
   (pm/check-timeout monitor))
 
-(defn get-stats
+(defn ^{:stratum 0} get-stats
   "Get current progress monitor statistics.
 
    Arguments:
@@ -305,10 +257,8 @@
   [monitor]
   (pm/get-stats monitor))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Model Selection API
-
-(defn get-model
+(defn ^{:stratum 0} get-model
   "Get a model's full profile by keyword.
 
    Example:
@@ -317,20 +267,20 @@
   [model-key]
   (registry/get-model model-key))
 
-(defn context-window-for-model-id
+(defn ^{:stratum 0} context-window-for-model-id
   "Context window (max input tokens) for a backend model-id string
    (e.g. \"claude-opus-4-6\"), or nil when uncatalogued. See N12 §2."
   [model-id]
   (registry/context-window-for-model-id model-id))
 
-(defn prompt-size-telemetry
+(defn ^{:stratum 0} prompt-size-telemetry
   "Pre-flight size gauge over the assembled system + user prompt:
    {:system-chars :user-chars :total-chars :estimated-input-tokens}.
    See N12 §3."
   [system prompt]
   (impl/prompt-size-telemetry system prompt))
 
-(defn get-models-by-capability
+(defn ^{:stratum 0} get-models-by-capability
   "Get models meeting or exceeding a capability level.
 
    Example:
@@ -338,7 +288,7 @@
   [capability min-level]
   (registry/get-models-by-capability capability min-level))
 
-(defn get-models-by-use-case
+(defn ^{:stratum 0} get-models-by-use-case
   "Get models that support a specific use-case.
 
    Example:
@@ -346,7 +296,7 @@
   [use-case]
   (registry/get-models-by-use-case use-case))
 
-(defn recommend-models-for-task-type
+(defn ^{:stratum 0} recommend-models-for-task-type
   "Get recommended models for a task type.
 
    Example:
@@ -354,7 +304,7 @@
   [task-type]
   (registry/recommend-models-for-task-type task-type))
 
-(defn select-model
+(defn ^{:stratum 0} select-model
   "Select optimal model based on task classification.
 
    Arguments:
@@ -373,7 +323,7 @@
   ([task-classification config constraints]
    (selector/select-model task-classification config constraints)))
 
-(defn select-model-for-phase
+(defn ^{:stratum 0} select-model-for-phase
   "Select model for a workflow phase.
 
    Example:
@@ -382,7 +332,7 @@
   [phase & {:keys [config constraints]}]
   (selector/select-model-for-phase phase :config config :constraints constraints))
 
-(defn explain-selection
+(defn ^{:stratum 0} explain-selection
   "Generate user-facing explanation of model selection.
 
    Example:
@@ -390,29 +340,67 @@
   [selection]
   (selector/explain-selection selection))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Capsule integration
-
-(def capsule-exec-fn
+(def ^{:stratum 0} capsule-exec-fn
   "Build a capsule-aware exec function for LLM clients running inside executors."
   impl/capsule-exec-fn)
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Cost estimation — single source of truth for token → USD pricing.
 ;; See ai.miniforge.llm.cost for the table and the arithmetic; this
 ;; re-export lets agent / workflow callers reach pricing without
 ;; depending on the impl namespace directly.
-
-(def estimate-cost
+(def ^{:stratum 0} estimate-cost
   "Estimate USD from {:input-tokens N :output-tokens N} usage and a
    model-id string. Returns 0.0 for unknown / unpriced models.
    See ai.miniforge.llm.cost/estimate-cost."
   cost/estimate-cost)
 
-(def pricing-for-model
+(def ^{:stratum 0} pricing-for-model
   "Look up {:input-per-1m :output-per-1m} pricing for a model-id.
    Returns nil when the model isn't in the cost table."
   cost/pricing-for-model)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-client-for-model
+  "Create a new LLM client using the appropriate backend for a model-id.
+   Looks up the model in the catalog to determine backend."
+  [model-id]
+  (create-client {:backend (backend-for-model model-id)}))
+
+(defn ^{:stratum 1} chat
+  "Convenience function for simple single-turn chat.
+
+   Arguments:
+   - client  - Client created by create-client
+   - prompt  - User message string
+   - opts    - Optional map with :system, :max-tokens
+
+   Example:
+     (chat client \"What is 2+2?\")
+     (chat client \"Explain monads\" {:system \"Be concise.\"})"
+  ([client prompt]
+   (chat client prompt {}))
+  ([client prompt opts]
+   (complete client (assoc opts :prompt prompt))))
+
+(defn ^{:stratum 1} chat-stream
+  "Convenience function for streaming single-turn chat.
+
+   Arguments:
+   - client   - Client created by create-client
+   - prompt   - User message string
+   - on-chunk - Callback for streaming chunks
+   - opts     - Optional map with :system, :max-tokens
+
+   Example:
+     (chat-stream client
+                  \"Tell me a story\"
+                  (fn [{:keys [delta]}] (print delta)))"
+  ([client prompt on-chunk]
+   (chat-stream client prompt on-chunk {}))
+  ([client prompt on-chunk opts]
+   (complete-stream client (assoc opts :prompt prompt) on-chunk)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

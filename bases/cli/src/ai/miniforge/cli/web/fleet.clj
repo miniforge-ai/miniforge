@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web.fleet
   "Fleet status and aggregation."
   (:require [ai.miniforge.cli.web.github :as github]))
 
-(defn format-time-ago [iso-timestamp]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} format-time-ago [iso-timestamp]
   (try
     (let [then (java.time.Instant/parse iso-timestamp)
           now (java.time.Instant/now)
@@ -35,7 +36,7 @@
         :else (str days "d ago")))
     (catch Exception _ "unknown")))
 
-(defn get-workflow-status [repos]
+(defn ^{:stratum 0} get-workflow-status [repos]
   (let [all-runs (->> repos
                       (mapcat #(map (fn [run] (assoc run :repo %))
                                     (github/fetch-workflow-runs %))))
@@ -51,7 +52,7 @@
      :succeeded (count succeeded)
      :runs (->> all-runs (sort-by :createdAt) reverse (take 5))}))
 
-(defn get-status [repos]
+(defn ^{:stratum 0} get-status [repos]
   (let [gh-status (github/check-auth)
         repo-statuses (when (:available gh-status)
                         (map github/check-repo repos))
@@ -68,7 +69,7 @@
                 :else :healthy)
      :last-check (java.time.Instant/now)}))
 
-(defn generate-summary [repos-with-prs]
+(defn ^{:stratum 0} generate-summary [repos-with-prs]
   (let [all-prs (mapcat :prs repos-with-prs)
         high-risk (filter #(= :high (get-in % [:analysis :risk])) all-prs)
         medium-risk (filter #(= :medium (get-in % [:analysis :risk])) all-prs)

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.responder-test
   "Unit tests for PR comment responder.
    Tests URL parsing, comment filtering, spec generation, and orchestration
@@ -30,9 +29,9 @@
    [ai.miniforge.pr-lifecycle.responder :as responder]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; PR URL parsing
 
-(deftest parse-pr-url-test
+;; PR URL parsing
+(deftest ^{:stratum 0} parse-pr-url-test
   (testing "parses standard GitHub PR URL"
     (let [result (responder/parse-pr-url "https://github.com/miniforge-ai/miniforge/pull/483")]
       (is (= "miniforge-ai" (:owner result)))
@@ -48,10 +47,8 @@
     (is (nil? (responder/parse-pr-url "not a url")))
     (is (nil? (responder/parse-pr-url nil)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Comment filtering
-
-(def review-comment
+(def ^{:stratum 0} review-comment
   {:comment/id 123
    :comment/body "Extract this function"
    :comment/author "reviewer"
@@ -59,63 +56,21 @@
    :comment/line 42
    :comment/type :review-comment})
 
-(def bot-comment
+(def ^{:stratum 0} bot-comment
   {:comment/id 456
    :comment/body "CI passed"
    :comment/author "github-actions[bot]"
    :comment/path "src/foo.clj"
    :comment/type :review-comment})
 
-(def issue-comment
+(def ^{:stratum 0} issue-comment
   {:comment/id 789
    :comment/body "General feedback"
    :comment/author "reviewer"
    :comment/type :issue-comment})
 
-(deftest filter-actionable-comments-test
-  (testing "keeps human review comments"
-    (let [result (responder/filter-actionable-comments [review-comment])]
-      (is (= 1 (count result)))))
-
-  (testing "filters bot comments"
-    (let [result (responder/filter-actionable-comments [review-comment bot-comment])]
-      (is (= 1 (count result)))
-      (is (= "reviewer" (:comment/author (first result))))))
-
-  (testing "filters issue comments (not inline review)"
-    (let [result (responder/filter-actionable-comments [review-comment issue-comment])]
-      (is (= 1 (count result)))))
-
-  (testing "returns empty for no actionable comments"
-    (is (empty? (responder/filter-actionable-comments [bot-comment issue-comment])))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Comment grouping
-
-(def comment-on-bar
-  (assoc review-comment :comment/id 124 :comment/path "src/bar.clj"))
-
-(def second-comment-on-foo
-  (assoc review-comment :comment/id 125 :comment/body "Also fix this"))
-
-(deftest group-comments-by-file-test
-  (testing "groups comments by path"
-    (let [groups (responder/group-comments-by-file
-                  [review-comment comment-on-bar second-comment-on-foo])]
-      (is (= 2 (count groups)))
-      (let [foo-group (first (filter #(= "src/foo.clj" (:path %)) groups))]
-        (is (= 2 (count (:comment-ids foo-group))))
-        (is (= #{123 125} (set (:comment-ids foo-group)))))))
-
-  (testing "skips comments without path"
-    (let [no-path (dissoc review-comment :comment/path)
-          groups (responder/group-comments-by-file [no-path])]
-      (is (empty? groups)))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Fix spec generation
-
-(deftest build-fix-spec-test
+(deftest ^{:stratum 0} build-fix-spec-test
   (testing "generates valid workflow spec with context"
     (let [group {:path "src/foo.clj"
                  :description "Extract this function"
@@ -134,10 +89,8 @@
           spec (responder/build-fix-spec group {:diff nil :files []})]
       (is (nil? (:task/existing-files spec))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Orchestration
-
-(deftest respond-to-comments-no-comments-test
+(deftest ^{:stratum 0} respond-to-comments-no-comments-test
   (testing "returns clean result when no comments found"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/ok {:comments []}))]
@@ -151,7 +104,60 @@
         (is (= 0 (:files-processed result)))
         (is (false? (:pushed? result)))))))
 
-(deftest respond-to-comments-comments-without-file-groups-test
+(deftest ^{:stratum 0} respond-to-comments-invalid-url-test
+  (testing "returns anomaly on unparseable PR URL"
+    (let [result (responder/respond-to-comments! "not-a-url" "/tmp" (fn [_ _] {}) (fn [] true) {})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
+
+(deftest ^{:stratum 0} respond-to-comments-fetch-failure-test
+  (testing "returns fetch anomaly without running fixes or pushing"
+    (let [fix-called? (atom false)
+          push-called? (atom false)]
+      (with-redefs [poller/fetch-pr-comments
+                    (fn [_ _] (dag/err :network "down"))]
+        (let [result (responder/respond-to-comments!
+                      "https://github.com/org/repo/pull/1"
+                      "/tmp/worktree"
+                      (fn [& _]
+                        (reset! fix-called? true)
+                        {})
+                      (fn []
+                        (reset! push-called? true)
+                        true)
+                      {})]
+          (is (anomaly/anomaly? result))
+          (is (= :fault (:anomaly/type result)))
+          (is (false? @fix-called?))
+          (is (false? @push-called?)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} filter-actionable-comments-test
+  (testing "keeps human review comments"
+    (let [result (responder/filter-actionable-comments [review-comment])]
+      (is (= 1 (count result)))))
+
+  (testing "filters bot comments"
+    (let [result (responder/filter-actionable-comments [review-comment bot-comment])]
+      (is (= 1 (count result)))
+      (is (= "reviewer" (:comment/author (first result))))))
+
+  (testing "filters issue comments (not inline review)"
+    (let [result (responder/filter-actionable-comments [review-comment issue-comment])]
+      (is (= 1 (count result)))))
+
+  (testing "returns empty for no actionable comments"
+    (is (empty? (responder/filter-actionable-comments [bot-comment issue-comment])))))
+
+;; Comment grouping
+(def ^{:stratum 1} comment-on-bar
+  (assoc review-comment :comment/id 124 :comment/path "src/bar.clj"))
+
+(def ^{:stratum 1} second-comment-on-foo
+  (assoc review-comment :comment/id 125 :comment/body "Also fix this"))
+
+(deftest ^{:stratum 1} respond-to-comments-comments-without-file-groups-test
   (testing "counts actionable comments even when no file groups are processable"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/ok {:comments [(dissoc review-comment :comment/path)]}))]
@@ -165,7 +171,7 @@
         (is (= 0 (:files-processed result)))
         (is (false? (:pushed? result)))))))
 
-(deftest respond-to-comments-with-comments-test
+(deftest ^{:stratum 1} respond-to-comments-with-comments-test
   (testing "processes comments, runs fix, and reports results"
     (let [fix-calls (atom [])]
       (with-redefs [poller/fetch-pr-comments
@@ -192,7 +198,7 @@
           (is (true? (get-in result [:fixes 0 :replied?])))
           (is (true? (get-in result [:fixes 0 :resolved?]))))))))
 
-(deftest respond-to-comments-fix-failure-test
+(deftest ^{:stratum 1} respond-to-comments-fix-failure-test
   (testing "reports failure and skips reply when fix fails"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/ok {:comments [review-comment]}))]
@@ -207,7 +213,7 @@
         (is (nil? (get-in result [:fixes 0 :replied?])))
         (is (false? (:pushed? result)))))))
 
-(deftest respond-to-comments-partial-success-test
+(deftest ^{:stratum 1} respond-to-comments-partial-success-test
   (testing "treats DAG partial success (failed status but PRs produced) as success"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/ok {:comments [review-comment]}))
@@ -228,7 +234,7 @@
         (is (true? (get-in result [:fixes 0 :replied?])))
         (is (true? (:pushed? result)))))))
 
-(deftest respond-to-comments-total-failure-test
+(deftest ^{:stratum 1} respond-to-comments-total-failure-test
   (testing "treats DAG failure with no PRs as failure"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/ok {:comments [review-comment]}))]
@@ -242,32 +248,21 @@
         (is (false? (get-in result [:fixes 0 :succeeded?])))
         (is (false? (:pushed? result)))))))
 
-(deftest respond-to-comments-invalid-url-test
-  (testing "returns anomaly on unparseable PR URL"
-    (let [result (responder/respond-to-comments! "not-a-url" "/tmp" (fn [_ _] {}) (fn [] true) {})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result))))))
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest respond-to-comments-fetch-failure-test
-  (testing "returns fetch anomaly without running fixes or pushing"
-    (let [fix-called? (atom false)
-          push-called? (atom false)]
-      (with-redefs [poller/fetch-pr-comments
-                    (fn [_ _] (dag/err :network "down"))]
-        (let [result (responder/respond-to-comments!
-                      "https://github.com/org/repo/pull/1"
-                      "/tmp/worktree"
-                      (fn [& _]
-                        (reset! fix-called? true)
-                        {})
-                      (fn []
-                        (reset! push-called? true)
-                        true)
-                      {})]
-          (is (anomaly/anomaly? result))
-          (is (= :fault (:anomaly/type result)))
-          (is (false? @fix-called?))
-          (is (false? @push-called?)))))))
+(deftest ^{:stratum 2} group-comments-by-file-test
+  (testing "groups comments by path"
+    (let [groups (responder/group-comments-by-file
+                  [review-comment comment-on-bar second-comment-on-foo])]
+      (is (= 2 (count groups)))
+      (let [foo-group (first (filter #(= "src/foo.clj" (:path %)) groups))]
+        (is (= 2 (count (:comment-ids foo-group))))
+        (is (= #{123 125} (set (:comment-ids foo-group)))))))
+
+  (testing "skips comments without path"
+    (let [no-path (dissoc review-comment :comment/path)
+          groups (responder/group-comments-by-file [no-path])]
+      (is (empty? groups)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

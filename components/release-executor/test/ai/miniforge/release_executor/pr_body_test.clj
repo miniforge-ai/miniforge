@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.pr-body-test
   "Tests for PR body update: sandbox/edit-pr-body! command generation
    and core/step-update-pr-body pipeline step behavior."
@@ -26,11 +25,12 @@
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.sandbox :as sandbox]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Mock executor
 ;; ============================================================================
-
-(defn- create-mock-executor
+(defn- ^{:stratum 0} create-mock-executor
   "Create a mock executor that records commands and returns configurable results."
   [& {:keys [responses default-response]
       :or {responses {}
@@ -55,11 +55,12 @@
        (environment-status [_ _] (dag/ok {:status :running})))
      commands]))
 
+;------------------------------------------------------------------------------ Layer 1
+
 ;; ============================================================================
 ;; sandbox/edit-pr-body! — command generation
 ;; ============================================================================
-
-(deftest edit-pr-body-generates-gh-pr-edit-command-test
+(deftest ^{:stratum 1} edit-pr-body-generates-gh-pr-edit-command-test
   (testing "edit-pr-body! calls gh pr edit with pr number and body"
     (let [[exec cmds] (create-mock-executor)
           _result (sandbox/edit-pr-body! exec "env-1" 42 "## Summary\nNew body")]
@@ -69,14 +70,14 @@
         (is (clojure.string/includes? cmd "--body"))
         (is (clojure.string/includes? cmd "## Summary"))))))
 
-(deftest edit-pr-body-escapes-single-quotes-test
+(deftest ^{:stratum 1} edit-pr-body-escapes-single-quotes-test
   (testing "edit-pr-body! escapes single quotes in body"
     (let [[exec cmds] (create-mock-executor)
           _result (sandbox/edit-pr-body! exec "env-1" 10 "it's a test")
           cmd (first @cmds)]
       (is (clojure.string/includes? cmd "it'\\''s a test")))))
 
-(deftest edit-pr-body-handles-nil-body-test
+(deftest ^{:stratum 1} edit-pr-body-handles-nil-body-test
   (testing "edit-pr-body! treats nil body as empty string"
     (let [[exec cmds] (create-mock-executor)
           _result (sandbox/edit-pr-body! exec "env-1" 5 nil)
@@ -84,20 +85,20 @@
       (is (clojure.string/includes? cmd "gh pr edit 5"))
       (is (clojure.string/includes? cmd "--body")))))
 
-(deftest edit-pr-body-forwards-exec-opts-test
+(deftest ^{:stratum 1} edit-pr-body-forwards-exec-opts-test
   (testing "edit-pr-body! accepts optional exec-opts (e.g. :env for GH_TOKEN)"
     (let [[exec cmds] (create-mock-executor)]
       ;; Should not throw — opts are forwarded to exec!
       (sandbox/edit-pr-body! exec "env-1" 7 "body" {:env {"GH_TOKEN" "tok"}})
       (is (= 1 (count @cmds))))))
 
-(deftest edit-pr-body-returns-success-on-zero-exit-test
+(deftest ^{:stratum 1} edit-pr-body-returns-success-on-zero-exit-test
   (testing "edit-pr-body! returns success when executor exits 0"
     (let [[exec _cmds] (create-mock-executor)
           result (sandbox/edit-pr-body! exec "env-1" 1 "body")]
       (is (:success? result)))))
 
-(deftest edit-pr-body-returns-failure-on-nonzero-exit-test
+(deftest ^{:stratum 1} edit-pr-body-returns-failure-on-nonzero-exit-test
   (testing "edit-pr-body! returns failure when executor exits non-zero"
     (let [[exec _cmds] (create-mock-executor
                          :responses {"gh pr edit" {:exit-code 1
@@ -110,8 +111,7 @@
 ;; ============================================================================
 ;; core/step-update-pr-body — pipeline step
 ;; ============================================================================
-
-(defn- make-state
+(defn- ^{:stratum 1} make-state
   "Build a minimal pipeline state for step-update-pr-body."
   [overrides]
   (let [[exec _cmds] (create-mock-executor)]
@@ -127,22 +127,24 @@
                            :release/commit-message "feat: test"}}
            overrides)))
 
-(deftest step-update-pr-body-skips-on-failure-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} step-update-pr-body-skips-on-failure-test
   (testing "step-update-pr-body passes through failed state unchanged"
     (let [state (assoc (make-state {}) :failure {:type :prior-failure})]
       (is (= state (core/step-update-pr-body state))))))
 
-(deftest step-update-pr-body-skips-when-no-create-pr-test
+(deftest ^{:stratum 2} step-update-pr-body-skips-when-no-create-pr-test
   (testing "step-update-pr-body returns state when :create-pr? is false"
     (let [state (make-state {:create-pr? false})]
       (is (= state (core/step-update-pr-body state))))))
 
-(deftest step-update-pr-body-skips-when-no-pr-number-test
+(deftest ^{:stratum 2} step-update-pr-body-skips-when-no-pr-number-test
   (testing "step-update-pr-body returns state when :pr-number is nil"
     (let [state (make-state {:pr-number nil})]
       (is (= state (core/step-update-pr-body state))))))
 
-(defn- degraded-body-state
+(defn- ^{:stratum 2} degraded-body-state
   "A pipeline state whose agent body is degraded (blank), so
    step-update-pr-body fires and posts the fallback render."
   [overrides]
@@ -151,7 +153,20 @@
                                      :release/pr-body ""}}
                      overrides)))
 
-(deftest step-update-pr-body-calls-edit-pr-body-test
+(deftest ^{:stratum 2} step-update-pr-body-skips-when-agent-body-present-test
+  (testing "a real agent :release/pr-body is NOT overwritten — the guard skips
+            edit-pr-body! (replaces the old :pr-doc-content-preference test; the
+            GitHub PR body and the committed docs file are separate surfaces)"
+    (let [called (atom false)]
+      (with-redefs [sandbox/edit-pr-body!
+                    (fn [& _args] (reset! called true) {:success? true})]
+        ;; make-state's default release-meta carries a real pr-body
+        (core/step-update-pr-body (make-state {}))
+        (is (not @called) "present agent body → step skips, body preserved")))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(deftest ^{:stratum 3} step-update-pr-body-calls-edit-pr-body-test
   (testing "with a DEGRADED agent body, step-update-pr-body posts the
             fallback-rendered body via sandbox/edit-pr-body! and returns state"
     (let [called (atom false)
@@ -171,18 +186,7 @@
           (is (= (:pr-number state) (:pr-number result)))
           (is (not (contains? result :failure))))))))
 
-(deftest step-update-pr-body-skips-when-agent-body-present-test
-  (testing "a real agent :release/pr-body is NOT overwritten — the guard skips
-            edit-pr-body! (replaces the old :pr-doc-content-preference test; the
-            GitHub PR body and the committed docs file are separate surfaces)"
-    (let [called (atom false)]
-      (with-redefs [sandbox/edit-pr-body!
-                    (fn [& _args] (reset! called true) {:success? true})]
-        ;; make-state's default release-meta carries a real pr-body
-        (core/step-update-pr-body (make-state {}))
-        (is (not @called) "present agent body → step skips, body preserved")))))
-
-(deftest step-update-pr-body-survives-exception-test
+(deftest ^{:stratum 3} step-update-pr-body-survives-exception-test
   (testing "step-update-pr-body catches exceptions and returns state (non-fatal)"
     (with-redefs [sandbox/edit-pr-body!
                   (fn [& _args]
@@ -193,7 +197,7 @@
         ;; Non-fatal — no :failure key
         (is (not (contains? result :failure)))))))
 
-(deftest step-update-pr-body-passes-github-token-test
+(deftest ^{:stratum 3} step-update-pr-body-passes-github-token-test
   (testing "step-update-pr-body threads github-token via gh-exec-opts"
     (let [seen-opts (atom nil)]
       (with-redefs [sandbox/edit-pr-body!

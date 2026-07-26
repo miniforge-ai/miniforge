@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane.decision-queue
   "Priority-ranked decision queue for the control plane.
 
@@ -24,27 +23,18 @@
    then by age (oldest first), with agents in :blocked state
    receiving a boost.
 
-   Built on the approval.clj pattern: atom-backed store with CRUD.
-
-   Layer 0: Decision creation
-   Layer 1: Decision resolution and status
-   Layer 2: Queue manager (atom-backed store)
-   Layer 3: Priority sorting and queries"
+   Built on the approval.clj pattern: atom-backed store with CRUD."
   (:require
    [ai.miniforge.decision.interface :as decision]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Decision creation
 
-(def ^:const priority-order
+;; Decision creation
+(def ^{:stratum 0} ^:const priority-order
   "Priority ranking — lower index = higher priority."
   [:critical :high :medium :low])
 
-(def ^:private priority-rank
-  "Map of priority keyword to numeric rank."
-  (zipmap priority-order (range)))
-
-(defn create-decision
+(defn ^{:stratum 0} create-decision
   "Create a new decision request.
 
    Arguments:
@@ -87,20 +77,18 @@
       (:deadline opts) (assoc :decision/deadline (:deadline opts))
       (:tags opts)     (assoc :decision/tags (set (:tags opts))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Decision resolution and status
-
-(defn pending?
+(defn ^{:stratum 0} pending?
   "Check if a decision is still pending."
   [decision]
   (= :pending (:decision/status decision)))
 
-(defn resolved?
+(defn ^{:stratum 0} resolved?
   "Check if a decision has been resolved."
   [decision]
   (= :resolved (:decision/status decision)))
 
-(defn- resolved-decision-record
+(defn- ^{:stratum 0} resolved-decision-record
   [decision resolution comment checkpoint episode]
   (cond-> (assoc decision
                  :decision/status :resolved
@@ -110,7 +98,74 @@
                  :decision/episode episode)
     (some? comment) (assoc :decision/comment comment)))
 
-(defn expired?
+(defn ^{:stratum 0} expire-decision
+  "Mark a decision as expired."
+  [decision]
+  (assoc decision :decision/status :expired))
+
+;; Queue manager (atom-backed store)
+(defn ^{:stratum 0} create-decision-manager
+  "Create a new decision manager.
+
+   Returns: Atom containing {:decisions {}}.
+
+   Example:
+     (def mgr (create-decision-manager))"
+  []
+  (atom {:decisions {}}))
+
+(defn ^{:stratum 0} submit-decision!
+  "Submit a new decision to the queue.
+
+   Arguments:
+   - manager  - Decision manager atom
+   - decision - Decision record (from create-decision)
+
+   Returns: The submitted decision."
+  [manager decision]
+  (swap! manager assoc-in [:decisions (:decision/id decision)] decision)
+  decision)
+
+(defn ^{:stratum 0} cancel-decision!
+  "Cancel a pending decision.
+
+   Returns: Updated decision, or nil if not found."
+  [manager decision-id]
+  (let [result (atom nil)]
+    (swap! manager
+           (fn [state]
+             (if-let [decision (get-in state [:decisions decision-id])]
+               (let [cancelled (assoc decision :decision/status :cancelled)]
+                 (reset! result cancelled)
+                 (assoc-in state [:decisions decision-id] cancelled))
+               (do (reset! result nil) state))))
+    @result))
+
+(defn ^{:stratum 0} get-decision
+  "Get a decision by ID."
+  [manager decision-id]
+  (get-in @manager [:decisions decision-id]))
+
+(defn ^{:stratum 0} decisions-for-agent
+  "Get all decisions for a specific agent.
+
+   Options:
+   - :status - Filter by decision status (:pending, :resolved, :expired)
+
+   Returns: Seq of decision records."
+  [manager agent-id & [opts]]
+  (let [decisions (vals (:decisions @manager))]
+    (cond->> decisions
+      true           (filter #(= agent-id (:decision/agent-id %)))
+      (:status opts) (filter #(= (:status opts) (:decision/status %))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private priority-rank
+  "Map of priority keyword to numeric rank."
+  (zipmap priority-order (range)))
+
+(defn ^{:stratum 1} expired?
   "Check if a decision has expired past its deadline."
   [decision]
   (or (= :expired (:decision/status decision))
@@ -118,7 +173,7 @@
         (and (pending? decision)
              (.after (java.util.Date.) deadline)))))
 
-(defn resolve-decision
+(defn ^{:stratum 1} resolve-decision
   "Resolve a decision with the human's choice.
 
    Arguments:
@@ -135,37 +190,35 @@
         episode (decision/update-episode (:decision/episode decision) checkpoint)]
     (resolved-decision-record decision resolution comment checkpoint episode)))
 
-(defn expire-decision
-  "Mark a decision as expired."
-  [decision]
-  (assoc decision :decision/status :expired))
+(defn ^{:stratum 1} expire-stale-decisions!
+  "Expire all decisions past their deadline.
+
+   Returns: Seq of expired decision IDs."
+  [manager]
+  (let [now (java.util.Date.)
+        expired-ids (atom [])]
+    (swap! manager
+           (fn [state]
+             (reduce-kv
+              (fn [s id decision]
+                (if (and (pending? decision)
+                         (:decision/deadline decision)
+                         (.after now (:decision/deadline decision)))
+                  (do (swap! expired-ids conj id)
+                      (assoc-in s [:decisions id] (expire-decision decision)))
+                  s))
+              state
+              (:decisions state))))
+    @expired-ids))
+
+(defn ^{:stratum 1} count-pending
+  "Count the number of pending decisions."
+  [manager]
+  (count (filter pending? (vals (:decisions @manager)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Queue manager (atom-backed store)
 
-(defn create-decision-manager
-  "Create a new decision manager.
-
-   Returns: Atom containing {:decisions {}}.
-
-   Example:
-     (def mgr (create-decision-manager))"
-  []
-  (atom {:decisions {}}))
-
-(defn submit-decision!
-  "Submit a new decision to the queue.
-
-   Arguments:
-   - manager  - Decision manager atom
-   - decision - Decision record (from create-decision)
-
-   Returns: The submitted decision."
-  [manager decision]
-  (swap! manager assoc-in [:decisions (:decision/id decision)] decision)
-  decision)
-
-(defn resolve-decision!
+(defn ^{:stratum 2} resolve-decision!
   "Resolve a pending decision in the queue.
 
    Arguments:
@@ -188,51 +241,8 @@
                (do (reset! result nil) state))))
     @result))
 
-(defn cancel-decision!
-  "Cancel a pending decision.
-
-   Returns: Updated decision, or nil if not found."
-  [manager decision-id]
-  (let [result (atom nil)]
-    (swap! manager
-           (fn [state]
-             (if-let [decision (get-in state [:decisions decision-id])]
-               (let [cancelled (assoc decision :decision/status :cancelled)]
-                 (reset! result cancelled)
-                 (assoc-in state [:decisions decision-id] cancelled))
-               (do (reset! result nil) state))))
-    @result))
-
-(defn get-decision
-  "Get a decision by ID."
-  [manager decision-id]
-  (get-in @manager [:decisions decision-id]))
-
-(defn expire-stale-decisions!
-  "Expire all decisions past their deadline.
-
-   Returns: Seq of expired decision IDs."
-  [manager]
-  (let [now (java.util.Date.)
-        expired-ids (atom [])]
-    (swap! manager
-           (fn [state]
-             (reduce-kv
-              (fn [s id decision]
-                (if (and (pending? decision)
-                         (:decision/deadline decision)
-                         (.after now (:decision/deadline decision)))
-                  (do (swap! expired-ids conj id)
-                      (assoc-in s [:decisions id] (expire-decision decision)))
-                  s))
-              state
-              (:decisions state))))
-    @expired-ids))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Priority sorting and queries
-
-(defn- decision-sort-key
+(defn- ^{:stratum 2} decision-sort-key
   "Compute sort key for priority ordering.
    Lower values = higher priority."
   [decision blocked-agent-ids]
@@ -243,7 +253,9 @@
         effective-priority (+ base-priority blocked-boost)]
     [effective-priority (.getTime (:decision/created-at decision))]))
 
-(defn pending-decisions
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} pending-decisions
   "Get all pending decisions, sorted by priority.
 
    Arguments:
@@ -256,24 +268,6 @@
     (->> (vals (:decisions @manager))
          (filter pending?)
          (sort-by #(decision-sort-key % blocked)))))
-
-(defn decisions-for-agent
-  "Get all decisions for a specific agent.
-
-   Options:
-   - :status - Filter by decision status (:pending, :resolved, :expired)
-
-   Returns: Seq of decision records."
-  [manager agent-id & [opts]]
-  (let [decisions (vals (:decisions @manager))]
-    (cond->> decisions
-      true           (filter #(= agent-id (:decision/agent-id %)))
-      (:status opts) (filter #(= (:status opts) (:decision/status %))))))
-
-(defn count-pending
-  "Count the number of pending decisions."
-  [manager]
-  (count (filter pending? (vals (:decisions @manager)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

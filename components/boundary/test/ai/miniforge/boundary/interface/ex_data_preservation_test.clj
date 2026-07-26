@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.ex-data-preservation-test
   "ex-data preservation. Libraries that throw `ExceptionInfo` carry
    structured data through `(ex-data e)`. Boundary must surface that
@@ -26,10 +25,14 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(defn- ex-data-from [chain]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} ex-data-from [chain]
   (-> chain chain/last-anomaly :anomaly/data :exception/data))
 
-(deftest plain-keyword-keys-survive
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} plain-keyword-keys-survive
   (testing "ex-data with simple keyword keys is preserved verbatim"
     (let [payload {:user/id 42 :retry? true}
           c (boundary/execute :db
@@ -38,7 +41,7 @@
                               (fn [] (throw (ex-info "lookup failed" payload))))]
       (is (= payload (ex-data-from c))))))
 
-(deftest namespaced-keys-survive
+(deftest ^{:stratum 1} namespaced-keys-survive
   (testing "namespaced ex-data keys are preserved without rewriting"
     (let [payload {:db.error/code :sql.unique-violation
                    :db.error/table "users"}
@@ -48,7 +51,7 @@
                               (fn [] (throw (ex-info "constraint" payload))))]
       (is (= payload (ex-data-from c))))))
 
-(deftest nested-data-structures-survive
+(deftest ^{:stratum 1} nested-data-structures-survive
   (testing "nested maps and vectors inside ex-data are preserved"
     (let [payload {:request {:url "https://x" :headers {"x-trace" "1"}}
                    :attempts [1 2 3]}
@@ -58,7 +61,7 @@
                               (fn [] (throw (ex-info "5xx" payload))))]
       (is (= payload (ex-data-from c))))))
 
-(deftest empty-ex-data-is-an-empty-map
+(deftest ^{:stratum 1} empty-ex-data-is-an-empty-map
   (testing "ex-info with an empty data map preserves the empty map (not nil)"
     (let [c (boundary/execute :db
                               (chain/create-chain :flow)
@@ -66,7 +69,7 @@
                               (fn [] (throw (ex-info "x" {}))))]
       (is (= {} (ex-data-from c))))))
 
-(deftest ex-data-preservation-survives-cause-chain
+(deftest ^{:stratum 1} ex-data-preservation-survives-cause-chain
   (testing "ex-data on the outer ExceptionInfo is preserved even when there is a cause"
     (let [root (RuntimeException. "root")
           wrap (ex-info "wrapped" {:layer :outer} root)

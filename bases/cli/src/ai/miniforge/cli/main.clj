@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main
   "CLI entry point for MiniForge Core and product CLIs.
 
@@ -86,9 +85,9 @@
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Composition seams (optional web/TUI providers) and pure helpers
 
-(defn- optional-composition-var
+;; Composition seams (optional web/TUI providers) and pure helpers
+(defn- ^{:stratum 0} optional-composition-var
   "Resolve a provider whose entire component is optional for this CLI product.
    This is the CLI's only late-binding boundary: miniforge-core loads this
    namespace without web-dashboard or TUI components on its classpath."
@@ -98,7 +97,7 @@
     (ns-resolve ns-sym var-sym)
     (catch Throwable _ nil)))
 
-(defn- caught-message
+(defn- ^{:stratum 0} caught-message
   [caught throwable]
   (cond
     (instance? Throwable caught)
@@ -114,104 +113,31 @@
     :else
     (str caught)))
 
-(defn- create-pr-train-manager
-  "Build the PR-train manager bound to `event-stream` so train
-   mutations (add-pr, complete-merge) publish governed events that
-   supervisory-state materializes for the consoles."
-  ([]
-   (create-pr-train-manager nil))
-  ([event-stream]
-   (try+
-     (if event-stream
-       (pr-train/create-manager {:event-stream event-stream})
-       (pr-train/create-manager))
-     (catch Object e
-       (println (messages/t :web/pr-train-warning
-                            {:error (caught-message e (:throwable &throw-context))}))
-       nil))))
-
-(defn- create-repo-dag-manager
-  []
-  (try+
-    (repo-dag/create-manager)
-    (catch Object e
-      (println (messages/t :web/repo-dag-warning
-                           {:error (caught-message e (:throwable &throw-context))}))
-      nil)))
-
-(defn- optional-web-launcher
-  "Compose the dashboard command when the product includes web-dashboard."
-  []
-  (when-let [start! (optional-composition-var
-                     'ai.miniforge.web-dashboard.interface
-                     'start!)]
-    (fn [{:keys [port]}]
-      (let [event-stream (es/create-event-stream)
-            _ (supervisory/ensure-attached! event-stream)
-            pr-train-manager (create-pr-train-manager event-stream)
-            repo-dag-manager (create-repo-dag-manager)]
-        (start! {:port port
-                 :event-stream event-stream
-                 :pr-train-manager pr-train-manager
-                 :repo-dag-manager repo-dag-manager})))))
-
-(def web-launcher
-  (optional-web-launcher))
-
-(def web-available?
-  (some? web-launcher))
-
-(alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
-(alter-var-root #'cmd-monitoring/*start-web-dashboard!* (constantly web-launcher))
-
-;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
-;; This is an optional composition seam: miniforge-core includes the CLI
-;; without bundling the JVM TUI component.
-(def tui-launcher
-  (optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
-
-(def tui-available?
-  (some? tui-launcher))
-
-;; Propagate TUI availability to monitoring commands
-(alter-var-root #'cmd-monitoring/*tui-available?* (constantly tui-available?))
-(alter-var-root #'cmd-monitoring/*start-standalone-tui!* (constantly tui-launcher))
-(when tui-launcher
-  (cmd-shared/register-optional-fn!
-   'ai.miniforge.tui-views.interface/start-standalone-tui!
-   tui-launcher))
-(when-let [start-fleet-tui! (optional-composition-var 'ai.miniforge.tui-views.interface
-                                                      'start-fleet-tui!)]
-  (cmd-shared/register-optional-fn!
-   'ai.miniforge.tui-views.interface/start-fleet-tui!
-   start-fleet-tui!))
-
 ;; ── Constants and pure helpers ──────────────────────────────────────────────
-
-(def version-info
+(def ^{:stratum 0} version-info
   {:name (app-config/binary-name)
    :version "2026.01.20.1"
    :description (app-config/description)})
 
-(defn current-time-ms
+(defn ^{:stratum 0} current-time-ms
   "Current epoch time in milliseconds. Public so CLI tests can rebind it."
   []
   (System/currentTimeMillis))
 
-(defn get-opts
+(defn ^{:stratum 0} get-opts
   "Extract opts from dispatch result."
   [m]
   (if (contains? m :opts)
     (:opts m)
     m))
 
-(defn check-command
+(defn ^{:stratum 0} check-command
   "Check if a command is available."
   [cmd]
   (let [{:keys [exit]} (process/sh "which" cmd)]
     (zero? exit)))
 
-(defn- timestamp->epoch-ms
+(defn- ^{:stratum 0} timestamp->epoch-ms
   [timestamp]
   (cond
     (instance? java.util.Date timestamp)
@@ -227,7 +153,129 @@
 
     :else nil))
 
-(defn- stale-running?
+(defn- ^{:stratum 0} status-label
+  [status]
+  (messages/t (keyword "status" (str "value-" (name status)))))
+
+(defn ^{:stratum 0} workflow-list-cmd [_m] (workflow-runner/list-workflows!))
+
+(defn ^{:stratum 0} chain-list-cmd [_m] (workflow-runner/list-chains!))
+
+(defn ^{:stratum 0} logs-list-cmd [_m] (observability/handle-logs {:subcommand "list"}))
+
+(defn ^{:stratum 0} events-list-cmd [_m] (observability/handle-events {:subcommand "list"}))
+
+(defn ^{:stratum 0} worktree-cmd [m] (cmd-worktree/worktree-cmd m))
+
+(defn ^{:stratum 0} runtime-info-cmd [m] (cmd-runtime/runtime-info-cmd m))
+
+(defn ^{:stratum 0} runtime-run-cmd [m] (cmd-runtime/runtime-run-cmd m))
+
+(defn ^{:stratum 0} hook-eval-cmd
+  "Evaluate a tool-use request from a Claude PreToolUse hook.
+
+   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
+  [_m]
+  (System/exit (agent/hook-eval-stdin!)))
+
+(defn ^{:stratum 0} lsp-mcp-bridge-cmd
+  "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
+
+   Reads MINIFORGE_PROJECT_DIR env for the project root. Invoked automatically
+   by the MCP client; not intended for direct user use."
+  [_m]
+  (lsp-bridge/-main))
+
+(defn ^{:stratum 0} lsp-status-cmd [_m]
+  (lsp-tasks/status))
+
+(defn ^{:stratum 0} lsp-install-cmd [m]
+  (lsp-tasks/install (:args m)))
+
+(defn ^{:stratum 0} lsp-setup-cmd [m]
+  (lsp-tasks/setup (:args m)))
+
+(defn ^{:stratum 0} help-cmd
+  [_m]
+  (let [binary-name (app-config/binary-name)
+        description (app-config/description)
+        command-lines (messages/t :help/command-lines)
+        note (messages/t :help/note {:binary binary-name})
+        tui-install (when-let [tui-package (app-config/tui-package)]
+                      (messages/t :help/tui-install {:tui-package tui-package}))]
+    (println (str "\n"
+                  (messages/t :help/title {:binary binary-name
+                                           :description description})
+                  "\n\n"
+                  (messages/t :help/usage {:binary binary-name})
+                  "\n\n"
+                  (str/join "\n" command-lines)
+                  "\n\nNote:\n  "
+                  note
+                  (when tui-install
+                    (str "\n  " tui-install))
+                  "\n\nExamples:\n"
+                  (str/join "\n" (map #(str "  " (app-config/command-string %))
+                                      (app-config/help-examples)))
+                  "\n"))))
+
+(defn- ^{:stratum 0} handle-unknown-command
+  "Print help for an unrecognized CLI command."
+  [{:keys [wrong-input dispatch all-commands]}]
+  (display/print-error (messages/t :main/unknown-command
+                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
+  (println)
+  (when (and (= (first dispatch) "fleet")
+             (contains? #{"web" "dashboard" "tui"} wrong-input))
+    (println (messages/t :main/did-you-mean))
+    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
+    (println))
+  (when (seq all-commands)
+    (println (messages/t :main/available-commands
+                         {:scope (if (seq dispatch)
+                                   (str "'" (str/join " " dispatch) "' ")
+                                   "")}))
+    (doseq [cmd all-commands]
+      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
+    (println))
+  (println (messages/t :main/run-help
+                       {:command (app-config/command-string "help")}))
+  (System/exit 1))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} create-pr-train-manager
+  "Build the PR-train manager bound to `event-stream` so train
+   mutations (add-pr, complete-merge) publish governed events that
+   supervisory-state materializes for the consoles."
+  ([]
+   (create-pr-train-manager nil))
+  ([event-stream]
+   (try+
+     (if event-stream
+       (pr-train/create-manager {:event-stream event-stream})
+       (pr-train/create-manager))
+     (catch Object e
+       (println (messages/t :web/pr-train-warning
+                            {:error (caught-message e (:throwable &throw-context))}))
+       nil))))
+
+(defn- ^{:stratum 1} create-repo-dag-manager
+  []
+  (try+
+    (repo-dag/create-manager)
+    (catch Object e
+      (println (messages/t :web/repo-dag-warning
+                           {:error (caught-message e (:throwable &throw-context))}))
+      nil)))
+
+;; TUI components loaded conditionally (only in JVM/jlink bundled runtime).
+;; This is an optional composition seam: miniforge-core includes the CLI
+;; without bundling the JVM TUI component.
+(def ^{:stratum 1} tui-launcher
+  (optional-composition-var 'ai.miniforge.tui-views.interface 'start-standalone-tui!))
+
+(defn- ^{:stratum 1} stale-running?
   [last-updated]
   (when-let [last-updated-ms (timestamp->epoch-ms last-updated)]
     (let [configured-threshold-ms (:running-stale-threshold-ms (app-config/status-config))
@@ -238,36 +286,7 @@
       (> (- (current-time-ms) last-updated-ms)
          threshold-ms))))
 
-(defn- reconstructed-status
-  [reconstructed last-updated]
-  (cond
-    (wr/completed? reconstructed) :completed
-    (wr/failed? reconstructed) :failed
-    (wr/paused? reconstructed) :paused
-    (stale-running? last-updated) :stale
-    :else :running))
-
-(defn- status-label
-  [status]
-  (messages/t (keyword "status" (str "value-" (name status)))))
-
-(defn- workflow-status-summary
-  [workflow-id]
-  (let [events-dir (app-config/events-dir)
-        events (es/read-workflow-events-by-id events-dir workflow-id)
-        reconstructed (wr/reconstruct-context events-dir workflow-id)
-        last-event (last events)]
-    (when (anomaly/anomaly? reconstructed)
-      (throw (ex-info (:anomaly/message reconstructed) reconstructed)))
-    {:workflow-id workflow-id
-     :status (reconstructed-status reconstructed (:event/timestamp last-event))
-     :spec-name (some-> reconstructed :workflow-spec :name)
-     :event-count (:event-count reconstructed)
-     :completed-phases (:completed-phases reconstructed)
-     :completed-dag-task-count (count (:completed-dag-tasks reconstructed))
-     :last-updated (:event/timestamp last-event)}))
-
-(defn- print-workflow-status
+(defn- ^{:stratum 1} print-workflow-status
   [{:keys [workflow-id status spec-name event-count completed-phases
            completed-dag-task-count last-updated]}]
   (let [unknown (messages/t :status/value-unknown)
@@ -284,29 +303,13 @@
     (println (messages/t :status/field-completed-dag-tasks
                          {:value completed-dag-task-count}))))
 
-(defn- all-workflow-summaries
-  []
-  (let [events-dir (app-config/events-dir)]
-    (if (fs/exists? events-dir)
-      (->> (fs/list-dir events-dir)
-           (filter fs/directory?)
-           (map #(fs/file-name %))
-           (keep (fn [workflow-id]
-                   (try
-                     (workflow-status-summary workflow-id)
-                     (catch Exception _ nil))))
-           (sort-by :last-updated #(compare %2 %1)))
-      [])))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Command implementations
-
-(defn version-cmd
+(defn ^{:stratum 1} version-cmd
   [_m]
   (println (str (:name version-info) " " (:version version-info)))
   (println (:description version-info)))
 
-(defn doctor-cmd
+(defn ^{:stratum 1} doctor-cmd
   [_m]
   (println "\n" (display/style (app-config/system-check-title) :foreground :cyan :bold true) "\n")
 
@@ -339,7 +342,266 @@
 
     (println)))
 
-(defn status-cmd
+;; Config commands — one-liner delegates
+(defn ^{:stratum 1} config-init-cmd [m] (config/cmd-init (get-opts m)))
+
+(defn ^{:stratum 1} config-list-cmd [m] (config/cmd-list (get-opts m)))
+
+(defn ^{:stratum 1} config-get-cmd [m] (config/cmd-get (get-opts m)))
+
+(defn ^{:stratum 1} config-set-cmd [m] (config/cmd-set (get-opts m)))
+
+(defn ^{:stratum 1} config-edit-cmd [m] (config/cmd-edit (get-opts m)))
+
+(defn ^{:stratum 1} config-reset-cmd [m] (config/cmd-reset (get-opts m)))
+
+(defn ^{:stratum 1} config-backends-cmd [m] (config/cmd-backends (get-opts m)))
+
+(defn ^{:stratum 1} config-backend-cmd [m] (config/cmd-backend (get-opts m)))
+
+(defn ^{:stratum 1} config-validate-cmd [m] (config/cmd-validate (get-opts m)))
+
+;; Workflow commands
+(defn ^{:stratum 1} workflow-run-cmd
+  [m]
+  (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
+    (if-not workflow-id
+      (display/print-error (messages/t :workflow-run/usage
+                                       {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
+      (try
+        (workflow-runner/run-workflow!
+         (keyword (str/replace workflow-id #"^:" ""))
+         {:version (or version "latest")
+          :input input
+          :input-json input-json
+          :output (or output :pretty)
+          :quiet (boolean quiet)
+          :dashboard-url dashboard-url})
+        (catch Exception e
+          (display/print-error (messages/t :workflow-run/failed
+                                           {:error (ex-message e)})))))))
+
+;; Workflow subcommands — spec-driven execution and lifecycle (N5)
+(defn ^{:stratum 1} workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
+
+(defn ^{:stratum 1} workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (get-opts m)))
+
+(defn ^{:stratum 1} workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
+
+(defn ^{:stratum 1} workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
+
+(defn ^{:stratum 1} workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
+
+;; Chain commands
+(defn ^{:stratum 1} chain-run-cmd
+  [m]
+  (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
+    (if-not chain-id
+      (display/print-error (messages/t :chain-run/usage
+                                       {:command (app-config/command-string "chain run <chain-id> [options]")}))
+      (try
+        (workflow-runner/run-chain!
+         (keyword (str/replace chain-id #"^:" ""))
+         {:version (or version "latest")
+          :spec spec
+          :input-json input-json
+          :quiet (boolean quiet)})
+        (catch Exception e
+          (display/print-error (messages/t :chain-run/failed
+                                           {:error (ex-message e)})))))))
+
+;; Observability commands
+(defn ^{:stratum 1} logs-tail-cmd [m] (observability/handle-logs (assoc (get-opts m) :subcommand "tail")))
+
+(defn ^{:stratum 1} events-tail-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "tail")))
+
+(defn ^{:stratum 1} events-show-cmd
+  "Render a human-readable timeline for a workflow from the local event log.
+   Delegates to the GROUP 3b events command module."
+  [m]
+  (cmd-events/events-show-cmd (get-opts m)))
+
+;; Delegated commands
+(defn ^{:stratum 1} run-cmd [m] (cmd-run/run-cmd (get-opts m)))
+
+(defn ^{:stratum 1} resume-cmd
+  "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
+   can be passed positionally, or via `--workflow-id`/`-w` / the legacy
+   `--resume`/`-r` flag (kept so existing docs keep working)."
+  [m]
+  (let [opts (get-opts m)
+        args (:args m)
+        wf-id (or (:workflow-id opts)
+                  (:resume opts)
+                  (first args))]
+    (if (str/blank? (str wf-id))
+      (display/print-error (messages/t :resume/missing-workflow-id))
+      (cmd-resume/resume-workflow wf-id opts))))
+
+(defn ^{:stratum 1} scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
+
+(defn ^{:stratum 1} init-cmd [m] (cmd-init/init-cmd (get-opts m)))
+
+(defn ^{:stratum 1} web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
+
+(defn ^{:stratum 1} tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
+
+(defn ^{:stratum 1} fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
+
+(defn ^{:stratum 1} fleet-stop-cmd [m] (cmd-fleet/fleet-stop-cmd (get-opts m)))
+
+(defn ^{:stratum 1} fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) config/default-user-config-path config/default-config))
+
+(defn ^{:stratum 1} fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) config/default-user-config-path config/default-config))
+
+(defn ^{:stratum 1} fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) config/default-user-config-path config/default-config))
+
+(defn ^{:stratum 1} fleet-watch-cmd [m] (cmd-fleet/fleet-watch-cmd (get-opts m)))
+
+(defn ^{:stratum 1} fleet-prs-cmd [m] (cmd-fleet/fleet-prs-cmd (get-opts m) config/default-user-config-path config/default-config))
+
+(defn ^{:stratum 1} pr-list-cmd [m]
+  (cmd-pr/pr-list-cmd (get-opts m)
+                      (fn [config-path]
+                        (cmd-fleet/load-config config-path config/default-user-config-path config/default-config))))
+
+(defn ^{:stratum 1} pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-resume-dispatcher-cmd [m] (cmd-pr-resume/pr-resume-dispatcher-cmd (get-opts m)))
+
+(defn ^{:stratum 1} pr-policy-respond-cmd [m] (cmd-pr-policy/pr-policy-respond-cmd (get-opts m)))
+
+;; Control Plane commands
+(defn ^{:stratum 1} cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
+
+(defn ^{:stratum 1} cp-decisions-cmd [m] (cmd-cp/decisions-cmd (get-opts m)))
+
+(defn ^{:stratum 1} cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
+
+(defn ^{:stratum 1} cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
+
+;; Policy commands (N5)
+(defn ^{:stratum 1} policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (get-opts m)))
+
+(defn ^{:stratum 1} policy-show-cmd    [m] (cmd-policy/policy-show-cmd    (get-opts m)))
+
+(defn ^{:stratum 1} policy-install-cmd [m] (cmd-policy/policy-install-cmd (get-opts m)))
+
+;; Evidence commands (N5)
+(defn ^{:stratum 1} evidence-list-cmd   [m] (cmd-evidence/evidence-list-cmd   (get-opts m)))
+
+(defn ^{:stratum 1} evidence-show-cmd   [m] (cmd-evidence/evidence-show-cmd   (get-opts m)))
+
+(defn ^{:stratum 1} evidence-export-cmd [m] (cmd-evidence/evidence-export-cmd (get-opts m)))
+
+;; Artifact commands (N5)
+(defn ^{:stratum 1} artifact-list-cmd       [m] (cmd-artifact/artifact-list-cmd       (get-opts m)))
+
+(defn ^{:stratum 1} artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (get-opts m)))
+
+;; ETL commands (N5)
+(defn ^{:stratum 1} etl-repo-cmd     [m] (cmd-etl/etl-repo-cmd     (get-opts m)))
+
+(defn ^{:stratum 1} etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
+
+(defn ^{:stratum 1} etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
+
+(defn ^{:stratum 1} etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
+
+(defn ^{:stratum 1} etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (get-opts m)))
+
+(defn ^{:stratum 1} context-server-cmd
+  "Run the MCP context server (internal — spawned as subprocess by the agent).
+
+   Reads JSON-RPC 2.0 from stdin, serves context_read/context_grep/context_glob
+   from a pre-populated cache with filesystem fallback, plus context_write which
+   writes to --workdir (the agent's worktree). Invoked automatically; not
+   intended for direct user use."
+  [m]
+  (let [{:keys [artifact-dir source-root workdir]} (get-opts m)]
+    (mcp-context-server/start-server artifact-dir source-root workdir)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} optional-web-launcher
+  "Compose the dashboard command when the product includes web-dashboard."
+  []
+  (when-let [start! (optional-composition-var
+                     'ai.miniforge.web-dashboard.interface
+                     'start!)]
+    (fn [{:keys [port]}]
+      (let [event-stream (es/create-event-stream)
+            _ (supervisory/ensure-attached! event-stream)
+            pr-train-manager (create-pr-train-manager event-stream)
+            repo-dag-manager (create-repo-dag-manager)]
+        (start! {:port port
+                 :event-stream event-stream
+                 :pr-train-manager pr-train-manager
+                 :repo-dag-manager repo-dag-manager})))))
+
+(def ^{:stratum 2} tui-available?
+  (some? tui-launcher))
+
+(defn- ^{:stratum 2} reconstructed-status
+  [reconstructed last-updated]
+  (cond
+    (wr/completed? reconstructed) :completed
+    (wr/failed? reconstructed) :failed
+    (wr/paused? reconstructed) :paused
+    (stale-running? last-updated) :stale
+    :else :running))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} web-launcher
+  (optional-web-launcher))
+
+(defn- ^{:stratum 3} workflow-status-summary
+  [workflow-id]
+  (let [events-dir (app-config/events-dir)
+        events (es/read-workflow-events-by-id events-dir workflow-id)
+        reconstructed (wr/reconstruct-context events-dir workflow-id)
+        last-event (last events)]
+    (when (anomaly/anomaly? reconstructed)
+      (throw (ex-info (:anomaly/message reconstructed) reconstructed)))
+    {:workflow-id workflow-id
+     :status (reconstructed-status reconstructed (:event/timestamp last-event))
+     :spec-name (some-> reconstructed :workflow-spec :name)
+     :event-count (:event-count reconstructed)
+     :completed-phases (:completed-phases reconstructed)
+     :completed-dag-task-count (count (:completed-dag-tasks reconstructed))
+     :last-updated (:event/timestamp last-event)}))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(def ^{:stratum 4} web-available?
+  (some? web-launcher))
+
+(defn- ^{:stratum 4} all-workflow-summaries
+  []
+  (let [events-dir (app-config/events-dir)]
+    (if (fs/exists? events-dir)
+      (->> (fs/list-dir events-dir)
+           (filter fs/directory?)
+           (map #(fs/file-name %))
+           (keep (fn [workflow-id]
+                   (try
+                     (workflow-status-summary workflow-id)
+                     (catch Exception _ nil))))
+           (sort-by :last-updated #(compare %2 %1)))
+      [])))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} status-cmd
   [m]
   (let [{:keys [workflow-id]} (get-opts m)]
     (if workflow-id
@@ -361,209 +623,10 @@
                                  {:value (or last-updated unknown)})))
           (println (str "  " none)))))))
 
-;; Config commands — one-liner delegates
-(defn config-init-cmd [m] (config/cmd-init (get-opts m)))
-(defn config-list-cmd [m] (config/cmd-list (get-opts m)))
-(defn config-get-cmd [m] (config/cmd-get (get-opts m)))
-(defn config-set-cmd [m] (config/cmd-set (get-opts m)))
-(defn config-edit-cmd [m] (config/cmd-edit (get-opts m)))
-(defn config-reset-cmd [m] (config/cmd-reset (get-opts m)))
-(defn config-backends-cmd [m] (config/cmd-backends (get-opts m)))
-(defn config-backend-cmd [m] (config/cmd-backend (get-opts m)))
-(defn config-validate-cmd [m] (config/cmd-validate (get-opts m)))
+;------------------------------------------------------------------------------ Layer 6
 
-;; Workflow commands
-(defn workflow-run-cmd
-  [m]
-  (let [{:keys [workflow-id version input input-json output quiet dashboard-url]} (get-opts m)]
-    (if-not workflow-id
-      (display/print-error (messages/t :workflow-run/usage
-                                       {:command (app-config/command-string "workflow run <workflow-id> [options]")}))
-      (try
-        (workflow-runner/run-workflow!
-         (keyword (str/replace workflow-id #"^:" ""))
-         {:version (or version "latest")
-          :input input
-          :input-json input-json
-          :output (or output :pretty)
-          :quiet (boolean quiet)
-          :dashboard-url dashboard-url})
-        (catch Exception e
-          (display/print-error (messages/t :workflow-run/failed
-                                           {:error (ex-message e)})))))))
-
-(defn workflow-list-cmd [_m] (workflow-runner/list-workflows!))
-
-;; Workflow subcommands — spec-driven execution and lifecycle (N5)
-(defn workflow-execute-cmd [m] (cmd-workflow/workflow-execute-cmd (get-opts m)))
-(defn workflow-inspect-cmd [m] (cmd-workflow/workflow-inspect-cmd (get-opts m)))
-(defn workflow-status-cmd  [m] (cmd-workflow/workflow-status-cmd  (get-opts m)))
-(defn workflow-cancel-cmd  [m] (cmd-workflow/workflow-cancel-cmd  (get-opts m)))
-(defn workflow-gc-scratch-cmd [m] (cmd-workflow/workflow-gc-scratch-cmd (get-opts m)))
-
-;; Chain commands
-(defn chain-run-cmd
-  [m]
-  (let [{:keys [chain-id version spec input-json quiet]} (get-opts m)]
-    (if-not chain-id
-      (display/print-error (messages/t :chain-run/usage
-                                       {:command (app-config/command-string "chain run <chain-id> [options]")}))
-      (try
-        (workflow-runner/run-chain!
-         (keyword (str/replace chain-id #"^:" ""))
-         {:version (or version "latest")
-          :spec spec
-          :input-json input-json
-          :quiet (boolean quiet)})
-        (catch Exception e
-          (display/print-error (messages/t :chain-run/failed
-                                           {:error (ex-message e)})))))))
-
-(defn chain-list-cmd [_m] (workflow-runner/list-chains!))
-
-;; Observability commands
-(defn logs-tail-cmd [m] (observability/handle-logs (assoc (get-opts m) :subcommand "tail")))
-(defn logs-list-cmd [_m] (observability/handle-logs {:subcommand "list"}))
-(defn events-tail-cmd [m] (observability/handle-events (assoc (get-opts m) :subcommand "tail")))
-(defn events-list-cmd [_m] (observability/handle-events {:subcommand "list"}))
-(defn events-show-cmd
-  "Render a human-readable timeline for a workflow from the local event log.
-   Delegates to the GROUP 3b events command module."
-  [m]
-  (cmd-events/events-show-cmd (get-opts m)))
-
-;; Delegated commands
-(defn run-cmd [m] (cmd-run/run-cmd (get-opts m)))
-
-(defn resume-cmd
-  "First-class `mf resume <workflow-id>` subcommand. The `<workflow-id>`
-   can be passed positionally, or via `--workflow-id`/`-w` / the legacy
-   `--resume`/`-r` flag (kept so existing docs keep working)."
-  [m]
-  (let [opts (get-opts m)
-        args (:args m)
-        wf-id (or (:workflow-id opts)
-                  (:resume opts)
-                  (first args))]
-    (if (str/blank? (str wf-id))
-      (display/print-error (messages/t :resume/missing-workflow-id))
-      (cmd-resume/resume-workflow wf-id opts))))
-(defn scan-cmd [m] (cmd-scan/scan-cmd (get-opts m)))
-(defn init-cmd [m] (cmd-init/init-cmd (get-opts m)))
-(defn worktree-cmd [m] (cmd-worktree/worktree-cmd m))
-(defn runtime-info-cmd [m] (cmd-runtime/runtime-info-cmd m))
-(defn runtime-run-cmd [m] (cmd-runtime/runtime-run-cmd m))
-(defn web-cmd [m] (cmd-monitoring/web-cmd (get-opts m)))
-(defn tui-cmd [m] (cmd-monitoring/tui-cmd (get-opts m)))
-(defn fleet-start-cmd [m] (cmd-fleet/fleet-start-cmd (get-opts m)))
-(defn fleet-stop-cmd [m] (cmd-fleet/fleet-stop-cmd (get-opts m)))
-(defn fleet-status-cmd [m] (cmd-fleet/fleet-status-cmd (get-opts m) config/default-user-config-path config/default-config))
-(defn fleet-add-cmd [m] (cmd-fleet/fleet-add-cmd (get-opts m) config/default-user-config-path config/default-config))
-(defn fleet-remove-cmd [m] (cmd-fleet/fleet-remove-cmd (get-opts m) config/default-user-config-path config/default-config))
-(defn fleet-watch-cmd [m] (cmd-fleet/fleet-watch-cmd (get-opts m)))
-(defn fleet-prs-cmd [m] (cmd-fleet/fleet-prs-cmd (get-opts m) config/default-user-config-path config/default-config))
-(defn pr-list-cmd [m]
-  (cmd-pr/pr-list-cmd (get-opts m)
-                      (fn [config-path]
-                        (cmd-fleet/load-config config-path config/default-user-config-path config/default-config))))
-(defn pr-review-cmd [m] (cmd-pr/pr-review-cmd (get-opts m)))
-(defn pr-respond-cmd [m] (cmd-pr/pr-respond-cmd (get-opts m)))
-(defn pr-merge-cmd [m] (cmd-pr/pr-merge-cmd (get-opts m)))
-(defn pr-monitor-cmd [m] (cmd-pr/pr-monitor-cmd (get-opts m)))
-(defn pr-review-monitor-cmd [m] (cmd-pr-review-monitor/pr-review-monitor-cmd (get-opts m)))
-(defn pr-resume-dispatcher-cmd [m] (cmd-pr-resume/pr-resume-dispatcher-cmd (get-opts m)))
-(defn pr-policy-respond-cmd [m] (cmd-pr-policy/pr-policy-respond-cmd (get-opts m)))
-
-;; Control Plane commands
-(defn cp-status-cmd [m] (cmd-cp/status-cmd (get-opts m)))
-(defn cp-decisions-cmd [m] (cmd-cp/decisions-cmd (get-opts m)))
-(defn cp-resolve-cmd [m] (cmd-cp/resolve-cmd (get-opts m)))
-(defn cp-terminate-cmd [m] (cmd-cp/terminate-cmd (get-opts m)))
-
-;; Policy commands (N5)
-(defn policy-list-cmd    [m] (cmd-policy/policy-list-cmd    (get-opts m)))
-(defn policy-show-cmd    [m] (cmd-policy/policy-show-cmd    (get-opts m)))
-(defn policy-install-cmd [m] (cmd-policy/policy-install-cmd (get-opts m)))
-
-;; Evidence commands (N5)
-(defn evidence-list-cmd   [m] (cmd-evidence/evidence-list-cmd   (get-opts m)))
-(defn evidence-show-cmd   [m] (cmd-evidence/evidence-show-cmd   (get-opts m)))
-(defn evidence-export-cmd [m] (cmd-evidence/evidence-export-cmd (get-opts m)))
-
-;; Artifact commands (N5)
-(defn artifact-list-cmd       [m] (cmd-artifact/artifact-list-cmd       (get-opts m)))
-(defn artifact-provenance-cmd [m] (cmd-artifact/artifact-provenance-cmd (get-opts m)))
-
-;; ETL commands (N5)
-(defn etl-repo-cmd     [m] (cmd-etl/etl-repo-cmd     (get-opts m)))
-(defn etl-run-cmd      [m] (cmd-etl/etl-run-cmd      (get-opts m)))
-(defn etl-list-cmd     [m] (cmd-etl/etl-list-cmd     (get-opts m)))
-(defn etl-validate-cmd [m] (cmd-etl/etl-validate-cmd (get-opts m)))
-(defn etl-registry-cmd [m] (cmd-etl/etl-registry-cmd (get-opts m)))
-
-(defn hook-eval-cmd
-  "Evaluate a tool-use request from a Claude PreToolUse hook.
-
-   Reads JSON from stdin, evaluates against policy, writes decision to stdout."
-  [_m]
-  (System/exit (agent/hook-eval-stdin!)))
-
-(defn context-server-cmd
-  "Run the MCP context server (internal — spawned as subprocess by the agent).
-
-   Reads JSON-RPC 2.0 from stdin, serves context_read/context_grep/context_glob
-   from a pre-populated cache with filesystem fallback, plus context_write which
-   writes to --workdir (the agent's worktree). Invoked automatically; not
-   intended for direct user use."
-  [m]
-  (let [{:keys [artifact-dir source-root workdir]} (get-opts m)]
-    (mcp-context-server/start-server artifact-dir source-root workdir)))
-
-(defn lsp-mcp-bridge-cmd
-  "Run the LSP-to-MCP bridge server (spawned by Claude Code/Desktop/Codex as MCP server).
-
-   Reads MINIFORGE_PROJECT_DIR env for the project root. Invoked automatically
-   by the MCP client; not intended for direct user use."
-  [_m]
-  (lsp-bridge/-main))
-
-(defn lsp-status-cmd [_m]
-  (lsp-tasks/status))
-
-(defn lsp-install-cmd [m]
-  (lsp-tasks/install (:args m)))
-
-(defn lsp-setup-cmd [m]
-  (lsp-tasks/setup (:args m)))
-
-(defn help-cmd
-  [_m]
-  (let [binary-name (app-config/binary-name)
-        description (app-config/description)
-        command-lines (messages/t :help/command-lines)
-        note (messages/t :help/note {:binary binary-name})
-        tui-install (when-let [tui-package (app-config/tui-package)]
-                      (messages/t :help/tui-install {:tui-package tui-package}))]
-    (println (str "\n"
-                  (messages/t :help/title {:binary binary-name
-                                           :description description})
-                  "\n\n"
-                  (messages/t :help/usage {:binary binary-name})
-                  "\n\n"
-                  (str/join "\n" command-lines)
-                  "\n\nNote:\n  "
-                  note
-                  (when tui-install
-                    (str "\n  " tui-install))
-                  "\n\nExamples:\n"
-                  (str/join "\n" (map #(str "  " (app-config/command-string %))
-                                      (app-config/help-examples)))
-                  "\n"))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; CLI dispatch
-
-(def dispatch-table
+(def ^{:stratum 6} dispatch-table
   [{:cmds ["version"] :fn version-cmd}
    {:cmds ["doctor"]  :fn doctor-cmd}
    {:cmds ["help"]    :fn help-cmd}
@@ -833,30 +896,9 @@
    {:cmds ["etl" "validate"]  :fn etl-validate-cmd :args->opts [:pack]}
    {:cmds ["etl" "registry"]  :fn etl-registry-cmd}])
 
-(defn- handle-unknown-command
-  "Print help for an unrecognized CLI command."
-  [{:keys [wrong-input dispatch all-commands]}]
-  (display/print-error (messages/t :main/unknown-command
-                                   {:command (str/join " " (conj (vec dispatch) wrong-input))}))
-  (println)
-  (when (and (= (first dispatch) "fleet")
-             (contains? #{"web" "dashboard" "tui"} wrong-input))
-    (println (messages/t :main/did-you-mean))
-    (println (str "  " (app-config/command-string (if (= wrong-input "dashboard") "web" wrong-input))))
-    (println))
-  (when (seq all-commands)
-    (println (messages/t :main/available-commands
-                         {:scope (if (seq dispatch)
-                                   (str "'" (str/join " " dispatch) "' ")
-                                   "")}))
-    (doseq [cmd all-commands]
-      (println (str "  " (app-config/command-string (str/join " " (conj (vec dispatch) cmd))))))
-    (println))
-  (println (messages/t :main/run-help
-                       {:command (app-config/command-string "help")}))
-  (System/exit 1))
+;------------------------------------------------------------------------------ Layer 7
 
-(defn -main
+(defn ^{:stratum 7} -main
   "CLI entry point."
   [& args]
   (try+
@@ -864,6 +906,26 @@
     #_{:clj-kondo/ignore [:unresolved-symbol]}
     (catch [:type :org.babashka/cli :cause :no-match] data
       (handle-unknown-command data))))
+
+(alter-var-root #'cmd-monitoring/*web-available?* (constantly web-available?))
+
+(alter-var-root #'cmd-monitoring/*start-web-dashboard!* (constantly web-launcher))
+
+;; Propagate TUI availability to monitoring commands
+(alter-var-root #'cmd-monitoring/*tui-available?* (constantly tui-available?))
+
+(alter-var-root #'cmd-monitoring/*start-standalone-tui!* (constantly tui-launcher))
+
+(when tui-launcher
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.tui-views.interface/start-standalone-tui!
+   tui-launcher))
+
+(when-let [start-fleet-tui! (optional-composition-var 'ai.miniforge.tui-views.interface
+                                                      'start-fleet-tui!)]
+  (cmd-shared/register-optional-fn!
+   'ai.miniforge.tui-views.interface/start-fleet-tui!
+   start-fleet-tui!))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

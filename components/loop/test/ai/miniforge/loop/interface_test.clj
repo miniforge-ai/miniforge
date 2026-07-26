@@ -15,32 +15,29 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [ai.miniforge.loop.interface :as loop]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def test-task
+;; Test fixtures
+(def ^{:stratum 0} test-task
   {:task/id (random-uuid)
    :task/type :implement})
 
-(defn valid-artifact []
+(defn ^{:stratum 0} valid-artifact []
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content "(defn hello [] \"world\")"})
 
-(defn make-generate-fn [artifact]
+(defn ^{:stratum 0} make-generate-fn [artifact]
   (fn [_task _ctx]
     {:artifact artifact
      :tokens 100}))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Schema re-export tests
-
-(deftest schema-exports-test
+(deftest ^{:stratum 0} schema-exports-test
   (testing "inner-loop-states contains expected values"
     (is (some #{:pending} loop/inner-loop-states))
     (is (some #{:complete} loop/inner-loop-states))
@@ -56,44 +53,14 @@
     (is (some #{:implement} loop/outer-loop-phases))
     (is (some #{:observe} loop/outer-loop-phases))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Inner loop API tests
-
-(deftest create-inner-loop-test
-  (testing "creates loop with default options"
-    (let [loop-state (loop/create-inner-loop test-task)]
-      (is (uuid? (:loop/id loop-state)))
-      (is (= :pending (:loop/state loop-state)))))
-
-  (testing "creates loop with custom options"
-    (let [loop-state (loop/create-inner-loop test-task {:max-iterations 10})]
-      (is (= 10 (get-in loop-state [:loop/config :max-iterations]))))))
-
-(deftest run-simple-test
-  (testing "successful run"
-    (let [result (loop/run-simple test-task
-                                  (make-generate-fn (valid-artifact))
-                                  {:max-iterations 3})]
-      (is (:success result))
-      (is (= 1 (:iterations result)))))
-
-  (testing "run with logging context"
-    (let [result (loop/run-simple test-task
-                                  (make-generate-fn (valid-artifact))
-                                  {:max-iterations 3
-                                   :logger nil})]
-      (is (:success result)))))
-
-(deftest termination-checks-test
+(deftest ^{:stratum 0} termination-checks-test
   (testing "terminal-state? detects terminal states"
     (is (loop/terminal-state? :complete))
     (is (loop/terminal-state? :failed))
     (is (not (loop/terminal-state? :pending)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Gates API tests
-
-(deftest gate-constructors-test
+(deftest ^{:stratum 0} gate-constructors-test
   (testing "syntax-gate creation"
     (let [gate (loop/syntax-gate)]
       (is (some? gate))))
@@ -111,7 +78,7 @@
                                  (fn [_a _c] (loop/pass-result :custom-check :custom)))]
       (is (some? gate)))))
 
-(deftest gate-sets-test
+(deftest ^{:stratum 0} gate-sets-test
   (testing "default-gates returns gates"
     (let [gates (loop/default-gates)]
       (is (seq gates))
@@ -125,14 +92,7 @@
     (let [gates (loop/strict-gates)]
       (is (seq gates)))))
 
-(deftest run-gates-test
-  (testing "run-gates returns result"
-    (let [artifact (valid-artifact)
-          result (loop/run-gates (loop/minimal-gates) artifact {})]
-      (is (:passed? result))
-      (is (seq (:results result))))))
-
-(deftest result-helpers-test
+(deftest ^{:stratum 0} result-helpers-test
   (testing "pass-result creates passing result"
     (let [result (loop/pass-result :test :syntax)]
       (is (:gate/passed? result))))
@@ -148,10 +108,8 @@
       (is (= :code (:code error)))
       (is (= "message" (:message error))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Repair API tests
-
-(deftest strategy-constructors-test
+(deftest ^{:stratum 0} strategy-constructors-test
   (testing "llm-fix-strategy creation"
     (let [strategy (loop/llm-fix-strategy)]
       (is (some? strategy))))
@@ -164,28 +122,14 @@
     (let [strategy (loop/escalate-strategy)]
       (is (some? strategy)))))
 
-(deftest default-strategies-test
+(deftest ^{:stratum 0} default-strategies-test
   (testing "default-strategies returns ordered list"
     (let [strategies (loop/default-strategies)]
       (is (seq strategies))
       (is (= 3 (count strategies))))))
 
-(deftest repair-result-helpers-test
-  (testing "repair-success creates success result"
-    (let [result (loop/repair-success :llm-fix (valid-artifact))]
-      (is (:success? result))
-      (is (some? (:artifact result)))))
-
-  (testing "repair-failure creates failure result"
-    (let [result (loop/repair-failure :llm-fix
-                                      [{:code :err :message "Error"}])]
-      (is (not (:success? result)))
-      (is (seq (:errors result))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Outer loop API tests (stubs)
-
-(deftest outer-loop-api-test
+(deftest ^{:stratum 0} outer-loop-api-test
   (let [spec {:spec/id (random-uuid)
               :description "Test spec"}]
     (testing "create-outer-loop"
@@ -219,10 +163,55 @@
         (is (= :implement (:phase/id def)))
         (is (= :implementer (:phase/agent def)))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Integration tests
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest step-by-step-control-test
+;; Inner loop API tests
+(deftest ^{:stratum 1} create-inner-loop-test
+  (testing "creates loop with default options"
+    (let [loop-state (loop/create-inner-loop test-task)]
+      (is (uuid? (:loop/id loop-state)))
+      (is (= :pending (:loop/state loop-state)))))
+
+  (testing "creates loop with custom options"
+    (let [loop-state (loop/create-inner-loop test-task {:max-iterations 10})]
+      (is (= 10 (get-in loop-state [:loop/config :max-iterations]))))))
+
+(deftest ^{:stratum 1} run-simple-test
+  (testing "successful run"
+    (let [result (loop/run-simple test-task
+                                  (make-generate-fn (valid-artifact))
+                                  {:max-iterations 3})]
+      (is (:success result))
+      (is (= 1 (:iterations result)))))
+
+  (testing "run with logging context"
+    (let [result (loop/run-simple test-task
+                                  (make-generate-fn (valid-artifact))
+                                  {:max-iterations 3
+                                   :logger nil})]
+      (is (:success result)))))
+
+(deftest ^{:stratum 1} run-gates-test
+  (testing "run-gates returns result"
+    (let [artifact (valid-artifact)
+          result (loop/run-gates (loop/minimal-gates) artifact {})]
+      (is (:passed? result))
+      (is (seq (:results result))))))
+
+(deftest ^{:stratum 1} repair-result-helpers-test
+  (testing "repair-success creates success result"
+    (let [result (loop/repair-success :llm-fix (valid-artifact))]
+      (is (:success? result))
+      (is (some? (:artifact result)))))
+
+  (testing "repair-failure creates failure result"
+    (let [result (loop/repair-failure :llm-fix
+                                      [{:code :err :message "Error"}])]
+      (is (not (:success? result)))
+      (is (seq (:errors result))))))
+
+;; Integration tests
+(deftest ^{:stratum 1} step-by-step-control-test
   (testing "manual step execution"
     (let [loop-state (loop/create-inner-loop test-task {})
           generate-fn (make-generate-fn (valid-artifact))

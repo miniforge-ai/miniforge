@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.state-creation-test
   "Tests for train and PR state creation and CRUD."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.state :as state]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Train state creation tests
 ;; ============================================================================
-
-(deftest create-train-state-test
+(deftest ^{:stratum 0} create-train-state-test
   (testing "creates valid initial state"
     (let [train-id (random-uuid)
           dag-id (random-uuid)
@@ -47,7 +47,7 @@
                                           :description "A description")]
       (is (= "A description" (:train/description train))))))
 
-(deftest transition-train-status-test
+(deftest ^{:stratum 0} transition-train-status-test
   (testing "valid transition updates status"
     (let [train (state/create-train-state (random-uuid) "Test" (random-uuid))
           updated (state/transition-train-status train :open)]
@@ -68,8 +68,7 @@
 ;; ============================================================================
 ;; PR state creation tests
 ;; ============================================================================
-
-(deftest create-pr-state-test
+(deftest ^{:stratum 0} create-pr-state-test
   (testing "creates valid PR state"
     (let [pr (state/create-pr-state "acme/repo" 123
                                     "https://github.com/acme/repo/pull/123"
@@ -85,7 +84,7 @@
       (is (empty? (:pr/depends-on pr)))
       (is (empty? (:pr/blocks pr))))))
 
-(deftest find-pr-test
+(deftest ^{:stratum 0} find-pr-test
   (testing "finds PR by number"
     (let [pr1 (state/create-pr-state "acme/a" 100 "url1" "branch" "PR 1" 1)
           pr2 (state/create-pr-state "acme/b" 200 "url2" "branch" "PR 2" 2)
@@ -95,7 +94,7 @@
       (is (= pr2 (state/find-pr train 200)))
       (is (nil? (state/find-pr train 300))))))
 
-(deftest update-pr-test
+(deftest ^{:stratum 0} update-pr-test
   (testing "updates PR in train"
     (let [pr1 (state/create-pr-state "acme/a" 100 "url1" "branch" "PR 1" 1)
           train (-> (state/create-train-state (random-uuid) "Test" (random-uuid))
@@ -103,7 +102,7 @@
           updated (state/update-pr train 100 #(assoc % :pr/status :open))]
       (is (= :open (:pr/status (state/find-pr updated 100)))))))
 
-(deftest transition-pr-status-test
+(deftest ^{:stratum 0} transition-pr-status-test
   (testing "valid PR transition updates status"
     (let [pr (state/create-pr-state "acme/a" 100 "url" "branch" "PR" 1)
           train (-> (state/create-train-state (random-uuid) "Test" (random-uuid))

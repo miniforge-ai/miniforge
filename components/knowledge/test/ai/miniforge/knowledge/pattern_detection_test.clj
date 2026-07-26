@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.pattern-detection-test
   "Tests for recurring pattern detection and cross-execution synthesis."
   (:require
@@ -24,14 +23,15 @@
    [ai.miniforge.knowledge.learning :as learning]
    [ai.miniforge.knowledge.store :as store]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- fresh-store
+;------------------------------------------------------------------------------ Helpers
+(defn- ^{:stratum 0} fresh-store
   "Create a fresh in-memory knowledge store."
   []
   (store/create-store))
 
-(defn- seed-learnings!
+(defn- ^{:stratum 0} seed-learnings!
   "Seed a store with n learnings sharing the given tags.
    Returns the store."
   [store n tags & {:keys [agent confidence]
@@ -47,21 +47,21 @@
       :confidence confidence}))
   store)
 
-;------------------------------------------------------------------------------ Layer 0
-;; detect-recurring-patterns
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest detect-recurring-patterns-empty-store
+;; detect-recurring-patterns
+(deftest ^{:stratum 1} detect-recurring-patterns-empty-store
   (testing "Empty store returns no patterns"
     (let [store (fresh-store)]
       (is (empty? (knowledge/detect-recurring-patterns store))))))
 
-(deftest detect-recurring-patterns-below-threshold
+(deftest ^{:stratum 1} detect-recurring-patterns-below-threshold
   (testing "Fewer than 3 learnings sharing a tag returns no patterns"
     (let [store (fresh-store)]
       (seed-learnings! store 2 [:clojure :protocol])
       (is (empty? (knowledge/detect-recurring-patterns store))))))
 
-(deftest detect-recurring-patterns-at-threshold
+(deftest ^{:stratum 1} detect-recurring-patterns-at-threshold
   (testing "Exactly 3 learnings sharing a tag returns a pattern"
     (let [store (fresh-store)]
       (seed-learnings! store 3 [:clojure :protocol])
@@ -71,7 +71,7 @@
         (is (every? #(= 3 (:count %)) patterns))
         (is (every? #(= 3 (count (:learnings %))) patterns))))))
 
-(deftest detect-recurring-patterns-above-threshold
+(deftest ^{:stratum 1} detect-recurring-patterns-above-threshold
   (testing "5 learnings sharing a tag returns pattern with count 5"
     (let [store (fresh-store)]
       (seed-learnings! store 5 [:namespace])
@@ -80,14 +80,14 @@
         (is (= :namespace (:tag (first patterns))))
         (is (= 5 (:count (first patterns))))))))
 
-(deftest detect-recurring-patterns-excludes-noise-tags
+(deftest ^{:stratum 1} detect-recurring-patterns-excludes-noise-tags
   (testing "Default exclude-tags filters :inner-loop and :repair"
     (let [store (fresh-store)]
       ;; These learnings only have excluded tags
       (seed-learnings! store 5 [:inner-loop :repair])
       (is (empty? (knowledge/detect-recurring-patterns store))))))
 
-(deftest detect-recurring-patterns-custom-threshold
+(deftest ^{:stratum 1} detect-recurring-patterns-custom-threshold
   (testing "Custom min-occurrences is respected"
     (let [store (fresh-store)]
       (seed-learnings! store 2 [:rare-pattern])
@@ -97,7 +97,7 @@
         (is (= 1 (count patterns)))
         (is (= :rare-pattern (:tag (first patterns))))))))
 
-(deftest detect-recurring-patterns-custom-exclude-tags
+(deftest ^{:stratum 1} detect-recurring-patterns-custom-exclude-tags
   (testing "Custom exclude-tags overrides defaults"
     (let [store (fresh-store)]
       (seed-learnings! store 4 [:inner-loop :real-tag])
@@ -110,7 +110,7 @@
                           store {:exclude-tags #{}})]
         (is (= 2 (count all-patterns)))))))
 
-(deftest detect-recurring-patterns-sorted-by-frequency
+(deftest ^{:stratum 1} detect-recurring-patterns-sorted-by-frequency
   (testing "Patterns are sorted by count descending"
     (let [store (fresh-store)]
       (seed-learnings! store 5 [:frequent])
@@ -119,7 +119,7 @@
         (is (= [:frequent :moderate]
                (mapv :tag patterns)))))))
 
-(deftest detect-recurring-patterns-learning-summaries
+(deftest ^{:stratum 1} detect-recurring-patterns-learning-summaries
   (testing "Each pattern includes learning summaries with expected keys"
     (let [store (fresh-store)]
       (seed-learnings! store 3 [:protocol])
@@ -132,16 +132,14 @@
           (is (contains? summary :title))
           (is (contains? summary :confidence)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; synthesize-recurring-patterns!
-
-(deftest synthesize-patterns-no-patterns
+(deftest ^{:stratum 1} synthesize-patterns-no-patterns
   (testing "No patterns means 0 synthesized"
     (let [store (fresh-store)]
       (seed-learnings! store 2 [:not-enough])
       (is (= 0 (knowledge/synthesize-recurring-patterns! store))))))
 
-(deftest synthesize-patterns-creates-meta-loop-learnings
+(deftest ^{:stratum 1} synthesize-patterns-creates-meta-loop-learnings
   (testing "Patterns above threshold produce meta-loop learnings"
     (let [store (fresh-store)]
       (seed-learnings! store 4 [:protocol])
@@ -158,14 +156,14 @@
           (is (some #{:meta-loop} (:zettel/tags pattern-learning)))
           (is (some #{:protocol} (:zettel/tags pattern-learning))))))))
 
-(deftest synthesize-patterns-idempotent
+(deftest ^{:stratum 1} synthesize-patterns-idempotent
   (testing "Second call produces 0 new patterns"
     (let [store (fresh-store)]
       (seed-learnings! store 4 [:protocol])
       (is (= 1 (knowledge/synthesize-recurring-patterns! store)))
       (is (= 0 (knowledge/synthesize-recurring-patterns! store))))))
 
-(deftest synthesize-patterns-multiple-tags
+(deftest ^{:stratum 1} synthesize-patterns-multiple-tags
   (testing "Multiple distinct patterns each produce a learning"
     (let [store (fresh-store)]
       (seed-learnings! store 3 [:alpha])
@@ -173,7 +171,7 @@
       (let [synthesized (knowledge/synthesize-recurring-patterns! store)]
         (is (= 2 synthesized))))))
 
-(deftest synthesize-patterns-content-includes-learning-titles
+(deftest ^{:stratum 1} synthesize-patterns-content-includes-learning-titles
   (testing "Synthesized learning content includes titles of related learnings"
     (let [store (fresh-store)]
       (seed-learnings! store 3 [:namespace])
@@ -185,7 +183,7 @@
         (is (re-find #"Learning 1" (:zettel/content pattern-learning)))
         (is (re-find #"Learning 2" (:zettel/content pattern-learning)))))))
 
-(deftest synthesize-patterns-high-confidence
+(deftest ^{:stratum 1} synthesize-patterns-high-confidence
   (testing "Synthesized meta-loop learnings have 0.85 confidence"
     (let [store (fresh-store)]
       (seed-learnings! store 3 [:quality])

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.dag-kanban
   "DAG Kanban view -- N5 Section 3.2.5.
 
@@ -34,16 +33,18 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Task grouping
 
-(defn column-title
+;; Task grouping
+(defn ^{:stratum 0} column-title
   "Column title with item count."
   [label cards]
   (if (seq cards)
     (msg/t :kanban/column-title {:label label :count (count cards)})
     label))
 
-(defn group-tasks-by-status
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} group-tasks-by-status
   "Group workflow tasks into kanban columns."
   [workflows]
   (let [all-wfs (or workflows [])
@@ -73,10 +74,10 @@
       :color palette/status-pass
       :cards done-cards}]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Rendering
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render
+;; Rendering
+(defn ^{:stratum 2} render
   "Render the DAG kanban view.
    model: full app model
    [cols rows]: available screen area"

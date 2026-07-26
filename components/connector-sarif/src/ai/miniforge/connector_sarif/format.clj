@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-sarif.format
   "SARIF JSON and CSV parsing helpers.
    Handles SARIF v2.1.0 structure (tool -> runs[] -> results[] -> locations[]).
@@ -27,10 +26,11 @@
             [clojure.string :as str]
             [clojure.data.csv :as csv]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; --------------------------------------------------------------------------
 ;; SARIF v2.1.0 Parsing
-
-(defn- normalize-severity
+(defn- ^{:stratum 0} normalize-severity
   "Normalize SARIF level string to keyword."
   [level]
   (case (str/lower-case (or level "warning"))
@@ -40,7 +40,7 @@
     "none"    :none
     :warning))
 
-(defn- extract-location
+(defn- ^{:stratum 0} extract-location
   "Extract physical location from a SARIF location object."
   [loc]
   (let [phys (get loc "physicalLocation")
@@ -50,7 +50,39 @@
      :line   (get region "startLine")
      :column (get region "startColumn")}))
 
-(defn- parse-sarif-result
+;; --------------------------------------------------------------------------
+;; CSV Parsing
+(def ^{:stratum 0} default-csv-columns
+  "Default column mapping for CSV scan output."
+  {:rule-id  "Rule ID"
+   :message  "Message"
+   :severity "Severity"
+   :file     "File"
+   :line     "Line"
+   :column   "Column"})
+
+(defn- ^{:stratum 0} find-column-index
+  "Find column index by header name (case-insensitive)."
+  [headers col-name]
+  (let [target (str/lower-case col-name)]
+    (first (keep-indexed
+            (fn [idx h] (when (= (str/lower-case (str/trim h)) target) idx))
+            headers))))
+
+;; --------------------------------------------------------------------------
+;; File discovery and format detection
+(defn ^{:stratum 0} detect-format
+  "Detect file format from extension."
+  [path]
+  (cond
+    (str/ends-with? (str/lower-case path) ".sarif")     :sarif
+    (str/ends-with? (str/lower-case path) ".sarif.json") :sarif
+    (str/ends-with? (str/lower-case path) ".csv")        :csv
+    :else :unknown))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} parse-sarif-result
   "Parse a single SARIF result into a unified violation record."
   [result tool-name run-idx result-idx]
   (let [rule-id  (get result "ruleId" "unknown")
@@ -66,44 +98,7 @@
      :violation/source-tool tool-name
      :violation/raw         result}))
 
-(defn parse-sarif
-  "Parse a SARIF v2.1.0 JSON file into violation records.
-   Returns a vector of unified SarifViolation maps."
-  [path]
-  (let [content (json/parse-string (slurp path))
-        runs    (get content "runs" [])]
-    (into []
-          (mapcat
-           (fn [[run-idx run]]
-             (let [tool-name (get-in run ["tool" "driver" "name"] "unknown")
-                   results   (get run "results" [])]
-               (map-indexed
-                (fn [res-idx result]
-                  (parse-sarif-result result tool-name run-idx res-idx))
-                results)))
-           (map-indexed vector runs)))))
-
-;; --------------------------------------------------------------------------
-;; CSV Parsing
-
-(def default-csv-columns
-  "Default column mapping for CSV scan output."
-  {:rule-id  "Rule ID"
-   :message  "Message"
-   :severity "Severity"
-   :file     "File"
-   :line     "Line"
-   :column   "Column"})
-
-(defn- find-column-index
-  "Find column index by header name (case-insensitive)."
-  [headers col-name]
-  (let [target (str/lower-case col-name)]
-    (first (keep-indexed
-            (fn [idx h] (when (= (str/lower-case (str/trim h)) target) idx))
-            headers))))
-
-(defn- csv-row->violation
+(defn- ^{:stratum 1} csv-row->violation
   "Convert a CSV row to a unified violation record."
   [row headers col-map idx]
   (let [get-col (fn [k]
@@ -121,7 +116,38 @@
      :violation/source-tool "csv-import"
      :violation/raw         (zipmap headers row)}))
 
-(defn parse-csv
+(defn ^{:stratum 1} list-scan-files
+  "List scannable files in a path (file or directory)."
+  [source-path]
+  (let [f (io/file source-path)]
+    (cond
+      (not (.exists f)) []
+      (.isFile f)       [(.getAbsolutePath f)]
+      (.isDirectory f)  (->> (.listFiles f)
+                             (filter #(#{:sarif :csv} (detect-format (.getName %))))
+                             (mapv #(.getAbsolutePath %)))
+      :else [])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} parse-sarif
+  "Parse a SARIF v2.1.0 JSON file into violation records.
+   Returns a vector of unified SarifViolation maps."
+  [path]
+  (let [content (json/parse-string (slurp path))
+        runs    (get content "runs" [])]
+    (into []
+          (mapcat
+           (fn [[run-idx run]]
+             (let [tool-name (get-in run ["tool" "driver" "name"] "unknown")
+                   results   (get run "results" [])]
+               (map-indexed
+                (fn [res-idx result]
+                  (parse-sarif-result result tool-name run-idx res-idx))
+                results)))
+           (map-indexed vector runs)))))
+
+(defn ^{:stratum 2} parse-csv
   "Parse a CSV scan output file into violation records.
    Accepts optional column mapping override."
   ([path] (parse-csv path nil))
@@ -135,31 +161,9 @@
                (fn [idx row] (csv-row->violation row headers col-map idx))
                data)))))))
 
-;; --------------------------------------------------------------------------
-;; File discovery and format detection
+;------------------------------------------------------------------------------ Layer 3
 
-(defn detect-format
-  "Detect file format from extension."
-  [path]
-  (cond
-    (str/ends-with? (str/lower-case path) ".sarif")     :sarif
-    (str/ends-with? (str/lower-case path) ".sarif.json") :sarif
-    (str/ends-with? (str/lower-case path) ".csv")        :csv
-    :else :unknown))
-
-(defn list-scan-files
-  "List scannable files in a path (file or directory)."
-  [source-path]
-  (let [f (io/file source-path)]
-    (cond
-      (not (.exists f)) []
-      (.isFile f)       [(.getAbsolutePath f)]
-      (.isDirectory f)  (->> (.listFiles f)
-                             (filter #(#{:sarif :csv} (detect-format (.getName %))))
-                             (mapv #(.getAbsolutePath %)))
-      :else [])))
-
-(defn parse-file
+(defn ^{:stratum 3} parse-file
   "Parse a single file based on format. Returns violation records."
   [path fmt csv-columns]
   (let [actual-fmt (if (= fmt :auto) (detect-format path) (or fmt (detect-format path)))]

@@ -15,13 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.store
   "Knowledge store for zettels.
-   Layer 0: In-memory store protocol and implementation
-   Layer 0.5: File-backed persistent store
-   Layer 1: Query operations
-   Layer 2: Agent injection"
+   Layer 0: KnowledgeStore protocol, matches-query?, file-backed I/O
+     helpers, find-related, search, agent-manifest data, prompt-format
+     helper — all pure or protocol-shape, no same-file dependents yet
+   Layer 1: InMemoryStore / FileBackedStore (implement the Layer 0
+     protocol), get-agent-manifest, compute-manifest-entry,
+     format-for-prompt
+   Layer 2: create-store / create-file-backed-store (construct the
+     Layer 1 records), inject-knowledge-with-manifest
+   Layer 3: inject-knowledge (over inject-knowledge-with-manifest)
+
+   4 real strata — over the rule 210 budget of 3; a genuine namespace
+   split (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.config.interface :as config]
    [ai.miniforge.knowledge.messages :as messages]
@@ -34,9 +41,9 @@
    [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Store protocol and in-memory implementation
 
-(defprotocol KnowledgeStore
+;; Store protocol and in-memory implementation
+(defprotocol ^{:stratum 0} KnowledgeStore
   "Protocol for zettel storage and retrieval."
 
   (put-zettel [this zettel]
@@ -57,7 +64,7 @@
   (query [this query-map]
     "Query zettels matching criteria. Returns vector of zettels."))
 
-(defn matches-query?
+(defn ^{:stratum 0} matches-query?
   "Check if a zettel matches query criteria."
   [zettel {:keys [tags dewey-prefixes include-types exclude-types
                   text-search]}]
@@ -88,7 +95,160 @@
          (str/includes? (str/lower-case zettel-content)
                         (str/lower-case text-search))))))
 
-(defrecord InMemoryStore [zettels-by-id zettels-by-uid logger]
+;; File-backed persistent store
+(defn- ^{:stratum 0} expand-path
+  "Expand ~ in file paths to home directory."
+  [path]
+  (if (str/starts-with? path "~")
+    (str (System/getProperty "user.home") (subs path 1))
+    path))
+
+(defn- ^{:stratum 0} ensure-directory
+  "Ensure a directory exists, creating it if necessary."
+  [path]
+  (let [dir (io/file path)]
+    (when-not (.exists dir)
+      (.mkdirs dir))
+    dir))
+
+(defn- ^{:stratum 0} uid->filename
+  "Convert a zettel UID to a safe filename."
+  [uid]
+  (-> uid
+      (str/replace #"[^a-zA-Z0-9_-]" "_")
+      (str ".edn")))
+
+(defn- ^{:stratum 0} atomic-write!
+  "Write content to file via temp + move, preferring atomic replacement."
+  [file content]
+  (let [parent (.getParentFile file)
+        tmp (java.io.File/createTempFile "zettel-" ".edn.tmp" parent)]
+    (try
+      (spit tmp content)
+      (try
+        (Files/move (.toPath tmp)
+                    (.toPath file)
+                    (into-array StandardCopyOption
+                                [StandardCopyOption/ATOMIC_MOVE
+                                 StandardCopyOption/REPLACE_EXISTING]))
+        (catch Exception _e
+          (Files/move (.toPath tmp)
+                      (.toPath file)
+                      (into-array StandardCopyOption
+                                  [StandardCopyOption/REPLACE_EXISTING]))))
+      (finally
+        (when (.exists tmp)
+          (.delete tmp))))))
+
+(defn- ^{:stratum 0} load-zettel-file
+  "Load a single .edn zettel file. Returns zettel map or nil."
+  [file]
+  (try
+    (edn/read-string (slurp file))
+    (catch Exception _e nil)))
+
+;; Query operations
+(defn ^{:stratum 0} find-related
+  [store zettel-or-id & {:keys [max-hops direction] :or {max-hops 1 direction :both}}]
+  (let [start-zettel (if (map? zettel-or-id)
+                       zettel-or-id
+                       (get-zettel-by-id store zettel-or-id))]
+    (when start-zettel
+      (loop [hop 1
+             visited #{(:zettel/id start-zettel)}
+             frontier [start-zettel]
+             results []]
+        (if (or (> hop max-hops) (empty? frontier))
+          results
+          (let [new-ids (for [z frontier
+                              link (zettel/get-links z direction)
+                              :let [target-id (:link/target-id link)]
+                              :when (and target-id (not (visited target-id)))]
+                          target-id)
+                new-zettels (->> new-ids
+                                 distinct
+                                 (map #(get-zettel-by-id store %))
+                                 (remove nil?)
+                                 vec)]
+            (recur (inc hop)
+                   (into visited (map :zettel/id new-zettels))
+                   new-zettels
+                   (into results new-zettels))))))))
+
+(defn ^{:stratum 0} search
+  [store text]
+  (let [terms (str/split (str/lower-case text) #"\s+")
+        score-fn (fn [zettel]
+                   (let [content (str/lower-case
+                                  (str (:zettel/title zettel) " "
+                                       (:zettel/content zettel)))]
+                     (reduce + (map (fn [term]
+                                      (count (re-seq (re-pattern term) content)))
+                                    terms))))]
+    (->> (query store {:text-search text})
+         (map (fn [z] (assoc z :search-score (score-fn z))))
+         (sort-by :search-score >)
+         (mapv #(dissoc % :search-score)))))
+
+;; Agent injection
+(def ^{:stratum 0} default-agent-manifests
+  "Default knowledge injection configuration per agent role.
+
+   Dewey prefix filtering has been removed from this map. Phase-scoped rule
+   injection (including always-inject standards rules) is now handled by
+   `ai.miniforge.phase.agent-behavior/load-and-filter-behaviors`, which reads
+   from compiled policy packs (miniforge-standards.pack.edn and built-ins).
+
+   This manifest drives dynamic Zettelkasten knowledge retrieval only —
+   user-created zettels that may not follow any Dewey classification."
+  {:planner
+   {:agent-role :planner
+    :tags [:architecture :planning :workflow]
+    :types [:rule :decision :hub]
+    :max-zettels 20}
+
+   :implementer
+   {:agent-role :implementer
+    :tags [:coding :clojure :testing]
+    :types [:rule :learning :example]
+    :max-zettels 15}
+
+   :tester
+   {:agent-role :tester
+    :tags [:testing :coverage :assertions]
+    :types [:rule :example :learning]
+    :max-zettels 10}
+
+   :reviewer
+   {:agent-role :reviewer
+    :tags [:code-review :quality]
+    :types [:rule :learning]
+    :max-zettels 15}})
+
+(def ^{:stratum 0} ^:private manifest-score-weights
+  "Weights for computing manifest entry relevance scores.
+   Each weight controls how much a particular match type contributes
+   to the total score used for ranking and observability."
+  {:tag-match   1.0   ; per matching tag
+   :dewey-match 1.0   ; dewey classification prefix match
+   :type-match  0.5})  ; zettel type match
+
+;; Prompt formatting
+(defn ^{:stratum 0} format-zettel-for-prompt
+  "Format a single zettel as a compact markdown block for LLM context."
+  [zettel]
+  (str (messages/t :store/zettel-heading {:title (:zettel/title zettel)})
+       (when-let [dewey (:zettel/dewey zettel)]
+         (messages/t :store/zettel-dewey-tag {:dewey dewey}))
+       (when (= :learning (:zettel/type zettel))
+         (messages/t :store/learning-suffix))
+       "\n"
+       (:zettel/content zettel)
+       "\n"))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defrecord ^{:stratum 1} InMemoryStore [zettels-by-id zettels-by-uid logger]
   KnowledgeStore
   (put-zettel [_this zettel]
     (let [id (:zettel/id zettel)
@@ -124,69 +284,7 @@
                     matching)]
       (vec limited))))
 
-(defn create-store
-  [& [{:keys [logger]}]]
-  (->InMemoryStore
-   (atom {})
-   (atom {})
-   (or logger (log/create-logger {:min-level :info :output (fn [_])}))))
-
-;------------------------------------------------------------------------------ Layer 0.5
-;; File-backed persistent store
-
-(defn- expand-path
-  "Expand ~ in file paths to home directory."
-  [path]
-  (if (str/starts-with? path "~")
-    (str (System/getProperty "user.home") (subs path 1))
-    path))
-
-(defn- ensure-directory
-  "Ensure a directory exists, creating it if necessary."
-  [path]
-  (let [dir (io/file path)]
-    (when-not (.exists dir)
-      (.mkdirs dir))
-    dir))
-
-(defn- uid->filename
-  "Convert a zettel UID to a safe filename."
-  [uid]
-  (-> uid
-      (str/replace #"[^a-zA-Z0-9_-]" "_")
-      (str ".edn")))
-
-
-(defn- atomic-write!
-  "Write content to file via temp + move, preferring atomic replacement."
-  [file content]
-  (let [parent (.getParentFile file)
-        tmp (java.io.File/createTempFile "zettel-" ".edn.tmp" parent)]
-    (try
-      (spit tmp content)
-      (try
-        (Files/move (.toPath tmp)
-                    (.toPath file)
-                    (into-array StandardCopyOption
-                                [StandardCopyOption/ATOMIC_MOVE
-                                 StandardCopyOption/REPLACE_EXISTING]))
-        (catch Exception _e
-          (Files/move (.toPath tmp)
-                      (.toPath file)
-                      (into-array StandardCopyOption
-                                  [StandardCopyOption/REPLACE_EXISTING]))))
-      (finally
-        (when (.exists tmp)
-          (.delete tmp))))))
-
-(defn- load-zettel-file
-  "Load a single .edn zettel file. Returns zettel map or nil."
-  [file]
-  (try
-    (edn/read-string (slurp file))
-    (catch Exception _e nil)))
-
-(defn- scan-directory
+(defn- ^{:stratum 1} scan-directory
   "Scan a directory for .edn zettel files and load them all.
    Returns {:by-id {uuid zettel} :by-uid {uid zettel}}."
   [dir]
@@ -204,7 +302,7 @@
             (filter #(str/ends-with? (.getName %) ".edn"))))
       {:by-id {} :by-uid {}})))
 
-(defrecord FileBackedStore [base-path zettels-by-id zettels-by-uid logger]
+(defrecord ^{:stratum 1} FileBackedStore [base-path zettels-by-id zettels-by-uid logger]
   KnowledgeStore
   (put-zettel [_this zettel]
     (let [id (:zettel/id zettel)
@@ -246,117 +344,12 @@
                     matching)]
       (vec limited))))
 
-(defn create-file-backed-store
-  [& [{:keys [path logger]}]]
-  (let [base-path (expand-path (or path (str (config/miniforge-home) "/knowledge")))
-        _ (ensure-directory base-path)
-        log (or logger (log/create-logger {:min-level :info :output (fn [_])}))
-        initial (scan-directory base-path)]
-    (log/debug log :knowledge :knowledge/store-initialized
-               {:data {:path base-path
-                       :zettel-count (count (:by-id initial))}})
-    (->FileBackedStore
-     base-path
-     (atom (:by-id initial))
-     (atom (:by-uid initial))
-     log)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Query operations
-
-(defn find-related
-  [store zettel-or-id & {:keys [max-hops direction] :or {max-hops 1 direction :both}}]
-  (let [start-zettel (if (map? zettel-or-id)
-                       zettel-or-id
-                       (get-zettel-by-id store zettel-or-id))]
-    (when start-zettel
-      (loop [hop 1
-             visited #{(:zettel/id start-zettel)}
-             frontier [start-zettel]
-             results []]
-        (if (or (> hop max-hops) (empty? frontier))
-          results
-          (let [new-ids (for [z frontier
-                              link (zettel/get-links z direction)
-                              :let [target-id (:link/target-id link)]
-                              :when (and target-id (not (visited target-id)))]
-                          target-id)
-                new-zettels (->> new-ids
-                                 distinct
-                                 (map #(get-zettel-by-id store %))
-                                 (remove nil?)
-                                 vec)]
-            (recur (inc hop)
-                   (into visited (map :zettel/id new-zettels))
-                   new-zettels
-                   (into results new-zettels))))))))
-
-(defn search
-  [store text]
-  (let [terms (str/split (str/lower-case text) #"\s+")
-        score-fn (fn [zettel]
-                   (let [content (str/lower-case
-                                  (str (:zettel/title zettel) " "
-                                       (:zettel/content zettel)))]
-                     (reduce + (map (fn [term]
-                                      (count (re-seq (re-pattern term) content)))
-                                    terms))))]
-    (->> (query store {:text-search text})
-         (map (fn [z] (assoc z :search-score (score-fn z))))
-         (sort-by :search-score >)
-         (mapv #(dissoc % :search-score)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Agent injection
-
-(def default-agent-manifests
-  "Default knowledge injection configuration per agent role.
-
-   Dewey prefix filtering has been removed from this map. Phase-scoped rule
-   injection (including always-inject standards rules) is now handled by
-   `ai.miniforge.phase.agent-behavior/load-and-filter-behaviors`, which reads
-   from compiled policy packs (miniforge-standards.pack.edn and built-ins).
-
-   This manifest drives dynamic Zettelkasten knowledge retrieval only —
-   user-created zettels that may not follow any Dewey classification."
-  {:planner
-   {:agent-role :planner
-    :tags [:architecture :planning :workflow]
-    :types [:rule :decision :hub]
-    :max-zettels 20}
-
-   :implementer
-   {:agent-role :implementer
-    :tags [:coding :clojure :testing]
-    :types [:rule :learning :example]
-    :max-zettels 15}
-
-   :tester
-   {:agent-role :tester
-    :tags [:testing :coverage :assertions]
-    :types [:rule :example :learning]
-    :max-zettels 10}
-
-   :reviewer
-   {:agent-role :reviewer
-    :tags [:code-review :quality]
-    :types [:rule :learning]
-    :max-zettels 15}})
-
-(defn get-agent-manifest
+(defn ^{:stratum 1} get-agent-manifest
   [role]
   (get default-agent-manifests role
        {:agent-role role :types [:rule] :max-zettels 10}))
 
-(def ^:private manifest-score-weights
-  "Weights for computing manifest entry relevance scores.
-   Each weight controls how much a particular match type contributes
-   to the total score used for ranking and observability."
-  {:tag-match   1.0   ; per matching tag
-   :dewey-match 1.0   ; dewey classification prefix match
-   :type-match  0.5}) ; zettel type match
-
-(defn- compute-manifest-entry
+(defn- ^{:stratum 1} compute-manifest-entry
   "Compute a manifest entry for a zettel matched during knowledge injection.
 
    Scores each zettel based on how well it matches the query criteria
@@ -386,7 +379,39 @@
      :tags-matched tags-matched
      :score        total-score}))
 
-(defn inject-knowledge-with-manifest
+(defn ^{:stratum 1} format-for-prompt
+  [zettels role]
+  (when (seq zettels)
+    (str (messages/t :prompt/header {:role (name role)})
+         (messages/t :prompt/preamble)
+         (apply str (map format-zettel-for-prompt zettels))
+         (messages/t :prompt/separator))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-store
+  [& [{:keys [logger]}]]
+  (->InMemoryStore
+   (atom {})
+   (atom {})
+   (or logger (log/create-logger {:min-level :info :output (fn [_])}))))
+
+(defn ^{:stratum 2} create-file-backed-store
+  [& [{:keys [path logger]}]]
+  (let [base-path (expand-path (or path (str (config/miniforge-home) "/knowledge")))
+        _ (ensure-directory base-path)
+        log (or logger (log/create-logger {:min-level :info :output (fn [_])}))
+        initial (scan-directory base-path)]
+    (log/debug log :knowledge :knowledge/store-initialized
+               {:data {:path base-path
+                       :zettel-count (count (:by-id initial))}})
+    (->FileBackedStore
+     base-path
+     (atom (:by-id initial))
+     (atom (:by-uid initial))
+     log)))
+
+(defn ^{:stratum 2} inject-knowledge-with-manifest
   "Retrieve relevant knowledge for an agent with a selection manifest.
 
    Like inject-knowledge, but returns a map containing both the matched
@@ -447,32 +472,11 @@
     {:zettels  zettels
      :manifest manifest-entries}))
 
-(defn inject-knowledge
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} inject-knowledge
   [store agent-role & [context]]
   (:zettels (inject-knowledge-with-manifest store agent-role context)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Prompt formatting
-
-(defn format-zettel-for-prompt
-  "Format a single zettel as a compact markdown block for LLM context."
-  [zettel]
-  (str (messages/t :store/zettel-heading {:title (:zettel/title zettel)})
-       (when-let [dewey (:zettel/dewey zettel)]
-         (messages/t :store/zettel-dewey-tag {:dewey dewey}))
-       (when (= :learning (:zettel/type zettel))
-         (messages/t :store/learning-suffix))
-       "\n"
-       (:zettel/content zettel)
-       "\n"))
-
-(defn format-for-prompt
-  [zettels role]
-  (when (seq zettels)
-    (str (messages/t :prompt/header {:role (name role)})
-         (messages/t :prompt/preamble)
-         (apply str (map format-zettel-for-prompt zettels))
-         (messages/t :prompt/separator))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

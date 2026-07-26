@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.mode
   "Mode switching and command buffer manipulation.
 
@@ -27,23 +26,23 @@
    [ai.miniforge.tui-views.transition :as transition]
    [ai.miniforge.tui-views.update.filter :as filter]))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Mode switching
+;------------------------------------------------------------------------------ Layer 0
 
-(defn enter-command-mode [model]
+;; Mode switching
+(defn ^{:stratum 0} enter-command-mode [model]
   (transition/enter-command model))
 
-(defn enter-search-mode [model]
+(defn ^{:stratum 0} enter-search-mode [model]
   (transition/enter-search model))
 
-(defn exit-mode
+(defn ^{:stratum 0} exit-mode
   "Exit command/search mode back to normal.
    Clears command buffer, search results, filtered-indices, and search-matches."
   [model]
   (assoc model :mode :normal :command-buf "" :search-results []
          :filtered-indices nil :search-matches [] :search-match-idx nil))
 
-(defn confirm-search
+(defn ^{:stratum 0} confirm-search
   "Confirm search: exit to normal mode but KEEP results.
    For aggregate views: keeps filtered-indices for browse/select.
    For detail views: keeps search-matches for n/N navigation.
@@ -57,19 +56,11 @@
                  :scroll-offset (:line-idx first-match 0)))
       m)))
 
-(defn command-append [model ch]
+(defn ^{:stratum 0} command-append [model ch]
   (update model :command-buf str ch))
 
-(defn command-backspace [model]
-  (let [buf (:command-buf model)]
-    (if (> (count buf) 1)
-      (assoc model :command-buf (subs buf 0 (dec (count buf))))
-      (exit-mode model))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Search filtering
-
-(defn search-lines
+(defn ^{:stratum 0} search-lines
   "Find line indices matching query in a vector of strings.
    Returns vector of {:line-idx N :text line}."
   [lines query]
@@ -81,7 +72,7 @@
             {:line-idx idx :text line})))
       lines)))
 
-(defn matching-indices
+(defn ^{:stratum 0} matching-indices
   "Return set of indices whose item matches query via name-fn."
   [items name-fn query]
   (->> items
@@ -90,27 +81,7 @@
        (map first)
        set))
 
-(defn compute-aggregate-search
-  "Filter items by name match. Sets :filtered-indices."
-  [model query items name-fn]
-  (if (str/blank? query)
-    (assoc model :filtered-indices nil :search-matches [])
-    (-> model
-        (assoc :filtered-indices (matching-indices items name-fn (str/lower-case query))
-               :selected-idx 0
-               :search-matches []))))
-
-(defn compute-detail-search
-  "Find matches in scrollable content. Sets :search-matches."
-  [model query lines]
-  (if (str/blank? query)
-    (assoc model :search-matches [] :search-match-idx nil)
-    (let [matches (search-lines lines query)]
-      (assoc model :search-matches matches
-                   :search-match-idx (when (seq matches) 0)
-                   :filtered-indices nil))))
-
-(defn evidence-labels
+(defn ^{:stratum 0} evidence-labels
   "Build searchable label strings from evidence tree."
   [model]
   (let [phases (get-in model [:detail :phases] [])
@@ -128,16 +99,73 @@
          (if (get-in evidence [:policy :compliant?])
            "Policy compliant" "Policy violations")]))))
 
-(defn compute-evidence-search
-  "Search evidence tree node labels."
-  [model query]
-  (compute-detail-search model query (evidence-labels model)))
-
-(def workflow-field-names
+(def ^{:stratum 0} workflow-field-names
   "Recognized field qualifiers for workflow search."
   #{"status" "name" "phase" "error"})
 
-(defn parse-workflow-query
+(defn ^{:stratum 0} workflow-field-value
+  "Extract the string value for a field from a workflow."
+  [wf field-kw]
+  (case field-kw
+    :status (some-> (:status wf) name)
+    :name   (:name wf)
+    :phase  (some-> (:phase wf) name)
+    :error  (get wf :error "")
+    ""))
+
+;; Filter mode (VS Code cmd+p style palette for PR fleet)
+(defn ^{:stratum 0} enter-filter-mode
+  "Enter filter mode. Sets mode to :filter with '>' prefix in command bar."
+  [model]
+  (if (= :pr-fleet (:view model))
+    (transition/enter-filter model)
+    model))
+
+(defn ^{:stratum 0} filter-query
+  "Extract the filter query from the command buffer (strip '>' prefix)."
+  [model]
+  (let [buf (get model :command-buf ">")]
+    (if (str/starts-with? buf ">")
+      (subs buf 1)
+      buf)))
+
+(defn ^{:stratum 0} filter-escape
+  "Escape filter: exit to normal mode, clear filter entirely."
+  [model]
+  (-> model
+      (assoc :mode :normal :command-buf ""
+             :filtered-indices nil :selected-idx 0
+             :active-filter nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} command-backspace [model]
+  (let [buf (:command-buf model)]
+    (if (> (count buf) 1)
+      (assoc model :command-buf (subs buf 0 (dec (count buf))))
+      (exit-mode model))))
+
+(defn ^{:stratum 1} compute-aggregate-search
+  "Filter items by name match. Sets :filtered-indices."
+  [model query items name-fn]
+  (if (str/blank? query)
+    (assoc model :filtered-indices nil :search-matches [])
+    (-> model
+        (assoc :filtered-indices (matching-indices items name-fn (str/lower-case query))
+               :selected-idx 0
+               :search-matches []))))
+
+(defn ^{:stratum 1} compute-detail-search
+  "Find matches in scrollable content. Sets :search-matches."
+  [model query lines]
+  (if (str/blank? query)
+    (assoc model :search-matches [] :search-match-idx nil)
+    (let [matches (search-lines lines query)]
+      (assoc model :search-matches matches
+                   :search-match-idx (when (seq matches) 0)
+                   :filtered-indices nil))))
+
+(defn ^{:stratum 1} parse-workflow-query
   "Parse a workflow search query into {:fields {kw [vals]} :text str}.
    Supports field:value tokens like status:failed, name:deploy."
   [query]
@@ -153,17 +181,7 @@
      {:fields {} :text ""}
      tokens)))
 
-(defn workflow-field-value
-  "Extract the string value for a field from a workflow."
-  [wf field-kw]
-  (case field-kw
-    :status (some-> (:status wf) name)
-    :name   (:name wf)
-    :phase  (some-> (:phase wf) name)
-    :error  (get wf :error "")
-    ""))
-
-(defn workflow-matches-query?
+(defn ^{:stratum 1} workflow-matches-query?
   "Test if a workflow matches a parsed query.
    AND across fields, OR within same field, free-text matches name."
   [wf parsed]
@@ -177,7 +195,32 @@
                               fields)]
     (and text-match? fields-match?)))
 
-(defn compute-workflow-search
+(defn ^{:stratum 1} update-filter-results
+  "Recompute filtered indices from the current filter query."
+  [model]
+  (let [query (filter-query model)
+        indices (filter/compute-filter-indices (:pr-items model []) query)]
+    (assoc model
+           :filtered-indices indices
+           :selected-idx 0)))
+
+(defn ^{:stratum 1} filter-confirm
+  "Confirm filter: exit to normal mode, keep filter active.
+   Sets :active-filter for display in the header."
+  [model]
+  (let [query (filter-query model)]
+    (-> model
+        (assoc :mode :normal :command-buf "")
+        (assoc :active-filter (when-not (str/blank? query) query)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} compute-evidence-search
+  "Search evidence tree node labels."
+  [model query]
+  (compute-detail-search model query (evidence-labels model)))
+
+(defn ^{:stratum 2} compute-workflow-search
   "Faceted search over workflows. Supports status:failed, name:deploy, etc."
   [model query workflows]
   (if (str/blank? query)
@@ -190,7 +233,26 @@
                         workflows)]
       (assoc model :filtered-indices indices :selected-idx 0 :search-matches []))))
 
-(defn compute-search-results
+(defn ^{:stratum 2} filter-append
+  "Append character to filter buffer and recompute results."
+  [model ch]
+  (-> model
+      (update :command-buf str ch)
+      update-filter-results))
+
+(defn ^{:stratum 2} filter-backspace
+  "Backspace in filter buffer. Exit mode if at '>' prefix."
+  [model]
+  (let [buf (:command-buf model)]
+    (if (> (count buf) 1)
+      (-> model
+          (assoc :command-buf (subs buf 0 (dec (count buf))))
+          update-filter-results)
+      (filter-escape model))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} compute-search-results
   "Dispatch search by current view.
    Aggregate views: filter list items via :filtered-indices.
    Detail views: find-in-page via :search-matches."
@@ -225,65 +287,3 @@
 
       ;; Default — no search behavior
       model)))
-
-;------------------------------------------------------------------------------ Layer 5
-;; Filter mode (VS Code cmd+p style palette for PR fleet)
-
-(defn enter-filter-mode
-  "Enter filter mode. Sets mode to :filter with '>' prefix in command bar."
-  [model]
-  (if (= :pr-fleet (:view model))
-    (transition/enter-filter model)
-    model))
-
-(defn filter-query
-  "Extract the filter query from the command buffer (strip '>' prefix)."
-  [model]
-  (let [buf (get model :command-buf ">")]
-    (if (str/starts-with? buf ">")
-      (subs buf 1)
-      buf)))
-
-(defn update-filter-results
-  "Recompute filtered indices from the current filter query."
-  [model]
-  (let [query (filter-query model)
-        indices (filter/compute-filter-indices (:pr-items model []) query)]
-    (assoc model
-           :filtered-indices indices
-           :selected-idx 0)))
-
-(defn filter-confirm
-  "Confirm filter: exit to normal mode, keep filter active.
-   Sets :active-filter for display in the header."
-  [model]
-  (let [query (filter-query model)]
-    (-> model
-        (assoc :mode :normal :command-buf "")
-        (assoc :active-filter (when-not (str/blank? query) query)))))
-
-(defn filter-escape
-  "Escape filter: exit to normal mode, clear filter entirely."
-  [model]
-  (-> model
-      (assoc :mode :normal :command-buf ""
-             :filtered-indices nil :selected-idx 0
-             :active-filter nil)))
-
-(defn filter-append
-  "Append character to filter buffer and recompute results."
-  [model ch]
-  (-> model
-      (update :command-buf str ch)
-      update-filter-results))
-
-(defn filter-backspace
-  "Backspace in filter buffer. Exit mode if at '>' prefix."
-  [model]
-  (let [buf (:command-buf model)]
-    (if (> (count buf) 1)
-      (-> model
-          (assoc :command-buf (subs buf 0 (dec (count buf))))
-          update-filter-results)
-      (filter-escape model))))
-

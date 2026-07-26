@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.anomaly.etl-anomaly-test
   "Coverage for `cli.main.commands.etl` boundary escalation via
    `response/throw-anomaly!`.
@@ -31,9 +30,10 @@
   (:import
    (clojure.lang ExceptionInfo)))
 
-;------------------------------------------------------------------------------ resolve-pipeline-path (private)
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest resolve-pipeline-path-empty-dir-throws-not-found
+;------------------------------------------------------------------------------ resolve-pipeline-path (private)
+(deftest ^{:stratum 0} resolve-pipeline-path-empty-dir-throws-not-found
   (testing "empty pack dir with no pipelines/*.edn raises :anomalies/not-found"
     (let [tmp (fs/create-temp-dir {:prefix "cli-etl-test-"})]
       (try
@@ -50,7 +50,7 @@
         (finally
           (fs/delete-tree tmp))))))
 
-(deftest resolve-pipeline-path-nonexistent-path-throws-incorrect
+(deftest ^{:stratum 0} resolve-pipeline-path-nonexistent-path-throws-incorrect
   (testing "non-dir non-edn path raises :anomalies/incorrect"
     (let [thrown (try (@#'etl/resolve-pipeline-path "/no/such/thing")
                       nil
@@ -60,7 +60,7 @@
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
       (is (= "/no/such/thing" (:input (ex-data thrown)))))))
 
-(deftest resolve-pipeline-path-valid-edn-returns-path
+(deftest ^{:stratum 0} resolve-pipeline-path-valid-edn-returns-path
   (testing "direct pipeline EDN file returns [nil <abs-path>]"
     (let [tmp (fs/create-temp-file {:suffix ".edn"})]
       (try
@@ -70,8 +70,7 @@
           (fs/delete-if-exists tmp))))))
 
 ;------------------------------------------------------------------------------ resolve-env-path (private)
-
-(deftest resolve-env-path-nil-throws-incorrect
+(deftest ^{:stratum 0} resolve-env-path-nil-throws-incorrect
   (testing "nil env raises :anomalies/incorrect"
     (let [thrown (try (@#'etl/resolve-env-path nil nil)
                       nil
@@ -80,7 +79,7 @@
       (is (re-find #"missing --env" (.getMessage thrown)))
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
-(deftest resolve-env-path-name-without-pack-dir-throws-incorrect
+(deftest ^{:stratum 0} resolve-env-path-name-without-pack-dir-throws-incorrect
   (testing "env name without pack-dir raises :anomalies/incorrect"
     (let [thrown (try (@#'etl/resolve-env-path "prod" nil)
                       nil
@@ -90,7 +89,7 @@
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown))))
       (is (= "prod" (:env (ex-data thrown)))))))
 
-(deftest resolve-env-path-name-missing-in-pack-throws-not-found
+(deftest ^{:stratum 0} resolve-env-path-name-missing-in-pack-throws-not-found
   (testing "env name not found under pack-dir/envs raises :anomalies/not-found"
     (let [tmp (fs/create-temp-dir {:prefix "cli-etl-pack-"})]
       (try
@@ -104,7 +103,7 @@
         (finally
           (fs/delete-tree tmp))))))
 
-(deftest resolve-env-path-valid-edn-returns-abs
+(deftest ^{:stratum 0} resolve-env-path-valid-edn-returns-abs
   (testing "env .edn path returns absolutized path"
     (let [tmp (fs/create-temp-file {:suffix ".edn"})]
       (try

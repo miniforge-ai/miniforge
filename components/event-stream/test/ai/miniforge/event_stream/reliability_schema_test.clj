@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.reliability-schema-test
   "Tests for RN-03: 4 reliability metric schemas + 2 repo-index schemas
    and the constructor functions that produce conforming event maps.
@@ -32,16 +31,16 @@
    [ai.miniforge.event-stream.schema :as schema]
    [ai.miniforge.event-stream.interface :as es]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Helpers
-
-(defn- make-stream []
+(defn- ^{:stratum 0} make-stream []
   (es/create-event-stream {:sinks []}))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 5.5 — Reliability metric schemas
-
-(deftest sli-computed-schema-test
+;; Reliability metric schemas
+(deftest ^{:stratum 0} sli-computed-schema-test
   (testing "SliComputed positive validation"
     (let [event {:event/type            :reliability/sli-computed
                  :event/id              (random-uuid)
@@ -80,7 +79,7 @@
       (is (not (m/validate schema/SliComputed event))
           "missing :sli/window should fail"))))
 
-(deftest slo-breach-schema-test
+(deftest ^{:stratum 0} slo-breach-schema-test
   (testing "SloBreach positive validation"
     (let [event {:event/type            :reliability/slo-breach
                  :event/id              (random-uuid)
@@ -110,7 +109,7 @@
       (is (not (m/validate schema/SloBreach event))
           "missing :slo/actual should fail"))))
 
-(deftest error-budget-update-schema-test
+(deftest ^{:stratum 0} error-budget-update-schema-test
   (testing "ErrorBudgetUpdate positive validation"
     (let [event {:event/type            :reliability/error-budget-update
                  :event/id              (random-uuid)
@@ -140,7 +139,7 @@
       (is (not (m/validate schema/ErrorBudgetUpdate event))
           "missing :budget/burn-rate should fail"))))
 
-(deftest degradation-mode-changed-schema-test
+(deftest ^{:stratum 0} degradation-mode-changed-schema-test
   (testing "DegradationModeChanged positive validation"
     (let [event {:event/type            :reliability/degradation-mode-changed
                  :event/id              (random-uuid)
@@ -167,9 +166,8 @@
           "missing :degradation/trigger should fail"))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 6 — Repo-index schemas
-
-(deftest repo-index-quality-measured-schema-test
+;; Repo-index schemas
+(deftest ^{:stratum 0} repo-index-quality-measured-schema-test
   (testing "RepoIndexQualityMeasured positive validation"
     (let [event {:event/type            :repo-index/quality-measured
                  :event/id              (random-uuid)
@@ -210,7 +208,7 @@
       (is (not (m/validate schema/RepoIndexQualityMeasured event))
           "missing :index/id should fail"))))
 
-(deftest repo-index-coverage-changed-schema-test
+(deftest ^{:stratum 0} repo-index-coverage-changed-schema-test
   (testing "RepoIndexCoverageChanged positive validation"
     (let [event {:event/type               :repo-index/coverage-changed
                  :event/id                 (random-uuid)
@@ -245,8 +243,7 @@
 ;; :sli/value, :slo/target and :slo/actual are intentionally unconstrained —
 ;; they carry SLI-native units (a ratio for rate-based SLIs, an absolute
 ;; measure such as latency ms for others) — so they are not covered here.
-
-(defn- valid-error-budget [overrides]
+(defn- ^{:stratum 0} valid-error-budget [overrides]
   (merge {:event/type            :reliability/error-budget-update
           :event/id              (random-uuid)
           :event/timestamp       (java.util.Date.)
@@ -260,7 +257,7 @@
           :message               "Error budget update"}
          overrides))
 
-(defn- valid-quality-measured [overrides]
+(defn- ^{:stratum 0} valid-quality-measured [overrides]
   (merge {:event/type            :repo-index/quality-measured
           :event/id              (random-uuid)
           :event/timestamp       (java.util.Date.)
@@ -273,7 +270,7 @@
           :message               "Index quality measured"}
          overrides))
 
-(defn- valid-coverage-changed [overrides]
+(defn- ^{:stratum 0} valid-coverage-changed [overrides]
   (merge {:event/type              :repo-index/coverage-changed
           :event/id                (random-uuid)
           :event/timestamp         (java.util.Date.)
@@ -286,7 +283,9 @@
           :message                 "Index coverage changed"}
          overrides))
 
-(deftest range-bounds-rejection-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} range-bounds-rejection-test
   (testing "ErrorBudgetUpdate :budget/remaining must be a [0.0, 1.0] ratio"
     (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining 0.0})))
     (is (m/validate schema/ErrorBudgetUpdate (valid-error-budget {:budget/remaining 1.0})))
@@ -308,8 +307,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Constructor output and round-trip tests
-
-(deftest sli-computed-constructor-test
+(deftest ^{:stratum 1} sli-computed-constructor-test
   (testing "sli-computed constructor produces correct :event/type"
     (let [stream (make-stream)
           event  (es/sli-computed stream :availability 0.999 :rolling-1h)]
@@ -331,7 +329,7 @@
           event  (es/sli-computed stream :latency 0.95 :rolling-5m {:tier :critical})]
       (is (= :critical (:sli/tier event))))))
 
-(deftest slo-breach-constructor-test
+(deftest ^{:stratum 1} slo-breach-constructor-test
   (testing "slo-breach constructor produces correct :event/type"
     (let [stream (make-stream)
           event  (es/slo-breach stream :availability 0.999 0.980 :standard :rolling-1h)]
@@ -350,7 +348,7 @@
       (is (m/validate schema/SloBreach event)
           "constructor output must satisfy SloBreach schema"))))
 
-(deftest error-budget-update-constructor-test
+(deftest ^{:stratum 1} error-budget-update-constructor-test
   (testing "error-budget-update constructor produces correct :event/type"
     (let [stream (make-stream)
           event  (es/error-budget-update stream :standard :availability 0.72 1.4 :rolling-30d)]
@@ -369,7 +367,7 @@
       (is (m/validate schema/ErrorBudgetUpdate event)
           "constructor output must satisfy ErrorBudgetUpdate schema"))))
 
-(deftest degradation-mode-changed-constructor-test
+(deftest ^{:stratum 1} degradation-mode-changed-constructor-test
   (testing "degradation-mode-changed constructor produces correct :event/type"
     (let [stream (make-stream)
           event  (es/degradation-mode-changed stream :normal :degraded "error-rate exceeded")]
@@ -386,7 +384,7 @@
       (is (m/validate schema/DegradationModeChanged event)
           "constructor output must satisfy DegradationModeChanged schema"))))
 
-(deftest repo-index-quality-measured-constructor-test
+(deftest ^{:stratum 1} repo-index-quality-measured-constructor-test
   (testing "repo-index-quality-measured produces correct :event/type"
     (let [stream (make-stream)
           event  (es/repo-index-quality-measured stream "main-code-index" 0.87 0.93 300000)]
@@ -412,7 +410,7 @@
                        {:measured-at measured-at})]
       (is (= measured-at (:index/measured-at event))))))
 
-(deftest repo-index-coverage-changed-constructor-test
+(deftest ^{:stratum 1} repo-index-coverage-changed-constructor-test
   (testing "repo-index-coverage-changed produces correct :event/type"
     (let [stream (make-stream)
           event  (es/repo-index-coverage-changed stream "main-code-index" 0.80 0.93)]

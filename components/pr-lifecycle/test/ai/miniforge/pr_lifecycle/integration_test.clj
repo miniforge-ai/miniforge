@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.integration-test
   "Integration test for PR lifecycle state machine.
 
@@ -31,54 +30,40 @@
    [ai.miniforge.release-executor.interface]
    [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Mock Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def mock-task
+;------------------------------------------------------------------------------ Mock Data
+(def ^{:stratum 0} mock-task
   {:task/id "test-task-1"
    :task/description "Implement feature X"
    :task/acceptance-criteria ["Feature works" "Tests pass"]
    :task/constraints ["No breaking changes"]})
 
-(def mock-pr-info
+(def ^{:stratum 0} mock-pr-info
   {:pr-number 123
    :pr-url "https://github.com/org/repo/pull/123"
    :branch "feature/test-feature"
    :commit-sha "abc123def456"})
 
-(def mock-ci-success
+(def ^{:stratum 0} mock-ci-success
   {:status :success
    :checks [{:name "tests" :conclusion "success"}
             {:name "lint" :conclusion "success"}]})
 
-(def mock-ci-failure
+(def ^{:stratum 0} mock-ci-failure
   {:status :failure
    :checks [{:name "tests" :conclusion "failure" :details "Test suite failed"}]})
 
-(def mock-review-approved
+(def ^{:stratum 0} mock-review-approved
   {:status :approved
    :reviews [{:user "reviewer1" :state "APPROVED"}]})
 
-(def mock-review-changes-requested
+(def ^{:stratum 0} mock-review-changes-requested
   {:status :changes_requested
    :reviews [{:user "reviewer1" :state "CHANGES_REQUESTED"
               :comments ["Please fix the error handling"]}]})
 
-;------------------------------------------------------------------------------ Mock Implementations
-
-(defn mock-release-executor
-  "Mock release executor that simulates PR creation."
-  [success?]
-  (fn [_workflow-state _exec-context _opts]
-    (if success?
-      {:success? true
-       :artifacts [{:artifact/type :release
-                    :artifact/content mock-pr-info}]
-       :metrics {:tokens 100 :duration-ms 1000}}
-      {:success? false
-       :errors [{:type :pr-creation-failed
-                 :message "Failed to create PR"}]})))
-
-(defn mock-ci-monitor
+(defn ^{:stratum 0} mock-ci-monitor
   "Mock CI monitor that returns predefined CI status."
   [ci-results-seq]
   (let [results (atom ci-results-seq)]
@@ -87,7 +72,7 @@
         (swap! results rest)
         result))))
 
-(defn mock-review-monitor
+(defn ^{:stratum 0} mock-review-monitor
   "Mock review monitor that returns predefined review status."
   [review-results-seq]
   (let [results (atom review-results-seq)]
@@ -96,7 +81,7 @@
         (swap! results rest)
         result))))
 
-(defn mock-merge-operation
+(defn ^{:stratum 0} mock-merge-operation
   "Mock merge operation."
   [success?]
   (fn [_repo-path _pr-number merge-policy]
@@ -107,7 +92,7 @@
       {:success? false
        :error "Merge conflict detected"})))
 
-(defn mock-fix-generator
+(defn ^{:stratum 0} mock-fix-generator
   "Mock fix generator that returns a code artifact."
   [success?]
   (fn [_task error-details _context]
@@ -121,7 +106,7 @@
       (response/failure
        (ex-info "Fix generation failed" {:error error-details})))))
 
-(defn collect-events
+(defn ^{:stratum 0} collect-events
   "Create an event collector that captures all emitted events."
   []
   (let [events (atom [])]
@@ -130,9 +115,47 @@
                  nil)
      :events events}))
 
-;------------------------------------------------------------------------------ Helper Functions
+(defn ^{:stratum 0} get-status [controller]
+  (:status @controller))
 
-(defn create-test-controller
+(defn ^{:stratum 0} get-pr-info [controller]
+  (:pr @controller))
+
+(defn ^{:stratum 0} get-history [controller]
+  (:history @controller))
+
+(defn ^{:stratum 0} simulate-pr-creation!
+  "Simulate PR creation by updating controller state."
+  [controller pr-info]
+  (swap! controller assoc
+         :status :monitoring-ci
+         :pr pr-info)
+  pr-info)
+
+(defn ^{:stratum 0} simulate-ci-result!
+  "Simulate CI result by updating controller."
+  [controller ci-result]
+  (swap! controller assoc :last-ci-result ci-result)
+  ci-result)
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Mock Implementations
+(defn ^{:stratum 1} mock-release-executor
+  "Mock release executor that simulates PR creation."
+  [success?]
+  (fn [_workflow-state _exec-context _opts]
+    (if success?
+      {:success? true
+       :artifacts [{:artifact/type :release
+                    :artifact/content mock-pr-info}]
+       :metrics {:tokens 100 :duration-ms 1000}}
+      {:success? false
+       :errors [{:type :pr-creation-failed
+                 :message "Failed to create PR"}]})))
+
+;------------------------------------------------------------------------------ Helper Functions
+(defn ^{:stratum 1} create-test-controller
   "Create a controller with mocked dependencies."
   [& {:keys [generate-fn _ci-monitor-fn _review-monitor-fn _merge-fn]
       :or {generate-fn (mock-fix-generator true)}}]
@@ -146,32 +169,10 @@
                   :review-poll-interval-ms 100)
      :events (:events event-collector)}))
 
-(defn get-status [controller]
-  (:status @controller))
-
-(defn get-pr-info [controller]
-  (:pr @controller))
-
-(defn get-history [controller]
-  (:history @controller))
-
-(defn simulate-pr-creation!
-  "Simulate PR creation by updating controller state."
-  [controller pr-info]
-  (swap! controller assoc
-         :status :monitoring-ci
-         :pr pr-info)
-  pr-info)
-
-(defn simulate-ci-result!
-  "Simulate CI result by updating controller."
-  [controller ci-result]
-  (swap! controller assoc :last-ci-result ci-result)
-  ci-result)
+;------------------------------------------------------------------------------ Layer 2
 
 ;------------------------------------------------------------------------------ Tests
-
-(deftest controller-creation-test
+(deftest ^{:stratum 2} controller-creation-test
   (testing "Controller creation initializes state correctly"
     (let [{:keys [controller]} (create-test-controller)]
       (is (= :pending (get-status controller))
@@ -183,7 +184,7 @@
       (is (some? (:controller/id @controller))
           "Controller should have an ID"))))
 
-(deftest pr-creation-flow-test
+(deftest ^{:stratum 2} pr-creation-flow-test
   (testing "PR creation updates controller state"
     (with-redefs [ai.miniforge.release-executor.interface/execute-release-phase
                   (mock-release-executor true)]
@@ -199,7 +200,7 @@
         (is (= 123 (:pr-number (get-pr-info controller)))
             "PR number should be accessible")))))
 
-(deftest ci-monitoring-happy-path-test
+(deftest ^{:stratum 2} ci-monitoring-happy-path-test
   (testing "CI monitoring transitions to review monitoring on success"
     (let [{:keys [controller]} (create-test-controller
                                 :ci-monitor-fn (mock-ci-monitor [mock-ci-success]))]
@@ -214,7 +215,7 @@
                   (:checks mock-ci-success))
           "All checks should pass"))))
 
-(deftest ci-failure-triggers-fix-loop-test
+(deftest ^{:stratum 2} ci-failure-triggers-fix-loop-test
   (testing "CI failure triggers fix loop"
     (let [{:keys [controller]} (create-test-controller
                                 :ci-monitor-fn (mock-ci-monitor [mock-ci-failure])
@@ -230,7 +231,7 @@
                 (:checks mock-ci-failure))
           "At least one check should fail"))))
 
-(deftest review-approval-flow-test
+(deftest ^{:stratum 2} review-approval-flow-test
   (testing "Review approval transitions to ready-to-merge"
     (let [{:keys [controller]} (create-test-controller
                                 :ci-monitor-fn (mock-ci-monitor [mock-ci-success])
@@ -246,7 +247,7 @@
       (is (= :ready-to-merge (get-status controller))
           "Controller should be ready to merge after approval"))))
 
-(deftest review-changes-requested-test
+(deftest ^{:stratum 2} review-changes-requested-test
   (testing "Changes requested triggers fix loop"
     (let [{:keys [controller]} (create-test-controller
                                 :review-monitor-fn (mock-review-monitor [mock-review-changes-requested])
@@ -261,7 +262,7 @@
       (is (seq (:reviews mock-review-changes-requested))
           "Review should have comments"))))
 
-(deftest merge-success-flow-test
+(deftest ^{:stratum 2} merge-success-flow-test
   (testing "Successful merge completes lifecycle"
     (with-redefs [ai.miniforge.pr-lifecycle.merge/merge-pr!
                   (mock-merge-operation true)]
@@ -278,7 +279,7 @@
         (is (= :merged (get-status controller))
             "Controller should be in :merged state")))))
 
-(deftest merge-conflict-handling-test
+(deftest ^{:stratum 2} merge-conflict-handling-test
   (testing "Merge conflict triggers rebase or fix"
     (with-redefs [ai.miniforge.pr-lifecycle.merge/merge-pr!
                   (mock-merge-operation false)]
@@ -295,7 +296,7 @@
         (is (= :fixing (get-status controller))
             "Controller should enter fixing state on merge conflict")))))
 
-(deftest max-fix-iterations-enforcement-test
+(deftest ^{:stratum 2} max-fix-iterations-enforcement-test
   (testing "Max fix iterations causes failure"
     (let [{:keys [controller]} (create-test-controller
                                 :generate-fn (mock-fix-generator false))]
@@ -308,7 +309,7 @@
               (get-in @controller [:config :max-fix-iterations]))
           "Fix iterations should reach max limit"))))
 
-(deftest event-emission-test
+(deftest ^{:stratum 2} event-emission-test
   (testing "Events are emitted for state transitions"
     (let [{:keys [controller events]} (create-test-controller)]
 
@@ -324,7 +325,7 @@
       (is (vector? @events)
           "Events should be collected in a vector"))))
 
-(deftest history-tracking-test
+(deftest ^{:stratum 2} history-tracking-test
   (testing "Controller tracks history of events"
     (let [{:keys [controller]} (create-test-controller)]
 
@@ -347,7 +348,7 @@
         (is (= :ci-passed (:type (second history)))
             "Second event should be :ci-passed")))))
 
-(deftest concurrent-monitoring-test
+(deftest ^{:stratum 2} concurrent-monitoring-test
   (testing "CI and review monitoring can run concurrently"
     (let [{:keys [controller]} (create-test-controller
                                 :ci-monitor-fn (mock-ci-monitor [mock-ci-success])
@@ -366,7 +367,7 @@
       (is (get-in @controller [:review-monitor :active])
           "Review monitor should be active"))))
 
-(deftest full-happy-path-simulation-test
+(deftest ^{:stratum 2} full-happy-path-simulation-test
   (testing "Full lifecycle: PR → CI pass → Review approve → Merge"
     (let [{:keys [controller]} (create-test-controller)]
 
@@ -395,7 +396,7 @@
       (is (some? (get-pr-info controller))
           "PR info should be retained after merge"))))
 
-(deftest error-recovery-test
+(deftest ^{:stratum 2} error-recovery-test
   (testing "Controller can recover from transient errors"
     (let [{:keys [controller]} (create-test-controller
                                 ;; First check fails, second succeeds

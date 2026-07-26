@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-budget
   "Per-PR budget tracking for the PR monitor loop.
 
@@ -29,9 +28,9 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas + budget defaults
 
-(def BudgetState
+;; Schemas + budget defaults
+(def ^{:stratum 0} BudgetState
   [:map
    [:pr-number pos-int?]
    [:limits [:map
@@ -44,14 +43,57 @@
    [:questions-answered nat-int?]
    [:fixes-pushed nat-int?]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Budget state
+;; Budget operations
+(defn ^{:stratum 0} record-fix-attempt
+  "Record a fix attempt for a comment. Returns updated budget state."
+  [budget comment-id]
+  (-> budget
+      (update-in [:comment-attempts comment-id] (fnil inc 0))
+      (update :total-attempts inc)))
 
-(defn create-budget
+(defn ^{:stratum 0} record-question-answered
+  "Record a question answered (does not consume fix budget)."
+  [budget]
+  (update budget :questions-answered inc))
+
+(defn ^{:stratum 0} record-fix-pushed
+  "Record a successful fix push."
+  [budget]
+  (update budget :fixes-pushed inc))
+
+(defn ^{:stratum 0} comment-attempts-remaining
+  "How many fix attempts remain for a specific comment."
+  [budget comment-id]
+  (let [max-per-comment (get-in budget [:limits :max-fix-attempts-per-comment])
+        used (get-in budget [:comment-attempts comment-id] 0)]
+    (max 0 (- max-per-comment used))))
+
+(defn ^{:stratum 0} total-attempts-remaining
+  "How many total fix attempts remain for the PR."
+  [budget]
+  (let [max-total (get-in budget [:limits :max-total-fix-attempts-per-pr])
+        used (:total-attempts budget)]
+    (max 0 (- max-total used))))
+
+(defn ^{:stratum 0} hours-elapsed
+  "Hours elapsed since monitoring started."
+  [budget]
+  (let [started (.getTime ^java.util.Date (:started-at budget))
+        now (System/currentTimeMillis)]
+    (/ (double (- now started)) 3600000.0)))
+
+;; Budget persistence
+(def ^{:stratum 0} ^:private state-dir
+  (str (mf-config/miniforge-home) "/state/pr-monitor"))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Budget state
+(defn ^{:stratum 1} create-budget
   "Create a new budget tracker for a PR.
 
    Arguments:
@@ -71,72 +113,61 @@
       :questions-answered 0
       :fixes-pushed 0})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Budget operations
-
-(defn record-fix-attempt
-  "Record a fix attempt for a comment. Returns updated budget state."
-  [budget comment-id]
-  (-> budget
-      (update-in [:comment-attempts comment-id] (fnil inc 0))
-      (update :total-attempts inc)))
-
-(defn record-question-answered
-  "Record a question answered (does not consume fix budget)."
-  [budget]
-  (update budget :questions-answered inc))
-
-(defn record-fix-pushed
-  "Record a successful fix push."
-  [budget]
-  (update budget :fixes-pushed inc))
-
-(defn comment-attempts-remaining
-  "How many fix attempts remain for a specific comment."
-  [budget comment-id]
-  (let [max-per-comment (get-in budget [:limits :max-fix-attempts-per-comment])
-        used (get-in budget [:comment-attempts comment-id] 0)]
-    (max 0 (- max-per-comment used))))
-
-(defn total-attempts-remaining
-  "How many total fix attempts remain for the PR."
-  [budget]
-  (let [max-total (get-in budget [:limits :max-total-fix-attempts-per-pr])
-        used (:total-attempts budget)]
-    (max 0 (- max-total used))))
-
-(defn hours-elapsed
-  "Hours elapsed since monitoring started."
-  [budget]
-  (let [started (.getTime ^java.util.Date (:started-at budget))
-        now (System/currentTimeMillis)]
-    (/ (double (- now started)) 3600000.0)))
-
-(defn time-remaining-hours
+(defn ^{:stratum 1} time-remaining-hours
   "Hours remaining before abandon deadline."
   [budget]
   (let [max-hours (get-in budget [:limits :abandon-after-hours])]
     (max 0.0 (- (double max-hours) (hours-elapsed budget)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Budget checks (hard stops)
-
-(defn comment-budget-exhausted?
+(defn ^{:stratum 1} comment-budget-exhausted?
   "Check if the per-comment budget is exhausted."
   [budget comment-id]
   (zero? (comment-attempts-remaining budget comment-id)))
 
-(defn pr-budget-exhausted?
+(defn ^{:stratum 1} pr-budget-exhausted?
   "Check if the total PR budget is exhausted."
   [budget]
   (zero? (total-attempts-remaining budget)))
 
-(defn time-budget-exhausted?
+(defn ^{:stratum 1} save-budget!
+  "Persist budget state to disk."
+  [budget]
+  (let [dir (io/file state-dir)
+        _ (when-not (.exists dir) (.mkdirs dir))
+        f (io/file state-dir (str "budget-" (:pr-number budget) ".edn"))]
+    (spit f (pr-str budget))))
+
+(defn ^{:stratum 1} load-budget
+  "Load persisted budget for a PR, if it exists."
+  [pr-number]
+  (let [f (io/file state-dir (str "budget-" pr-number ".edn"))]
+    (when (.exists f)
+      (try
+        (edn/read-string (slurp f))
+        (catch Exception _e nil)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} time-budget-exhausted?
   "Check if the time budget is exhausted."
   [budget]
   (<= (time-remaining-hours budget) 0.0))
 
-(defn any-budget-exhausted?
+(defn ^{:stratum 2} budget-summary
+  "Generate a summary of current budget status for events and logging."
+  [budget]
+  {:total-attempts-used (:total-attempts budget)
+   :total-attempts-remaining (total-attempts-remaining budget)
+   :hours-elapsed (hours-elapsed budget)
+   :hours-remaining (time-remaining-hours budget)
+   :fixes-pushed (:fixes-pushed budget)
+   :questions-answered (:questions-answered budget)
+   :comment-attempts (:comment-attempts budget)})
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} any-budget-exhausted?
   "Check if any budget dimension is exhausted.
 
    Returns nil if budget OK, or a keyword indicating which limit was hit:
@@ -148,40 +179,6 @@
     (and comment-id
          (comment-budget-exhausted? budget comment-id)) :comment-limit
     :else                                               nil))
-
-(defn budget-summary
-  "Generate a summary of current budget status for events and logging."
-  [budget]
-  {:total-attempts-used (:total-attempts budget)
-   :total-attempts-remaining (total-attempts-remaining budget)
-   :hours-elapsed (hours-elapsed budget)
-   :hours-remaining (time-remaining-hours budget)
-   :fixes-pushed (:fixes-pushed budget)
-   :questions-answered (:questions-answered budget)
-   :comment-attempts (:comment-attempts budget)})
-
-;------------------------------------------------------------------------------ Layer 1
-;; Budget persistence
-
-(def ^:private state-dir
-  (str (mf-config/miniforge-home) "/state/pr-monitor"))
-
-(defn save-budget!
-  "Persist budget state to disk."
-  [budget]
-  (let [dir (io/file state-dir)
-        _ (when-not (.exists dir) (.mkdirs dir))
-        f (io/file state-dir (str "budget-" (:pr-number budget) ".edn"))]
-    (spit f (pr-str budget))))
-
-(defn load-budget
-  "Load persisted budget for a PR, if it exists."
-  [pr-number]
-  (let [f (io/file state-dir (str "budget-" pr-number ".edn"))]
-    (when (.exists f)
-      (try
-        (edn/read-string (slurp f))
-        (catch Exception _e nil)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-label-watcher.interface
   "Public surface for the mechanical PR-label watcher.
 
@@ -27,17 +26,21 @@
   (:require
    [ai.miniforge.pr-label-watcher.core :as core]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Registry loading
-(def load-registry        core/load-registry)
-(def matching-labels      core/matching-labels)
+(def ^{:stratum 0} load-registry        core/load-registry)
+
+(def ^{:stratum 0} matching-labels      core/matching-labels)
 
 ;; Ancestry + applicability
-(def make-ancestor?-fn    core/make-ancestor?-fn)
-(def workflow-applies?    core/workflow-applies?)
+(def ^{:stratum 0} make-ancestor?-fn    core/make-ancestor?-fn)
+
+(def ^{:stratum 0} workflow-applies?    core/workflow-applies?)
 
 ;; Top-level match — pure, all inputs explicit, no side effects.
-(def match                core/match)
+(def ^{:stratum 0} match                core/match)
 
 ;; Payload construction (exposed so downstream consumers can synthesize
 ;; payloads in tests without going through the full match pipeline).
-(def build-match-payload  core/build-match-payload)
+(def ^{:stratum 0} build-match-payload  core/build-match-payload)

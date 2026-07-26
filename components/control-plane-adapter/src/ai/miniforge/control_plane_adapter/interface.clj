@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane-adapter.interface
   "Public API for the control plane adapter component.
 
@@ -29,9 +28,9 @@
    [ai.miniforge.control-plane-adapter.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol re-exports + pure data + helpers with no in-namespace deps.
 
-(def ControlPlaneAdapter
+;; Protocol re-exports + pure data + helpers with no in-namespace deps.
+(def ^{:stratum 0} ControlPlaneAdapter
   "Protocol vendor-specific adapters must implement to bridge a
    vendor-native agent API to the control plane's normalized model.
 
@@ -39,20 +38,20 @@
    `deliver-decision`, `send-command`. Implement via defrecord/reify."
   proto/ControlPlaneAdapter)
 
-(def ControlPlaneAdapterLogs
+(def ^{:stratum 0} ControlPlaneAdapterLogs
   "Optional protocol for adapters that can retrieve agent logs.
 
    Single member `agent-logs`; adapters without log support omit it."
   proto/ControlPlaneAdapterLogs)
 
-(def adapter-id
+(def ^{:stratum 0} adapter-id
   "Protocol fn. Return the keyword identifying an adapter (e.g.
    :claude-code, :openai). Unique across all registered adapters.
 
    Args: [this]. Returns: keyword."
   proto/adapter-id)
 
-(def discover-agents
+(def ^{:stratum 0} discover-agents
   "Protocol fn. Discover running agents for the adapter's vendor.
 
    Args: [this config]. Returns: seq of agent-registration maps
@@ -61,7 +60,7 @@
    when none found or discovery unsupported (push-only adapters)."
   proto/discover-agents)
 
-(def poll-agent-status
+(def ^{:stratum 0} poll-agent-status
   "Protocol fn. Poll the current status of a single agent.
 
    Args: [this agent-record]. Returns: map
@@ -69,7 +68,7 @@
    when the agent is no longer reachable."
   proto/poll-agent-status)
 
-(def deliver-decision
+(def ^{:stratum 0} deliver-decision
   "Protocol fn. Deliver a resolved decision to an agent.
 
    Args: [this agent-record decision-resolution], where
@@ -78,7 +77,7 @@
    Returns: map {:delivered? boolean :error str-or-nil}."
   proto/deliver-decision)
 
-(def send-command
+(def ^{:stratum 0} send-command
   "Protocol fn. Send a control command to an agent.
 
    Args: [this agent-record command] where command is one of
@@ -86,7 +85,7 @@
    Returns: map {:success? boolean :error str-or-nil}."
   proto/send-command)
 
-(def agent-logs
+(def ^{:stratum 0} agent-logs
   "Protocol fn (ControlPlaneAdapterLogs). Retrieve recent agent logs.
 
    Args: [this agent-record opts] where opts is
@@ -95,14 +94,14 @@
    or nil when log retrieval is unsupported."
   proto/agent-logs)
 
-(def ^:private vendor-heartbeat-ms
+(def ^{:stratum 0} ^:private vendor-heartbeat-ms
   "Recommended heartbeat intervals per vendor (ms)."
   {:claude-code 15000    ;; local process, fast check
    :miniforge   10000    ;; native, fastest
    :openai      60000    ;; API rate limits
    :cursor      30000})
 
-(defn normalize-status
+(defn ^{:stratum 0} normalize-status
   "Normalize a vendor-specific status string to a control plane status keyword.
 
    Arguments:
@@ -117,7 +116,7 @@
   [vendor-status mapping]
   (get mapping (keyword vendor-status) :unknown))
 
-(defn ms-since
+(defn ^{:stratum 0} ms-since
   "Calculate milliseconds elapsed since a timestamp.
 
    Arguments:
@@ -129,9 +128,9 @@
     (- (System/currentTimeMillis) (.getTime timestamp))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0 (`vendor-heartbeat-ms`).
 
-(defn heartbeat-interval-for-vendor
+;; Composes Layer 0 (`vendor-heartbeat-ms`).
+(defn ^{:stratum 1} heartbeat-interval-for-vendor
   "Return the recommended heartbeat interval for a vendor.
 
    Arguments:

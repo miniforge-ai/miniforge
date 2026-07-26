@@ -15,50 +15,32 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.search-lex
   "BM25 lexical search over repo file contents.
 
    Pure Clojure implementation — no JNI dependencies. Suitable for
    single-repo indexing (thousands of files, not millions).
 
-   Layer 1 — depends on factory (Layer 0)."
+   Depends on factory."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [ai.miniforge.repo-index.factory :as factory]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Configuration (loaded from EDN resource)
+(def ^{:stratum 0} ^:private config-path "config/repo-index/search.edn")
 
-(def ^:private config-path "config/repo-index/search.edn")
-
-(defn- load-search-config []
-  (if-let [res (io/resource config-path)]
-    (get (edn/read-string (slurp res)) :repo-index/search {})
-    {}))
-
-(def ^:private search-config (delay (load-search-config)))
-
-(defn- bm25-k1 [] (get @search-config :bm25-k1 1.2))
-(defn- bm25-b  [] (get @search-config :bm25-b 0.75))
-(defn- default-max-results [] (get @search-config :default-max-results 10))
-(defn- default-context-lines [] (get @search-config :default-context-lines 3))
-(defn- default-max-hits [] (get @search-config :default-max-hits 5))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Tokenization
-
-(defn- tokenize
+(defn- ^{:stratum 0} tokenize
   "Split text into lowercase word tokens."
   [text]
   (->> (str/split (str/lower-case text) #"[^a-z0-9_-]+")
        (remove str/blank?)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Index construction
-
-(defn- read-file-content
+(defn- ^{:stratum 0} read-file-content
   "Read file content from disk. Returns nil for binary/unreadable files."
   [repo-root path]
   (try
@@ -68,14 +50,7 @@
     (catch Exception _
       nil)))
 
-(defn- build-doc-entry
-  "Build a document entry for the inverted index."
-  [repo-root {:keys [path]}]
-  (when-let [content (read-file-content repo-root path)]
-    (let [tokens (tokenize content)]
-      (factory/->doc-entry path (count tokens) (frequencies tokens) content))))
-
-(defn- build-inverted-index
+(defn- ^{:stratum 0} build-inverted-index
   "Build an inverted index from document entries.
    Returns {:term->doc-ids {term #{doc-id ...}} :doc-freq {term count}}."
   [docs]
@@ -91,14 +66,79 @@
     (factory/->inverted-index)
     docs))
 
-(defn- compute-avg-doc-length
+(defn- ^{:stratum 0} compute-avg-doc-length
   "Compute average document length from doc entries."
   [docs]
   (if (seq docs)
     (double (/ (reduce + 0 (map :token-count docs)) (count docs)))
     0.0))
 
-(defn build-search-index
+;; BM25 scoring
+(defn- ^{:stratum 0} idf
+  "Compute inverse document frequency for a term."
+  [doc-count doc-freq-for-term]
+  (Math/log (+ 1.0 (/ (- doc-count doc-freq-for-term 0.5)
+                       (+ doc-freq-for-term 0.5)))))
+
+;; Context extraction
+(defn- ^{:stratum 0} extract-snippet
+  "Extract a snippet around a matching line with context."
+  [lines line-idx context-lines]
+  (let [start (max 0 (- line-idx context-lines))
+        end (min (count lines) (+ line-idx context-lines 1))]
+    (factory/->snippet (inc start) (inc (dec end))
+                       (str/join "\n" (subvec lines start end)))))
+
+(defn- ^{:stratum 0} find-matching-lines
+  "Find line indices containing any query term."
+  [content query-terms]
+  (let [lines (str/split-lines content)
+        lower-lines (mapv str/lower-case lines)]
+    (->> (range (count lower-lines))
+         (filter (fn [i]
+                   (let [line (nth lower-lines i)]
+                     (some #(str/includes? line %) query-terms))))
+         vec)))
+
+;; Candidate collection
+(defn- ^{:stratum 0} collect-candidates
+  "Collect all document paths matching any query term."
+  [search-index query-terms]
+  (reduce
+    (fn [paths term]
+      (into paths (get (:term->doc-ids search-index) term #{})))
+    #{}
+    query-terms))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-search-config []
+  (if-let [res (io/resource config-path)]
+    (get (edn/read-string (slurp res)) :repo-index/search {})
+    {}))
+
+(defn- ^{:stratum 1} build-doc-entry
+  "Build a document entry for the inverted index."
+  [repo-root {:keys [path]}]
+  (when-let [content (read-file-content repo-root path)]
+    (let [tokens (tokenize content)]
+      (factory/->doc-entry path (count tokens) (frequencies tokens) content))))
+
+(defn- ^{:stratum 1} build-snippets
+  "Build preview snippets for matching lines in a document."
+  [content query-terms context-lines max-hits]
+  (let [lines (into [] (str/split-lines content))
+        matching (find-matching-lines content query-terms)]
+    (->> matching
+         (take max-hits)
+         (mapv #(extract-snippet lines % context-lines))
+         (filterv #(not (str/blank? (:text %)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private search-config (delay (load-search-config)))
+
+(defn ^{:stratum 2} build-search-index
   "Build a BM25 search index from a repo index.
 
    Arguments:
@@ -117,16 +157,21 @@
                             (:term->doc-ids inv-idx)
                             (:doc-freq inv-idx))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; BM25 scoring
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- idf
-  "Compute inverse document frequency for a term."
-  [doc-count doc-freq-for-term]
-  (Math/log (+ 1.0 (/ (- doc-count doc-freq-for-term 0.5)
-                       (+ doc-freq-for-term 0.5)))))
+(defn- ^{:stratum 3} bm25-k1 [] (get @search-config :bm25-k1 1.2))
 
-(defn- bm25-term-score
+(defn- ^{:stratum 3} bm25-b  [] (get @search-config :bm25-b 0.75))
+
+(defn- ^{:stratum 3} default-max-results [] (get @search-config :default-max-results 10))
+
+(defn- ^{:stratum 3} default-context-lines [] (get @search-config :default-context-lines 3))
+
+(defn- ^{:stratum 3} default-max-hits [] (get @search-config :default-max-hits 5))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} bm25-term-score
   "Compute BM25 score for a single term in a single document."
   [tf-in-doc doc-length avg-doc-length idf-value]
   (let [k1 (bm25-k1)
@@ -136,7 +181,9 @@
                        (* k1 (+ (- 1.0 b) (* b (/ doc-length avg-doc-length)))))]
     (* idf-value (/ numerator denominator))))
 
-(defn- score-document
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} score-document
   "Score a document against query terms."
   [doc query-terms search-index]
   (let [{:keys [avg-doc-length doc-count doc-freq]} search-index
@@ -152,51 +199,9 @@
       0.0
       query-terms)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Context extraction
+;------------------------------------------------------------------------------ Layer 6
 
-(defn- extract-snippet
-  "Extract a snippet around a matching line with context."
-  [lines line-idx context-lines]
-  (let [start (max 0 (- line-idx context-lines))
-        end (min (count lines) (+ line-idx context-lines 1))]
-    (factory/->snippet (inc start) (inc (dec end))
-                       (str/join "\n" (subvec lines start end)))))
-
-(defn- find-matching-lines
-  "Find line indices containing any query term."
-  [content query-terms]
-  (let [lines (str/split-lines content)
-        lower-lines (mapv str/lower-case lines)]
-    (->> (range (count lower-lines))
-         (filter (fn [i]
-                   (let [line (nth lower-lines i)]
-                     (some #(str/includes? line %) query-terms))))
-         vec)))
-
-(defn- build-snippets
-  "Build preview snippets for matching lines in a document."
-  [content query-terms context-lines max-hits]
-  (let [lines (into [] (str/split-lines content))
-        matching (find-matching-lines content query-terms)]
-    (->> matching
-         (take max-hits)
-         (mapv #(extract-snippet lines % context-lines))
-         (filterv #(not (str/blank? (:text %)))))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Candidate collection
-
-(defn- collect-candidates
-  "Collect all document paths matching any query term."
-  [search-index query-terms]
-  (reduce
-    (fn [paths term]
-      (into paths (get (:term->doc-ids search-index) term #{})))
-    #{}
-    query-terms))
-
-(defn- score-and-rank
+(defn- ^{:stratum 6} score-and-rank
   "Score candidate documents and return top results."
   [search-index candidate-paths query-terms max-results]
   (->> candidate-paths
@@ -208,10 +213,10 @@
        (sort-by :score >)
        (take max-results)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public search API
+;------------------------------------------------------------------------------ Layer 7
 
-(defn search
+;; Public search API
+(defn ^{:stratum 7} search
   "Search the index with a query string.
 
    Arguments:

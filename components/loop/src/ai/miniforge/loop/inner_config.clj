@@ -15,27 +15,30 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.inner-config
   "Configuration-as-data for the inner loop lifecycle."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
-(def ^:private defaults
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private defaults
   (delay
     (if-let [resource (io/resource "config/loop/inner.edn")]
       (:loop/inner (edn/read-string (slurp resource)))
       {})))
 
-(defn default-max-iterations
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} default-max-iterations
   []
   (get @defaults :default-max-iterations 5))
 
-(defn initial-loop-state
+(defn ^{:stratum 1} initial-loop-state
   []
   (get @defaults :initial-loop-state :pending))
 
-(defn default-loop-metrics
+(defn ^{:stratum 1} default-loop-metrics
   []
   (get @defaults
        :default-loop-metrics
@@ -45,6 +48,6 @@
         :generate-calls 0
         :repair-calls 0}))
 
-(defn machine-definition
+(defn ^{:stratum 1} machine-definition
   []
   (get @defaults :machine-definition {}))

@@ -1,7 +1,6 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.control-plane.orchestrator-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -11,11 +10,12 @@
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
 ;; ---------------------------------------------------------------------------
-
-(defn make-mock-adapter
+(defn ^{:stratum 0} make-mock-adapter
   "Create a mock adapter implementing ControlPlaneAdapter.
    `overrides` is a map of {:discover-agents fn, :poll-agent-status fn,
                              :deliver-decision fn, :send-command fn, :adapter-id kw}."
@@ -40,61 +40,21 @@
           (f agent-record command)
           {:success? true})))))
 
-(defn make-test-event-stream
+(defn ^{:stratum 0} make-test-event-stream
   "Create a minimal event stream that captures published events."
   []
   (let [events-atom (atom [])]
     {:stream (stream/create-event-stream {:sinks []})
      :published events-atom}))
 
-(def ^:private default-wait-timeout-ms 2000)
+(def ^{:stratum 0} ^:private default-wait-timeout-ms 2000)
 
-(defn- wait-until-count
-  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
-   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
-  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
-  ([items-atom n timeout-ms]
-   (let [done (promise)
-         k    (gensym "wait-count-")]
-     (when (>= (count @items-atom) n)
-       (deliver done :immediate))
-     (add-watch items-atom k
-                (fn [_ _ _ new-val]
-                  (when (>= (count new-val) n)
-                    (deliver done :reached))))
-     (let [result (deref done timeout-ms ::timeout)]
-       (remove-watch items-atom k)
-       (not= result ::timeout)))))
-
-(defn- wait-until
-  "Block until `(pred)` returns truthy or `timeout-ms` elapses.
-   Returns true if pred satisfied, false on timeout."
-  ([pred] (wait-until pred default-wait-timeout-ms))
-  ([pred timeout-ms]
-   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-     (loop []
-       (cond
-         (pred) true
-         (> (System/currentTimeMillis) deadline) false
-         :else (do (java.util.concurrent.locks.LockSupport/parkNanos 1000000)
-                   (recur)))))))
-
-(def test-workflow-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001"))
-
-(defn base-orchestrator-opts
-  "Minimal valid opts for creating an orchestrator."
-  [& [overrides]]
-  (merge {:adapters []
-          :workflow-id test-workflow-id
-          :discovery-interval-ms 50
-          :poll-interval-ms 50}
-         overrides))
+(def ^{:stratum 0} test-workflow-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001"))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 0: create-orchestrator
+;; create-orchestrator
 ;; ---------------------------------------------------------------------------
-
-(deftest create-orchestrator-defaults-test
+(deftest ^{:stratum 0} create-orchestrator-defaults-test
   (testing "creates orchestrator with default values when minimal opts given"
     (let [orch (sut/create-orchestrator {})]
       (is (some? (:registry orch))
@@ -122,7 +82,92 @@
       (is (empty? @(:futures orch))
           "should have no futures initially"))))
 
-(deftest create-orchestrator-custom-opts-test
+(deftest ^{:stratum 0} create-orchestrator-default-callbacks-are-safe-test
+  (testing "default callbacks can be called without error"
+    (let [orch (sut/create-orchestrator {})]
+      (is (nil? ((:on-agent-discovered orch) {:agent/id (random-uuid)})))
+      (is (nil? ((:on-agent-unreachable orch) (random-uuid))))
+      (is (nil? ((:on-decision-created orch) {:decision/id (random-uuid)}))))))
+
+(deftest ^{:stratum 0} create-orchestrator-running-and-futures-are-atoms-test
+  (testing "running and futures are independent atoms per orchestrator"
+    (let [orch1 (sut/create-orchestrator {})
+          orch2 (sut/create-orchestrator {})]
+      (reset! (:running orch1) true)
+      (is (true? @(:running orch1)))
+      (is (false? @(:running orch2))
+          "orch2 running should be independent of orch1"))))
+
+;; ---------------------------------------------------------------------------
+;; Constants
+;; ---------------------------------------------------------------------------
+(deftest ^{:stratum 0} default-constants-test
+  (testing "default interval constants are positive integers"
+    (is (pos-int? sut/default-discovery-interval-ms))
+    (is (pos-int? sut/default-poll-interval-ms))
+    (is (= 30000 sut/default-discovery-interval-ms))
+    (is (= 10000 sut/default-poll-interval-ms))))
+
+;; ---------------------------------------------------------------------------
+;; Edge cases
+;; ---------------------------------------------------------------------------
+(deftest ^{:stratum 0} create-orchestrator-nil-adapters-test
+  (testing "nil adapters defaults to empty vector"
+    (let [orch (sut/create-orchestrator {:adapters nil})]
+      (is (= [] (:adapters orch))))))
+
+(deftest ^{:stratum 0} create-orchestrator-empty-opts-test
+  (testing "create-orchestrator works with completely empty opts map"
+    (let [orch (sut/create-orchestrator {})]
+      (is (some? orch))
+      (is (some? (:registry orch)))
+      (is (some? (:decision-manager orch)))
+      (is (= [] (:adapters orch)))
+      (is (instance? clojure.lang.Atom (:running orch)))
+      (is (instance? clojure.lang.Atom (:futures orch))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} wait-until-count
+  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
+   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
+  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
+  ([items-atom n timeout-ms]
+   (let [done (promise)
+         k    (gensym "wait-count-")]
+     (when (>= (count @items-atom) n)
+       (deliver done :immediate))
+     (add-watch items-atom k
+                (fn [_ _ _ new-val]
+                  (when (>= (count new-val) n)
+                    (deliver done :reached))))
+     (let [result (deref done timeout-ms ::timeout)]
+       (remove-watch items-atom k)
+       (not= result ::timeout)))))
+
+(defn- ^{:stratum 1} wait-until
+  "Block until `(pred)` returns truthy or `timeout-ms` elapses.
+   Returns true if pred satisfied, false on timeout."
+  ([pred] (wait-until pred default-wait-timeout-ms))
+  ([pred timeout-ms]
+   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+     (loop []
+       (cond
+         (pred) true
+         (> (System/currentTimeMillis) deadline) false
+         :else (do (java.util.concurrent.locks.LockSupport/parkNanos 1000000)
+                   (recur)))))))
+
+(defn ^{:stratum 1} base-orchestrator-opts
+  "Minimal valid opts for creating an orchestrator."
+  [& [overrides]]
+  (merge {:adapters []
+          :workflow-id test-workflow-id
+          :discovery-interval-ms 50
+          :poll-interval-ms 50}
+         overrides))
+
+(deftest ^{:stratum 1} create-orchestrator-custom-opts-test
   (testing "respects all provided options"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -159,7 +204,7 @@
       ((:on-agent-discovered orch) :test-agent)
       (is (= :test-agent @discovered-atom)))))
 
-(deftest create-orchestrator-multiple-adapters-test
+(deftest ^{:stratum 1} create-orchestrator-multiple-adapters-test
   (testing "supports multiple adapters as a vector"
     (let [a1 (make-mock-adapter {:adapter-id :adapter-1})
           a2 (make-mock-adapter {:adapter-id :adapter-2})
@@ -168,38 +213,12 @@
       (is (= :adapter-1 (adapter/adapter-id (first (:adapters orch)))))
       (is (= :adapter-2 (adapter/adapter-id (second (:adapters orch))))))))
 
-(deftest create-orchestrator-default-callbacks-are-safe-test
-  (testing "default callbacks can be called without error"
-    (let [orch (sut/create-orchestrator {})]
-      (is (nil? ((:on-agent-discovered orch) {:agent/id (random-uuid)})))
-      (is (nil? ((:on-agent-unreachable orch) (random-uuid))))
-      (is (nil? ((:on-decision-created orch) {:decision/id (random-uuid)}))))))
-
-(deftest create-orchestrator-running-and-futures-are-atoms-test
-  (testing "running and futures are independent atoms per orchestrator"
-    (let [orch1 (sut/create-orchestrator {})
-          orch2 (sut/create-orchestrator {})]
-      (reset! (:running orch1) true)
-      (is (true? @(:running orch1)))
-      (is (false? @(:running orch2))
-          "orch2 running should be independent of orch1"))))
+;------------------------------------------------------------------------------ Layer 2
 
 ;; ---------------------------------------------------------------------------
-;; Constants
+;; Discovery pass (unit-level, calling private fn via #')
 ;; ---------------------------------------------------------------------------
-
-(deftest default-constants-test
-  (testing "default interval constants are positive integers"
-    (is (pos-int? sut/default-discovery-interval-ms))
-    (is (pos-int? sut/default-poll-interval-ms))
-    (is (= 30000 sut/default-discovery-interval-ms))
-    (is (= 10000 sut/default-poll-interval-ms))))
-
-;; ---------------------------------------------------------------------------
-;; Layer 1: Discovery pass (unit-level, calling private fn via #')
-;; ---------------------------------------------------------------------------
-
-(deftest run-discovery-pass-registers-new-agents-test
+(deftest ^{:stratum 2} run-discovery-pass-registers-new-agents-test
   (testing "discovery pass registers newly discovered agents"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -221,7 +240,7 @@
           "on-agent-discovered callback should have been called")
       (is (= "Test Agent" (:agent/name (first @discovered)))))))
 
-(deftest run-discovery-pass-skips-known-agents-test
+(deftest ^{:stratum 2} run-discovery-pass-skips-known-agents-test
   (testing "discovery pass does not re-register known agents"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -244,7 +263,7 @@
       (is (= 1 (count @discovered))
           "callback should only fire once"))))
 
-(deftest run-discovery-pass-handles-adapter-exception-test
+(deftest ^{:stratum 2} run-discovery-pass-handles-adapter-exception-test
   (testing "discovery pass catches exceptions from adapter"
     (let [reg (registry/create-registry)
           adapter (make-mock-adapter
@@ -255,7 +274,7 @@
       ;; Should not throw
       (is (nil? (#'sut/run-discovery-pass orch))))))
 
-(deftest run-discovery-pass-multiple-adapters-test
+(deftest ^{:stratum 2} run-discovery-pass-multiple-adapters-test
   (testing "discovery across multiple adapters"
     (let [reg (registry/create-registry)
           a1 (make-mock-adapter
@@ -273,7 +292,7 @@
       (#'sut/run-discovery-pass orch)
       (is (= 2 (registry/count-agents reg))))))
 
-(deftest run-discovery-pass-with-event-stream-test
+(deftest ^{:stratum 2} run-discovery-pass-with-event-stream-test
   (testing "discovery emits agent-registered events when stream is present"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
@@ -293,7 +312,7 @@
       (is (wait-until-count published 1)
           "should have published at least one event"))))
 
-(deftest run-discovery-pass-empty-results-test
+(deftest ^{:stratum 2} run-discovery-pass-empty-results-test
   (testing "discovery pass handles adapter returning empty list"
     (let [reg (registry/create-registry)
           adapter (make-mock-adapter
@@ -305,7 +324,7 @@
       (is (zero? (registry/count-agents reg))
           "no agents should be registered when none discovered"))))
 
-(deftest run-discovery-pass-multiple-agents-one-adapter-test
+(deftest ^{:stratum 2} run-discovery-pass-multiple-agents-one-adapter-test
   (testing "discovery pass registers multiple agents from a single adapter"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -325,7 +344,7 @@
       (is (= 3 (count @discovered))
           "callback should fire for each new agent"))))
 
-(deftest run-discovery-pass-partial-failure-test
+(deftest ^{:stratum 2} run-discovery-pass-partial-failure-test
   (testing "discovery continues with second adapter when first throws"
     (let [reg (registry/create-registry)
           failing-adapter (make-mock-adapter
@@ -344,10 +363,9 @@
           "should still register agents from non-failing adapter"))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 1: Poll pass
+;; Poll pass
 ;; ---------------------------------------------------------------------------
-
-(deftest run-poll-pass-updates-agent-status-test
+(deftest ^{:stratum 2} run-poll-pass-updates-agent-status-test
   (testing "poll pass records heartbeat and detects status changes"
     (let [reg (registry/create-registry)
           agent-rec (registry/register-agent! reg
@@ -368,7 +386,7 @@
         (is (some? (:agent/last-heartbeat updated))
             "heartbeat should be recorded")))))
 
-(deftest run-poll-pass-skips-terminal-agents-test
+(deftest ^{:stratum 2} run-poll-pass-skips-terminal-agents-test
   (testing "poll pass skips agents with terminal status"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -388,7 +406,7 @@
       (is (zero? @poll-count)
           "should not poll terminal agents"))))
 
-(deftest run-poll-pass-skips-failed-agents-test
+(deftest ^{:stratum 2} run-poll-pass-skips-failed-agents-test
   (testing "poll pass skips agents with :failed status"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -408,7 +426,7 @@
       (is (zero? @poll-count)
           "should not poll failed agents"))))
 
-(deftest run-poll-pass-skips-terminated-agents-test
+(deftest ^{:stratum 2} run-poll-pass-skips-terminated-agents-test
   (testing "poll pass skips agents with :terminated status"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -428,7 +446,7 @@
       (is (zero? @poll-count)
           "should not poll terminated agents"))))
 
-(deftest run-poll-pass-handles-poll-exception-test
+(deftest ^{:stratum 2} run-poll-pass-handles-poll-exception-test
   (testing "poll pass catches exceptions from adapter poll"
     (let [reg (registry/create-registry)
           _ (registry/register-agent! reg
@@ -444,7 +462,7 @@
       ;; Should not throw
       (is (nil? (#'sut/run-poll-pass orch))))))
 
-(deftest run-poll-pass-nil-status-update-test
+(deftest ^{:stratum 2} run-poll-pass-nil-status-update-test
   (testing "poll pass handles nil status update gracefully"
     (let [reg (registry/create-registry)
           _ (registry/register-agent! reg
@@ -459,7 +477,7 @@
       ;; Should not throw when poll returns nil
       (is (nil? (#'sut/run-poll-pass orch))))))
 
-(deftest run-poll-pass-with-event-stream-emits-on-status-change-test
+(deftest ^{:stratum 2} run-poll-pass-with-event-stream-emits-on-status-change-test
   (testing "poll pass emits agent-state-changed event when status changes"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
@@ -483,7 +501,7 @@
       (is (wait-until-count published 1)
           "should have published at least one state-changed event"))))
 
-(deftest run-poll-pass-no-event-when-status-unchanged-test
+(deftest ^{:stratum 2} run-poll-pass-no-event-when-status-unchanged-test
   (testing "poll pass keeps heartbeats but skips state-changed when status remains the same"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
@@ -508,7 +526,7 @@
         (is (= [:control-plane/agent-heartbeat] event-types)
             "stable polls should publish heartbeat context but not a state change")))))
 
-(deftest run-poll-pass-multiple-vendors-test
+(deftest ^{:stratum 2} run-poll-pass-multiple-vendors-test
   (testing "poll pass routes agents to correct adapters by vendor"
     (let [reg (registry/create-registry)
           poll-log (atom [])
@@ -535,7 +553,7 @@
       (is (some #(= [:vendor-1 "V1 Agent"] %) @poll-log))
       (is (some #(= [:vendor-2 "V2 Agent"] %) @poll-log)))))
 
-(deftest run-poll-pass-unmatched-vendor-test
+(deftest ^{:stratum 2} run-poll-pass-unmatched-vendor-test
   (testing "poll pass skips agents whose vendor has no matching adapter"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -552,10 +570,9 @@
           "should not poll agents with unmatched vendor"))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 2: start! and stop!
+;; start! and stop!
 ;; ---------------------------------------------------------------------------
-
-(deftest start-stop-lifecycle-test
+(deftest ^{:stratum 2} start-stop-lifecycle-test
   (testing "start! sets running to true and stop! cleans up"
     (let [adapter (make-mock-adapter {})
           orch (sut/create-orchestrator
@@ -572,7 +589,7 @@
         (is (empty? @(:futures stopped))
             "futures should be cleared after stop")))))
 
-(deftest start-runs-discovery-test
+(deftest ^{:stratum 2} start-runs-discovery-test
   (testing "start! triggers discovery loop that finds agents"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -603,7 +620,7 @@
       (is (pos? (count @discovered))
           "on-agent-discovered should have been called"))))
 
-(deftest stop-idempotent-test
+(deftest ^{:stratum 2} stop-idempotent-test
   (testing "stop! can be called multiple times safely"
     (let [orch (sut/create-orchestrator (base-orchestrator-opts))]
       (sut/start! orch)
@@ -611,7 +628,7 @@
       ;; Second stop should not throw
       (is (some? (sut/stop! orch))))))
 
-(deftest start-returns-orchestrator-with-watchdog-test
+(deftest ^{:stratum 2} start-returns-orchestrator-with-watchdog-test
   (testing "start! returns orchestrator with :watchdog key"
     (let [orch (sut/create-orchestrator (base-orchestrator-opts))
           started (sut/start! orch)]
@@ -619,7 +636,7 @@
           "should have a watchdog after start")
       (sut/stop! started))))
 
-(deftest stop-clears-running-flag-immediately-test
+(deftest ^{:stratum 2} stop-clears-running-flag-immediately-test
   (testing "stop! sets running to false immediately"
     (let [orch (sut/create-orchestrator (base-orchestrator-opts))]
       (sut/start! orch)
@@ -627,7 +644,7 @@
       (sut/stop! orch)
       (is (false? @(:running orch))))))
 
-(deftest stop-on-never-started-orchestrator-test
+(deftest ^{:stratum 2} stop-on-never-started-orchestrator-test
   (testing "stop! on a never-started orchestrator is safe"
     (let [orch (sut/create-orchestrator (base-orchestrator-opts))]
       (is (some? (sut/stop! orch))
@@ -635,10 +652,9 @@
       (is (false? @(:running orch))))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 2: submit-decision-from-agent!
+;; submit-decision-from-agent!
 ;; ---------------------------------------------------------------------------
-
-(deftest submit-decision-from-agent-test
+(deftest ^{:stratum 2} submit-decision-from-agent-test
   (testing "submits a decision, transitions agent to :blocked, fires callback"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -672,7 +688,7 @@
       ;; Decision should be in the manager
       (is (some? (dq/get-decision dm (:decision/id decision)))))))
 
-(deftest submit-decision-with-opts-test
+(deftest ^{:stratum 2} submit-decision-with-opts-test
   (testing "submit-decision-from-agent! passes opts to create-decision"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -692,7 +708,7 @@
       (is (= :high (:decision/priority decision)))
       (is (= :choice (:decision/type decision))))))
 
-(deftest submit-decision-terminal-agent-test
+(deftest ^{:stratum 2} submit-decision-terminal-agent-test
   (testing "submit-decision-from-agent! handles already-terminal agent gracefully"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -711,7 +727,7 @@
       (is (some? decision)
           "decision should still be created even if transition fails"))))
 
-(deftest submit-decision-with-event-stream-test
+(deftest ^{:stratum 2} submit-decision-with-event-stream-test
   (testing "submit-decision-from-agent! emits decision-created event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -733,7 +749,7 @@
       (is (wait-until-count published 1)
           "should have published a decision-created event"))))
 
-(deftest submit-multiple-decisions-same-agent-test
+(deftest ^{:stratum 2} submit-multiple-decisions-same-agent-test
   (testing "can submit multiple decisions for the same agent"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -757,10 +773,9 @@
           "both decisions should be in the manager"))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 2: resolve-and-deliver!
+;; resolve-and-deliver!
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-test
+(deftest ^{:stratum 2} resolve-and-deliver-test
   (testing "resolves decision, delivers to agent, transitions back to :running"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -795,7 +810,7 @@
         (is (= :running (:agent/status agent))
             "agent should be transitioned back to :running")))))
 
-(deftest resolve-and-deliver-unknown-decision-test
+(deftest ^{:stratum 2} resolve-and-deliver-unknown-decision-test
   (testing "resolve-and-deliver! returns nil for unknown decision ID"
     (let [orch (sut/create-orchestrator (base-orchestrator-opts))
           result (sut/resolve-and-deliver!
@@ -803,7 +818,7 @@
       (is (nil? result)
           "should return nil when decision not found"))))
 
-(deftest resolve-and-deliver-no-adapter-test
+(deftest ^{:stratum 2} resolve-and-deliver-no-adapter-test
   (testing "resolve-and-deliver! handles missing adapter (delivery fails)"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -826,7 +841,7 @@
       (is (false? (:delivered? result))
           "delivery should be false when no adapter matches"))))
 
-(deftest resolve-and-deliver-with-event-stream-test
+(deftest ^{:stratum 2} resolve-and-deliver-with-event-stream-test
   (testing "resolve-and-deliver! emits decision-resolved event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -854,7 +869,7 @@
       (is (wait-until-count published 2)
           "should have published decision-created and decision-resolved events"))))
 
-(deftest resolve-and-deliver-without-comment-test
+(deftest ^{:stratum 2} resolve-and-deliver-without-comment-test
   (testing "resolve-and-deliver! works without optional comment"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -875,7 +890,7 @@
       (is (some? (:resolved result)))
       (is (true? (:delivered? result))))))
 
-(deftest resolve-and-deliver-adapter-delivery-failure-test
+(deftest ^{:stratum 2} resolve-and-deliver-adapter-delivery-failure-test
   (testing "resolve-and-deliver! reports delivered? false when adapter returns failure"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -898,7 +913,7 @@
       (is (false? (:delivered? result))
           "delivered? should be false when adapter reports failure"))))
 
-(deftest resolve-and-deliver-resolved-data-contains-resolution-test
+(deftest ^{:stratum 2} resolve-and-deliver-resolved-data-contains-resolution-test
   (testing "the resolved decision contains the resolution value"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -922,8 +937,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Integration: full lifecycle
 ;; ---------------------------------------------------------------------------
-
-(deftest full-lifecycle-integration-test
+(deftest ^{:stratum 2} full-lifecycle-integration-test
   (testing "end-to-end: create -> start -> discover -> decide -> resolve -> stop"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -968,7 +982,7 @@
       (sut/stop! orch)
       (is (false? @(:running orch))))))
 
-(deftest full-lifecycle-with-event-stream-integration-test
+(deftest ^{:stratum 2} full-lifecycle-with-event-stream-integration-test
   (testing "end-to-end with event stream captures all events"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -1007,16 +1021,7 @@
 
       (sut/stop! orch))))
 
-;; ---------------------------------------------------------------------------
-;; Edge cases
-;; ---------------------------------------------------------------------------
-
-(deftest create-orchestrator-nil-adapters-test
-  (testing "nil adapters defaults to empty vector"
-    (let [orch (sut/create-orchestrator {:adapters nil})]
-      (is (= [] (:adapters orch))))))
-
-(deftest discovery-with-no-adapters-test
+(deftest ^{:stratum 2} discovery-with-no-adapters-test
   (testing "discovery pass with no adapters is a no-op"
     (let [reg (registry/create-registry)
           orch (sut/create-orchestrator
@@ -1024,7 +1029,7 @@
       (#'sut/run-discovery-pass orch)
       (is (zero? (registry/count-agents reg))))))
 
-(deftest poll-pass-with-no-agents-test
+(deftest ^{:stratum 2} poll-pass-with-no-agents-test
   (testing "poll pass with empty registry is a no-op"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -1037,7 +1042,7 @@
       (is (zero? @poll-count)
           "should not call poll when registry is empty"))))
 
-(deftest poll-pass-with-no-adapters-test
+(deftest ^{:stratum 2} poll-pass-with-no-adapters-test
   (testing "poll pass with no adapters is safe"
     (let [reg (registry/create-registry)
           _ (registry/register-agent! reg
@@ -1046,13 +1051,3 @@
                 (base-orchestrator-opts {:registry reg :adapters []}))]
       ;; Should not throw
       (is (nil? (#'sut/run-poll-pass orch))))))
-
-(deftest create-orchestrator-empty-opts-test
-  (testing "create-orchestrator works with completely empty opts map"
-    (let [orch (sut/create-orchestrator {})]
-      (is (some? orch))
-      (is (some? (:registry orch)))
-      (is (some? (:decision-manager orch)))
-      (is (= [] (:adapters orch)))
-      (is (instance? clojure.lang.Atom (:running orch)))
-      (is (instance? clojure.lang.Atom (:futures orch))))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.kanban-test
   "Tests for work spec kanban lifecycle — provenance tracking and file moves."
   (:require
@@ -24,13 +23,14 @@
    [babashka.fs :as fs]
    [ai.miniforge.cli.workflow-runner :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Helpers
 ;; ============================================================================
+(def ^{:stratum 0} ^:dynamic *test-dir* nil)
 
-(def ^:dynamic *test-dir* nil)
-
-(defn with-temp-work-dir [f]
+(defn ^{:stratum 0} with-temp-work-dir [f]
   (let [dir (str (fs/create-temp-dir {:prefix "kanban-test-"}))]
     (binding [*test-dir* dir]
       (try
@@ -38,9 +38,37 @@
         (finally
           (fs/delete-tree dir))))))
 
-(use-fixtures :each with-temp-work-dir)
+(deftest ^{:stratum 0} move-spec-to-in-progress-non-work-spec-test
+  (testing "non-work spec provenance is returned unchanged"
+    (let [provenance {:source-file "/tmp/not-a-work-spec.edn"}]
+      (is (= provenance (sut/move-spec-to-in-progress! provenance))))))
 
-(defn create-work-spec!
+;; ============================================================================
+;; failure-message
+;; ============================================================================
+(deftest ^{:stratum 0} failure-message-with-errors-test
+  (testing "uses first error entry when errors exist"
+    (let [result {:execution/errors [{:type :gate-failed :message "lint failed"}]
+                  :execution/status :failed}
+          msg (#'sut/failure-message result)]
+      (is (str/includes? msg "lint failed")))))
+
+(deftest ^{:stratum 0} failure-message-without-errors-test
+  (testing "includes execution status when no errors"
+    (let [result {:execution/errors []
+                  :execution/status :failed}
+          msg (#'sut/failure-message result)]
+      (is (str/includes? msg "failed")))))
+
+(deftest ^{:stratum 0} failure-message-nil-errors-test
+  (testing "handles nil errors gracefully"
+    (let [result {:execution/status :timeout}
+          msg (#'sut/failure-message result)]
+      (is (str/includes? msg "timeout")))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-work-spec!
   "Create a dummy spec file at work/<name> inside the test dir."
   [name]
   (let [work-dir (str *test-dir* "/work")
@@ -49,7 +77,7 @@
     (spit path "{:spec/title \"test\"}")
     path))
 
-(defmacro with-test-kanban
+(defmacro ^{:stratum 1} with-test-kanban
   "Redirect kanban dirs and work-spec? predicate to use the temp test dir."
   [& body]
   `(let [prefix# (str *test-dir* "/work/")]
@@ -61,11 +89,12 @@
                                       (str/starts-with? (str src#) prefix#)))]
        ~@body)))
 
+;------------------------------------------------------------------------------ Layer 2
+
 ;; ============================================================================
 ;; move-spec-to-in-progress! returns updated provenance
 ;; ============================================================================
-
-(deftest move-spec-to-in-progress-returns-updated-provenance-test
+(deftest ^{:stratum 2} move-spec-to-in-progress-returns-updated-provenance-test
   (testing "provenance source-file is updated to the new in-progress path"
     (let [spec-path (create-work-spec! "test.spec.edn")
           provenance {:source-file spec-path}]
@@ -76,7 +105,7 @@
           (is (fs/exists? (:source-file updated)))
           (is (not (fs/exists? spec-path))))))))
 
-(deftest move-spec-on-completion-uses-updated-provenance-test
+(deftest ^{:stratum 2} move-spec-on-completion-uses-updated-provenance-test
   (testing "after move-to-in-progress, move-on-completion finds the file"
     (let [spec-path (create-work-spec! "lifecycle.spec.edn")
           provenance {:source-file spec-path}]
@@ -87,7 +116,7 @@
           (is (fs/exists? (str *test-dir* "/work/done/lifecycle.spec.edn")))
           (is (not (fs/exists? (:source-file updated)))))))))
 
-(deftest move-spec-on-failure-uses-updated-provenance-test
+(deftest ^{:stratum 2} move-spec-on-failure-uses-updated-provenance-test
   (testing "failed workflow moves spec to failed directory"
     (let [spec-path (create-work-spec! "broken.spec.edn")
           provenance {:source-file spec-path}]
@@ -97,31 +126,4 @@
           (is (fs/exists? (str *test-dir* "/work/failed/broken.spec.edn")))
           (is (not (fs/exists? (:source-file updated)))))))))
 
-(deftest move-spec-to-in-progress-non-work-spec-test
-  (testing "non-work spec provenance is returned unchanged"
-    (let [provenance {:source-file "/tmp/not-a-work-spec.edn"}]
-      (is (= provenance (sut/move-spec-to-in-progress! provenance))))))
-
-;; ============================================================================
-;; failure-message
-;; ============================================================================
-
-(deftest failure-message-with-errors-test
-  (testing "uses first error entry when errors exist"
-    (let [result {:execution/errors [{:type :gate-failed :message "lint failed"}]
-                  :execution/status :failed}
-          msg (#'sut/failure-message result)]
-      (is (str/includes? msg "lint failed")))))
-
-(deftest failure-message-without-errors-test
-  (testing "includes execution status when no errors"
-    (let [result {:execution/errors []
-                  :execution/status :failed}
-          msg (#'sut/failure-message result)]
-      (is (str/includes? msg "failed")))))
-
-(deftest failure-message-nil-errors-test
-  (testing "handles nil errors gracefully"
-    (let [result {:execution/status :timeout}
-          msg (#'sut/failure-message result)]
-      (is (str/includes? msg "timeout")))))
+(use-fixtures :each with-temp-work-dir)

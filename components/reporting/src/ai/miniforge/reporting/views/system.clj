@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.views.system
   "System overview rendering.
 
@@ -24,9 +23,9 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; System overview rendering
 
-(defn render-system-overview
+;; System overview rendering
+(defn ^{:stratum 0} render-system-overview
   "Render system overview with boxed display.
 
    Args:

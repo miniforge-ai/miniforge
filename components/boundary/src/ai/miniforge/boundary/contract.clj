@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.contract
   "Malli contracts for the boundary primitive.
 
@@ -35,9 +34,9 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Exception-category vocabulary
 
-(def exception-categories
+;; Exception-category vocabulary
+(def ^{:stratum 0} exception-categories
   "Standard categories for classifying caught exceptions.
 
    The category is supplied by the call site (the developer knows what
@@ -60,10 +59,27 @@
     :unavailable
     :unknown})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Captured-exception payload
+;; check-fn shape (advisory)
+;;
+;; The boundary primitive is intentionally small: callers pass an
+;; ordinary 0+ arity function `f` plus its `args`. There is no
+;; mandatory pre-flight `check-fn` — but downstream callers commonly
+;; want to validate input before invoking `f`, and a `check-fn` is the
+;; conventional name for that. The schema below documents the shape
+;; consumers should use when they layer one on top of `execute`.
+(def ^{:stratum 0} CheckFn
+  "Malli schema for the optional pre-flight check function consumers
+   may layer on top of `execute`. A `check-fn` returns nil when its
+   inputs are acceptable, or a canonical `Anomaly` (per
+   `ai.miniforge.anomaly.interface/Anomaly`) when they are not.
+   Boundary itself does not consume a check-fn — this schema is
+   exposed so higher-level wrappers agree on the shape."
+  [:=> [:cat [:* :any]] [:maybe anomaly/Anomaly]])
 
-(def CapturedException
+;------------------------------------------------------------------------------ Layer 1
+
+;; Captured-exception payload
+(def ^{:stratum 1} CapturedException
   "Malli schema for the exception payload stored inside an anomaly's
    `:anomaly/data` when boundary converts a throw into a chain step.
 
@@ -87,40 +103,21 @@
    [:exception/data     [:maybe [:map-of :any :any]]]
    [:boundary/category  (into [:enum] exception-categories)]])
 
-;------------------------------------------------------------------------------ Layer 2
-;; check-fn shape (advisory)
-;;
-;; The boundary primitive is intentionally small: callers pass an
-;; ordinary 0+ arity function `f` plus its `args`. There is no
-;; mandatory pre-flight `check-fn` — but downstream callers commonly
-;; want to validate input before invoking `f`, and a `check-fn` is the
-;; conventional name for that. The schema below documents the shape
-;; consumers should use when they layer one on top of `execute`.
-
-(def CheckFn
-  "Malli schema for the optional pre-flight check function consumers
-   may layer on top of `execute`. A `check-fn` returns nil when its
-   inputs are acceptable, or a canonical `Anomaly` (per
-   `ai.miniforge.anomaly.interface/Anomaly`) when they are not.
-   Boundary itself does not consume a check-fn — this schema is
-   exposed so higher-level wrappers agree on the shape."
-  [:=> [:cat [:* :any]] [:maybe anomaly/Anomaly]])
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Validation helpers
-
-(defn valid-category?
+(defn ^{:stratum 1} valid-category?
   "Return true when `value` is one of the standard
    `exception-categories`."
   [value]
   (contains? exception-categories value))
 
-(defn valid-captured-exception?
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} valid-captured-exception?
   "Return true when `value` matches the `CapturedException` schema."
   [value]
   (m/validate CapturedException value))
 
-(defn explain-captured-exception
+(defn ^{:stratum 2} explain-captured-exception
   "Return a humanized explanation for an invalid captured-exception
    payload, or nil when `value` is valid."
   [value]

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.review-repair-loop-test
   "Tests for the review → implement repair loop.
 
@@ -30,39 +29,288 @@
    [ai.miniforge.phase-software-factory.review-convergence :as rconv]
    [ai.miniforge.phase-software-factory.implement]))
 
-(def phase-test-config-resource
-  "config/phase/test-support-namespaces.edn")
+;------------------------------------------------------------------------------ Layer 0
 
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (try
-      (binding [loader/phase-loader-config-resource phase-test-config-resource]
-        (f))
-      (finally
-        (phase/reset-phase-loader!)))))
+(def ^{:stratum 0} phase-test-config-resource
+  "config/phase/test-support-namespaces.edn")
 
 ;; ============================================================================
 ;; leave-review status tests
 ;; ============================================================================
-
-(def ^:private default-review-issues
+(def ^{:stratum 0} ^:private default-review-issues
   [{:severity :blocking
     :description "Missing require"}])
 
-(def ^:private first-review-iteration
+(def ^{:stratum 0} ^:private first-review-iteration
   1)
 
-(def ^:private next-repair-attempt
+(def ^{:stratum 0} ^:private next-repair-attempt
   2)
 
-(def ^:private review-repair-budget
+(def ^{:stratum 0} ^:private review-repair-budget
   4)
 
-(def ^:private default-review-issue-summary
+;; ============================================================================
+;; Execution engine integration: failed + transition request triggers redirect
+;; ============================================================================
+(deftest ^{:stratum 0} failed-with-transition-request-not-confused-with-retrying
+  (testing "execution engine distinguishes failed+transition-request from retrying"
+    (let [phase-result (phase/request-redirect {:status :failed} :implement)]
+      ;; The key invariant: failed? is true, retrying? is false
+      (is (phase/failed? phase-result)
+          "Should be detected as failed")
+      (is (not (phase/retrying? phase-result))
+          "Should NOT be detected as retrying")
+      ;; This means execution will hit the redirect branch,
+      ;; not the retrying branch (which would stay at current index)
+      )))
+
+(deftest ^{:stratum 0} retrying-status-stays-at-current-phase
+  (testing "retrying status would stay at current phase (the old broken behavior)"
+    (let [phase-result {:status :retrying}]
+      (is (phase/retrying? phase-result)
+          "retrying? returns true for :retrying status")
+      ;; This is why the old code was broken: :retrying caused review
+      ;; to re-run itself instead of redirecting to implement
+      )))
+
+;; ============================================================================
+;; Build-implement-task includes review feedback from context
+;; ============================================================================
+(deftest ^{:stratum 0} implement-task-includes-review-feedback-from-context
+  (testing "build-implement-task passes review-feedback through to task"
+    ;; The implement phase reads review feedback from execution/phase-results
+    ;; (survives :phase clearing between phases) and includes it as :task/review-feedback
+    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
+               :execution/phase-results {:plan {:result {:output nil}}
+                                         :review {:result {:output {:review/decision :changes-requested
+                                                                     :review/feedback [{:severity :blocking
+                                                                                         :description "Missing require"}]}}}}}
+          {:keys [task]} (build-implement-task ctx)]
+      (is (= [{:severity :blocking :description "Missing require"}]
+             (:task/review-feedback task))
+          "Task should include review feedback from context"))))
+
+(deftest ^{:stratum 0} implement-task-includes-phase-handoff-from-context
+  (testing "build-implement-task passes phase handoff through to task"
+    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
+          phase-handoff {:frame/kind :repair-request
+                         :transition/from :review
+                         :transition/to :implement
+                         :frame/body {:repair/findings
+                                      [{:finding/summary "GROUP 3 missing"}]}}
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
+               :execution/phase-results {:plan {:result {:output nil}}
+                                         :review {:phase/handoff phase-handoff
+                                                  :result {:output {:review/decision :changes-requested}}}}}
+          {:keys [task]} (build-implement-task ctx)]
+      (is (= phase-handoff (:task/phase-handoff task))))))
+
+(deftest ^{:stratum 0} implement-task-omits-review-feedback-when-absent
+  (testing "build-implement-task works normally without review feedback"
+    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
+          ctx {:execution/worktree-path "/tmp/test-worktree"
+               :execution/input {:description "Build widget"}
+               :execution/phase-results {:plan {:result {:output nil}}}}
+          {:keys [task]} (build-implement-task ctx)]
+      (is (nil? (:task/review-feedback task))
+          "Task should not have review feedback when none in context"))))
+
+;; ============================================================================
+;; Stagnation detector
+;;
+;; The review→implement loop must terminate with :anomalies.review/stagnation
+;; when the reviewer's actionable-issue fingerprint is identical to the prior
+;; iteration's. Catching it here saves the next implement+verify+review cycle.
+(def ^{:stratum 0} ^:private blocking-issue
+  {:severity :blocking :file "src/foo.clj" :line 12 :description "Bad"})
+
+(def ^{:stratum 0} ^:private different-blocking-issue
+  {:severity :blocking :file "src/bar.clj" :line 4 :description "Worse"})
+
+(def ^{:stratum 0} ^:private first-iteration
+  "Iteration counter at the very first review."
+  1)
+
+(def ^{:stratum 0} ^:private second-iteration
+  "Iteration counter when the first repair has already happened."
+  2)
+
+(def ^{:stratum 0} ^:private default-max-iterations
+  "Iteration cap that lets the test reach the second review without
+   bumping into the budget — only stagnation should short-circuit."
+  4)
+
+(def ^{:stratum 0} ^:private mock-token-count    100)
+
+(def ^{:stratum 0} ^:private mock-duration-ms    5000)
+
+(def ^{:stratum 0} ^:private mock-elapsed-ms     1000)
+
+(def ^{:stratum 0} ^:private one-fingerprint     1)
+
+(def ^{:stratum 0} ^:private two-fingerprints    2)
+
+;;----------------------------------------------------------------------------- Convergence cap (:needs-decomposition)
+(def ^{:stratum 0} ^:private third-iteration
+  "Iteration counter when two repair cycles have already happened (the
+   reviewer is now on its third rejection in a row) — the default cap."
+  3)
+
+(def ^{:stratum 0} ^:private prior-distinct-fingerprints
+  "Two distinct prior fingerprints — stagnation must NOT fire (it requires
+   IDENTICAL adjacent fingerprints), so the convergence cap is what should
+   trigger when the third review also rejects with yet a different blocker."
+  [{:review/fingerprint :fp-1}
+   {:review/fingerprint :fp-2}])
+
+(def ^{:stratum 0} ^:private yet-another-blocking-issue
+  {:severity :blocking :file "src/baz.clj" :line 7 :description "And worse"})
+
+(def ^{:stratum 0} ^:private default-convergence-cap
+  "Default `max-no-progress-attempts` — matches `default-max-no-progress-attempts`
+   in review.clj. Locks the magic number to the shipped value so test math stays
+   honest if either side drifts."
+  3)
+
+(deftest ^{:stratum 0} no-progress-streak-unit-test
+  (let [streak @#'rconv/no-progress-streak]
+    (testing "shrinking every cycle = 0 streak"
+      (is (= 0 (streak [3 2 1])))
+      (is (= 0 (streak [5 4]))))
+    (testing "one stall after progress = 1; flat throughout = full length"
+      (is (= 1 (streak [3 2 2])))
+      (is (= 3 (streak [1 1 1])))
+      (is (= 2 (streak [5 4 3 3 3]))))  ; trailing 3 3 3 → two no-progress steps after the last drop
+    (testing "growth counts as no-progress; single cycle = 1; empty = 0"
+      (is (= 3 (streak [1 1 2])))   ; no-prior, flat, growth — none shrank
+      (is (= 1 (streak [4])))
+      (is (= 0 (streak []))))))
+
+(deftest ^{:stratum 0} compute-needs-decomposition?-progress-aware-unit-test
+  (let [nd @#'rconv/compute-needs-decomposition?]
+    ;; args: blocked? stagnated? no-progress-streak cycle-count max-no-progress absolute-max
+    (testing "streak below the cap does not decompose (still converging)"
+      (is (false? (nd true false 0 3 3 6)))
+      (is (false? (nd true false 2 5 3 6))))
+    (testing "streak at the no-progress cap decomposes"
+      (is (true? (nd true false 3 3 3 6))))
+    (testing "absolute ceiling overrides a converging (low-streak) loop"
+      (is (true? (nd true false 0 6 3 6))))
+    (testing "stagnation pre-empts (handled elsewhere) — never decomposition"
+      (is (false? (nd true true 9 9 3 6))))
+    (testing "not blocked never decomposes"
+      (is (false? (nd false false 9 9 3 6))))))
+
+;; ============================================================================
+;; Backend-timeout verdict — companion to PR-A (#1058)
+;;
+;; PR-A wires the reviewer agent to take a `:reviewer/backend-timeout`
+;; error exit when the LLM call itself stream-idle'd (or stagnation /
+;; hard-limit / generic timeout). PR-B's `compute-verdict` arm here
+;; translates that error code into a `:review/backend-timeout` verdict
+;; — terminal in the FSM's `terminal-verdicts` set — so an infra
+;; timeout no longer cascade-fails the workflow through the
+;; `:exhausted` / on-fail-implement path that would just hit the same
+;; dead provider on the next pass.
+;; ============================================================================
+(defn- ^{:stratum 0} simulate-leave-review-backend-timeout-context
+  "Simulate the leave-review logic when the reviewer agent returned a
+   `:reviewer/backend-timeout` error result (the PR-A exit shape).
+
+   The result mirrors what `artifact/timeout-only-error-result` wires
+   through `result-boundary/error-response`: `:status :error` at the
+   top of the result, the error data carries `:code :reviewer/backend-
+   timeout`, no `:output` artifact."
+  [iterations max-iterations]
+  (let [result {:status :error
+                :error {:message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"
+                        :data {:code :reviewer/backend-timeout
+                               :blocking-issues ["Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"]}}
+                :metrics {:tokens 9 :duration-ms 360087}}
+        ctx {:phase {:started-at (- (System/currentTimeMillis) 360087)
+                     :iterations iterations
+                     :budget {:iterations max-iterations}
+                     :result result}
+             :phase-config {:phase :review}
+             :execution/phase-results {}
+             :execution/input {:description "test task"}
+             :execution/metrics {}}
+        interceptor (phase/get-phase-interceptor {:phase :review})
+        leave-fn (:leave interceptor)]
+    (leave-fn ctx)))
+
+(deftest ^{:stratum 0} backend-timeout-verdict-is-in-the-canonical-verdict-set
+  (testing "compute-verdict's verdict tag set declares :review/backend-timeout
+            — the FSM's terminal-verdicts wiring + `:verdict/terminal?`
+            guard look up the verdict by exact keyword match, so the
+            tag-set must enumerate it. Coverage here pins the public
+            surface so a rename can't silently slip past."
+    ;; Read the private var via the var; the resolved value is the set.
+    (let [verdicts @#'rconv/verdicts]
+      (is (contains? verdicts :review/backend-timeout))
+      (is (contains? verdicts :approved))
+      (is (contains? verdicts :accept-with-warnings))
+      (is (contains? verdicts :exhausted))
+      (is (contains? verdicts :stagnated))
+      (is (contains? verdicts :needs-decomposition))
+      (is (contains? verdicts :repair-requested)))))
+
+;; ============================================================================
+;; Warning-churn tracking — classify-rejection-cause + compute-warning-churn?
+;;
+;; When the reviewer emits only warnings (no blocking issues) for
+;; max-warning-only-cycles consecutive cycles the churn policy fires.
+;; The default policy (:accept-with-warnings) lets the phase succeed with
+;; unresolved warnings attached; the :needs-decomposition policy terminates.
+;;
+;; With the default cap of 2:
+;;   cycle 1: warning-only → count=1, (>= 1 2) = false → :repair-requested
+;;   cycle 2: warning-only → count=2, (>= 2 2) = true  → policy verdict
+;; ============================================================================
+(def ^{:stratum 0} ^:private warning-only-issue
+  "Review issue that is only a warning (non-blocking)."
+  {:severity :warning :description "Style nit: prefer cond over nested if"})
+
+(def ^{:stratum 0} ^:private default-cap
+  "Matches `default-max-warning-only-cycles` in review.clj."
+  2)
+
+(def ^{:stratum 0} ^:private count-below-cap
+  "Warning-only-count for cycle 1 — one short of default cap."
+  1)
+
+(def ^{:stratum 0} ^:private count-at-cap
+  "Warning-only-count for cycle 2 — exactly at default cap."
+  2)
+
+(deftest ^{:stratum 0} classify-rejection-cause-blocking-resets-count
+  (testing "blocking defect resets the warning-only count to 0"
+    (let [classify #'rconv/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues [{:severity :blocking
+                                              :description "Missing require"}]
+                    :review/warnings        []}
+          result   (classify artifact 3)]
+      (is (= :blocking-defect (:cause/type result)))
+      (is (= 0 (:warning-only-count result))))))
+
+;;------------------------------------------------------------------------------ accept-with-warnings is in the verdict set
+(deftest ^{:stratum 0} accept-with-warnings-is-in-canonical-verdict-set
+  (testing ":accept-with-warnings is declared in the verdicts set so the FSM
+            can recognise it without an IllegalArgumentException from case"
+    (let [verdicts @#'rconv/verdicts]
+      (is (contains? verdicts :accept-with-warnings)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private default-review-issue-summary
   (:description (first default-review-issues)))
 
-(defn simulate-leave-review-context
+(defn ^{:stratum 1} simulate-leave-review-context
   "Simulate the leave-review logic and return the full context."
   ([decision iterations max-iterations]
    (simulate-leave-review-context
@@ -84,214 +332,7 @@
          result-ctx (leave-fn ctx)]
      result-ctx)))
 
-(defn simulate-leave-review
-  "Simulate the leave-review logic for a given decision and iteration state.
-   Returns the phase map after leave-review processing."
-  ([decision iterations max-iterations]
-   (simulate-leave-review decision iterations max-iterations {:review/issues default-review-issues}))
-  ([decision iterations max-iterations review-output]
-   (:phase (simulate-leave-review-context decision iterations max-iterations review-output))))
-
-;; ============================================================================
-;; Core behavior tests
-;; ============================================================================
-
-(deftest changes-requested-sets-failed-status
-  (testing "changes-requested sets :failed status (not :retrying)"
-    (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (phase/failed? phase)
-          "Status should be :failed so execution can follow the transition request")
-      (is (not (phase/retrying? phase))
-          "Should NOT be retrying (would cause review to re-run in place)"))))
-
-(deftest changes-requested-within-budget-emits-repair-requested-verdict
-  (testing "changes-requested within budget sets :phase/verdict :repair-requested
-            on the phase result so the FSM's verdict-driven guarded
-            :phase/fail array can route via :on-fail (Phase 2b)"
-    (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (= :repair-requested (:verdict phase))
-          ":verdict is exposed on the phase map for callers/tests")
-      (is (= :repair-requested (get-in phase [:result :output :phase/verdict]))
-          ":phase/verdict on the phase result is what determine-phase-event reads")
-      (is (phase/failed? phase)
-          "Status stays :failed; the FSM's guarded array picks the on-fail target"))))
-
-(deftest changes-requested-over-budget-no-redirect
-  (testing "changes-requested at max iterations fails without redirect"
-    (let [phase (simulate-leave-review :changes-requested 4 4)]
-      (is (phase/failed? phase)
-          "Should be failed")
-      (is (not (phase/redirect-requested? phase))
-          "Should NOT redirect — iteration budget exhausted"))))
-
-(deftest changes-requested-stores-review-feedback
-  (testing "changes-requested stores review issues as feedback"
-    (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (some? (:review-feedback phase))
-          "Review feedback should be stored for implement to consume")
-      (is (= default-review-issues
-             (:review-feedback phase))
-          "Should contain the review issues"))))
-
-(deftest changes-requested-stores-repair-handoff
-  (testing "changes-requested stores a typed repair handoff"
-    (let [result-ctx (simulate-leave-review-context
-                      :changes-requested first-review-iteration review-repair-budget)
-          handoff (get-in result-ctx [:phase :phase/handoff])
-          finding (first (get-in handoff [:frame/body :repair/findings]))]
-      (is (= :repair-request (:frame/kind handoff)))
-      (is (= :review (:transition/from handoff)))
-      (is (= :implement (:transition/to handoff)))
-      (is (= next-repair-attempt (:phase/attempt handoff)))
-      (is (= next-repair-attempt (get-in handoff [:frame/body :repair/attempt])))
-      (is (not (contains? (:frame/body handoff) :repair/raw-feedback)))
-      (is (= [handoff] (:execution/phase-handoffs result-ctx)))
-      (is (= default-review-issue-summary (:finding/summary finding))))))
-
-(deftest rejected-emits-repair-requested-verdict-like-changes-requested
-  (testing "iter-23 regression guard (Phase 2b shape): :rejected must set
-            :failed AND set verdict :repair-requested (NOT silently fall
-            through to :completed and let an empty-diff PR open). The
-            FSM's guarded array dispatches to on-fail :implement from
-            there."
-    (let [phase (simulate-leave-review :rejected 1 4)]
-      (is (phase/failed? phase)
-          "rejected must be :failed — falling through to :completed lets an empty-diff PR open")
-      (is (= :repair-requested (:verdict phase))
-          "verdict drives the FSM's on-fail dispatch"))))
-
-(deftest rejected-over-budget-no-redirect
-  (testing ":rejected at max iterations fails terminally (no redirect)"
-    (let [phase (simulate-leave-review :rejected 4 4)]
-      (is (phase/failed? phase))
-      (is (not (phase/redirect-requested? phase))))))
-
-(deftest rejected-without-actionable-feedback-fails-closed
-  (testing "operational reviewer rejection with no repair feedback does not redirect"
-    (let [phase (simulate-leave-review :rejected 1 4 {})]
-      (is (phase/failed? phase))
-      (is (not (phase/redirect-requested? phase))
-          "No redirect when reviewer produced no actionable feedback for implement")
-      (is (nil? (:review-feedback phase))))))
-
-(deftest approved-sets-completed-status
-  (testing "approved review sets :completed status"
-    (let [phase (simulate-leave-review :approved 1 4)]
-      (is (phase/succeeded? phase)
-          "Approved review should complete normally")
-      (is (not (phase/redirect-requested? phase))
-          "No redirect needed for approved review"))))
-
-(deftest iteration-counter-incremented-on-redirect
-  (testing "iteration counter increments when redirecting"
-    (let [phase (simulate-leave-review :changes-requested 1 4)]
-      (is (= 2 (:iterations phase))
-          "Iterations should increment from 1 to 2"))))
-
-;; ============================================================================
-;; Execution engine integration: failed + transition request triggers redirect
-;; ============================================================================
-
-(deftest failed-with-transition-request-not-confused-with-retrying
-  (testing "execution engine distinguishes failed+transition-request from retrying"
-    (let [phase-result (phase/request-redirect {:status :failed} :implement)]
-      ;; The key invariant: failed? is true, retrying? is false
-      (is (phase/failed? phase-result)
-          "Should be detected as failed")
-      (is (not (phase/retrying? phase-result))
-          "Should NOT be detected as retrying")
-      ;; This means execution will hit the redirect branch,
-      ;; not the retrying branch (which would stay at current index)
-      )))
-
-(deftest retrying-status-stays-at-current-phase
-  (testing "retrying status would stay at current phase (the old broken behavior)"
-    (let [phase-result {:status :retrying}]
-      (is (phase/retrying? phase-result)
-          "retrying? returns true for :retrying status")
-      ;; This is why the old code was broken: :retrying caused review
-      ;; to re-run itself instead of redirecting to implement
-      )))
-
-;; ============================================================================
-;; Build-implement-task includes review feedback from context
-;; ============================================================================
-
-(deftest implement-task-includes-review-feedback-from-context
-  (testing "build-implement-task passes review-feedback through to task"
-    ;; The implement phase reads review feedback from execution/phase-results
-    ;; (survives :phase clearing between phases) and includes it as :task/review-feedback
-    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
-          ctx {:execution/worktree-path "/tmp/test-worktree"
-               :execution/input {:description "Build widget"}
-               :execution/phase-results {:plan {:result {:output nil}}
-                                         :review {:result {:output {:review/decision :changes-requested
-                                                                     :review/feedback [{:severity :blocking
-                                                                                         :description "Missing require"}]}}}}}
-          {:keys [task]} (build-implement-task ctx)]
-      (is (= [{:severity :blocking :description "Missing require"}]
-             (:task/review-feedback task))
-          "Task should include review feedback from context"))))
-
-(deftest implement-task-includes-phase-handoff-from-context
-  (testing "build-implement-task passes phase handoff through to task"
-    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
-          phase-handoff {:frame/kind :repair-request
-                         :transition/from :review
-                         :transition/to :implement
-                         :frame/body {:repair/findings
-                                      [{:finding/summary "GROUP 3 missing"}]}}
-          ctx {:execution/worktree-path "/tmp/test-worktree"
-               :execution/input {:description "Build widget"}
-               :execution/phase-results {:plan {:result {:output nil}}
-                                         :review {:phase/handoff phase-handoff
-                                                  :result {:output {:review/decision :changes-requested}}}}}
-          {:keys [task]} (build-implement-task ctx)]
-      (is (= phase-handoff (:task/phase-handoff task))))))
-
-(deftest implement-task-omits-review-feedback-when-absent
-  (testing "build-implement-task works normally without review feedback"
-    (let [build-implement-task #'ai.miniforge.phase-software-factory.implement/build-implement-task
-          ctx {:execution/worktree-path "/tmp/test-worktree"
-               :execution/input {:description "Build widget"}
-               :execution/phase-results {:plan {:result {:output nil}}}}
-          {:keys [task]} (build-implement-task ctx)]
-      (is (nil? (:task/review-feedback task))
-          "Task should not have review feedback when none in context"))))
-
-;; ============================================================================
-;; Stagnation detector
-;;
-;; The review→implement loop must terminate with :anomalies.review/stagnation
-;; when the reviewer's actionable-issue fingerprint is identical to the prior
-;; iteration's. Catching it here saves the next implement+verify+review cycle.
-
-(def ^:private blocking-issue
-  {:severity :blocking :file "src/foo.clj" :line 12 :description "Bad"})
-
-(def ^:private different-blocking-issue
-  {:severity :blocking :file "src/bar.clj" :line 4 :description "Worse"})
-
-(def ^:private first-iteration
-  "Iteration counter at the very first review."
-  1)
-
-(def ^:private second-iteration
-  "Iteration counter when the first repair has already happened."
-  2)
-
-(def ^:private default-max-iterations
-  "Iteration cap that lets the test reach the second review without
-   bumping into the budget — only stagnation should short-circuit."
-  4)
-
-(def ^:private mock-token-count    100)
-(def ^:private mock-duration-ms    5000)
-(def ^:private mock-elapsed-ms     1000)
-(def ^:private one-fingerprint     1)
-(def ^:private two-fingerprints    2)
-
-(defn- run-leave-review
+(defn- ^{:stratum 1} run-leave-review
   "Run leave-review against a custom ctx and return the resulting full ctx."
   [{:keys [issues iterations max-iterations prior-fingerprints prior-blocking-counts]
     :or   {iterations            first-iteration
@@ -314,7 +355,177 @@
         interceptor (phase/get-phase-interceptor {:phase :review})]
     ((:leave interceptor) ctx)))
 
-(deftest stagnation-emits-stagnated-verdict-test
+(def ^{:stratum 1} ^:private cycles-at-cap
+  "Number of completed review cycles that should trip the convergence cap.
+   Equals the cap itself: cycle 1 (no prior) + cycle 2 (one prior) + cycle 3
+   (two prior) = cap-3 reached on the third review."
+  default-convergence-cap)
+
+(deftest ^{:stratum 1} backend-timeout-result-emits-review-backend-timeout-verdict
+  ;; 2026-06-05 dogfood (workflow adhoc-944448986) repro: reviewer LLM
+  ;; stream-idle'd at 360s; PR-A makes the reviewer return the
+  ;; backend-timeout error code instead of synthesizing a false
+  ;; `:rejected`. PR-B converts that error code into the verdict the
+  ;; FSM reads to take the terminal branch.
+  (testing "reviewer-agent :reviewer/backend-timeout error → :review/backend-timeout verdict"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
+          phase (:phase final-ctx)]
+      (is (= :review/backend-timeout (:verdict phase))
+          ":verdict slot exposes the canonical backend-timeout signal")
+      (is (= :review/backend-timeout
+             (get-in phase [:result :output :phase/verdict]))
+          "FSM-readable :phase/verdict carries the same verdict
+           — `determine-phase-event` plumbs this into the
+           `:verdict/terminal?` guard")))
+
+  (testing "backend-timeout verdict takes priority over the within-budget repair branch
+            — the LLM call NEVER produced a real verdict, so there's
+            nothing to repair; redirecting to implement would just hit
+            the same dead provider on the next review pass"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 4)
+          phase (:phase final-ctx)]
+      (is (= :review/backend-timeout (:verdict phase))
+          "even with iterations < max, backend-timeout pre-empts :repair-requested")
+      (is (not= :repair-requested (:verdict phase))))))
+
+(deftest ^{:stratum 1} backend-timeout-apply-verdict-attaches-anomaly-without-throwing
+  ;; PR #1059 review (Copilot): `apply-verdict` is a `case` with no
+  ;; default arm. Adding `:review/backend-timeout` to the verdicts set
+  ;; without a matching clause would raise IllegalArgumentException at
+  ;; the first production stream-idle. This test pins both the no-
+  ;; throw contract AND the anomaly-attached side-effect that mirrors
+  ;; the stagnated / needs-decomposition pattern.
+  (testing "leave-review on backend-timeout produces a context (no IllegalArgumentException)
+            and attaches the :anomalies.review/backend-timeout sub-anomaly
+            to [:phase :error] for the evidence bundle"
+    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
+          phase-error (get-in final-ctx [:phase :error])]
+      (is (some? phase-error)
+          ":phase :error is set — case clause fired the anomaly-attach side effect")
+      (is (= :anomalies.review/backend-timeout
+             (:anomaly/category phase-error))
+          "anomaly category matches the verdict — parallels :anomalies.review/stagnation
+           and :anomalies.review/needs-decomposition")
+      (is (string? (:anomaly/message phase-error))
+          "anomaly message is a string — pulled from the agent error message
+           or the catalog fallback")
+      (is (= (get-in final-ctx [:phase :result :error :message])
+             (:message phase-error))
+          "anomaly :message preserves the actual adaptive-timeout text the
+           operator needs (stream-idle / stagnation / etc.) — not just a
+           generic catalog string"))))
+
+(defn- ^{:stratum 1} run-leave-review-warning-only
+  "Run leave-review with a warning-only reviewer output.
+   `prior-warning-cycles` seeds [:execution :review-warning-only-cycles].
+   Returns the resulting full context."
+  [{:keys [prior-warning-cycles iterations max-iterations]
+    :or   {prior-warning-cycles 0
+           iterations           first-iteration
+           max-iterations       default-max-iterations}}]
+  (let [result {:output  {:review/decision :changes-requested
+                          :review/blocking-issues []
+                          :review/warnings [warning-only-issue]}
+                :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
+        ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
+                         :iterations iterations
+                         :budget     {:iterations max-iterations}
+                         :result     result}
+             :phase-config {:phase :review}
+             :execution {:review-fingerprints    []
+                         :review-warning-only-cycles prior-warning-cycles}
+             :execution/phase-results {}
+             :execution/input {:description "test task"}
+             :execution/metrics {}}
+        interceptor (phase/get-phase-interceptor {:phase :review})]
+    ((:leave interceptor) ctx)))
+
+;;------------------------------------------------------------------------------ classify-rejection-cause
+(deftest ^{:stratum 1} classify-rejection-cause-warning-only-increments-count
+  (testing "warning-only rejection increments the prior count"
+    (let [classify #'rconv/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues []
+                    :review/warnings        [warning-only-issue]}
+          result   (classify artifact 0)]
+      (is (= :warning-churn (:cause/type result)))
+      (is (= 1 (:warning-only-count result)))))
+  (testing "increments from a non-zero prior"
+    (let [classify #'rconv/classify-rejection-cause
+          artifact {:review/decision        :changes-requested
+                    :review/blocking-issues []
+                    :review/warnings        [warning-only-issue]}
+          result   (classify artifact 1)]
+      (is (= :warning-churn (:cause/type result)))
+      (is (= 2 (:warning-only-count result))))))
+
+;;------------------------------------------------------------------------------ compute-warning-churn?
+(deftest ^{:stratum 1} compute-warning-churn-below-cap-returns-false
+  (testing "warning-only-count below cap → not churn yet"
+    (let [pred #'rconv/compute-warning-churn?]
+      (is (not (pred :warning-churn count-below-cap default-cap))
+          "count 1 with cap 2 must not trip the policy"))))
+
+(deftest ^{:stratum 1} compute-warning-churn-at-cap-returns-true
+  (testing "warning-only-count at cap → churn fires"
+    (let [pred #'rconv/compute-warning-churn?]
+      (is (pred :warning-churn count-at-cap default-cap)
+          "count 2 with cap 2 must trip the policy"))))
+
+(deftest ^{:stratum 1} compute-warning-churn-blocking-cause-returns-false
+  (testing "blocking-defect cause never trips warning-churn even at or above cap"
+    (let [pred #'rconv/compute-warning-churn?]
+      (is (not (pred :blocking-defect count-at-cap default-cap))
+          "blocking-defect must not be churn regardless of count"))))
+
+(deftest ^{:stratum 1} blocking-rejection-resets-warning-cycle-count
+  (testing "a blocking-defect rejection resets the warning-only count to 0"
+    (let [result {:output  {:review/decision        :changes-requested
+                            :review/blocking-issues [{:severity    :blocking
+                                                      :description "Missing require"}]
+                            :review/warnings        []}
+                  :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
+          ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
+                           :iterations first-iteration
+                           :budget     {:iterations default-max-iterations}
+                           :result     result}
+               :phase-config {:phase :review}
+               :execution {:review-fingerprints        []
+                           :review-warning-only-cycles 1}
+               :execution/phase-results {}
+               :execution/input {:description "test task"}
+               :execution/metrics {}}
+          interceptor (phase/get-phase-interceptor {:phase :review})
+          final-ctx   ((:leave interceptor) ctx)]
+      (is (= 0 (get-in final-ctx [:execution :review-warning-only-cycles]))
+          "blocking defect resets the warning-only cycle counter"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} simulate-leave-review
+  "Simulate the leave-review logic for a given decision and iteration state.
+   Returns the phase map after leave-review processing."
+  ([decision iterations max-iterations]
+   (simulate-leave-review decision iterations max-iterations {:review/issues default-review-issues}))
+  ([decision iterations max-iterations review-output]
+   (:phase (simulate-leave-review-context decision iterations max-iterations review-output))))
+
+(deftest ^{:stratum 2} changes-requested-stores-repair-handoff
+  (testing "changes-requested stores a typed repair handoff"
+    (let [result-ctx (simulate-leave-review-context
+                      :changes-requested first-review-iteration review-repair-budget)
+          handoff (get-in result-ctx [:phase :phase/handoff])
+          finding (first (get-in handoff [:frame/body :repair/findings]))]
+      (is (= :repair-request (:frame/kind handoff)))
+      (is (= :review (:transition/from handoff)))
+      (is (= :implement (:transition/to handoff)))
+      (is (= next-repair-attempt (:phase/attempt handoff)))
+      (is (= next-repair-attempt (get-in handoff [:frame/body :repair/attempt])))
+      (is (not (contains? (:frame/body handoff) :repair/raw-feedback)))
+      (is (= [handoff] (:execution/phase-handoffs result-ctx)))
+      (is (= default-review-issue-summary (:finding/summary finding))))))
+
+(deftest ^{:stratum 2} stagnation-emits-stagnated-verdict-test
   (testing "Phase 2b: two consecutive identical fingerprints ⇒ verdict
             :stagnated. No call to request-redirect — the FSM's
             :verdict/terminal? guard routes :phase/fail straight to
@@ -348,7 +559,7 @@
               two-fingerprints)
           "fingerprint history carries the chain that proved stagnation"))))
 
-(deftest non-stagnant-progress-emits-repair-requested-test
+(deftest ^{:stratum 2} non-stagnant-progress-emits-repair-requested-test
   (testing "Phase 2b: fingerprint changed between iterations ⇒ verdict
             :repair-requested. FSM routes to on-fail :implement via the
             third branch of the guarded array."
@@ -364,7 +575,7 @@
       (is (nil? (get-in phase [:error :anomaly/subtype]))
           "no stagnation anomaly when progress is detected"))))
 
-(deftest first-iteration-never-stagnates-test
+(deftest ^{:stratum 2} first-iteration-never-stagnates-test
   (testing "Phase 2b: no prior fingerprint history ⇒ first review must
             not short-circuit. Verdict is :repair-requested (within
             budget, has feedback) and the FSM dispatches to implement
@@ -377,7 +588,7 @@
       (is (= :repair-requested (:verdict phase))
           "first :changes-requested produces :repair-requested verdict"))))
 
-(deftest fingerprint-recorded-on-every-review-test
+(deftest ^{:stratum 2} fingerprint-recorded-on-every-review-test
   (testing "every review iteration appends its fingerprint to the execution history"
     (let [final-ctx (run-leave-review {:issues [blocking-issue]
                                        :iterations first-iteration})]
@@ -390,36 +601,7 @@
       (is (= two-fingerprints (count (get-in final-ctx [:execution :review-fingerprints])))
           "second iteration appends without dropping prior history"))))
 
-;;----------------------------------------------------------------------------- Convergence cap (:needs-decomposition)
-
-(def ^:private third-iteration
-  "Iteration counter when two repair cycles have already happened (the
-   reviewer is now on its third rejection in a row) — the default cap."
-  3)
-
-(def ^:private prior-distinct-fingerprints
-  "Two distinct prior fingerprints — stagnation must NOT fire (it requires
-   IDENTICAL adjacent fingerprints), so the convergence cap is what should
-   trigger when the third review also rejects with yet a different blocker."
-  [{:review/fingerprint :fp-1}
-   {:review/fingerprint :fp-2}])
-
-(def ^:private yet-another-blocking-issue
-  {:severity :blocking :file "src/baz.clj" :line 7 :description "And worse"})
-
-(def ^:private default-convergence-cap
-  "Default `max-no-progress-attempts` — matches `default-max-no-progress-attempts`
-   in review.clj. Locks the magic number to the shipped value so test math stays
-   honest if either side drifts."
-  3)
-
-(def ^:private cycles-at-cap
-  "Number of completed review cycles that should trip the convergence cap.
-   Equals the cap itself: cycle 1 (no prior) + cycle 2 (one prior) + cycle 3
-   (two prior) = cap-3 reached on the third review."
-  default-convergence-cap)
-
-(deftest needs-decomposition-fires-after-n-non-stagnated-rejections-test
+(deftest ^{:stratum 2} needs-decomposition-fires-after-n-non-stagnated-rejections-test
   (testing "Phase 2b: 3 consecutive non-stagnated review rejections trip
             verdict :needs-decomposition. FSM's :verdict/terminal? guard
             routes to terminal :failed rather than on-fail redirect.
@@ -443,7 +625,7 @@
       (is (= cycles-at-cap (get-in phase [:error :review/cycle-count]))
           "task-level cycle count carried in the anomaly"))))
 
-(deftest needs-decomposition-yields-to-stagnation-test
+(deftest ^{:stratum 2} needs-decomposition-yields-to-stagnation-test
   (testing "when the new fingerprint matches the immediate prior one,
             stagnation wins over :needs-decomposition (identical-loop is
             the sharper signal). Seed with two prior fingerprints so the
@@ -460,7 +642,7 @@
       (is (= :stagnated (:verdict phase))
           "stagnation pre-empts :needs-decomposition in compute-verdict"))))
 
-(deftest needs-decomposition-does-not-fire-below-cap-test
+(deftest ^{:stratum 2} needs-decomposition-does-not-fire-below-cap-test
   (testing "Phase 2b: two cycles total (one prior + this review) — below
             the default cap of 3 — emit :repair-requested verdict so the
             FSM redirects via on-fail rather than terminating."
@@ -473,7 +655,7 @@
       (is (= :repair-requested (:verdict phase))
           "below cap with progress + actionable feedback = :repair-requested"))))
 
-(deftest needs-decomposition-fires-records-blocking-counts-test
+(deftest ^{:stratum 2} needs-decomposition-fires-records-blocking-counts-test
   (testing "the convergence-cap anomaly carries the blocking-count trend"
     (let [final-ctx (run-leave-review {:issues             [yet-another-blocking-issue]
                                        :iterations         third-iteration
@@ -485,7 +667,7 @@
       (is (= [1 1 1] (get-in phase [:error :review/blocking-counts]))
           "blocking-count history recorded in the anomaly"))))
 
-(deftest progressing-loop-not-decomposed-at-cap-test
+(deftest ^{:stratum 2} progressing-loop-not-decomposed-at-cap-test
   (testing "a loop whose blocking count is SHRINKING is allowed past
             max-no-progress-attempts — it is converging, just not in one
             turn. This is the 2026-06-07b dogfood regression: a real
@@ -500,7 +682,7 @@
       (is (= :repair-requested (:verdict phase))
           "converging loop keeps redirecting to implement"))))
 
-(deftest progressing-loop-decomposed-at-absolute-ceiling-test
+(deftest ^{:stratum 2} progressing-loop-decomposed-at-absolute-ceiling-test
   (testing "even a shrinking loop terminates at the absolute redirect ceiling
             (default 6) — backstop against an unbounded slow decrement."
     (let [five-priors (mapv (fn [i] {:review/fingerprint (keyword (str "fp" i))})
@@ -513,252 +695,8 @@
       (is (= :needs-decomposition (:verdict phase))
           "absolute ceiling overrides progress"))))
 
-(deftest no-progress-streak-unit-test
-  (let [streak @#'rconv/no-progress-streak]
-    (testing "shrinking every cycle = 0 streak"
-      (is (= 0 (streak [3 2 1])))
-      (is (= 0 (streak [5 4]))))
-    (testing "one stall after progress = 1; flat throughout = full length"
-      (is (= 1 (streak [3 2 2])))
-      (is (= 3 (streak [1 1 1])))
-      (is (= 2 (streak [5 4 3 3 3]))))  ; trailing 3 3 3 → two no-progress steps after the last drop
-    (testing "growth counts as no-progress; single cycle = 1; empty = 0"
-      (is (= 3 (streak [1 1 2])))   ; no-prior, flat, growth — none shrank
-      (is (= 1 (streak [4])))
-      (is (= 0 (streak []))))))
-
-(deftest compute-needs-decomposition?-progress-aware-unit-test
-  (let [nd @#'rconv/compute-needs-decomposition?]
-    ;; args: blocked? stagnated? no-progress-streak cycle-count max-no-progress absolute-max
-    (testing "streak below the cap does not decompose (still converging)"
-      (is (false? (nd true false 0 3 3 6)))
-      (is (false? (nd true false 2 5 3 6))))
-    (testing "streak at the no-progress cap decomposes"
-      (is (true? (nd true false 3 3 3 6))))
-    (testing "absolute ceiling overrides a converging (low-streak) loop"
-      (is (true? (nd true false 0 6 3 6))))
-    (testing "stagnation pre-empts (handled elsewhere) — never decomposition"
-      (is (false? (nd true true 9 9 3 6))))
-    (testing "not blocked never decomposes"
-      (is (false? (nd false false 9 9 3 6))))))
-
-;; ============================================================================
-;; Backend-timeout verdict — companion to PR-A (#1058)
-;;
-;; PR-A wires the reviewer agent to take a `:reviewer/backend-timeout`
-;; error exit when the LLM call itself stream-idle'd (or stagnation /
-;; hard-limit / generic timeout). PR-B's `compute-verdict` arm here
-;; translates that error code into a `:review/backend-timeout` verdict
-;; — terminal in the FSM's `terminal-verdicts` set — so an infra
-;; timeout no longer cascade-fails the workflow through the
-;; `:exhausted` / on-fail-implement path that would just hit the same
-;; dead provider on the next pass.
-;; ============================================================================
-
-(defn- simulate-leave-review-backend-timeout-context
-  "Simulate the leave-review logic when the reviewer agent returned a
-   `:reviewer/backend-timeout` error result (the PR-A exit shape).
-
-   The result mirrors what `artifact/timeout-only-error-result` wires
-   through `result-boundary/error-response`: `:status :error` at the
-   top of the result, the error data carries `:code :reviewer/backend-
-   timeout`, no `:output` artifact."
-  [iterations max-iterations]
-  (let [result {:status :error
-                :error {:message "Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"
-                        :data {:code :reviewer/backend-timeout
-                               :blocking-issues ["Adaptive timeout: No stream output for 360000ms (type: stream-idle, elapsed: 360087ms)"]}}
-                :metrics {:tokens 9 :duration-ms 360087}}
-        ctx {:phase {:started-at (- (System/currentTimeMillis) 360087)
-                     :iterations iterations
-                     :budget {:iterations max-iterations}
-                     :result result}
-             :phase-config {:phase :review}
-             :execution/phase-results {}
-             :execution/input {:description "test task"}
-             :execution/metrics {}}
-        interceptor (phase/get-phase-interceptor {:phase :review})
-        leave-fn (:leave interceptor)]
-    (leave-fn ctx)))
-
-(deftest backend-timeout-result-emits-review-backend-timeout-verdict
-  ;; 2026-06-05 dogfood (workflow adhoc-944448986) repro: reviewer LLM
-  ;; stream-idle'd at 360s; PR-A makes the reviewer return the
-  ;; backend-timeout error code instead of synthesizing a false
-  ;; `:rejected`. PR-B converts that error code into the verdict the
-  ;; FSM reads to take the terminal branch.
-  (testing "reviewer-agent :reviewer/backend-timeout error → :review/backend-timeout verdict"
-    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
-          phase (:phase final-ctx)]
-      (is (= :review/backend-timeout (:verdict phase))
-          ":verdict slot exposes the canonical backend-timeout signal")
-      (is (= :review/backend-timeout
-             (get-in phase [:result :output :phase/verdict]))
-          "FSM-readable :phase/verdict carries the same verdict
-           — `determine-phase-event` plumbs this into the
-           `:verdict/terminal?` guard")))
-
-  (testing "backend-timeout verdict takes priority over the within-budget repair branch
-            — the LLM call NEVER produced a real verdict, so there's
-            nothing to repair; redirecting to implement would just hit
-            the same dead provider on the next review pass"
-    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 4)
-          phase (:phase final-ctx)]
-      (is (= :review/backend-timeout (:verdict phase))
-          "even with iterations < max, backend-timeout pre-empts :repair-requested")
-      (is (not= :repair-requested (:verdict phase))))))
-
-(deftest backend-timeout-verdict-is-in-the-canonical-verdict-set
-  (testing "compute-verdict's verdict tag set declares :review/backend-timeout
-            — the FSM's terminal-verdicts wiring + `:verdict/terminal?`
-            guard look up the verdict by exact keyword match, so the
-            tag-set must enumerate it. Coverage here pins the public
-            surface so a rename can't silently slip past."
-    ;; Read the private var via the var; the resolved value is the set.
-    (let [verdicts @#'rconv/verdicts]
-      (is (contains? verdicts :review/backend-timeout))
-      (is (contains? verdicts :approved))
-      (is (contains? verdicts :accept-with-warnings))
-      (is (contains? verdicts :exhausted))
-      (is (contains? verdicts :stagnated))
-      (is (contains? verdicts :needs-decomposition))
-      (is (contains? verdicts :repair-requested)))))
-
-(deftest backend-timeout-apply-verdict-attaches-anomaly-without-throwing
-  ;; PR #1059 review (Copilot): `apply-verdict` is a `case` with no
-  ;; default arm. Adding `:review/backend-timeout` to the verdicts set
-  ;; without a matching clause would raise IllegalArgumentException at
-  ;; the first production stream-idle. This test pins both the no-
-  ;; throw contract AND the anomaly-attached side-effect that mirrors
-  ;; the stagnated / needs-decomposition pattern.
-  (testing "leave-review on backend-timeout produces a context (no IllegalArgumentException)
-            and attaches the :anomalies.review/backend-timeout sub-anomaly
-            to [:phase :error] for the evidence bundle"
-    (let [final-ctx (simulate-leave-review-backend-timeout-context 1 2)
-          phase-error (get-in final-ctx [:phase :error])]
-      (is (some? phase-error)
-          ":phase :error is set — case clause fired the anomaly-attach side effect")
-      (is (= :anomalies.review/backend-timeout
-             (:anomaly/category phase-error))
-          "anomaly category matches the verdict — parallels :anomalies.review/stagnation
-           and :anomalies.review/needs-decomposition")
-      (is (string? (:anomaly/message phase-error))
-          "anomaly message is a string — pulled from the agent error message
-           or the catalog fallback")
-      (is (= (get-in final-ctx [:phase :result :error :message])
-             (:message phase-error))
-          "anomaly :message preserves the actual adaptive-timeout text the
-           operator needs (stream-idle / stagnation / etc.) — not just a
-           generic catalog string"))))
-
-;; ============================================================================
-;; Warning-churn tracking — classify-rejection-cause + compute-warning-churn?
-;;
-;; When the reviewer emits only warnings (no blocking issues) for
-;; max-warning-only-cycles consecutive cycles the churn policy fires.
-;; The default policy (:accept-with-warnings) lets the phase succeed with
-;; unresolved warnings attached; the :needs-decomposition policy terminates.
-;;
-;; With the default cap of 2:
-;;   cycle 1: warning-only → count=1, (>= 1 2) = false → :repair-requested
-;;   cycle 2: warning-only → count=2, (>= 2 2) = true  → policy verdict
-;; ============================================================================
-
-(def ^:private warning-only-issue
-  "Review issue that is only a warning (non-blocking)."
-  {:severity :warning :description "Style nit: prefer cond over nested if"})
-
-(def ^:private default-cap
-  "Matches `default-max-warning-only-cycles` in review.clj."
-  2)
-
-(def ^:private count-below-cap
-  "Warning-only-count for cycle 1 — one short of default cap."
-  1)
-
-(def ^:private count-at-cap
-  "Warning-only-count for cycle 2 — exactly at default cap."
-  2)
-
-(defn- run-leave-review-warning-only
-  "Run leave-review with a warning-only reviewer output.
-   `prior-warning-cycles` seeds [:execution :review-warning-only-cycles].
-   Returns the resulting full context."
-  [{:keys [prior-warning-cycles iterations max-iterations]
-    :or   {prior-warning-cycles 0
-           iterations           first-iteration
-           max-iterations       default-max-iterations}}]
-  (let [result {:output  {:review/decision :changes-requested
-                          :review/blocking-issues []
-                          :review/warnings [warning-only-issue]}
-                :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
-        ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
-                         :iterations iterations
-                         :budget     {:iterations max-iterations}
-                         :result     result}
-             :phase-config {:phase :review}
-             :execution {:review-fingerprints    []
-                         :review-warning-only-cycles prior-warning-cycles}
-             :execution/phase-results {}
-             :execution/input {:description "test task"}
-             :execution/metrics {}}
-        interceptor (phase/get-phase-interceptor {:phase :review})]
-    ((:leave interceptor) ctx)))
-
-;;------------------------------------------------------------------------------ classify-rejection-cause
-
-(deftest classify-rejection-cause-warning-only-increments-count
-  (testing "warning-only rejection increments the prior count"
-    (let [classify #'rconv/classify-rejection-cause
-          artifact {:review/decision        :changes-requested
-                    :review/blocking-issues []
-                    :review/warnings        [warning-only-issue]}
-          result   (classify artifact 0)]
-      (is (= :warning-churn (:cause/type result)))
-      (is (= 1 (:warning-only-count result)))))
-  (testing "increments from a non-zero prior"
-    (let [classify #'rconv/classify-rejection-cause
-          artifact {:review/decision        :changes-requested
-                    :review/blocking-issues []
-                    :review/warnings        [warning-only-issue]}
-          result   (classify artifact 1)]
-      (is (= :warning-churn (:cause/type result)))
-      (is (= 2 (:warning-only-count result))))))
-
-(deftest classify-rejection-cause-blocking-resets-count
-  (testing "blocking defect resets the warning-only count to 0"
-    (let [classify #'rconv/classify-rejection-cause
-          artifact {:review/decision        :changes-requested
-                    :review/blocking-issues [{:severity :blocking
-                                              :description "Missing require"}]
-                    :review/warnings        []}
-          result   (classify artifact 3)]
-      (is (= :blocking-defect (:cause/type result)))
-      (is (= 0 (:warning-only-count result))))))
-
-;;------------------------------------------------------------------------------ compute-warning-churn?
-
-(deftest compute-warning-churn-below-cap-returns-false
-  (testing "warning-only-count below cap → not churn yet"
-    (let [pred #'rconv/compute-warning-churn?]
-      (is (not (pred :warning-churn count-below-cap default-cap))
-          "count 1 with cap 2 must not trip the policy"))))
-
-(deftest compute-warning-churn-at-cap-returns-true
-  (testing "warning-only-count at cap → churn fires"
-    (let [pred #'rconv/compute-warning-churn?]
-      (is (pred :warning-churn count-at-cap default-cap)
-          "count 2 with cap 2 must trip the policy"))))
-
-(deftest compute-warning-churn-blocking-cause-returns-false
-  (testing "blocking-defect cause never trips warning-churn even at or above cap"
-    (let [pred #'rconv/compute-warning-churn?]
-      (is (not (pred :blocking-defect count-at-cap default-cap))
-          "blocking-defect must not be churn regardless of count"))))
-
 ;;------------------------------------------------------------------------------ first warning-only cycle → still repairs
-
-(deftest first-warning-only-rejection-still-redirects
+(deftest ^{:stratum 2} first-warning-only-rejection-still-redirects
   (testing "first warning-only rejection (count=1 < cap=2) emits :repair-requested
             — the policy should not fire until max-warning-only-cycles is reached"
     (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 0})
@@ -769,8 +707,7 @@
           "warning cycle count persisted as 1 after first warning-only review"))))
 
 ;;------------------------------------------------------------------------------ second warning-only cycle → accept-with-warnings
-
-(deftest second-warning-only-rejection-emits-accept-with-warnings
+(deftest ^{:stratum 2} second-warning-only-rejection-emits-accept-with-warnings
   (testing "second consecutive warning-only rejection (count=2 >= cap=2) trips the
             default :accept-with-warnings policy — phase succeeds"
     (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
@@ -783,7 +720,7 @@
       (is (= 2 (get-in final-ctx [:execution :review-warning-only-cycles]))
           "warning cycle count persisted as 2"))))
 
-(deftest accept-with-warnings-marks-phase-completed
+(deftest ^{:stratum 2} accept-with-warnings-marks-phase-completed
   (testing ":accept-with-warnings mark the phase as :completed
             so the workflow can proceed to release"
     (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
@@ -791,7 +728,7 @@
       (is (phase/succeeded? phase)
           ":accept-with-warnings must succeed (not fail) — PR proceeds"))))
 
-(deftest accept-with-warnings-attaches-unresolved-warnings
+(deftest ^{:stratum 2} accept-with-warnings-attaches-unresolved-warnings
   (testing ":accept-with-warnings attaches the unresolved warnings at
             [:phase :unresolved-warnings] so release can surface them"
     (let [final-ctx (run-leave-review-warning-only {:prior-warning-cycles 1})
@@ -800,8 +737,7 @@
           "unresolved warnings from the review artifact are attached to the phase"))))
 
 ;;------------------------------------------------------------------------------ warning count persists correctly
-
-(deftest warning-cycle-count-persists-across-re-entries
+(deftest ^{:stratum 2} warning-cycle-count-persists-across-re-entries
   (testing "each warning-only cycle increments the counter stored at
             [:execution :review-warning-only-cycles]"
     (let [ctx-after-1 (run-leave-review-warning-only {:prior-warning-cycles 0})
@@ -811,32 +747,93 @@
           count-after-2 (get-in ctx-after-2 [:execution :review-warning-only-cycles])]
       (is (= 2 count-after-2) "second warning-only cycle stores count=2"))))
 
-(deftest blocking-rejection-resets-warning-cycle-count
-  (testing "a blocking-defect rejection resets the warning-only count to 0"
-    (let [result {:output  {:review/decision        :changes-requested
-                            :review/blocking-issues [{:severity    :blocking
-                                                      :description "Missing require"}]
-                            :review/warnings        []}
-                  :metrics {:tokens mock-token-count :duration-ms mock-duration-ms}}
-          ctx {:phase     {:started-at (- (System/currentTimeMillis) mock-elapsed-ms)
-                           :iterations first-iteration
-                           :budget     {:iterations default-max-iterations}
-                           :result     result}
-               :phase-config {:phase :review}
-               :execution {:review-fingerprints        []
-                           :review-warning-only-cycles 1}
-               :execution/phase-results {}
-               :execution/input {:description "test task"}
-               :execution/metrics {}}
-          interceptor (phase/get-phase-interceptor {:phase :review})
-          final-ctx   ((:leave interceptor) ctx)]
-      (is (= 0 (get-in final-ctx [:execution :review-warning-only-cycles]))
-          "blocking defect resets the warning-only cycle counter"))))
+;------------------------------------------------------------------------------ Layer 3
 
-;;------------------------------------------------------------------------------ accept-with-warnings is in the verdict set
+;; ============================================================================
+;; Core behavior tests
+;; ============================================================================
+(deftest ^{:stratum 3} changes-requested-sets-failed-status
+  (testing "changes-requested sets :failed status (not :retrying)"
+    (let [phase (simulate-leave-review :changes-requested 1 4)]
+      (is (phase/failed? phase)
+          "Status should be :failed so execution can follow the transition request")
+      (is (not (phase/retrying? phase))
+          "Should NOT be retrying (would cause review to re-run in place)"))))
 
-(deftest accept-with-warnings-is-in-canonical-verdict-set
-  (testing ":accept-with-warnings is declared in the verdicts set so the FSM
-            can recognise it without an IllegalArgumentException from case"
-    (let [verdicts @#'rconv/verdicts]
-      (is (contains? verdicts :accept-with-warnings)))))
+(deftest ^{:stratum 3} changes-requested-within-budget-emits-repair-requested-verdict
+  (testing "changes-requested within budget sets :phase/verdict :repair-requested
+            on the phase result so the FSM's verdict-driven guarded
+            :phase/fail array can route via :on-fail (Phase 2b)"
+    (let [phase (simulate-leave-review :changes-requested 1 4)]
+      (is (= :repair-requested (:verdict phase))
+          ":verdict is exposed on the phase map for callers/tests")
+      (is (= :repair-requested (get-in phase [:result :output :phase/verdict]))
+          ":phase/verdict on the phase result is what determine-phase-event reads")
+      (is (phase/failed? phase)
+          "Status stays :failed; the FSM's guarded array picks the on-fail target"))))
+
+(deftest ^{:stratum 3} changes-requested-over-budget-no-redirect
+  (testing "changes-requested at max iterations fails without redirect"
+    (let [phase (simulate-leave-review :changes-requested 4 4)]
+      (is (phase/failed? phase)
+          "Should be failed")
+      (is (not (phase/redirect-requested? phase))
+          "Should NOT redirect — iteration budget exhausted"))))
+
+(deftest ^{:stratum 3} changes-requested-stores-review-feedback
+  (testing "changes-requested stores review issues as feedback"
+    (let [phase (simulate-leave-review :changes-requested 1 4)]
+      (is (some? (:review-feedback phase))
+          "Review feedback should be stored for implement to consume")
+      (is (= default-review-issues
+             (:review-feedback phase))
+          "Should contain the review issues"))))
+
+(deftest ^{:stratum 3} rejected-emits-repair-requested-verdict-like-changes-requested
+  (testing "iter-23 regression guard (Phase 2b shape): :rejected must set
+            :failed AND set verdict :repair-requested (NOT silently fall
+            through to :completed and let an empty-diff PR open). The
+            FSM's guarded array dispatches to on-fail :implement from
+            there."
+    (let [phase (simulate-leave-review :rejected 1 4)]
+      (is (phase/failed? phase)
+          "rejected must be :failed — falling through to :completed lets an empty-diff PR open")
+      (is (= :repair-requested (:verdict phase))
+          "verdict drives the FSM's on-fail dispatch"))))
+
+(deftest ^{:stratum 3} rejected-over-budget-no-redirect
+  (testing ":rejected at max iterations fails terminally (no redirect)"
+    (let [phase (simulate-leave-review :rejected 4 4)]
+      (is (phase/failed? phase))
+      (is (not (phase/redirect-requested? phase))))))
+
+(deftest ^{:stratum 3} rejected-without-actionable-feedback-fails-closed
+  (testing "operational reviewer rejection with no repair feedback does not redirect"
+    (let [phase (simulate-leave-review :rejected 1 4 {})]
+      (is (phase/failed? phase))
+      (is (not (phase/redirect-requested? phase))
+          "No redirect when reviewer produced no actionable feedback for implement")
+      (is (nil? (:review-feedback phase))))))
+
+(deftest ^{:stratum 3} approved-sets-completed-status
+  (testing "approved review sets :completed status"
+    (let [phase (simulate-leave-review :approved 1 4)]
+      (is (phase/succeeded? phase)
+          "Approved review should complete normally")
+      (is (not (phase/redirect-requested? phase))
+          "No redirect needed for approved review"))))
+
+(deftest ^{:stratum 3} iteration-counter-incremented-on-redirect
+  (testing "iteration counter increments when redirecting"
+    (let [phase (simulate-leave-review :changes-requested 1 4)]
+      (is (= 2 (:iterations phase))
+          "Iterations should increment from 1 to 2"))))
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))

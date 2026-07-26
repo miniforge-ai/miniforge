@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-excel.anomaly.excel-anomaly-test
   "Coverage for `impl/do-connect` config-validation paths,
    `impl/parse-sheet` sheet-not-found, and the non-2xx download path
@@ -28,7 +27,9 @@
   (:import (clojure.lang ExceptionInfo)
            (org.apache.poi.xssf.usermodel XSSFWorkbook)))
 
-(deftest do-connect-missing-url-throws-anomaly
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} do-connect-missing-url-throws-anomaly
   (testing "missing :excel/url raises :anomalies/incorrect"
     (try
       (impl/do-connect {:excel/sheet-name "Sheet1" :excel/columns {0 :a}} nil)
@@ -39,7 +40,7 @@
         (is (= :missing-excel-url
                (:config/invalid-config-reason (ex-data e))))))))
 
-(deftest do-connect-missing-sheet-throws-anomaly
+(deftest ^{:stratum 0} do-connect-missing-sheet-throws-anomaly
   (testing "missing :excel/sheet-name raises :anomalies/incorrect"
     (try
       (impl/do-connect {:excel/url "http://x/y.xls" :excel/columns {0 :a}} nil)
@@ -50,7 +51,7 @@
         (is (= :missing-excel-sheet-name
                (:config/invalid-config-reason (ex-data e))))))))
 
-(deftest do-connect-missing-columns-throws-anomaly
+(deftest ^{:stratum 0} do-connect-missing-columns-throws-anomaly
   (testing "missing :excel/columns raises :anomalies/incorrect"
     (try
       (impl/do-connect {:excel/url "http://x/y.xls" :excel/sheet-name "Sheet1"} nil)
@@ -61,7 +62,7 @@
         (is (= :missing-excel-columns
                (:config/invalid-config-reason (ex-data e))))))))
 
-(deftest parse-sheet-missing-sheet-throws-anomaly
+(deftest ^{:stratum 0} parse-sheet-missing-sheet-throws-anomaly
   (testing "requesting a sheet absent from the workbook raises :anomalies/not-found"
     (let [wb (XSSFWorkbook.)]
       (try
@@ -78,7 +79,7 @@
         (finally
           (.close wb))))))
 
-(deftest do-connect-non-2xx-download-throws-anomaly
+(deftest ^{:stratum 0} do-connect-non-2xx-download-throws-anomaly
   (testing "non-2xx HTTP response while downloading raises :anomalies/unavailable"
     (with-redefs [http/get (fn [_url _opts] {:status 503 :body (byte-array 0)})]
       (try
@@ -91,7 +92,7 @@
           (is (= :anomalies/unavailable (:anomaly/category (ex-data e))))
           (is (= 503 (:status (ex-data e)))))))))
 
-(deftest download-to-temp-result-non-2xx-returns-anomaly
+(deftest ^{:stratum 0} download-to-temp-result-non-2xx-returns-anomaly
   (testing "non-2xx HTTP response can be represented without throwing"
     (with-redefs [http/get (fn [_url _opts] {:status 503 :body (byte-array 0)})]
       (let [result (@#'impl/download-to-temp-result "http://x/y.xls")]

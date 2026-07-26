@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.overlays
   "Overlay pipeline for TUI views.
 
@@ -33,9 +32,9 @@
    [ai.miniforge.tui-views.views.help :as help]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Overlay functions
 
-(defn overlay-command-bar
+;; Overlay functions
+(defn ^{:stratum 0} overlay-command-bar
   "Add command/search bar at the bottom when in command/search mode."
   [buf model theme [cols rows]]
   (if (not= :normal (:mode model))
@@ -46,7 +45,7 @@
       (layout/blit buf cmd-bar 0 (dec rows)))
     buf))
 
-(defn overlay-completions
+(defn ^{:stratum 0} overlay-completions
   "Add tab-completion popup above the command bar when completing."
   [buf model theme [cols rows]]
   (if (and (:completing? model) (seq (:completions model)))
@@ -80,7 +79,7 @@
       (layout/blit buf popup 0 y-off))
     buf))
 
-(defn overlay-help
+(defn ^{:stratum 0} overlay-help
   "Add help overlay centered on screen when help is visible."
   [buf model _theme [cols rows]]
   (if (:help-visible? model)
@@ -92,7 +91,7 @@
       (layout/blit buf overlay x y))
     buf))
 
-(defn- confirm-item-label
+(defn- ^{:stratum 0} confirm-item-label
   "Format a confirmation item ID for display."
   [id]
   (cond
@@ -102,7 +101,9 @@
     (string? id) (str "  " id)
     :else (str "  " id)))
 
-(defn overlay-confirm
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} overlay-confirm
   "Add confirmation dialog centered on screen showing affected items."
   [buf model _theme [cols rows]]
   (if-let [{:keys [action label ids]} (:confirm model)]

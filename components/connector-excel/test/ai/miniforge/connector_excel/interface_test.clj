@@ -15,17 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-excel.interface-test
   (:require [ai.miniforge.response.interface :as response]
             [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-excel.impl :as impl]))
 
-(deftest cell-value-nil-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} cell-value-nil-test
   (testing "nil cell returns nil"
     (is (nil? (#'impl/cell-value nil)))))
 
-(deftest parse-sheet-column-mapping-test
+(deftest ^{:stratum 0} parse-sheet-column-mapping-test
   (testing "parse-sheet extracts records with column mapping"
     ;; Create an in-memory workbook to test against
     (let [wb   (org.apache.poi.xssf.usermodel.XSSFWorkbook.)
@@ -49,7 +50,7 @@
         (is (= 36.1 (:value (second records)))))
       (.close wb))))
 
-(deftest parse-sheet-with-filter-test
+(deftest ^{:stratum 0} parse-sheet-with-filter-test
   (testing "parse-sheet applies row filter"
     (let [wb    (org.apache.poi.xssf.usermodel.XSSFWorkbook.)
           sheet (.createSheet wb "Filtered")]
@@ -69,14 +70,14 @@
         (is (= 2020.01 (:date (first records)))))
       (.close wb))))
 
-(deftest parse-sheet-missing-sheet-test
+(deftest ^{:stratum 0} parse-sheet-missing-sheet-test
   (testing "parse-sheet throws on missing sheet"
     (let [wb (org.apache.poi.xssf.usermodel.XSSFWorkbook.)]
       (.createSheet wb "Other")
       (is (thrown? Exception (impl/parse-sheet wb "Missing" {0 :x} 0 nil)))
       (.close wb))))
 
-(deftest extract-enriches-series-id-test
+(deftest ^{:stratum 0} extract-enriches-series-id-test
   (testing "do-extract enriches records with series-id"
     (let [wb    (org.apache.poi.xssf.usermodel.XSSFWorkbook.)
           sheet (.createSheet wb "Data")]
@@ -97,7 +98,7 @@
         (impl/remove-handle! handle))
       (.close wb))))
 
-(deftest extract-decimal-year-date-format-test
+(deftest ^{:stratum 0} extract-decimal-year-date-format-test
   (testing "do-extract normalizes decimal-year dates to ISO"
     (let [wb    (org.apache.poi.xssf.usermodel.XSSFWorkbook.)
           sheet (.createSheet wb "Data")]
@@ -120,24 +121,22 @@
         (impl/remove-handle! handle))
       (.close wb))))
 
-(deftest connect-validates-config-test
+(deftest ^{:stratum 0} connect-validates-config-test
   (testing "do-connect requires url, sheet-name, columns"
     (is (thrown? Exception (impl/do-connect {} nil)))
     (is (thrown? Exception (impl/do-connect {:excel/url "x"} nil)))
     (is (thrown? Exception (impl/do-connect {:excel/url "x" :excel/sheet-name "S"} nil)))))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Migrated handle-lookup helper — connector boundaries return response
 ;; anomalies.
-
-(deftest discover-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} discover-returns-anomaly-on-unknown-handle-test
   (testing "do-discover returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-discover "no-such-handle")]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} extract-returns-anomaly-on-unknown-handle-test
   (testing "do-extract returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-extract "no-such-handle" {})]
       (is (response/anomaly-map? result))

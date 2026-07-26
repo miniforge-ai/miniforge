@@ -15,18 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-github.interface
   "Public API for the GitHub REST API connector component."
   (:require [ai.miniforge.connector-github.core :as core]
             [ai.miniforge.connector.interface :as conn]))
 
-(defn create-github-connector
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} create-github-connector
   "Create a new GitHubConnector instance."
   []
   (core/->GitHubConnector))
 
-(def connector-metadata
+(def ^{:stratum 0} connector-metadata
   "Registration metadata for the GitHub REST API connector."
   {:connector/name         "GitHub REST API Connector"
    :connector/type         :source

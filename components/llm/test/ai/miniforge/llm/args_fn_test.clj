@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.args-fn-test
   "Tests for named backend argument builder functions.
    Verifies that extracted defn- functions produce the same args
@@ -25,71 +24,13 @@
    [clojure.string :as str]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Private fn accessor
-(defn- private-fn [sym]
+(defn- ^{:stratum 0} private-fn [sym]
   (var-get (ns-resolve 'ai.miniforge.llm.protocols.impl.llm-client sym)))
 
-;; ============================================================================
-;; claude-args
-;; ============================================================================
-
-(deftest claude-args-minimal-test
-  (testing "minimal prompt produces [-p <prompt>]"
-    (let [args ((private-fn 'claude-args) {:prompt "hello"})]
-      (is (= ["-p" "hello"] args)))))
-
-(deftest claude-args-streaming-test
-  (testing "streaming adds output-format and verbose flags"
-    (let [args ((private-fn 'claude-args) {:prompt "hi" :streaming? true})]
-      (is (some #(= "--output-format" %) args))
-      (is (some #(= "stream-json" %) args))
-      (is (some #(= "--verbose" %) args))
-      (is (= "hi" (last args))))))
-
-(deftest claude-args-mcp-config-test
-  (testing "mcp-config adds --mcp-config flag"
-    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
-      (is (some #(= "--mcp-config" %) args))
-      (is (some #(= "/tmp/mcp.json" %) args))))
-
-  (testing "mcp-config also adds --strict-mcp-config so host MCP config does not leak"
-    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
-      (is (some #(= "--strict-mcp-config" %) args))
-      (is (= ["--mcp-config" "/tmp/mcp.json" "--strict-mcp-config"]
-             (->> args
-                  (drop-while #(not= "--mcp-config" %))
-                  (take 3)))
-          "--strict-mcp-config immediately follows the --mcp-config path")))
-
-  (testing "no mcp-config means no --strict-mcp-config"
-    (let [args ((private-fn 'claude-args) {:prompt "p"})]
-      (is (not (some #(= "--strict-mcp-config" %) args))))))
-
-(deftest claude-args-allowed-tools-test
-  (testing "mcp maps format as mcp__<server>__<tool>, joined with commas"
-    (let [args ((private-fn 'claude-args)
-                {:prompt "p"
-                 :mcp-allowed-tools
-                 [{:mcp/server :context :mcp/tool :context_read}
-                  {:mcp/server :context :mcp/tool :context_grep}]})]
-      (is (some #(= "--allowedTools" %) args))
-      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
-
-  (testing "bare keywords format as the native tool name"
-    (let [args ((private-fn 'claude-args)
-                {:prompt "p"
-                 :mcp-allowed-tools [:Write :Edit]})]
-      (is (some #(= "Write,Edit" %) args))))
-
-  (testing "mixed maps + keywords format correctly"
-    (let [args ((private-fn 'claude-args)
-                {:prompt "p"
-                 :mcp-allowed-tools
-                 [{:mcp/server :context :mcp/tool :context_read}
-                  :Write]})]
-      (is (some #(= "mcp__context__context_read,Write" %) args)))))
-
-(deftest claude-mcp-allowlist-string-test
+(deftest ^{:stratum 0} claude-mcp-allowlist-string-test
   (testing "keyword server + tool → mcp__<server>__<tool>"
     (is (= "mcp__context__context_read"
            (impl/claude-mcp-allowlist-string
@@ -115,50 +56,129 @@
   (testing "empty vector produces empty string"
     (is (= "" (impl/claude-mcp-allowlist-string [])))))
 
-(deftest claude-args-disallowed-tools-test
+;; ============================================================================
+;; backends map wiring
+;; ============================================================================
+(deftest ^{:stratum 0} backends-args-fn-wired-test
+  (testing "all backends with :args-fn reference named functions, not lambdas"
+    (doseq [[k backend] impl/backends
+            :when (:args-fn backend)]
+      (is (fn? (:args-fn backend))
+          (str "Backend " k " should have a function :args-fn")))))
+
+(deftest ^{:stratum 0} opencode-backend-wiring-test
+  (testing "OpenCode backend delegates auth/provider handling to OpenCode"
+    (is (= "opencode" (get-in impl/backends [:opencode :cmd])))
+    (is (= "OpenCode" (get-in impl/backends [:opencode :provider])))
+    (is (false? (get-in impl/backends [:opencode :streaming?])))
+    (is (not (contains? (get impl/backends :opencode) :api-key-env)))
+    (is (= :argv (get-in impl/backends [:opencode :prompt-via])))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; claude-args
+;; ============================================================================
+(deftest ^{:stratum 1} claude-args-minimal-test
+  (testing "minimal prompt produces [-p <prompt>]"
+    (let [args ((private-fn 'claude-args) {:prompt "hello"})]
+      (is (= ["-p" "hello"] args)))))
+
+(deftest ^{:stratum 1} claude-args-streaming-test
+  (testing "streaming adds output-format and verbose flags"
+    (let [args ((private-fn 'claude-args) {:prompt "hi" :streaming? true})]
+      (is (some #(= "--output-format" %) args))
+      (is (some #(= "stream-json" %) args))
+      (is (some #(= "--verbose" %) args))
+      (is (= "hi" (last args))))))
+
+(deftest ^{:stratum 1} claude-args-mcp-config-test
+  (testing "mcp-config adds --mcp-config flag"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
+      (is (some #(= "--mcp-config" %) args))
+      (is (some #(= "/tmp/mcp.json" %) args))))
+
+  (testing "mcp-config also adds --strict-mcp-config so host MCP config does not leak"
+    (let [args ((private-fn 'claude-args) {:prompt "p" :mcp-config "/tmp/mcp.json"})]
+      (is (some #(= "--strict-mcp-config" %) args))
+      (is (= ["--mcp-config" "/tmp/mcp.json" "--strict-mcp-config"]
+             (->> args
+                  (drop-while #(not= "--mcp-config" %))
+                  (take 3)))
+          "--strict-mcp-config immediately follows the --mcp-config path")))
+
+  (testing "no mcp-config means no --strict-mcp-config"
+    (let [args ((private-fn 'claude-args) {:prompt "p"})]
+      (is (not (some #(= "--strict-mcp-config" %) args))))))
+
+(deftest ^{:stratum 1} claude-args-allowed-tools-test
+  (testing "mcp maps format as mcp__<server>__<tool>, joined with commas"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools
+                 [{:mcp/server :context :mcp/tool :context_read}
+                  {:mcp/server :context :mcp/tool :context_grep}]})]
+      (is (some #(= "--allowedTools" %) args))
+      (is (some #(= "mcp__context__context_read,mcp__context__context_grep" %) args))))
+
+  (testing "bare keywords format as the native tool name"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools [:Write :Edit]})]
+      (is (some #(= "Write,Edit" %) args))))
+
+  (testing "mixed maps + keywords format correctly"
+    (let [args ((private-fn 'claude-args)
+                {:prompt "p"
+                 :mcp-allowed-tools
+                 [{:mcp/server :context :mcp/tool :context_read}
+                  :Write]})]
+      (is (some #(= "mcp__context__context_read,Write" %) args)))))
+
+(deftest ^{:stratum 1} claude-args-disallowed-tools-test
   (testing "disallowed-tools adds --disallowedTools"
     (let [args ((private-fn 'claude-args) {:prompt "p" :disallowed-tools ["bad"]})]
       (is (some #(= "--disallowedTools" %) args))
       (is (some #(= "bad" %) args)))))
 
-(deftest claude-args-system-prompt-test
+(deftest ^{:stratum 1} claude-args-system-prompt-test
   (testing "system prompt adds --system-prompt flag"
     (let [args ((private-fn 'claude-args) {:prompt "p" :system "You are helpful"})]
       (is (some #(= "--system-prompt" %) args))
       (is (some #(= "You are helpful" %) args)))))
 
-(deftest claude-args-budget-test
+(deftest ^{:stratum 1} claude-args-budget-test
   (testing "explicit budget-usd sets --max-budget-usd"
     (let [args ((private-fn 'claude-args) {:prompt "p" :budget-usd 5.0})]
       (is (some #(= "--max-budget-usd" %) args))
       (is (some #(= "5.0" %) args)))))
 
-(deftest claude-args-max-turns-test
+(deftest ^{:stratum 1} claude-args-max-turns-test
   (testing "max-turns adds --max-turns flag"
     (let [args ((private-fn 'claude-args) {:prompt "p" :max-turns 10})]
       (is (some #(= "--max-turns" %) args))
       (is (some #(= "10" %) args)))))
 
-(deftest claude-args-supervision-settings-test
+(deftest ^{:stratum 1} claude-args-supervision-settings-test
   (testing "supervision settings path adds --settings flag"
     (let [args ((private-fn 'claude-args)
                 {:prompt "p" :supervision {:settings-path "/tmp/s.json"}})]
       (is (some #(= "--settings" %) args))
       (is (some #(= "/tmp/s.json" %) args)))))
 
-(deftest claude-args-model-test
+(deftest ^{:stratum 1} claude-args-model-test
   (testing "model adds --model flag"
     (let [args ((private-fn 'claude-args) {:prompt "p" :model "claude-sonnet-4-6"})]
       (is (some #(= "--model" %) args))
       (is (some #(= "claude-sonnet-4-6" %) args)))))
 
-(deftest claude-args-resume-test
+(deftest ^{:stratum 1} claude-args-resume-test
   (testing "resume adds --resume flag"
     (let [args ((private-fn 'claude-args) {:prompt "p" :resume "session-abc"})]
       (is (some #(= "--resume" %) args))
       (is (some #(= "session-abc" %) args)))))
 
-(deftest claude-args-prompt-always-last-test
+(deftest ^{:stratum 1} claude-args-prompt-always-last-test
   (testing "prompt is always the last argument"
     (let [args ((private-fn 'claude-args)
                 {:prompt "the-prompt" :streaming? true :system "sys"
@@ -168,8 +188,7 @@
 ;; ============================================================================
 ;; codex-args
 ;; ============================================================================
-
-(deftest codex-args-minimal-test
+(deftest ^{:stratum 1} codex-args-minimal-test
   (testing "minimal prompt produces exec with explicit sandbox + approval flags"
     (let [args ((private-fn 'codex-args) {:prompt "fix bug"
                                           :prompt-via :argv})]
@@ -183,20 +202,20 @@
       (is (some #(= "--skip-git-repo-check" %) args))
       (is (= "fix bug" (last args))))))
 
-(deftest codex-args-defaults-to-stdin-test
+(deftest ^{:stratum 1} codex-args-defaults-to-stdin-test
   (testing "default prompt delivery follows the backend stdin shape"
     (let [args ((private-fn 'codex-args) {:prompt "fix bug"})]
       (is (not (some #{"fix bug"} args)))
       (is (= "-" (last args))))))
 
-(deftest codex-args-stdin-test
+(deftest ^{:stratum 1} codex-args-stdin-test
   (testing "stdin prompt delivery keeps prompt content out of argv"
     (let [args ((private-fn 'codex-args)
                 {:prompt "fix bug" :prompt-via :stdin})]
       (is (not (some #{"fix bug"} args)))
       (is (= "-" (last args))))))
 
-(deftest codex-args-preflight-safe-config-test
+(deftest ^{:stratum 1} codex-args-preflight-safe-config-test
   (testing "config overrides are safe before artifact MCP config exists"
     (let [args ((private-fn 'codex-args) {:prompt "p"})]
       ;; The artifact MCP config writer marks the server required. Passing
@@ -207,13 +226,13 @@
       ;; cannot relax it.
       (is (some #(re-matches #"approval_policy=\"?never\"?" %) args)))))
 
-(deftest codex-args-model-test
+(deftest ^{:stratum 1} codex-args-model-test
   (testing "model adds -m flag"
     (let [args ((private-fn 'codex-args) {:prompt "p" :model "gpt-4o"})]
       (is (some #(= "-m" %) args))
       (is (some #(= "gpt-4o" %) args)))))
 
-(deftest codex-args-system-test
+(deftest ^{:stratum 1} codex-args-system-test
   (testing "system prompt adds -c flag with JSON-encoded value"
     (let [args ((private-fn 'codex-args) {:prompt "p" :system "be helpful"})]
       (is (some #(str/starts-with? % "system_prompt=") args)))))
@@ -221,24 +240,23 @@
 ;; ============================================================================
 ;; cursor-args
 ;; ============================================================================
-
-(deftest cursor-args-minimal-test
+(deftest ^{:stratum 1} cursor-args-minimal-test
   (testing "minimal prompt produces [-p --force <prompt>] (autonomous writes)"
     (let [args ((private-fn 'cursor-args) {:prompt "fix it"})]
       (is (= ["-p" "--force" "fix it"] args)))))
 
-(deftest cursor-args-no-approve-mcps-test
+(deftest ^{:stratum 1} cursor-args-no-approve-mcps-test
   (testing "MCP scoping is via the permissions allowlist, not --approve-mcps"
     (let [args ((private-fn 'cursor-args) {:prompt "p" :mcp-allowed-tools ["t1"]})]
       (is (not (some #(= "--approve-mcps" %) args)))
       (is (= "p" (last args))))))
 
-(deftest cursor-args-model-test
+(deftest ^{:stratum 1} cursor-args-model-test
   (testing "model adds --model <model> before the prompt"
     (let [args ((private-fn 'cursor-args) {:prompt "p" :model "gpt-5.2"})]
       (is (= ["-p" "--force" "--model" "gpt-5.2" "p"] args)))))
 
-(deftest cursor-args-system-test
+(deftest ^{:stratum 1} cursor-args-system-test
   (testing "system is prepended to the prompt (no system-prompt flag on cursor)"
     (let [args ((private-fn 'cursor-args) {:prompt "do it" :system "be terse"})]
       (is (= ["-p" "--force" "be terse\n\ndo it"] args)))))
@@ -246,13 +264,12 @@
 ;; ============================================================================
 ;; opencode-args
 ;; ============================================================================
-
-(deftest opencode-args-minimal-test
+(deftest ^{:stratum 1} opencode-args-minimal-test
   (testing "minimal prompt invokes non-interactive run"
     (let [args ((private-fn 'opencode-args) {:prompt "explain"})]
       (is (= ["run" "explain"] args)))))
 
-(deftest opencode-args-model-and-agent-test
+(deftest ^{:stratum 1} opencode-args-model-and-agent-test
   (testing "model and agent pass through to OpenCode"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "fix it"
@@ -265,7 +282,7 @@
       (is (some #(= "miniforge-implementer" %) args))
       (is (= "fix it" (last args))))))
 
-(deftest opencode-args-session-and-attach-test
+(deftest ^{:stratum 1} opencode-args-session-and-attach-test
   (testing "session reuse and serve attachment flags are preserved"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "continue"
@@ -279,7 +296,7 @@
               "continue"]
              args)))))
 
-(deftest opencode-args-files-test
+(deftest ^{:stratum 1} opencode-args-files-test
   (testing "attached files expand into repeated --file flags"
     (let [args ((private-fn 'opencode-args)
                 {:prompt "review"
@@ -293,27 +310,7 @@
 ;; ============================================================================
 ;; echo-args
 ;; ============================================================================
-
-(deftest echo-args-test
+(deftest ^{:stratum 1} echo-args-test
   (testing "echo backend returns prompt in a vector"
     (let [args ((private-fn 'echo-args) {:prompt "test-echo"})]
       (is (= ["test-echo"] args)))))
-
-;; ============================================================================
-;; backends map wiring
-;; ============================================================================
-
-(deftest backends-args-fn-wired-test
-  (testing "all backends with :args-fn reference named functions, not lambdas"
-    (doseq [[k backend] impl/backends
-            :when (:args-fn backend)]
-      (is (fn? (:args-fn backend))
-          (str "Backend " k " should have a function :args-fn")))))
-
-(deftest opencode-backend-wiring-test
-  (testing "OpenCode backend delegates auth/provider handling to OpenCode"
-    (is (= "opencode" (get-in impl/backends [:opencode :cmd])))
-    (is (= "OpenCode" (get-in impl/backends [:opencode :provider])))
-    (is (false? (get-in impl/backends [:opencode :streaming?])))
-    (is (not (contains? (get impl/backends :opencode) :api-key-var)))
-    (is (= :argv (get-in impl/backends [:opencode :prompt-via])))))

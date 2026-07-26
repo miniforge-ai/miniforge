@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.interface
   "Public API for the web dashboard component.
 
@@ -24,9 +23,9 @@
    [ai.miniforge.web-dashboard.server :as server]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Public API
 
-(defn start!
+;; Public API
+(defn ^{:stratum 0} start!
   "Start the web dashboard server.
 
    Options:
@@ -44,7 +43,7 @@
   [opts]
   (server/start-server! opts))
 
-(defn stop!
+(defn ^{:stratum 0} stop!
   "Stop the web dashboard server.
 
    Arguments:
@@ -55,7 +54,7 @@
   [server]
   (server/stop-server! server))
 
-(defn get-port
+(defn ^{:stratum 0} get-port
   "Get the port the server is listening on.
 
    Arguments:

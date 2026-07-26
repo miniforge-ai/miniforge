@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.progress-monitor
   "Adaptive timeout monitoring based on actual progress detection.
 
@@ -23,39 +22,39 @@
    changes to detect when an agent is stuck vs actively working.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Timeout thresholds and monitor state
 
-(def ^:private default-stagnation-threshold-ms
+;; Timeout thresholds and monitor state
+(def ^{:stratum 0} ^:private default-stagnation-threshold-ms
   "Time without any progress signal before an agent is considered stuck —
    the adaptive-timeout trip point. 2 minutes: long enough to ride out a slow
    model turn or a quiet tool call, short enough that a genuinely hung agent
    is caught before it burns a phase budget."
   120000)
 
-(def ^:private default-max-total-ms
+(def ^{:stratum 0} ^:private default-max-total-ms
   "Hard ceiling on a single monitored run regardless of progress. 10 minutes —
    a backstop for an agent that keeps emitting just enough to look active but
    never actually finishes."
   600000)
 
-(def ^:private default-min-activity-interval-ms
+(def ^{:stratum 0} ^:private default-min-activity-interval-ms
   "Minimum spacing between counted progress signals; debounces a burst of
    chunks into one activity tick so rapid streaming doesn't reset the
    stagnation clock on every token. 5 seconds."
   5000)
 
-(def ^:private min-substantive-chunk-length
+(def ^{:stratum 0} ^:private min-substantive-chunk-length
   "A streamed chunk with this length or fewer characters is treated as
    non-substantive — a spinner/keepalive blip, not real output — so it does
    not count as progress."
   10)
 
-(def ^:private active-window-ms
+(def ^{:stratum 0} ^:private active-window-ms
   "Recency window for the :is-active? status flag: activity newer than this
    marks the monitor active. 30 seconds."
   30000)
 
-(defn create-progress-monitor
+(defn ^{:stratum 0} create-progress-monitor
    "Create a progress monitor for adaptive timeout.
 
    Options:
@@ -79,47 +78,7 @@
           :min-activity-interval-ms min-activity-interval-ms
           :stagnant-cycles 0}))
 
-(defn record-chunk!
-   "Record a streaming chunk as activity.
-
-   Returns true if this represents meaningful progress, false if stagnant."
-   [monitor chunk-content]
-   (let [now (System/currentTimeMillis)
-         state @monitor
-         last-content (:last-chunk-content state)
-         last-activity (:last-activity-at state)
-         min-interval (:min-activity-interval-ms state)
-         is-different? (not= chunk-content last-content)
-         is-not-just-thinking? (and chunk-content
-                                    (not (re-find #"(?i)^(thinking|analyzing|considering)" chunk-content)))
-         is-substantive? (and chunk-content (> (count chunk-content) min-substantive-chunk-length))
-         time-since-activity (- now last-activity)
-         ;; First chunk always counts as progress (last-content will be nil)
-         is-first-chunk? (nil? last-content)
-         sufficient-interval? (or is-first-chunk?
-                                  (> time-since-activity min-interval))
-
-         meaningful-progress? (and is-different?
-                                   is-not-just-thinking?
-                                   is-substantive?
-                                   sufficient-interval?)]
-
-     (swap! monitor
-            (fn [state]
-              (cond-> (assoc state
-                             :last-chunk-content chunk-content
-                             :chunk-count (inc (:chunk-count state)))
-                meaningful-progress?
-                (assoc :last-activity-at now
-                       :stagnant-cycles 0
-                       :unique-chunks (conj (:unique-chunks state) chunk-content))
-
-                (not meaningful-progress?)
-                (update :stagnant-cycles inc))))
-
-     meaningful-progress?))
-
-(defn record-file-write!
+(defn ^{:stratum 0} record-file-write!
   "Record a file write as significant progress."
   [monitor file-path]
   (let [now (System/currentTimeMillis)]
@@ -130,7 +89,7 @@
                     :stagnant-cycles 0
                     :file-writes (conj (:file-writes state) file-path))))))
 
-(defn record-activity!
+(defn ^{:stratum 0} record-activity!
   "Record semantic activity that should keep the monitor alive even when
    repeated events do not produce new substantive text.
 
@@ -148,7 +107,7 @@
                  (update :unique-chunks conj activity-key)))))
   true)
 
-(defn check-timeout
+(defn ^{:stratum 0} check-timeout
   "Check if the monitor has timed out.
 
    Returns:
@@ -188,16 +147,56 @@
       ;; Still making progress
       :else nil)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Keepalive — decouples stagnation from CLI emission cadence
-
-(def ^:private keepalive-stop-join-ms
+(def ^{:stratum 0} ^:private keepalive-stop-join-ms
   "How long stop! waits for the keepalive thread to exit after
    interrupting it. 100ms is generous — the worker only needs to
    wake from Thread/sleep, see the running? flag, and exit."
   100)
 
-(defn start-keepalive!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} record-chunk!
+   "Record a streaming chunk as activity.
+
+   Returns true if this represents meaningful progress, false if stagnant."
+   [monitor chunk-content]
+   (let [now (System/currentTimeMillis)
+         state @monitor
+         last-content (:last-chunk-content state)
+         last-activity (:last-activity-at state)
+         min-interval (:min-activity-interval-ms state)
+         is-different? (not= chunk-content last-content)
+         is-not-just-thinking? (and chunk-content
+                                    (not (re-find #"(?i)^(thinking|analyzing|considering)" chunk-content)))
+         is-substantive? (and chunk-content (> (count chunk-content) min-substantive-chunk-length))
+         time-since-activity (- now last-activity)
+         ;; First chunk always counts as progress (last-content will be nil)
+         is-first-chunk? (nil? last-content)
+         sufficient-interval? (or is-first-chunk?
+                                  (> time-since-activity min-interval))
+
+         meaningful-progress? (and is-different?
+                                   is-not-just-thinking?
+                                   is-substantive?
+                                   sufficient-interval?)]
+
+     (swap! monitor
+            (fn [state]
+              (cond-> (assoc state
+                             :last-chunk-content chunk-content
+                             :chunk-count (inc (:chunk-count state)))
+                meaningful-progress?
+                (assoc :last-activity-at now
+                       :stagnant-cycles 0
+                       :unique-chunks (conj (:unique-chunks state) chunk-content))
+
+                (not meaningful-progress?)
+                (update :stagnant-cycles inc))))
+
+     meaningful-progress?))
+
+(defn ^{:stratum 1} start-keepalive!
   "Spawn a daemon thread that calls record-activity! on `monitor` every
    `interval-ms` until the returned 0-arity stop-fn is invoked.
 
@@ -255,7 +254,7 @@
       (.interrupt thread)
       (.join thread keepalive-stop-join-ms))))
 
-(defn get-stats
+(defn ^{:stratum 1} get-stats
   "Get current statistics from the monitor."
   [monitor]
   (let [now (System/currentTimeMillis)

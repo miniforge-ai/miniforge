@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.intent-test
   "Unit tests for semantic intent validation (N4 §4).
 
@@ -28,11 +27,12 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.intent :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Intent inference tests (N4 §4.3)
 ;; ============================================================================
-
-(deftest infer-intent-test
+(deftest ^{:stratum 0} infer-intent-test
   (testing "all zeros infers :refactor"
     (is (= :refactor (sut/infer-intent {:creates 0 :updates 0 :destroys 0}))))
 
@@ -57,8 +57,7 @@
 ;; ============================================================================
 ;; Intent validation tests (N4 §4.1)
 ;; ============================================================================
-
-(deftest intent-matches-import-test
+(deftest ^{:stratum 0} intent-matches-import-test
   (testing "IMPORT with 0 changes passes"
     (is (true? (:passed? (sut/intent-matches? :import {:creates 0 :updates 0 :destroys 0})))))
 
@@ -73,35 +72,35 @@
   (testing "IMPORT with destroys fails"
     (is (false? (:passed? (sut/intent-matches? :import {:creates 0 :updates 0 :destroys 1}))))))
 
-(deftest intent-matches-create-test
+(deftest ^{:stratum 0} intent-matches-create-test
   (testing "CREATE with creates passes"
     (is (true? (:passed? (sut/intent-matches? :create {:creates 5 :updates 2 :destroys 0})))))
 
   (testing "CREATE with destroys fails"
     (is (false? (:passed? (sut/intent-matches? :create {:creates 5 :updates 0 :destroys 1}))))))
 
-(deftest intent-matches-update-test
+(deftest ^{:stratum 0} intent-matches-update-test
   (testing "UPDATE with only updates passes"
     (is (true? (:passed? (sut/intent-matches? :update {:creates 0 :updates 3 :destroys 0})))))
 
   (testing "UPDATE with creates fails"
     (is (false? (:passed? (sut/intent-matches? :update {:creates 1 :updates 3 :destroys 0}))))))
 
-(deftest intent-matches-destroy-test
+(deftest ^{:stratum 0} intent-matches-destroy-test
   (testing "DESTROY with only destroys passes"
     (is (true? (:passed? (sut/intent-matches? :destroy {:creates 0 :updates 0 :destroys 5})))))
 
   (testing "DESTROY with creates fails"
     (is (false? (:passed? (sut/intent-matches? :destroy {:creates 1 :updates 0 :destroys 5}))))))
 
-(deftest intent-matches-refactor-test
+(deftest ^{:stratum 0} intent-matches-refactor-test
   (testing "REFACTOR with 0 changes passes"
     (is (true? (:passed? (sut/intent-matches? :refactor {:creates 0 :updates 0 :destroys 0})))))
 
   (testing "REFACTOR with any changes fails"
     (is (false? (:passed? (sut/intent-matches? :refactor {:creates 1 :updates 0 :destroys 0}))))))
 
-(deftest intent-matches-migrate-test
+(deftest ^{:stratum 0} intent-matches-migrate-test
   (testing "MIGRATE with creates + destroys passes"
     (is (true? (:passed? (sut/intent-matches? :migrate {:creates 3 :updates 0 :destroys 2})))))
 
@@ -111,8 +110,7 @@
 ;; ============================================================================
 ;; Full semantic intent check tests
 ;; ============================================================================
-
-(deftest semantic-intent-check-test
+(deftest ^{:stratum 0} semantic-intent-check-test
   (testing "returns inferred intent and metadata"
     (let [result (sut/semantic-intent-check :import {:creates 0 :updates 0 :destroys 0})]
       (is (true? (:passed? result)))
@@ -128,8 +126,7 @@
 ;; ============================================================================
 ;; Kubernetes diff parsing tests
 ;; ============================================================================
-
-(deftest parse-k8s-diff-counts-test
+(deftest ^{:stratum 0} parse-k8s-diff-counts-test
   (testing "empty diff returns zeros"
     (is (= {:creates 0 :updates 0 :destroys 0}
            (sut/parse-k8s-diff-counts ""))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.model-selection-integration-test
   "Integration tests for the complete intelligent model selection system.
    Tests the full flow: task -> classification -> model selection -> execution."
@@ -31,7 +30,9 @@
                       (with-redefs [selector/get-env-var (constantly "test-key")]
                         (f))))
 
-(deftest test-end-to-end-planning-task
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} test-end-to-end-planning-task
   (testing "End-to-end: Planning task selects Opus"
     (let [;; Step 1: Create task description
           task {:phase :plan
@@ -60,7 +61,7 @@
       (let [model (registry/get-model (:model selection))]
         (is (#{:exceptional :excellent} (get-in model [:capabilities :reasoning])))))))
 
-(deftest test-end-to-end-implementation-task
+(deftest ^{:stratum 0} test-end-to-end-implementation-task
   (testing "End-to-end: Implementation task selects Sonnet"
     (let [task {:phase :implement
                 :agent-type :implementer-agent
@@ -80,7 +81,7 @@
       (let [model (registry/get-model (:model selection))]
         (is (#{:exceptional :excellent} (get-in model [:capabilities :code-generation])))))))
 
-(deftest test-end-to-end-validation-task
+(deftest ^{:stratum 0} test-end-to-end-validation-task
   (testing "End-to-end: Validation task selects Haiku or fast model"
     (let [task {:phase :validate
                 :agent-type :validator-agent
@@ -100,7 +101,7 @@
       (let [model (registry/get-model (:model selection))]
         (is (#{:fast :very-fast :economical} (get-in model [:capabilities :speed])))))))
 
-(deftest test-privacy-constraint
+(deftest ^{:stratum 0} test-privacy-constraint
   (testing "Privacy constraint forces local model"
     (let [task {:phase :implement
                 :agent-type :implementer-agent
@@ -120,7 +121,7 @@
         (is (get-in model [:capabilities :local]))
         (is (= :free (get-in model [:capabilities :cost])))))))
 
-(deftest test-large-context-task
+(deftest ^{:stratum 0} test-large-context-task
   (testing "Large context task selects a large-context provider"
     (let [task {:phase :implement
                 :context-tokens 500000
@@ -140,7 +141,7 @@
         ;; Current large-context tier includes Anthropic (Opus 4.7 1M), Google and OpenAI 1M+ models.
         (is (some #{(:provider model)} [:anthropic :google :openai]))))))
 
-(deftest test-cost-optimized-strategy
+(deftest ^{:stratum 0} test-cost-optimized-strategy
   (testing "Cost-optimized strategy prefers cheaper models"
     (let [task {:phase :implement
                 :agent-type :implementer-agent
@@ -164,7 +165,7 @@
       (is (:model selection-auto))
       (is (:model selection-cost)))))
 
-(deftest test-selection-transparency
+(deftest ^{:stratum 0} test-selection-transparency
   (testing "Selection provides clear rationale"
     (let [task {:phase :plan
                 :description "Architecture planning"}
@@ -184,7 +185,7 @@
       (is (re-find #"Model Auto-Selected:" explanation))
       (is (re-find #"Override:" explanation)))))
 
-(deftest test-multiple-task-types
+(deftest ^{:stratum 0} test-multiple-task-types
   (testing "Different task types get appropriate models"
     (let [;; Create various task types
           tasks [{:phase :plan :title "Plan"}
@@ -222,7 +223,7 @@
       (let [validate-selection (-> selections (nth 2) :selection)]
         (is (= :simple-validation (:task-type validate-selection)))))))
 
-(deftest test-fallback-behavior
+(deftest ^{:stratum 0} test-fallback-behavior
   (testing "System has safe fallback when selection fails"
     (let [;; Minimal task with no clear signals
           task {:description "Generic task"}
@@ -238,7 +239,7 @@
       (is (:model selection))
       (is (:model-id selection)))))
 
-(deftest test-cross-provider-selection
+(deftest ^{:stratum 0} test-cross-provider-selection
   (testing "System can select from multiple providers"
     (let [;; Create tasks that might favor different providers
           tasks [{:phase :plan :title "Complex reasoning"}
@@ -268,7 +269,7 @@
       (let [privacy (nth selections 2)]
         (is (#{:meta :alibaba :deepseek :zhipu} (:provider privacy)))))))
 
-(deftest test-model-override
+(deftest ^{:stratum 0} test-model-override
   (testing "Explicit model override bypasses automatic selection"
     ;; Note: This test documents expected behavior
     ;; In actual agent creation, passing :model explicitly
@@ -287,7 +288,7 @@
       ;; This is tested at the agent layer, not here
       )))
 
-(deftest test-selection-confidence
+(deftest ^{:stratum 0} test-selection-confidence
   (testing "Selection includes confidence from classification"
     (let [;; High-confidence task (clear phase signal)
           high-conf-task {:phase :plan
@@ -313,7 +314,7 @@
       (is (:model high-selection))
       (is (:model low-selection)))))
 
-(deftest test-all-19-models-accessible
+(deftest ^{:stratum 0} test-all-19-models-accessible
   (testing "All 19 models in registry can be selected"
     (let [;; Get all model keys
           all-models (keys registry/model-registry)]
@@ -329,7 +330,7 @@
           (is (:provider model))
           (is (:capabilities model)))))))
 
-(deftest test-selection-rationale-completeness
+(deftest ^{:stratum 0} test-selection-rationale-completeness
   (testing "Selection rationale includes all key information"
     (let [task {:phase :implement
                 :description "Code implementation"

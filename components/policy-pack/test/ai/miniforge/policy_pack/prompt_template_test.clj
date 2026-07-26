@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.prompt-template-test
   "Tests for pack-bundled prompt template interpolation and rendering."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.prompt-template :as sut]))
 
-;; ============================================================================
-;; Layer 0 — Interpolation engine tests
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest interpolate-test
+;; ============================================================================
+;; Interpolation engine tests
+;; ============================================================================
+(deftest ^{:stratum 0} interpolate-test
   (testing "replaces keyword-keyed variables"
     (is (= "Hello Chris" (sut/interpolate "Hello {{name}}" {:name "Chris"}))))
 
@@ -44,10 +44,9 @@
     (is (= "plain text" (sut/interpolate "plain text" {:foo "bar"})))))
 
 ;; ============================================================================
-;; Layer 2 — Template resolution tests
+;; Template resolution tests
 ;; ============================================================================
-
-(deftest resolve-repair-template-test
+(deftest ^{:stratum 0} resolve-repair-template-test
   (testing "rule-level template wins"
     (let [rule {:rule/repair-prompt-template "Rule: {{current}}"}
           pack {:pack/prompt-templates {:repair-prompt "Pack: {{current}}"}}]
@@ -61,7 +60,7 @@
   (testing "default used when neither rule nor pack provides"
     (is (= @sut/default-repair-prompt (sut/resolve-repair-template {} {})))))
 
-(deftest resolve-behavior-template-test
+(deftest ^{:stratum 0} resolve-behavior-template-test
   (testing "pack-level template wins"
     (let [pack {:pack/prompt-templates {:behavior-section "Custom: {{behaviors}}"}}]
       (is (= "Custom: {{behaviors}}" (sut/resolve-behavior-template pack)))))
@@ -70,10 +69,9 @@
     (is (= @sut/default-behavior-section (sut/resolve-behavior-template {})))))
 
 ;; ============================================================================
-;; Layer 2 — Rendering tests
+;; Rendering tests
 ;; ============================================================================
-
-(deftest render-repair-prompt-test
+(deftest ^{:stratum 0} render-repair-prompt-test
   (testing "renders with default template"
     (let [violation {:file "src/core.clj" :line 42
                      :current "(eval x)" :rationale "eval is unsafe"
@@ -100,7 +98,7 @@
           result    (sut/render-repair-prompt violation rule pack)]
       (is (= "Pack fix: y" (:content result))))))
 
-(deftest render-behavior-section-test
+(deftest ^{:stratum 0} render-behavior-section-test
   (testing "formats numbered behaviors"
     (let [result (sut/render-behavior-section ["Do A" "Do B"] {})]
       (is (.contains result "1. Do A"))
@@ -109,7 +107,7 @@
   (testing "returns nil for empty behaviors"
     (is (nil? (sut/render-behavior-section [] {})))))
 
-(deftest render-knowledge-section-test
+(deftest ^{:stratum 0} render-knowledge-section-test
   (testing "formats knowledge entries"
     (let [result (sut/render-knowledge-section
                   [{:rule/title "Rule A" :content "Content A"}] {})]

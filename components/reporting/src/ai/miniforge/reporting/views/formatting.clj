@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.views.formatting
   "Low-level formatting utilities for terminal output.
 
@@ -23,9 +22,9 @@
   (:require [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; ANSI color codes and basic colorization
 
-(def ansi-codes
+;; ANSI color codes and basic colorization
+(def ^{:stratum 0} ansi-codes
   "ANSI escape codes for terminal colors and styles."
   {:reset "\033[0m"
    :bold "\033[1m"
@@ -43,12 +42,7 @@
    :bg-yellow "\033[43m"
    :bg-blue "\033[44m"})
 
-(defn ansi
-  "Apply ANSI color/formatting to text."
-  [code text]
-  (str (get ansi-codes code "") text (:reset ansi-codes)))
-
-(defn status-color
+(defn ^{:stratum 0} status-color
   "Get color for a status keyword."
   [status]
   (case status
@@ -57,10 +51,8 @@
     (:failed :error) :red
     :white))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Box drawing and separators
-
-(def box-chars
+(def ^{:stratum 0} box-chars
   "Unicode box drawing characters."
   {:horizontal "─"
    :vertical "│"
@@ -74,7 +66,41 @@
    :t-right "├"
    :t-left "┤"})
 
-(defn draw-box
+;; Table formatting
+(defn ^{:stratum 0} format-table
+  "Format data as a table."
+  [headers rows]
+  (let [col-count (count headers)
+        col-widths (map (fn [idx]
+                          (apply max
+                                 (count (nth headers idx))
+                                 (map #(count (str (nth % idx ""))) rows)))
+                        (range col-count))
+        format-row (fn [row]
+                     (str/join " │ "
+                               (map-indexed
+                                (fn [idx val]
+                                  (let [width (nth col-widths idx)
+                                        val-str (str val)]
+                                    (str val-str
+                                         (apply str (repeat (- width (count val-str)) " ")))))
+                                row)))
+        header-line (format-row headers)
+        separator (str/join "─┼─"
+                            (map #(apply str (repeat % "─")) col-widths))]
+    (str/join "\n"
+              (concat
+               [header-line separator]
+               (map format-row rows)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ansi
+  "Apply ANSI color/formatting to text."
+  [code text]
+  (str (get ansi-codes code "") text (:reset ansi-codes)))
+
+(defn ^{:stratum 1} draw-box
   "Draw a box around content."
   [title content width]
   (let [title-str (str " " title " ")
@@ -101,39 +127,10 @@
                     content-lines)
                [bottom-line]))))
 
-(defn draw-separator
+(defn ^{:stratum 1} draw-separator
   "Draw a horizontal separator."
   [width]
   (apply str (repeat width (:horizontal box-chars))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Table formatting
-
-(defn format-table
-  "Format data as a table."
-  [headers rows]
-  (let [col-count (count headers)
-        col-widths (map (fn [idx]
-                          (apply max
-                                 (count (nth headers idx))
-                                 (map #(count (str (nth % idx ""))) rows)))
-                        (range col-count))
-        format-row (fn [row]
-                     (str/join " │ "
-                               (map-indexed
-                                (fn [idx val]
-                                  (let [width (nth col-widths idx)
-                                        val-str (str val)]
-                                    (str val-str
-                                         (apply str (repeat (- width (count val-str)) " ")))))
-                                row)))
-        header-line (format-row headers)
-        separator (str/join "─┼─"
-                            (map #(apply str (repeat % "─")) col-widths))]
-    (str/join "\n"
-              (concat
-               [header-line separator]
-               (map format-row rows)))))
 
 (comment
   ;; Test ANSI colors

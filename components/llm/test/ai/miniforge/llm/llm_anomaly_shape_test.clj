@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.llm-anomaly-shape-test
   "Lock the canonical anomaly shape produced by `llm-client/llm-error`
    and `llm-client/http-post-request` after the W2 anomaly convergence
@@ -42,32 +41,24 @@
    [ai.miniforge.llm.protocols.impl.llm-client :as client]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Factories and fixtures
 
-(def ^:private test-url
+;; Factories and fixtures
+(def ^{:stratum 0} ^:private test-url
   "Static target URL used by `http-post-request` failure tests. Never
    actually dereferenced — `http/post` is stubbed via `with-redefs`."
   "http://llm-anomaly-shape-test.invalid/llm")
 
-(def ^:private test-headers
+(def ^{:stratum 0} ^:private test-headers
   {"Content-Type" "application/json"})
 
-(defn- error-type-placeholder
+(defn- ^{:stratum 0} error-type-placeholder
   "Opaque error-type label used by `llm-error` tests. The shape-of-anomaly
    tests don't assert against the error-type field — they only need a
    stable, non-blank token to pass the builder's contract."
   []
   "shape_test_error_type")
 
-(defn- anomaly-of
-  "Build a canonical anomaly map for the given legacy category by driving
-   the public `llm-error` builder and extracting `:anomaly` from the
-   response. The 2nd/3rd args are opaque placeholders — shape tests
-   only assert on the anomaly map itself."
-  [category]
-  (:anomaly (client/llm-error category (error-type-placeholder) "boom")))
-
-(defn- delivered-future
+(defn- ^{:stratum 0} delivered-future
   "Wrap a value in an already-resolved future so `@(http/post ...)`
    returns it synchronously under `with-redefs`."
   [v]
@@ -75,7 +66,7 @@
     (deliver p v)
     p))
 
-(defn- stub-http-post-throwing
+(defn- ^{:stratum 0} stub-http-post-throwing
   "`http/post` stub whose deref throws the given exception — mirrors
    http-kit's throwing failure mode (e.g. body serialization or an
    `IllegalArgumentException` on a malformed URL)."
@@ -84,7 +75,17 @@
     (reify clojure.lang.IDeref
       (deref [_] (throw ex)))))
 
-(defn- stub-http-post-error-map
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} anomaly-of
+  "Build a canonical anomaly map for the given legacy category by driving
+   the public `llm-error` builder and extracting `:anomaly` from the
+   response. The 2nd/3rd args are opaque placeholders — shape tests
+   only assert on the anomaly map itself."
+  [category]
+  (:anomaly (client/llm-error category (error-type-placeholder) "boom")))
+
+(defn- ^{:stratum 1} stub-http-post-error-map
   "`http/post` stub whose deref returns `{:error <Throwable>}` — mirrors
    http-kit's non-throwing failure mode (the common case for connection
    refused / DNS failure)."
@@ -92,10 +93,26 @@
   (fn [_url _opts]
     (delivered-future {:error cause :opts {}})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Unit tests
+(deftest ^{:stratum 1} http-post-request-throwing-failure-emits-canonical-unavailable
+  (testing "thrown exception on deref → canonical :unavailable anomaly"
+    (let [cause (java.net.ConnectException. "Connection refused")]
+      (with-redefs [http/post (stub-http-post-throwing cause)]
+        (let [a (client/http-post-request test-url test-headers {})]
+          (is (anomaly/anomaly? a)
+              "throwing path must produce a canonical anomaly")
+          (is (= :unavailable (:anomaly/type a)))
+          (is (nil? (:anomaly/subtype a))
+              ":anomalies/unavailable is generic-standard — no subtype")
+          (is (= :http-request (get-in a [:anomaly/data :operation])))
+          (is (= test-url (get-in a [:anomaly/data :url]))
+              ":url lives under :anomaly/data, not at the top level")
+          (is (nil? (:anomaly.llm/url a))
+              "legacy :anomaly.llm/url no longer set at the top level"))))))
 
-(deftest llm-error-generic-standard-category-emits-typed-anomaly-no-subtype
+;------------------------------------------------------------------------------ Layer 2
+
+;; Unit tests
+(deftest ^{:stratum 2} llm-error-generic-standard-category-emits-typed-anomaly-no-subtype
   (testing ":anomalies/unavailable maps to :unavailable with no subtype"
     (let [a (anomaly-of :anomalies/unavailable)]
       (is (anomaly/anomaly? a))
@@ -118,7 +135,7 @@
       (is (= :timeout (:anomaly/type a)))
       (is (nil? (:anomaly/subtype a))))))
 
-(deftest llm-error-domain-category-emits-subtype
+(deftest ^{:stratum 2} llm-error-domain-category-emits-subtype
   (testing ":anomalies.agent/llm-error → :fault + subtype verbatim"
     (let [a (anomaly-of :anomalies.agent/llm-error)]
       (is (anomaly/anomaly? a))
@@ -131,7 +148,7 @@
       (is (= :unavailable (:anomaly/type a)))
       (is (= :anomalies.agent/rate-limited (:anomaly/subtype a))))))
 
-(deftest llm-error-domain-payload-lives-under-anomaly-data
+(deftest ^{:stratum 2} llm-error-domain-payload-lives-under-anomaly-data
   (testing "the :operation domain field is carried under :anomaly/data"
     (let [a    (anomaly-of :anomalies/fault)
           data (:anomaly/data a)]
@@ -142,23 +159,7 @@
       (is (nil? (:operation a))
           ":operation also not at the anomaly's top level"))))
 
-(deftest http-post-request-throwing-failure-emits-canonical-unavailable
-  (testing "thrown exception on deref → canonical :unavailable anomaly"
-    (let [cause (java.net.ConnectException. "Connection refused")]
-      (with-redefs [http/post (stub-http-post-throwing cause)]
-        (let [a (client/http-post-request test-url test-headers {})]
-          (is (anomaly/anomaly? a)
-              "throwing path must produce a canonical anomaly")
-          (is (= :unavailable (:anomaly/type a)))
-          (is (nil? (:anomaly/subtype a))
-              ":anomalies/unavailable is generic-standard — no subtype")
-          (is (= :http-request (get-in a [:anomaly/data :operation])))
-          (is (= test-url (get-in a [:anomaly/data :url]))
-              ":url lives under :anomaly/data, not at the top level")
-          (is (nil? (:anomaly.llm/url a))
-              "legacy :anomaly.llm/url no longer set at the top level"))))))
-
-(deftest http-post-request-error-map-failure-emits-canonical-unavailable
+(deftest ^{:stratum 2} http-post-request-error-map-failure-emits-canonical-unavailable
   (testing "{:error <Throwable>} deref response → canonical :unavailable anomaly"
     ;; http-kit's common non-throwing failure mode: the future resolves
     ;; to a map with `:error` set. Pre-fix this would have flowed through

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.app-config
   "Project-composed CLI app identity and filesystem layout."
   (:require
@@ -24,22 +23,31 @@
    [ai.miniforge.cli.resource-config :as resource-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Resource loading
 
-(def app-config-resource
+;; Resource loading
+(def ^{:stratum 0} app-config-resource
   "Classpath resource path for CLI app identity."
   "config/cli/app.edn")
 
-(def default-status-config
+(def ^{:stratum 0} default-status-config
   "Defaults for workflow status rendering and health classification."
   {:running-stale-threshold-ms 300000})
 
-(defn- normalize-profile
+(defn- ^{:stratum 0} normalize-profile
   [profile]
   (-> profile
       (update :help-examples #(vec (or % [])))))
 
-(defn app-profile
+(defn ^{:stratum 0} getenv
+  "Environment-variable lookup seam. Public so tests can rebind it via
+   `with-redefs` when validating MINIFORGE_HOME resolution; not part of
+   the external API."
+  [var-name]
+  (System/getenv var-name))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} app-profile
   "Resolve the active CLI app profile from the classpath."
   []
   (-> (resource-config/merged-resource-config app-config-resource
@@ -47,86 +55,83 @@
                                               {})
       normalize-profile))
 
-(defn pr-monitor-config
+(defn ^{:stratum 1} pr-monitor-config
   "Resolve PR monitor CLI config from the classpath."
   []
   (resource-config/merged-resource-config app-config-resource
                                           :cli-app/pr-monitor
                                           {}))
 
-(defn status-config
+(defn ^{:stratum 1} status-config
   "Resolve workflow status CLI config from the classpath."
   []
   (resource-config/merged-resource-config app-config-resource
                                           :cli-app/status
                                           default-status-config))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Identity helpers
+;------------------------------------------------------------------------------ Layer 2
 
-(defn binary-name []
+;; Identity helpers
+(defn ^{:stratum 2} binary-name []
   (:name (app-profile)))
 
-(defn display-name []
+(defn ^{:stratum 2} display-name []
   (:display-name (app-profile)))
 
-(defn description []
+(defn ^{:stratum 2} description []
   (:description (app-profile)))
 
-(defn system-check-title []
+(defn ^{:stratum 2} system-check-title []
   (:system-check-title (app-profile)))
 
-(defn home-dir-name []
+(defn ^{:stratum 2} home-dir-name []
   (:home-dir-name (app-profile)))
 
-(defn getenv
-  "Environment-variable lookup seam. Public so tests can rebind it via
-   `with-redefs` when validating MINIFORGE_HOME resolution; not part of
-   the external API."
-  [var-name]
-  (System/getenv var-name))
+(defn ^{:stratum 2} tui-package []
+  (:tui-package (app-profile)))
 
-(defn default-home-dir
+(defn ^{:stratum 2} help-examples []
+  (:help-examples (app-profile)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} default-home-dir
   "Profile-derived default home directory. Public so tests can rebind
    it via `with-redefs`; not part of the external API."
   []
   (str (fs/home) "/" (home-dir-name)))
 
-(defn home-dir []
-  (or (getenv "MINIFORGE_HOME")
-      (default-home-dir)))
-
-(defn tui-package []
-  (:tui-package (app-profile)))
-
-(defn help-examples []
-  (:help-examples (app-profile)))
-
-(defn command-string
+(defn ^{:stratum 3} command-string
   "Build a CLI command string prefixed with the active binary name."
   [& parts]
   (str/join " " (cons (binary-name) (remove str/blank? parts))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Filesystem layout helpers
+;------------------------------------------------------------------------------ Layer 4
 
-(defn config-path []
+(defn ^{:stratum 4} home-dir []
+  (or (getenv "MINIFORGE_HOME")
+      (default-home-dir)))
+
+;------------------------------------------------------------------------------ Layer 5
+
+;; Filesystem layout helpers
+(defn ^{:stratum 5} config-path []
   (str (home-dir) "/config.edn"))
 
-(defn artifacts-dir []
+(defn ^{:stratum 5} artifacts-dir []
   (str (home-dir) "/artifacts"))
 
-(defn worktrees-dir []
+(defn ^{:stratum 5} worktrees-dir []
   (str (home-dir) "/worktrees"))
 
-(defn events-dir []
+(defn ^{:stratum 5} events-dir []
   (str (home-dir) "/events"))
 
-(defn logs-dir []
+(defn ^{:stratum 5} logs-dir []
   (str (home-dir) "/logs"))
 
-(defn dashboard-port-file []
+(defn ^{:stratum 5} dashboard-port-file []
   (str (home-dir) "/dashboard.port"))
 
-(defn state-file []
+(defn ^{:stratum 5} state-file []
   (str (home-dir) "/state.edn"))

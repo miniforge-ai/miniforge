@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.normalize-spec-test
   "Coverage for `core/normalize-spec` (anomaly-returning) and its
    boundary escalation through `parse-spec-file`.
@@ -29,9 +28,10 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Anomaly-returning happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest normalize-spec-minimal-input
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+(deftest ^{:stratum 0} normalize-spec-minimal-input
   (testing "minimal valid input normalizes (not an anomaly)"
     (let [result (core/normalize-spec {:spec/title "T" :spec/description "D"})]
       (is (not (anomaly/anomaly? result)))
@@ -39,22 +39,21 @@
       (is (= "D" (:spec/description result))))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure paths
-
-(deftest normalize-spec-non-map-input
+(deftest ^{:stratum 0} normalize-spec-non-map-input
   (testing "non-map input yields :invalid-input anomaly"
     (let [result (core/normalize-spec "not a map")]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= "Workflow spec must be a map" (:anomaly/message result))))))
 
-(deftest normalize-spec-missing-title
+(deftest ^{:stratum 0} normalize-spec-missing-title
   (testing "map without :spec/title yields :invalid-input anomaly"
     (let [result (core/normalize-spec {:spec/description "D"})]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result)))
       (is (= "Workflow spec must have :spec/title" (:anomaly/message result))))))
 
-(deftest normalize-spec-missing-description
+(deftest ^{:stratum 0} normalize-spec-missing-description
   (testing "map without :spec/description yields :invalid-input anomaly"
     (let [result (core/normalize-spec {:spec/title "T"})]
       (is (anomaly/anomaly? result))
@@ -62,8 +61,7 @@
       (is (= "Workflow spec must have :spec/description" (:anomaly/message result))))))
 
 ;------------------------------------------------------------------------------ Boundary escalation
-
-(deftest parse-spec-file-escalates-missing-title
+(deftest ^{:stratum 0} parse-spec-file-escalates-missing-title
   (testing "spec missing :spec/title surfaces as ex-info from parse-spec-file"
     (let [tmp (fs/create-temp-file {:suffix ".edn"})]
       (try

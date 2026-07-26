@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.interface
   "Public API for the repo-index component.
 
    Provides repository scanning, repo map generation, and file retrieval.
 
-   Layer 0: Schema re-exports
-   Layer 1: Index building and repo map
-   Layer 2: File retrieval"
+   Layer 0: Schema re-exports, index/map/search building, and index lookups
+   Layer 1: Single-file retrieval and repo-map text convenience
+   Layer 2: Batch file retrieval"
   (:require [ai.miniforge.repo-index.messages :as messages]
             [ai.miniforge.repo-index.schema :as schema]
             [ai.miniforge.repo-index.factory :as factory]
@@ -35,55 +34,51 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Messages
 
-(def t
+;; Messages
+(def ^{:stratum 0} t
   "Look up a repo-index message by key, with optional param substitution."
   messages/t)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Schema re-exports
-
-(def FileRecord
+(def ^{:stratum 0} FileRecord
   "Malli schema (a [:map ...] vector) for a single file entry in the repo index.
    Keys: :path (non-empty string), :blob-sha (string, min 7), :size (int),
    :lines (int), :language (string or nil), :generated? (boolean)."
   schema/FileRecord)
 
-(def RepoIndex
+(def ^{:stratum 0} RepoIndex
   "Malli schema (a [:map ...] vector) for a complete repo index.
    Keys: :tree-sha (string, min 7), :repo-root (non-empty string),
    :files (vector of FileRecord), :file-count (int), :total-lines (int),
    :languages (map of string->int), :indexed-at (inst)."
   schema/RepoIndex)
 
-(def RepoMapEntry
+(def ^{:stratum 0} RepoMapEntry
   "Malli schema (a [:map ...] vector) for a single entry in the repo map.
    Keys: :path (non-empty string), :lang (string or nil), :lines (int),
    :size (int)."
   schema/RepoMapEntry)
 
-(def RepoMapSlice
+(def ^{:stratum 0} RepoMapSlice
   "Malli schema (a [:map ...] vector) for a token-budgeted repo map slice.
    Keys: :tree-sha (string, min 7), :entries (vector of RepoMapEntry),
    :total-files (int), :shown-files (int), :truncated? (boolean),
    :token-estimate (int)."
   schema/RepoMapSlice)
 
-(def SearchHit
+(def ^{:stratum 0} SearchHit
   "Malli schema (a [:map ...] vector) for a single search result.
    Keys: :path (non-empty string), :score (double), :snippets (vector of Snippet)."
   schema/SearchHit)
 
-(def Snippet
+(def ^{:stratum 0} Snippet
   "Malli schema (a [:map ...] vector) for a search result snippet.
    Keys: :start-line (int), :end-line (int), :text (string)."
   schema/Snippet)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Index building
-
-(defn build-index
+(defn ^{:stratum 0} build-index
   "Build a repo index for a git repository.
 
    Uses cached index if tree-sha hasn't changed, otherwise performs a full scan.
@@ -102,10 +97,8 @@
           (storage/save-index repo-root index)
           index)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Repo map
-
-(defn repo-map
+(defn ^{:stratum 0} repo-map
   "Generate a token-budgeted repo map from a repo index.
 
    Arguments:
@@ -119,15 +112,8 @@
   ([index] (repo-map/generate index))
   ([index opts] (repo-map/generate index opts)))
 
-(defn repo-map-text
-  "Convenience: generate repo map and return just the rendered text."
-  ([index] (:text (repo-map index)))
-  ([index opts] (:text (repo-map index opts))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Lexical search
-
-(defn build-search-index
+(defn ^{:stratum 0} build-search-index
   "Build a BM25 search index from a repo index.
 
    Should be called once after build-index; the result is reusable for
@@ -141,7 +127,7 @@
   [repo-index]
   (search-lex/build-search-index repo-index))
 
-(defn search-lex
+(defn ^{:stratum 0} search-lex
   "Search the codebase by keyword using BM25 ranking.
 
    Arguments:
@@ -158,15 +144,13 @@
   ([search-index query] (search-lex/search search-index query))
   ([search-index query opts] (search-lex/search search-index query opts)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; File retrieval
-
-(defn- find-in-index
+(defn- ^{:stratum 0} find-in-index
   "Find a file record in the index by path. Returns nil if absent."
   [index file-path]
   (first (filter #(= (:path %) file-path) (:files index))))
 
-(defn- read-file-limited
+(defn- ^{:stratum 0} read-file-limited
   "Read a file from disk, truncating to max-lines.
    Returns a file-content map or nil on error."
   [repo-root file-path max-lines]
@@ -184,7 +168,19 @@
     (catch Exception _
       nil)))
 
-(defn get-file
+(defn ^{:stratum 0} find-files
+  "Find files in the index matching a predicate."
+  [index pred]
+  (filterv pred (:files index)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} repo-map-text
+  "Convenience: generate repo map and return just the rendered text."
+  ([index] (:text (repo-map index)))
+  ([index opts] (:text (repo-map index opts))))
+
+(defn ^{:stratum 1} get-file
   "Read a single file's contents from disk, using the index for validation.
 
    Arguments:
@@ -201,24 +197,21 @@
      (when (find-in-index index file-path)
        (read-file-limited (:repo-root index) file-path max-lines)))))
 
-(defn get-files
+(defn ^{:stratum 1} files-by-language
+  "Get all non-generated files for a given language."
+  [index language]
+  (find-files index
+    (fn [f] (and (= (:language f) language) (not (:generated? f))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-files
   "Read multiple files from disk, using the index for validation."
   ([index file-paths] (get-files index file-paths {}))
   ([index file-paths opts]
    (->> file-paths
         (map #(get-file index % opts))
         (filterv some?))))
-
-(defn find-files
-  "Find files in the index matching a predicate."
-  [index pred]
-  (filterv pred (:files index)))
-
-(defn files-by-language
-  "Get all non-generated files for a given language."
-  [index language]
-  (find-files index
-    (fn [f] (and (= (:language f) language) (not (:generated? f))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

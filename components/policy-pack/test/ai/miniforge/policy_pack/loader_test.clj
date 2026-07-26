@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.loader-test
   "Tests for the policy-pack loader."
   (:require
@@ -24,11 +23,11 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Test fixtures
+(def ^{:stratum 0} ^:dynamic *test-dir* nil)
 
-(def ^:dynamic *test-dir* nil)
-
-(defn create-test-dir
+(defn ^{:stratum 0} create-test-dir
   "Create a temporary directory for test files."
   []
   (let [dir (io/file (System/getProperty "java.io.tmpdir")
@@ -36,14 +35,16 @@
     (.mkdirs dir)
     dir))
 
-(defn delete-dir
+(defn ^{:stratum 0} delete-dir
   "Recursively delete a directory."
   [dir]
   (when (.exists dir)
     (doseq [f (reverse (file-seq dir))]
       (.delete f))))
 
-(defn test-fixture
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} test-fixture
   "Create and cleanup test directory."
   [f]
   (let [dir (create-test-dir)]
@@ -53,12 +54,8 @@
       (finally
         (delete-dir dir)))))
 
-(use-fixtures :each test-fixture)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Single file loader tests
-
-(deftest load-pack-from-file-test
+(deftest ^{:stratum 1} load-pack-from-file-test
   (testing "Loads valid pack from EDN file"
     (let [pack-file (io/file *test-dir* "test.pack.edn")
           pack-content "{:pack/id \"test-pack\"
@@ -88,7 +85,7 @@
       (let [result (loader/load-pack-from-file (.getPath pack-file))]
         (is (not (:success? result)))))))
 
-(deftest load-pack-with-rules-test
+(deftest ^{:stratum 1} load-pack-with-rules-test
   (testing "Loads pack with inline rules"
     (let [pack-file (io/file *test-dir* "with-rules.pack.edn")
           pack-content "{:pack/id \"rules-pack\"
@@ -116,10 +113,8 @@
         (is (= 1 (count (get-in result [:pack :pack/rules]))))
         (is (= :test-rule (get-in result [:pack :pack/rules 0 :rule/id])))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Directory loader tests
-
-(deftest load-pack-from-directory-test
+(deftest ^{:stratum 1} load-pack-from-directory-test
   (testing "Loads pack from directory with manifest"
     (let [pack-dir (io/file *test-dir* "my-pack")]
       (.mkdirs pack-dir)
@@ -215,10 +210,8 @@
         (is (= "Directory Version" (:rule/title rule)))
         (is (= :high (:rule/severity rule)))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Auto-detect and discovery tests
-
-(deftest load-pack-auto-detect-test
+(deftest ^{:stratum 1} load-pack-auto-detect-test
   (testing "Auto-detects file format"
     (let [pack-file (io/file *test-dir* "auto.pack.edn")]
       (spit pack-file "{:pack/id \"auto-pack\"
@@ -253,7 +246,7 @@
         (is (:success? result))
         (is (= "auto-dir-pack" (get-in result [:pack :pack/id])))))))
 
-(deftest discover-packs-test
+(deftest ^{:stratum 1} discover-packs-test
   (testing "Discovers packs in directory"
     (let [packs-dir (io/file *test-dir* "packs")]
       (.mkdirs packs-dir)
@@ -277,7 +270,7 @@
         (is (some #(= :file (:type %)) discovered))
         (is (some #(= :directory (:type %)) discovered))))))
 
-(deftest load-all-packs-test
+(deftest ^{:stratum 1} load-all-packs-test
   (testing "Loads all packs from directory"
     (let [packs-dir (io/file *test-dir* "all-packs")]
       (.mkdirs packs-dir)
@@ -296,6 +289,8 @@
       (let [result (loader/load-all-packs (.getPath packs-dir))]
         (is (= 2 (count (:loaded result))))
         (is (empty? (:failed result)))))))
+
+(use-fixtures :each test-fixture)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

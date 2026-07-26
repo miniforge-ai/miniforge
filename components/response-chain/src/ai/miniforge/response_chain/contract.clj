@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.contract
   "Malli contracts for the response-chain shape.
 
@@ -33,9 +32,9 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Step
 
-(def Step
+;; Step
+(def ^{:stratum 0} Step
   "Malli schema for a single response-chain step.
 
    Every step carries:
@@ -60,9 +59,9 @@
    [:request    {:optional true} :any]])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Chain
 
-(def Chain
+;; Chain
+(def ^{:stratum 1} Chain
   "Malli schema for a response-chain envelope.
 
    Every chain carries:
@@ -75,27 +74,27 @@
    [:succeeded?     :boolean]
    [:response-chain [:vector Step]]])
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Validation helpers
-
-(defn valid-step?
+(defn ^{:stratum 1} valid-step?
   "Return true when `value` matches the `Step` schema."
   [value]
   (m/validate Step value))
 
-(defn valid-chain?
-  "Return true when `value` matches the `Chain` schema."
-  [value]
-  (m/validate Chain value))
-
-(defn explain-step
+(defn ^{:stratum 1} explain-step
   "Return a humanized explanation for an invalid step, or nil
    when `value` is valid."
   [value]
   (some-> (m/explain Step value)
           me/humanize))
 
-(defn explain-chain
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} valid-chain?
+  "Return true when `value` matches the `Chain` schema."
+  [value]
+  (m/validate Chain value))
+
+(defn ^{:stratum 2} explain-chain
   "Return a humanized explanation for an invalid chain, or nil
    when `value` is valid."
   [value]

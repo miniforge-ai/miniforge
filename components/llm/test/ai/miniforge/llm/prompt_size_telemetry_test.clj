@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.prompt-size-telemetry-test
   "Pre-flight input-size gauge for the assembled agent prompt."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
-(deftest prompt-size-telemetry-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} prompt-size-telemetry-test
   (testing "counts system + user chars and estimates input tokens (chars/4)"
     (is (= {:system-chars 8
             :user-chars 12

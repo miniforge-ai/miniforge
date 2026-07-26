@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.phase-terminal-test
   "Unit tests for derive-termination-reason in phase-terminal.
 
@@ -24,19 +23,39 @@
   (:require [clojure.test :refer [deftest testing is]]
             [ai.miniforge.phase-software-factory.phase-terminal :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Helpers
-
-(defn reason [result & [watchdog]]
+(defn ^{:stratum 0} reason [result & [watchdog]]
   (:phase/termination-reason
    (if watchdog
      (sut/derive-termination-reason result watchdog)
      (sut/derive-termination-reason result))))
 
+(deftest ^{:stratum 0} stream-idle-priority
+  (testing "stall takes precedence over stream-idle"
+    ;; :stalled? wins — agent-stalled is higher priority than stream-idle
+    (let [result {:status :error :error {:data {:code :stream-idle}}}
+          out    (sut/derive-termination-reason result {:stalled? true})]
+      (is (= :agent-stalled (:phase/termination-reason out)))))
+
+  (testing "stream-idle takes precedence over curator-rejected"
+    (let [result {:status :error
+                  :error  {:data {:code :curator/no-files-written}}}
+          out    (sut/derive-termination-reason result {:stream-idle? true})]
+      (is (= :stream-idle-timeout (:phase/termination-reason out)))))
+
+  (testing "stream-idle takes precedence over tool-error"
+    (let [result {:status :error :error {:data {:code :tool-error}}}
+          out    (sut/derive-termination-reason result {:stream-idle? true})]
+      (is (= :stream-idle-timeout (:phase/termination-reason out))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
 ;; ---------------------------------------------------------------------------
 ;; Happy path — normal termination
-
-(deftest normal-success
+(deftest ^{:stratum 1} normal-success
   (testing "success result with no watchdog yields :normal"
     (let [result {:status :success :output {} :metrics {:tokens 100}}]
       (is (= :normal (reason result)))))
@@ -54,8 +73,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Watchdog stall → :agent-stalled
-
-(deftest watchdog-stall-by-flag
+(deftest ^{:stratum 1} watchdog-stall-by-flag
   (testing ":stalled? true produces :agent-stalled"
     (let [result {:status :error :error {:message "silent"}}]
       (is (= :agent-stalled (reason result {:stalled? true})))))
@@ -67,7 +85,7 @@
   (testing "nil watchdog state is not a stall"
     (is (= :normal (reason {} nil)))))
 
-(deftest watchdog-stall-by-gap-ms
+(deftest ^{:stratum 1} watchdog-stall-by-gap-ms
   (testing "positive :stall/gap-duration-ms produces :agent-stalled"
     (let [result {:status :error}
           ws     {:stall/gap-duration-ms 45000}]
@@ -93,8 +111,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Stream-idle → :stream-idle-timeout
-
-(deftest stream-idle-by-watchdog-flag
+(deftest ^{:stratum 1} stream-idle-by-watchdog-flag
   (testing ":stream-idle? true in watchdog produces :stream-idle-timeout"
     (let [result {:status :error :error {:message "stream went quiet"}}
           out    (sut/derive-termination-reason result {:stream-idle? true})]
@@ -109,7 +126,7 @@
     (let [result {:status :error}]
       (is (= :normal (reason result {:stream-idle? nil}))))))
 
-(deftest stream-idle-by-result-marker
+(deftest ^{:stratum 1} stream-idle-by-result-marker
   (testing "the PRODUCTION shape — [:error :data :timeout :type] :stream-idle
             (result-boundary error-response envelope) — produces
             :stream-idle-timeout"
@@ -134,28 +151,9 @@
       (is (not= :stream-idle-timeout (:phase/termination-reason
                                       (sut/derive-termination-reason result)))))))
 
-(deftest stream-idle-priority
-  (testing "stall takes precedence over stream-idle"
-    ;; :stalled? wins — agent-stalled is higher priority than stream-idle
-    (let [result {:status :error :error {:data {:code :stream-idle}}}
-          out    (sut/derive-termination-reason result {:stalled? true})]
-      (is (= :agent-stalled (:phase/termination-reason out)))))
-
-  (testing "stream-idle takes precedence over curator-rejected"
-    (let [result {:status :error
-                  :error  {:data {:code :curator/no-files-written}}}
-          out    (sut/derive-termination-reason result {:stream-idle? true})]
-      (is (= :stream-idle-timeout (:phase/termination-reason out)))))
-
-  (testing "stream-idle takes precedence over tool-error"
-    (let [result {:status :error :error {:data {:code :tool-error}}}
-          out    (sut/derive-termination-reason result {:stream-idle? true})]
-      (is (= :stream-idle-timeout (:phase/termination-reason out))))))
-
 ;; ---------------------------------------------------------------------------
 ;; Curator rejection → :curator-rejected
-
-(deftest curator-rejected-no-files-written
+(deftest ^{:stratum 1} curator-rejected-no-files-written
   (testing ":curator/no-files-written error code maps to :curator-rejected"
     (let [result {:status  :error
                   :error   {:data {:code :curator/no-files-written}
@@ -169,7 +167,7 @@
       (is (= :agent-stalled
              (reason result {:stalled? true}))))))
 
-(deftest curator-rejected-release-zero-files
+(deftest ^{:stratum 1} curator-rejected-release-zero-files
   (testing ":release/zero-files :data :type maps to :curator-rejected"
     (let [result {:status :error
                   :error  {:data {:type :release/zero-files}}}]
@@ -182,15 +180,14 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Tool / infra error → :tool-error
-
-(deftest tool-error-from-code
+(deftest ^{:stratum 1} tool-error-from-code
   (testing ":tool-error error code maps to :tool-error"
     (let [result {:status :error
                   :error  {:data {:code :tool-error}
                             :message "MCP tool invocation failed"}}]
       (is (= :tool-error (reason result))))))
 
-(deftest tool-error-from-rate-limit-hint
+(deftest ^{:stratum 1} tool-error-from-rate-limit-hint
   (testing ":rate-limited? true hint produces :tool-error"
     (let [result {:status :error :error {:message "429 Too Many Requests"}}]
       (is (= :tool-error (reason result {:rate-limited? true})))))
@@ -207,8 +204,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Priority ordering
-
-(deftest priority-ordering
+(deftest ^{:stratum 1} priority-ordering
   (testing "stall takes precedence over curator-rejected"
     (let [result {:status :error
                   :error  {:data {:code :curator/no-files-written}}}]

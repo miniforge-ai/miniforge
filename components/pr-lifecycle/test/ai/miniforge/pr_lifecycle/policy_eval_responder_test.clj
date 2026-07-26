@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval-responder-test
   "Tests for the N13 §2.5 Comment Response Agent (deterministic
    policy-eval path)."
@@ -28,32 +27,18 @@
             [ai.miniforge.pr-lifecycle.github :as github]
             [ai.miniforge.pr-lifecycle.policy-eval-responder :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ── fixture: ephemeral worktree ──────────────────────────────────────
+(def ^{:stratum 0} ^:dynamic *worktree* nil)
 
-(def ^:dynamic *worktree* nil)
-
-(defn worktree-fixture [f]
+(defn ^{:stratum 0} worktree-fixture [f]
   (let [w (str (fs/create-temp-dir {:prefix "policy-eval-responder-test-"}))]
     (try
       (binding [*worktree* w] (f))
       (finally (try (fs/delete-tree w) (catch Throwable _ nil))))))
 
-(use-fixtures :each worktree-fixture)
-
-;; ── helpers ──────────────────────────────────────────────────────────
-
-(defn- write-file!
-  "Write `content` to `*worktree*/relative-path`, creating dirs."
-  [relative-path content]
-  (let [abs (str (fs/path *worktree* relative-path))]
-    (fs/create-dirs (fs/parent abs))
-    (spit abs content)))
-
-(defn- read-file
-  [relative-path]
-  (slurp (str (fs/path *worktree* relative-path))))
-
-(def ^:private fixable-payload
+(def ^{:stratum 0} ^:private fixable-payload
   {:violation/rule-id        :ai.miniforge.standards/exceptions-as-data
    :violation/severity       :warning
    :violation/auto-fixable?  true
@@ -62,13 +47,7 @@
    :violation/pack-id        "miniforge-standards"
    :violation/pack-version   "1.4.0"})
 
-(def ^:private non-fixable-payload
-  (assoc fixable-payload
-         :violation/auto-fixable? false
-         :violation/suggested-fix nil
-         :violation/rule-id :ai.miniforge.standards/no-credentials-in-source))
-
-(defn- comment-with
+(defn- ^{:stratum 0} comment-with
   "Build a comment record carrying `payload` rendered into the body."
   [path line payload & {:keys [author id]
                         :or {author sut/policy-eval-author
@@ -93,37 +72,7 @@
      :comment/line   line
      :comment/body   body}))
 
-;; ── classify-fix ─────────────────────────────────────────────────────
-
-(deftest classify-fix-apply-on-fixable-single-line
-  (let [c (comment-with "src/foo.clj" 5 fixable-payload)
-        r (sut/classify-fix c)]
-    (is (= :apply (:action r)))
-    (is (= :ok (:reason r)))
-    (is (some? (:payload r)))))
-
-(deftest classify-fix-escalate-on-not-fixable
-  (let [c (comment-with "src/sec.clj" 7 non-fixable-payload)
-        r (sut/classify-fix c)]
-    (is (= :escalate (:action r)))
-    (is (= :violation/auto-fixable?-false (:reason r)))))
-
-(deftest classify-fix-escalate-on-multi-line-suggestion
-  (let [p (assoc fixable-payload
-                 :violation/suggested-fix "line one\nline two\nline three")
-        c (comment-with "src/foo.clj" 5 p)
-        r (sut/classify-fix c)]
-    (is (= :escalate (:action r)))
-    (is (= :policy-eval/multi-line-not-supported (:reason r)))))
-
-(deftest classify-fix-escalate-on-blank-suggestion
-  (let [p (assoc fixable-payload :violation/suggested-fix "")
-        c (comment-with "src/foo.clj" 5 p)
-        r (sut/classify-fix c)]
-    (is (= :escalate (:action r)))
-    (is (= :no-suggested-fix (:reason r)))))
-
-(deftest classify-fix-skip-on-no-payload
+(deftest ^{:stratum 0} classify-fix-skip-on-no-payload
   (let [c {:comment/id 1 :comment/author sut/policy-eval-author
            :comment/path "src/x.clj" :comment/line 1
            :comment/body "no edn payload here"}
@@ -131,9 +80,72 @@
     (is (= :skip (:action r)))
     (is (= :no-payload (:reason r)))))
 
-;; ── plan-fixes (partition) ───────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest plan-fixes-partitions-correctly
+;; ── helpers ──────────────────────────────────────────────────────────
+(defn- ^{:stratum 1} write-file!
+  "Write `content` to `*worktree*/relative-path`, creating dirs."
+  [relative-path content]
+  (let [abs (str (fs/path *worktree* relative-path))]
+    (fs/create-dirs (fs/parent abs))
+    (spit abs content)))
+
+(defn- ^{:stratum 1} read-file
+  [relative-path]
+  (slurp (str (fs/path *worktree* relative-path))))
+
+(def ^{:stratum 1} ^:private non-fixable-payload
+  (assoc fixable-payload
+         :violation/auto-fixable? false
+         :violation/suggested-fix nil
+         :violation/rule-id :ai.miniforge.standards/no-credentials-in-source))
+
+;; ── classify-fix ─────────────────────────────────────────────────────
+(deftest ^{:stratum 1} classify-fix-apply-on-fixable-single-line
+  (let [c (comment-with "src/foo.clj" 5 fixable-payload)
+        r (sut/classify-fix c)]
+    (is (= :apply (:action r)))
+    (is (= :ok (:reason r)))
+    (is (some? (:payload r)))))
+
+(deftest ^{:stratum 1} classify-fix-escalate-on-multi-line-suggestion
+  (let [p (assoc fixable-payload
+                 :violation/suggested-fix "line one\nline two\nline three")
+        c (comment-with "src/foo.clj" 5 p)
+        r (sut/classify-fix c)]
+    (is (= :escalate (:action r)))
+    (is (= :policy-eval/multi-line-not-supported (:reason r)))))
+
+(deftest ^{:stratum 1} classify-fix-escalate-on-blank-suggestion
+  (let [p (assoc fixable-payload :violation/suggested-fix "")
+        c (comment-with "src/foo.clj" 5 p)
+        r (sut/classify-fix c)]
+    (is (= :escalate (:action r)))
+    (is (= :no-suggested-fix (:reason r)))))
+
+(deftest ^{:stratum 1} apply-single-line-replacement-rejects-missing-file
+  (let [r (sut/apply-single-line-replacement!
+           *worktree* "no/such.clj" 1 "(replacement)")]
+    (is (not (dag/ok? r)))
+    (is (= :policy-eval/file-not-found (get-in r [:error :code])))))
+
+(deftest ^{:stratum 1} materialize-fix-decorates-with-comment-id-on-failure
+  (let [c (comment-with "no/such.clj" 1 fixable-payload :id 42)
+        entry {:comment c :payload fixable-payload}
+        r (sut/materialize-fix! *worktree* entry)]
+    (is (not (dag/ok? r)))
+    (is (= 42 (get-in r [:error :data :comment/id])))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} classify-fix-escalate-on-not-fixable
+  (let [c (comment-with "src/sec.clj" 7 non-fixable-payload)
+        r (sut/classify-fix c)]
+    (is (= :escalate (:action r)))
+    (is (= :violation/auto-fixable?-false (:reason r)))))
+
+;; ── plan-fixes (partition) ───────────────────────────────────────────
+(deftest ^{:stratum 2} plan-fixes-partitions-correctly
   (let [a (comment-with "src/a.clj" 1 fixable-payload :id 100)
         b (comment-with "src/b.clj" 2 non-fixable-payload :id 101)
         c (comment-with "src/c.clj" 3 fixable-payload :id 102)
@@ -145,8 +157,7 @@
     (is (empty? (:to-skip plan)))))
 
 ;; ── apply-single-line-replacement! ───────────────────────────────────
-
-(deftest apply-single-line-replacement-success
+(deftest ^{:stratum 2} apply-single-line-replacement-success
   (write-file! "src/foo.clj" "(ns foo)\n(throw (ex-info \"x\" {}))\n(println :ok)\n")
   (let [r (sut/apply-single-line-replacement!
            *worktree* "src/foo.clj" 2
@@ -159,13 +170,7 @@
     (is (not (str/includes? (read-file "src/foo.clj")
                             "(throw (ex-info \"x\" {}))")))))
 
-(deftest apply-single-line-replacement-rejects-missing-file
-  (let [r (sut/apply-single-line-replacement!
-           *worktree* "no/such.clj" 1 "(replacement)")]
-    (is (not (dag/ok? r)))
-    (is (= :policy-eval/file-not-found (get-in r [:error :code])))))
-
-(deftest apply-single-line-replacement-rejects-out-of-range-line
+(deftest ^{:stratum 2} apply-single-line-replacement-rejects-out-of-range-line
   (write-file! "src/short.clj" "line1\nline2\n")
   (let [r (sut/apply-single-line-replacement!
            *worktree* "src/short.clj" 999 "(x)")]
@@ -173,7 +178,7 @@
     (is (= :policy-eval/line-out-of-range (get-in r [:error :code])))
     (is (= 999 (get-in r [:error :data :line])))))
 
-(deftest apply-single-line-replacement-rejects-path-traversal
+(deftest ^{:stratum 2} apply-single-line-replacement-rejects-path-traversal
   (testing "absolute paths + ..-segments are rejected before any file I/O"
     (write-file! "src/inside.clj" "ok\n")
     (doseq [bad ["/etc/passwd"
@@ -186,7 +191,7 @@
     (testing "the legitimate inside file still wrote fine"
       (is (= "ok" (str/trim (read-file "src/inside.clj")))))))
 
-(deftest apply-single-line-replacement-no-op-when-already-applied
+(deftest ^{:stratum 2} apply-single-line-replacement-no-op-when-already-applied
   (testing "before == replacement → :already-applied, no file rewrite, no spurious diff"
     (write-file! "src/idem.clj" "(ns idem)\n(def x 1)\n")
     (let [before-mtime (.lastModified (java.io.File. (str (fs/path *worktree* "src/idem.clj"))))]
@@ -199,7 +204,7 @@
           (is (= before-mtime after-mtime)
               "file mtime unchanged — write was skipped"))))))
 
-(deftest apply-single-line-replacement-preserves-trailing-newline
+(deftest ^{:stratum 2} apply-single-line-replacement-preserves-trailing-newline
   (testing "file with trailing newline keeps its trailing newline after edit"
     (write-file! "src/trail.clj" "line1\nline2\nline3\n")
     (sut/apply-single-line-replacement! *worktree* "src/trail.clj" 2 "line2-new")
@@ -212,8 +217,7 @@
         "no spurious trailing newline added")))
 
 ;; ── materialize-fix! decorates with comment-id ───────────────────────
-
-(deftest materialize-fix-decorates-with-comment-id-on-success
+(deftest ^{:stratum 2} materialize-fix-decorates-with-comment-id-on-success
   (write-file! "src/foo.clj" "line1\n(throw (ex-info \"x\" {}))\nline3\n")
   (let [c (comment-with "src/foo.clj" 2 fixable-payload :id 999)
         entry {:comment c :payload fixable-payload}
@@ -221,16 +225,8 @@
     (is (dag/ok? r))
     (is (= 999 (-> r :data :comment/id)))))
 
-(deftest materialize-fix-decorates-with-comment-id-on-failure
-  (let [c (comment-with "no/such.clj" 1 fixable-payload :id 42)
-        entry {:comment c :payload fixable-payload}
-        r (sut/materialize-fix! *worktree* entry)]
-    (is (not (dag/ok? r)))
-    (is (= 42 (get-in r [:error :data :comment/id])))))
-
 ;; ── respond-to-policy-comments! end-to-end with mocks ────────────────
-
-(deftest respond-end-to-end-only-policy-eval-comments-considered
+(deftest ^{:stratum 2} respond-end-to-end-only-policy-eval-comments-considered
   (testing "comments from non-policy-eval authors are ignored entirely"
     (write-file! "src/foo.clj" "ok\n")
     (let [human-comment {:comment/id 1
@@ -245,7 +241,7 @@
       (is (empty? (-> r :data :skipped))
           "human comments are filtered out before plan-fixes; never enter the buckets"))))
 
-(deftest respond-end-to-end-applies-fixes-and-replies
+(deftest ^{:stratum 2} respond-end-to-end-applies-fixes-and-replies
   (testing "applies fixable comments → commits → pushes → replies + resolves"
     (write-file! "src/foo.clj" "(ns foo)\n(throw (ex-info \"x\" {}))\n(println :ok)\n")
     (write-file! "src/bar.clj" "(println :before)\n")
@@ -291,7 +287,7 @@
           (is (str/includes? (read-file "src/bar.clj")
                              "(println :after)")))))))
 
-(deftest respond-end-to-end-escalates-non-fixable
+(deftest ^{:stratum 2} respond-end-to-end-escalates-non-fixable
   (testing "non-fixable comments end up in :escalated, not :applied"
     (write-file! "src/sec.clj" "ok\n")
     (let [c (comment-with "src/sec.clj" 1 non-fixable-payload :id 333)
@@ -305,7 +301,7 @@
       (is (nil? (:commit-sha data))
           "no commit because nothing was applied"))))
 
-(deftest respond-end-to-end-no-commit-when-zero-fixes
+(deftest ^{:stratum 2} respond-end-to-end-no-commit-when-zero-fixes
   (testing "all-escalated-no-applies path doesn't try to commit/push"
     (let [stub (fn [_ & args] (throw (ex-info "should not be called" {:args args})))]
       (with-redefs [process/shell stub]
@@ -315,7 +311,7 @@
           (is (false? (-> r :data :pushed?))
               "pushed? is false when nothing applied — no git operations"))))))
 
-(deftest respond-end-to-end-already-applied-skips-commit
+(deftest ^{:stratum 2} respond-end-to-end-already-applied-skips-commit
   (testing "all-:already-applied path doesn't commit (would be empty diff)"
     (write-file! "src/idem.clj" "(ns idem)\n(anomaly/throw-anomaly :foo/bad-state {})\n")
     (let [stub (fn [_ & args] (throw (ex-info "should not be called" {:args args})))]
@@ -331,3 +327,5 @@
               ":already-applied entries surface in their own bucket")
           (is (nil? (:commit-sha d))
               "no commit when all fixes are no-ops"))))))
+
+(use-fixtures :each worktree-fixture)

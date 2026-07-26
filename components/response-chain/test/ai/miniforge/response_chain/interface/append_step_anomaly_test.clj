@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.append-step-anomaly-test
   "Anomaly-step append. The 4-arity overload with a non-nil anomaly
    must record a failed step and flip the chain's `:succeeded?` to false
@@ -25,7 +24,9 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest anomaly-step-marks-itself-failed
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} anomaly-step-marks-itself-failed
   (testing "step with non-nil anomaly has succeeded? false"
     (let [a (anomaly/anomaly :not-found "missing" {:id 1})
           c (-> (chain/create-chain :flow)
@@ -35,7 +36,7 @@
       (is (= a (:anomaly s)))
       (is (nil? (:response s))))))
 
-(deftest anomaly-step-flips-chain-succeeded-false
+(deftest ^{:stratum 0} anomaly-step-flips-chain-succeeded-false
   (testing "chain :succeeded? becomes false once any step fails"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :flow)
@@ -43,7 +44,7 @@
                 (chain/append-step :b a nil))]
       (is (false? (chain/succeeded? c))))))
 
-(deftest later-success-does-not-recover-failed-chain
+(deftest ^{:stratum 0} later-success-does-not-recover-failed-chain
   (testing "once any step has failed, the chain stays failed"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :flow)
@@ -53,7 +54,7 @@
       (is (false? (chain/succeeded? c)))
       (is (= 3 (count (chain/steps c)))))))
 
-(deftest four-arity-with-nil-anomaly-is-success
+(deftest ^{:stratum 0} four-arity-with-nil-anomaly-is-success
   (testing "4-arity with explicit nil anomaly behaves like the 3-arity"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :a nil 42))

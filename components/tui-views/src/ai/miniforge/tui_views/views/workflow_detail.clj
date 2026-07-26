@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.workflow-detail
   "Workflow detail view -- N5 Section 3.2.2.
 
@@ -31,65 +30,30 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn find-workflow [model]
+;; Helpers
+(defn ^{:stratum 0} find-workflow [model]
   (let [wf-id (get-in model [:detail :workflow-id])]
     (some #(when (= (:id %) wf-id) %) (:workflows model))))
 
-(defn status-suffix [status]
+(defn ^{:stratum 0} status-suffix [status]
   (case status
     :running  " ●"
     :success  " ✓"
     :failed   " ✗"
     ""))
 
-(defn format-cost [cost-usd]
+(defn ^{:stratum 0} format-cost [cost-usd]
   (when (and cost-usd (pos? cost-usd))
     (format "$%.4f" (double cost-usd))))
 
-(defn format-tokens [tokens]
+(defn ^{:stratum 0} format-tokens [tokens]
   (when (and tokens (pos? tokens))
     (if (>= tokens 1000)
       (format "%.1fk" (/ (double tokens) 1000.0))
       (str tokens))))
 
-(defn format-phase-node [{:keys [phase status tokens cost-usd]}]
-  (let [suffix (status-suffix status)
-        metrics (str/join " " (keep identity
-                                     [(format-tokens tokens)
-                                      (format-cost cost-usd)]))]
-    {:label (str (name phase) suffix
-                 (when (seq metrics) (str "  " metrics)))
-     :depth 0
-     :expandable? false}))
-
-(defn render-title-bar [wf detail [cols rows]]
-  (let [metrics-parts (keep identity
-                             [(format-tokens (:tokens detail))
-                              (format-cost (:cost-usd detail))])
-        metrics-str (when (seq metrics-parts)
-                      (str " │ " (str/join " " metrics-parts)))]
-    (layout/text [cols rows]
-                 (str (msg/t :detail/title-prefix)
-                      (get wf :name (msg/t :workflow/detail-title-fallback))
-                      (when-let [phase (:phase wf)]
-                        (str " │ " (name phase)))
-                      metrics-str)
-                 {:fg palette/status-info :bold? true})))
-
-(defn render-phase-list [phases [cols rows]]
-  (layout/box [cols rows]
-    {:title (msg/t :evidence/phases) :border :single :fg :default
-     :content-fn
-     (fn [[ic ir]]
-       (if (empty? phases)
-         (layout/text [ic ir] (msg/t :workflow/waiting-for-phases))
-         (widget/tree [ic ir]
-           {:nodes (mapv format-phase-node phases)
-            :selected 0})))}))
-
-(defn render-agent-output [agent output [cols rows]]
+(defn ^{:stratum 0} render-agent-output [agent output [cols rows]]
   (layout/box [cols rows]
     {:title (if agent
               (msg/t :workflow/agent-status-label
@@ -108,12 +72,53 @@
             :offset offset
             :fg :default})))}))
 
-(defn render-footer [[cols rows]]
+(defn ^{:stratum 0} render-footer [[cols rows]]
   (layout/text [cols rows]
     (msg/t :workflow/detail-footer)
     {:fg :default}))
 
-(defn render
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-phase-node [{:keys [phase status tokens cost-usd]}]
+  (let [suffix (status-suffix status)
+        metrics (str/join " " (keep identity
+                                     [(format-tokens tokens)
+                                      (format-cost cost-usd)]))]
+    {:label (str (name phase) suffix
+                 (when (seq metrics) (str "  " metrics)))
+     :depth 0
+     :expandable? false}))
+
+(defn ^{:stratum 1} render-title-bar [wf detail [cols rows]]
+  (let [metrics-parts (keep identity
+                             [(format-tokens (:tokens detail))
+                              (format-cost (:cost-usd detail))])
+        metrics-str (when (seq metrics-parts)
+                      (str " │ " (str/join " " metrics-parts)))]
+    (layout/text [cols rows]
+                 (str (msg/t :detail/title-prefix)
+                      (get wf :name (msg/t :workflow/detail-title-fallback))
+                      (when-let [phase (:phase wf)]
+                        (str " │ " (name phase)))
+                      metrics-str)
+                 {:fg palette/status-info :bold? true})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} render-phase-list [phases [cols rows]]
+  (layout/box [cols rows]
+    {:title (msg/t :evidence/phases) :border :single :fg :default
+     :content-fn
+     (fn [[ic ir]]
+       (if (empty? phases)
+         (layout/text [ic ir] (msg/t :workflow/waiting-for-phases))
+         (widget/tree [ic ir]
+           {:nodes (mapv format-phase-node phases)
+            :selected 0})))}))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} render
   "Render the workflow detail view.
    model: full app model
    [cols rows]: available screen area"

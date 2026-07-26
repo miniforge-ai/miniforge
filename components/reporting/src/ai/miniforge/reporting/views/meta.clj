@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.views.meta
   "Meta-loop status rendering.
 
@@ -24,9 +23,9 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Meta-loop status rendering
 
-(defn render-meta-loop
+;; Meta-loop status rendering
+(defn ^{:stratum 0} render-meta-loop
   "Render meta-loop dashboard.
 
    Args:

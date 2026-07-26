@@ -15,17 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.loader
   "Load rules and knowledge from .cursor/rules/ and project documentation.
 
    Converts .mdc rule files and markdown documentation into zettels
    and populates the knowledge store for agent access.
 
-   This component is organized into 3 layers:
-   - Layer 0: Pure path/file utilities
-   - Layer 1: File loading operations
-   - Layer 2: Orchestration (initialize function)"
+   - Layer 0: pure path/file utilities + directory-loading driver
+   - Layer 1: load-mdc-file / load-project-docs (over Layer 0)
+   - Layer 2: load-rules-from-directory / load-docs (over Layer 1)
+   - Layer 3: load-rules (over Layer 2)
+   - Layer 4: initialize-knowledge-store! (over Layer 3)
+
+   5 real strata — over the rule 210 budget of 3; a genuine namespace
+   split (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.knowledge.messages :as messages]
    [ai.miniforge.knowledge.store :as store]
@@ -34,9 +37,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure path and file utilities
 
-(defn find-mdc-files
+;; Pure path and file utilities
+(defn ^{:stratum 0} find-mdc-files
   "Recursively find all .mdc files in a directory.
    Returns sequence of java.io.File objects."
   [dir]
@@ -45,7 +48,7 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".mdc")))))
 
-(defn extract-tags-from-path
+(defn ^{:stratum 0} extract-tags-from-path
   "Extract tags from file path relative to rules root.
    Uses slug-only path segments — no numeric prefix required.
    Examples:
@@ -58,7 +61,7 @@
        (map keyword)
        vec))
 
-(defn generate-title-from-filename
+(defn ^{:stratum 0} generate-title-from-filename
   "Generate a human-readable title from a slug filename.
    Examples:
      'clojure.mdc'          -> 'Clojure'
@@ -69,10 +72,62 @@
       (str/replace #"-" " ")
       str/capitalize))
 
-;------------------------------------------------------------------------------ Layer 1
-;; File loading operations
+(defn ^{:stratum 0} load-markdown-file
+  "Load a markdown file and convert to zettel.
+   For files like agents.md, claude.md, etc."
+  [file zettel-type]
+  (try
+    (let [content (slurp file)
+          filename (.getName file)
+          uid (str/replace filename #"\.md$" "")
 
-(defn load-mdc-file
+          ;; Extract title from first # heading or use filename
+          title (if-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
+                  (second match)
+                  (-> filename
+                      (str/replace #"\.md$" "")
+                      (str/replace #"-" " ")
+                      str/capitalize))]
+
+      {:zettel/id (random-uuid)
+       :zettel/uid uid
+       :zettel/title title
+       :zettel/content content
+       :zettel/type zettel-type
+       :zettel/dewey "000"  ;; Foundational documentation
+       :zettel/tags [:documentation :project]
+       :zettel/links []
+       :zettel/source {:type :migration
+                      :origin filename
+                      :confidence 1.0}
+       :zettel/author "system"
+       :zettel/created (java.util.Date.)
+       :zettel/metadata {}})
+
+    (catch Exception e
+      (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
+      nil)))
+
+(defn ^{:stratum 0} load-files-from-directory
+  "Load files from directory using provided loader function.
+   Returns {:loaded int :failed int :items [items...]}."
+  [knowledge-store files loader-fn]
+  (reduce
+   (fn [acc file]
+     (if-let [item (loader-fn file)]
+       (do
+         (store/put-zettel knowledge-store item)
+         (-> acc
+             (update :loaded inc)
+             (update :items conj item)))
+       (update acc :failed inc)))
+   {:loaded 0 :failed 0 :items []}
+   files))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; File loading operations
+(defn ^{:stratum 1} load-mdc-file
   "Load a single .mdc file and convert to zettel data.
    Returns zettel map or nil if parsing fails."
   [file rules-root]
@@ -116,69 +171,7 @@
       (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
       nil)))
 
-(defn load-markdown-file
-  "Load a markdown file and convert to zettel.
-   For files like agents.md, claude.md, etc."
-  [file zettel-type]
-  (try
-    (let [content (slurp file)
-          filename (.getName file)
-          uid (str/replace filename #"\.md$" "")
-
-          ;; Extract title from first # heading or use filename
-          title (if-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
-                  (second match)
-                  (-> filename
-                      (str/replace #"\.md$" "")
-                      (str/replace #"-" " ")
-                      str/capitalize))]
-
-      {:zettel/id (random-uuid)
-       :zettel/uid uid
-       :zettel/title title
-       :zettel/content content
-       :zettel/type zettel-type
-       :zettel/dewey "000"  ;; Foundational documentation
-       :zettel/tags [:documentation :project]
-       :zettel/links []
-       :zettel/source {:type :migration
-                      :origin filename
-                      :confidence 1.0}
-       :zettel/author "system"
-       :zettel/created (java.util.Date.)
-       :zettel/metadata {}})
-
-    (catch Exception e
-      (println (messages/t :loader/error-loading {:file (.getName file) :error (.getMessage e)}))
-      nil)))
-
-(defn load-files-from-directory
-  "Load files from directory using provided loader function.
-   Returns {:loaded int :failed int :items [items...]}."
-  [knowledge-store files loader-fn]
-  (reduce
-   (fn [acc file]
-     (if-let [item (loader-fn file)]
-       (do
-         (store/put-zettel knowledge-store item)
-         (-> acc
-             (update :loaded inc)
-             (update :items conj item)))
-       (update acc :failed inc)))
-   {:loaded 0 :failed 0 :items []}
-   files))
-
-(defn load-rules-from-directory
-  [knowledge-store rules-dir]
-  (let [rules-root (io/file rules-dir)
-        mdc-files (find-mdc-files rules-root)
-        loader (fn [file] (load-mdc-file file (.getPath rules-root)))
-        result (load-files-from-directory knowledge-store mdc-files loader)]
-    (-> result
-        (dissoc :items)
-        (assoc :zettels (:items result)))))
-
-(defn load-project-docs
+(defn ^{:stratum 1} load-project-docs
   [knowledge-store project-root]
   (let [root (io/file project-root)
         doc-files ["agents.md" "claude.md" ".clauderc" "claude_instructions.md"]
@@ -190,23 +183,37 @@
         (dissoc :items))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Orchestration
 
-(defn load-rules
-  "Load rules and return result with stats.
-   Pure orchestration - delegates I/O to loader function."
+(defn ^{:stratum 2} load-rules-from-directory
   [knowledge-store rules-dir]
-  (let [result (load-rules-from-directory knowledge-store rules-dir)]
-    (select-keys result [:loaded :failed])))
+  (let [rules-root (io/file rules-dir)
+        mdc-files (find-mdc-files rules-root)
+        loader (fn [file] (load-mdc-file file (.getPath rules-root)))
+        result (load-files-from-directory knowledge-store mdc-files loader)]
+    (-> result
+        (dissoc :items)
+        (assoc :zettels (:items result)))))
 
-(defn load-docs
+(defn ^{:stratum 2} load-docs
   "Load documentation and return result with stats and file list.
    Pure orchestration - delegates I/O to loader function."
   [knowledge-store project-root]
   (let [result (load-project-docs knowledge-store project-root)]
     result))
 
-(defn initialize-knowledge-store!
+;------------------------------------------------------------------------------ Layer 3
+
+;; Orchestration
+(defn ^{:stratum 3} load-rules
+  "Load rules and return result with stats.
+   Pure orchestration - delegates I/O to loader function."
+  [knowledge-store rules-dir]
+  (let [result (load-rules-from-directory knowledge-store rules-dir)]
+    (select-keys result [:loaded :failed])))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} initialize-knowledge-store!
   "Initialize a knowledge store with rules and documentation.
 
    This is the main entry point for loading knowledge at system startup.

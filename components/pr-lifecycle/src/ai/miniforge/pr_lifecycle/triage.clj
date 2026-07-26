@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.triage
   "Comment triage for PR reviews.
 
@@ -25,9 +24,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Comment classification
 
-(def actionable-indicators
+;; Comment classification
+(def ^{:stratum 0} actionable-indicators
   "Keywords/phrases that indicate an actionable comment."
   #{;; Direct requests
     "please" "should" "must" "need to" "needs to" "required"
@@ -41,7 +40,7 @@
     ;; Design/architecture
     "violation" "constraint" "requirement" "spec"})
 
-(def non-actionable-indicators
+(def ^{:stratum 0} non-actionable-indicators
   "Keywords/phrases that indicate a non-actionable comment."
   #{;; Approval/praise
     "lgtm" "looks good" "great" "nice" "well done" "excellent"
@@ -53,7 +52,7 @@
     ;; Information only
     "fyi" "for your information" "just noting" "reminder"})
 
-(defn score-indicators
+(defn ^{:stratum 0} score-indicators
   "Score text against a set of indicators.
    Returns count of matching indicators."
   [text indicators]
@@ -62,10 +61,8 @@
          (filter #(str/includes? lower-text %))
          count)))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Comment structure
-
-(defn parse-comment
+(defn ^{:stratum 0} parse-comment
   "Parse a raw comment into structured form.
 
    Input can be:
@@ -84,10 +81,109 @@
      :comment/path (:path raw)
      :comment/line (:line raw)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Triage logic
+;; CI failure triage
+(defn ^{:stratum 0} parse-ci-failure
+  "Parse CI failure logs into structured actionable items.
 
-(defn classify-comment
+   Arguments:
+   - logs: CI log output (string or lines)
+
+   Returns {:test-failures [...] :lint-errors [...] :build-errors [...]
+            :actionable-summary string}"
+  [logs]
+  (let [lines (if (string? logs)
+                (str/split-lines logs)
+                logs)
+        _lower-lines (map str/lower-case lines)
+
+        ;; Extract test failures
+        test-failures (->> lines
+                           (filter #(or (str/includes? % "FAIL")
+                                        (str/includes? % "ERROR")
+                                        (str/includes? % "AssertionError")
+                                        (re-find #"expected:.*actual:" %)))
+                           (take 20)
+                           vec)
+
+        ;; Extract lint errors
+        lint-errors (->> lines
+                         (filter #(or (str/includes? % "warning:")
+                                      (str/includes? % "error:")
+                                      (re-find #":\d+:\d+:" %)))
+                         (take 20)
+                         vec)
+
+        ;; Extract build errors
+        build-errors (->> lines
+                          (filter #(or (str/includes? % "BUILD FAILED")
+                                       (str/includes? % "compilation failed")
+                                       (str/includes? % "Could not resolve")))
+                          vec)]
+    {:test-failures test-failures
+     :lint-errors lint-errors
+     :build-errors build-errors
+     :actionable-summary (str/join "\n"
+                                   (concat
+                                    (when (seq test-failures)
+                                      [(str (count test-failures) " test failure(s)")])
+                                    (when (seq lint-errors)
+                                      [(str (count lint-errors) " lint error(s)")])
+                                    (when (seq build-errors)
+                                      [(str (count build-errors) " build error(s)")])))}))
+
+(defn ^{:stratum 0} extract-failing-files
+  "Extract file paths mentioned in CI failures.
+
+   Returns set of file paths."
+  [ci-failure]
+  (let [all-lines (concat (:test-failures ci-failure)
+                          (:lint-errors ci-failure)
+                          (:build-errors ci-failure))
+        ;; Common file path patterns
+        path-patterns [#"([a-zA-Z0-9_/\-\.]+\.(clj|cljs|cljc|edn|java|py|js|ts))"
+                       #"at\s+([a-zA-Z0-9_/\-\.]+):\d+"
+                       #"in\s+file\s+([a-zA-Z0-9_/\-\.]+)"]]
+    (->> all-lines
+         (mapcat (fn [line]
+                   (mapcat #(re-seq % line) path-patterns)))
+         (map second)
+         (filter some?)
+         (remove #(str/starts-with? % "java."))
+         set)))
+
+;; Review request triage
+(defn ^{:stratum 0} extract-requested-changes
+  "Extract specific requested changes from review comments.
+
+   Returns sequence of {:file path :change description :original comment}"
+  [actionable-comments]
+  (->> actionable-comments
+       (map (fn [{:keys [comment]}]
+              (let [body (:comment/body comment)
+                    path (:comment/path comment)
+                    line (:comment/line comment)]
+                {:file path
+                 :line line
+                 :change body
+                 :original comment})))
+       (filter :file) ; Only comments with file context
+       vec))
+
+(defn ^{:stratum 0} group-changes-by-file
+  "Group requested changes by file for efficient processing."
+  [requested-changes]
+  (->> requested-changes
+       (group-by :file)
+       (map (fn [[file changes]]
+              {:file file
+               :changes (vec changes)
+               :lines (set (keep :line changes))}))
+       vec))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Triage logic
+(defn ^{:stratum 1} classify-comment
   "Classify a comment as actionable or non-actionable.
 
    Arguments:
@@ -140,7 +236,9 @@
                   :non-actionable non-actionable-matches}
      :comment parsed}))
 
-(defn triage-comments
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} triage-comments
   "Triage a collection of comments.
 
    Arguments:
@@ -168,109 +266,6 @@
              :actionable-count (count actionable)
              :non-actionable-count (count non-actionable)
              :policy policy}}))
-
-;------------------------------------------------------------------------------ Layer 2
-;; CI failure triage
-
-(defn parse-ci-failure
-  "Parse CI failure logs into structured actionable items.
-
-   Arguments:
-   - logs: CI log output (string or lines)
-
-   Returns {:test-failures [...] :lint-errors [...] :build-errors [...]
-            :actionable-summary string}"
-  [logs]
-  (let [lines (if (string? logs)
-                (str/split-lines logs)
-                logs)
-        _lower-lines (map str/lower-case lines)
-
-        ;; Extract test failures
-        test-failures (->> lines
-                           (filter #(or (str/includes? % "FAIL")
-                                        (str/includes? % "ERROR")
-                                        (str/includes? % "AssertionError")
-                                        (re-find #"expected:.*actual:" %)))
-                           (take 20)
-                           vec)
-
-        ;; Extract lint errors
-        lint-errors (->> lines
-                         (filter #(or (str/includes? % "warning:")
-                                      (str/includes? % "error:")
-                                      (re-find #":\d+:\d+:" %)))
-                         (take 20)
-                         vec)
-
-        ;; Extract build errors
-        build-errors (->> lines
-                          (filter #(or (str/includes? % "BUILD FAILED")
-                                       (str/includes? % "compilation failed")
-                                       (str/includes? % "Could not resolve")))
-                          vec)]
-    {:test-failures test-failures
-     :lint-errors lint-errors
-     :build-errors build-errors
-     :actionable-summary (str/join "\n"
-                                   (concat
-                                    (when (seq test-failures)
-                                      [(str (count test-failures) " test failure(s)")])
-                                    (when (seq lint-errors)
-                                      [(str (count lint-errors) " lint error(s)")])
-                                    (when (seq build-errors)
-                                      [(str (count build-errors) " build error(s)")])))}))
-
-(defn extract-failing-files
-  "Extract file paths mentioned in CI failures.
-
-   Returns set of file paths."
-  [ci-failure]
-  (let [all-lines (concat (:test-failures ci-failure)
-                          (:lint-errors ci-failure)
-                          (:build-errors ci-failure))
-        ;; Common file path patterns
-        path-patterns [#"([a-zA-Z0-9_/\-\.]+\.(clj|cljs|cljc|edn|java|py|js|ts))"
-                       #"at\s+([a-zA-Z0-9_/\-\.]+):\d+"
-                       #"in\s+file\s+([a-zA-Z0-9_/\-\.]+)"]]
-    (->> all-lines
-         (mapcat (fn [line]
-                   (mapcat #(re-seq % line) path-patterns)))
-         (map second)
-         (filter some?)
-         (remove #(str/starts-with? % "java."))
-         set)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Review request triage
-
-(defn extract-requested-changes
-  "Extract specific requested changes from review comments.
-
-   Returns sequence of {:file path :change description :original comment}"
-  [actionable-comments]
-  (->> actionable-comments
-       (map (fn [{:keys [comment]}]
-              (let [body (:comment/body comment)
-                    path (:comment/path comment)
-                    line (:comment/line comment)]
-                {:file path
-                 :line line
-                 :change body
-                 :original comment})))
-       (filter :file) ; Only comments with file context
-       vec))
-
-(defn group-changes-by-file
-  "Group requested changes by file for efficient processing."
-  [requested-changes]
-  (->> requested-changes
-       (group-by :file)
-       (map (fn [[file changes]]
-              {:file file
-               :changes (vec changes)
-               :lines (set (keep :line changes))}))
-       vec))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

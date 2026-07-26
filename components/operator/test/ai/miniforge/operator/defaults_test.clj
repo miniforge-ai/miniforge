@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.defaults-test
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.string :as str]
             [ai.miniforge.operator.defaults :as sut]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Pattern detector defaults
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest pattern-detector-system-prompt-shape-test
+;; Pattern detector defaults
+(deftest ^{:stratum 0} pattern-detector-system-prompt-shape-test
   (testing "Pattern detector system prompt mentions all five documented pattern types"
     (let [p sut/pattern-detector-system-prompt]
       (is (string? p))
@@ -36,16 +35,14 @@
       ;; The prompt instructs the model to return JSON only.
       (is (str/includes? p "JSON")))))
 
-(deftest pattern-detector-defaults-shape-test
+(deftest ^{:stratum 0} pattern-detector-defaults-shape-test
   (testing "Pattern detector defaults bundles the prompt and a max-tokens budget"
     (let [d sut/pattern-detector-defaults]
       (is (= sut/pattern-detector-system-prompt (:system-prompt d)))
       (is (pos-int? (:max-tokens d))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Improvement generator defaults
-
-(deftest improvement-generator-system-prompt-shape-test
+(deftest ^{:stratum 0} improvement-generator-system-prompt-shape-test
   (testing "Improvement generator prompt mentions every documented improvement type"
     (let [p sut/improvement-generator-system-prompt
           types ["prompt-change" "gate-adjustment" "policy-update"
@@ -56,13 +53,13 @@
             (str "Prompt should mention improvement type: " t)))
       (is (str/includes? p "JSON")))))
 
-(deftest improvement-types-set-test
+(deftest ^{:stratum 0} improvement-types-set-test
   (testing "improvement-types is a set containing the documented six types"
     (is (= #{:prompt-change :gate-adjustment :policy-update
              :rule-addition :budget-adjustment :workflow-modification}
            sut/improvement-types))))
 
-(deftest improvement-generator-defaults-shape-test
+(deftest ^{:stratum 0} improvement-generator-defaults-shape-test
   (testing "Improvement generator defaults bundles prompt, type set, and token budget"
     (let [d sut/improvement-generator-defaults]
       (is (= sut/improvement-generator-system-prompt (:system-prompt d)))

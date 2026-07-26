@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.interface-test
   "Tests for the policy-pack component public interface."
   (:require
@@ -23,9 +22,9 @@
    [ai.miniforge.policy-pack.interface :as pp]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema validation tests
 
-(deftest valid-rule-test
+;; Schema validation tests
+(deftest ^{:stratum 0} valid-rule-test
   (testing "Valid rule passes validation"
     (let [rule {:rule/id :test-rule
                 :rule/title "Test Rule"
@@ -43,7 +42,7 @@
     (is (not (pp/valid-rule? {:rule/id "not-a-keyword"})))
     (is (not (pp/valid-rule? {:rule/id :test :rule/severity :invalid})))))
 
-(deftest validate-rule-test
+(deftest ^{:stratum 0} validate-rule-test
   (testing "Returns valid result for valid rule"
     (let [rule {:rule/id :test
                 :rule/title "Test"
@@ -62,7 +61,7 @@
       (is (not (:valid? result)))
       (is (some? (:errors result))))))
 
-(deftest valid-pack-test
+(deftest ^{:stratum 0} valid-pack-test
   (testing "Valid pack passes validation"
     (let [now (java.time.Instant/now)
           pack {:pack/id "test-pack"
@@ -79,10 +78,8 @@
   (testing "Invalid pack fails validation"
     (is (not (pp/valid-pack? {:pack/id 123})))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Registry tests
-
-(deftest registry-crud-test
+(deftest ^{:stratum 0} registry-crud-test
   (testing "Register and retrieve pack"
     (let [reg (pp/create-registry)
           now (java.time.Instant/now)
@@ -124,7 +121,7 @@
       (is (true? (pp/delete-pack reg "to-delete" "2026.01.01")))
       (is (nil? (pp/get-pack reg "to-delete"))))))
 
-(deftest registry-list-test
+(deftest ^{:stratum 0} registry-list-test
   (testing "List packs with criteria"
     (let [reg (pp/create-registry)
           now (java.time.Instant/now)
@@ -163,10 +160,8 @@
         (is (= 1 (count beta-packs)))
         (is (= "pack-b" (:pack/id (first beta-packs))))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pack and rule builders test
-
-(deftest create-pack-test
+(deftest ^{:stratum 0} create-pack-test
   (testing "Creates pack with required fields"
     (let [pack (pp/create-pack "my-pack" "My Pack" "Description" "me")]
       (is (= "my-pack" (:pack/id pack)))
@@ -192,7 +187,7 @@
       (is (= "Apache-2.0" (:pack/license pack)))
       (is (= 1 (count (:pack/rules pack)))))))
 
-(deftest create-rule-test
+(deftest ^{:stratum 0} create-rule-test
   (testing "Creates rule with builder"
     (let [rule (pp/create-rule
                 :no-todos
@@ -222,7 +217,7 @@
       (is (= "Don't do that" (:rule/agent-behavior rule)))
       (is (= "Fix it" (get-in rule [:rule/enforcement :remediation]))))))
 
-(deftest detection-builders-test
+(deftest ^{:stratum 0} detection-builders-test
   (testing "Content scan detection"
     (let [det (pp/content-scan-detection "pattern")]
       (is (= :content-scan (:type det)))
@@ -241,7 +236,7 @@
       (is (= :plan-output (:type det)))
       (is (= ["pattern1" "pattern2"] (:patterns det))))))
 
-(deftest enforcement-builders-test
+(deftest ^{:stratum 0} enforcement-builders-test
   (testing "Warn enforcement"
     (let [enf (pp/warn-enforcement "Warning message")]
       (is (= :warn (:action enf)))
@@ -259,10 +254,8 @@
       (is (= :require-approval (:action enf)))
       (is (= [:human :security] (:approvers enf))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Detection and checking tests
-
-(deftest check-artifact-test
+(deftest ^{:stratum 0} check-artifact-test
   (testing "Detects content violations"
     (let [pack (pp/create-pack "test" "Test" "Test pack" "author"
                                :rules
@@ -306,7 +299,7 @@
       (is (:passed? result))
       (is (empty? (:violations result))))))
 
-(deftest check-multiple-packs-test
+(deftest ^{:stratum 0} check-multiple-packs-test
   (testing "Rules from multiple packs are checked"
     (let [pack1 (pp/create-pack "pack1" "Pack 1" "First" "author"
                                 :rules
@@ -325,10 +318,8 @@
                                     {})]
       (is (= 2 (count (:violations result)))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Rule resolution tests
-
-(deftest resolve-rules-test
+(deftest ^{:stratum 0} resolve-rules-test
   (testing "Later rules override earlier ones"
     (let [rule1 {:rule/id :test
                  :rule/severity :low
@@ -349,10 +340,8 @@
           resolved (pp/resolve-rules [rule1 rule2])]
       (is (= 2 (count resolved))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Utility function tests
-
-(deftest glob-matches-test
+(deftest ^{:stratum 0} glob-matches-test
   (testing "Simple glob matching"
     (is (pp/glob-matches? "*.tf" "main.tf"))
     (is (not (pp/glob-matches? "*.tf" "main.py")))
@@ -363,7 +352,7 @@
     (is (pp/glob-matches? "**/*.tf" "modules/vpc/main.tf"))
     (is (not (pp/glob-matches? "**/*.tf" "main.py")))))
 
-(deftest compare-versions-test
+(deftest ^{:stratum 0} compare-versions-test
   (testing "Version comparison"
     (is (pos? (pp/compare-versions "2026.01.22" "2026.01.15")))
     (is (neg? (pp/compare-versions "2025.12.01" "2026.01.01")))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-github.anomaly.github-anomaly-test
   "Coverage for `impl/do-connect` config anomalies and
    `impl/require-resource!` boundary escalation via `response/throw-anomaly!`."
@@ -26,13 +25,15 @@
             [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest do-connect-missing-owner-and-org-returns-anomaly
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} do-connect-missing-owner-and-org-returns-anomaly
   (testing "config without :github/owner or :github/org returns :anomalies/incorrect"
     (let [result (impl/do-connect {} nil)]
       (is (response/anomaly-map? result))
       (is (= :anomalies/incorrect (:anomaly/category result))))))
 
-(deftest require-resource-unknown-throws-anomaly
+(deftest ^{:stratum 0} require-resource-unknown-throws-anomaly
   (testing "looking up an unknown resource raises :anomalies/not-found"
     (try
       (@#'impl/require-resource! "totally-bogus-resource")
@@ -41,14 +42,14 @@
         (is (= :anomalies/not-found (:anomaly/category (ex-data e))))
         (is (= "totally-bogus-resource" (:resource (ex-data e))))))))
 
-(deftest do-connect-invalid-schema-returns-anomaly
+(deftest ^{:stratum 0} do-connect-invalid-schema-returns-anomaly
   (testing "malformed config returns :anomalies/incorrect"
     (let [result (impl/do-connect {:github/owner 42} nil)]
       (is (response/anomaly-map? result))
       (is (= :anomalies/incorrect (:anomaly/category result)))
       (is (some? (:errors result))))))
 
-(deftest load-resources-missing-edn-throws-anomaly
+(deftest ^{:stratum 0} load-resources-missing-edn-throws-anomaly
   (testing "missing resource EDN raises :anomalies/not-found"
     (with-redefs [io/resource (constantly nil)]
       (try

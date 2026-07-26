@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.repair
   "Repair strategy protocol and built-in implementations.
 
@@ -23,30 +22,41 @@
    - ai.miniforge.loop.interface.protocols.repair-strategy (RepairStrategy protocol)
 
    This namespace contains the built-in repair strategy implementations.
-   Layer 0: Pure functions for repair results
-   Layer 1: Built-in strategies (llm-fix, retry, escalate)
-   Layer 2: Repair orchestration"
+   Layer 0: protocol re-exports, result predicates/constructors
+     (succeeded?, repair-success, repair-failure, the make-*-result
+     helpers, create-repair-attempt), and the EscalateStrategy
+     defrecord — no same-file dependents among them
+   Layer 1: the LLMFixStrategy/RetryStrategy defrecords (call the Layer
+     0 result constructors), escalate-strategy (constructs an
+     EscalateStrategy), and the orchestration helpers (select-strategy,
+     try-repair-with-strategy, process-repair-result)
+   Layer 2: llm-fix-strategy, retry-strategy (construct the matching
+     Layer 1 defrecord), attempt-repair (calls the Layer 1 orchestration
+     helpers)
+   Layer 3: default-strategies (calls llm-fix-strategy, retry-strategy,
+     escalate-strategy)"
   (:require
    [ai.miniforge.loop.interface.protocols.repair-strategy :as p]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.loop.messages :as messages]))
 
-;; Re-export protocol for backward compatibility
-(def RepairStrategy p/RepairStrategy)
-(def can-repair? p/can-repair?)
-(def repair p/repair)
-
 ;------------------------------------------------------------------------------ Layer 0
-;; Repair result predicates
 
-(defn succeeded?
+;; Re-export protocol for backward compatibility
+(def ^{:stratum 0} RepairStrategy p/RepairStrategy)
+
+(def ^{:stratum 0} can-repair? p/can-repair?)
+
+(def ^{:stratum 0} repair p/repair)
+
+;; Repair result predicates
+(defn ^{:stratum 0} succeeded?
   "Check if a repair result indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; Repair result constructors (pure functions)
-
-(defn repair-success
+(defn ^{:stratum 0} repair-success
   "Create a successful repair result."
   [strategy artifact & {:keys [tokens-used duration-ms message]}]
   (cond-> {:success? true
@@ -56,7 +66,7 @@
     duration-ms (assoc :duration-ms duration-ms)
     message (assoc :message message)))
 
-(defn repair-failure
+(defn ^{:stratum 0} repair-failure
   "Create a failed repair result."
   [strategy errors & {:keys [tokens-used duration-ms message]}]
   (cond-> {:success? false
@@ -66,10 +76,81 @@
     duration-ms (assoc :duration-ms duration-ms)
     message (assoc :message message)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Built-in repair strategies
+(defrecord ^{:stratum 0} EscalateStrategy [_config]
+  p/RepairStrategy
+  (can-repair? [_this _errors _context]
+    ;; Escalate can always be used as a last resort
+    true)
 
-(defrecord LLMFixStrategy [config]
+  (repair [_this artifact errors context]
+    (let [start (System/currentTimeMillis)
+          logger (:logger context)]
+      (when logger
+        (log/warn logger :loop :inner/escalated
+                  {:message (messages/t :repair/escalating)
+                   :data {:error-count (count errors)
+                          :error-codes (mapv :code errors)}}))
+      ;; Escalation signals that the inner loop cannot handle this
+      {:success? false
+       :escalate? true
+       :artifact artifact
+       :errors errors
+       :strategy :escalate
+       :duration-ms (- (System/currentTimeMillis) start)
+       :message (messages/t :repair/escalating-resolution)})))
+
+(defn ^{:stratum 0} make-max-attempts-result
+  "Create a result map for max attempts exceeded."
+  [attempt results errors]
+  {:success? false
+   :attempts attempt
+   :results results
+   :errors errors
+   :message (messages/t :repair/max-attempts-exceeded)})
+
+(defn ^{:stratum 0} make-exhausted-strategies-result
+  "Create a result map for exhausted strategies."
+  [attempt results errors]
+  {:success? false
+   :attempts attempt
+   :results results
+   :errors errors
+   :message (messages/t :repair/strategies-exhausted)})
+
+(defn ^{:stratum 0} make-success-result
+  "Create a result map for successful repair."
+  [result attempt results]
+  {:success? true
+   :artifact (:artifact result)
+   :attempts (inc attempt)
+   :results (conj results result)
+   :strategy (:strategy result)})
+
+(defn ^{:stratum 0} make-escalation-result
+  "Create a result map for escalation."
+  [result attempt results errors]
+  {:success? false
+   :escalate? true
+   :attempts (inc attempt)
+   :results (conj results result)
+   :errors errors
+   :message (messages/t :repair/escalated)})
+
+(defn ^{:stratum 0} create-repair-attempt
+  "Create a repair attempt record for loop history."
+  [strategy iteration errors result]
+  {:repair/id (random-uuid)
+   :repair/strategy strategy
+   :repair/iteration iteration
+   :repair/errors errors
+   :repair/success? (:success? result false)
+   :repair/duration-ms (:duration-ms result)
+   :repair/tokens-used (:tokens-used result)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Built-in repair strategies
+(defrecord ^{:stratum 1} LLMFixStrategy [config]
   p/RepairStrategy
   (can-repair? [_this errors _context]
     ;; LLM can attempt to fix most errors except hardware/infrastructure issues
@@ -113,15 +194,7 @@
                           :message (messages/t :repair/no-repair-fn)}]
                         :duration-ms (- (System/currentTimeMillis) start))))))
 
-(defn llm-fix-strategy
-  "Create an LLM-based repair strategy.
-   Options:
-   - :max-tokens - Maximum tokens for repair attempt (default 4000)"
-  ([] (llm-fix-strategy {}))
-  ([config] (->LLMFixStrategy config)))
-
-
-(defrecord RetryStrategy [config]
+(defrecord ^{:stratum 1} RetryStrategy [config]
   p/RepairStrategy
   (can-repair? [_this errors _context]
     ;; Retry is suitable for transient errors
@@ -144,97 +217,27 @@
                       :duration-ms (- (System/currentTimeMillis) start)
                       :message (messages/t :repair/retry-completed)))))
 
-(defn retry-strategy
-  "Create a simple retry strategy.
-   Options:
-   - :delay-ms - Delay before retry in milliseconds (default 1000)"
-  ([] (retry-strategy {}))
-  ([config] (->RetryStrategy config)))
-
-
-(defrecord EscalateStrategy [_config]
-  p/RepairStrategy
-  (can-repair? [_this _errors _context]
-    ;; Escalate can always be used as a last resort
-    true)
-
-  (repair [_this artifact errors context]
-    (let [start (System/currentTimeMillis)
-          logger (:logger context)]
-      (when logger
-        (log/warn logger :loop :inner/escalated
-                  {:message (messages/t :repair/escalating)
-                   :data {:error-count (count errors)
-                          :error-codes (mapv :code errors)}}))
-      ;; Escalation signals that the inner loop cannot handle this
-      {:success? false
-       :escalate? true
-       :artifact artifact
-       :errors errors
-       :strategy :escalate
-       :duration-ms (- (System/currentTimeMillis) start)
-       :message (messages/t :repair/escalating-resolution)})))
-
-(defn escalate-strategy
+(defn ^{:stratum 1} escalate-strategy
   "Create an escalation strategy.
    This strategy always signals escalation to the outer loop."
   ([] (escalate-strategy {}))
   ([config] (->EscalateStrategy config)))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Repair orchestration
-
-(defn select-strategy
+(defn ^{:stratum 1} select-strategy
   "Select the first applicable repair strategy for the given errors.
    Returns nil if no strategy can handle the errors."
   [strategies errors context]
   (first (filter #(can-repair? % errors context) strategies)))
 
-(defn make-max-attempts-result
-  "Create a result map for max attempts exceeded."
-  [attempt results errors]
-  {:success? false
-   :attempts attempt
-   :results results
-   :errors errors
-   :message (messages/t :repair/max-attempts-exceeded)})
-
-(defn make-exhausted-strategies-result
-  "Create a result map for exhausted strategies."
-  [attempt results errors]
-  {:success? false
-   :attempts attempt
-   :results results
-   :errors errors
-   :message (messages/t :repair/strategies-exhausted)})
-
-(defn make-success-result
-  "Create a result map for successful repair."
-  [result attempt results]
-  {:success? true
-   :artifact (:artifact result)
-   :attempts (inc attempt)
-   :results (conj results result)
-   :strategy (:strategy result)})
-
-(defn make-escalation-result
-  "Create a result map for escalation."
-  [result attempt results errors]
-  {:success? false
-   :escalate? true
-   :attempts (inc attempt)
-   :results (conj results result)
-   :errors errors
-   :message (messages/t :repair/escalated)})
-
-(defn try-repair-with-strategy
+(defn ^{:stratum 1} try-repair-with-strategy
   "Try to repair using a single strategy.
    Returns result map or nil if strategy can't handle errors."
   [strategy artifact errors context]
   (when (can-repair? strategy errors context)
     (repair strategy artifact errors context)))
 
-(defn process-repair-result
+(defn ^{:stratum 1} process-repair-result
   "Process the result of a repair attempt.
    Returns a map with :action (:success, :escalate, or :continue) and :result."
   [result attempt results errors]
@@ -251,7 +254,23 @@
     {:action :continue
      :result result}))
 
-(defn attempt-repair
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} llm-fix-strategy
+  "Create an LLM-based repair strategy.
+   Options:
+   - :max-tokens - Maximum tokens for repair attempt (default 4000)"
+  ([] (llm-fix-strategy {}))
+  ([config] (->LLMFixStrategy config)))
+
+(defn ^{:stratum 2} retry-strategy
+  "Create a simple retry strategy.
+   Options:
+   - :delay-ms - Delay before retry in milliseconds (default 1000)"
+  ([] (retry-strategy {}))
+  ([config] (->RetryStrategy config)))
+
+(defn ^{:stratum 2} attempt-repair
   "Attempt to repair an artifact using available strategies.
    Tries strategies in order until one succeeds or all fail.
 
@@ -296,24 +315,15 @@
                    attempt
                    results)))))))
 
-(defn default-strategies
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} default-strategies
   "Create a default ordered list of repair strategies.
    Order: LLM fix -> Retry -> Escalate"
   []
   [(llm-fix-strategy)
    (retry-strategy)
    (escalate-strategy)])
-
-(defn create-repair-attempt
-  "Create a repair attempt record for loop history."
-  [strategy iteration errors result]
-  {:repair/id (random-uuid)
-   :repair/strategy strategy
-   :repair/iteration iteration
-   :repair/errors errors
-   :repair/success? (:success? result false)
-   :repair/duration-ms (:duration-ms result)
-   :repair/tokens-used (:tokens-used result)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

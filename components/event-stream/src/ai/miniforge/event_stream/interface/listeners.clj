@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.listeners
   "Listener management API for the event stream."
   (:require
    [ai.miniforge.event-stream.listeners :as listeners]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Listener management
 
-(def register-listener!
+;; Listener management
+(def ^{:stratum 0} register-listener!
   "Register a listener on the stream with a capability level (:observe,
    :advise, or :control), wrapping its callback with capability-based
    and user filters and emitting :listener/attached. Returns the new
@@ -34,18 +33,18 @@
    :listener/callback, :listener/options."
   listeners/register-listener!)
 
-(def deregister-listener!
+(def ^{:stratum 0} deregister-listener!
   "Unsubscribe a listener by id, drop its metadata, and emit
    :listener/detached. Returns true when the listener existed, or nil
    when no listener matched the id."
   listeners/deregister-listener!)
 
-(def list-listeners
+(def ^{:stratum 0} list-listeners
   "Return a sequence of registered listener metadata maps for the
    stream (empty when none registered)."
   listeners/list-listeners)
 
-(def submit-annotation!
+(def ^{:stratum 0} submit-annotation!
   "Submit an advisory annotation from a listener; requires :advise or
    :control capability. Emits and returns the :annotation/created event
    map. Throws an :anomalies/not-found anomaly when the listener is

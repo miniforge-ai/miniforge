@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.anomaly.fetch-actionable-comments-result-test
   "Coverage for `responder/fetch-actionable-comments-result`
    (anomaly-returning).
@@ -29,9 +28,10 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [ai.miniforge.pr-lifecycle.responder :as responder]))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest fetch-result-returns-comments-and-groups-on-success
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 0} fetch-result-returns-comments-and-groups-on-success
   (testing "successful poller fetch returns {:comments :groups}"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _]
@@ -45,7 +45,7 @@
         (is (vector? (:groups result)))
         (is (= 1 (count (:comments result))))))))
 
-(deftest fetch-result-filters-bot-comments
+(deftest ^{:stratum 0} fetch-result-filters-bot-comments
   (testing "bot-authored comments are filtered out"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _]
@@ -62,8 +62,7 @@
         (is (= "alice" (:comment/author (first (:comments result)))))))))
 
 ;------------------------------------------------------------------------------ Failure path
-
-(deftest fetch-result-returns-anomaly-on-poller-err
+(deftest ^{:stratum 0} fetch-result-returns-anomaly-on-poller-err
   (testing "poller DAG err yields :fault anomaly"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/err :network "down"))]
@@ -73,7 +72,7 @@
         (is (= 42 (:pr-number (:anomaly/data result))))
         (is (= "down" (:error (:anomaly/data result))))))))
 
-(deftest fetch-result-anomaly-message-stable
+(deftest ^{:stratum 0} fetch-result-anomaly-message-stable
   (testing ":anomaly/message is the canonical fetch-failure string"
     (with-redefs [poller/fetch-pr-comments
                   (fn [_ _] (dag/err :downstream "boom"))]

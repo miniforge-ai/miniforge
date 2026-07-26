@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.interface
   "Public API for the repo-dag component.
    Provides DAG CRUD, topological sorting, and dependency graph queries."
@@ -24,75 +23,84 @@
    [ai.miniforge.repo-dag.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def RepoNode
+;; Schema re-exports
+(def ^{:stratum 0} RepoNode
   "Malli `[:map ...]` schema for a repository node: its URL, name, type,
    layer, default branch, and optional org and watch-config."
   schema/RepoNode)
-(def RepoEdge
+
+(def ^{:stratum 0} RepoEdge
   "Malli `[:map ...]` schema for a directed dependency edge between two repos
    (`:edge/from` -> `:edge/to`) carrying a constraint, merge-ordering, and
    optional validation config."
   schema/RepoEdge)
-(def RepoDag
+
+(def ^{:stratum 0} RepoDag
   "Malli `[:map ...]` schema for a complete repository dependency graph:
    id, name, optional description, vectors of repos and edges, and optional
    computed topo-order and layers."
   schema/RepoDag)
-(def WatchConfig
+
+(def ^{:stratum 0} WatchConfig
   "Malli `[:map ...]` schema for change-watch configuration: optional
    `:labels-include`/`:labels-exclude` and `:paths-include`/`:paths-exclude`
    vectors of strings."
   schema/WatchConfig)
-(def EdgeValidation
+
+(def ^{:stratum 0} EdgeValidation
   "Malli `[:map ...]` schema for per-edge validation gates: require-ci-pass?,
    require-plan-clean?, and an optional custom-gate keyword."
   schema/EdgeValidation)
 
 ;; Enum value sets for programmatic access
-(def repo-types
+(def ^{:stratum 0} repo-types
   "Vector of the repository type keywords valid in the DAG
    (e.g. :terraform-module, :kubernetes, :library)."
   schema/repo-types)
-(def repo-layers
+
+(def ^{:stratum 0} repo-layers
   "Vector of the logical layer keywords for repositories
    (:foundations :infrastructure :platform :application :adapters)."
   schema/repo-layers)
-(def edge-constraints
+
+(def ^{:stratum 0} edge-constraints
   "Vector of the dependency-edge constraint keywords
    (e.g. :module-before-live, :schema-before-impl)."
   schema/edge-constraints)
-(def merge-orderings
+
+(def ^{:stratum 0} merge-orderings
   "Vector of the merge-ordering strategy keywords
    (:sequential :parallel-ok :same-pr-train)."
   schema/merge-orderings)
-(def type->layer
+
+(def ^{:stratum 0} type->layer
   "Map of repository type keyword to its default layer keyword."
   schema/type->layer)
 
 ;; Validation helpers
-(def valid-repo-node?
+(def ^{:stratum 0} valid-repo-node?
   "Predicate: returns true if the value conforms to the RepoNode schema,
    false otherwise."
   schema/valid-repo-node?)
-(def valid-repo-edge?
+
+(def ^{:stratum 0} valid-repo-edge?
   "Predicate: returns true if the value conforms to the RepoEdge schema,
    false otherwise."
   schema/valid-repo-edge?)
-(def valid-repo-dag?
+
+(def ^{:stratum 0} valid-repo-dag?
   "Predicate: returns true if the value conforms to the RepoDag schema,
    false otherwise."
   schema/valid-repo-dag?)
-(def infer-layer
+
+(def ^{:stratum 0} infer-layer
   "Given a repository type keyword, returns its default layer keyword,
    falling back to :application for unknown types."
   schema/infer-layer)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Manager lifecycle
-
-(defn create-manager
+(defn ^{:stratum 0} create-manager
   "Create a new in-memory DAG manager.
 
    Returns a manager instance that can be used with all other functions.
@@ -102,7 +110,7 @@
   []
   (core/create-manager))
 
-(defn reset-manager!
+(defn ^{:stratum 0} reset-manager!
   "Reset the manager's store to empty. Useful for testing.
 
    Arguments:
@@ -110,7 +118,7 @@
   [manager]
   (core/reset-manager! manager))
 
-(defn get-all-dags
+(defn ^{:stratum 0} get-all-dags
   "Get all DAGs from the manager's store.
 
    Arguments:
@@ -120,10 +128,8 @@
   [manager]
   (core/get-all-dags manager))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; DAG CRUD operations
-
-(defn create-dag
+(defn ^{:stratum 0} create-dag
   "Create a new empty DAG.
 
    Arguments:
@@ -138,7 +144,7 @@
   ([manager dag-name] (core/create-dag manager dag-name nil))
   ([manager dag-name description] (core/create-dag manager dag-name description)))
 
-(defn get-dag
+(defn ^{:stratum 0} get-dag
   "Retrieve a DAG by ID.
 
    Arguments:
@@ -149,7 +155,7 @@
   [manager dag-id]
   (core/get-dag manager dag-id))
 
-(defn add-repo
+(defn ^{:stratum 0} add-repo
   "Add a repository node to the DAG.
 
    Arguments:
@@ -168,7 +174,7 @@
   [manager dag-id repo-config]
   (core/add-repo manager dag-id repo-config))
 
-(defn add-repo-anomaly
+(defn ^{:stratum 0} add-repo-anomaly
   "Anomaly-returning variant of [[add-repo]].
 
    Returns the updated DAG on success, or an anomaly map on failure:
@@ -182,7 +188,7 @@
   [manager dag-id repo-config]
   (core/add-repo-anomaly manager dag-id repo-config))
 
-(defn remove-repo
+(defn ^{:stratum 0} remove-repo
   "Remove a repository from the DAG.
 
    Arguments:
@@ -195,7 +201,7 @@
   [manager dag-id repo-name]
   (core/remove-repo manager dag-id repo-name))
 
-(defn remove-repo-anomaly
+(defn ^{:stratum 0} remove-repo-anomaly
   "Anomaly-returning variant of [[remove-repo]].
 
    Returns the updated DAG on success, or a `:not-found` anomaly when the
@@ -203,7 +209,7 @@
   [manager dag-id repo-name]
   (core/remove-repo-anomaly manager dag-id repo-name))
 
-(defn add-edge
+(defn ^{:stratum 0} add-edge
   "Add a dependency edge between repos.
 
    Arguments:
@@ -225,7 +231,7 @@
   [manager dag-id from-repo to-repo constraint merge-ordering]
   (core/add-edge manager dag-id from-repo to-repo constraint merge-ordering))
 
-(defn add-edge-anomaly
+(defn ^{:stratum 0} add-edge-anomaly
   "Anomaly-returning variant of [[add-edge]].
 
    Returns the updated DAG on success, or an anomaly map on failure:
@@ -241,7 +247,7 @@
   [manager dag-id from-repo to-repo constraint merge-ordering]
   (core/add-edge-anomaly manager dag-id from-repo to-repo constraint merge-ordering))
 
-(defn remove-edge
+(defn ^{:stratum 0} remove-edge
   "Remove a dependency edge.
 
    Arguments:
@@ -254,7 +260,7 @@
   [manager dag-id from-repo to-repo]
   (core/remove-edge manager dag-id from-repo to-repo))
 
-(defn remove-edge-anomaly
+(defn ^{:stratum 0} remove-edge-anomaly
   "Anomaly-returning variant of [[remove-edge]].
 
    Returns the updated DAG on success, or a `:not-found` anomaly when the
@@ -262,10 +268,8 @@
   [manager dag-id from-repo to-repo]
   (core/remove-edge-anomaly manager dag-id from-repo to-repo))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Query operations
-
-(defn compute-topo-order
+(defn ^{:stratum 0} compute-topo-order
   "Compute topological sort of repos in the DAG.
 
    Arguments:
@@ -283,7 +287,7 @@
   [manager dag-id]
   (core/compute-topo-order manager dag-id))
 
-(defn compute-topo-order-anomaly
+(defn ^{:stratum 0} compute-topo-order-anomaly
   "Explicit implementation name for [[compute-topo-order]].
 
    Returns the topo-sort result map on success, or a `:not-found` anomaly
@@ -291,7 +295,7 @@
   [manager dag-id]
   (core/compute-topo-order-anomaly manager dag-id))
 
-(defn affected-repos
+(defn ^{:stratum 0} affected-repos
   "Given a changed repo, return all downstream repos that may be affected.
 
    Arguments:
@@ -308,7 +312,7 @@
   [manager dag-id changed-repo]
   (core/affected-repos manager dag-id changed-repo))
 
-(defn affected-repos-anomaly
+(defn ^{:stratum 0} affected-repos-anomaly
   "Explicit implementation name for [[affected-repos]].
 
    Returns the set of downstream repo names on success, or a `:not-found`
@@ -316,7 +320,7 @@
   [manager dag-id changed-repo]
   (core/affected-repos-anomaly manager dag-id changed-repo))
 
-(defn upstream-repos
+(defn ^{:stratum 0} upstream-repos
   "Return all repos that the given repo depends on.
 
    Arguments:
@@ -333,7 +337,7 @@
   [manager dag-id repo-name]
   (core/upstream-repos manager dag-id repo-name))
 
-(defn upstream-repos-anomaly
+(defn ^{:stratum 0} upstream-repos-anomaly
   "Explicit implementation name for [[upstream-repos]].
 
    Returns the set of upstream repo names on success, or a `:not-found`
@@ -341,7 +345,7 @@
   [manager dag-id repo-name]
   (core/upstream-repos-anomaly manager dag-id repo-name))
 
-(defn merge-order
+(defn ^{:stratum 0} merge-order
   "Given a set of repos with PRs, compute valid merge order.
 
    Arguments:
@@ -363,7 +367,7 @@
   [manager dag-id pr-set]
   (core/merge-order manager dag-id pr-set))
 
-(defn merge-order-anomaly
+(defn ^{:stratum 0} merge-order-anomaly
   "Explicit implementation name for [[merge-order]].
 
    Returns the merge-order result map on success, or a `:not-found`
@@ -371,10 +375,8 @@
   [manager dag-id pr-set]
   (core/merge-order-anomaly manager dag-id pr-set))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Validation
-
-(defn validate-dag
+(defn ^{:stratum 0} validate-dag
   "Check DAG for structural validity.
 
    Arguments:
@@ -399,7 +401,7 @@
   [manager dag-id]
   (core/validate-dag manager dag-id))
 
-(defn validate-dag-anomaly
+(defn ^{:stratum 0} validate-dag-anomaly
   "Explicit implementation name for [[validate-dag]].
 
    Returns the validation result map on success, or a `:not-found` anomaly
@@ -407,10 +409,8 @@
   [manager dag-id]
   (core/validate-dag-anomaly manager dag-id))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Pure functions (no manager required)
-
-(defn topo-sort
+(defn ^{:stratum 0} topo-sort
   "Perform topological sort on a DAG directly.
 
    Arguments:
@@ -424,7 +424,7 @@
   [dag]
   (core/topo-sort dag))
 
-(defn find-cycle-nodes
+(defn ^{:stratum 0} find-cycle-nodes
   "Find nodes involved in a cycle.
 
    Arguments:
@@ -434,7 +434,7 @@
   [dag]
   (core/find-cycle-nodes dag))
 
-(defn compute-layers
+(defn ^{:stratum 0} compute-layers
   "Group repos by their layer.
 
    Arguments:

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.pr-detail
   "PR detail view -- shows detailed information about a single PR.
 
@@ -28,21 +27,28 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Rendering helpers
 
-(defn- status-label
+;; Rendering helpers
+(defn- ^{:stratum 0} status-label
   "Render a status keyword for display: the status's own name, or a localized
    'unknown' label when the status is absent."
   [status]
   (if status (name status) (msg/t :detail/status-unknown)))
 
-(defn render-title-bar [pr [cols rows]]
+(defn ^{:stratum 0} render-title-bar [pr [cols rows]]
   (layout/text [cols rows]
     (str (msg/t :detail/title-prefix)
          (get pr :pr/title (msg/t :detail/title-fallback)))
     {:fg palette/status-info :bold? true}))
 
-(defn render-info-panel [pr [cols rows]]
+(defn ^{:stratum 0} render-footer [[cols rows]]
+  (layout/text [cols rows]
+    (msg/t :detail/footer)
+    {:fg :default}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} render-info-panel [pr [cols rows]]
   (layout/box [cols rows]
     {:title (msg/t :detail/panel-title) :border :single :fg :default
      :content-fn
@@ -56,12 +62,9 @@
                     (msg/t :detail/line-author {:value (get pr :pr/author none)})]]
          (layout/text [ic ir] (str/join "\n" lines))))}))
 
-(defn render-footer [[cols rows]]
-  (layout/text [cols rows]
-    (msg/t :detail/footer)
-    {:fg :default}))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render
+(defn ^{:stratum 2} render
   "Render the PR detail view.
    model: full app model
    [cols rows]: available screen area"

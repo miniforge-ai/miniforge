@@ -15,12 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.zettel
   "Zettel (atomic note) operations.
-   Layer 0: Zettel creation and manipulation
-   Layer 1: Link management
-   Layer 2: Serialization (Markdown with YAML frontmatter)"
+   Layer 0: pure helpers — link/backlink management, summary/validation,
+     frontmatter formatting/parsing, id/inst coercion
+   Layer 1: markdown <-> zettel serialization + content-projection (over Layer 0)
+   Layer 2: compute-digest (over the Layer 1 content-projection)
+   Layer 3: stamp-revision (over the Layer 2 digest)
+   Layer 4: create-zettel / update-zettel (over stamp-revision)
+
+   5 real strata — over the rule 210 budget of 3; a genuine namespace
+   split (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.knowledge.schema :as schema]
@@ -31,6 +36,7 @@
    [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Content-bearing subset + revision-id derivation.
 ;;
 ;; miniforge-fleet's Phase E Decision 6: trust attaches to the IMMUTABLE
@@ -39,8 +45,7 @@
 ;; content" — anything that affects WHAT the zettel says — and (b)
 ;; derive `:zettel/revision-id` deterministically from the digest so two
 ;; agents producing the same content land on the same revision id.
-
-(def ^:private content-bearing-fields
+(def ^{:stratum 0} ^:private content-bearing-fields
   "Fields whose value affects the zettel's revision identity. Operational
    metadata (`:zettel/id`, `:zettel/created`, `:zettel/modified`,
    `:zettel/author`, `:zettel/backlinks`, `:fleet/*`, `:privacy/*`,
@@ -55,39 +60,14 @@
    :zettel/links
    :zettel/source])
 
-(defn- content-projection
-  "Pure: project `zettel` down to the content-bearing subset that feeds
-   the digest. Stable across additions of operational metadata."
-  [zettel]
-  (select-keys zettel content-bearing-fields))
-
-(defn compute-digest
-  "Pure: SHA-256 hex digest of the zettel's canonical-EDN
-   content-projection. Stable across map-key reorderings and across
-   non-content metadata changes; rotates whenever a content-bearing
-   field changes. Used to seed `:zettel/digest` and (deterministically)
-   `:zettel/revision-id`."
-  [zettel]
-  (content-hash/content-hash (content-projection zettel)))
-
-(defn revision-id-from-digest
+(defn ^{:stratum 0} revision-id-from-digest
   "Pure: derive a stable UUID from a digest hex string. Two zettels with
    identical content land on the same `:zettel/revision-id` — the
    property miniforge-fleet's E.1 idempotent-retry path needs."
   ^UUID [^String digest]
   (UUID/nameUUIDFromBytes (.getBytes digest "UTF-8")))
 
-(defn- stamp-revision
-  "Pure: stamp a zettel with `:zettel/digest` + `:zettel/revision-id`
-   derived from its current content projection. Idempotent for an
-   already-stamped zettel whose content has not changed."
-  [zettel]
-  (let [d (compute-digest zettel)]
-    (assoc zettel
-           :zettel/digest d
-           :zettel/revision-id (revision-id-from-digest d))))
-
-(def ^:private derived-fields
+(def ^{:stratum 0} ^:private derived-fields
   "Fields the constructor / updater own — callers cannot override them
    directly via `update-zettel`'s `changes` map; they're recomputed
    from `content-projection` so the relationship between content
@@ -111,10 +91,195 @@
    consumer enforces its meaning."
   #{:zettel/digest :zettel/revision-id :zettel/trust-level})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Zettel creation and manipulation
+(defn ^{:stratum 0} zettel-summary
+  [zettel]
+  (select-keys zettel [:zettel/id :zettel/uid :zettel/title
+                       :zettel/type :zettel/dewey :zettel/tags]))
 
-(defn create-zettel
+(defn ^{:stratum 0} validate-zettel
+  [zettel]
+  (if (m/validate schema/Zettel zettel)
+    {:valid? true :errors nil}
+    {:valid? false :errors (m/explain schema/Zettel zettel)}))
+
+;; Link management
+(defn ^{:stratum 0} create-link
+  [target-id type rationale & {:keys [strength bidirectional?]}]
+  (cond-> {:link/target-id target-id
+           :link/type type
+           :link/rationale rationale}
+    strength (assoc :link/strength strength)
+    (some? bidirectional?) (assoc :link/bidirectional? bidirectional?)))
+
+(defn ^{:stratum 0} add-link
+  [zettel link]
+  (let [links (get zettel :zettel/links [])]
+    (-> zettel
+        (assoc :zettel/links (conj links link))
+        (assoc :zettel/modified (java.util.Date.)))))
+
+(defn ^{:stratum 0} remove-link
+  [zettel target-id]
+  (let [links (get zettel :zettel/links [])]
+    (-> zettel
+        (assoc :zettel/links (vec (remove #(= target-id (:link/target-id %)) links)))
+        (assoc :zettel/modified (java.util.Date.)))))
+
+(defn ^{:stratum 0} get-links
+  "Get links from a zettel.
+
+   Direction:
+   - :outgoing  - Links from this zettel
+   - :incoming  - Backlinks to this zettel
+   - :both      - All connections"
+  [zettel direction]
+  (case direction
+    :outgoing (get zettel :zettel/links [])
+    :incoming (mapv (fn [id] {:link/target-id id :link/type :backlink})
+                    (get zettel :zettel/backlinks []))
+    :both (concat (get-links zettel :outgoing)
+                  (get-links zettel :incoming))))
+
+(defn ^{:stratum 0} compute-backlinks
+  [zettels]
+  (reduce
+   (fn [acc zettel]
+     (let [source-id (:zettel/id zettel)]
+       (reduce
+        (fn [acc2 link]
+          (let [target-id (:link/target-id link)]
+            (update acc2 target-id (fnil conj []) source-id)))
+        acc
+        (get zettel :zettel/links []))))
+   {}
+   zettels))
+
+;; Serialization (Markdown with YAML frontmatter)
+(defn ^{:stratum 0} format-frontmatter
+  "Convert zettel metadata to YAML frontmatter."
+  [zettel]
+  (let [meta (cond-> {:id (str (:zettel/id zettel))
+                      :uid (:zettel/uid zettel)
+                      :type (name (:zettel/type zettel))
+                      :created (str (:zettel/created zettel))
+                      :author (:zettel/author zettel)}
+               (:zettel/dewey zettel) (assoc :dewey (:zettel/dewey zettel))
+               (seq (:zettel/tags zettel)) (assoc :tags (mapv name (:zettel/tags zettel)))
+               (:zettel/modified zettel) (assoc :modified (str (:zettel/modified zettel)))
+               (seq (:zettel/links zettel))
+               (assoc :links (mapv (fn [link]
+                                     {:target (str (:link/target-id link))
+                                      :type (name (:link/type link))
+                                      :rationale (:link/rationale link)})
+                                   (:zettel/links zettel))))]
+    (yaml/generate-string meta :dumper-options {:flow-style :block})))
+
+(defn ^{:stratum 0} parse-frontmatter
+  "Parse YAML frontmatter from a string."
+  [frontmatter-str]
+  (try
+    (yaml/parse-string frontmatter-str)
+    (catch Exception _e
+      nil)))
+
+(defn ^{:stratum 0} extract-title-from-content
+  "Extract title from first H1 heading in content."
+  [content]
+  (when-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
+    (second match)))
+
+(defn ^{:stratum 0} str->uuid
+  "Parse a string as UUID, or return nil."
+  [s]
+  (try
+    (java.util.UUID/fromString s)
+    (catch Exception _e nil)))
+
+(defn ^{:stratum 0} parse-inst
+  "Parse a string as inst, or return nil."
+  [s]
+  (try
+    (java.util.Date/from (java.time.Instant/parse s))
+    (catch Exception _e
+      ;; Try alternate format
+      (try
+        (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy")]
+          (.parse fmt s))
+        (catch Exception _e2 nil)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} content-projection
+  "Pure: project `zettel` down to the content-bearing subset that feeds
+   the digest. Stable across additions of operational metadata."
+  [zettel]
+  (select-keys zettel content-bearing-fields))
+
+(defn ^{:stratum 1} zettel->markdown
+  [zettel]
+  (str "---\n"
+       (format-frontmatter zettel)
+       "---\n\n"
+       "# " (:zettel/title zettel) "\n\n"
+       (:zettel/content zettel)))
+
+(defn ^{:stratum 1} markdown->zettel
+  [markdown-str]
+  (when-let [matches (re-find #"(?s)^---\n(.+?)\n---\n\n?(.*)$" markdown-str)]
+    (let [[_ frontmatter-str content] matches
+          frontmatter (parse-frontmatter frontmatter-str)]
+      (when frontmatter
+        (let [title (or (extract-title-from-content content)
+                        (:title frontmatter)
+                        "Untitled")
+              ;; Remove title line from content if present
+              body (str/replace content #"^#\s+.+\n\n?" "")]
+          (cond-> {:zettel/id (or (str->uuid (:id frontmatter)) (random-uuid))
+                   :zettel/uid (:uid frontmatter)
+                   :zettel/title title
+                   :zettel/content body
+                   :zettel/type (keyword (:type frontmatter))
+                   :zettel/created (or (parse-inst (:created frontmatter))
+                                       (java.util.Date.))
+                   :zettel/author (get frontmatter :author "unknown")}
+            (:dewey frontmatter) (assoc :zettel/dewey (:dewey frontmatter))
+            (seq (:tags frontmatter)) (assoc :zettel/tags (mapv keyword (:tags frontmatter)))
+            (:modified frontmatter) (assoc :zettel/modified (parse-inst (:modified frontmatter)))
+            (seq (:links frontmatter))
+            (assoc :zettel/links
+                   (mapv (fn [link]
+                           {:link/target-id (str->uuid (:target link))
+                            :link/type (keyword (:type link))
+                            :link/rationale (:rationale link)})
+                         (:links frontmatter)))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} compute-digest
+  "Pure: SHA-256 hex digest of the zettel's canonical-EDN
+   content-projection. Stable across map-key reorderings and across
+   non-content metadata changes; rotates whenever a content-bearing
+   field changes. Used to seed `:zettel/digest` and (deterministically)
+   `:zettel/revision-id`."
+  [zettel]
+  (content-hash/content-hash (content-projection zettel)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} stamp-revision
+  "Pure: stamp a zettel with `:zettel/digest` + `:zettel/revision-id`
+   derived from its current content projection. Idempotent for an
+   already-stamped zettel whose content has not changed."
+  [zettel]
+  (let [d (compute-digest zettel)]
+    (assoc zettel
+           :zettel/digest d
+           :zettel/revision-id (revision-id-from-digest d))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Zettel creation and manipulation
+(defn ^{:stratum 4} create-zettel
   "Create a new zettel with required fields.
 
    Arguments:
@@ -186,7 +351,7 @@
                  oss-version            (assoc :fleet/oss-version oss-version))]
     (stamp-revision zettel)))
 
-(defn update-zettel
+(defn ^{:stratum 4} update-zettel
   "Update a zettel with new values, setting modified timestamp.
 
    `:zettel/digest`, `:zettel/revision-id`, and `:zettel/trust-level`
@@ -239,164 +404,6 @@
                      (some? old-trust)                            old-trust
                      :else                                        :untrusted)]
     (assoc stamped :zettel/trust-level next-trust)))
-
-(defn zettel-summary
-  [zettel]
-  (select-keys zettel [:zettel/id :zettel/uid :zettel/title
-                       :zettel/type :zettel/dewey :zettel/tags]))
-
-(defn validate-zettel
-  [zettel]
-  (if (m/validate schema/Zettel zettel)
-    {:valid? true :errors nil}
-    {:valid? false :errors (m/explain schema/Zettel zettel)}))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Link management
-
-(defn create-link
-  [target-id type rationale & {:keys [strength bidirectional?]}]
-  (cond-> {:link/target-id target-id
-           :link/type type
-           :link/rationale rationale}
-    strength (assoc :link/strength strength)
-    (some? bidirectional?) (assoc :link/bidirectional? bidirectional?)))
-
-(defn add-link
-  [zettel link]
-  (let [links (get zettel :zettel/links [])]
-    (-> zettel
-        (assoc :zettel/links (conj links link))
-        (assoc :zettel/modified (java.util.Date.)))))
-
-(defn remove-link
-  [zettel target-id]
-  (let [links (get zettel :zettel/links [])]
-    (-> zettel
-        (assoc :zettel/links (vec (remove #(= target-id (:link/target-id %)) links)))
-        (assoc :zettel/modified (java.util.Date.)))))
-
-(defn get-links
-  "Get links from a zettel.
-
-   Direction:
-   - :outgoing  - Links from this zettel
-   - :incoming  - Backlinks to this zettel
-   - :both      - All connections"
-  [zettel direction]
-  (case direction
-    :outgoing (get zettel :zettel/links [])
-    :incoming (mapv (fn [id] {:link/target-id id :link/type :backlink})
-                    (get zettel :zettel/backlinks []))
-    :both (concat (get-links zettel :outgoing)
-                  (get-links zettel :incoming))))
-
-(defn compute-backlinks
-  [zettels]
-  (reduce
-   (fn [acc zettel]
-     (let [source-id (:zettel/id zettel)]
-       (reduce
-        (fn [acc2 link]
-          (let [target-id (:link/target-id link)]
-            (update acc2 target-id (fnil conj []) source-id)))
-        acc
-        (get zettel :zettel/links []))))
-   {}
-   zettels))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Serialization (Markdown with YAML frontmatter)
-
-(defn format-frontmatter
-  "Convert zettel metadata to YAML frontmatter."
-  [zettel]
-  (let [meta (cond-> {:id (str (:zettel/id zettel))
-                      :uid (:zettel/uid zettel)
-                      :type (name (:zettel/type zettel))
-                      :created (str (:zettel/created zettel))
-                      :author (:zettel/author zettel)}
-               (:zettel/dewey zettel) (assoc :dewey (:zettel/dewey zettel))
-               (seq (:zettel/tags zettel)) (assoc :tags (mapv name (:zettel/tags zettel)))
-               (:zettel/modified zettel) (assoc :modified (str (:zettel/modified zettel)))
-               (seq (:zettel/links zettel))
-               (assoc :links (mapv (fn [link]
-                                     {:target (str (:link/target-id link))
-                                      :type (name (:link/type link))
-                                      :rationale (:link/rationale link)})
-                                   (:zettel/links zettel))))]
-    (yaml/generate-string meta :dumper-options {:flow-style :block})))
-
-(defn zettel->markdown
-  [zettel]
-  (str "---\n"
-       (format-frontmatter zettel)
-       "---\n\n"
-       "# " (:zettel/title zettel) "\n\n"
-       (:zettel/content zettel)))
-
-(defn parse-frontmatter
-  "Parse YAML frontmatter from a string."
-  [frontmatter-str]
-  (try
-    (yaml/parse-string frontmatter-str)
-    (catch Exception _e
-      nil)))
-
-(defn extract-title-from-content
-  "Extract title from first H1 heading in content."
-  [content]
-  (when-let [match (re-find #"^#\s+(.+)$" (first (str/split-lines content)))]
-    (second match)))
-
-(defn str->uuid
-  "Parse a string as UUID, or return nil."
-  [s]
-  (try
-    (java.util.UUID/fromString s)
-    (catch Exception _e nil)))
-
-(defn parse-inst
-  "Parse a string as inst, or return nil."
-  [s]
-  (try
-    (java.util.Date/from (java.time.Instant/parse s))
-    (catch Exception _e
-      ;; Try alternate format
-      (try
-        (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy")]
-          (.parse fmt s))
-        (catch Exception _e2 nil)))))
-
-(defn markdown->zettel
-  [markdown-str]
-  (when-let [matches (re-find #"(?s)^---\n(.+?)\n---\n\n?(.*)$" markdown-str)]
-    (let [[_ frontmatter-str content] matches
-          frontmatter (parse-frontmatter frontmatter-str)]
-      (when frontmatter
-        (let [title (or (extract-title-from-content content)
-                        (:title frontmatter)
-                        "Untitled")
-              ;; Remove title line from content if present
-              body (str/replace content #"^#\s+.+\n\n?" "")]
-          (cond-> {:zettel/id (or (str->uuid (:id frontmatter)) (random-uuid))
-                   :zettel/uid (:uid frontmatter)
-                   :zettel/title title
-                   :zettel/content body
-                   :zettel/type (keyword (:type frontmatter))
-                   :zettel/created (or (parse-inst (:created frontmatter))
-                                       (java.util.Date.))
-                   :zettel/author (get frontmatter :author "unknown")}
-            (:dewey frontmatter) (assoc :zettel/dewey (:dewey frontmatter))
-            (seq (:tags frontmatter)) (assoc :zettel/tags (mapv keyword (:tags frontmatter)))
-            (:modified frontmatter) (assoc :zettel/modified (parse-inst (:modified frontmatter)))
-            (seq (:links frontmatter))
-            (assoc :zettel/links
-                   (mapv (fn [link]
-                           {:link/target-id (str->uuid (:target link))
-                            :link/type (keyword (:type link))
-                            :link/rationale (:rationale link)})
-                         (:links frontmatter)))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

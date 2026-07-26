@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.repo-index.interface :as repo-index]
@@ -24,7 +23,9 @@
             [ai.miniforge.repo-index.schema :as schema]
             [malli.core :as m]))
 
-(deftest scanner-parse-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} scanner-parse-test
   (testing "detect-language via scanner"
     (let [idx (scanner/scan ".")]
       (is (some? idx) "scan should succeed in a git repo")
@@ -35,7 +36,7 @@
         (is (map? (:languages idx)))
         (is (vector? (:files idx)))))))
 
-(deftest scanner-schema-test
+(deftest ^{:stratum 0} scanner-schema-test
   (testing "scanned index conforms to RepoIndex schema"
     (let [idx (scanner/scan ".")]
       (when idx
@@ -43,7 +44,7 @@
             (str "RepoIndex schema mismatch: "
                  (m/explain schema/RepoIndex idx)))))))
 
-(deftest scanner-file-record-test
+(deftest ^{:stratum 0} scanner-file-record-test
   (testing "individual file records conform to FileRecord schema"
     (let [idx (scanner/scan ".")]
       (when idx
@@ -52,7 +53,7 @@
               (str "FileRecord schema mismatch for " (:path f) ": "
                    (m/explain schema/FileRecord f))))))))
 
-(deftest repo-map-test
+(deftest ^{:stratum 0} repo-map-test
   (testing "repo map generation"
     (let [idx (scanner/scan ".")]
       (when idx
@@ -63,7 +64,7 @@
           (is (pos? (:shown-files rmap)))
           (is (boolean? (:truncated? rmap))))))))
 
-(deftest repo-map-budget-test
+(deftest ^{:stratum 0} repo-map-budget-test
   (testing "repo map respects token budget"
     (let [idx (scanner/scan ".")]
       (when idx
@@ -74,7 +75,7 @@
           (is (>= (:shown-files rmap-large) (:shown-files rmap-small))
               "larger budget should show more files"))))))
 
-(deftest build-index-test
+(deftest ^{:stratum 0} build-index-test
   (testing "build-index produces a valid index"
     (let [idx (repo-index/build-index ".")]
       (is (some? idx))
@@ -82,7 +83,7 @@
         (is (string? (:tree-sha idx)))
         (is (vector? (:files idx)))))))
 
-(deftest get-file-test
+(deftest ^{:stratum 0} get-file-test
   (testing "get-file retrieves a known file"
     (let [idx (repo-index/build-index ".")]
       (when idx
@@ -93,13 +94,13 @@
             (is (string? (:content result)))
             (is (pos? (:lines result)))))))))
 
-(deftest get-file-not-in-index-test
+(deftest ^{:stratum 0} get-file-not-in-index-test
   (testing "get-file returns nil for files not in index"
     (let [idx (repo-index/build-index ".")]
       (when idx
         (is (nil? (repo-index/get-file idx "nonexistent-file-xyz.txt")))))))
 
-(deftest files-by-language-test
+(deftest ^{:stratum 0} files-by-language-test
   (testing "files-by-language filters correctly"
     (let [idx (repo-index/build-index ".")]
       (when idx

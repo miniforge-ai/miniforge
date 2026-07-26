@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view
   "View dispatch: model -> cell buffer.
 
@@ -31,19 +30,17 @@
    [ai.miniforge.tui-views.view.overlays :as overlays]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; View dispatch — data-driven via screen specs
 
-(defn render-active-view
+;; View dispatch — data-driven via screen specs
+(defn ^{:stratum 0} render-active-view
   "Render the active view using the declarative screen spec interpreter."
   [model theme size]
   (if-let [spec (interpret/get-screen-spec (:view model))]
     (interpret/render-screen model theme size spec)
     (layout/text size (msg/t :view/unknown-view))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Theme post-processing
-
-(defn apply-theme-bg
+(defn ^{:stratum 0} apply-theme-bg
   "Replace :bg :default cells with the theme's background color."
   [buffer theme]
   (let [bg (:bg theme :default)]
@@ -57,10 +54,10 @@
                     row))
             buffer))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Root view function
+;------------------------------------------------------------------------------ Layer 1
 
-(defn root-view
+;; Root view function
+(defn ^{:stratum 1} root-view
   "Root view function for the Elm runtime.
    Resolves theme, renders the active view via the spec interpreter,
    then applies overlays as a pipeline.

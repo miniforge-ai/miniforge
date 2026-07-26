@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.cli.scan-test
   "Tests for the scan CLI command — pack resolution, selector parsing, pipeline."
   (:require
@@ -9,16 +8,21 @@
    [ai.miniforge.compliance-scanner.interface :as compliance-scanner]
    [ai.miniforge.cli.main.commands.scan :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Access private functions via var
-(def resolve-rules-selector (var-get #'sut/resolve-rules-selector))
-(def resolve-pack (var-get #'sut/resolve-pack))
-(def build-scan-opts (var-get #'sut/build-scan-opts))
+(def ^{:stratum 0} resolve-rules-selector (var-get #'sut/resolve-rules-selector))
+
+(def ^{:stratum 0} resolve-pack (var-get #'sut/resolve-pack))
+
+(def ^{:stratum 0} build-scan-opts (var-get #'sut/build-scan-opts))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ============================================================================
 ;; Rule selector parsing
 ;; ============================================================================
-
-(deftest resolve-rules-selector-test
+(deftest ^{:stratum 1} resolve-rules-selector-test
   (testing "nil defaults to :all"
     (is (= :all (resolve-rules-selector nil))))
 
@@ -34,8 +38,7 @@
 ;; ============================================================================
 ;; Pack resolution
 ;; ============================================================================
-
-(deftest resolve-pack-from-classpath-test
+(deftest ^{:stratum 1} resolve-pack-from-classpath-test
   (testing "loads reference pack by name from classpath"
     (let [pack (resolve-pack "foundations-1.0.0")]
       (is (some? pack))
@@ -46,7 +49,7 @@
   (testing "returns nil for nonexistent pack"
     (is (nil? (resolve-pack "nonexistent-pack-9999")))))
 
-(deftest resolve-pack-from-file-test
+(deftest ^{:stratum 1} resolve-pack-from-file-test
   (testing "loads pack from file path"
     (let [pack (resolve-pack "components/compliance-scanner/resources/test-fixtures/clojure-210-pack.edn")]
       (is (some? pack))
@@ -56,8 +59,7 @@
 ;; ============================================================================
 ;; Scan opts construction
 ;; ============================================================================
-
-(deftest build-scan-opts-test
+(deftest ^{:stratum 1} build-scan-opts-test
   (testing "defaults to :all rules"
     (let [opts (build-scan-opts "." {})]
       (is (= :all (:rules opts)))))
@@ -78,8 +80,7 @@
 ;; ============================================================================
 ;; Negative-mode violation messages
 ;; ============================================================================
-
-(deftest negative-mode-uses-rule-title-test
+(deftest ^{:stratum 1} negative-mode-uses-rule-title-test
   (testing "negative-mode violations use rule title, not hardcoded header message"
     (let [k8s    (resolve-pack "kubernetes-1.0.0")
           result (compliance-scanner/scan "." ".standards" {:rules :all :pack k8s})]

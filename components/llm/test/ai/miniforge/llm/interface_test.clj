@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [clojure.string :as str]
@@ -28,14 +27,12 @@
             [cheshire.core :as json]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Test fixtures
+(def ^{:stratum 0} mock-response "This is a mock response")
 
-(def mock-response "This is a mock response")
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Client creation tests
-
-(deftest create-client-test
+(deftest ^{:stratum 0} create-client-test
   (testing "creates client with default backend"
     (let [client (llm/create-client)]
       (is (some? client))))
@@ -48,7 +45,7 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (llm/create-client {:backend :unknown})))))
 
-(deftest mock-client-test
+(deftest ^{:stratum 0} mock-client-test
   (testing "creates mock client with output"
     (let [client (llm/mock-client {:output "Hello"})]
       (is (some? client))))
@@ -58,8 +55,7 @@
       (is (some? client)))))
 
 ;; Completion tests with mock client
-
-(deftest complete-test
+(deftest ^{:stratum 0} complete-test
   (testing "returns success for mock client"
     (let [client (llm/mock-client {:output "42"})
           resp (llm/complete client {:prompt "What is 6*7?"})]
@@ -84,7 +80,7 @@
       (is (not (llm/success? resp)))
       (is (some? (llm/get-error resp))))))
 
-(deftest chat-test
+(deftest ^{:stratum 0} chat-test
   (testing "simple chat returns response"
     (let [client (llm/mock-client {:output "4"})
           resp (llm/chat client "2+2?")]
@@ -96,7 +92,7 @@
           resp (llm/chat client "explain" {:system "Be brief"})]
       (is (llm/success? resp)))))
 
-(deftest multi-response-test
+(deftest ^{:stratum 0} multi-response-test
   (testing "mock client returns sequential responses"
     (let [client (llm/mock-client {:outputs ["First" "Second" "Third"]})
           r1 (llm/chat client "1")
@@ -114,8 +110,7 @@
       (is (= "B" (llm/get-content r3))))))
 
 ;; Response helper tests
-
-(deftest response-helpers-test
+(deftest ^{:stratum 0} response-helpers-test
   (testing "success? returns true for successful response"
     (is (llm/success? {:success true :content "ok"})))
 
@@ -130,21 +125,16 @@
 
 ;; Echo backend test moved to integration tests
 ;; (actual CLI calls belong in projects/miniforge/test)
-
 ;; Backends registry test
-
-(deftest backends-test
+(deftest ^{:stratum 0} backends-test
   (testing "backends contains expected keys"
     (is (contains? llm/backends :claude))
     (is (contains? llm/backends :echo))))
 
 ;; Streaming tests removed - they call actual CLIs via p/process and can't be
 ;; properly mocked in brick tests. Move to integration tests.
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Metrics tracking tests (PR #248)
-
-(deftest parse-claude-stream-result-event-test
+(deftest ^{:stratum 0} parse-claude-stream-result-event-test
   (testing "result event extracts usage tokens"
     (let [line (json/generate-string
                  {:type "result"
@@ -183,7 +173,7 @@
       (is (= 42 (:num-turns parsed)))
       (is (= "max_turns" (:stop-reason parsed))))))
 
-(deftest parse-claude-stream-liveness-event-test
+(deftest ^{:stratum 0} parse-claude-stream-liveness-event-test
   (testing "rate_limit_event parses as a heartbeat — keeps stream supervision alive"
     ;; 2026-05-04 dogfood regression: parse-claude-stream-line returned nil
     ;; for rate_limit_event, so 60s of 'allowed' rate-limit notifications
@@ -207,7 +197,7 @@
           "system init refreshes liveness once at the start of the stream")
       (is (false? (:done? parsed))))))
 
-(deftest record-parsed-progress-heartbeat-liveness-test
+(deftest ^{:stratum 0} record-parsed-progress-heartbeat-liveness-test
   (testing "heartbeat-only Claude stream events are recorded as activity"
     ;; This guards the production regression path more directly than the
     ;; parser-shape test above: if parsing still succeeds but progress
@@ -239,7 +229,7 @@
         (is (nil? (pm/check-timeout monitor))
             (str label " heartbeat must keep monitor below stagnation threshold"))))))
 
-(deftest parse-claude-stream-assistant-stop-reason-test
+(deftest ^{:stratum 0} parse-claude-stream-assistant-stop-reason-test
   (testing "assistant message with text carries stop_reason"
     (let [line (json/generate-string
                  {:type "assistant"
@@ -275,7 +265,7 @@
       (is (= "partial" (:delta parsed)))
       (is (nil? (:stop-reason parsed))))))
 
-(deftest parse-codex-stream-line-test
+(deftest ^{:stratum 0} parse-codex-stream-line-test
   (testing "agent_message item extracts text delta"
     (let [line (json/generate-string
                  {:type "item.completed"
@@ -327,7 +317,7 @@
           parsed (impl/parse-codex-stream-line line)]
       (is (nil? parsed)))))
 
-(deftest parse-codex-stream-line-finish-reason-test
+(deftest ^{:stratum 0} parse-codex-stream-line-finish-reason-test
   (testing "turn.completed always sets :increment-turns true"
     (let [line (json/generate-string {:type "turn.completed"
                                       :usage {:input_tokens 10 :output_tokens 5}})
@@ -368,7 +358,7 @@
           parsed (impl/parse-codex-stream-line line)]
       (is (nil? (:stop-reason parsed))))))
 
-(deftest parse-cli-output-includes-metrics-test
+(deftest ^{:stratum 0} parse-cli-output-includes-metrics-test
   (testing "success response includes :tokens and :usage keys"
     (let [resp (impl/parse-cli-output "hello world" 0)]
       (is (:success resp))
@@ -389,7 +379,7 @@
       (is (= "empty_success_output" (get-in resp [:error :type])))
       (is (some? (:anomaly resp))))))
 
-(deftest mock-client-response-includes-metrics-test
+(deftest ^{:stratum 0} mock-client-response-includes-metrics-test
   (testing "mock client success response has :tokens and :usage"
     (let [client (llm/mock-client {:output "ok"})
           resp (llm/complete client {:prompt "test"})]
@@ -402,7 +392,7 @@
           resp (llm/complete client {:prompt "test"})]
       (is (some? (:anomaly resp))))))
 
-(deftest stream-parser-accumulates-usage-test
+(deftest ^{:stratum 0} stream-parser-accumulates-usage-test
   (testing "stream-with-parser stores usage from parsed events"
     (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
           content (atom "")
@@ -440,7 +430,7 @@
       (is (= {:input-tokens 100 :output-tokens 50} @usage))
       (is (= 0.0045 @cost)))))
 
-(deftest stream-parser-recovers-result-only-content-test
+(deftest ^{:stratum 0} stream-parser-recovers-result-only-content-test
   (testing "result-only content is recovered when no assistant delta arrived"
     (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
           content (atom "")
@@ -466,7 +456,7 @@
       (is (= "end_turn" @stop-reason))
       (is (= "{\"ok\":true}" (:content (last @chunks)))))))
 
-(deftest stream-parser-accumulates-stop-reason-and-turns-test
+(deftest ^{:stratum 0} stream-parser-accumulates-stop-reason-and-turns-test
   (testing "latest stop_reason wins, num_turns captured from result event"
     (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
           content (atom "")
@@ -503,7 +493,7 @@
       (is (= "end_turn" @stop-reason))
       (is (= 7 @turns)))))
 
-(deftest stream-parser-codex-increment-turns-test
+(deftest ^{:stratum 0} stream-parser-codex-increment-turns-test
   (testing "turn.completed events increment the turns accumulator"
     (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
           content (atom "")
@@ -552,10 +542,8 @@
       (is (= "end_turn" @stop-reason))
       (is (= 1 @turns)))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Rate limit detection tests
-
-(deftest rate-limited?-test
+(deftest ^{:stratum 0} rate-limited?-test
   (testing "detects Claude CLI rate limit message"
     (is (impl/rate-limited? (msg/t :rate-limit-test.system/claude-limit-la)))
     (is (impl/rate-limited? (msg/t :rate-limit-test.system/claude-limit-utc))))
@@ -578,7 +566,7 @@
                                  (msg/t :rate-limit-test.system/risk-tag)]}]}))))
     (is (not (impl/rate-limited? nil)))))
 
-(deftest rate-limited-success-response-test
+(deftest ^{:stratum 0} rate-limited-success-response-test
   (testing "rate limit content in success-response returns error"
     (let [resp (impl/success-response
                  "You've hit your limit · resets 7pm (America/Los_Angeles)" 0)]
@@ -600,7 +588,7 @@
       (is (:success resp))
       (is (= "warning on stderr" (:stderr resp))))))
 
-(deftest rate-limited-streaming-success-response-test
+(deftest ^{:stratum 0} rate-limited-streaming-success-response-test
   (testing "rate limit content in streaming-success-response returns error"
     (let [resp (impl/streaming-success-response
                  "You've hit your limit · resets 7pm (America/Los_Angeles)" 0 nil nil nil nil nil nil nil)]
@@ -618,10 +606,8 @@
       (is (= "max_turns" (:stop-reason resp)))
       (is (= 80 (:num-turns resp))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Diagnostic metadata tests — tool-call-count and final-message-preview
-
-(deftest streaming-success-response-diagnostic-test
+(deftest ^{:stratum 0} streaming-success-response-diagnostic-test
   (testing "tool-call-count is included when provided"
     (let [resp (impl/streaming-success-response "hello" 0 nil nil nil nil 3 nil nil)]
       (is (:success resp))
@@ -655,7 +641,7 @@
       (is (= "diagnostic stderr" (:stderr resp)))
       (is (= 0.002 (:cost-usd resp))))))
 
-(deftest streaming-error-response-diagnostic-test
+(deftest ^{:stratum 0} streaming-error-response-diagnostic-test
   (testing "tool-call-count is surfaced on error responses"
     (let [resp (impl/streaming-error-response "" -1 "process died" "" nil nil nil 5 nil)]
       (is (not (:success resp)))
@@ -692,7 +678,7 @@
       (is (= raw (get-in resp [:error :message])))
       (is (= raw (get-in resp [:error :raw-stdout]))))))
 
-(deftest process-stream-lines-eof-is-not-timeout-test
+(deftest ^{:stratum 0} process-stream-lines-eof-is-not-timeout-test
   (testing "clean EOF with no lines does not synthesize a stream-idle timeout"
     (let [reader (java.io.BufferedReader. (java.io.StringReader. ""))
           monitor (pm/create-progress-monitor
@@ -703,7 +689,7 @@
       (is (= [] (:lines result)))
       (is (nil? (:timeout result))))))
 
-(deftest process-stream-lines-read-failure-is-anomaly-data-test
+(deftest ^{:stratum 0} process-stream-lines-read-failure-is-anomaly-data-test
   (testing "reader failures return canonical anomaly data instead of throwing"
     (let [reader (java.io.BufferedReader.
                   (proxy [java.io.Reader] []
@@ -722,10 +708,11 @@
       (is (= :fault (:anomaly/type stream-anomaly)))
       (is (= "stream read failed" (:anomaly/message stream-anomaly))))))
 
-(def ^:private start-stream-reader! #'impl/start-stream-reader!)
-(def ^:private stop-stream-reader!  #'impl/stop-stream-reader!)
+(def ^{:stratum 0} ^:private start-stream-reader! #'impl/start-stream-reader!)
 
-(defn- wait-until-blocked
+(def ^{:stratum 0} ^:private stop-stream-reader!  #'impl/stop-stream-reader!)
+
+(defn- ^{:stratum 0} wait-until-blocked
   "Spin-wait until `^Thread t` reaches a parked/blocked thread state
    (WAITING/TIMED_WAITING/BLOCKED). Used by the clean-shutdown regression
    test to confirm the reader is actually blocked on `.put` BEFORE we
@@ -742,60 +729,7 @@
         (>= (System/currentTimeMillis) deadline) false
         :else (do (Thread/sleep 5) (recur))))))
 
-(deftest start-stream-reader!-clean-shutdown-prints-no-stderr-test
-  ;; Regression: pre-fix the daemon's `(catch Exception e ...)` caught
-  ;; the InterruptedException raised by `stop-stream-reader!`'s
-  ;; interrupt, then tried to enqueue a `stream-read-failure` anomaly
-  ;; via `.put` — which itself raised IE because the thread's interrupt
-  ;; flag was still set, bubbling the second IE to the JVM default
-  ;; handler and printing an ugly stack trace to stderr. The 2026-06-04
-  ;; dogfood surfaced 18 of these across 20 sub-tasks (pure noise, zero
-  ;; workflow impact).
-  ;;
-  ;; The fix: dedicated `(catch InterruptedException _)` for the clean
-  ;; shutdown + inner try/catch around the anomaly enqueue.
-  ;;
-  ;; The test exercises `start-stream-reader!` / `stop-stream-reader!`
-  ;; directly with a CAPACITY-1 queue so the reader's second `.put`
-  ;; blocks deterministically (no `Thread/sleep`-based race). With the
-  ;; queue full, the reader is guaranteed to be parked on `.put` when
-  ;; `stop-stream-reader!` interrupts it.
-  (testing "interrupting a reader blocked on a full queue does not print to stderr"
-    (let [;; Bounded queue, capacity 1. Pre-filled so the reader's first
-          ;; put blocks immediately.
-          line-queue (java.util.concurrent.LinkedBlockingQueue. 1)
-          _          (.put line-queue "filler")
-          ;; PipedWriter/Reader with one line of content so the reader
-          ;; has something to read and try to enqueue.
-          writer (java.io.PipedWriter.)
-          reader (java.io.BufferedReader. (java.io.PipedReader. writer))
-          _ (.write writer "first-line\n")
-          _ (.flush writer)
-          stderr-capture (java.io.ByteArrayOutputStream.)
-          original-err System/err
-          captured-print-stream (java.io.PrintStream. stderr-capture true "UTF-8")]
-      (try
-        (System/setErr captured-print-stream)
-        (let [reader-thread (start-stream-reader! reader line-queue)]
-          (try
-            (is (wait-until-blocked reader-thread 1000)
-                "reader must reach a blocked state on .put before the interrupt fires")
-            (stop-stream-reader! reader-thread reader)
-            (finally
-              (.join reader-thread 1000))))
-        ;; Read with the same charset the PrintStream wrote.
-        (let [captured (.toString stderr-capture "UTF-8")]
-          (is (not (re-find #"InterruptedException" captured))
-              "clean shutdown must not leak an IE stack trace to stderr"))
-        (finally
-          (System/setErr original-err)
-          ;; Close the redirected stream — flushes any buffered bytes and
-          ;; releases the underlying ByteArrayOutputStream from the
-          ;; PrintStream's writer lock.
-          (.close captured-print-stream)
-          (.close writer))))))
-
-(deftest process-stream-lines-honors-progress-monitor-while-waiting-for-output-test
+(deftest ^{:stratum 0} process-stream-lines-honors-progress-monitor-while-waiting-for-output-test
   (testing "progress-monitor timeout can fire while stdout is idle and still open"
     (let [writer (java.io.PipedWriter.)
           reader (java.io.BufferedReader. (java.io.PipedReader. writer))
@@ -817,7 +751,7 @@
         (finally
           (.close writer))))))
 
-(deftest stream-with-parser-records-tool-progress-test
+(deftest ^{:stratum 0} stream-with-parser-records-tool-progress-test
   (testing "tool-use events reset semantic progress even without text deltas"
     (let [monitor (pm/create-progress-monitor
                    {:stagnation-threshold-ms 1000
@@ -851,7 +785,7 @@
       (is (= "" @accumulated-content))
       (is (= 1 (count @chunks))))))
 
-(deftest stream-with-parser-records-liveness-progress-test
+(deftest ^{:stratum 0} stream-with-parser-records-liveness-progress-test
   ;; 2026-05-04 dogfood regression — Claude emits rate_limit_event
   ;; while the model is mid-think (no assistant chunks yet). PR #774
   ;; mapped these to nil, so they did not advance the activity
@@ -895,7 +829,7 @@
         (is (< before (:last-activity-at @monitor))
             "system init must refresh liveness once at stream start")))))
 
-(deftest message-preview-via-streaming-success-test
+(deftest ^{:stratum 0} message-preview-via-streaming-success-test
   (testing "short content is returned in full as preview"
     (let [short-content "short response"
           resp (impl/streaming-success-response short-content 0 nil nil nil nil 0 short-content nil)]
@@ -907,7 +841,7 @@
           resp (impl/streaming-success-response long-content 0 nil nil nil nil 0 preview nil)]
       (is (= 500 (count (:final-message-preview resp)))))))
 
-(deftest complete-stream-impl-empty-stream-fallback-test
+(deftest ^{:stratum 0} complete-stream-impl-empty-stream-fallback-test
   (testing "streaming success with no parsed output falls back to non-streaming completion"
     (let [chunks (atom [])
           client (ai.miniforge.llm.protocols.records.llm-client/create-client
@@ -925,10 +859,8 @@
                :content "fallback answer"}]
              @chunks)))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Claude backend args-fn budget tests (PR #288)
-
-(deftest claude-args-fn-budget-usd-test
+(deftest ^{:stratum 0} claude-args-fn-budget-usd-test
   (let [args-fn (:args-fn (get impl/backends :claude))]
 
     (testing "budget-usd from request is used as --max-budget-usd value"
@@ -965,7 +897,6 @@
       (let [args (args-fn {:prompt "test" :budget-usd 1.0})]
         (is (not (some #{"--max-turns"} args)))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Claude backend prompt delivery (argv vs stdin) — argv-overflow guard
 ;;
 ;; The Stage 3 dogfood (2026-05-07) hit "Argument list too long" because
@@ -973,74 +904,43 @@
 ;; pushed the argv past POSIX ARG_MAX. The :claude backend now declares
 ;; :prompt-via :stdin and the args-fn omits the positional prompt while
 ;; adding --input-format text. These tests lock that contract.
-
-(def ^:private sample-prompt
+(def ^{:stratum 0} ^:private sample-prompt
   "Synthetic prompt used to assert the prompt content's *placement*
    (argv vs not-argv). Same shape (string) as a real planner prompt;
    size is small because the assertions hinge on identity-of-content,
    not length."
   "this should arrive on stdin not in argv")
 
-(deftest claude-args-fn-prompt-via-argv-default-test
-  (testing "prompt-via defaults to :argv — prompt is the last argv element"
-    (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt sample-prompt})]
-      (is (= sample-prompt (last args))
-          "prompt is conjoined as positional argv arg")
-      (is (not (some #{"--input-format"} args))
-          "no --input-format flag in argv mode"))))
-
-(deftest claude-args-fn-prompt-via-argv-explicit-test
-  (testing "prompt-via :argv (explicit) keeps current argv shape"
-    (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt sample-prompt :prompt-via :argv})]
-      (is (= sample-prompt (last args))
-          "prompt is conjoined as positional argv arg")
-      (is (not (some #{"--input-format"} args))))))
-
-(deftest claude-args-fn-prompt-via-stdin-omits-argv-test
-  (testing "prompt-via :stdin drops the positional prompt"
-    (let [args-fn (:args-fn (get impl/backends :claude))
-          args (args-fn {:prompt sample-prompt :prompt-via :stdin})]
-      (is (not (some #{sample-prompt} args))
-          "prompt content must NOT appear in argv when :prompt-via :stdin")
-      (is (some #{"--input-format"} args)
-          "--input-format text flag must be present so claude reads stdin")
-      (is (= "text" (nth args (inc (.indexOf args "--input-format"))))
-          "--input-format value is 'text'"))))
-
-(deftest claude-backend-declares-prompt-via-stdin-test
+(deftest ^{:stratum 0} claude-backend-declares-prompt-via-stdin-test
   (testing ":claude backend config declares :prompt-via :stdin"
     (is (= :stdin (:prompt-via (get impl/backends :claude)))
         "claude must default to stdin to avoid POSIX ARG_MAX overflow")))
 
-(deftest cli-backends-declare-safe-prompt-delivery-test
+(deftest ^{:stratum 0} cli-backends-declare-safe-prompt-delivery-test
   (testing "codex uses stdin; other non-Claude CLI backends remain argv"
     (is (= :stdin (:prompt-via (get impl/backends :codex))))
     (is (= :argv (:prompt-via (get impl/backends :cursor))))
     (is (= :argv (:prompt-via (get impl/backends :opencode))))
     (is (= :argv (:prompt-via (get impl/backends :echo))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; default-exec-fn / stream-exec-fn — :stdin opt is piped to the subprocess
 ;;
 ;; Use `cat` as the subprocess: stdin is echoed verbatim to stdout, so we
 ;; can assert the bytes the exec layer wrote without depending on a
 ;; real LLM CLI.
-
-(deftest default-exec-fn-pipes-stdin-test
+(deftest ^{:stratum 0} default-exec-fn-pipes-stdin-test
   (testing ":stdin opt is written to subprocess stdin"
     (let [{:keys [out exit]} (impl/default-exec-fn ["cat"] {:stdin "hello stdin"})]
       (is (zero? exit))
       (is (= "hello stdin" out)))))
 
-(deftest default-exec-fn-no-stdin-default-test
+(deftest ^{:stratum 0} default-exec-fn-no-stdin-default-test
   (testing "no :stdin opt → empty stdin (legacy behavior)"
     (let [{:keys [out exit]} (impl/default-exec-fn ["cat"])]
       (is (zero? exit))
       (is (= "" out)))))
 
-(deftest default-exec-fn-honors-workdir-test
+(deftest ^{:stratum 0} default-exec-fn-honors-workdir-test
   (testing ":workdir opt becomes the subprocess working directory"
     (let [workdir (.getCanonicalPath (java.io.File. (System/getProperty "java.io.tmpdir")))
           {:keys [out exit]} (impl/default-exec-fn ["pwd"] {:workdir workdir})
@@ -1048,7 +948,7 @@
       (is (zero? exit))
       (is (= workdir actual)))))
 
-(deftest read-process-stream-error-is-string-test
+(deftest ^{:stratum 0} read-process-stream-error-is-string-test
   (testing "reader exceptions never publish nil output"
     (let [stream (proxy [java.io.InputStream] []
                    (read
@@ -1064,7 +964,7 @@
       (is (string? @output))
       (is (seq @output)))))
 
-(deftest stop-capture-process-waits-after-destroy-test
+(deftest ^{:stratum 0} stop-capture-process-waits-after-destroy-test
   (testing "capture timeout waits again after forcible destroy before returning"
     (let [destroyed? (atom false)
           wait-calls (atom [])
@@ -1100,7 +1000,7 @@
             (is (= "" (:out result)))
             (is (= "" (:err result)))))))))
 
-(deftest complete-impl-passes-workdir-to-exec-fn-test
+(deftest ^{:stratum 0} complete-impl-passes-workdir-to-exec-fn-test
   (testing "non-streaming CLI completion runs in the requested workdir"
     (let [seen-opts (atom nil)
           exec-fn   (fn
@@ -1115,7 +1015,7 @@
       (is (= "/tmp/task-worktree" (:workdir @seen-opts))
           "fallback/non-streaming calls must not run in the host checkout"))))
 
-(deftest legacy-1-arity-exec-fn-survives-stdin-path-test
+(deftest ^{:stratum 0} legacy-1-arity-exec-fn-survives-stdin-path-test
   (testing "1-arity user-supplied :exec-fn keeps working when impl invokes 2-arity"
     ;; Backward-compat guard: PR #798 review pointed out that callers
     ;; predating :prompt-via supplied 1-arity exec-fns. The :claude
@@ -1134,7 +1034,7 @@
       (is (some? @seen)
           "legacy 1-arity fn was eventually invoked"))))
 
-(deftest normalize-exec-fn-passes-opts-to-2-arity-fn-test
+(deftest ^{:stratum 0} normalize-exec-fn-passes-opts-to-2-arity-fn-test
   (testing "2-arity user-supplied exec-fn receives opts unchanged"
     (let [seen-opts (atom nil)
           two-arity (fn
@@ -1147,7 +1047,6 @@
       (is (= {:stdin "the-prompt"} @seen-opts)
           "opts must reach a 2-arity-capable fn unchanged"))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Keepalive — decouples stagnation from the CLI's emission cadence
 ;;
 ;; Stage-3 dogfood (2026-05-07) failed at the planner with
@@ -1160,8 +1059,7 @@
 ;; the JVM-side reader is alive. These tests lock both halves of the
 ;; contract — the bug pattern (silence => stagnation) and the fix
 ;; (keepalive masks silence).
-
-(deftest stagnation-fires-on-silence-without-keepalive-test
+(deftest ^{:stratum 0} stagnation-fires-on-silence-without-keepalive-test
   (testing "without keepalive, a silent monitor stagnates after the threshold"
     ;; Bug demonstration: this is the dogfood failure mode in unit form.
     ;; record-activity! once at start, then silence — the timer expires.
@@ -1175,7 +1073,7 @@
         (is (= :stagnation (:type timeout))
             "silence beyond stagnation-threshold-ms ⇒ stagnation fires")))))
 
-(deftest keepalive-prevents-stagnation-during-silence-test
+(deftest ^{:stratum 0} keepalive-prevents-stagnation-during-silence-test
   (testing "keepalive thread refreshes the monitor across silent periods"
     (let [monitor (pm/create-progress-monitor
                    {:stagnation-threshold-ms 80
@@ -1190,7 +1088,7 @@
         (finally
           (stop!))))))
 
-(deftest keepalive-stop-fn-halts-the-thread-test
+(deftest ^{:stratum 0} keepalive-stop-fn-halts-the-thread-test
   (testing "stop! returned by start-keepalive! halts further refreshes"
     (let [monitor (pm/create-progress-monitor
                    {:stagnation-threshold-ms 80
@@ -1205,7 +1103,7 @@
       (is (= :stagnation (:type (pm/check-timeout monitor)))
           "after stop!, silence stagnates as expected"))))
 
-(deftest keepalive-rejects-non-positive-interval-test
+(deftest ^{:stratum 0} keepalive-rejects-non-positive-interval-test
   (testing "start-keepalive! refuses non-positive interval-ms"
     ;; Without validation Thread/sleep would throw IllegalArgumentException
     ;; deep in the worker thread; assert + AssertionError fails fast at the
@@ -1218,7 +1116,7 @@
       (is (thrown? AssertionError (pm/start-keepalive! monitor 1.5))
           "non-integer interval rejected"))))
 
-(deftest keepalive-stop-is-definitive-test
+(deftest ^{:stratum 0} keepalive-stop-is-definitive-test
   (testing "after stop!, no further activity ticks land"
     ;; Race-window guard: stop! interrupts the thread + joins so the
     ;; worker has exited (or is about to exit on the running? check)
@@ -1241,7 +1139,7 @@
               (str "at most one in-flight tick may land after stop!, got "
                    extra-ticks)))))))
 
-(deftest keepalive-does-not-mask-hard-limit-test
+(deftest ^{:stratum 0} keepalive-does-not-mask-hard-limit-test
   (testing "keepalive only refreshes stagnation; max-total-ms still fires"
     ;; Wedge backstop: the keepalive is a per-tick refresh of
     ;; last-activity-at, but :max-total-ms tracks elapsed-since-start
@@ -1261,7 +1159,7 @@
         (finally
           (stop!))))))
 
-(deftest stream-exec-fn-pipes-stdin-test
+(deftest ^{:stratum 0} stream-exec-fn-pipes-stdin-test
   (testing ":stdin opt is written to subprocess stdin in streaming path"
     (let [seen (atom [])
           handler (fn [line] (swap! seen conj line))
@@ -1273,7 +1171,7 @@
       (is (= ["line1" "line2"] @seen)
           "subprocess saw stdin content split by line"))))
 
-(defn- fake-stream-process
+(defn- ^{:stratum 0} fake-stream-process
   "Stub for `#'impl/start-stream-process!`. Returns a map matching the
    shape `stream-exec-fn` consumes, with a `Process` proxy whose
    stdout is `input-stream`. `.destroyForcibly` closes the supplied
@@ -1306,91 +1204,9 @@
      :stdin-thread  nil
      :stderr-thread nil}))
 
-(defn- fake-blocking-stream-process
-  "Variant of `fake-stream-process` whose stdout never produces a line
-   (PipedInputStream connected to a never-written PipedOutputStream).
-   `.destroyForcibly` closes the pipe so the reader unblocks with EOF."
-  []
-  (let [piped-out (java.io.PipedOutputStream.)
-        piped-in  (java.io.PipedInputStream. piped-out)]
-    (fake-stream-process piped-in
-                         (fn [] (try (.close piped-out) (catch Exception _))))))
-
-(defn- fake-eof-stream-process
-  "Variant of `fake-stream-process` whose stdout is immediately empty,
-   so `process-stream-lines` returns cleanly. Used by the no-monitor
-   test."
-  []
-  (fake-stream-process (java.io.ByteArrayInputStream. (byte-array 0))
-                       (fn [])))
-
-(deftest stream-exec-fn-network-drop-returns-network-drop-timeout-test
-  ;; PR-B integration test: when the network-monitor's probe-fn reports
-  ;; sustained failure, `stream-exec-fn` must (a) kill the subprocess
-  ;; so the consumer loop unblocks and (b) surface the network-drop
-  ;; reason as the result's `:timeout` envelope. PR-C will key off the
-  ;; `:type :network-drop` to schedule the auto-resume.
-  (testing "sustained probe failure surfaces a :network-drop timeout result"
-    ;; Stubbed subprocess (see `fake-blocking-stream-process`) — never
-    ;; produces output until the network monitor's `.destroyForcibly`
-    ;; closes the pipe. With a stub probe-fn returning false, the
-    ;; monitor fires within ~30ms (10ms interval × 3 strikes) and
-    ;; forces stream-exec-fn to return. No real subprocess; portable.
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-blocking-stream-process))]
-      (let [handler (fn [_line] nil)
-            monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
-                                                 :stagnation-threshold-ms  120000
-                                                 :max-total-ms             120000})
-            result  (impl/stream-exec-fn
-                      ["unused-because-stubbed"]
-                      handler
-                      {:progress-monitor monitor
-                       :backend-key      :claude
-                       :network-monitor-opts
-                       {:probe-interval-ms 10
-                        :failure-threshold 3
-                        :probe-fn          (constantly false)}})
-            timeout (:timeout result)]
-        (is (some? timeout)
-            "result must carry a :timeout envelope when the monitor fires")
-        (is (= :network-drop (:type timeout)))
-        (is (= :claude (:backend-key timeout)))
-        (is (re-find #"Network drop" (:message timeout))
-            ":message identifies the drop class for downstream log readers")))))
-
-(deftest stream-exec-fn-omits-network-monitor-when-no-backend-key-test
-  ;; Backwards compat: legacy callers (synthetic-stream tests, the
-  ;; `:echo` test backend) supply no `:backend-key`. The network
-  ;; monitor must stay dormant so they keep working unchanged.
-  (testing "without :backend-key, no probe traffic is generated"
-    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
-                                               (fake-eof-stream-process))]
-      (let [probe-calls (atom 0)
-            handler (fn [_line] nil)
-            monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
-            result  (impl/stream-exec-fn
-                      ["unused-because-stubbed"]
-                      handler
-                      {:progress-monitor monitor
-                       ;; No :backend-key. Even if the test caller
-                       ;; mistakenly supplies network-monitor-opts (e.g.
-                       ;; via a stale fixture), the monitor must not
-                       ;; start.
-                       :network-monitor-opts
-                       {:probe-fn (fn [_probe-url]
-                                    (swap! probe-calls inc)
-                                    false)}})]
-        (is (zero? @probe-calls)
-            "probe-fn must not be called when :backend-key is absent")
-        (is (nil? (:timeout result))
-            "process completed without timeout")))))
-
-;------------------------------------------------------------------------------ Layer 6
 ;; Rich tool-event chunks — :tool-call-id/:tool-input on tool_use,
 ;; :tool-result chunks from tool_result content blocks
-
-(deftest parse-claude-stream-tool-use-enriched-test
+(deftest ^{:stratum 0} parse-claude-stream-tool-use-enriched-test
   (testing "tool_use block with id and input yields :tool-call-id and :tool-input"
     (let [line   (json/generate-string
                    {:type "assistant"
@@ -1436,7 +1252,7 @@
       (is (= "t1" (:tool-call-id parsed)))
       (is (= {:pattern "foo"} (:tool-input parsed))))))
 
-(deftest parse-claude-stream-tool-result-test
+(deftest ^{:stratum 0} parse-claude-stream-tool-result-test
   (testing "user message with tool_result block emits :tool-result chunk"
     (let [line   (json/generate-string
                    {:type "user"
@@ -1492,7 +1308,7 @@
       (is (true? (:heartbeat parsed)))
       (is (nil? (:tool-result parsed))))))
 
-(deftest parse-codex-stream-tool-result-test
+(deftest ^{:stratum 0} parse-codex-stream-tool-result-test
   (testing "mcp_tool_result item emits :tool-result chunk"
     (let [line   (json/generate-string
                    {:type "item.completed"
@@ -1541,7 +1357,7 @@
       (is (= "native_call" (:tool-call-id parsed)))
       (is (= "native output" (:tool-output parsed))))))
 
-(deftest stream-with-parser-tool-result-test
+(deftest ^{:stratum 0} stream-with-parser-tool-result-test
   (testing ":tool-result chunks forwarded via on-chunk without accumulating content"
     (let [monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
           chunks  (atom [])
@@ -1597,6 +1413,171 @@
                                        :is_error    false}]}}))
       (is (< before (:last-activity-at @monitor))
           ":tool-result must advance :last-activity-at to keep monitor alive"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} start-stream-reader!-clean-shutdown-prints-no-stderr-test
+  ;; Regression: pre-fix the daemon's `(catch Exception e ...)` caught
+  ;; the InterruptedException raised by `stop-stream-reader!`'s
+  ;; interrupt, then tried to enqueue a `stream-read-failure` anomaly
+  ;; via `.put` — which itself raised IE because the thread's interrupt
+  ;; flag was still set, bubbling the second IE to the JVM default
+  ;; handler and printing an ugly stack trace to stderr. The 2026-06-04
+  ;; dogfood surfaced 18 of these across 20 sub-tasks (pure noise, zero
+  ;; workflow impact).
+  ;;
+  ;; The fix: dedicated `(catch InterruptedException _)` for the clean
+  ;; shutdown + inner try/catch around the anomaly enqueue.
+  ;;
+  ;; The test exercises `start-stream-reader!` / `stop-stream-reader!`
+  ;; directly with a CAPACITY-1 queue so the reader's second `.put`
+  ;; blocks deterministically (no `Thread/sleep`-based race). With the
+  ;; queue full, the reader is guaranteed to be parked on `.put` when
+  ;; `stop-stream-reader!` interrupts it.
+  (testing "interrupting a reader blocked on a full queue does not print to stderr"
+    (let [;; Bounded queue, capacity 1. Pre-filled so the reader's first
+          ;; put blocks immediately.
+          line-queue (java.util.concurrent.LinkedBlockingQueue. 1)
+          _          (.put line-queue "filler")
+          ;; PipedWriter/Reader with one line of content so the reader
+          ;; has something to read and try to enqueue.
+          writer (java.io.PipedWriter.)
+          reader (java.io.BufferedReader. (java.io.PipedReader. writer))
+          _ (.write writer "first-line\n")
+          _ (.flush writer)
+          stderr-capture (java.io.ByteArrayOutputStream.)
+          original-err System/err
+          captured-print-stream (java.io.PrintStream. stderr-capture true "UTF-8")]
+      (try
+        (System/setErr captured-print-stream)
+        (let [reader-thread (start-stream-reader! reader line-queue)]
+          (try
+            (is (wait-until-blocked reader-thread 1000)
+                "reader must reach a blocked state on .put before the interrupt fires")
+            (stop-stream-reader! reader-thread reader)
+            (finally
+              (.join reader-thread 1000))))
+        ;; Read with the same charset the PrintStream wrote.
+        (let [captured (.toString stderr-capture "UTF-8")]
+          (is (not (re-find #"InterruptedException" captured))
+              "clean shutdown must not leak an IE stack trace to stderr"))
+        (finally
+          (System/setErr original-err)
+          ;; Close the redirected stream — flushes any buffered bytes and
+          ;; releases the underlying ByteArrayOutputStream from the
+          ;; PrintStream's writer lock.
+          (.close captured-print-stream)
+          (.close writer))))))
+
+(deftest ^{:stratum 1} claude-args-fn-prompt-via-argv-default-test
+  (testing "prompt-via defaults to :argv — prompt is the last argv element"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt})]
+      (is (= sample-prompt (last args))
+          "prompt is conjoined as positional argv arg")
+      (is (not (some #{"--input-format"} args))
+          "no --input-format flag in argv mode"))))
+
+(deftest ^{:stratum 1} claude-args-fn-prompt-via-argv-explicit-test
+  (testing "prompt-via :argv (explicit) keeps current argv shape"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt :prompt-via :argv})]
+      (is (= sample-prompt (last args))
+          "prompt is conjoined as positional argv arg")
+      (is (not (some #{"--input-format"} args))))))
+
+(deftest ^{:stratum 1} claude-args-fn-prompt-via-stdin-omits-argv-test
+  (testing "prompt-via :stdin drops the positional prompt"
+    (let [args-fn (:args-fn (get impl/backends :claude))
+          args (args-fn {:prompt sample-prompt :prompt-via :stdin})]
+      (is (not (some #{sample-prompt} args))
+          "prompt content must NOT appear in argv when :prompt-via :stdin")
+      (is (some #{"--input-format"} args)
+          "--input-format text flag must be present so claude reads stdin")
+      (is (= "text" (nth args (inc (.indexOf args "--input-format"))))
+          "--input-format value is 'text'"))))
+
+(defn- ^{:stratum 1} fake-blocking-stream-process
+  "Variant of `fake-stream-process` whose stdout never produces a line
+   (PipedInputStream connected to a never-written PipedOutputStream).
+   `.destroyForcibly` closes the pipe so the reader unblocks with EOF."
+  []
+  (let [piped-out (java.io.PipedOutputStream.)
+        piped-in  (java.io.PipedInputStream. piped-out)]
+    (fake-stream-process piped-in
+                         (fn [] (try (.close piped-out) (catch Exception _))))))
+
+(defn- ^{:stratum 1} fake-eof-stream-process
+  "Variant of `fake-stream-process` whose stdout is immediately empty,
+   so `process-stream-lines` returns cleanly. Used by the no-monitor
+   test."
+  []
+  (fake-stream-process (java.io.ByteArrayInputStream. (byte-array 0))
+                       (fn [])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} stream-exec-fn-network-drop-returns-network-drop-timeout-test
+  ;; PR-B integration test: when the network-monitor's probe-fn reports
+  ;; sustained failure, `stream-exec-fn` must (a) kill the subprocess
+  ;; so the consumer loop unblocks and (b) surface the network-drop
+  ;; reason as the result's `:timeout` envelope. PR-C will key off the
+  ;; `:type :network-drop` to schedule the auto-resume.
+  (testing "sustained probe failure surfaces a :network-drop timeout result"
+    ;; Stubbed subprocess (see `fake-blocking-stream-process`) — never
+    ;; produces output until the network monitor's `.destroyForcibly`
+    ;; closes the pipe. With a stub probe-fn returning false, the
+    ;; monitor fires within ~30ms (10ms interval × 3 strikes) and
+    ;; forces stream-exec-fn to return. No real subprocess; portable.
+    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
+                                               (fake-blocking-stream-process))]
+      (let [handler (fn [_line] nil)
+            monitor (pm/create-progress-monitor {:min-activity-interval-ms 1
+                                                 :stagnation-threshold-ms  120000
+                                                 :max-total-ms             120000})
+            result  (impl/stream-exec-fn
+                      ["unused-because-stubbed"]
+                      handler
+                      {:progress-monitor monitor
+                       :backend-key      :claude
+                       :network-monitor-opts
+                       {:probe-interval-ms 10
+                        :failure-threshold 3
+                        :probe-fn          (constantly false)}})
+            timeout (:timeout result)]
+        (is (some? timeout)
+            "result must carry a :timeout envelope when the monitor fires")
+        (is (= :network-drop (:type timeout)))
+        (is (= :claude (:backend-key timeout)))
+        (is (re-find #"Network drop" (:message timeout))
+            ":message identifies the drop class for downstream log readers")))))
+
+(deftest ^{:stratum 2} stream-exec-fn-omits-network-monitor-when-no-backend-key-test
+  ;; Backwards compat: legacy callers (synthetic-stream tests, the
+  ;; `:echo` test backend) supply no `:backend-key`. The network
+  ;; monitor must stay dormant so they keep working unchanged.
+  (testing "without :backend-key, no probe traffic is generated"
+    (with-redefs [impl/start-stream-process! (fn [_cmd _opts]
+                                               (fake-eof-stream-process))]
+      (let [probe-calls (atom 0)
+            handler (fn [_line] nil)
+            monitor (pm/create-progress-monitor {:min-activity-interval-ms 1})
+            result  (impl/stream-exec-fn
+                      ["unused-because-stubbed"]
+                      handler
+                      {:progress-monitor monitor
+                       ;; No :backend-key. Even if the test caller
+                       ;; mistakenly supplies network-monitor-opts (e.g.
+                       ;; via a stale fixture), the monitor must not
+                       ;; start.
+                       :network-monitor-opts
+                       {:probe-fn (fn [_probe-url]
+                                    (swap! probe-calls inc)
+                                    false)}})]
+        (is (zero? @probe-calls)
+            "probe-fn must not be called when :backend-key is absent")
+        (is (nil? (:timeout result))
+            "process completed without timeout")))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

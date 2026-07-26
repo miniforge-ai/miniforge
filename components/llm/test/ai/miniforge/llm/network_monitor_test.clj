@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.network-monitor-test
   "Tests for `ai.miniforge.llm.network-monitor` — the consecutive-
    failure scheduler that turns the probe primitive into a single-fire
@@ -24,9 +23,10 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.network-monitor :as nm]))
 
-;------------------------------------------------------------------------------ Factories + helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- scripted-probe
+;------------------------------------------------------------------------------ Factories + helpers
+(defn- ^{:stratum 0} scripted-probe
   "Build a probe-fn that returns the next value from `script` on each
    call. `script` is a vector of `:up` / `:down` keywords (or true /
    false). Once the script runs out, further calls return the last
@@ -41,7 +41,7 @@
         (swap! idx inc)
         (get coerce v v)))))
 
-(defn- record-call
+(defn- ^{:stratum 0} record-call
   "Build an on-drop callback that swap!'s its diagnostic-map into
    `record-atom` under :calls (vec) and signals the latch."
   [record-atom latch]
@@ -52,19 +52,46 @@
 ;; Short interval / low threshold so the suite stays fast — the
 ;; production defaults are 10s/3 strikes (~30s to fire); tests use ms-
 ;; level intervals for the same logical exercise.
-(def ^:private fast-probe-interval-ms 10)
-(def ^:private fast-failure-threshold 3)
+(def ^{:stratum 0} ^:private fast-probe-interval-ms 10)
 
-(defn- wait-for-fire-or-timeout
+(def ^{:stratum 0} ^:private fast-failure-threshold 3)
+
+(defn- ^{:stratum 0} wait-for-fire-or-timeout
   "Block up to `timeout-ms` for the on-drop callback to fire (the
    `latch` promise to be delivered). Returns the delivered value, or
    `::timeout` if the latch never fires."
   [latch timeout-ms]
   (deref latch timeout-ms ::timeout))
 
-;------------------------------------------------------------------------------ Healthy path
+;------------------------------------------------------------------------------ stream-exec-fn opts merge protection
+;; This test lives here (rather than in interface_test) because it
+;; pins the contract from the monitor's perspective: when callers pass
+;; through `:network-monitor-opts`, the integration must enforce its
+;; own `:probe-url`, `:backend-key`, and `:on-drop`. The integration
+;; site in `stream-exec-fn` (Copilot review on PR #1053) merges caller
+;; opts FIRST, so its protected keys always win.
+(deftest ^{:stratum 0} probe-url-and-on-drop-take-priority-over-caller-opts-test
+  (testing "caller opts merged FIRST → integration owns the protected keys"
+    ;; Mimic the merge order that stream-exec-fn now uses:
+    ;;   (merge caller-opts {:probe-url ... :backend-key ... :on-drop ...})
+    (let [caller-opts {:probe-url   "https://malicious.example.com/"
+                       :on-drop     (fn [_] (throw (Exception. "caller's on-drop")))
+                       :backend-key :spoofed}
+          integration {:probe-url   "https://real.example.com/"
+                       :backend-key :claude
+                       :on-drop     (fn [diag]
+                                      (is (= "https://real.example.com/" (:probe-url diag)))
+                                      (is (= :claude (:backend-key diag))))}
+          effective   (merge caller-opts integration)]
+      (is (= "https://real.example.com/" (:probe-url effective)))
+      (is (= :claude (:backend-key effective)))
+      (is (not= (:on-drop caller-opts) (:on-drop effective))
+          "integration's on-drop wins; caller's on-drop is discarded"))))
 
-(deftest steady-healthy-stream-never-fires-test
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Healthy path
+(deftest ^{:stratum 1} steady-healthy-stream-never-fires-test
   (testing "every probe returns :up → on-drop never called"
     (let [record (atom {:calls []})
           stop!  (nm/start-network-monitor!
@@ -83,8 +110,7 @@
           (stop!))))))
 
 ;------------------------------------------------------------------------------ Transient blip
-
-(deftest transient-blip-resets-counter-test
+(deftest ^{:stratum 1} transient-blip-resets-counter-test
   (testing "an isolated failure followed by a recovery does not fire on-drop"
     (let [record (atom {:calls []})
           ;; failure-threshold 3; sequence is down, up, down, down, up, up...
@@ -106,8 +132,7 @@
           (stop!))))))
 
 ;------------------------------------------------------------------------------ Confirmed drop
-
-(deftest three-consecutive-failures-fire-on-drop-once-test
+(deftest ^{:stratum 1} three-consecutive-failures-fire-on-drop-once-test
   (testing "exactly threshold consecutive failures fires on-drop once"
     (let [record (atom {:calls []})
           latch  (promise)
@@ -133,7 +158,7 @@
         (finally
           (stop!))))))
 
-(deftest on-drop-diagnostic-shape-test
+(deftest ^{:stratum 1} on-drop-diagnostic-shape-test
   (testing "on-drop receives a diagnostic map with the canonical keys"
     (let [record (atom {:calls []})
           latch  (promise)
@@ -159,8 +184,7 @@
           (stop!))))))
 
 ;------------------------------------------------------------------------------ Probe-fn exception is treated as failure
-
-(deftest probe-fn-exception-counts-as-failure-test
+(deftest ^{:stratum 1} probe-fn-exception-counts-as-failure-test
   ;; A probe that throws (DNS resolution failure that bubbles out,
   ;; some other unexpected exception) should be treated as a failed
   ;; probe rather than crashing the monitor thread.
@@ -185,8 +209,7 @@
           (stop!))))))
 
 ;------------------------------------------------------------------------------ stop! semantics
-
-(deftest stop!-prevents-further-on-drop-calls-test
+(deftest ^{:stratum 1} stop!-prevents-further-on-drop-calls-test
   (testing "stop! invoked before the threshold is reached → on-drop never fires"
     (let [record (atom {:calls []})
           stop!  (nm/start-network-monitor!
@@ -203,7 +226,7 @@
       (is (empty? (:calls @record))
           "stop! interrupts the worker before on-drop can fire"))))
 
-(deftest stop!-is-idempotent-test
+(deftest ^{:stratum 1} stop!-is-idempotent-test
   (testing "calling stop! twice is a no-op the second time"
     (let [stop! (nm/start-network-monitor!
                   {:probe-url         "https://test.example.com/"
@@ -217,8 +240,7 @@
           "second stop! returns nil — does not throw"))))
 
 ;------------------------------------------------------------------------------ Argument validation
-
-(deftest start-monitor-rejects-missing-probe-url-test
+(deftest ^{:stratum 1} start-monitor-rejects-missing-probe-url-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
                  {:backend-key       :claude
@@ -237,7 +259,7 @@
                   :on-drop           (fn [_] nil)}))
       "empty :probe-url is not a usable URL"))
 
-(deftest start-monitor-rejects-non-positive-interval-test
+(deftest ^{:stratum 1} start-monitor-rejects-non-positive-interval-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
                  {:probe-url         "https://test.example.com/"
@@ -255,7 +277,7 @@
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           (fn [_] nil)}))))
 
-(deftest start-monitor-rejects-non-positive-threshold-test
+(deftest ^{:stratum 1} start-monitor-rejects-non-positive-threshold-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
                  {:probe-url         "https://test.example.com/"
@@ -273,7 +295,7 @@
                   :probe-fn          (scripted-probe [:up])
                   :on-drop           (fn [_] nil)}))))
 
-(deftest start-monitor-rejects-non-fn-on-drop-test
+(deftest ^{:stratum 1} start-monitor-rejects-non-fn-on-drop-test
   (is (thrown? AssertionError
                (nm/start-network-monitor!
                  {:probe-url         "https://test.example.com/"
@@ -290,8 +312,7 @@
 ;; after stop! had already returned. The fix uses `compare-and-set!`
 ;; on the running? atom to atomically claim the firing slot — stop!
 ;; and the worker race for the same true→false transition.
-
-(deftest stop!-racing-the-fire-cas-suppresses-on-drop-test
+(deftest ^{:stratum 1} stop!-racing-the-fire-cas-suppresses-on-drop-test
   ;; Drive many short trials. The slow `:on-drop` callback amplifies
   ;; the window in which a stop! after the threshold check could race
   ;; the fire. With the CAS in place, a stop! that wins the
@@ -320,7 +341,7 @@
         (is (<= (count (:calls @record)) 1)
             "CAS guarantees at most one on-drop call, regardless of race outcome")))))
 
-(deftest stop!-then-already-passed-threshold-fires-at-most-once-test
+(deftest ^{:stratum 1} stop!-then-already-passed-threshold-fires-at-most-once-test
   ;; The classic single-fire guarantee under heavy concurrent stop! /
   ;; probe pressure. After firing, the worker exits; extra :down
   ;; probes do NOT produce additional calls.
@@ -340,30 +361,3 @@
         (is (= 1 (count (:calls @record))))
         (finally
           (stop!))))))
-
-;------------------------------------------------------------------------------ stream-exec-fn opts merge protection
-
-;; This test lives here (rather than in interface_test) because it
-;; pins the contract from the monitor's perspective: when callers pass
-;; through `:network-monitor-opts`, the integration must enforce its
-;; own `:probe-url`, `:backend-key`, and `:on-drop`. The integration
-;; site in `stream-exec-fn` (Copilot review on PR #1053) merges caller
-;; opts FIRST, so its protected keys always win.
-
-(deftest probe-url-and-on-drop-take-priority-over-caller-opts-test
-  (testing "caller opts merged FIRST → integration owns the protected keys"
-    ;; Mimic the merge order that stream-exec-fn now uses:
-    ;;   (merge caller-opts {:probe-url ... :backend-key ... :on-drop ...})
-    (let [caller-opts {:probe-url   "https://malicious.example.com/"
-                       :on-drop     (fn [_] (throw (Exception. "caller's on-drop")))
-                       :backend-key :spoofed}
-          integration {:probe-url   "https://real.example.com/"
-                       :backend-key :claude
-                       :on-drop     (fn [diag]
-                                      (is (= "https://real.example.com/" (:probe-url diag)))
-                                      (is (= :claude (:backend-key diag))))}
-          effective   (merge caller-opts integration)]
-      (is (= "https://real.example.com/" (:probe-url effective)))
-      (is (= :claude (:backend-key effective)))
-      (is (not= (:on-drop caller-opts) (:on-drop effective))
-          "integration's on-drop wins; caller's on-drop is discarded"))))

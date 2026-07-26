@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.ci-monitor
   "CI status monitoring for PRs.
 
@@ -30,9 +29,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; CI status types
 
-(def ci-statuses
+;; CI status types
+(def ^{:stratum 0} ci-statuses
   "Possible CI check statuses."
   #{:pending    ; Checks running
     :success    ; All checks passed
@@ -42,14 +41,12 @@
     :timed-out  ; Checks timed out
     :unknown})  ; Could not determine status
 
-(def terminal-statuses
+(def ^{:stratum 0} terminal-statuses
   "CI statuses that indicate checks are complete."
   #{:success :failure :neutral :cancelled :timed-out})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
-
-(defn run-gh-command
+(defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
   (try
@@ -67,7 +64,70 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn get-pr-checks
+;; Value coercion
+(defn- ^{:stratum 0} keywordize-val
+  "Coerce a map value to a lower-case keyword, returning `default` when nil."
+  [m k default]
+  (or (some-> (get m k) str/lower-case keyword) default))
+
+(defn ^{:stratum 0} get-check-logs
+  "Get logs for failed checks.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: PR number
+   - check-name: Name of the check
+
+   Returns result with logs."
+  [_worktree-path _pr-number check-name]
+  ;; Note: gh doesn't have a direct way to get check logs
+  ;; This would typically go through the GitHub API or action artifacts
+  (dag/ok {:logs nil
+           :message "Log retrieval requires GitHub API access"
+           :check-name check-name}))
+
+;; Monitoring loop
+(defn ^{:stratum 0} create-ci-monitor
+  "Create a CI monitor for a PR.
+
+   Arguments:
+   - dag-id: DAG run ID
+   - run-id: Run instance ID
+   - task-id: Task ID
+   - pr-number: PR number
+   - worktree-path: Path to git worktree
+
+   Options:
+   - :poll-interval-ms - Polling interval (default 30000)
+   - :timeout-ms - Total timeout (default 3600000 = 1 hour)
+   - :event-bus - Event bus for publishing events
+
+   Returns monitor state atom."
+  [dag-id run-id task-id pr-number worktree-path
+   & {:keys [poll-interval-ms timeout-ms event-bus]
+      :or {poll-interval-ms 30000 timeout-ms 3600000}}]
+  (atom {:dag-id dag-id
+         :run-id run-id
+         :task-id task-id
+         :pr-number pr-number
+         :worktree-path worktree-path
+         :poll-interval-ms poll-interval-ms
+         :timeout-ms timeout-ms
+         :event-bus event-bus
+         :status :pending
+         :started-at nil
+         :last-poll nil
+         :polls 0
+         :running? false}))
+
+(defn ^{:stratum 0} stop-ci-monitor
+  "Stop a running CI monitor."
+  [monitor]
+  (swap! monitor assoc :running? false))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-pr-checks
   "Get CI check status for a PR.
 
    Arguments:
@@ -92,7 +152,7 @@
           (dag/ok {:checks [] :raw (:output (:data result))})))
       result)))
 
-(defn get-pr-status
+(defn ^{:stratum 1} get-pr-status
   "Get overall PR status including checks.
 
    Returns result with :state :mergeable :reviewDecision etc."
@@ -105,18 +165,8 @@
       (dag/ok {:raw (:output (:data result))})
       result)))
 
-;------------------------------------------------------------------------------ Layer 0.5
-;; Value coercion
-
-(defn- keywordize-val
-  "Coerce a map value to a lower-case keyword, returning `default` when nil."
-  [m k default]
-  (or (some-> (get m k) str/lower-case keyword) default))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Status computation
-
-(defn compute-ci-status
+(defn ^{:stratum 1} compute-ci-status
   "Compute overall CI status from individual checks.
 
    Arguments:
@@ -161,59 +211,9 @@
      :neutral neutral
      :total (count checks)}))
 
-(defn get-check-logs
-  "Get logs for failed checks.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - check-name: Name of the check
-
-   Returns result with logs."
-  [_worktree-path _pr-number check-name]
-  ;; Note: gh doesn't have a direct way to get check logs
-  ;; This would typically go through the GitHub API or action artifacts
-  (dag/ok {:logs nil
-           :message "Log retrieval requires GitHub API access"
-           :check-name check-name}))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Monitoring loop
 
-(defn create-ci-monitor
-  "Create a CI monitor for a PR.
-
-   Arguments:
-   - dag-id: DAG run ID
-   - run-id: Run instance ID
-   - task-id: Task ID
-   - pr-number: PR number
-   - worktree-path: Path to git worktree
-
-   Options:
-   - :poll-interval-ms - Polling interval (default 30000)
-   - :timeout-ms - Total timeout (default 3600000 = 1 hour)
-   - :event-bus - Event bus for publishing events
-
-   Returns monitor state atom."
-  [dag-id run-id task-id pr-number worktree-path
-   & {:keys [poll-interval-ms timeout-ms event-bus]
-      :or {poll-interval-ms 30000 timeout-ms 3600000}}]
-  (atom {:dag-id dag-id
-         :run-id run-id
-         :task-id task-id
-         :pr-number pr-number
-         :worktree-path worktree-path
-         :poll-interval-ms poll-interval-ms
-         :timeout-ms timeout-ms
-         :event-bus event-bus
-         :status :pending
-         :started-at nil
-         :last-poll nil
-         :polls 0
-         :running? false}))
-
-(defn poll-ci-status
+(defn ^{:stratum 2} poll-ci-status
   "Poll CI status once.
 
    Arguments:
@@ -266,7 +266,9 @@
                                            (str/join ", "
                                                      (map :name (:failed computed)))))))}))))
 
-(defn run-ci-monitor
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} run-ci-monitor
   "Run the CI monitor until checks complete or timeout.
 
    Arguments:
@@ -328,11 +330,6 @@
           (do
             (Thread/sleep poll-interval-ms)
             (recur)))))))
-
-(defn stop-ci-monitor
-  "Stop a running CI monitor."
-  [monitor]
-  (swap! monitor assoc :running? false))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

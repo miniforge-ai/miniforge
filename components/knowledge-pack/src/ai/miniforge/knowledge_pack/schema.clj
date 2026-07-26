@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge-pack.schema
   "Malli schemas for Zettelkasten knowledge packs.
 
@@ -46,9 +45,9 @@
    [ai.miniforge.knowledge.interface :as knowledge]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Content-addressed reference triple.
 
-(def ZettelRef
+;; Content-addressed reference triple.
+(def ^{:stratum 0} ZettelRef
   "The canonical Decision-6 reference to a zettel revision. Pack
    manifests + future content-addressed surfaces reference zettels
    only via this triple; no surface is permitted to substitute the
@@ -60,9 +59,9 @@
    [:zettel/digest      [:re #"^[0-9a-f]{64}$"]]])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Pack manifest.
 
-(def KnowledgePack
+;; Pack manifest.
+(def ^{:stratum 1} KnowledgePack
   "A curated collection of zettel revisions distributed as a
    content-addressed manifest.
 

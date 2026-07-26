@@ -9,7 +9,6 @@
 ;; You may obtain a copy of the License at
 ;;
 ;;     http://www.apache.org/licenses/LICENSE-2.0
-
 (ns ai.miniforge.knowledge.learning-test
   "Tests for the learning lifecycle — capture and promotion.
 
@@ -32,17 +31,17 @@
    [clojure.test :refer [deftest is testing use-fixtures]]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Fixtures.
+(def ^{:stratum 0} ^:dynamic *store* nil)
 
-(def ^:dynamic *store* nil)
-
-(defn- with-store [f]
+(defn- ^{:stratum 0} with-store [f]
   (binding [*store* (knowledge/create-store)]
     (f)))
 
-(use-fixtures :each with-store)
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- new-learning
+(defn- ^{:stratum 1} new-learning
   "Build + persist a fresh `:learning` zettel; return the persisted
    value so callers can drive `promote-learning` against its id."
   []
@@ -54,16 +53,24 @@
     (knowledge/put-zettel *store* z)
     (knowledge/get-zettel *store* (:zettel/id z))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; promote-learning trust stamp.
+(deftest ^{:stratum 1} test-promote-learning-on-non-learning-returns-nil
+  (testing "promote-learning is a no-op on a non-:learning zettel — existing contract"
+    (let [rule (knowledge/create-zettel "200-already-a-rule" "Already a Rule"
+                                        "Body." :rule)
+          _    (knowledge/put-zettel *store* rule)
+          r    (knowledge/promote-learning *store* (:zettel/id rule))]
+      (is (nil? r)))))
 
-(deftest test-fresh-learning-defaults-to-untrusted
+;------------------------------------------------------------------------------ Layer 2
+
+;; promote-learning trust stamp.
+(deftest ^{:stratum 2} test-fresh-learning-defaults-to-untrusted
   (testing "create-zettel + put → the persisted :learning carries :zettel/trust-level :untrusted"
     (let [l (new-learning)]
       (is (= :learning  (:zettel/type l)))
       (is (= :untrusted (:zettel/trust-level l))))))
 
-(deftest test-promote-learning-stamps-trusted-on-promoted-revision
+(deftest ^{:stratum 2} test-promote-learning-stamps-trusted-on-promoted-revision
   (testing "promote-learning flips type to :rule AND stamps :zettel/trust-level :trusted"
     (let [l        (new-learning)
           promoted (knowledge/promote-learning *store* (:zettel/id l)
@@ -73,18 +80,8 @@
       (is (= :trusted (:zettel/trust-level promoted))
           "promotion is the only path that grants :trusted"))))
 
-(deftest test-promote-learning-on-non-learning-returns-nil
-  (testing "promote-learning is a no-op on a non-:learning zettel — existing contract"
-    (let [rule (knowledge/create-zettel "200-already-a-rule" "Already a Rule"
-                                        "Body." :rule)
-          _    (knowledge/put-zettel *store* rule)
-          r    (knowledge/promote-learning *store* (:zettel/id rule))]
-      (is (nil? r)))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Trust drops on a content edit AFTER promotion (the closure of #836).
-
-(deftest test-content-edit-on-promoted-rule-drops-trust
+(deftest ^{:stratum 2} test-content-edit-on-promoted-rule-drops-trust
   (testing "update-zettel on a content-bearing field of a :trusted rule resets to :untrusted"
     ;; The gap #836 closes: a promoted-and-trusted rule must NOT
     ;; carry trust onto a new revision when its content rotates.
@@ -100,7 +97,7 @@
       (is (= :untrusted (:zettel/trust-level edited))
           "rotation reset trust on the new revision"))))
 
-(deftest test-operational-edit-on-promoted-rule-preserves-trust
+(deftest ^{:stratum 2} test-operational-edit-on-promoted-rule-preserves-trust
   (testing "update-zettel on operational metadata only preserves the :trusted stamp"
     (let [l        (new-learning)
           promoted (knowledge/promote-learning *store* (:zettel/id l))
@@ -110,3 +107,5 @@
           "operational edit did not rotate revision-id")
       (is (= :trusted (:zettel/trust-level edited))
           "trust preserved across operational-only edit"))))
+
+(use-fixtures :each with-store)

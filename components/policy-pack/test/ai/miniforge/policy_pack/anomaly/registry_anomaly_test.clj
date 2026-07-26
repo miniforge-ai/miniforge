@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.anomaly.registry-anomaly-test
   "Coverage for `policy-pack/registry` anomaly behavior.
 
@@ -28,12 +27,15 @@
   (:import
    (clojure.lang ExceptionInfo)))
 
-(defn- new-registry []
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} new-registry []
   (registry/->InMemoryPackRegistry (atom {:packs {}})))
 
-;------------------------------------------------------------------------------ register-pack — invalid schema
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest register-pack-invalid-schema-returns-anomaly
+;------------------------------------------------------------------------------ register-pack — invalid schema
+(deftest ^{:stratum 1} register-pack-invalid-schema-returns-anomaly
   (testing "schema-invalid pack returns :invalid-input / :anomalies/incorrect"
     (let [reg    (new-registry)
           result (registry/register-pack reg {:pack/id :bad-pack})]
@@ -42,7 +44,7 @@
       (is (= :anomalies/incorrect (:anomaly/subtype result)))
       (is (= "Invalid pack schema" (:anomaly/message result))))))
 
-(deftest register-pack-anomaly-carries-pack-id
+(deftest ^{:stratum 1} register-pack-anomaly-carries-pack-id
   (testing "anomaly data carries :pack-id and schema errors"
     (let [reg    (new-registry)
           result (registry/register-pack reg {:pack/id :bad})]
@@ -50,8 +52,7 @@
       (is (contains? (:anomaly/data result) :errors)))))
 
 ;------------------------------------------------------------------------------ import-pack — unsupported source
-
-(deftest import-pack-string-source-throws-unsupported
+(deftest ^{:stratum 1} import-pack-string-source-throws-unsupported
   (testing "string source raises :anomalies/unsupported"
     (let [reg    (new-registry)
           thrown (try (registry/import-pack reg "/path/to/pack.edn") nil (catch ExceptionInfo e e))]
@@ -60,8 +61,7 @@
       (is (= :anomalies/unsupported (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ export-pack — pack not found
-
-(deftest export-pack-not-found-returns-anomaly
+(deftest ^{:stratum 1} export-pack-not-found-returns-anomaly
   (testing "missing pack returns :not-found / :anomalies/not-found"
     (let [reg    (new-registry)
           result (registry/export-pack reg :missing "1.0.0" :edn)]
@@ -71,8 +71,7 @@
       (is (= {:pack-id :missing :version "1.0.0"} (:anomaly/data result))))))
 
 ;------------------------------------------------------------------------------ export-pack — unsupported / unknown formats
-
-(deftest export-pack-json-unsupported
+(deftest ^{:stratum 1} export-pack-json-unsupported
   (testing "JSON export raises :anomalies/unsupported for present pack"
     (let [reg (new-registry)
           pack {:pack/id :p1
@@ -87,7 +86,7 @@
            #"JSON export not implemented"
            (registry/export-pack reg :p1 "1.0.0" :json))))))
 
-(deftest export-pack-directory-unsupported
+(deftest ^{:stratum 1} export-pack-directory-unsupported
   (testing "directory export raises :anomalies/unsupported for present pack"
     (let [reg (new-registry)
           pack {:pack/id :p1
@@ -102,7 +101,7 @@
            #"Directory export not implemented"
            (registry/export-pack reg :p1 "1.0.0" :directory))))))
 
-(deftest export-pack-unknown-format-incorrect
+(deftest ^{:stratum 1} export-pack-unknown-format-incorrect
   (testing "unknown format raises :anomalies/incorrect for present pack"
     (let [reg (new-registry)
           pack {:pack/id :p1
