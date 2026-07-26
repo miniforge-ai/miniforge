@@ -269,7 +269,7 @@ second one). Verified each directly against the code before fixing:
     itself. Added both (and their case variants, via the existing
     case-insensitive check) to the reserved set.
 
-Added 16 regression tests: 8 in `sandbox_test.clj`
+Added 15 regression tests: 8 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
@@ -299,7 +299,7 @@ behavior only the fixed code produces — verified by inspection (and, for
 the `yaml-scalar` leading-dash regex, by an actual test failure during
 development that caught the gap, and again for the `create-branch!`
 argv-vector conversion, which broke two existing tests'
-substring assertions until `cmd-str` was added) that all sixteen would
+substring assertions until `cmd-str` was added) that all fifteen would
 fail against the pre-fix code.
 
 ## Testing Plan
@@ -314,7 +314,7 @@ fail against the pre-fix code.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the fourteen review-flagged issues (above) and added 16
+6. Fixed the fourteen review-flagged issues (above) and added 15
    regression tests. Ran all 9 test namespaces directly via `clojure
    -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 260
    tests, 658 assertions, 0 failures, 0 errors.
@@ -381,7 +381,7 @@ newly-surfaced `SL003` files above.
       of the reserved-word set itself, missing `on`/`off`);
       `sandbox.clj`'s `create-branch!` plain-string-concat fetch call;
       `reuse-existing-pr!`'s inverted docstring in both `sandbox.clj` and
-      `git.clj`. 16 regression tests added.
+      `git.clj`. 15 regression tests added.
 - [x] Component tests pass (260 tests, 658 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
