@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval.git
   "N13 §2.5 Comment Response Agent — Layer 3a: git commit + push.
 
@@ -28,7 +27,9 @@
    [babashka.process :as process]
    [clojure.string :as str]))
 
-(defn- git-sh
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} git-sh
   "Run `git -C worktree-path <args>`. Returns DAG result."
   [worktree-path & args]
   (try
@@ -44,18 +45,7 @@
     (catch Throwable e
       (dag/err :policy-eval/git-failed (.getMessage e) {:args (vec args)}))))
 
-(defn- stage-paths!
-  "git add each unique path in `applied-fixes`."
-  [worktree-path applied-fixes]
-  (let [paths (distinct (map :path applied-fixes))]
-    (reduce
-     (fn [acc path]
-       (let [r (git-sh worktree-path "add" "--" path)]
-         (if (dag/ok? r) acc (reduced r))))
-     (dag/ok {:staged-count (count paths)})
-     paths)))
-
-(defn- commit-message
+(defn- ^{:stratum 0} commit-message
   "Build a commit message summarizing the applied fixes."
   [applied-fixes]
   (let [n (count applied-fixes)]
@@ -68,7 +58,22 @@
          "\n\n"
          "Applied by miniforge pr-lifecycle/policy-eval-responder per N13 §2.5.")))
 
-(defn commit-and-push!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} stage-paths!
+  "git add each unique path in `applied-fixes`."
+  [worktree-path applied-fixes]
+  (let [paths (distinct (map :path applied-fixes))]
+    (reduce
+     (fn [acc path]
+       (let [r (git-sh worktree-path "add" "--" path)]
+         (if (dag/ok? r) acc (reduced r))))
+     (dag/ok {:staged-count (count paths)})
+     paths)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} commit-and-push!
   "Stage all touched files, commit, push. Returns DAG result with
    `{:commit-sha :pushed?}` on success.
 

@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.pr-poller
   "GitHub PR polling adapter with watermark persistence.
 
@@ -33,17 +32,14 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas + watermark persistence
 
-(def WatermarkEntry
+;; Schemas + watermark persistence
+(def ^{:stratum 0} WatermarkEntry
   [:map
    [:last-seen-at :string]
    [:advanced-at :string]])
 
-(def Watermarks
-  [:map-of int? WatermarkEntry])
-
-(def PrInfo
+(def ^{:stratum 0} PrInfo
   [:map
    [:pr/number int?]
    [:pr/url :string]
@@ -52,7 +48,7 @@
    [:pr/sha :string]
    [:pr/updated-at :string]])
 
-(def PrComment
+(def ^{:stratum 0} PrComment
   [:map
    [:comment/id int?]
    [:comment/body {:optional true} [:maybe :string]]
@@ -62,59 +58,16 @@
    [:comment/path {:optional true} [:maybe :string]]
    [:comment/line {:optional true} [:maybe int?]]])
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-(def ^:private state-dir
+(def ^{:stratum 0} ^:private state-dir
   "Base directory for PR monitor state."
   (str (mf-config/miniforge-home) "/state/pr-monitor"))
 
-(defn- ensure-state-dir!
-  "Ensure the state directory exists."
-  []
-  (let [dir (io/file state-dir)]
-    (when-not (.exists dir)
-      (.mkdirs dir))))
-
-(defn load-watermarks
-  "Load watermarks from persistent storage.
-
-   Returns map of PR number → {:last-seen-at string :advanced-at string}.
-   Safe to call on restart — returns empty map when no state exists."
-  []
-  (let [f (io/file state-dir "watermarks.edn")]
-    (if (.exists f)
-      (try
-        (->> f
-             slurp
-             edn/read-string
-             (validate! Watermarks))
-        (catch Exception _e {}))
-      {})))
-
-(defn save-watermarks!
-  "Persist watermarks to disk. Idempotent and safe to call every cycle."
-  [watermarks]
-  (ensure-state-dir!)
-  (spit (io/file state-dir "watermarks.edn")
-        (pr-str watermarks)))
-
-(defn advance-watermark
-  "Advance the watermark for a PR to the given timestamp.
-
-   Returns updated watermarks map (pure — call save-watermarks! to persist)."
-  [watermarks pr-number timestamp]
-  (validate!
-   Watermarks
-   (assoc watermarks pr-number
-          {:last-seen-at timestamp
-           :advanced-at (str (java.util.Date.))})))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
-
-(defn- run-gh
+(defn- ^{:stratum 0} run-gh
   "Run a gh CLI command and return DAG result.
 
    Arguments:
@@ -137,10 +90,36 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PR listing
+(defn ^{:stratum 0} comments-since
+  "Filter comments to only those created after a watermark timestamp.
 
-(defn- normalize-pr
+   Arguments:
+   - comments: Vector of comment maps with :comment/created-at
+   - since: Timestamp string (ISO 8601) or nil for all comments
+
+   Returns filtered comments sorted by creation time."
+  [comments since]
+  (if-not since
+    (vec (sort-by :comment/created-at comments))
+    (->> comments
+         (filter #(pos? (compare (str (:comment/created-at %)) (str since))))
+         (sort-by :comment/created-at)
+         vec)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Watermarks
+  [:map-of int? WatermarkEntry])
+
+(defn- ^{:stratum 1} ensure-state-dir!
+  "Ensure the state directory exists."
+  []
+  (let [dir (io/file state-dir)]
+    (when-not (.exists dir)
+      (.mkdirs dir))))
+
+;; PR listing
+(defn- ^{:stratum 1} normalize-pr
   [pr]
   (validate!
    PrInfo
@@ -151,7 +130,94 @@
     :pr/sha (:headRefOid pr)
     :pr/updated-at (:updatedAt pr)}))
 
-(defn poll-open-prs
+(defn ^{:stratum 1} current-github-login
+  "Resolve the authenticated GitHub login via `gh api user --jq .login`.
+
+   Used as the default `:self-author` for PR monitoring so the monitor loop
+   can find PRs this instance authored when no self-author is configured.
+   Returns the login string, or nil when gh is unauthenticated/unavailable."
+  [worktree-path]
+  (let [result (run-gh ["gh" "api" "user" "--jq" ".login"] worktree-path)]
+    (when (dag/ok? result)
+      (let [login (str/trim (:output (:data result) ""))]
+        (when (seq login) login)))))
+
+;; Comment fetching
+(defn- ^{:stratum 1} normalize-comment
+  [comment comment-type]
+  (validate!
+   PrComment
+   (cond-> {:comment/id (:id comment)
+            :comment/body (:body comment)
+            :comment/author (get-in comment [:user :login])
+            :comment/created-at (:created_at comment)
+            :comment/type comment-type}
+     (:path comment)
+     (assoc :comment/path (:path comment))
+
+     (:original_line comment)
+     (assoc :comment/line (:original_line comment))
+
+     (:line comment)
+     (assoc :comment/line (:line comment)))))
+
+;; Comment posting
+(defn ^{:stratum 1} post-comment
+  "Post an issue comment on a PR.
+
+   Arguments:
+   - worktree-path: Path to git repo
+   - pr-number: PR number
+   - body: Comment body text
+
+   Returns DAG result with :comment-posted true on success."
+  [worktree-path pr-number body]
+  (let [result (run-gh
+                ["gh" "pr" "comment" (str pr-number)
+                 "--body" body]
+                worktree-path)]
+    (if (dag/ok? result)
+      (dag/ok {:comment-posted true
+               :pr-number pr-number})
+      result)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} load-watermarks
+  "Load watermarks from persistent storage.
+
+   Returns map of PR number → {:last-seen-at string :advanced-at string}.
+   Safe to call on restart — returns empty map when no state exists."
+  []
+  (let [f (io/file state-dir "watermarks.edn")]
+    (if (.exists f)
+      (try
+        (->> f
+             slurp
+             edn/read-string
+             (validate! Watermarks))
+        (catch Exception _e {}))
+      {})))
+
+(defn ^{:stratum 2} save-watermarks!
+  "Persist watermarks to disk. Idempotent and safe to call every cycle."
+  [watermarks]
+  (ensure-state-dir!)
+  (spit (io/file state-dir "watermarks.edn")
+        (pr-str watermarks)))
+
+(defn ^{:stratum 2} advance-watermark
+  "Advance the watermark for a PR to the given timestamp.
+
+   Returns updated watermarks map (pure — call save-watermarks! to persist)."
+  [watermarks pr-number timestamp]
+  (validate!
+   Watermarks
+   (assoc watermarks pr-number
+          {:last-seen-at timestamp
+           :advanced-at (str (java.util.Date.))})))
+
+(defn ^{:stratum 2} poll-open-prs
   "Poll GitHub for open PRs authored by a given login.
 
    Arguments:
@@ -180,40 +246,7 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
-(defn current-github-login
-  "Resolve the authenticated GitHub login via `gh api user --jq .login`.
-
-   Used as the default `:self-author` for PR monitoring so the monitor loop
-   can find PRs this instance authored when no self-author is configured.
-   Returns the login string, or nil when gh is unauthenticated/unavailable."
-  [worktree-path]
-  (let [result (run-gh ["gh" "api" "user" "--jq" ".login"] worktree-path)]
-    (when (dag/ok? result)
-      (let [login (str/trim (:output (:data result) ""))]
-        (when (seq login) login)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Comment fetching
-
-(defn- normalize-comment
-  [comment comment-type]
-  (validate!
-   PrComment
-   (cond-> {:comment/id (:id comment)
-            :comment/body (:body comment)
-            :comment/author (get-in comment [:user :login])
-            :comment/created-at (:created_at comment)
-            :comment/type comment-type}
-     (:path comment)
-     (assoc :comment/path (:path comment))
-
-     (:original_line comment)
-     (assoc :comment/line (:original_line comment))
-
-     (:line comment)
-     (assoc :comment/line (:line comment)))))
-
-(defn- parse-gh-comments
+(defn- ^{:stratum 2} parse-gh-comments
   "Parse JSON output from gh api into normalized comment maps."
   [raw comment-type]
   (when-not (str/blank? raw)
@@ -222,7 +255,9 @@
         (into [] (map #(normalize-comment % comment-type)) parsed))
       (catch Exception _e []))))
 
-(defn fetch-pr-comments
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} fetch-pr-comments
   "Fetch all comments for a PR via GitHub REST API.
 
    Fetches both review comments (inline code comments) and issue comments
@@ -268,48 +303,10 @@
                                (or issue-comments []))]
         (dag/ok {:comments all-comments})))))
 
-(defn comments-since
-  "Filter comments to only those created after a watermark timestamp.
+;------------------------------------------------------------------------------ Layer 4
 
-   Arguments:
-   - comments: Vector of comment maps with :comment/created-at
-   - since: Timestamp string (ISO 8601) or nil for all comments
-
-   Returns filtered comments sorted by creation time."
-  [comments since]
-  (if-not since
-    (vec (sort-by :comment/created-at comments))
-    (->> comments
-         (filter #(pos? (compare (str (:comment/created-at %)) (str since))))
-         (sort-by :comment/created-at)
-         vec)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Comment posting
-
-(defn post-comment
-  "Post an issue comment on a PR.
-
-   Arguments:
-   - worktree-path: Path to git repo
-   - pr-number: PR number
-   - body: Comment body text
-
-   Returns DAG result with :comment-posted true on success."
-  [worktree-path pr-number body]
-  (let [result (run-gh
-                ["gh" "pr" "comment" (str pr-number)
-                 "--body" body]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:comment-posted true
-               :pr-number pr-number})
-      result)))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Orchestrated polling
-
-(defn poll-pr-for-new-comments
+(defn ^{:stratum 4} poll-pr-for-new-comments
   "Poll a single PR for new comments since its watermark.
 
    Fetches comments, filters by watermark, advances watermark.

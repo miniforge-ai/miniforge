@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.controller-config
   "Load PR lifecycle controller defaults from EDN configuration."
   (:require
@@ -23,9 +22,9 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas + config loading
 
-(def ControllerDefaults
+;; Schemas + config loading
+(def ^{:stratum 0} ControllerDefaults
   [:map
    [:max-fix-iterations nat-int?]
    [:ci-poll-interval-ms nat-int?]
@@ -33,31 +32,37 @@
    [:auto-resolve-comments boolean?]
    [:branch-name-prefix :string]])
 
-(def ControllerConfig
-  [:map
-   [:pr-lifecycle/controller-defaults ControllerDefaults]])
-
-(def ^:private controller-defaults-resource
+(def ^{:stratum 0} ^:private controller-defaults-resource
   "Classpath resource holding controller defaults."
   "config/pr-lifecycle/controller-defaults.edn")
 
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-(defn- load-controller-config
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ControllerConfig
+  [:map
+   [:pr-lifecycle/controller-defaults ControllerDefaults]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} load-controller-config
   []
   (validate! ControllerConfig
              (config/load-config-resource controller-defaults-resource
                                           [:pr-lifecycle/controller-defaults])))
 
-(def ^:private controller-config
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} ^:private controller-config
   (delay (load-controller-config)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Public helpers
+;------------------------------------------------------------------------------ Layer 4
 
-(defn controller-defaults
+;; Public helpers
+(defn ^{:stratum 4} controller-defaults
   "Return the PR lifecycle controller defaults map."
   []
   (:pr-lifecycle/controller-defaults @controller-config))

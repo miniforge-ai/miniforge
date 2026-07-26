@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.review-monitor
   "Review and comment monitoring for PRs.
 
@@ -31,20 +30,18 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Review status types
 
-(def review-states
+;; Review status types
+(def ^{:stratum 0} review-states
   "Possible review states."
   #{:pending           ; Awaiting reviews
     :approved          ; Required approvals met
     :changes-requested ; Reviewer requested changes
     :commented         ; Review submitted with comments only
-    :dismissed})       ; Review was dismissed
+    :dismissed})  ; Review was dismissed
 
-;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
-
-(defn run-gh-command
+(defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
   (try
@@ -62,36 +59,8 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn get-pr-reviews
-  "Get reviews for a PR.
-
-   Returns result with review information."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "view" (str pr-number) "--json"
-                 "reviews,reviewDecision"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:raw (:output (:data result))})
-      result)))
-
-(defn get-pr-comments
-  "Get comments on a PR (both review comments and issue comments).
-
-   Returns result with comments."
-  [worktree-path pr-number]
-  (let [result (run-gh-command
-                ["gh" "pr" "view" (str pr-number) "--json"
-                 "comments,reviewComments"]
-                worktree-path)]
-    (if (dag/ok? result)
-      (dag/ok {:raw (:output (:data result))})
-      result)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Review status computation
-
-(defn parse-review-decision
+(defn ^{:stratum 0} parse-review-decision
   "Parse GitHub review decision into our status.
 
    reviewDecision can be: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, or empty"
@@ -102,7 +71,7 @@
     "REVIEW_REQUIRED" :pending
     :pending))
 
-(defn compute-review-status
+(defn ^{:stratum 0} compute-review-status
   "Compute overall review status from reviews.
 
    Arguments:
@@ -136,7 +105,7 @@
      :approval-count (count unique-approvers)
      :required-approvals required-approvals}))
 
-(defn extract-review-comments
+(defn ^{:stratum 0} extract-review-comments
   "Extract actionable comments from reviews.
 
    Returns sequence of comment maps."
@@ -151,10 +120,8 @@
                :line (:line c)}))
        vec))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Comment tracking
-
-(defn create-comment-tracker
+(defn ^{:stratum 0} create-comment-tracker
   "Create a tracker for PR comments.
 
    Tracks seen comments to detect new ones."
@@ -162,7 +129,7 @@
   (atom {:seen-ids #{}
          :comments []}))
 
-(defn track-comment!
+(defn ^{:stratum 0} track-comment!
   "Track a comment, returning true if it's new."
   [tracker comment]
   (let [comment-id (or (:id comment)
@@ -176,7 +143,40 @@
                    (update :comments conj comment)))))
     (not already-seen?)))
 
-(defn new-comments
+(defn ^{:stratum 0} stop-review-monitor
+  "Stop a running review monitor."
+  [monitor]
+  (swap! monitor assoc :running? false))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-pr-reviews
+  "Get reviews for a PR.
+
+   Returns result with review information."
+  [worktree-path pr-number]
+  (let [result (run-gh-command
+                ["gh" "pr" "view" (str pr-number) "--json"
+                 "reviews,reviewDecision"]
+                worktree-path)]
+    (if (dag/ok? result)
+      (dag/ok {:raw (:output (:data result))})
+      result)))
+
+(defn ^{:stratum 1} get-pr-comments
+  "Get comments on a PR (both review comments and issue comments).
+
+   Returns result with comments."
+  [worktree-path pr-number]
+  (let [result (run-gh-command
+                ["gh" "pr" "view" (str pr-number) "--json"
+                 "comments,reviewComments"]
+                worktree-path)]
+    (if (dag/ok? result)
+      (dag/ok {:raw (:output (:data result))})
+      result)))
+
+(defn ^{:stratum 1} new-comments
   "Get comments that are new since last check.
 
    Arguments:
@@ -189,10 +189,8 @@
        (filter #(track-comment! tracker %))
        vec))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Monitoring
-
-(defn create-review-monitor
+(defn ^{:stratum 1} create-review-monitor
   "Create a review monitor for a PR.
 
    Arguments:
@@ -228,7 +226,9 @@
          :polls 0
          :running? false}))
 
-(defn poll-review-status
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} poll-review-status
   "Poll review status once.
 
    Arguments:
@@ -305,7 +305,9 @@
          :actionable-comments actionable-comments
          :events events}))))
 
-(defn run-review-monitor
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} run-review-monitor
   "Run the review monitor until approved or changes requested.
 
    Note: This doesn't necessarily terminate - it runs until
@@ -359,11 +361,6 @@
           (do
             (Thread/sleep poll-interval-ms)
             (recur)))))))
-
-(defn stop-review-monitor
-  "Stop a running review monitor."
-  [monitor]
-  (swap! monitor assoc :running? false))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

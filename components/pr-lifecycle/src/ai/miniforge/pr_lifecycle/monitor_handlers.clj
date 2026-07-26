@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-handlers
   "Comment handlers for the PR monitor loop."
   (:require
@@ -28,13 +27,13 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- succeeded?
+;; Helpers
+(defn- ^{:stratum 0} succeeded?
   [result]
   (true? (:success? result)))
 
-(def ^:private category->action
+(def ^{:stratum 0} ^:private category->action
   "The PR-monitor's action verb for each classified-comment category. The
    closed vocabulary the classify→act decision records."
   {:change-request :fix
@@ -43,15 +42,94 @@
    :bot-comment    :skip
    :noise          :skip})
 
-(defn- decision-action
+(defn ^{:stratum 0} handle-question
+  "Handle a question comment by generating and posting a reply."
+  [monitor pr-info classified-comment]
+  (let [{:keys [worktree-path generate-fn logger]} (:config @monitor)
+        pr-number (:pr/number pr-info)
+        comment (:comment classified-comment)
+        comment-id (:comment/id comment)
+        body (:comment/body comment)]
+    (if-not generate-fn
+      (do
+        (when logger
+          (log/warn logger :pr-monitor :handler/no-generate-fn
+                    {:message "Cannot answer question — no generate-fn configured"
+                     :data {:pr-number pr-number}}))
+        {:success? false :reason :no-generate-fn})
+      (let [prompt (str "You are miniforge, an autonomous software development agent. "
+                        "A reviewer left this question on a pull request you authored. "
+                        "Answer clearly and concisely. Do not make code changes.\n\n"
+                        "Question:\n" body "\n\n"
+                        "Write only the answer text, no preamble.")
+            answer (try
+                     (generate-fn prompt)
+                     (catch Exception e
+                       (when logger
+                         (log/error logger :pr-monitor :handler/llm-error
+                                    {:message "LLM call failed for question"
+                                     :data {:error (.getMessage e)}}))
+                       nil))]
+        (if answer
+          (let [reply-body (str answer
+                                "\n\n---\n*Answered by miniforge's autonomous PR monitor.*")
+                post-result (poller/post-comment worktree-path pr-number reply-body)]
+            (if (dag/ok? post-result)
+              (do
+                (state/emit! monitor (mevents/question-answered pr-number comment-id))
+                (state/emit! monitor (mevents/reply-posted pr-number comment-id
+                                                           :question-reply))
+                (let [pr-budget (state/get-or-create-budget monitor pr-number)]
+                  (state/update-budget! monitor pr-number
+                                        (budget/record-question-answered pr-budget)))
+                (swap! monitor update-in [:evidence :questions-answered] conj
+                       {:comment-id comment-id :at (java.util.Date.)})
+                (swap! monitor update-in [:evidence :comments-addressed] inc)
+                (when logger
+                  (log/info logger :pr-monitor :handler/question-answered
+                            {:message (str "Answered question on PR #" pr-number)
+                             :data {:comment-id comment-id}}))
+                {:success? true :type :question-answered})
+              (do
+                (when logger
+                  (log/warn logger :pr-monitor :handler/post-failed
+                            {:message "Failed to post question answer"
+                             :data {:pr-number pr-number}}))
+                {:success? false :reason :post-failed})))
+          {:success? false :reason :llm-failed})))))
+
+(defn ^{:stratum 0} handle-bot-comment
+  "Handle a bot comment. Log and skip."
+  [monitor _pr-info classified-comment]
+  (let [logger (get-in @monitor [:config :logger])
+        comment (:comment classified-comment)]
+    (when logger
+      (log/debug logger :pr-monitor :handler/bot-comment
+                 {:message "Bot comment — skipping"
+                  :data {:author (:comment/author comment)}}))
+    {:success? true :type :bot-skipped}))
+
+(defn ^{:stratum 0} handle-approval
+  "Handle an approval comment. Log and skip."
+  [monitor pr-info classified-comment]
+  (let [logger (get-in @monitor [:config :logger])
+        pr-number (:pr/number pr-info)
+        comment (:comment classified-comment)]
+    (when logger
+      (log/info logger :pr-monitor :handler/approval
+                {:message (str "Approval received on PR #" pr-number)
+                 :data {:author (:comment/author comment)}}))
+    {:success? true :type :approval-noted}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} decision-action
   "Action verb for a classified comment's category; unknown categories → :skip."
   [category]
   (get category->action category :skip))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Comment handlers
-
-(defn handle-change-request
+(defn ^{:stratum 1} handle-change-request
   "Handle a change-request comment by running one fix-loop attempt."
   [monitor pr-info classified-comment]
   (let [{:keys [worktree-path generate-fn logger event-bus]} (:config @monitor)
@@ -131,89 +209,10 @@
                            :data {:reason (:reason fix-result) :attempt attempt}}))
               {:success? false :reason (:reason fix-result) :attempt attempt})))))))
 
-(defn handle-question
-  "Handle a question comment by generating and posting a reply."
-  [monitor pr-info classified-comment]
-  (let [{:keys [worktree-path generate-fn logger]} (:config @monitor)
-        pr-number (:pr/number pr-info)
-        comment (:comment classified-comment)
-        comment-id (:comment/id comment)
-        body (:comment/body comment)]
-    (if-not generate-fn
-      (do
-        (when logger
-          (log/warn logger :pr-monitor :handler/no-generate-fn
-                    {:message "Cannot answer question — no generate-fn configured"
-                     :data {:pr-number pr-number}}))
-        {:success? false :reason :no-generate-fn})
-      (let [prompt (str "You are miniforge, an autonomous software development agent. "
-                        "A reviewer left this question on a pull request you authored. "
-                        "Answer clearly and concisely. Do not make code changes.\n\n"
-                        "Question:\n" body "\n\n"
-                        "Write only the answer text, no preamble.")
-            answer (try
-                     (generate-fn prompt)
-                     (catch Exception e
-                       (when logger
-                         (log/error logger :pr-monitor :handler/llm-error
-                                    {:message "LLM call failed for question"
-                                     :data {:error (.getMessage e)}}))
-                       nil))]
-        (if answer
-          (let [reply-body (str answer
-                                "\n\n---\n*Answered by miniforge's autonomous PR monitor.*")
-                post-result (poller/post-comment worktree-path pr-number reply-body)]
-            (if (dag/ok? post-result)
-              (do
-                (state/emit! monitor (mevents/question-answered pr-number comment-id))
-                (state/emit! monitor (mevents/reply-posted pr-number comment-id
-                                                           :question-reply))
-                (let [pr-budget (state/get-or-create-budget monitor pr-number)]
-                  (state/update-budget! monitor pr-number
-                                        (budget/record-question-answered pr-budget)))
-                (swap! monitor update-in [:evidence :questions-answered] conj
-                       {:comment-id comment-id :at (java.util.Date.)})
-                (swap! monitor update-in [:evidence :comments-addressed] inc)
-                (when logger
-                  (log/info logger :pr-monitor :handler/question-answered
-                            {:message (str "Answered question on PR #" pr-number)
-                             :data {:comment-id comment-id}}))
-                {:success? true :type :question-answered})
-              (do
-                (when logger
-                  (log/warn logger :pr-monitor :handler/post-failed
-                            {:message "Failed to post question answer"
-                             :data {:pr-number pr-number}}))
-                {:success? false :reason :post-failed})))
-          {:success? false :reason :llm-failed})))))
-
-(defn handle-bot-comment
-  "Handle a bot comment. Log and skip."
-  [monitor _pr-info classified-comment]
-  (let [logger (get-in @monitor [:config :logger])
-        comment (:comment classified-comment)]
-    (when logger
-      (log/debug logger :pr-monitor :handler/bot-comment
-                 {:message "Bot comment — skipping"
-                  :data {:author (:comment/author comment)}}))
-    {:success? true :type :bot-skipped}))
-
-(defn handle-approval
-  "Handle an approval comment. Log and skip."
-  [monitor pr-info classified-comment]
-  (let [logger (get-in @monitor [:config :logger])
-        pr-number (:pr/number pr-info)
-        comment (:comment classified-comment)]
-    (when logger
-      (log/info logger :pr-monitor :handler/approval
-                {:message (str "Approval received on PR #" pr-number)
-                 :data {:author (:comment/author comment)}}))
-    {:success? true :type :approval-noted}))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Routing
 
-(defn route-comment
+;; Routing
+(defn ^{:stratum 2} route-comment
   "Route a classified comment to the appropriate handler, recording the typed
    classify→act decision first so the choice is one explicit act with provenance
    rather than an inference from which handler ran."
@@ -231,4 +230,3 @@
       :approval (handle-approval monitor pr-info classified)
       :noise {:success? true :type :noise-skipped}
       {:success? true :type :unknown-skipped :category category})))
-

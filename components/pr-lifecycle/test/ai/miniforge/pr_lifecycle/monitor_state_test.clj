@@ -15,20 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-state-test
   (:require
    [ai.miniforge.pr-lifecycle.monitor-budget :as budget]
    [ai.miniforge.pr-lifecycle.monitor-state :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest create-monitor-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} create-monitor-test
   (testing "shared defaults are loaded into the monitor config"
     (let [monitor (sut/create-monitor {:self-author "miniforge[bot]"})]
       (is (= 60000 (get-in @monitor [:config :poll-interval-ms])))
       (is (= "miniforge[bot]" (get-in @monitor [:config :self-author]))))))
 
-(deftest load-budget-from-disk!-test
+(deftest ^{:stratum 0} load-budget-from-disk!-test
   (testing "persisted budgets are loaded and cached on the monitor"
     (let [monitor (atom {:config {} :budgets {}})
           persisted {:pr-number 42 :limits {} :comment-attempts {} :total-attempts 0
