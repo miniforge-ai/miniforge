@@ -121,6 +121,28 @@
       (is (not (clojure.string/includes? fm "commit:")))
       (is (clojure.string/includes? fm "generated-by: miniforge")))))
 
+(deftest ^{:stratum 0} provenance-frontmatter-escapes-yaml-significant-characters
+  (testing "a value carrying YAML-significant characters (: followed by space, #) is
+            double-quoted rather than emitted as a raw plain scalar"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "adhoc--123"
+                            :spec "work/x.spec.edn"
+                            :task "fix: the thing # not a comment"}
+               :commit-sha "abc1234"})]
+      (is (clojure.string/includes? fm "task: \"fix: the thing # not a comment\""))
+      (is (= 2 (count (re-seq #"(?m)^---$" fm)))
+          "frontmatter still has exactly one opening and one closing delimiter"))))
+
+(deftest ^{:stratum 0} provenance-frontmatter-escapes-leading-dash-and-newline
+  (testing "a leading '-' or an embedded newline in a value is quoted/escaped, not emitted raw"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "-danger" :spec "line1\nline2"}
+               :commit-sha nil})]
+      (is (clojure.string/includes? fm "miniforge-workflow: \"-danger\""))
+      (is (clojure.string/includes? fm "spec: \"line1\\nline2\""))
+      (is (= 2 (count (re-seq #"(?m)^---$" fm)))
+          "an embedded newline must not introduce a spurious frontmatter delimiter line"))))
+
 (deftest ^{:stratum 0} with-provenance-prepends-and-is-idempotent
   (testing "prepends frontmatter to a plain body"
     (let [out (core/with-provenance "## Summary\nbody" {:provenance {:workflow "r1"} :commit-sha "c1"})]

@@ -86,9 +86,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Six real bugs found by automated review, fixed in `sandbox.clj` and `git.clj`
+### Eight real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
 
-Automated review on this PR flagged six genuine, pre-existing
+Automated review on this PR flagged eight genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -161,12 +161,42 @@ second one). Verified each directly against the code before fixing:
    pair and the `get-url` probe as two related comments; both are the same
    defect class and are fixed together here.)
 
-Added 7 regression tests: 5 in `sandbox_test.clj`
+7. **`stage-files!` interpolated file paths into a shell command string
+   without validating them first**, unlike its siblings `write-file!` and
+   `delete-file!` in the same file, which both guard with
+   `validate-safe-container-path` before single-quote-wrapping a path. An
+   unvalidated path containing an embedded single quote would break out of
+   the `'...'` wrapping — a real command-injection vector, not a style
+   nit, since `exec!` routes string commands through `sh -c`. Fixed by
+   validating every path with `validate-safe-container-path` (same guard
+   already used elsewhere in this file) before building the command;
+   returns the validation failure directly if any path is unsafe.
+
+8. **`core.clj`'s `provenance-frontmatter` built YAML frontmatter via raw
+   string concatenation**, with no escaping of YAML-significant
+   characters in provenance values (workflow/spec/task ids, commit sha).
+   A value containing `:` (colon-space), a leading `-` (YAML
+   block-sequence indicator), a `#` (comment marker), or an embedded
+   newline could produce invalid or ambiguously-parsed frontmatter in the
+   committed PR doc. Added a `yaml-scalar` helper: values matching a
+   conservative safe pattern (start with an alphanumeric, then
+   `[A-Za-z0-9._/-]*` — covers the common case of ids/paths/shas) render
+   as an unquoted YAML plain scalar; anything else renders as a
+   double-quoted scalar with backslashes/quotes escaped and newlines
+   collapsed to `\n`. Caught my own first draft of this fix during
+   testing: an initial regex allowed a *leading* `-` through as "safe"
+   (a bare `-x` is technically a valid YAML plain scalar in most parsers,
+   but exactly the ambiguous case the review comment called out), so the
+   regex now requires the first character to be alphanumeric,
+   pushing anything hyphen-led into the quoted branch.
+
+Added 10 regression tests: 5 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
 `exec-executor-error-includes-output-test`,
-`push-with-https-fallback-threads-opts-test`), following the existing
+`push-with-https-fallback-threads-opts-test`) plus 1 more
+(`stage-files-rejects-unsafe-path-test`), following the existing
 tracking-exec mock pattern already used by
 `push-branch-ssh-fail-https-fallback-test` in the same file; 2 in
 `git_test.clj` (`commit-changes-rev-parse-failure-test`,
@@ -175,15 +205,13 @@ existing `with-redefs [process/shell ...]` pattern (used by
 `gh-token-injection-test`/`force-push-injects-token-test`) rather than the
 real-git-repo round-trip pattern, since simulating a `rev-parse` failure
 or a thrown exception right after/during a real git invocation isn't a
-reachable real-git state to construct directly. Each assertion targets
-behavior only the fixed code produces — verified by inspection that all
-seven would fail against the pre-fix code (both old `commit-changes!`s
-always report `:success? true`; the old `push-with-https-fallback!`
-always retries the push regardless of set-url's outcome, always returns
-the retry result regardless of restore's outcome, and always passed `{}`
-instead of `opts` to the repoint/restore calls; both old `exec!`s produce
-a result with no `:output` key at all on their error/exception branch, so
-`(contains? result :output)` is false).
+reachable real-git state to construct directly; 2 in
+`core_sandbox_test.clj` (`provenance-frontmatter-escapes-yaml-significant-characters`,
+`provenance-frontmatter-escapes-leading-dash-and-newline`). Each assertion
+targets behavior only the fixed code produces — verified by inspection
+(and, for the `yaml-scalar` leading-dash regex, by an actual test failure
+during development that caught the gap) that all ten would fail against
+the pre-fix code.
 
 ## Testing Plan
 
@@ -197,15 +225,15 @@ a result with no `:output` key at all on their error/exception branch, so
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the six review-flagged bugs (above) and added 7 regression
+6. Fixed the eight review-flagged bugs (above) and added 10 regression
    tests. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
-   "(require ...) (clojure.test/run-tests ...)"`: 252 tests, 634
+   "(require ...) (clojure.test/run-tests ...)"`: 255 tests, 641
    assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
    the old decorative headings under-reported (none of these 5 reported
    any finding in the baseline):
-   - `core.clj` — 4 real layers (max 3)
+   - `core.clj` — 5 real layers (max 3)
    - `files.clj` — 5 real layers
    - `metadata.clj` — 6 real layers
    - `sandbox.clj` — 5 real layers
@@ -217,14 +245,16 @@ a result with no `:output` key at all on their error/exception branch, so
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the six bug fixes above are real behavior
+comment/metadata/order-only; the eight bug fixes above are real behavior
 changes (a failure that used to be silently swallowed, misreported as
 success, dropped from the result shape, or run against the wrong executor
-context now surfaces/behaves correctly), scoped to the HTTPS-token-fallback
-push path, the post-commit sha lookup, and the generic `exec!`
-error/exception branches in both the sandbox and host-mode backends, all
-covered by new tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at
-commit time for the 5 newly-surfaced `SL003` files above.
+context now surfaces/behaves correctly; an unvalidated path or an
+unescaped provenance value can no longer corrupt a shell command or a
+committed YAML frontmatter), scoped to the HTTPS-token-fallback push
+path, the post-commit sha lookup, the generic `exec!` error/exception
+branches, `stage-files!`, and `provenance-frontmatter`, all covered by
+new tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit
+time for the 5 newly-surfaced `SL003` files above.
 
 ## Related Issues/PRs
 
@@ -246,14 +276,17 @@ commit time for the 5 newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Six review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
+- [x] Eight review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
       phantom success on `rev-parse` failure; `sandbox.clj`'s
       `push-with-https-fallback!` unescaped token URL + unchecked
-      `set-url`/restore results + unthreaded `opts`; `git.clj`'s
-      `commit-changes!` sibling `rev-parse` bug; `sandbox.clj`'s and
-      `git.clj`'s `exec!` both omitting `:output` on their
-      error/exception branch. 7 regression tests added.
-- [x] Component tests pass (252 tests, 634 assertions, 0 failures/errors)
+      `set-url`/restore results + unthreaded `opts` (including the
+      `get-url` probe); `git.clj`'s `commit-changes!` sibling `rev-parse`
+      bug; `sandbox.clj`'s and `git.clj`'s `exec!` both omitting `:output`
+      on their error/exception branch; `sandbox.clj`'s `stage-files!`
+      unvalidated shell-injection surface; `core.clj`'s
+      `provenance-frontmatter` unescaped YAML injection surface. 10
+      regression tests added.
+- [x] Component tests pass (255 tests, 641 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

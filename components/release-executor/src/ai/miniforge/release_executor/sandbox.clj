@@ -199,14 +199,6 @@
         str/trim
         (str/replace #"refs/remotes/origin/" ""))))
 
-(defn ^{:stratum 1} stage-files!
-  "Stage files in the sandbox container."
-  [executor env-id file-paths]
-  (let [cmd (if (= file-paths :all)
-              "git add ."
-              (str "git add " (str/join " " (map #(str "'" % "'") file-paths))))]
-    (exec! executor env-id cmd)))
-
 (defn ^{:stratum 1} commit-changes!
   "Commit staged changes inside the sandbox container.
 
@@ -309,6 +301,20 @@
       (count-deftest (:output r "")))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} stage-files!
+  "Stage files in the sandbox container. Returns a shell failure result if
+   any path is unsafe (see validate-safe-container-path) — an unvalidated
+   path containing a single quote or other shell metacharacter would
+   otherwise break out of the single-quoting below, since exec! routes
+   string commands through `sh -c`."
+  [executor env-id file-paths]
+  (if (= file-paths :all)
+    (exec! executor env-id "git add .")
+    (if-let [invalid (some validate-safe-container-path file-paths)]
+      invalid
+      (exec! executor env-id
+             (str "git add " (str/join " " (map #(str "'" % "'") file-paths)))))))
 
 (defn ^{:stratum 2} try-checkout-branch
   "Try to checkout a new branch off the current HEAD, retrying with a
@@ -473,7 +479,9 @@
       (when (result/succeeded? r)
         (count-deftest (:output r ""))))))
 
-(defn ^{:stratum 2} metrics->result
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} metrics->result
   "Convert operation metrics to a final result, staging files if no errors."
   [executor env-id written-paths {:keys [created modified deleted errors]}]
   (let [file-metrics {:files-written created
@@ -488,8 +496,6 @@
           {:success? false
            :errors [{:type :git-stage-failed :message (:error stage-r)}]
            :metrics file-metrics})))))
-
-;------------------------------------------------------------------------------ Layer 3
 
 (defn ^{:stratum 3} create-branch!
   "Create a new git branch inside the sandbox container, off the current

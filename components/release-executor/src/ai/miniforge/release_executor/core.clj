@@ -100,21 +100,24 @@
        (> deletions 20)
        (> deletions (* 3 (max 1 additions)))))
 
-(defn ^{:stratum 0} provenance-frontmatter
-  "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
-   state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
-   `generated-by: miniforge` (authorship) plus whatever provenance is present.
-   Visible in the rendered PR — human-readable AND deterministically parsable
-   (fixed position, explicit `---` delimiters, rigid key: value)."
-  [{:keys [provenance commit-sha]}]
-  (let [{:keys [workflow spec task]} provenance
-        rows (cond-> []
-               workflow   (conj (str "miniforge-workflow: " workflow))
-               spec       (conj (str "spec: " spec))
-               task       (conj (str "task: " task))
-               commit-sha (conj (str "commit: " commit-sha))
-               true       (conj "generated-by: miniforge"))]
-    (str "---\n" (str/join "\n" rows) "\n---\n\n")))
+(defn- ^{:stratum 0} yaml-scalar
+  "Render `v` as a safe YAML scalar for a `key: value` frontmatter line.
+   Values starting with an alphanumeric and otherwise made up only of a
+   conservative safe character set ([A-Za-z0-9._/-]) — the common case:
+   workflow ids, spec paths, task ids, commit shas — are emitted as an
+   unquoted YAML plain scalar. Anything else is emitted as a
+   double-quoted YAML scalar with embedded backslashes/quotes escaped and
+   newlines collapsed, so a `:` followed by a space, a leading `-` (a
+   block-sequence indicator in YAML), a `#`, or an embedded newline in the
+   source value can't corrupt the frontmatter or be ambiguously parsed."
+  [v]
+  (let [s (str v)]
+    (if (re-matches #"[A-Za-z0-9][A-Za-z0-9._/-]*" s)
+      s
+      (str "\"" (-> s
+                    (str/replace "\\" "\\\\")
+                    (str/replace "\"" "\\\"")
+                    (str/replace "\n" "\\n")) "\""))))
 
 (defn- ^{:stratum 0} pr-doc-filename
   "Generate a docs/pull-requests/ filename from the PR title.
@@ -235,6 +238,24 @@
                  :branch     branch}))))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} provenance-frontmatter
+  "YAML frontmatter mapping a PR back to its workflow run + spec. Built from
+   state's :provenance ({:workflow :spec :task}) + :commit-sha. Always emits
+   `generated-by: miniforge` (authorship) plus whatever provenance is present.
+   Visible in the rendered PR — human-readable AND deterministically parsable
+   (fixed position, explicit `---` delimiters, rigid key: value). Each value
+   is rendered via yaml-scalar so a value carrying YAML-significant
+   characters can't produce invalid or ambiguous frontmatter."
+  [{:keys [provenance commit-sha]}]
+  (let [{:keys [workflow spec task]} provenance
+        rows (cond-> []
+               workflow   (conj (str "miniforge-workflow: " (yaml-scalar workflow)))
+               spec       (conj (str "spec: " (yaml-scalar spec)))
+               task       (conj (str "task: " (yaml-scalar task)))
+               commit-sha (conj (str "commit: " (yaml-scalar commit-sha)))
+               true       (conj "generated-by: miniforge"))]
+    (str "---\n" (str/join "\n" rows) "\n---\n\n")))
 
 ;; Pipeline steps
 (defn ^{:stratum 1} step-validate-inputs
@@ -476,15 +497,6 @@
         state
         (fail state :push-failed (:error result))))))
 
-(defn ^{:stratum 1} with-provenance
-  "Prepend the provenance frontmatter to a PR body. Idempotent: a body that
-   already opens with a `---` frontmatter block is returned unchanged."
-  [body state]
-  (let [body (str body)]
-    (if (str/starts-with? body "---\n")
-      body
-      (str (provenance-frontmatter state) body))))
-
 (defn- ^{:stratum 1} render-pr-doc-full
   "Render a comprehensive docs/pull-requests/ markdown file.
    Includes: title, summary, files changed, test results, review decision."
@@ -615,63 +627,14 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-(defn ^{:stratum 2} step-create-pr
-  "Create the pull request.  Dispatches git backend based on :host-mode?.
-
-   git/create-pr! carries the same duplicate-PR reuse logic as
-   sandbox/create-pr! — retry-safe on both backends."
-  [state]
-  (cond
-    (failed? state)           state
-    (not (:create-pr? state)) state
-    :else
-    (let [{:keys [release-meta base-branch host-mode? worktree-path
-                  executor environment-id]} state
-          pr-opts {:title       (:release/pr-title release-meta)
-                   :body        (with-provenance (:release/pr-body release-meta) state)
-                   :base-branch base-branch}
-          result (if host-mode?
-                   (git/create-pr! worktree-path pr-opts (:github-token state))
-                   (sandbox/create-pr! executor environment-id pr-opts
-                                       (gh-exec-opts state)))]
-      (if (result/succeeded? result)
-        (assoc state
-               :pr-number (:pr-number result)
-               :pr-url    (:pr-url result))
-        (fail state :pr-create-failed (:error result))))))
-
-(defn ^{:stratum 2} step-update-pr-body
-  "Update the GitHub PR body when the initial body was missing or degraded.
-   Dispatches git backend based on :host-mode?."
-  [state]
-  (cond
-    (failed? state)                               state
-    (not (:create-pr? state))                     state
-    (not (:pr-number state))                      state
-    (not (pr-body-needs-update? (:release-meta state))) state
-    :else
-    (let [{:keys [release-meta pr-number host-mode? worktree-path
-                  executor environment-id logger
-                  code-artifacts workflow-data]} state
-          body (with-provenance
-                (render-pr-body-fallback release-meta code-artifacts workflow-data)
-                state)]
-      (try
-        (if host-mode?
-          (git/edit-pr-body! worktree-path pr-number body (:github-token state))
-          (sandbox/edit-pr-body! executor environment-id pr-number body
-                                 (gh-exec-opts state)))
-        (when logger
-          (log/info logger :release-executor :pr-body-updated
-                    {:data {:pr-number pr-number
-                            :reason    :degraded-agent-body
-                            :source    :fallback-renderer}}))
-        state
-        (catch Exception e
-          (when logger
-            (log/warn logger :release-executor :pr-body-update-failed
-                      {:message (.getMessage e)}))
-          state)))))
+(defn ^{:stratum 2} with-provenance
+  "Prepend the provenance frontmatter to a PR body. Idempotent: a body that
+   already opens with a `---` frontmatter block is returned unchanged."
+  [body state]
+  (let [body (str body)]
+    (if (str/starts-with? body "---\n")
+      body
+      (str (provenance-frontmatter state) body))))
 
 (defn ^{:stratum 2} step-generate-pr-doc
   "Generate a comprehensive PR doc at docs/pull-requests/YYYY-MM-DD-<slug>.md.
@@ -750,8 +713,68 @@
 
 ;------------------------------------------------------------------------------ Layer 3
 
+(defn ^{:stratum 3} step-create-pr
+  "Create the pull request.  Dispatches git backend based on :host-mode?.
+
+   git/create-pr! carries the same duplicate-PR reuse logic as
+   sandbox/create-pr! — retry-safe on both backends."
+  [state]
+  (cond
+    (failed? state)           state
+    (not (:create-pr? state)) state
+    :else
+    (let [{:keys [release-meta base-branch host-mode? worktree-path
+                  executor environment-id]} state
+          pr-opts {:title       (:release/pr-title release-meta)
+                   :body        (with-provenance (:release/pr-body release-meta) state)
+                   :base-branch base-branch}
+          result (if host-mode?
+                   (git/create-pr! worktree-path pr-opts (:github-token state))
+                   (sandbox/create-pr! executor environment-id pr-opts
+                                       (gh-exec-opts state)))]
+      (if (result/succeeded? result)
+        (assoc state
+               :pr-number (:pr-number result)
+               :pr-url    (:pr-url result))
+        (fail state :pr-create-failed (:error result))))))
+
+(defn ^{:stratum 3} step-update-pr-body
+  "Update the GitHub PR body when the initial body was missing or degraded.
+   Dispatches git backend based on :host-mode?."
+  [state]
+  (cond
+    (failed? state)                               state
+    (not (:create-pr? state))                     state
+    (not (:pr-number state))                      state
+    (not (pr-body-needs-update? (:release-meta state))) state
+    :else
+    (let [{:keys [release-meta pr-number host-mode? worktree-path
+                  executor environment-id logger
+                  code-artifacts workflow-data]} state
+          body (with-provenance
+                (render-pr-body-fallback release-meta code-artifacts workflow-data)
+                state)]
+      (try
+        (if host-mode?
+          (git/edit-pr-body! worktree-path pr-number body (:github-token state))
+          (sandbox/edit-pr-body! executor environment-id pr-number body
+                                 (gh-exec-opts state)))
+        (when logger
+          (log/info logger :release-executor :pr-body-updated
+                    {:data {:pr-number pr-number
+                            :reason    :degraded-agent-body
+                            :source    :fallback-renderer}}))
+        state
+        (catch Exception e
+          (when logger
+            (log/warn logger :release-executor :pr-body-update-failed
+                      {:message (.getMessage e)}))
+          state)))))
+
+;------------------------------------------------------------------------------ Layer 4
+
 ;; Main execute function
-(defn ^{:stratum 3} execute-release-phase
+(defn ^{:stratum 4} execute-release-phase
   "Execute the release phase.
 
    Accepts two backends transparently:

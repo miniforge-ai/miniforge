@@ -368,6 +368,14 @@
         (is (clojure.string/includes? cmd "src/a.clj"))
         (is (clojure.string/includes? cmd "src/b.clj"))))))
 
+(deftest ^{:stratum 1} stage-files-rejects-unsafe-path-test
+  (testing "stage-files! rejects a path containing a shell metacharacter instead of
+            interpolating it unescaped into the git add command"
+    (let [[exec cmds] (create-mock-executor)
+          result (sandbox/stage-files! exec "env-1" ["src/a.clj" "src/evil'; rm -rf /'.clj"])]
+      (is (false? (:success? result)))
+      (is (empty? @cmds) "no command is shelled out once an unsafe path is found"))))
+
 ;; ============================================================================
 ;; commit-changes! tests
 ;; ============================================================================
