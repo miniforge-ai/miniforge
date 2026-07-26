@@ -111,9 +111,9 @@ time) until Wave 2 splits it.
 - [x] Second `--fix` pass confirms idempotency (zero diff)
 - [x] Diff read in full for all 10 changed files — no orphaned decorative
       banners, no displaced trailing comments
-- [x] `clj-kondo` clean of new issues (0 errors before/after; 1
-      pre-existing warning unchanged in content, only its line number
-      shifted from reordering)
+- [x] `clj-kondo` clean: 0 errors, 0 warnings. A pre-existing warning in
+      `format_test.clj` (unrequired `clojure.string`) was cleared by
+      adding the require and switching to `str/join` (review feedback)
 - [x] Component tests pass (50 tests, 141 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero `SL001`/`SL002`/`SL004`; `SL003`
       remains on `format.clj` only — newly surfaced by the fix (not
