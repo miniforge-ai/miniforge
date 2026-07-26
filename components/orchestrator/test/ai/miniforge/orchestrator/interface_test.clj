@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.orchestrator.interface-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -25,9 +24,9 @@
    [ai.miniforge.orchestrator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures and factories
 
-(defn- task
+;; Test fixtures and factories
+(defn- ^{:stratum 0} task
   "Build a task map with an optional :task/type and other overrides."
   [task-type & {:as overrides}]
   (merge {:task/id    (random-uuid)
@@ -35,25 +34,25 @@
           :task/title (str (name task-type) " task")}
          overrides))
 
-(defn- repair-entry
+(defn- ^{:stratum 0} repair-entry
   [error-type fix-description]
   {:error-type      error-type
    :fix-description fix-description})
 
-(defn- zettel
+(defn- ^{:stratum 0} zettel
   [& {:as overrides}]
   (merge {:zettel/id      (random-uuid)
           :zettel/title   "Z"
           :zettel/content "body"}
          overrides))
 
-(defn- learning-with-confidence
+(defn- ^{:stratum 0} learning-with-confidence
   [confidence]
   {:zettel/source {:source/confidence confidence}})
 
 ;; Capture/no-op knowledge-store stub used to keep the knowledge coordinator
 ;; tests honest without dragging in the real knowledge component.
-(defn- capture-knowledge-store
+(defn- ^{:stratum 0} capture-knowledge-store
   "Return [stub captured-atom]. Calls to inject-knowledge/capture-inner-loop-learning
    are recorded, and inject-knowledge returns whatever vector is configured."
   [{:keys [inject-result capture-fn promote-fn]
@@ -69,10 +68,8 @@
       :stub/captured      captured}
      captured]))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Re-exports — interface forwards to core/protocol
-
-(deftest interface-re-exports-test
+(deftest ^{:stratum 0} interface-re-exports-test
   (testing "interface namespace re-exports the four protocols"
     (is (= proto/Orchestrator         sut/Orchestrator))
     (is (= proto/TaskRouter           sut/TaskRouter))
@@ -86,10 +83,8 @@
     (is (= core/create-knowledge-coordinator sut/create-knowledge-coordinator))
     (is (= core/default-config               sut/default-config))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; default-config
-
-(deftest default-config-shape-test
+(deftest ^{:stratum 0} default-config-shape-test
   (testing "default-config carries the documented keys"
     (let [cfg core/default-config]
       (is (contains? cfg :default-budget))
@@ -101,42 +96,8 @@
         (is (pos? (:max-cost-usd b)))
         (is (pos? (:timeout-ms b)))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; SimpleTaskRouter / route-task / can-handle?
-
-(deftest route-task-uses-task-type-mapping-test
-  (testing "Each known task type routes to its expected agent role"
-    (let [router (sut/create-router)]
-      (is (= :planner     (-> (sut/route-task router (task :plan)      {}) :agent-role)))
-      (is (= :planner     (-> (sut/route-task router (task :design)    {}) :agent-role)))
-      (is (= :implementer (-> (sut/route-task router (task :implement) {}) :agent-role)))
-      (is (= :tester      (-> (sut/route-task router (task :test)      {}) :agent-role)))
-      (is (= :reviewer    (-> (sut/route-task router (task :review)    {}) :agent-role))))))
-
-(deftest route-task-unknown-defaults-to-implementer-test
-  (testing "Unknown task type falls back to :implementer"
-    (let [router (sut/create-router)]
-      (is (= :implementer (-> (sut/route-task router (task :unknown) {}) :agent-role))))))
-
-(deftest route-task-includes-reason-string-test
-  (testing "Routing decision carries a non-blank :reason"
-    (let [router (sut/create-router)
-          {:keys [reason]} (sut/route-task router (task :implement) {})]
-      (is (string? reason))
-      (is (not (str/blank? reason))))))
-
-(deftest can-handle?-test
-  (testing "can-handle? matches the mapping"
-    (let [router (sut/create-router)]
-      (is (true?  (sut/can-handle? router (task :plan)      :planner)))
-      (is (false? (sut/can-handle? router (task :plan)      :implementer)))
-      (is (true?  (sut/can-handle? router (task :implement) :implementer)))
-      (is (false? (sut/can-handle? router (task :review)    :tester))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; SimpleBudgetManager
-
-(deftest budget-set-and-check-test
+(deftest ^{:stratum 0} budget-set-and-check-test
   (testing "set-budget stores per-workflow limits, check-budget reports them"
     (let [bm (sut/create-budget-manager)
           wf-id (random-uuid)
@@ -150,7 +111,7 @@
         (is (= 60000  (:time-ms remaining)))
         (is (= 1000   (:max-tokens budget)))))))
 
-(deftest budget-track-accumulates-test
+(deftest ^{:stratum 0} budget-track-accumulates-test
   (testing "Repeated track-usage calls accumulate across all three counters"
     (let [bm (sut/create-budget-manager)
           wf-id (random-uuid)]
@@ -164,7 +125,7 @@
         (is (= 700  (:tokens remaining)))
         (is (true? within-budget?))))))
 
-(deftest budget-exceeded-reports-not-within-budget-test
+(deftest ^{:stratum 0} budget-exceeded-reports-not-within-budget-test
   (testing "Spending past the cap flips :within-budget? to false"
     (let [bm (sut/create-budget-manager)
           wf-id (random-uuid)]
@@ -172,7 +133,7 @@
       (sut/track-usage bm wf-id {:tokens 200 :cost-usd 0.10 :duration-ms 0})
       (is (false? (:within-budget? (sut/check-budget bm wf-id)))))))
 
-(deftest budget-default-applies-when-not-set-test
+(deftest ^{:stratum 0} budget-default-applies-when-not-set-test
   (testing "An unset workflow falls back to the default budget"
     (let [bm (sut/create-budget-manager)
           wf-id (random-uuid)
@@ -181,10 +142,44 @@
       (is (= (-> core/default-config :default-budget :max-tokens)
              (:max-tokens budget))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; build-repair-learning
+(deftest ^{:stratum 0} format-knowledge-block-empty-test
+  (testing "Empty zettel list produces no block"
+    (is (nil? (core/format-knowledge-block [] :implementer)))))
 
-(deftest build-repair-learning-shape-test
+;------------------------------------------------------------------------------ Layer 1
+
+;; SimpleTaskRouter / route-task / can-handle?
+(deftest ^{:stratum 1} route-task-uses-task-type-mapping-test
+  (testing "Each known task type routes to its expected agent role"
+    (let [router (sut/create-router)]
+      (is (= :planner     (-> (sut/route-task router (task :plan)      {}) :agent-role)))
+      (is (= :planner     (-> (sut/route-task router (task :design)    {}) :agent-role)))
+      (is (= :implementer (-> (sut/route-task router (task :implement) {}) :agent-role)))
+      (is (= :tester      (-> (sut/route-task router (task :test)      {}) :agent-role)))
+      (is (= :reviewer    (-> (sut/route-task router (task :review)    {}) :agent-role))))))
+
+(deftest ^{:stratum 1} route-task-unknown-defaults-to-implementer-test
+  (testing "Unknown task type falls back to :implementer"
+    (let [router (sut/create-router)]
+      (is (= :implementer (-> (sut/route-task router (task :unknown) {}) :agent-role))))))
+
+(deftest ^{:stratum 1} route-task-includes-reason-string-test
+  (testing "Routing decision carries a non-blank :reason"
+    (let [router (sut/create-router)
+          {:keys [reason]} (sut/route-task router (task :implement) {})]
+      (is (string? reason))
+      (is (not (str/blank? reason))))))
+
+(deftest ^{:stratum 1} can-handle?-test
+  (testing "can-handle? matches the mapping"
+    (let [router (sut/create-router)]
+      (is (true?  (sut/can-handle? router (task :plan)      :planner)))
+      (is (false? (sut/can-handle? router (task :plan)      :implementer)))
+      (is (true?  (sut/can-handle? router (task :implement) :implementer)))
+      (is (false? (sut/can-handle? router (task :review)    :tester))))))
+
+;; build-repair-learning
+(deftest ^{:stratum 1} build-repair-learning-shape-test
   (testing "build-repair-learning returns the documented learning capture shape"
     (let [tk (task :implement :task/title "Add greet fn")
           history [(repair-entry :compile-error "added missing import")
@@ -197,10 +192,8 @@
       (is (= [:repair :inner-loop :implementer] (:tags learning)))
       (is (= 0.7 (:confidence learning))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; format-zettel-for-context / format-knowledge-block
-
-(deftest format-zettel-includes-title-and-content-test
+(deftest ^{:stratum 1} format-zettel-includes-title-and-content-test
   (testing "Each zettel renders title + content; dewey is bracketed when present"
     (let [with-dewey (zettel :zettel/title "T" :zettel/content "C" :zettel/dewey "210")
           without    (zettel :zettel/title "T" :zettel/content "C")]
@@ -209,11 +202,7 @@
       (is (str/includes? (core/format-zettel-for-context with-dewey) "C"))
       (is (not (str/includes? (core/format-zettel-for-context without) "["))))))
 
-(deftest format-knowledge-block-empty-test
-  (testing "Empty zettel list produces no block"
-    (is (nil? (core/format-knowledge-block [] :implementer)))))
-
-(deftest format-knowledge-block-renders-test
+(deftest ^{:stratum 1} format-knowledge-block-renders-test
   (testing "Non-empty zettel list produces a block containing each title"
     (let [block (core/format-knowledge-block
                  [(zettel :zettel/title "Alpha")
@@ -223,10 +212,8 @@
       (is (str/includes? block "Alpha"))
       (is (str/includes? block "Beta")))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; SimpleKnowledgeCoordinator — uses with-redefs to stub knowledge calls.
-
-(deftest knowledge-coord-injection-disabled-returns-nil-test
+(deftest ^{:stratum 1} knowledge-coord-injection-disabled-returns-nil-test
   (testing "When :knowledge-injection? is false, inject-for-agent returns nil"
     (let [[store _] (capture-knowledge-store {})
           coord (sut/create-knowledge-coordinator store
@@ -234,7 +221,7 @@
                                                          :knowledge-injection? false))]
       (is (nil? (sut/inject-for-agent coord :implementer (task :implement) {}))))))
 
-(deftest knowledge-coord-injection-enabled-returns-block-test
+(deftest ^{:stratum 1} knowledge-coord-injection-enabled-returns-block-test
   (testing "When enabled, inject-for-agent merges task and context tags into the query
             and packages the result into a {:formatted :zettels :count} map"
     (let [seen-args (atom nil)
@@ -256,7 +243,7 @@
             (is (= :implementer role))
             (is (= #{:clj :io} (set (:tags context))))))))))
 
-(deftest should-promote-learning?-confidence-threshold-test
+(deftest ^{:stratum 1} should-promote-learning?-confidence-threshold-test
   (testing "Confidence ≥ 0.85 ⇒ :promote? true; below ⇒ false"
     (let [coord (sut/create-knowledge-coordinator ::store core/default-config)]
       (is (true?  (:promote? (sut/should-promote-learning? coord (learning-with-confidence 0.90)))))
@@ -265,7 +252,7 @@
       (is (false? (:promote? (sut/should-promote-learning? coord (learning-with-confidence 0.0)))))
       (is (false? (:promote? (sut/should-promote-learning? coord {})))))))
 
-(deftest should-promote-learning?-includes-confidence-and-reason-test
+(deftest ^{:stratum 1} should-promote-learning?-includes-confidence-and-reason-test
   (testing "should-promote-learning? returns the confidence and a non-blank reason"
     (let [coord (sut/create-knowledge-coordinator ::store core/default-config)
           decision (sut/should-promote-learning? coord (learning-with-confidence 0.90))]
@@ -273,14 +260,14 @@
       (is (string? (:reason decision)))
       (is (not (str/blank? (:reason decision)))))))
 
-(deftest capture-execution-learning-no-op-when-not-repaired-test
+(deftest ^{:stratum 1} capture-execution-learning-no-op-when-not-repaired-test
   (testing "execution-result without :repaired? skips capture"
     (let [coord (sut/create-knowledge-coordinator ::store core/default-config)]
       (is (nil? (sut/capture-execution-learning
                  coord {:repaired? false :agent-role :implementer
                         :task (task :implement) :repair-history []}))))))
 
-(deftest capture-execution-learning-disabled-test
+(deftest ^{:stratum 1} capture-execution-learning-disabled-test
   (testing "When :learning-capture? false, capture is skipped even on a repair"
     (let [coord (sut/create-knowledge-coordinator
                  ::store
@@ -291,7 +278,7 @@
                         :task (task :implement)
                         :repair-history history}))))))
 
-(deftest capture-execution-learning-calls-knowledge-store-test
+(deftest ^{:stratum 1} capture-execution-learning-calls-knowledge-store-test
   (testing "On a repaired execution, capture-inner-loop-learning is called and the
             result is returned"
     (let [seen   (atom nil)

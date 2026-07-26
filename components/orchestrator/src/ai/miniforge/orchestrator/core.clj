@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.orchestrator.core
   "Core orchestrator (Control Plane) implementation.
 
@@ -36,9 +35,9 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
 
-(defn build-repair-learning
+;; Configuration
+(defn ^{:stratum 0} build-repair-learning
   "Build a learning capture map from a repair history entry."
   [agent-role task repair-history]
   (let [last-repair (last repair-history)]
@@ -53,12 +52,12 @@
      :tags [:repair :inner-loop (keyword (name agent-role))]
      :confidence 0.7}))
 
-(def default-config
+(def ^{:stratum 0} default-config
   "Default control plane configuration."
   (config/load-config-resource "config/orchestrator/defaults.edn"
                                [:default-budget :escalation-threshold]))
 
-(def task-type->agent-role
+(def ^{:stratum 0} task-type->agent-role
   "Mapping of task types to agent roles."
   {:plan       :planner
    :design     :planner
@@ -66,66 +65,8 @@
    :test       :tester
    :review     :reviewer})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Task Router implementation
-
-(defrecord SimpleTaskRouter [config]
-  proto/TaskRouter
-
-  (route-task [_this task _context]
-    (let [task-type (:task/type task)
-          agent-role (get task-type->agent-role task-type :implementer)]
-      {:agent-role agent-role
-       :reason (messages/t :route/reason {:task-type task-type :agent-role agent-role})}))
-
-  (can-handle? [_this task agent-role]
-    (let [task-type (:task/type task)
-          expected-role (get task-type->agent-role task-type)]
-      (= expected-role agent-role))))
-
-(defn create-router
-  "Create a task router."
-  ([] (create-router {}))
-  ([config] (->SimpleTaskRouter config)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Budget Manager implementation
-
-(defrecord SimpleBudgetManager [budgets usage]
-  proto/BudgetManager
-
-  (track-usage [_this workflow-id new-usage]
-    (swap! usage update workflow-id
-           (fn [current]
-             (let [curr (or current {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
-               {:tokens (+ (:tokens curr) (get new-usage :tokens 0))
-                :cost-usd (+ (:cost-usd curr) (get new-usage :cost-usd 0.0))
-                :duration-ms (+ (:duration-ms curr) (get new-usage :duration-ms 0))}))))
-
-  (check-budget [_this workflow-id]
-    (let [budget (get @budgets workflow-id (:default-budget default-config))
-          used (get @usage workflow-id {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
-      {:within-budget? (and (<= (:tokens used) (:max-tokens budget))
-                            (<= (:cost-usd used) (:max-cost-usd budget))
-                            (<= (:duration-ms used) (:timeout-ms budget)))
-       :remaining {:tokens (- (:max-tokens budget) (:tokens used))
-                   :cost-usd (- (:max-cost-usd budget) (:cost-usd used))
-                   :time-ms (- (:timeout-ms budget) (:duration-ms used))}
-       :used used
-       :budget budget}))
-
-  (set-budget [_this workflow-id budget]
-    (swap! budgets assoc workflow-id budget)))
-
-(defn create-budget-manager
-  "Create a budget manager."
-  []
-  (->SimpleBudgetManager (atom {}) (atom {})))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Knowledge Coordinator implementation
-
-(defn format-zettel-for-context
+(defn ^{:stratum 0} format-zettel-for-context
   "Format a zettel for inclusion in agent context."
   [zettel]
   (str (messages/t :knowledge/zettel-heading {:title (:zettel/title zettel)})
@@ -135,70 +76,8 @@
        (:zettel/content zettel)
        "\n"))
 
-(defn format-knowledge-block
-  "Format injected knowledge as a context block."
-  [zettels agent-role]
-  (when (seq zettels)
-    (str (messages/t :knowledge/header {:role (name agent-role)})
-         (messages/t :knowledge/preamble)
-         (apply str (map format-zettel-for-context zettels))
-         (messages/t :knowledge/separator))))
-
-(defrecord SimpleKnowledgeCoordinator [knowledge-store config]
-  proto/KnowledgeCoordinator
-
-  (inject-for-agent [_this agent-role task context]
-    (when (:knowledge-injection? config)
-      (let [task-tags (get task :task/tags [])
-            context-tags (get context :tags [])
-            query-context {:tags (distinct (concat task-tags context-tags))}
-            zettels (knowledge/inject-knowledge knowledge-store agent-role query-context)]
-        {:formatted (format-knowledge-block zettels agent-role)
-         :zettels zettels
-         :count (count zettels)})))
-
-  (capture-execution-learning [this execution-result]
-    (when (and (:learning-capture? config)
-               (:repaired? execution-result))
-      (let [{:keys [agent-role task repair-history]} execution-result]
-        (when (seq repair-history)
-          (let [learning (knowledge/capture-inner-loop-learning
-                          knowledge-store
-                          (build-repair-learning agent-role task repair-history))]
-            ;; Check if learning should be promoted to a rule
-            (when learning
-              (let [learning-id (or (:zettel/id learning) (:id learning))
-                    promotion-check (proto/should-promote-learning? this learning)]
-                (when (and (:promote? promotion-check) learning-id)
-                  (try
-                    (knowledge/promote-learning knowledge-store learning-id {})
-                    (catch Exception e
-                      (log/warn (:logger knowledge-store)
-                                :orchestrator
-                                :orchestrator/promote-learning-failed
-                                {:error (ex-message e) :learning-id learning-id})
-                      nil)))))
-            learning)))))
-
-  (should-promote-learning? [_this learning]
-    (let [confidence (get-in learning [:zettel/source :source/confidence] 0)
-          promotable? (>= confidence 0.85)]
-      {:promote? promotable?
-       :confidence confidence
-       :reason (if promotable?
-                 (messages/t :promote/ready)
-                 (messages/t :promote/below-threshold {:threshold 0.85}))})))
-
-(defn create-knowledge-coordinator
-  "Create a knowledge coordinator."
-  ([knowledge-store] (create-knowledge-coordinator knowledge-store default-config))
-  ([knowledge-store config]
-   (->SimpleKnowledgeCoordinator knowledge-store config)))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Control Plane implementation
-
-(defrecord ControlPlane [config router budget-mgr knowledge-coord
+(defrecord ^{:stratum 0} ControlPlane [config router budget-mgr knowledge-coord
                           workflow-mgr operator llm-backend artifact-store
                           active-workflows logger]
   proto/Orchestrator
@@ -286,7 +165,127 @@
                   {:data {:workflow-id workflow-id}})
         true))))
 
-(defn create-control-plane
+;------------------------------------------------------------------------------ Layer 1
+
+;; Task Router implementation
+(defrecord ^{:stratum 1} SimpleTaskRouter [config]
+  proto/TaskRouter
+
+  (route-task [_this task _context]
+    (let [task-type (:task/type task)
+          agent-role (get task-type->agent-role task-type :implementer)]
+      {:agent-role agent-role
+       :reason (messages/t :route/reason {:task-type task-type :agent-role agent-role})}))
+
+  (can-handle? [_this task agent-role]
+    (let [task-type (:task/type task)
+          expected-role (get task-type->agent-role task-type)]
+      (= expected-role agent-role))))
+
+;; Budget Manager implementation
+(defrecord ^{:stratum 1} SimpleBudgetManager [budgets usage]
+  proto/BudgetManager
+
+  (track-usage [_this workflow-id new-usage]
+    (swap! usage update workflow-id
+           (fn [current]
+             (let [curr (or current {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
+               {:tokens (+ (:tokens curr) (get new-usage :tokens 0))
+                :cost-usd (+ (:cost-usd curr) (get new-usage :cost-usd 0.0))
+                :duration-ms (+ (:duration-ms curr) (get new-usage :duration-ms 0))}))))
+
+  (check-budget [_this workflow-id]
+    (let [budget (get @budgets workflow-id (:default-budget default-config))
+          used (get @usage workflow-id {:tokens 0 :cost-usd 0.0 :duration-ms 0})]
+      {:within-budget? (and (<= (:tokens used) (:max-tokens budget))
+                            (<= (:cost-usd used) (:max-cost-usd budget))
+                            (<= (:duration-ms used) (:timeout-ms budget)))
+       :remaining {:tokens (- (:max-tokens budget) (:tokens used))
+                   :cost-usd (- (:max-cost-usd budget) (:cost-usd used))
+                   :time-ms (- (:timeout-ms budget) (:duration-ms used))}
+       :used used
+       :budget budget}))
+
+  (set-budget [_this workflow-id budget]
+    (swap! budgets assoc workflow-id budget)))
+
+(defn ^{:stratum 1} format-knowledge-block
+  "Format injected knowledge as a context block."
+  [zettels agent-role]
+  (when (seq zettels)
+    (str (messages/t :knowledge/header {:role (name agent-role)})
+         (messages/t :knowledge/preamble)
+         (apply str (map format-zettel-for-context zettels))
+         (messages/t :knowledge/separator))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-router
+  "Create a task router."
+  ([] (create-router {}))
+  ([config] (->SimpleTaskRouter config)))
+
+(defn ^{:stratum 2} create-budget-manager
+  "Create a budget manager."
+  []
+  (->SimpleBudgetManager (atom {}) (atom {})))
+
+(defrecord ^{:stratum 2} SimpleKnowledgeCoordinator [knowledge-store config]
+  proto/KnowledgeCoordinator
+
+  (inject-for-agent [_this agent-role task context]
+    (when (:knowledge-injection? config)
+      (let [task-tags (get task :task/tags [])
+            context-tags (get context :tags [])
+            query-context {:tags (distinct (concat task-tags context-tags))}
+            zettels (knowledge/inject-knowledge knowledge-store agent-role query-context)]
+        {:formatted (format-knowledge-block zettels agent-role)
+         :zettels zettels
+         :count (count zettels)})))
+
+  (capture-execution-learning [this execution-result]
+    (when (and (:learning-capture? config)
+               (:repaired? execution-result))
+      (let [{:keys [agent-role task repair-history]} execution-result]
+        (when (seq repair-history)
+          (let [learning (knowledge/capture-inner-loop-learning
+                          knowledge-store
+                          (build-repair-learning agent-role task repair-history))]
+            ;; Check if learning should be promoted to a rule
+            (when learning
+              (let [learning-id (or (:zettel/id learning) (:id learning))
+                    promotion-check (proto/should-promote-learning? this learning)]
+                (when (and (:promote? promotion-check) learning-id)
+                  (try
+                    (knowledge/promote-learning knowledge-store learning-id {})
+                    (catch Exception e
+                      (log/warn (:logger knowledge-store)
+                                :orchestrator
+                                :orchestrator/promote-learning-failed
+                                {:error (ex-message e) :learning-id learning-id})
+                      nil)))))
+            learning)))))
+
+  (should-promote-learning? [_this learning]
+    (let [confidence (get-in learning [:zettel/source :source/confidence] 0)
+          promotable? (>= confidence 0.85)]
+      {:promote? promotable?
+       :confidence confidence
+       :reason (if promotable?
+                 (messages/t :promote/ready)
+                 (messages/t :promote/below-threshold {:threshold 0.85}))})))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-knowledge-coordinator
+  "Create a knowledge coordinator."
+  ([knowledge-store] (create-knowledge-coordinator knowledge-store default-config))
+  ([knowledge-store config]
+   (->SimpleKnowledgeCoordinator knowledge-store config)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} create-control-plane
   "Create a control plane (orchestrator) with all components.
    See ai.miniforge.orchestrator.interface for the full argument/option contract."
   [llm-backend knowledge-store artifact-store & [{:keys [config logger operator]}]]
@@ -313,8 +312,10 @@
      (atom {})
      log)))
 
+;------------------------------------------------------------------------------ Layer 5
+
 ;; Alias for backward compatibility
-(def create-orchestrator create-control-plane)
+(def ^{:stratum 5} create-orchestrator create-control-plane)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
