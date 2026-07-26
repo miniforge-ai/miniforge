@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-edgar.impl
   "Implementation functions for the EDGAR connector.
    Queries SEC EDGAR EFTS for filings, fetches filing documents,
@@ -35,53 +34,23 @@
            [java.time.temporal TemporalAdjusters]
            [java.util UUID]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; -- Handle state --
-
-(def ^:private handles (connector/create-handle-registry))
-
-(defn get-handle [handle] (connector/get-handle handles handle))
-(defn store-handle! [handle state] (connector/store-handle! handles handle state))
-(defn remove-handle! [handle] (connector/remove-handle! handles handle))
+(def ^{:stratum 0} ^:private handles (connector/create-handle-registry))
 
 ;; -- Rate limiting --
-
-(def ^:private last-request-at (atom 0))
-
-(defn- rate-limit!
-  "Sleep to enforce requests-per-second."
-  [rps]
-  (reset! last-request-at (http/time-based-acquire! rps @last-request-at)))
-
-;; -- HTTP helpers --
-
-(defn- fetch-url
-  "Fetch a URL with the SEC-required User-Agent header."
-  [url user-agent]
-  (rate-limit! 8)
-  (let [resp (bb-http/get url {:headers {"User-Agent" user-agent}
-                               :as      :bytes
-                               :throw   false
-                               :timeout 30000})
-        status (:status resp)]
-    (when (<= 200 status 299)
-      (:body resp))))
-
-(defn- fetch-json
-  "Fetch a URL and parse response as JSON."
-  [url user-agent]
-  (when-let [body (fetch-url url user-agent)]
-    (cheshire/parse-string (String. ^bytes body "UTF-8") keyword)))
+(def ^{:stratum 0} ^:private last-request-at (atom 0))
 
 ;; -- XML parsing --
-
-(defn- parse-xml
+(defn- ^{:stratum 0} parse-xml
   "Parse a byte-array as XML, return the root element. `clojure.data.xml`
    elements are records shaped `{:tag :attrs :content}` with content
    being a seq of child elements and text strings."
   [^bytes xml-bytes]
   (xml/parse (ByteArrayInputStream. xml-bytes)))
 
-(defn- elements-by-tag
+(defn- ^{:stratum 0} elements-by-tag
   "Return every descendant element whose `:tag` matches `tag-kw`.
    Depth-first, excluding `el` itself — matches the javax.xml
    `getElementsByTagName` it replaces. `(rest (tree-seq …))` drops the
@@ -90,63 +59,8 @@
   (filter (fn [n] (and (map? n) (= tag-kw (:tag n))))
           (rest (tree-seq :content :content el))))
 
-(defn- text-content
-  "Concatenated text content of the first descendant element with
-   `tag-kw`, or nil when empty. Matches the javax.xml
-   `getTextContent` behaviour the caller expects."
-  [el tag-kw]
-  (when-let [match (first (elements-by-tag el tag-kw))]
-    (let [text (->> (tree-seq :content :content match)
-                    (filter string?)
-                    (apply str))]
-      (when-not (empty? text) text))))
-
-;; -- EDGAR EFTS API --
-
-(defn- search-filings
-  "Search EDGAR EFTS for filings of a given form type in a date range."
-  [efts-base form-type start-date end-date sample-size user-agent]
-  (let [url (str efts-base
-                 "?q=%22" form-type "%22"
-                 "&forms=" form-type
-                 "&dateRange=custom"
-                 "&startdt=" start-date
-                 "&enddt=" end-date
-                 "&_source=adsh,ciks,file_date"
-                 "&from=0&size=" sample-size)]
-    (when-let [data (fetch-json url user-agent)]
-      (get-in data [:hits :hits]))))
-
-(defn- fetch-filing-xml
-  "Fetch a filing's XML document. Tries common filenames."
-  [archives-base adsh cik user-agent filenames]
-  (let [adsh-path (str/replace adsh "-" "")
-        cik-num   (str (parse-long cik))]
-    (some (fn [fname]
-            (fetch-url (str archives-base "/" cik-num "/" adsh-path "/" fname)
-                       user-agent))
-          filenames)))
-
-;; -- Form 4 transaction extraction --
-
-(defn- extract-form4-transactions
-  "Extract open-market P/S transactions from Form 4 XML bytes."
-  [^bytes xml-bytes transaction-codes]
-  (try
-    (let [root (parse-xml xml-bytes)]
-      (for [txn (elements-by-tag root :nonDerivativeTransaction)
-            :let [code   (text-content txn :transactionCode)
-                  shares (text-content txn :transactionShares)
-                  price  (text-content txn :transactionPricePerShare)]
-            :when (and code (contains? transaction-codes code))]
-        {:code   code
-         :shares (when shares (parse-double shares))
-         :price  (when price (parse-double price))}))
-    (catch Exception _ [])))
-
 ;; -- Aggregation --
-
-(defn- monthly-windows
+(defn- ^{:stratum 0} monthly-windows
   "Generate [start end] date string pairs for each month from start to today."
   [^String start-date-str]
   (let [start  (LocalDate/parse start-date-str)
@@ -161,7 +75,154 @@
           (recur (.plusMonths d 1)
                  (conj windows [(.format d fmt) (.format end fmt)])))))))
 
-(defn- fetch-filing-transactions
+(defn- ^{:stratum 0} count-by-code
+  "Count transactions matching a given code."
+  [txns code]
+  (count (filter #(= code (:code %)) txns)))
+
+(defn- ^{:stratum 0} handle-anomaly->response
+  "Convert connector handle validation anomalies to the response anomaly shape
+   expected by current connector protocol consumers."
+  [handle-anomaly]
+  (response/make-anomaly :anomalies/not-found
+                         (:anomaly/message handle-anomaly)
+                         (:anomaly/data handle-anomaly)))
+
+(defn ^{:stratum 0} do-checkpoint [cursor-state]
+  (connector/checkpoint-result cursor-state))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-handle [handle] (connector/get-handle handles handle))
+
+(defn ^{:stratum 1} store-handle! [handle state] (connector/store-handle! handles handle state))
+
+(defn ^{:stratum 1} remove-handle! [handle] (connector/remove-handle! handles handle))
+
+(defn- ^{:stratum 1} rate-limit!
+  "Sleep to enforce requests-per-second."
+  [rps]
+  (reset! last-request-at (http/time-based-acquire! rps @last-request-at)))
+
+(defn- ^{:stratum 1} text-content
+  "Concatenated text content of the first descendant element with
+   `tag-kw`, or nil when empty. Matches the javax.xml
+   `getTextContent` behaviour the caller expects."
+  [el tag-kw]
+  (when-let [match (first (elements-by-tag el tag-kw))]
+    (let [text (->> (tree-seq :content :content match)
+                    (filter string?)
+                    (apply str))]
+      (when-not (empty? text) text))))
+
+;; -- Source --
+(defn- ^{:stratum 1} require-handle
+  "Retrieve handle state or return an anomaly."
+  [handle]
+  (connector/require-handle handles handle
+                            {:message (msg/t :edgar/handle-not-found {:handle handle})}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; -- HTTP helpers --
+(defn- ^{:stratum 2} fetch-url
+  "Fetch a URL with the SEC-required User-Agent header."
+  [url user-agent]
+  (rate-limit! 8)
+  (let [resp (bb-http/get url {:headers {"User-Agent" user-agent}
+                               :as      :bytes
+                               :throw   false
+                               :timeout 30000})
+        status (:status resp)]
+    (when (<= 200 status 299)
+      (:body resp))))
+
+;; -- Form 4 transaction extraction --
+(defn- ^{:stratum 2} extract-form4-transactions
+  "Extract open-market P/S transactions from Form 4 XML bytes."
+  [^bytes xml-bytes transaction-codes]
+  (try
+    (let [root (parse-xml xml-bytes)]
+      (for [txn (elements-by-tag root :nonDerivativeTransaction)
+            :let [code   (text-content txn :transactionCode)
+                  shares (text-content txn :transactionShares)
+                  price  (text-content txn :transactionPricePerShare)]
+            :when (and code (contains? transaction-codes code))]
+        {:code   code
+         :shares (when shares (parse-double shares))
+         :price  (when price (parse-double price))}))
+    (catch Exception _ [])))
+
+;; -- Lifecycle --
+(defn ^{:stratum 2} do-connect
+  "Validate config, register handle."
+  [config _auth]
+  (let [form-type  (:edgar/form-type config)
+        user-agent (:edgar/user-agent config)
+        aggregation (:edgar/aggregation config)]
+    (cond
+      (nil? form-type)   (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/form-type-required)
+                                                  {:config config})
+      (nil? user-agent)  (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/user-agent-required)
+                                                  {:config config})
+      (nil? aggregation) (response/throw-anomaly! :anomalies/incorrect
+                                                  (msg/t :edgar/aggregation-required)
+                                                  {:config config})
+      :else
+      (let [handle (str (UUID/randomUUID))]
+        (store-handle! handle {:config config})
+        (connector/connect-result handle)))))
+
+(defn ^{:stratum 2} do-close [handle]
+  (remove-handle! handle)
+  (connector/close-result))
+
+(defn ^{:stratum 2} do-discover [handle]
+  (let [handle-state (require-handle handle)]
+    (if (anomaly/anomaly? handle-state)
+      (handle-anomaly->response handle-state)
+      (let [{:keys [config]} handle-state]
+        (connector/discover-result [{:schema/name        (:edgar/form-type config)
+                                     :schema/aggregation (:edgar/aggregation config)}])))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} fetch-json
+  "Fetch a URL and parse response as JSON."
+  [url user-agent]
+  (when-let [body (fetch-url url user-agent)]
+    (cheshire/parse-string (String. ^bytes body "UTF-8") keyword)))
+
+(defn- ^{:stratum 3} fetch-filing-xml
+  "Fetch a filing's XML document. Tries common filenames."
+  [archives-base adsh cik user-agent filenames]
+  (let [adsh-path (str/replace adsh "-" "")
+        cik-num   (str (parse-long cik))]
+    (some (fn [fname]
+            (fetch-url (str archives-base "/" cik-num "/" adsh-path "/" fname)
+                       user-agent))
+          filenames)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; -- EDGAR EFTS API --
+(defn- ^{:stratum 4} search-filings
+  "Search EDGAR EFTS for filings of a given form type in a date range."
+  [efts-base form-type start-date end-date sample-size user-agent]
+  (let [url (str efts-base
+                 "?q=%22" form-type "%22"
+                 "&forms=" form-type
+                 "&dateRange=custom"
+                 "&startdt=" start-date
+                 "&enddt=" end-date
+                 "&_source=adsh,ciks,file_date"
+                 "&from=0&size=" sample-size)]
+    (when-let [data (fetch-json url user-agent)]
+      (get-in data [:hits :hits]))))
+
+(defn- ^{:stratum 4} fetch-filing-transactions
   "Fetch and extract transactions from a single EFTS hit."
   [archives-base hit user-agent filenames transaction-codes]
   (let [src  (:_source hit)
@@ -171,12 +232,9 @@
       (when-let [xml (fetch-filing-xml archives-base adsh cik user-agent filenames)]
         (extract-form4-transactions xml transaction-codes)))))
 
-(defn- count-by-code
-  "Count transactions matching a given code."
-  [txns code]
-  (count (filter #(= code (:code %)) txns)))
+;------------------------------------------------------------------------------ Layer 5
 
-(defn- aggregate-buy-sell-ratio
+(defn- ^{:stratum 5} aggregate-buy-sell-ratio
   "Aggregate Form 4 transactions into monthly buy:sell ratio records."
   [config user-agent]
   (let [{:edgar/keys [start-date sample-size transaction-codes
@@ -203,58 +261,9 @@
         :series_id (or series-id "INSIDER_BUY_SELL_RATIO")
         :value     (format "%.4f" ratio)}))))
 
-;; -- Lifecycle --
+;------------------------------------------------------------------------------ Layer 6
 
-(defn do-connect
-  "Validate config, register handle."
-  [config _auth]
-  (let [form-type  (:edgar/form-type config)
-        user-agent (:edgar/user-agent config)
-        aggregation (:edgar/aggregation config)]
-    (cond
-      (nil? form-type)   (response/throw-anomaly! :anomalies/incorrect
-                                                  (msg/t :edgar/form-type-required)
-                                                  {:config config})
-      (nil? user-agent)  (response/throw-anomaly! :anomalies/incorrect
-                                                  (msg/t :edgar/user-agent-required)
-                                                  {:config config})
-      (nil? aggregation) (response/throw-anomaly! :anomalies/incorrect
-                                                  (msg/t :edgar/aggregation-required)
-                                                  {:config config})
-      :else
-      (let [handle (str (UUID/randomUUID))]
-        (store-handle! handle {:config config})
-        (connector/connect-result handle)))))
-
-(defn do-close [handle]
-  (remove-handle! handle)
-  (connector/close-result))
-
-;; -- Source --
-
-(defn- require-handle
-  "Retrieve handle state or return an anomaly."
-  [handle]
-  (connector/require-handle handles handle
-                            {:message (msg/t :edgar/handle-not-found {:handle handle})}))
-
-(defn- handle-anomaly->response
-  "Convert connector handle validation anomalies to the response anomaly shape
-   expected by current connector protocol consumers."
-  [handle-anomaly]
-  (response/make-anomaly :anomalies/not-found
-                         (:anomaly/message handle-anomaly)
-                         (:anomaly/data handle-anomaly)))
-
-(defn do-discover [handle]
-  (let [handle-state (require-handle handle)]
-    (if (anomaly/anomaly? handle-state)
-      (handle-anomaly->response handle-state)
-      (let [{:keys [config]} handle-state]
-        (connector/discover-result [{:schema/name        (:edgar/form-type config)
-                                     :schema/aggregation (:edgar/aggregation config)}])))))
-
-(defn do-extract
+(defn ^{:stratum 6} do-extract
   "Extract aggregated records from EDGAR filings."
   [handle _opts]
   (let [handle-state (require-handle handle)]
@@ -270,6 +279,3 @@
                                                   (msg/t :edgar/aggregation-unknown {:agg (:edgar/aggregation config)})
                                                   {:aggregation (:edgar/aggregation config)}))]
         (connector/extract-result records nil false)))))
-
-(defn do-checkpoint [cursor-state]
-  (connector/checkpoint-result cursor-state))

@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-edgar.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-edgar.impl :as impl]
             [ai.miniforge.response.interface :as response]))
 
-(deftest connect-validates-config-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} connect-validates-config-test
   (testing "do-connect requires form-type, user-agent, aggregation"
     (is (thrown? Exception (impl/do-connect {} nil)))
     (is (thrown? Exception (impl/do-connect {:edgar/form-type "4"} nil)))
@@ -29,7 +30,7 @@
                 (impl/do-connect {:edgar/form-type "4"
                                   :edgar/user-agent "Test/1.0"} nil)))))
 
-(deftest connect-close-lifecycle-test
+(deftest ^{:stratum 0} connect-close-lifecycle-test
   (testing "connect and close work"
     (let [config {:edgar/form-type   "4"
                   :edgar/user-agent  "Test/1.0 test@test.com"
@@ -40,7 +41,7 @@
       (let [close-result (impl/do-close (:connection/handle result))]
         (is (= :closed (:connector/status close-result)))))))
 
-(deftest extract-form4-transactions-test
+(deftest ^{:stratum 0} extract-form4-transactions-test
   (testing "extracts P and S transactions from Form 4 XML"
     (let [xml-str "<?xml version=\"1.0\"?>
 <ownershipDocument>
@@ -83,12 +84,12 @@
       (is (= "S" (:code (second txns))))
       (is (= 500.0 (:shares (second txns)))))))
 
-(deftest extract-form4-transactions-invalid-xml-test
+(deftest ^{:stratum 0} extract-form4-transactions-invalid-xml-test
   (testing "invalid XML returns empty"
     (let [txns (#'impl/extract-form4-transactions (.getBytes "not xml" "UTF-8") #{"P" "S"})]
       (is (empty? txns)))))
 
-(deftest monthly-windows-test
+(deftest ^{:stratum 0} monthly-windows-test
   (testing "generates monthly windows from start date"
     (let [windows (#'impl/monthly-windows "2026-01-01")]
       (is (pos? (count windows)))
@@ -98,7 +99,7 @@
         (is (string? s))
         (is (string? e))))))
 
-(deftest discover-test
+(deftest ^{:stratum 0} discover-test
   (testing "discover returns form type info"
     (let [config {:edgar/form-type   "4"
                   :edgar/user-agent  "Test/1.0"
@@ -109,17 +110,15 @@
       (is (= "4" (:schema/name (first (:schemas result)))))
       (impl/do-close handle))))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Migrated handle-lookup helper — connector boundaries return anomalies.
-
-(deftest discover-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} discover-returns-anomaly-on-unknown-handle-test
   (testing "do-discover returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-discover "no-such-handle")]
       (is (response/anomaly-map? result))
       (is (= :anomalies/not-found (:anomaly/category result)))
       (is (= "no-such-handle" (:handle result))))))
 
-(deftest extract-returns-anomaly-on-unknown-handle-test
+(deftest ^{:stratum 0} extract-returns-anomaly-on-unknown-handle-test
   (testing "do-extract returns an anomaly with :handle when handle is missing"
     (let [result (impl/do-extract "no-such-handle" {})]
       (is (response/anomaly-map? result))
