@@ -52,7 +52,7 @@
            (result/shell-success {:output (str/trim (or stdout ""))})
            (result/shell-failure (str/trim (or stderr ""))
                                  {:output (str/trim (or stdout ""))})))
-       (result/shell-failure (str "Executor error: " (:error r)))))))
+       (result/shell-failure (str "Executor error: " (:error r)) {:output ""})))))
 
 (defn- ^{:stratum 0} ssh->https-with-token
   "Convert an SSH or HTTPS git remote URL to HTTPS with token auth.

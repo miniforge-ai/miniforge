@@ -102,6 +102,16 @@
         (is (nil? (:commit-sha result)))
         (is (str/includes? (:error result) "bad revision"))))))
 
+(deftest ^{:stratum 0} exec-bang-exception-includes-output-test
+  (testing "exec! includes :output even when process/shell throws"
+    (with-redefs [process/shell (fn [& _] (throw (Exception. "spawn failed")))]
+      (let [result (git/exec! "/tmp/wt" ["git" "status"])]
+        (is (not (:success? result)))
+        (is (contains? result :output)
+            "an exception path must still carry an :output key, matching the docstring's contract")
+        (is (= "" (:output result)))
+        (is (str/includes? (:error result) "spawn failed"))))))
+
 ;;-------------------------------------------- path traversal + base safety
 (deftest ^{:stratum 0} write-file-path-traversal-test
   (let [dir (fs/create-temp-dir {:prefix "git-host-mode-wf-"})]

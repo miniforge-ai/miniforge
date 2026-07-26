@@ -100,7 +100,7 @@
         (result/shell-failure (str/trim (get r :err ""))
                               {:output (str/trim (get r :out ""))})))
     (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+      (result/shell-failure (.getMessage e) {:output ""}))))
 
 ;; Git operations
 (defn ^{:stratum 0} stage-files!

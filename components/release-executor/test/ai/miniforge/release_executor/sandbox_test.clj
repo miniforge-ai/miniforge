@@ -168,6 +168,25 @@
       (is (true? (:push-succeeded? result)))
       (is (clojure.string/includes? (:error result) "Scrub it")))))
 
+(deftest ^{:stratum 0} exec-executor-error-includes-output-test
+  (testing "exec! includes :output even when the executor itself errors (not just a nonzero exit)"
+    (let [failing-exec (reify
+                          dag/TaskExecutor
+                          (executor-type [_] :mock)
+                          (available? [_] (dag/ok {:available? true}))
+                          (acquire-environment! [_ _ _] (dag/ok {}))
+                          (execute! [_ _env-id _command _opts]
+                            (dag/err :executor-unavailable "container is gone"))
+                          (copy-to! [_ _ _ _] (dag/ok {}))
+                          (copy-from! [_ _ _ _] (dag/ok {}))
+                          (release-environment! [_ _] (dag/ok {}))
+                          (environment-status [_ _] (dag/ok {:status :running})))
+          result (sandbox/exec! failing-exec "env-1" "git status")]
+      (is (not (:success? result)))
+      (is (contains? result :output)
+          "executor-level failures must still carry an :output key, matching the docstring's contract")
+      (is (= "" (:output result))))))
+
 ;; ============================================================================
 ;; safe container path validation tests
 ;; ============================================================================
