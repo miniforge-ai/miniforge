@@ -15,38 +15,39 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.schema
   "Malli schemas for the repo-dag component.
-   Layer 0: Enums and base types
-   Layer 1: RepoNode and RepoEdge schemas
-   Layer 2: RepoDag composite schema"
+   Layer 0: Enums, base types, and standalone map schemas
+   Layer 1: Registry and infer-layer (depend on the Layer 0 enums)
+   Layer 2: RepoNode and RepoEdge schemas (depend on the registry)
+   Layer 3: RepoDag composite schema and node/edge validators
+   Layer 4: valid-repo-dag? (depends on RepoDag)"
   (:require
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums and base types
 
-(def repo-types
+;; Enums and base types
+(def ^{:stratum 0} repo-types
   [:terraform-module :terraform-live :kubernetes
    :argocd :application :library :documentation])
 
-(def repo-layers
+(def ^{:stratum 0} repo-layers
   [:foundations :infrastructure :platform :application :adapters])
 
-(def edge-constraints
+(def ^{:stratum 0} edge-constraints
   [:module-before-live      ; TF modules before live infra
    :infra-before-k8s        ; Infrastructure before K8s manifests
    :k8s-before-argocd       ; Manifests before ArgoCD apps
    :library-before-consumer ; Libraries before consumers
-   :schema-before-impl])    ; Schema changes before implementations
+   :schema-before-impl])  ; Schema changes before implementations
 
-(def merge-orderings
+(def ^{:stratum 0} merge-orderings
   [:sequential    ; Must merge in order
    :parallel-ok   ; Can merge in parallel if both ready
-   :same-pr-train]) ; Must be in same PR train
+   :same-pr-train])  ; Must be in same PR train
 
-(def type->layer
+(def ^{:stratum 0} type->layer
   {:terraform-module :foundations
    :terraform-live   :infrastructure
    :kubernetes       :platform
@@ -55,7 +56,41 @@
    :library          :foundations
    :documentation    :adapters})
 
-(def registry
+;; RepoNode and RepoEdge schemas
+(def ^{:stratum 0} WatchConfig
+  [:map
+   [:labels-include {:optional true} [:vector string?]]
+   [:labels-exclude {:optional true} [:vector string?]]
+   [:paths-include {:optional true} [:vector string?]]
+   [:paths-exclude {:optional true} [:vector string?]]])
+
+(def ^{:stratum 0} EdgeValidation
+  [:map
+   [:require-ci-pass? {:default true} boolean?]
+   [:require-plan-clean? {:default false} boolean?]
+   [:custom-gate {:optional true} keyword?]])
+
+(def ^{:stratum 0} TopoSortResult
+  "Result of a topological sort operation."
+  [:map
+   [:success boolean?]
+   [:order {:optional true} [:vector string?]]
+   [:error {:optional true} [:enum :cycle-detected :invalid-dag]]
+   [:cycle-nodes {:optional true} [:set string?]]])
+
+(def ^{:stratum 0} ValidationResult
+  "Result of DAG validation."
+  [:map
+   [:valid? boolean?]
+   [:errors [:vector
+             [:map
+              [:type [:enum :cycle :orphan-edge :missing-repo :duplicate-repo :self-loop]]
+              [:message string?]
+              [:data {:optional true} any?]]]]])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} registry
   "Malli registry for repo-dag schema types."
   {;; Identifiers
    :dag/id          uuid?
@@ -70,17 +105,13 @@
    :edge/constraint (into [:enum] edge-constraints)
    :edge/merge-ordering (into [:enum] merge-orderings)})
 
-;------------------------------------------------------------------------------ Layer 1
-;; RepoNode and RepoEdge schemas
+(defn ^{:stratum 1} infer-layer
+  [repo-type]
+  (get type->layer repo-type :application))
 
-(def WatchConfig
-  [:map
-   [:labels-include {:optional true} [:vector string?]]
-   [:labels-exclude {:optional true} [:vector string?]]
-   [:paths-include {:optional true} [:vector string?]]
-   [:paths-exclude {:optional true} [:vector string?]]])
+;------------------------------------------------------------------------------ Layer 2
 
-(def RepoNode
+(def ^{:stratum 2} RepoNode
   "Repository node in the DAG.
    Represents a single repository with its metadata and configuration."
   [:map {:registry registry}
@@ -92,13 +123,7 @@
    [:repo/default-branch {:default "main"} string?]
    [:repo/watch-config {:optional true} WatchConfig]])
 
-(def EdgeValidation
-  [:map
-   [:require-ci-pass? {:default true} boolean?]
-   [:require-plan-clean? {:default false} boolean?]
-   [:custom-gate {:optional true} keyword?]])
-
-(def RepoEdge
+(def ^{:stratum 2} RepoEdge
   "Dependency edge between repositories.
    Represents a directed relationship from one repo to another."
   [:map {:registry registry}
@@ -108,10 +133,10 @@
    [:edge/merge-ordering :edge/merge-ordering]
    [:edge/validation {:optional true} EdgeValidation]])
 
-;------------------------------------------------------------------------------ Layer 2
-;; RepoDag composite schema
+;------------------------------------------------------------------------------ Layer 3
 
-(def RepoDag
+;; RepoDag composite schema
+(def ^{:stratum 3} RepoDag
   "Complete repository dependency graph.
    Contains all nodes, edges, and computed ordering information."
   [:map {:registry registry}
@@ -124,42 +149,20 @@
    [:dag/topo-order {:optional true} [:vector :repo/name]]
    [:dag/layers {:optional true} [:map-of keyword? [:vector :repo/name]]]])
 
-(def TopoSortResult
-  "Result of a topological sort operation."
-  [:map
-   [:success boolean?]
-   [:order {:optional true} [:vector string?]]
-   [:error {:optional true} [:enum :cycle-detected :invalid-dag]]
-   [:cycle-nodes {:optional true} [:set string?]]])
-
-(def ValidationResult
-  "Result of DAG validation."
-  [:map
-   [:valid? boolean?]
-   [:errors [:vector
-             [:map
-              [:type [:enum :cycle :orphan-edge :missing-repo :duplicate-repo :self-loop]]
-              [:message string?]
-              [:data {:optional true} any?]]]]])
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Validation helpers
-
-(defn valid-repo-node?
+(defn ^{:stratum 3} valid-repo-node?
   [value]
   (m/validate RepoNode value))
 
-(defn valid-repo-edge?
+(defn ^{:stratum 3} valid-repo-edge?
   [value]
   (m/validate RepoEdge value))
 
-(defn valid-repo-dag?
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} valid-repo-dag?
   [value]
   (m/validate RepoDag value))
-
-(defn infer-layer
-  [repo-type]
-  (get type->layer repo-type :application))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.anomaly.remove-repo-test
   "Coverage for `dag/remove-repo-anomaly` and its stable alias
    `dag/remove-repo`. Only failure mode is `:not-found` — DAG missing."
@@ -23,22 +22,23 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
-(def ^:dynamic *manager* nil)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn manager-fixture [f]
+(def ^{:stratum 0} ^:dynamic *manager* nil)
+
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
-
-(def repo-config
+(def ^{:stratum 0} repo-config
   {:repo/url "https://github.com/acme/tf"
    :repo/name "tf"
    :repo/type :terraform-module})
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest remove-repo-anomaly-returns-updated-dag
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 1} remove-repo-anomaly-returns-updated-dag
   (testing "successful remove returns the updated DAG, not an anomaly"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo-anomaly *manager* (:dag/id d) repo-config)
@@ -47,8 +47,7 @@
       (is (= 0 (count (:dag/repos result)))))))
 
 ;------------------------------------------------------------------------------ Failure path
-
-(deftest remove-repo-anomaly-not-found-when-dag-missing
+(deftest ^{:stratum 1} remove-repo-anomaly-not-found-when-dag-missing
   (testing "missing DAG yields :not-found anomaly"
     (let [missing-id (random-uuid)
           result (dag/remove-repo-anomaly *manager* missing-id "tf")]
@@ -57,9 +56,10 @@
       (is (= missing-id (get-in result [:anomaly/data :dag-id]))))))
 
 ;------------------------------------------------------------------------------ Alias compatibility
-
-(deftest remove-repo-returns-anomaly-on-missing-dag
+(deftest ^{:stratum 1} remove-repo-returns-anomaly-on-missing-dag
   (testing "stable alias returns anomaly data on missing DAG"
     (let [result (dag/remove-repo *manager* (random-uuid) "tf")]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
+
+(use-fixtures :each manager-fixture)

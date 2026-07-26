@@ -15,27 +15,25 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.dag-topology-test
-  "Tests for topological sort and cycle detection (Layers 3-4)."
+  "Tests for topological sort and cycle detection."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *manager* nil)
 
-(def ^:dynamic *manager* nil)
-
-(defn manager-fixture [f]
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Topological sort tests
-
-(deftest topo-sort-test
+(deftest ^{:stratum 1} topo-sort-test
   (testing "returns correct order for linear chain"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -85,10 +83,8 @@
       (is (= 2 (count (:order result))))
       (is (= #{"a" "b"} (set (:order result)))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Cycle detection tests
-
-(deftest cycle-detection-test
+(deftest ^{:stratum 1} cycle-detection-test
   (testing "detects simple cycle on add-edge"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -131,3 +127,5 @@
                                       {:edge/from "c" :edge/to "a" :edge/constraint :library-before-consumer :edge/merge-ordering :sequential}]}
           cycle-nodes (dag/find-cycle-nodes dag-with-cycle)]
       (is (= #{"a" "b" "c"} cycle-nodes)))))
+
+(use-fixtures :each manager-fixture)
