@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow-resume.core
   "Pure reconstruction of execution context from recorded event streams.
 
@@ -45,35 +44,35 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure extractors over an event sequence
 
-(defn completed?
+;; Pure extractors over an event sequence
+(defn ^{:stratum 0} completed?
   [reconstructed]
   (true? (:completed? reconstructed)))
 
-(defn failed?
+(defn ^{:stratum 0} failed?
   [reconstructed]
   (true? (:failed? reconstructed)))
 
-(defn paused?
+(defn ^{:stratum 0} paused?
   [reconstructed]
   (true? (:dag-paused? reconstructed)))
 
-(defn extract-completed-dag-tasks
+(defn ^{:stratum 0} extract-completed-dag-tasks
   [events]
   (->> events
        (filter #(= :dag/task-completed (:event/type %)))
        (map :dag/task-id)
        set))
 
-(defn extract-completed-dag-artifacts
+(defn ^{:stratum 0} extract-completed-dag-artifacts
   [events]
   (->> events
        (filter #(= :dag/task-completed (:event/type %)))
        (mapcat #(get-in % [:dag/result :data :artifacts] []))
        vec))
 
-(defn extract-workspace-checkpoints
+(defn ^{:stratum 0} extract-workspace-checkpoints
   "Workspace persistence records emitted at phase boundaries.
 
    These are the container/worktree provenance records that survive when
@@ -98,7 +97,7 @@
                    checkpoint))))
        vec))
 
-(defn extract-dag-pause-info
+(defn ^{:stratum 0} extract-dag-pause-info
   [events]
   (when-let [pause-event (->> events
                               (filter #(= :dag/paused (:event/type %)))
@@ -106,7 +105,7 @@
     {:completed-task-ids (set (:dag/completed-task-ids pause-event))
      :pause-reason (:dag/pause-reason pause-event)}))
 
-(def completed-outcomes
+(def ^{:stratum 0} completed-outcomes
   "Phase outcomes that count as completed for resume — the phase finished its
    work, so resume trims it from the pipeline rather than re-running it.
    :success did the work; :skipped short-circuited because the work was already
@@ -114,14 +113,7 @@
    producer yet, so they too fall outside this set and would re-run."
   #{:success :skipped})
 
-(defn extract-completed-phases
-  [events]
-  (->> events
-       (filter #(= :workflow/phase-completed (:event/type %)))
-       (filter #(contains? completed-outcomes (:phase/outcome %)))
-       (mapv :workflow/phase)))
-
-(defn extract-phase-results
+(defn ^{:stratum 0} extract-phase-results
   [events]
   (->> events
        (filter #(= :workflow/phase-completed (:event/type %)))
@@ -139,14 +131,14 @@
                                     (:phase/review-decision evt)))))
                {})))
 
-(defn find-workflow-spec
+(defn ^{:stratum 0} find-workflow-spec
   [events]
   (->> events
        (filter #(= :workflow/started (:event/type %)))
        first
        :workflow/spec))
 
-(defn- ensure-reconstruction-source
+(defn- ^{:stratum 0} ensure-reconstruction-source
   [checkpoint-data events-dir workflow-id events raw-events]
   (when-not (or checkpoint-data (seq events))
     (anomaly/anomaly :not-found
@@ -155,56 +147,18 @@
                       :events-dir (str events-dir)
                       :raw-event-count (count raw-events)})))
 
-(defn- checkpoint-status
+(defn- ^{:stratum 0} checkpoint-status
   [checkpoint-data]
   (get-in checkpoint-data [:machine-snapshot :execution/status]))
 
-(defn- checkpoint-dag-result
+(defn- ^{:stratum 0} checkpoint-dag-result
   [checkpoint-data]
   (get-in checkpoint-data [:machine-snapshot :execution/dag-result]))
 
-(defn- reconstructed-completed?
-  [by-type checkpoint-data]
-  (let [status (checkpoint-status checkpoint-data)]
-    (if (some? status)
-      (contains? #{:completed :completed-with-warnings} status)
-      (boolean (seq (get by-type :workflow/completed))))))
-
-(defn- reconstructed-failed?
-  [by-type checkpoint-data]
-  (let [status (checkpoint-status checkpoint-data)]
-    (if (some? status)
-      (= :failed status)
-      (boolean (seq (get by-type :workflow/failed))))))
-
-(def ^:private resume-config-resource
+(def ^{:stratum 0} ^:private resume-config-resource
   "config/workflow-resume/resume.edn")
 
-(defn- read-resume-config
-  []
-  (if-let [resource (io/resource resume-config-resource)]
-    (:workflow-resume/resume (edn/read-string (slurp resource)))
-    (anomaly/anomaly :not-found
-                     "Workflow resume config resource not found"
-                     {:resource resume-config-resource
-                      :config/error :invalid-config})))
-
-(def ^:private resume-config
-  (delay (read-resume-config)))
-
-(defn- config-set
-  [k]
-  (set (get @resume-config k)))
-
-(def completed-phase-statuses
-  "Phase result statuses that are safe to skip on resume."
-  (config-set :completed-phase-statuses))
-
-(def blocking-review-decisions
-  "Review decisions that must resume the repair path."
-  (config-set :blocking-review-decisions))
-
-(defn- phase-result-status
+(defn- ^{:stratum 0} phase-result-status
   [phase-result]
   (or (:status phase-result)
       (:phase/status phase-result)
@@ -213,26 +167,13 @@
       (get-in phase-result [:result :status])
       (get-in phase-result [:phase/result :status])))
 
-(defn- review-blocked?
-  [phase-id phase-result]
-  (and (= :review phase-id)
-       (contains? blocking-review-decisions
-                  (response/review-decision (response/phase-output phase-result)))))
-
-(defn- completed-phase-result?
-  [phase-id phase-result]
-  (and phase-result
-       (not (review-blocked? phase-id phase-result))
-       (contains? completed-phase-statuses
-                  (phase-result-status phase-result))))
-
-(defn- checkpoint-phase-order
+(defn- ^{:stratum 0} checkpoint-phase-order
   [checkpoint-data phase-results]
   (let [manifest-order (get-in checkpoint-data [:manifest :workflow/phases-completed])]
     (vec (concat manifest-order
                  (remove (set manifest-order) (keys phase-results))))))
 
-(defn- event-phase-order
+(defn- ^{:stratum 0} event-phase-order
   [events]
   (->> events
        (filter #(= :workflow/phase-completed (:event/type %)))
@@ -240,31 +181,80 @@
        distinct
        vec))
 
-(defn- completed-checkpoint-phases
-  [checkpoint-data phase-results]
-  (->> (checkpoint-phase-order checkpoint-data phase-results)
-       (filter #(completed-phase-result? % (get phase-results %)))))
+;; Pipeline trimming
+(defn ^{:stratum 0} trim-pipeline
+  "Drop the already-completed prefix from a workflow's pipeline.
 
-(defn- completed-event-phases
+   Pure: takes a workflow map with `:workflow/pipeline` and a
+   collection of completed phase keywords; returns the workflow with only
+   leading completed phases removed. Completed phases after the first
+   incomplete phase are preserved."
+  [workflow completed-phases]
+  (anomaly/let-ok [_valid (schema/validate schema/TrimPipelineInput
+                                           {:workflow workflow
+                                            :completed-phases completed-phases}
+                                           {:message "Invalid trim-pipeline input"
+                                            :schema-name :workflow-resume/trim-pipeline})]
+    (let [completed-set (set completed-phases)
+          remaining (vec (drop-while #(completed-set (:phase %))
+                                     (get workflow :workflow/pipeline [])))]
+      (assoc workflow :workflow/pipeline remaining))))
+
+;; Identity resolution
+(defn- ^{:stratum 0} synthetic-dag-task-workflow-id?
+  "True when the recorded workflow id is an internal DAG task workflow key,
+   not a loadable top-level workflow type from the registry."
+  [workflow-id]
+  (and (keyword? workflow-id)
+       (str/starts-with? (name workflow-id) "dag-task-")))
+
+(def ^{:stratum 0} ^:private workflow-type-identifier-re
+  "Regex for an unqualified workflow-type keyword name. Workflow types are loader keys
+   like :canonical-sdlc / :quick-fix — strict identifier characters only.
+   This rejects values like \"In-flight PR / branch / task-claim registry\"
+   (a human title that the producer side accidentally records under
+   `:name`) before they get keywordized into an unloadable lookup key."
+  #"^[A-Za-z][A-Za-z0-9._+!?*<>=-]*$")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} extract-completed-phases
   [events]
-  (let [event-results (extract-phase-results events)]
-    (->> (event-phase-order events)
-         (filter #(completed-phase-result? % (get event-results %))))))
+  (->> events
+       (filter #(= :workflow/phase-completed (:event/type %)))
+       (filter #(contains? completed-outcomes (:phase/outcome %)))
+       (mapv :workflow/phase)))
 
-(defn- restored-completed-phases
-  [checkpoint-data events phase-results]
-  (->> (concat (completed-event-phases events)
-               (completed-checkpoint-phases checkpoint-data phase-results))
-       distinct
-       vec))
+(defn- ^{:stratum 1} reconstructed-completed?
+  [by-type checkpoint-data]
+  (let [status (checkpoint-status checkpoint-data)]
+    (if (some? status)
+      (contains? #{:completed :completed-with-warnings} status)
+      (boolean (seq (get by-type :workflow/completed))))))
 
-(defn- restored-phase-results
+(defn- ^{:stratum 1} reconstructed-failed?
+  [by-type checkpoint-data]
+  (let [status (checkpoint-status checkpoint-data)]
+    (if (some? status)
+      (= :failed status)
+      (boolean (seq (get by-type :workflow/failed))))))
+
+(defn- ^{:stratum 1} read-resume-config
+  []
+  (if-let [resource (io/resource resume-config-resource)]
+    (:workflow-resume/resume (edn/read-string (slurp resource)))
+    (anomaly/anomaly :not-found
+                     "Workflow resume config resource not found"
+                     {:resource resume-config-resource
+                      :config/error :invalid-config})))
+
+(defn- ^{:stratum 1} restored-phase-results
   [checkpoint-data events]
   (if checkpoint-data
     (:phase-results checkpoint-data)
     (extract-phase-results events)))
 
-(defn- restored-dag-pause-info
+(defn- ^{:stratum 1} restored-dag-pause-info
   [checkpoint-data events]
   (let [dag-result (checkpoint-dag-result checkpoint-data)]
     (or (when (:paused? dag-result)
@@ -272,7 +262,32 @@
            :pause-reason (:pause-reason dag-result)})
         (extract-dag-pause-info events))))
 
-(defn- restored-completed-dag-tasks
+(defn- ^{:stratum 1} restored-completed-dag-artifacts
+  [checkpoint-data events]
+  (let [dag-result (checkpoint-dag-result checkpoint-data)
+        checkpoint-artifacts (vec (get dag-result :artifacts []))
+        event-artifacts (extract-completed-dag-artifacts events)]
+    (if (seq checkpoint-artifacts)
+      checkpoint-artifacts
+      event-artifacts)))
+
+(defn- ^{:stratum 1} restored-workspace-checkpoint
+  [events]
+  (last (extract-workspace-checkpoints events)))
+
+(defn- ^{:stratum 1} valid-workflow-type-keyword?
+  "True when `v` is an unqualified workflow-type keyword name."
+  [v]
+  (and (keyword? v)
+       (nil? (namespace v))
+       (re-matches workflow-type-identifier-re (name v))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private resume-config
+  (delay (read-resume-config)))
+
+(defn- ^{:stratum 2} restored-completed-dag-tasks
   [checkpoint-data events]
   (let [dag-result (checkpoint-dag-result checkpoint-data)
         checkpoint-task-ids (set (:completed-task-ids dag-result))
@@ -283,23 +298,140 @@
         pause-task-ids
         #{})))
 
-(defn- restored-completed-dag-artifacts
-  [checkpoint-data events]
-  (let [dag-result (checkpoint-dag-result checkpoint-data)
-        checkpoint-artifacts (vec (get dag-result :artifacts []))
-        event-artifacts (extract-completed-dag-artifacts events)]
-    (if (seq checkpoint-artifacts)
-      checkpoint-artifacts
-      event-artifacts)))
+(defn- ^{:stratum 2} candidate-workflow-type
+  "Pull a candidate workflow-type keyword out of the recorded workflow
+   spec. Preference order:
 
-(defn- restored-workspace-checkpoint
+   1. `:workflow-type` — canonical key when callers thread it through
+   2. `:workflow/id`    — same shape as a workflow-config map
+   3. `:name`           — legacy / TUI shape; ONLY accepted when the
+      value is an unqualified workflow-type keyword/name matching a
+      strict keyword-name regex, because some producers
+      (notably the cli + TUI persistence path) record the human spec
+      title under `:name` and a title with spaces / slashes would
+      keywordize into an unloadable key.
+
+   Returns a keyword or nil."
+  [workflow-spec]
+  (let [keyword-if-valid (fn [v]
+                           (cond
+                             (valid-workflow-type-keyword? v) v
+                             (and (string? v)
+                                  (re-matches workflow-type-identifier-re v))
+                             (keyword v)
+                             :else nil))]
+    (or (keyword-if-valid (get workflow-spec :workflow-type))
+        (keyword-if-valid (get workflow-spec :workflow/id))
+        (keyword-if-valid (get workflow-spec :name)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} config-set
+  [k]
+  (set (get @resume-config k)))
+
+(defn ^{:stratum 3} resolve-workflow-identity
+  "Resolve `{:workflow-type :workflow-version}` for a resume run.
+
+   Preference order for `:workflow-type`:
+
+   1. A keyword-valid identifier extracted from the recorded
+      `:workflow/spec` via `candidate-workflow-type` (tries
+      `:workflow-type`, `:workflow/id`, then `:name`).
+   2. The `:execution/workflow-id` from the machine snapshot, unless
+      it's a synthetic DAG-task key.
+   3. The caller-supplied `fallback-fn` (typically a selection profile).
+
+   Returns a `:not-found` anomaly if no source yields a loadable type.
+
+   Arguments:
+   - `reconstructed` — context map from `reconstruct-context`
+   - `fallback-fn`   — 0-arity; returns a type keyword or nil
+
+   Pre-2026-05-23: this fn did `(some-> workflow-spec :name keyword)`
+   unconditionally, which produced unloadable keywords like
+   `:In-flight PR / branch / task-claim registry` whenever a producer
+   recorded the spec title under `:name` (observed dogfooding
+   work/in-flight-pr-registry.spec.edn, workflow a92b2c97). The
+   identifier-regex gate above keeps the legacy path working for
+   well-formed names while rejecting human-title strings."
+  [reconstructed fallback-fn]
+  (anomaly/let-ok [_valid (schema/validate schema/ResolveWorkflowIdentityInput
+                                           {:reconstructed reconstructed
+                                            :fallback-fn fallback-fn}
+                                           {:message "Invalid resolve-workflow-identity input"
+                                            :schema-name :workflow-resume/resolve-workflow-identity})]
+    (let [workflow-spec (:workflow-spec reconstructed)
+          machine-snapshot (:machine-snapshot reconstructed)
+          workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
+          workflow-type (or (candidate-workflow-type workflow-spec)
+                            (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
+                              workflow-id-from-snapshot)
+                            (fallback-fn))
+          workflow-version (or (get workflow-spec :version)
+                               (:execution/workflow-version machine-snapshot)
+                               "latest")]
+      (if workflow-type
+        {:workflow-type workflow-type
+         :workflow-version workflow-version}
+        (anomaly/anomaly :not-found
+                         "Could not resolve a workflow type for resume"
+                         {:operation :resume-workflow
+                          :workflow-spec workflow-spec})))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(def ^{:stratum 4} completed-phase-statuses
+  "Phase result statuses that are safe to skip on resume."
+  (config-set :completed-phase-statuses))
+
+(def ^{:stratum 4} blocking-review-decisions
+  "Review decisions that must resume the repair path."
+  (config-set :blocking-review-decisions))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} review-blocked?
+  [phase-id phase-result]
+  (and (= :review phase-id)
+       (contains? blocking-review-decisions
+                  (response/review-decision (response/phase-output phase-result)))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} completed-phase-result?
+  [phase-id phase-result]
+  (and phase-result
+       (not (review-blocked? phase-id phase-result))
+       (contains? completed-phase-statuses
+                  (phase-result-status phase-result))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn- ^{:stratum 7} completed-checkpoint-phases
+  [checkpoint-data phase-results]
+  (->> (checkpoint-phase-order checkpoint-data phase-results)
+       (filter #(completed-phase-result? % (get phase-results %)))))
+
+(defn- ^{:stratum 7} completed-event-phases
   [events]
-  (last (extract-workspace-checkpoints events)))
+  (let [event-results (extract-phase-results events)]
+    (->> (event-phase-order events)
+         (filter #(completed-phase-result? % (get event-results %))))))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 8
+
+(defn- ^{:stratum 8} restored-completed-phases
+  [checkpoint-data events phase-results]
+  (->> (concat (completed-event-phases events)
+               (completed-checkpoint-phases checkpoint-data phase-results))
+       distinct
+       vec))
+
+;------------------------------------------------------------------------------ Layer 9
+
 ;; Context reconstruction
-
-(defn reconstruct-context
+(defn ^{:stratum 9} reconstruct-context
   "Build a complete resume-context map from a workflow id's events.
 
    Arguments:
@@ -365,124 +497,3 @@
            :dag-pause-reason (:pause-reason dag-pause-info)
            :machine-snapshot machine-snapshot
            :checkpoint-manifest (:manifest checkpoint-data)})))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Pipeline trimming
-
-(defn trim-pipeline
-  "Drop the already-completed prefix from a workflow's pipeline.
-
-   Pure: takes a workflow map with `:workflow/pipeline` and a
-   collection of completed phase keywords; returns the workflow with only
-   leading completed phases removed. Completed phases after the first
-   incomplete phase are preserved."
-  [workflow completed-phases]
-  (anomaly/let-ok [_valid (schema/validate schema/TrimPipelineInput
-                                           {:workflow workflow
-                                            :completed-phases completed-phases}
-                                           {:message "Invalid trim-pipeline input"
-                                            :schema-name :workflow-resume/trim-pipeline})]
-    (let [completed-set (set completed-phases)
-          remaining (vec (drop-while #(completed-set (:phase %))
-                                     (get workflow :workflow/pipeline [])))]
-      (assoc workflow :workflow/pipeline remaining))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Identity resolution
-
-(defn- synthetic-dag-task-workflow-id?
-  "True when the recorded workflow id is an internal DAG task workflow key,
-   not a loadable top-level workflow type from the registry."
-  [workflow-id]
-  (and (keyword? workflow-id)
-       (str/starts-with? (name workflow-id) "dag-task-")))
-
-(def ^:private workflow-type-identifier-re
-  "Regex for an unqualified workflow-type keyword name. Workflow types are loader keys
-   like :canonical-sdlc / :quick-fix — strict identifier characters only.
-   This rejects values like \"In-flight PR / branch / task-claim registry\"
-   (a human title that the producer side accidentally records under
-   `:name`) before they get keywordized into an unloadable lookup key."
-  #"^[A-Za-z][A-Za-z0-9._+!?*<>=-]*$")
-
-(defn- valid-workflow-type-keyword?
-  "True when `v` is an unqualified workflow-type keyword name."
-  [v]
-  (and (keyword? v)
-       (nil? (namespace v))
-       (re-matches workflow-type-identifier-re (name v))))
-
-(defn- candidate-workflow-type
-  "Pull a candidate workflow-type keyword out of the recorded workflow
-   spec. Preference order:
-
-   1. `:workflow-type` — canonical key when callers thread it through
-   2. `:workflow/id`    — same shape as a workflow-config map
-   3. `:name`           — legacy / TUI shape; ONLY accepted when the
-      value is an unqualified workflow-type keyword/name matching a
-      strict keyword-name regex, because some producers
-      (notably the cli + TUI persistence path) record the human spec
-      title under `:name` and a title with spaces / slashes would
-      keywordize into an unloadable key.
-
-   Returns a keyword or nil."
-  [workflow-spec]
-  (let [keyword-if-valid (fn [v]
-                           (cond
-                             (valid-workflow-type-keyword? v) v
-                             (and (string? v)
-                                  (re-matches workflow-type-identifier-re v))
-                             (keyword v)
-                             :else nil))]
-    (or (keyword-if-valid (get workflow-spec :workflow-type))
-        (keyword-if-valid (get workflow-spec :workflow/id))
-        (keyword-if-valid (get workflow-spec :name)))))
-
-(defn resolve-workflow-identity
-  "Resolve `{:workflow-type :workflow-version}` for a resume run.
-
-   Preference order for `:workflow-type`:
-
-   1. A keyword-valid identifier extracted from the recorded
-      `:workflow/spec` via `candidate-workflow-type` (tries
-      `:workflow-type`, `:workflow/id`, then `:name`).
-   2. The `:execution/workflow-id` from the machine snapshot, unless
-      it's a synthetic DAG-task key.
-   3. The caller-supplied `fallback-fn` (typically a selection profile).
-
-   Returns a `:not-found` anomaly if no source yields a loadable type.
-
-   Arguments:
-   - `reconstructed` — context map from `reconstruct-context`
-   - `fallback-fn`   — 0-arity; returns a type keyword or nil
-
-   Pre-2026-05-23: this fn did `(some-> workflow-spec :name keyword)`
-   unconditionally, which produced unloadable keywords like
-   `:In-flight PR / branch / task-claim registry` whenever a producer
-   recorded the spec title under `:name` (observed dogfooding
-   work/in-flight-pr-registry.spec.edn, workflow a92b2c97). The
-   identifier-regex gate above keeps the legacy path working for
-   well-formed names while rejecting human-title strings."
-  [reconstructed fallback-fn]
-  (anomaly/let-ok [_valid (schema/validate schema/ResolveWorkflowIdentityInput
-                                           {:reconstructed reconstructed
-                                            :fallback-fn fallback-fn}
-                                           {:message "Invalid resolve-workflow-identity input"
-                                            :schema-name :workflow-resume/resolve-workflow-identity})]
-    (let [workflow-spec (:workflow-spec reconstructed)
-          machine-snapshot (:machine-snapshot reconstructed)
-          workflow-id-from-snapshot (:execution/workflow-id machine-snapshot)
-          workflow-type (or (candidate-workflow-type workflow-spec)
-                            (when-not (synthetic-dag-task-workflow-id? workflow-id-from-snapshot)
-                              workflow-id-from-snapshot)
-                            (fallback-fn))
-          workflow-version (or (get workflow-spec :version)
-                               (:execution/workflow-version machine-snapshot)
-                               "latest")]
-      (if workflow-type
-        {:workflow-type workflow-type
-         :workflow-version workflow-version}
-        (anomaly/anomaly :not-found
-                         "Could not resolve a workflow type for resume"
-                         {:operation :resume-workflow
-                          :workflow-spec workflow-spec})))))
