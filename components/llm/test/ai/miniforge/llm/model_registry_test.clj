@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.model-registry-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.llm.model-registry :as registry]))
 
-(deftest test-get-model
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} test-get-model
   (testing "Get model by keyword"
     (let [opus (registry/get-model :opus-4.6)]
       (is (= "claude-opus-4-6" (:model-id opus)))
@@ -41,7 +42,7 @@
       (is (= :openai (:provider gpt-5-4-model)))
       (is (= 1050000 (get-in gpt-5-4-model [:capabilities :context-window]))))))
 
-(deftest test-get-models-by-capability
+(deftest ^{:stratum 0} test-get-models-by-capability
   (testing "Query by reasoning capability"
     (let [exceptional (registry/get-models-by-capability :reasoning :exceptional)]
       (is (seq exceptional))
@@ -71,7 +72,7 @@
       (is (seq very-fast))
       (is (some #{:gemini-2.5-flash-lite} very-fast)))))
 
-(deftest test-get-models-by-use-case
+(deftest ^{:stratum 0} test-get-models-by-use-case
   (testing "Query by code-implementation use-case"
     (let [models (registry/get-models-by-use-case :code-implementation)]
       (is (seq models))
@@ -88,7 +89,7 @@
       (is (seq models))
       (is (some #{:haiku-4.5} models)))))
 
-(deftest test-get-models-by-provider
+(deftest ^{:stratum 0} test-get-models-by-provider
   (testing "Get Anthropic models"
     (let [models (registry/get-models-by-provider :anthropic)]
       (is (seq models))
@@ -111,7 +112,7 @@
       (is (some #{:gpt-5.3-codex} models))
       (is (some #{:gpt-5.2-codex} models)))))
 
-(deftest test-context-window-for-model-id
+(deftest ^{:stratum 0} test-context-window-for-model-id
   (testing "resolves the context window by provider model-id string"
     (is (= 200000 (registry/context-window-for-model-id "claude-opus-4-6")))
     (is (= 1000000 (registry/context-window-for-model-id "claude-opus-4-7"))))
@@ -120,7 +121,7 @@
     (is (nil? (registry/context-window-for-model-id "no-such-model")))
     (is (nil? (registry/context-window-for-model-id nil)))))
 
-(deftest test-get-local-models
+(deftest ^{:stratum 0} test-get-local-models
   (testing "Get all local models"
     (let [models (registry/get-local-models)]
       (is (seq models))
@@ -132,7 +133,7 @@
       (is (not (some #{:opus-4.6} models)))
       (is (not (some #{:sonnet-4.6} models))))))
 
-(deftest test-supports-large-context
+(deftest ^{:stratum 0} test-supports-large-context
   (testing "Check large context support"
     (is (registry/supports-large-context? :opus-4.6))
     (is (registry/supports-large-context? :sonnet-4.6))
@@ -147,7 +148,7 @@
     (is (not (registry/supports-large-context? :opus-4.6 1000000)))
     (is (not (registry/supports-large-context? :haiku-4.5 300000)))))
 
-(deftest test-recommend-models-for-task-type
+(deftest ^{:stratum 0} test-recommend-models-for-task-type
   (testing "Recommend models for thinking-heavy tasks"
     (let [rec (registry/recommend-models-for-task-type :thinking-heavy)]
       (is (seq (:tier-1 rec)))
@@ -174,14 +175,14 @@
       (is (some #{:llama-3.3-70b} (:tier-1-local rec)))
       (is (:rationale rec)))))
 
-(deftest test-get-primary-recommendation
+(deftest ^{:stratum 0} test-get-primary-recommendation
   (testing "Get primary recommendation"
     (is (= :opus-4.7 (registry/get-primary-recommendation :thinking-heavy)))
     (is (= :sonnet-4.6 (registry/get-primary-recommendation :execution-focused)))
     (is (= :haiku-4.5 (registry/get-primary-recommendation :simple-validation)))
     (is (= :opus-4.7 (registry/get-primary-recommendation :large-context)))))
 
-(deftest test-model-registry-completeness
+(deftest ^{:stratum 0} test-model-registry-completeness
   (testing "All 19 models are present"
     (is (= 19 (count registry/model-registry))))
 

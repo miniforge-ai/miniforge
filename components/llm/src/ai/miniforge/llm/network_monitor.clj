@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.network-monitor
   "Network-drop scheduler for the per-LLM-call lifecycle.
 
@@ -36,36 +35,34 @@
   (:require [ai.miniforge.llm.network-health :as nh]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Defaults
 ;;
 ;; Operationally tuned constants — kept as named `def`s here (vs an EDN
 ;; file) per standards rule 007: callers override via the
 ;; `start-network-monitor!` options map and the values change very
 ;; rarely.
-
-(def ^:const default-probe-interval-ms
+(def ^{:stratum 0} ^:const default-probe-interval-ms
   "Time between probe attempts. 10s — fast enough to detect a drop
    within ~30s (probe interval × failure threshold), slow enough that
    the probe traffic itself does not contribute meaningful load."
   10000)
 
-(def ^:const default-failure-threshold
+(def ^{:stratum 0} ^:const default-failure-threshold
   "Number of CONSECUTIVE probe failures required to declare a
    confirmed network drop. 3 strikes (= ~30s of dead network at the
    default 10s interval) absorbs transient blips — a single failed
    probe never costs a phase restart."
   3)
 
-(def ^:const monitor-stop-join-ms
+(def ^{:stratum 0} ^:const monitor-stop-join-ms
   "How long stop! waits for the worker thread to exit after
    interrupting it. The worker only needs to wake from Thread/sleep,
    see the running? flag, and exit."
   200)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Scheduler
-
-(defn- run-monitor-loop!
+(defn- ^{:stratum 0} run-monitor-loop!
   "Inner worker loop. Polls `probe-fn` every `probe-interval-ms`;
    tracks consecutive failures. On `failure-threshold` consecutive
    failures, atomically claims the firing slot via `compare-and-set!`
@@ -100,7 +97,9 @@
             :else
             (recur next-failures)))))))
 
-(defn start-network-monitor!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} start-network-monitor!
   "Spawn a daemon thread that probes `:probe-url` every
    `:probe-interval-ms` ms and fires `:on-drop` after
    `:failure-threshold` consecutive failures (single-fire).
