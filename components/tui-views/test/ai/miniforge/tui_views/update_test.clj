@@ -196,7 +196,7 @@
     (into [[:input {:key :key/colon :char \:}]]   ;; enter command mode
           (conj (vec (for [ch cmd-str]
                        [:input {:key nil :char ch}]))
-                [:input :key/enter]))))
+                [:input :key/enter]))))  ;; execute
 
 ;; ---------------------------------------------------------------------------
 ;; PR event handler tests
@@ -930,4 +930,4 @@
     (let [m (util/apply-updates (util/fresh-model)
               [[:msg/workflow-added {:workflow-id wf-id-1 :name "test"}]
                [:msg/agent-started {:workflow-id wf-id-1 :agent :planner}]])]
-      (is (= :started (get-in m [:workflows 0 :agents :planner :status])))))  ;; execute
+      (is (= :started (get-in m [:workflows 0 :agents :planner :status])))))
