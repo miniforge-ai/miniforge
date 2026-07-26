@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.file-backed-store-test
   "Tests for FileBackedStore: persistence, round-trip, query."
   (:require
@@ -24,9 +23,11 @@
    [ai.miniforge.knowledge.zettel :as zettel]
    [clojure.java.io :as io]))
 
-(def ^:dynamic *test-dir* nil)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn temp-dir-fixture [f]
+(def ^{:stratum 0} ^:dynamic *test-dir* nil)
+
+(defn ^{:stratum 0} temp-dir-fixture [f]
   (let [dir (str (System/getProperty "java.io.tmpdir")
                  "/miniforge-kb-test-" (System/currentTimeMillis))]
     (binding [*test-dir* dir]
@@ -40,9 +41,24 @@
                 (.delete file))
               (.delete d))))))))
 
-(use-fixtures :each temp-dir-fixture)
+(deftest ^{:stratum 0} format-for-prompt-test
+  (testing "format-for-prompt renders markdown block"
+    (let [z1 (zettel/create-zettel "r1" "Rule One" "Content one" :rule :dewey "210")
+          z2 (zettel/create-zettel "l1" "Learning One" "Content two" :learning)
+          result (store/format-for-prompt [z1 z2] :implementer)]
+      (is (string? result))
+      (is (.contains result "Rule One"))
+      (is (.contains result "Learning One"))
+      (is (.contains result "(learning)"))
+      (is (.contains result "implementer"))))
 
-(deftest file-backed-store-round-trip
+  (testing "format-for-prompt returns nil for empty zettels"
+    (is (nil? (store/format-for-prompt [] :planner)))
+    (is (nil? (store/format-for-prompt nil :planner)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} file-backed-store-round-trip
   (testing "Write → restart → read round-trip"
     (let [store1 (store/create-file-backed-store {:path *test-dir*})
           z (zettel/create-zettel "test-uid" "Test Title"
@@ -62,7 +78,7 @@
           (is (= :rule (:zettel/type loaded)))
           (is (= "210" (:zettel/dewey loaded))))))))
 
-(deftest file-backed-store-delete
+(deftest ^{:stratum 1} file-backed-store-delete
   (testing "Delete removes file and index entry"
     (let [store1 (store/create-file-backed-store {:path *test-dir*})
           z (zettel/create-zettel "del-test" "Delete Me"
@@ -77,7 +93,7 @@
       (let [store2 (store/create-file-backed-store {:path *test-dir*})]
         (is (= 0 (count (store/list-zettels store2))))))))
 
-(deftest file-backed-store-query
+(deftest ^{:stratum 1} file-backed-store-query
   (testing "Query works on file-backed store"
     (let [s (store/create-file-backed-store {:path *test-dir*})
           z1 (zettel/create-zettel "rule-1" "Clojure Rule"
@@ -93,7 +109,7 @@
       (is (= 1 (count (store/query s {:include-types [:learning]}))))
       (is (= 2 (count (store/query s {})))))))
 
-(deftest file-backed-store-search
+(deftest ^{:stratum 1} file-backed-store-search
   (testing "Text search works on file-backed store"
     (let [s (store/create-file-backed-store {:path *test-dir*})
           z (zettel/create-zettel "search-test" "Threading Macros"
@@ -103,17 +119,4 @@
       (is (= 1 (count (store/search s "threading"))))
       (is (= 0 (count (store/search s "nonexistent")))))))
 
-(deftest format-for-prompt-test
-  (testing "format-for-prompt renders markdown block"
-    (let [z1 (zettel/create-zettel "r1" "Rule One" "Content one" :rule :dewey "210")
-          z2 (zettel/create-zettel "l1" "Learning One" "Content two" :learning)
-          result (store/format-for-prompt [z1 z2] :implementer)]
-      (is (string? result))
-      (is (.contains result "Rule One"))
-      (is (.contains result "Learning One"))
-      (is (.contains result "(learning)"))
-      (is (.contains result "implementer"))))
-
-  (testing "format-for-prompt returns nil for empty zettels"
-    (is (nil? (store/format-for-prompt [] :planner)))
-    (is (nil? (store/format-for-prompt nil :planner)))))
+(use-fixtures :each temp-dir-fixture)

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.interface
   "Public API for the knowledge component (Zettelkasten).
 
@@ -44,9 +43,9 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def Zettel
+;; Schema re-exports
+(def ^{:stratum 0} Zettel
   "Malli schema (a `[:map ...]`) for an atomic unit of knowledge.
    Required keys: :zettel/id (uuid), :zettel/uid, :zettel/title,
    :zettel/content, :zettel/type, :zettel/created (inst), :zettel/author.
@@ -55,90 +54,102 @@
    share intent (:fleet/*, :privacy/classification, :zettel/trust-level).
    Use with `malli.core/validate` to check a zettel map."
   schema/Zettel)
-(def ZettelSummary
+
+(def ^{:stratum 0} ZettelSummary
   "Malli schema (a `[:map ...]`) for a lightweight zettel reference used
    in listings. Required keys: :zettel/id (uuid), :zettel/uid (string),
    :zettel/title (string), :zettel/type. Optional: :zettel/dewey,
    :zettel/tags."
   schema/ZettelSummary)
-(def Link
+
+(def ^{:stratum 0} Link
   "Malli schema (a `[:map ...]`) for a connection between zettels with
    explicit rationale. Required keys: :link/target-id (uuid), :link/type
    (a LinkType), :link/rationale (string, min 10 chars — must explain WHY).
    Optional: :link/strength (double 0.0-1.0), :link/bidirectional? (bool)."
   schema/Link)
-(def LinkType
+
+(def ^{:stratum 0} LinkType
   "Malli schema — an `[:enum ...]` of link kinds between zettels:
    :supports, :contradicts, :extends, :applies-to, :example-of,
    :questions, :answers, :supersedes, :related."
   schema/LinkType)
-(def ZettelType
+
+(def ^{:stratum 0} ZettelType
   "Malli schema — an `[:enum ...]` of knowledge-unit categories:
    :rule, :concept, :learning, :example, :hub, :question, :decision."
   schema/ZettelType)
-(def Source
+
+(def ^{:stratum 0} Source
   "Malli schema (a `[:map ...]`) for zettel provenance. Required key:
    :source/type (a SourceType). Optional: :source/agent (keyword),
    :source/task-id (uuid), :source/context (string),
    :source/confidence (double 0.0-1.0)."
   schema/Source)
-(def SourceType
+
+(def ^{:stratum 0} SourceType
   "Malli schema — an `[:enum ...]` of how knowledge was created:
    :manual, :inner-loop, :meta-loop, :import, :migration."
   schema/SourceType)
-(def KnowledgeQuery
+
+(def ^{:stratum 0} KnowledgeQuery
   "Malli schema (a `[:map ...]`) for a knowledge-retrieval query. All keys
    optional: :agent-role, :task-type, :tags, :dewey-range (tuple),
    :dewey-prefixes, :include-types, :exclude-types, :min-strength,
    :related-to, :traverse-links?, :max-hops (1-5), :limit, :text-search."
   schema/KnowledgeQuery)
-(def AgentManifest
+
+(def ^{:stratum 0} AgentManifest
   "Malli schema (a `[:map ...]`) for an agent role's knowledge-injection
    config. Required key: :agent-role (keyword). Optional: :dewey-prefixes,
    :tags, :types, :hubs (hub UIDs), :always-include (UIDs), :max-zettels."
   schema/AgentManifest)
-(def LearningCapture
+
+(def ^{:stratum 0} LearningCapture
   "Malli schema (a `[:map ...]`) for input when capturing a new learning.
    Required keys: :type (a SourceType), :title (string), :content (string).
    Optional: :agent, :task-id, :tags, :dewey, :links, :confidence (0.0-1.0)."
   schema/LearningCapture)
+
 ;; Fleet-share enums (added in #807). Surfaced through the interface
 ;; so downstream components reference them without reaching into
 ;; `knowledge.schema` directly (Polylith dependency rule).
-(def ShareScope
+(def ^{:stratum 0} ShareScope
   "Malli schema — an `[:enum ...]` of audience scopes a zettel is intended
    for when shared via Fleet: :org, :team, :repo, :workflow."
   schema/ShareScope)
-(def Classification
+
+(def ^{:stratum 0} Classification
   "Malli schema — an `[:enum ...]` of privacy classifications (Fleet
    Decision 8): :public-org, :internal, :restricted, :secret. Governs how
    far a shared zettel may travel and the scanner's veto bar."
   schema/Classification)
+
 ;; Per-revision trust enum (closes #836). Surfaced here so fleet's
 ;; producer-side share-learning gate can reference it without
 ;; reaching into `knowledge.schema` directly.
-(def TrustLevel
+(def ^{:stratum 0} TrustLevel
   "Malli schema — an `[:enum ...]` of per-revision trust values:
    :untrusted (default) and :trusted (set only by promote-learning, reset
    on any content rotation). Fleet's share-learning gate keys off this."
   schema/TrustLevel)
+
 ;; Policy-pack rule lookup schemas. Callers may validate their own
 ;; inputs against PolicyQuery before passing to lookup-policy-rules.
-(def PolicyQuery
+(def ^{:stratum 0} PolicyQuery
   "Malli schema (a `[:map ...]`) for policy-pack rule lookup input. All
    keys optional (omitting all returns every loaded :rule zettel); multiple
    criteria are ANDed: :query (case-insensitive substring on title + body),
    :tags (vector keyword; at-least-one match), :dewey-prefix (prefix string)."
   schema/PolicyQuery)
-(def PolicyResult
+
+(def ^{:stratum 0} PolicyResult
   "Malli schema (a `[:map ...]`) for a compact rule result from
    lookup-policy-rules. Keys: :rule/title (string), :rule/content (string)."
   schema/PolicyResult)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Store creation
-
-(def create-store
+(def ^{:stratum 0} create-store
   "Create an in-memory knowledge store.
 
    Options:
@@ -149,7 +160,7 @@
      (create-store {:logger my-logger})"
   store/create-store)
 
-(def create-file-backed-store
+(def ^{:stratum 0} create-file-backed-store
   "Create a file-backed persistent knowledge store.
 
    On startup, scans the directory and loads all .edn files into
@@ -164,10 +175,8 @@
      (create-file-backed-store {:path \"/repo/.miniforge/knowledge\"})"
   store/create-file-backed-store)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Zettel CRUD
-
-(def create-zettel
+(def ^{:stratum 0} create-zettel
   "Create a new zettel with required fields.
 
    Arguments:
@@ -189,45 +198,43 @@
                     :dewey '210' :tags [:clojure :namespace])"
   zettel/create-zettel)
 
-(defn put-zettel
+(defn ^{:stratum 0} put-zettel
   "Store a zettel in the knowledge store. Returns the stored zettel."
   [knowledge-store zettel-data]
   (store/put-zettel knowledge-store zettel-data))
 
-(defn get-zettel
+(defn ^{:stratum 0} get-zettel
   "Retrieve a zettel by ID (UUID) or UID (string)."
   [knowledge-store id-or-uid]
   (if (uuid? id-or-uid)
     (store/get-zettel-by-id knowledge-store id-or-uid)
     (store/get-zettel-by-uid knowledge-store id-or-uid)))
 
-(defn delete-zettel
+(defn ^{:stratum 0} delete-zettel
   "Remove a zettel from the store by ID."
   [knowledge-store id]
   (store/delete-zettel knowledge-store id))
 
-(defn list-zettels
+(defn ^{:stratum 0} list-zettels
   "List all zettels as lightweight summaries."
   [knowledge-store]
   (store/list-zettels knowledge-store))
 
-(def update-zettel
+(def ^{:stratum 0} update-zettel
   "Update a zettel with new values, setting modified timestamp."
   zettel/update-zettel)
 
-(def validate-zettel
+(def ^{:stratum 0} validate-zettel
   "Validate a zettel against the schema.
    Returns {:valid? bool :errors ...}"
   zettel/validate-zettel)
 
-(def zettel-summary
+(def ^{:stratum 0} zettel-summary
   "Extract a lightweight summary from a zettel."
   zettel/zettel-summary)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Link management
-
-(def create-link
+(def ^{:stratum 0} create-link
   "Create a link to another zettel.
 
    Arguments:
@@ -244,28 +251,26 @@
                   'Adds namespace details to the base Clojure rule')"
   zettel/create-link)
 
-(def add-link
+(def ^{:stratum 0} add-link
   "Add a link to a zettel. Returns updated zettel."
   zettel/add-link)
 
-(def remove-link
+(def ^{:stratum 0} remove-link
   "Remove a link from a zettel by target ID. Returns updated zettel."
   zettel/remove-link)
 
-(def get-links
+(def ^{:stratum 0} get-links
   "Get links from a zettel.
    Direction: :outgoing, :incoming, or :both"
   zettel/get-links)
 
-(def compute-backlinks
+(def ^{:stratum 0} compute-backlinks
   "Given a collection of zettels, compute backlinks for each.
    Returns map of zettel-id -> [source-ids...]"
   zettel/compute-backlinks)
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Query and search
-
-(defn query-knowledge
+(defn ^{:stratum 0} query-knowledge
   "Query zettels matching criteria.
 
    Query options:
@@ -280,7 +285,7 @@
   [knowledge-store query-map]
   (store/query knowledge-store query-map))
 
-(def find-related
+(def ^{:stratum 0} find-related
   "Find zettels related through links.
 
    Options:
@@ -290,12 +295,12 @@
    Returns vector of related zettels sorted by hop distance."
   store/find-related)
 
-(def search
+(def ^{:stratum 0} search
   "Full-text search across zettel titles and content.
    Returns matching zettels sorted by relevance."
   store/search)
 
-(defn lookup-policy-rules
+(defn ^{:stratum 0} lookup-policy-rules
   "Search loaded policy-pack rules by keyword, dewey code, or tag.
 
    Only :rule-type zettels are searched — those loaded from .mdc rule files
@@ -321,15 +326,13 @@
       (policy-lookup/lookup-policy-rules knowledge-store q)
       [])))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Agent injection
-
-(def get-agent-manifest
+(def ^{:stratum 0} get-agent-manifest
   "Get the knowledge injection manifest for an agent role.
    Returns configuration specifying which knowledge to inject."
   store/get-agent-manifest)
 
-(def inject-knowledge
+(def ^{:stratum 0} inject-knowledge
   "Retrieve relevant knowledge for an agent based on role and context.
 
    Arguments:
@@ -342,7 +345,7 @@
    See also: inject-knowledge-with-manifest for zettels + selection manifest."
   store/inject-knowledge)
 
-(def inject-knowledge-with-manifest
+(def ^{:stratum 0} inject-knowledge-with-manifest
   "Retrieve relevant knowledge for an agent with a selection manifest.
 
    Like inject-knowledge, but returns a map containing both the matched
@@ -360,7 +363,7 @@
                 :tags-matched [keyword...], :score number}]}"
   store/inject-knowledge-with-manifest)
 
-(def format-for-prompt
+(def ^{:stratum 0} format-for-prompt
   "Format a collection of zettels as a markdown knowledge block for LLM context.
 
    Arguments:
@@ -370,7 +373,7 @@
    Returns markdown string, or nil if no zettels."
   store/format-for-prompt)
 
-(defn inject-and-format
+(defn ^{:stratum 0} inject-and-format
   "Inject knowledge for an agent role and format for prompt inclusion.
    Combines inject-knowledge + format-for-prompt into a single safe call.
 
@@ -388,10 +391,8 @@
           (store/format-for-prompt zettels role)))
       (catch Exception _e nil))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Learning capture
-
-(def capture-learning
+(def ^{:stratum 0} capture-learning
   "Capture a new learning from agent execution.
 
    Arguments:
@@ -408,11 +409,11 @@
    Returns the created learning zettel."
   learning/capture-learning)
 
-(def capture-inner-loop-learning
+(def ^{:stratum 0} capture-inner-loop-learning
   "Convenience function to capture learning from repair cycle."
   learning/capture-inner-loop-learning)
 
-(defn capture-repair-learning!
+(defn ^{:stratum 0} capture-repair-learning!
   "Capture a learning when a repair cycle succeeds.
    Safe to call unconditionally — no-ops when store is nil or iterations <= 1.
 
@@ -436,7 +437,7 @@
           :tags [:repair :inner-loop (keyword (name agent-role))]})
         (catch Exception _e nil)))))
 
-(defn capture-feedback-learning!
+(defn ^{:stratum 0} capture-feedback-learning!
   "Capture review feedback as a learning.
    Safe to call unconditionally — no-ops when store is nil or feedback is empty.
 
@@ -459,11 +460,11 @@
         :confidence 0.6})
       (catch Exception _e nil))))
 
-(def capture-meta-loop-learning
+(def ^{:stratum 0} capture-meta-loop-learning
   "Convenience function to capture learning from observed patterns."
   learning/capture-meta-loop-learning)
 
-(def detect-recurring-patterns
+(def ^{:stratum 0} detect-recurring-patterns
   "Detect recurring patterns among learnings by grouping on tags.
 
    Scans all learnings and flags tags with 3+ occurrences.
@@ -475,7 +476,7 @@
    Returns vector of {:tag :count :learnings}."
   learning/detect-recurring-patterns)
 
-(def synthesize-recurring-patterns!
+(def ^{:stratum 0} synthesize-recurring-patterns!
   "Detect recurring patterns and capture them as meta-loop learnings.
 
    Scans learnings for recurring tags, creates a meta-loop learning for each
@@ -484,7 +485,7 @@
    Returns count of new patterns synthesized."
   learning/synthesize-recurring-patterns!)
 
-(def promote-learning
+(def ^{:stratum 0} promote-learning
   "Promote a validated learning to a rule.
 
    Options:
@@ -493,7 +494,7 @@
    - :reviewed-by - Who reviewed/approved this"
   learning/promote-learning)
 
-(def list-learnings
+(def ^{:stratum 0} list-learnings
   "List all learnings, optionally filtered.
 
    Options:
@@ -502,32 +503,28 @@
    - :promotable?    - Only return high-confidence learnings"
   learning/list-learnings)
 
-;------------------------------------------------------------------------------ Layer 7
 ;; Serialization
-
-(def zettel->markdown
+(def ^{:stratum 0} zettel->markdown
   "Serialize a zettel to Markdown with YAML frontmatter."
   zettel/zettel->markdown)
 
-(def markdown->zettel
+(def ^{:stratum 0} markdown->zettel
   "Parse Markdown content (a string) with YAML frontmatter into a zettel.
    Returns nil if parsing fails."
   zettel/markdown->zettel)
 
-(def split-frontmatter
+(def ^{:stratum 0} split-frontmatter
   "Split markdown content into frontmatter and body.
    Returns {:frontmatter string :body string} or nil if no frontmatter."
   yaml/split-frontmatter)
 
-(def parse-yaml-frontmatter
+(def ^{:stratum 0} parse-yaml-frontmatter
   "Parse YAML frontmatter into EDN map.
    Handles basic YAML: key: value, arrays, lists."
   yaml/parse-yaml-frontmatter)
 
-;------------------------------------------------------------------------------ Layer 8
 ;; Rule and documentation loading
-
-(def load-rules-from-directory
+(def ^{:stratum 0} load-rules-from-directory
   "Load all .mdc rule files from a directory into the knowledge store.
 
    Arguments:
@@ -541,7 +538,7 @@
      (load-rules-from-directory store \".cursor/rules\")"
   loader/load-rules-from-directory)
 
-(def load-project-docs
+(def ^{:stratum 0} load-project-docs
   "Load project documentation files (agents.md, claude.md, etc.) into knowledge store.
 
    Arguments:
@@ -555,7 +552,7 @@
      (load-project-docs store \".\")"
   loader/load-project-docs)
 
-(def initialize-knowledge-store!
+(def ^{:stratum 0} initialize-knowledge-store!
   "Initialize a knowledge store with rules and documentation.
 
    This is the main entry point for loading knowledge at system startup.
@@ -578,10 +575,8 @@
      (initialize-knowledge-store! store {:rules-dir \"custom/rules\"})"
   loader/initialize-knowledge-store!)
 
-;------------------------------------------------------------------------------ Layer 9
 ;; Trust validation (N1 §2.10.2)
-
-(defn make-pack-ref
+(defn ^{:stratum 0} make-pack-ref
   "Create a pack reference with trust information.
 
    Arguments:
@@ -601,7 +596,7 @@
   (ai.miniforge.knowledge.trust/make-pack-ref
    pack-id trust-level authority :dependencies dependencies))
 
-(def validate-transitive-trust
+(def ^{:stratum 0} validate-transitive-trust
   "Validate all transitive trust rules for a pack graph.
 
    Checks:
@@ -621,7 +616,7 @@
      (validate-transitive-trust {\"pack-a\" pack-ref-a \"pack-b\" pack-ref-b})"
   ai.miniforge.knowledge.trust/validate-transitive-trust)
 
-(def compute-inherited-trust-level
+(def ^{:stratum 0} compute-inherited-trust-level
   "Compute the inherited trust level from a collection of packs.
 
    Rule 2: When pack A includes content from pack B, the combined content

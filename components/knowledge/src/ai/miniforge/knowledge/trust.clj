@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.trust
   "Transitive trust rules for knowledge packs.
 
@@ -40,54 +39,22 @@
    [clojure.string]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Trust level ordering
 
-(def trust-levels
+;; Trust level ordering
+(def ^{:stratum 0} trust-levels
   "Trust levels in ascending order (lower index = less trusted)."
   [:tainted :untrusted :trusted])
 
-(defn trust-level-order
-  "Return numeric order of trust level (lower = less trusted).
-   Returns nil for invalid trust levels."
-  [level]
-  (let [idx (.indexOf trust-levels level)]
-    (when (>= idx 0) idx)))
-
-(defn lowest-trust-level
-  "Return the lowest (least trusted) level from a collection.
-   Returns :tainted if any level is :tainted.
-   Returns :untrusted if any is :untrusted and none are :tainted.
-   Returns :trusted only if all are :trusted."
-  [levels]
-  (when (seq levels)
-    (let [valid-levels (filter #(contains? (set trust-levels) %) levels)]
-      (if (empty? valid-levels)
-        :untrusted  ; Default to untrusted if no valid levels
-        (apply min-key trust-level-order valid-levels)))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack trust schema
-
-(defn make-pack-ref
+(defn ^{:stratum 0} make-pack-ref
   [pack-id trust-level authority & {:keys [dependencies]}]
   {:pack-id pack-id
    :trust-level trust-level
    :authority authority
    :dependencies (or dependencies [])})
 
-(defn valid-pack-ref?
-  "Validate that a pack reference has required fields and valid values."
-  [pack-ref]
-  (and (map? pack-ref)
-       (:pack-id pack-ref)
-       (contains? (set trust-levels) (:trust-level pack-ref))
-       (contains? #{:authority/instruction :authority/data} (:authority pack-ref))
-       (vector? (:dependencies pack-ref))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Transitive trust rule validation
-
-(defn validate-instruction-authority-not-transitive
+(defn ^{:stratum 0} validate-instruction-authority-not-transitive
   "Rule 1: Instruction authority is not transitive.
 
    If pack A (:trusted, :authority/instruction) references pack B (:untrusted),
@@ -111,12 +78,7 @@
                :trust-level (:trust-level target-pack)}))
       (schema/valid))))
 
-(defn compute-inherited-trust-level
-  [pack-refs]
-  (let [levels (map :trust-level pack-refs)]
-    (lowest-trust-level levels)))
-
-(defn validate-cross-trust-references
+(defn ^{:stratum 0} validate-cross-trust-references
   "Rule 3: Cross-trust references.
 
    Packs MAY reference other packs of any trust level, but must
@@ -146,7 +108,7 @@
 
        :else nil))))
 
-(defn validate-tainted-isolation
+(defn ^{:stratum 0} validate-tainted-isolation
   "Rule 4: Tainted isolation.
 
    Content marked :tainted MUST NOT be included in any pack used for
@@ -175,35 +137,72 @@
          {:tainted-path (:path found)})
         (schema/valid)))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Combined validation helpers
-
-(defn valid?
+(defn ^{:stratum 0} valid?
   "Check if a validation result is valid."
   [result]
   (:valid? result))
 
-(defn error-from
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} trust-level-order
+  "Return numeric order of trust level (lower = less trusted).
+   Returns nil for invalid trust levels."
+  [level]
+  (let [idx (.indexOf trust-levels level)]
+    (when (>= idx 0) idx)))
+
+(defn ^{:stratum 1} valid-pack-ref?
+  "Validate that a pack reference has required fields and valid values."
+  [pack-ref]
+  (and (map? pack-ref)
+       (:pack-id pack-ref)
+       (contains? (set trust-levels) (:trust-level pack-ref))
+       (contains? #{:authority/instruction :authority/data} (:authority pack-ref))
+       (vector? (:dependencies pack-ref))))
+
+(defn ^{:stratum 1} error-from
   "Extract error from validation result if invalid, otherwise nil."
   [result]
   (when-not (valid? result)
     (:error result)))
 
-(defn check-dependency-authority
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} lowest-trust-level
+  "Return the lowest (least trusted) level from a collection.
+   Returns :tainted if any level is :tainted.
+   Returns :untrusted if any is :untrusted and none are :tainted.
+   Returns :trusted only if all are :trusted."
+  [levels]
+  (when (seq levels)
+    (let [valid-levels (filter #(contains? (set trust-levels) %) levels)]
+      (if (empty? valid-levels)
+        :untrusted  ; Default to untrusted if no valid levels
+        (apply min-key trust-level-order valid-levels)))))
+
+(defn ^{:stratum 2} check-dependency-authority
   "Check if a dependency violates authority transitivity rules.
    Returns error string or nil."
   [pack-ref dep-id pack-graph]
   (when-let [dep-ref (get pack-graph dep-id)]
     (error-from (validate-instruction-authority-not-transitive pack-ref dep-ref))))
 
-(defn check-pack-tainted-isolation
+(defn ^{:stratum 2} check-pack-tainted-isolation
   "Check if an instruction pack transitively includes tainted content.
    Returns error string or nil."
   [pack-id pack-ref pack-graph]
   (when (= :authority/instruction (:authority pack-ref))
     (error-from (validate-tainted-isolation pack-id pack-graph))))
 
-(defn collect-authority-errors
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} compute-inherited-trust-level
+  [pack-refs]
+  (let [levels (map :trust-level pack-refs)]
+    (lowest-trust-level levels)))
+
+(defn ^{:stratum 3} collect-authority-errors
   "Check Rule 1: Instruction authority is not transitive.
 
    Validates that no pack with instruction authority transitively
@@ -221,7 +220,7 @@
         :when error]
     error))
 
-(defn collect-tainted-errors
+(defn ^{:stratum 3} collect-tainted-errors
   "Check Rule 4: Tainted isolation from instruction authority.
 
    Validates that no pack with instruction authority transitively
@@ -238,7 +237,9 @@
         :when error]
     error))
 
-(defn validate-transitive-trust
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} validate-transitive-trust
   [pack-graph]
   ;; Rule 3: Validate cross-trust references first (graph structure)
   (let [graph-validation (validate-cross-trust-references pack-graph)]
