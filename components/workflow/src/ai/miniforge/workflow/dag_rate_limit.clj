@@ -89,7 +89,13 @@
                   context rate-limited-ids new-completed logger batch-results)]
     (if (= :continue (:action decision))
       decision
-      (let [{:keys [artifacts]} (dag-finalize/aggregate-results all-results)
+      (let [;; `all-results` only holds PRIOR batches — the caller merges
+            ;; the current batch in only on the :continue recur, which we
+            ;; never reach on this pause path. Fold in this batch's own
+            ;; completed results here so the paused result's artifacts
+            ;; include tasks that finished before the rate limit hit.
+            merged-results (merge all-results (select-keys batch-results new-completed))
+            {:keys [artifacts]} (dag-finalize/aggregate-results merged-results)
             reset-at (:reset-at decision)
             auto-resume? (= :checkpoint-and-resume (:action decision))]
         ;; Emit enriched pause event with reset time for scheduler
