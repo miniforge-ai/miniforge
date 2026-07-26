@@ -24,9 +24,11 @@
    - Scanner composition (chain multiple scanners)
    - Scanner registration and discovery
 
-   Layer 0: Protocol definitions
-   Layer 1: Scanner registry
-   Layer 2: Built-in scanners")
+   Layer 0: Scanner/RepairableScanner protocol definitions, scanner-registry atom
+   Layer 1: register-scanner!/deregister-scanner!/get-scanner/list-scanners/
+     scanners-for-type (over scanner-registry), RegexScanner (implements
+     the Layer 0 Scanner protocol)
+   Layer 2: create-regex-scanner (constructs a RegexScanner)")
 
 ;------------------------------------------------------------------------------ Layer 0
 

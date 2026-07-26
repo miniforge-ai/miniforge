@@ -159,7 +159,14 @@
           context {:terraform-plan "# aws_vpc.main will be destroyed\n# aws_subnet.private[0] must be replaced"}
           result (detection/detect-plan-output rule {} context)]
       (is (some? result))
-      (is (= 2 (count (:resource-violations result)))))))
+      (is (= 2 (count (:resource-violations result))))))
+
+  (testing "No violations when no matching resources"
+    (let [rule {:rule/id :test
+                :rule/detection {:type :plan-output}
+                :rule/applies-to {:resource-patterns ["aws_vpc"]}}
+          context {:terraform-plan "# aws_s3_bucket.example will be created"}]
+      (is (nil? (detection/detect-plan-output rule {} context))))))
 
 ;; Unified detection tests
 (deftest ^{:stratum 0} detect-violation-test
@@ -465,13 +472,6 @@
       (is (= :custom (:type result)))
       (is (= :resolvable (:rule-id result)))
       (is (= ["custom-hit"] (:matches result))))))
-
-(testing "No violations when no matching resources"
-    (let [rule {:rule/id :test
-                :rule/detection {:type :plan-output}
-                :rule/applies-to {:resource-patterns ["aws_vpc"]}}
-          context {:terraform-plan "# aws_s3_bucket.example will be created"}]
-      (is (nil? (detection/detect-plan-output rule {} context)))))
 
 (use-fixtures
   :once
