@@ -61,9 +61,10 @@
                 (.printStackTrace e)
                 (println (str (color/error color-mode "Couldn't run test statement")
                                " for the " (color/project project-name color-mode)
-                               " project: " statement " " (color/error color-mode e)))))
+                               " project: " statement " " (color/error color-mode e)))
+                {:pass 0 :fail 0 :error 1}))
             result-str (str "Test results: " pass " passes, " fail " failures, " error " errors.")]
-        (if (or (nil? error) (< 0 error) (< 0 fail))
+        (if (or (pos? error) (pos? fail))
           (do (reset! any-failed? true)
               (println (str "\n" (color/error color-mode result-str))))
           (println (str "\n" (color/ok color-mode result-str))))))
