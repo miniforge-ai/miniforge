@@ -15,33 +15,42 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.schema
   "Malli schemas for loop state, gates, and repair strategies.
-   Layer 0: Base types and registries
-   Layer 1: Composite schemas (InnerLoopState, GateResult, RepairResult)"
+   Layer 0: enum vectors (inner-loop-states, outer-loop-phases,
+     gate-types, repair-strategies, termination-reasons) — no same-file
+     dependents among them
+   Layer 1: registry (references the Layer 0 enum vectors)
+   Layer 2: GateError, GateConfig, LoopMetrics, LoopBudget,
+     OuterLoopPhase, OuterLoopState (reference registry)
+   Layer 3: GateResult, RepairAttempt (reference GateError),
+     InnerLoopResult (references LoopMetrics)
+   Layer 4: InnerLoopState (references GateResult, RepairAttempt,
+     LoopMetrics, LoopBudget)"
   (:require
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Base types and enums
 
-(def inner-loop-states
+;; Base types and enums
+(def ^{:stratum 0} inner-loop-states
   [:pending :generating :validating :repairing :complete :failed :escalated])
 
-(def outer-loop-phases
+(def ^{:stratum 0} outer-loop-phases
   [:spec :plan :design :implement :verify :review :release :observe])
 
-(def gate-types
+(def ^{:stratum 0} gate-types
   [:syntax :lint :test :policy :custom])
 
-(def repair-strategies
+(def ^{:stratum 0} repair-strategies
   [:llm-fix :retry :escalate])
 
-(def termination-reasons
+(def ^{:stratum 0} termination-reasons
   [:gates-passed :max-iterations :budget-exhausted :timeout :unrecoverable-error :manual-stop])
 
-(def registry
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} registry
   "Malli registry for loop schema types."
   {;; Identifiers
    :id/uuid        uuid?
@@ -68,10 +77,10 @@
    :common/non-neg-int [:int {:min 0}]
    :common/pos-number [:double {:min 0.0}]})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Gate schemas
+;------------------------------------------------------------------------------ Layer 2
 
-(def GateError
+;; Gate schemas
+(def ^{:stratum 2} GateError
   "Schema for a single gate error."
   [:map {:registry registry}
    [:code keyword?]
@@ -82,7 +91,59 @@
      [:line {:optional true} :common/non-neg-int]
      [:column {:optional true} :common/non-neg-int]]]])
 
-(def GateResult
+(def ^{:stratum 2} GateConfig
+  [:map {:registry registry}
+   [:gate/id :gate/id]
+   [:gate/type :gate/type]
+   [:gate/enabled? {:optional true :default true} boolean?]
+   [:gate/config {:optional true} [:map-of keyword? any?]]
+   [:gate/applies-to {:optional true} [:set keyword?]]])
+
+;; Loop metrics
+(def ^{:stratum 2} LoopMetrics
+  [:map {:registry registry}
+   [:tokens {:optional true} :common/non-neg-int]
+   [:cost-usd {:optional true} :common/pos-number]
+   [:duration-ms {:optional true} :common/non-neg-int]
+   [:generate-calls {:optional true} :common/non-neg-int]
+   [:repair-calls {:optional true} :common/non-neg-int]])
+
+(def ^{:stratum 2} LoopBudget
+  [:map {:registry registry}
+   [:max-tokens {:optional true} :common/non-neg-int]
+   [:max-cost-usd {:optional true} :common/pos-number]
+   [:max-duration-ms {:optional true} :common/non-neg-int]
+   [:max-iterations {:optional true} :common/non-neg-int]])
+
+;; Outer loop state schema (P1 - stub)
+(def ^{:stratum 2} OuterLoopPhase
+  "Schema for outer loop phase definition."
+  [:map {:registry registry}
+   [:phase/id keyword?]
+   [:phase/agent {:optional true} keyword?]
+   [:phase/artifacts {:optional true} [:vector keyword?]]
+   [:phase/requires {:optional true} [:vector keyword?]]])
+
+(def ^{:stratum 2} OuterLoopState
+  "Schema for the outer loop state machine.
+   Tracks the SDLC phases: plan -> design -> implement -> verify -> review -> release -> observe"
+  [:map {:registry registry}
+   [:loop/id :loop/id]
+   [:loop/type [:= :outer]]
+   [:loop/phase (into [:enum] outer-loop-phases)]
+   [:loop/spec {:optional true} [:map [:spec/id :id/uuid]]]
+   [:loop/artifacts {:optional true} [:map-of keyword? :id/uuid]]
+   [:loop/history {:optional true} [:vector [:map
+                                              [:phase keyword?]
+                                              [:timestamp :common/timestamp]
+                                              [:outcome keyword?]]]]
+   [:loop/config {:optional true} [:map-of keyword? any?]]
+   [:loop/created-at {:optional true} :common/timestamp]
+   [:loop/updated-at {:optional true} :common/timestamp]])
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} GateResult
   [:map {:registry registry}
    [:gate/id :gate/id]
    [:gate/type :gate/type]
@@ -91,18 +152,8 @@
    [:gate/warnings {:optional true} [:vector GateError]]
    [:gate/duration-ms {:optional true} :common/non-neg-int]])
 
-(def GateConfig
-  [:map {:registry registry}
-   [:gate/id :gate/id]
-   [:gate/type :gate/type]
-   [:gate/enabled? {:optional true :default true} boolean?]
-   [:gate/config {:optional true} [:map-of keyword? any?]]
-   [:gate/applies-to {:optional true} [:set keyword?]]])
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Repair schemas
-
-(def RepairAttempt
+(def ^{:stratum 3} RepairAttempt
   [:map {:registry registry}
    [:repair/id :id/uuid]
    [:repair/strategy :repair/strategy]
@@ -112,28 +163,26 @@
    [:repair/duration-ms {:optional true} :common/non-neg-int]
    [:repair/tokens-used {:optional true} :common/non-neg-int]])
 
-;------------------------------------------------------------------------------ Layer 1
-;; Loop metrics
-
-(def LoopMetrics
+;; Inner loop result
+(def ^{:stratum 3} InnerLoopResult
   [:map {:registry registry}
-   [:tokens {:optional true} :common/non-neg-int]
-   [:cost-usd {:optional true} :common/pos-number]
-   [:duration-ms {:optional true} :common/non-neg-int]
-   [:generate-calls {:optional true} :common/non-neg-int]
-   [:repair-calls {:optional true} :common/non-neg-int]])
+   [:success boolean?]
+   [:artifact {:optional true}
+    [:map
+     [:artifact/id :id/uuid]
+     [:artifact/type keyword?]
+     [:artifact/content {:optional true} any?]]]
+   [:iterations :common/non-neg-int]
+   [:metrics {:optional true} LoopMetrics]
+   [:termination {:optional true}
+    [:map
+     [:reason :termination/reason]
+     [:message {:optional true} :id/string]]]])
 
-(def LoopBudget
-  [:map {:registry registry}
-   [:max-tokens {:optional true} :common/non-neg-int]
-   [:max-cost-usd {:optional true} :common/pos-number]
-   [:max-duration-ms {:optional true} :common/non-neg-int]
-   [:max-iterations {:optional true} :common/non-neg-int]])
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Inner loop state schema
-
-(def InnerLoopState
+(def ^{:stratum 4} InnerLoopState
   [:map {:registry registry}
    ;; Required fields
    [:loop/id :loop/id]
@@ -185,52 +234,6 @@
     [:map
      [:reason :termination/reason]
      [:message {:optional true} :id/string]]]])
-
-;------------------------------------------------------------------------------ Layer 1
-;; Inner loop result
-
-(def InnerLoopResult
-  [:map {:registry registry}
-   [:success boolean?]
-   [:artifact {:optional true}
-    [:map
-     [:artifact/id :id/uuid]
-     [:artifact/type keyword?]
-     [:artifact/content {:optional true} any?]]]
-   [:iterations :common/non-neg-int]
-   [:metrics {:optional true} LoopMetrics]
-   [:termination {:optional true}
-    [:map
-     [:reason :termination/reason]
-     [:message {:optional true} :id/string]]]])
-
-;------------------------------------------------------------------------------ Layer 1
-;; Outer loop state schema (P1 - stub)
-
-(def OuterLoopPhase
-  "Schema for outer loop phase definition."
-  [:map {:registry registry}
-   [:phase/id keyword?]
-   [:phase/agent {:optional true} keyword?]
-   [:phase/artifacts {:optional true} [:vector keyword?]]
-   [:phase/requires {:optional true} [:vector keyword?]]])
-
-(def OuterLoopState
-  "Schema for the outer loop state machine.
-   Tracks the SDLC phases: plan -> design -> implement -> verify -> review -> release -> observe"
-  [:map {:registry registry}
-   [:loop/id :loop/id]
-   [:loop/type [:= :outer]]
-   [:loop/phase (into [:enum] outer-loop-phases)]
-   [:loop/spec {:optional true} [:map [:spec/id :id/uuid]]]
-   [:loop/artifacts {:optional true} [:map-of keyword? :id/uuid]]
-   [:loop/history {:optional true} [:vector [:map
-                                              [:phase keyword?]
-                                              [:timestamp :common/timestamp]
-                                              [:outcome keyword?]]]]
-   [:loop/config {:optional true} [:map-of keyword? any?]]
-   [:loop/created-at {:optional true} :common/timestamp]
-   [:loop/updated-at {:optional true} :common/timestamp]])
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

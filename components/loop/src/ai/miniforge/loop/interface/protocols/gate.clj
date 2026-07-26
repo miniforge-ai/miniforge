@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.interface.protocols.gate
   "Public protocol for validation gates.
 
    This is an extensibility point - users can implement custom gates
    by implementing this protocol.")
 
-(defprotocol Gate
+;------------------------------------------------------------------------------ Layer 0
+
+(defprotocol ^{:stratum 0} Gate
   "Protocol for validation gates.
    Gates check artifacts and return pass/fail results with errors."
   (check [this artifact context]

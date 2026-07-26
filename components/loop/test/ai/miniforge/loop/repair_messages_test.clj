@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.repair-messages-test
   "Tests that repair result factory functions use localized messages."
   (:require
@@ -23,11 +22,12 @@
    [ai.miniforge.loop.repair :as repair]
    [ai.miniforge.loop.messages :as messages]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Result factory functions use localized messages
 ;; ============================================================================
-
-(deftest make-max-attempts-result-uses-localized-message-test
+(deftest ^{:stratum 0} make-max-attempts-result-uses-localized-message-test
   (testing "message comes from the message catalog, not a hardcoded string"
     (let [result (repair/make-max-attempts-result 3 [] [{:code :err}])
           expected (messages/t :repair/max-attempts-exceeded)]
@@ -35,14 +35,14 @@
       (is (false? (:success? result)))
       (is (= 3 (:attempts result))))))
 
-(deftest make-exhausted-strategies-result-uses-localized-message-test
+(deftest ^{:stratum 0} make-exhausted-strategies-result-uses-localized-message-test
   (testing "message comes from the message catalog"
     (let [result (repair/make-exhausted-strategies-result 2 [] [{:code :err}])
           expected (messages/t :repair/strategies-exhausted)]
       (is (= expected (:message result)))
       (is (false? (:success? result))))))
 
-(deftest make-escalation-result-uses-localized-message-test
+(deftest ^{:stratum 0} make-escalation-result-uses-localized-message-test
   (testing "escalation message comes from the message catalog"
     (let [result (repair/make-escalation-result {:artifact "a"} 1 [] [{:code :err}])
           expected (messages/t :repair/escalated)]
@@ -50,7 +50,7 @@
       (is (true? (:escalate? result)))
       (is (false? (:success? result))))))
 
-(deftest make-success-result-has-no-message-test
+(deftest ^{:stratum 0} make-success-result-has-no-message-test
   (testing "success result does not include a message key"
     (let [result (repair/make-success-result {:artifact "a" :strategy :llm-fix} 0 [])]
       (is (true? (:success? result)))
