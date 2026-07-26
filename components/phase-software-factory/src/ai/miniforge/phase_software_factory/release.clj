@@ -363,13 +363,16 @@
                       verdict
                       (-> (assoc-in [:phase :verdict] verdict)
                           (assoc-in [:phase :result :output :phase/verdict] verdict)))
-        updated-ctx (-> updated-ctx
-                        (assoc-in [:metrics :release :duration-ms] duration-ms)
-                        (assoc-in [:metrics :release :repair-cycles] (dec iterations))
-                        (update-in [:execution :phases-completed] (fnil conj []) :release)
-                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))]
+        updated-ctx (cond-> updated-ctx
+                      true
+                      (-> (assoc-in [:metrics :release :duration-ms] duration-ms)
+                          (assoc-in [:metrics :release :repair-cycles] (dec iterations))
+                          (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                          (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
+                          (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
+
+                      (= :completed phase-status)
+                      (update-in [:execution :phases-completed] (fnil conj []) :release))]
     (doto (cond-> updated-ctx
             (phase/retrying? (:phase updated-ctx))
             (-> (update-in [:phase :iterations] (fnil inc 1))
