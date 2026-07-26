@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.factory-test
   (:require [clojure.test :refer [deftest testing is]]
             [ai.miniforge.repo-index.factory :as sut]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; ->file-record
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest file-record-shape-test
+;; ->file-record
+(deftest ^{:stratum 0} file-record-shape-test
   (testing "->file-record carries every documented key with the supplied value"
     (let [r (sut/->file-record "src/a.clj" "abc1234" 1024 42 "clojure" false)]
       (is (= "src/a.clj" (:path r)))
@@ -33,15 +32,13 @@
       (is (= "clojure"   (:language r)))
       (is (false?        (:generated? r))))))
 
-(deftest file-record-allows-nil-language-test
+(deftest ^{:stratum 0} file-record-allows-nil-language-test
   (testing "Language may be nil for files of unknown type"
     (let [r (sut/->file-record "f.bin" "abc1234" 0 0 nil false)]
       (is (nil? (:language r))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->repo-index
-
-(deftest repo-index-shape-test
+(deftest ^{:stratum 0} repo-index-shape-test
   (testing "->repo-index computes :file-count, :total-lines, and stamps :indexed-at"
     (let [files [(sut/->file-record "a.clj" "abc1234" 1 10 "clojure" false)
                  (sut/->file-record "b.py"  "def5678" 2 20 "python"  false)]
@@ -54,7 +51,7 @@
       (is (= {"clojure" 1 "python" 1} (:languages idx)))
       (is (inst? (:indexed-at idx))))))
 
-(deftest repo-index-empty-test
+(deftest ^{:stratum 0} repo-index-empty-test
   (testing "Empty entries produces zero counts but still stamps :indexed-at"
     (let [idx (sut/->repo-index "tree-sha-aaa" "/repo" [] {})]
       (is (= 0 (:file-count idx)))
@@ -62,10 +59,8 @@
       (is (= {} (:languages idx)))
       (is (inst? (:indexed-at idx))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->repo-map-entry
-
-(deftest repo-map-entry-from-file-record-test
+(deftest ^{:stratum 0} repo-map-entry-from-file-record-test
   (testing "->repo-map-entry projects path/lang/lines/size from a file record;
             :blob-sha and :generated? are dropped"
     (let [fr (sut/->file-record "src/x.clj" "abc1234" 100 5 "clojure" false)
@@ -77,15 +72,13 @@
       (is (not (contains? e :blob-sha)))
       (is (not (contains? e :generated?))))))
 
-(deftest repo-map-entry-renames-language-to-lang-test
+(deftest ^{:stratum 0} repo-map-entry-renames-language-to-lang-test
   (testing "FileRecord's :language becomes RepoMapEntry's :lang (note rename)"
     (is (= "rust" (:lang (sut/->repo-map-entry
                           (sut/->file-record "f.rs" "abc1234" 1 1 "rust" false)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->repo-map-slice
-
-(deftest repo-map-slice-shape-test
+(deftest ^{:stratum 0} repo-map-slice-shape-test
   (testing "->repo-map-slice carries every supplied positional argument as a key"
     (let [s (sut/->repo-map-slice "tree-sha" [{:path "a"}] "## map" 100 1 true 50)]
       (is (= "tree-sha"   (:tree-sha s)))
@@ -96,10 +89,8 @@
       (is (true?          (:truncated? s)))
       (is (= 50           (:token-estimate s))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->file-content
-
-(deftest file-content-shape-test
+(deftest ^{:stratum 0} file-content-shape-test
   (testing "->file-content carries the four documented keys"
     (let [c (sut/->file-content "src/a.clj" "(ns a)" 1 false)]
       (is (= "src/a.clj" (:path c)))
@@ -107,28 +98,24 @@
       (is (= 1           (:lines c)))
       (is (false?        (:truncated? c))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->render-acc / render-acc-with
-
-(deftest render-acc-initial-shape-test
+(deftest ^{:stratum 0} render-acc-initial-shape-test
   (testing "->render-acc returns the initial empty accumulator"
     (is (= {:text "" :tokens 0 :shown 0 :truncated? false}
            (sut/->render-acc)))))
 
-(deftest render-acc-with-overrides-test
+(deftest ^{:stratum 0} render-acc-with-overrides-test
   (testing "render-acc-with produces an accumulator with the given fields"
     (is (= {:text "x" :tokens 5 :shown 1 :truncated? true}
            (sut/render-acc-with "x" 5 1 true)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->snippet / ->search-hit
-
-(deftest snippet-shape-test
+(deftest ^{:stratum 0} snippet-shape-test
   (testing "->snippet carries start-line, end-line, and text"
     (is (= {:start-line 10 :end-line 12 :text "hit"}
            (sut/->snippet 10 12 "hit")))))
 
-(deftest search-hit-shape-test
+(deftest ^{:stratum 0} search-hit-shape-test
   (testing "->search-hit carries path, score, and snippets"
     (let [snip (sut/->snippet 1 1 "x")
           hit  (sut/->search-hit "src/a.clj" 0.95 [snip])]
@@ -136,10 +123,8 @@
       (is (= 0.95        (:score hit)))
       (is (= [snip]      (:snippets hit))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ->doc-entry / ->inverted-index / ->search-index
-
-(deftest doc-entry-shape-test
+(deftest ^{:stratum 0} doc-entry-shape-test
   (testing "->doc-entry stores path, token-count, term-freqs, and content"
     (let [entry (sut/->doc-entry "src/a.clj" 5 {"a" 2 "b" 3} "(ns a)")]
       (is (= "src/a.clj"   (:path entry)))
@@ -147,11 +132,11 @@
       (is (= {"a" 2 "b" 3} (:term-freqs entry)))
       (is (= "(ns a)"      (:content entry))))))
 
-(deftest inverted-index-empty-test
+(deftest ^{:stratum 0} inverted-index-empty-test
   (testing "->inverted-index returns the documented empty shape"
     (is (= {:term->doc-ids {} :doc-freq {}} (sut/->inverted-index)))))
 
-(deftest search-index-shape-test
+(deftest ^{:stratum 0} search-index-shape-test
   (testing "->search-index aggregates docs, corpus stats, and posting lists"
     (let [idx (sut/->search-index {"a.clj" {:path "a.clj"}} 1 5.0
                                   {"foo" #{"a.clj"}} {"foo" 1})]
