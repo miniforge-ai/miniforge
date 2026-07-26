@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.context-pack.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.context-pack.interface :as ctx]
@@ -23,7 +22,9 @@
             [ai.miniforge.repo-index.interface :as repo-index]
             [malli.core :as m]))
 
-(deftest phase-budget-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} phase-budget-test
   (testing "returns configured budgets for known phases"
     (is (= 100000 (ctx/phase-budget :implement)))
     (is (= 20000 (ctx/phase-budget :plan)))
@@ -33,7 +34,7 @@
   (testing "returns default budget for unknown phases"
     (is (= 40000 (ctx/phase-budget :unknown)))))
 
-(deftest build-pack-basic-test
+(deftest ^{:stratum 0} build-pack-basic-test
   (testing "builds a context pack with repo map and files"
     (let [idx (repo-index/build-index ".")
           ;; Use small files that fit within budget
@@ -47,7 +48,7 @@
       (is (pos? (count (:files pack))))
       (is (not (:exhausted? pack))))))
 
-(deftest build-pack-schema-test
+(deftest ^{:stratum 0} build-pack-schema-test
   (testing "pack conforms to ContextPack schema"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx
@@ -56,7 +57,7 @@
           (str "ContextPack schema mismatch: "
                (m/explain schema/ContextPack pack))))))
 
-(deftest build-pack-with-search-test
+(deftest ^{:stratum 0} build-pack-with-search-test
   (testing "builds a pack including search results"
     (let [idx (repo-index/build-index ".")
           si (repo-index/build-search-index idx)
@@ -67,7 +68,7 @@
       (is (pos? (count (:search-results pack))))
       (is (pos? (:tokens-used pack))))))
 
-(deftest budget-enforcement-test
+(deftest ^{:stratum 0} budget-enforcement-test
   (testing "pack respects budget limits"
     (let [idx (repo-index/build-index ".")
           ;; Very small budget should truncate
@@ -78,7 +79,7 @@
       (is (<= (:tokens-used pack) 200)
           "should stay near budget (with one item overshoot possible)"))))
 
-(deftest budget-exhaustion-test
+(deftest ^{:stratum 0} budget-exhaustion-test
   (testing "pack marks exhausted when budget exceeded"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx
@@ -88,7 +89,7 @@
       ;; 50 tokens is too small for repo-map + files
       (is (:exhausted? pack)))))
 
-(deftest audit-test
+(deftest ^{:stratum 0} audit-test
   (testing "audit returns budget snapshot"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx
@@ -102,7 +103,7 @@
       (is (double? (:utilization a)))
       (is (not (:exhausted? a))))))
 
-(deftest audit-schema-test
+(deftest ^{:stratum 0} audit-schema-test
   (testing "audit conforms to BudgetAudit schema"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx {:files-in-scope ["workspace.edn"]})
@@ -111,7 +112,7 @@
           (str "BudgetAudit schema mismatch: "
                (m/explain schema/BudgetAudit a))))))
 
-(deftest extend-pack-test
+(deftest ^{:stratum 0} extend-pack-test
   (testing "extend-pack adds more content within budget"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx {:files-in-scope ["workspace.edn"]})
@@ -121,14 +122,14 @@
       (is (> (:tokens-used extended) initial-tokens))
       (is (> (count (:files extended)) (count (:files pack)))))))
 
-(deftest tokens-remaining-test
+(deftest ^{:stratum 0} tokens-remaining-test
   (testing "tokens-remaining reports correct value"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx {:files-in-scope ["workspace.edn"]})]
       (is (= (- (:budget pack) (:tokens-used pack))
              (ctx/tokens-remaining pack))))))
 
-(deftest dedup-test
+(deftest ^{:stratum 0} dedup-test
   (testing "duplicate files are not double-counted"
     (let [idx (repo-index/build-index ".")
           pack (ctx/build-pack :implement idx

@@ -1,16 +1,16 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.context-pack.interface
   "Public API for the context-pack component.
 
    Assembles bounded, auditable context documents from repo-index data
    with per-phase token budgets.
 
-   Layer 0: Schema re-exports
-   Layer 1: Budget queries
-   Layer 2: Pack building and auditing"
+   Sections: schema re-exports, factory re-exports, budget queries,
+   pack building and auditing. All delegate to other namespaces, so
+   there's no same-file reference depth between them — every def here
+   sits at Layer 0."
   (:require [ai.miniforge.context-pack.schema :as schema]
             [ai.miniforge.context-pack.factory :as factory]
             [ai.miniforge.context-pack.builder :as builder]
@@ -18,9 +18,9 @@
             [ai.miniforge.context-pack.config :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def ContextPack
+;; Schema re-exports
+(def ^{:stratum 0} ContextPack
   "Malli schema (a [:map ...] vector) for a bounded context pack.
 
    Keys: :phase (keyword), :budget (int), :tokens-used (int),
@@ -29,7 +29,7 @@
    :sources (vector of Source)."
   schema/ContextPack)
 
-(def BudgetAudit
+(def ^{:stratum 0} BudgetAudit
   "Malli schema (a [:map ...] vector) for a budget audit snapshot.
 
    Keys: :phase (keyword), :budget (int), :tokens-used (int),
@@ -37,17 +37,15 @@
    :utilization (double)."
   schema/BudgetAudit)
 
-(def Source
+(def ^{:stratum 0} Source
   "Malli schema (a [:map ...] vector) for a single source-tracking entry.
 
    Keys: :kind (enum :repo-map | :file | :search), :path (non-empty
    string or nil), :tokens (int)."
   schema/Source)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Factory re-exports
-
-(def ->context-pack
+(def ^{:stratum 0} ->context-pack
   "Construct a ContextPack map with an empty audit trail.
 
    Args: phase (keyword), budget (int), repo-map-text (string or nil),
@@ -56,7 +54,7 @@
    :sources []. Total function, never throws."
   factory/->context-pack)
 
-(def ->budget-audit
+(def ^{:stratum 0} ->budget-audit
   "Construct a BudgetAudit snapshot map.
 
    Args: phase (keyword), budget (int), tokens-used (int),
@@ -68,7 +66,7 @@
    is non-positive)."
   factory/->budget-audit)
 
-(def ->source
+(def ^{:stratum 0} ->source
   "Construct a Source-tracking entry for a pack's audit trail.
 
    Args: kind (keyword :repo-map | :file | :search), path (string or
@@ -76,7 +74,7 @@
    throws."
   factory/->source)
 
-(def ->pack-context
+(def ^{:stratum 0} ->pack-context
   "Construct a pack-context map for caching context-pack results in an
    execution context.
 
@@ -86,28 +84,24 @@
    function, never throws."
   factory/->pack-context)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Budget queries
-
-(defn phase-budget
+(defn ^{:stratum 0} phase-budget
   "Get the configured token budget for a phase."
   [phase]
   (config/phase-budget phase))
 
-(defn tokens-remaining
+(defn ^{:stratum 0} tokens-remaining
   "Get remaining token budget for a context pack."
   [pack]
   (budget/tokens-remaining pack))
 
-(defn exhausted?
+(defn ^{:stratum 0} exhausted?
   "Check if a pack's budget is exhausted."
   [pack]
   (budget/exhausted? pack))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pack building
-
-(defn build-pack
+(defn ^{:stratum 0} build-pack
   "Assemble a context pack for a given phase.
 
    Wraps repo-map + files + search results into a bounded context
@@ -127,7 +121,7 @@
   [phase repo-index opts]
   (builder/build-pack phase repo-index opts))
 
-(defn extend-pack
+(defn ^{:stratum 0} extend-pack
   "Extend an existing context pack with additional content.
 
    Arguments:
@@ -140,7 +134,7 @@
   [pack repo-index opts]
   (builder/extend-pack pack repo-index opts))
 
-(defn audit
+(defn ^{:stratum 0} audit
   "Create a budget audit snapshot for a context pack.
 
    Returns:

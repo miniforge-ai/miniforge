@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.context-pack.config
   "Budget configuration loaded from EDN resources.
 
@@ -9,42 +8,50 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
-(def ^:private config-path "config/context-pack/budgets.edn")
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- load-budget-config []
+(def ^{:stratum 0} ^:private config-path "config/context-pack/budgets.edn")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-budget-config []
   (if-let [res (io/resource config-path)]
     (get (edn/read-string (slurp res)) :context-pack/budgets {})
     {}))
 
-(def ^:private budget-config (delay (load-budget-config)))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn phase-budget
+(def ^{:stratum 2} ^:private budget-config (delay (load-budget-config)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} phase-budget
   "Get the token budget for a given phase keyword."
   [phase]
   (get-in @budget-config [:phase-budgets phase]
           (get @budget-config :default-budget 2000)))
 
-(defn repo-map-budget
+(defn ^{:stratum 3} repo-map-budget
   "Get the token budget allocated for the repo map."
   []
   (get @budget-config :repo-map-budget 500))
 
-(defn max-files
+(defn ^{:stratum 3} max-files
   "Get the maximum number of files to include."
   []
   (get @budget-config :max-files 25))
 
-(defn max-lines-per-file
+(defn ^{:stratum 3} max-lines-per-file
   "Get the maximum lines per file."
   []
   (get @budget-config :max-lines-per-file 500))
 
-(defn max-search-results
+(defn ^{:stratum 3} max-search-results
   "Get the maximum number of search results."
   []
   (get @budget-config :max-search-results 5))
 
-(defn exhaustion-policy
+(defn ^{:stratum 3} exhaustion-policy
   "Get the budget exhaustion policy (:fail-closed or :warn)."
   []
   (get @budget-config :exhaustion-policy :fail-closed))
