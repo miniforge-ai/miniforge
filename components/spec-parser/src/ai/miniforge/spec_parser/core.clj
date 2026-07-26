@@ -18,9 +18,12 @@
 (ns ai.miniforge.spec-parser.core
   "Spec normalization and format-specific parsers.
 
-   Layer 0: leaf-level parsers and anomaly helpers (detect-format,
-     parse-yaml/edn/json, validate-spec, frontmatter key-mapping)
-   Layer 1: normalize-spec and markdown-decoration helpers, built on Layer 0
+   Layer 0: leaf-level parsers, anomaly helpers, and the frontmatter
+     key -> namespace map (detect-format, parse-yaml/edn/json,
+     validate-spec, spec-key->ns)
+   Layer 1: normalize-spec, the frontmatter key-mapping helper
+     (namespace-frontmatter-keys), and markdown-decoration helpers,
+     built on Layer 0
    Layer 2: parse-markdown, composing the Layer 1 helpers
    Layer 3: format-parsers, the format -> parser-fn registry
    Layer 4: parse-content, dispatching through format-parsers

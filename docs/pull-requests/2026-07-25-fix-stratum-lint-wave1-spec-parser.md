@@ -26,9 +26,12 @@ bb -Sdeps '{:deps {io.github.miniforge-ai/stratum-lint {:git/sha "80699e378cb8eb
 ```
 
 All 10 `.clj` files in the component were rewritten (`--fix` normalizes
-every file, not just the ones with findings). No executable code
-changed — only heading text, `^{:stratum n}` metadata, and def/deftest
-reordering.
+every file, not just the ones with findings). The mechanical `--fix`
+pass itself changed only heading text, `^{:stratum n}` metadata, and
+def/deftest reordering — no executable code. (A review follow-up landed
+one narrow, unrelated behavior fix on top of this same PR; see
+"Review follow-up" below — that commit is the exception to this PR's
+otherwise mechanical-only diff.)
 
 The real reference-graph computation did not agree with the old
 headings' claimed depth in either direction:
@@ -78,6 +81,40 @@ tool-limitation patterns from earlier Wave 1 batches:
 No same-line trailing-comment relocation issue applied here — this
 component has none (all comments already own-line).
 
+### Review follow-up
+
+Two rounds of Copilot review comments landed on this PR and were folded
+in as a second commit (`a6894c452`), separate from the mechanical `--fix`
+commit above:
+
+1. `parse-markdown`'s frontmatter/body merge used `(str % "\n\n" ...)`.
+   Copilot claimed this produces a literal `"nil\n\n..."` description
+   when frontmatter omits `:spec/description`. Verified empirically —
+   false: `(str nil "\n\n" "body")` evaluates to `"\n\nbody"` in
+   Clojure, since `str` coerces `nil` to `""` rather than the text
+   `"nil"`. The real, smaller issue underneath: a stray leading blank
+   line before the body in that case — cosmetic, not corrupted content.
+   Fixed by making the nil-coercion explicit and trimming:
+   `(str/trim (str (or % "") "\n\n" (str/trim body)))`. Added a
+   regression test for the missing-frontmatter-description case.
+2. `validate-spec`'s docstring (in both `core.clj` and its `interface.clj`
+   re-export) claimed `:errors [...]` (a vector). Verified against
+   `explain-spec-payload` (`schema.clj`): it returns
+   `malli.error/humanize`'s output, a field-key -> messages map, not a
+   vector. Corrected both docstrings.
+3. A subsequent comment caught that this PR doc's "no executable code
+   changed" line (above) was now stale given fix #1's behavior change —
+   reworded to scope that claim to the mechanical `--fix` commit only.
+4. A subsequent comment caught that `core.clj`'s ns docstring listed
+   `namespace-frontmatter-keys` (the frontmatter key-mapping helper)
+   under "Layer 0", but it's tagged `^{:stratum 1}` — it depends on
+   `spec-key->ns` (the Layer 0 key -> namespace map), it isn't itself
+   Layer 0. Corrected the docstring's layer breakdown to name
+   `spec-key->ns` at Layer 0 and `namespace-frontmatter-keys` at Layer 1.
+
+Each Copilot thread was replied to with the empirical finding (correct,
+partially correct, or — for #3/#4 — direct fixes) before being resolved.
+
 ## Testing Plan
 
 1. Ran plain (non-`--fix`) `stratum-lint` before the fix — reproduced the
@@ -90,7 +127,11 @@ component has none (all comments already own-line).
 4. `clj-kondo --lint components/spec-parser`: 0 errors, 0 warnings.
 5. Ran all 7 test namespaces directly via `clojure -A:test -e`: 36 tests,
    131 assertions, 0 failures, 0 errors.
-6. Re-ran plain `stratum-lint` after the fix:
+6. After the review follow-up (nil-coercion fix + new regression test):
+   re-ran `--fix` (zero diff, still idempotent), `clj-kondo` (still 0/0),
+   and all 7 test namespaces again: 36 tests, 132 assertions (one more
+   than before — the new regression test), 0 failures, 0 errors.
+7. Re-ran plain `stratum-lint` after the fix:
    - `interface.clj`'s `SL003` is gone (real depth 1, well under budget).
    - `core.clj`'s `SL003` remains, now reporting 6 layers (was 4) — same
      finding, worse number, since the fix corrected an undercount.
@@ -130,4 +171,7 @@ forward; the two `SL003`s stay advisory
       layers, worse-than-baseline number for the same finding) and
       `schema.clj` (4 layers, newly surfaced) — both documented above,
       tracked as Wave 2
+- [x] Review follow-up: nil-coercion whitespace artifact + 2 stale
+      docstrings fixed, regression test added, all Copilot threads
+      replied to with empirical findings and resolved
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
