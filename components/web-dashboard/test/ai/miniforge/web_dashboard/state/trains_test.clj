@@ -51,7 +51,7 @@
     (str (.getAbsolutePath dir) "/config.edn")))
 
 ;; ============================================================================
-;; Layer 0: Helper and utility function tests
+;; Helper and utility function tests
 ;; ============================================================================
 (deftest ^{:stratum 0} normalized-limit-test
   (testing "Returns the integer when positive"
@@ -158,7 +158,7 @@
           (.delete (io/file path)))))))
 
 ;; ============================================================================
-;; Layer 0: Provider PR field parsing
+;; Provider PR field parsing
 ;; ============================================================================
 (deftest ^{:stratum 0} pr-status-from-provider-test
   (testing "Closed state"

@@ -31,7 +31,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;------------------------------------------------------------------------------ Re-exports
-;; Layer 0: Primitives
+;; Primitives
 (def ^{:stratum 0} button primitives/button)
 
 (def ^{:stratum 0} badge primitives/badge)
