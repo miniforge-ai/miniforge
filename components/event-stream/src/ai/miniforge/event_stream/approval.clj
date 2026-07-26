@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.approval
   "Multi-party approval state machine for N8 OCI compliance.
 
@@ -32,26 +31,146 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Response predicates for builder responses
 ;; Local aliases that delegate to response/success? and response/error?
 ;; so call sites in this namespace stay terse.
-
-(def succeeded?
+(def ^{:stratum 0} succeeded?
   "Check if a builder response (from response/success) succeeded."
   response/success?)
 
-(def failed?
+(def ^{:stratum 0} failed?
   "Check if a builder response (from response/failure) failed."
   response/error?)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Approval request creation
-
-(def ^:const default-expiry-hours
+(def ^{:stratum 0} ^:const default-expiry-hours
   "Default approval request expiry in hours."
   24)
 
-(defn create-approval-request
+;; Approval signing
+(defn ^{:stratum 0} signer-authorized?
+  "Check if a signer is in the required-signers list."
+  [approval-request signer]
+  (some #{signer} (:approval/required-signers approval-request)))
+
+(defn ^{:stratum 0} already-signed?
+  "Check if a signer has already signed."
+  [approval-request signer]
+  (some #(= signer (:signer %)) (:approval/signatures approval-request)))
+
+(defn ^{:stratum 0} expired?
+  "Check if an approval request has expired."
+  [approval-request]
+  (let [now (java.util.Date.)
+        expires-at (:approval/expires-at approval-request)]
+    (when expires-at
+      (.after now expires-at))))
+
+(defn ^{:stratum 0} cancel-approval
+  "Cancel a pending approval request.
+
+   Arguments:
+   - approval-request - Approval request map
+   - canceller - Identifier of the person cancelling
+   - reason - Reason for cancellation
+
+   Returns:
+   - response/success with updated request on success
+   - response/failure if not pending"
+  [approval-request canceller reason]
+  (if (not= :pending (:approval/status approval-request))
+    (response/failure "Can only cancel pending approvals"
+                      {:data {:status (:approval/status approval-request)}})
+    (response/success
+     (assoc approval-request
+            :approval/status :cancelled
+            :approval/cancelled-by canceller
+            :approval/cancel-reason reason
+            :approval/cancelled-at (java.util.Date.)))))
+
+;; Approval manager (atom-backed store)
+(defn ^{:stratum 0} create-approval-manager
+  "Create an atom-backed approval manager.
+
+   Returns: Atom containing {:approvals {uuid approval-request}}"
+  []
+  (atom {:approvals {}}))
+
+(defn ^{:stratum 0} store-approval!
+  "Store an approval request in the manager.
+
+   Arguments:
+   - manager - Approval manager atom
+   - approval - Approval request map
+
+   Returns: The stored approval."
+  [manager approval]
+  (let [id (:approval/id approval)]
+    (swap! manager assoc-in [:approvals id] approval)
+    approval))
+
+(defn ^{:stratum 0} get-approval
+  "Get an approval request by ID.
+
+   Arguments:
+   - manager - Approval manager atom
+   - approval-id - UUID
+
+   Returns: Approval request or nil."
+  [manager approval-id]
+  (get-in @manager [:approvals approval-id]))
+
+(defn ^{:stratum 0} update-approval!
+  "Update an approval request in the manager.
+
+   Arguments:
+   - manager - Approval manager atom
+   - approval - Updated approval request map
+
+   Returns: The updated approval."
+  [manager approval]
+  (let [id (:approval/id approval)]
+    (swap! manager assoc-in [:approvals id] approval)
+    approval))
+
+;; Approval event constructors
+(defn ^{:stratum 0} approval-requested
+  "Create an approval/requested event."
+  [stream workflow-id approval-id action-id required-signers]
+  (-> (core/create-envelope stream :approval/requested workflow-id
+                            (str "Approval requested for action " action-id))
+      (assoc :approval/id approval-id
+             :approval/action-id action-id
+             :approval/required-signers required-signers)))
+
+(defn ^{:stratum 0} approval-signed
+  "Create an approval/signed event."
+  [stream workflow-id approval-id signer decision]
+  (-> (core/create-envelope stream :approval/signed workflow-id
+                            (str "Approval " (name decision) " by " signer))
+      (assoc :approval/id approval-id
+             :approval/signer signer
+             :approval/decision decision)))
+
+(defn ^{:stratum 0} approval-completed
+  "Create an approval/completed event."
+  [stream workflow-id approval-id final-status]
+  (-> (core/create-envelope stream :approval/completed workflow-id
+                            (str "Approval " (name final-status)))
+      (assoc :approval/id approval-id
+             :approval/final-status final-status)))
+
+(defn ^{:stratum 0} approval-expired
+  "Create an approval/expired event."
+  [stream workflow-id approval-id]
+  (-> (core/create-envelope stream :approval/expired workflow-id
+                            "Approval request expired")
+      (assoc :approval/id approval-id)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-approval-request
   "Create a new approval request.
 
    Arguments:
@@ -77,28 +196,7 @@
              :approval/expires-at expires-at}
       (:metadata opts) (assoc :approval/metadata (:metadata opts)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Approval signing
-
-(defn signer-authorized?
-  "Check if a signer is in the required-signers list."
-  [approval-request signer]
-  (some #{signer} (:approval/required-signers approval-request)))
-
-(defn already-signed?
-  "Check if a signer has already signed."
-  [approval-request signer]
-  (some #(= signer (:signer %)) (:approval/signatures approval-request)))
-
-(defn expired?
-  "Check if an approval request has expired."
-  [approval-request]
-  (let [now (java.util.Date.)
-        expires-at (:approval/expires-at approval-request)]
-    (when expires-at
-      (.after now expires-at))))
-
-(defn submit-approval
+(defn ^{:stratum 1} submit-approval
   "Submit an approval or rejection for a request.
 
    Arguments:
@@ -156,10 +254,8 @@
           final (assoc updated :approval/status new-status)]
       (response/success final))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Status checking
-
-(defn check-approval-status
+(defn ^{:stratum 1} check-approval-status
   "Check the current status of an approval request, accounting for expiry.
 
    Arguments:
@@ -172,76 +268,9 @@
       :expired
       status)))
 
-(defn cancel-approval
-  "Cancel a pending approval request.
-
-   Arguments:
-   - approval-request - Approval request map
-   - canceller - Identifier of the person cancelling
-   - reason - Reason for cancellation
-
-   Returns:
-   - response/success with updated request on success
-   - response/failure if not pending"
-  [approval-request canceller reason]
-  (if (not= :pending (:approval/status approval-request))
-    (response/failure "Can only cancel pending approvals"
-                      {:data {:status (:approval/status approval-request)}})
-    (response/success
-     (assoc approval-request
-            :approval/status :cancelled
-            :approval/cancelled-by canceller
-            :approval/cancel-reason reason
-            :approval/cancelled-at (java.util.Date.)))))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Approval manager (atom-backed store)
 
-(defn create-approval-manager
-  "Create an atom-backed approval manager.
-
-   Returns: Atom containing {:approvals {uuid approval-request}}"
-  []
-  (atom {:approvals {}}))
-
-(defn store-approval!
-  "Store an approval request in the manager.
-
-   Arguments:
-   - manager - Approval manager atom
-   - approval - Approval request map
-
-   Returns: The stored approval."
-  [manager approval]
-  (let [id (:approval/id approval)]
-    (swap! manager assoc-in [:approvals id] approval)
-    approval))
-
-(defn get-approval
-  "Get an approval request by ID.
-
-   Arguments:
-   - manager - Approval manager atom
-   - approval-id - UUID
-
-   Returns: Approval request or nil."
-  [manager approval-id]
-  (get-in @manager [:approvals approval-id]))
-
-(defn update-approval!
-  "Update an approval request in the manager.
-
-   Arguments:
-   - manager - Approval manager atom
-   - approval - Updated approval request map
-
-   Returns: The updated approval."
-  [manager approval]
-  (let [id (:approval/id approval)]
-    (swap! manager assoc-in [:approvals id] approval)
-    approval))
-
-(defn list-approvals
+(defn ^{:stratum 2} list-approvals
   "List all approval requests, optionally filtered.
 
    Arguments:
@@ -254,42 +283,6 @@
     (if-let [status (:status opts)]
       (vec (filter #(= status (check-approval-status %)) approvals))
       (vec approvals))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Approval event constructors
-
-(defn approval-requested
-  "Create an approval/requested event."
-  [stream workflow-id approval-id action-id required-signers]
-  (-> (core/create-envelope stream :approval/requested workflow-id
-                            (str "Approval requested for action " action-id))
-      (assoc :approval/id approval-id
-             :approval/action-id action-id
-             :approval/required-signers required-signers)))
-
-(defn approval-signed
-  "Create an approval/signed event."
-  [stream workflow-id approval-id signer decision]
-  (-> (core/create-envelope stream :approval/signed workflow-id
-                            (str "Approval " (name decision) " by " signer))
-      (assoc :approval/id approval-id
-             :approval/signer signer
-             :approval/decision decision)))
-
-(defn approval-completed
-  "Create an approval/completed event."
-  [stream workflow-id approval-id final-status]
-  (-> (core/create-envelope stream :approval/completed workflow-id
-                            (str "Approval " (name final-status)))
-      (assoc :approval/id approval-id
-             :approval/final-status final-status)))
-
-(defn approval-expired
-  "Create an approval/expired event."
-  [stream workflow-id approval-id]
-  (-> (core/create-envelope stream :approval/expired workflow-id
-                            "Approval request expired")
-      (assoc :approval/id approval-id)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

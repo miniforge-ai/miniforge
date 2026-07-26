@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.event-stream.interface :as es]))
 
-(deftest create-event-stream-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} create-event-stream-test
   (testing "creates event stream with initial state"
     (let [stream (es/create-event-stream {:sinks []})]
       (is (some? stream))
@@ -30,7 +31,7 @@
       (is (contains? @stream :events))
       (is (contains? @stream :subscribers)))))
 
-(deftest publish-and-subscribe-test
+(deftest ^{:stratum 0} publish-and-subscribe-test
   (testing "subscribers receive published events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -72,7 +73,7 @@
       ;; Only first event received
       (is (= 1 (count @received))))))
 
-(deftest event-envelope-test
+(deftest ^{:stratum 0} event-envelope-test
   (testing "events have required N3 envelope fields"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -106,7 +107,7 @@
       (is (= 0 (:event/sequence-number e2)))
       (is (= 1 (:event/sequence-number e3))))))
 
-(deftest workflow-event-constructors-test
+(deftest ^{:stratum 0} workflow-event-constructors-test
   (testing "workflow-started includes spec when provided"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -164,7 +165,7 @@
       (is (= "LLM timeout" (:workflow/failure-reason event)))
       (is (= error (:workflow/error-details event))))))
 
-(deftest dependency-event-constructors-test
+(deftest ^{:stratum 0} dependency-event-constructors-test
   (testing "dependency health events are exposed on the public interface"
     (let [stream (es/create-event-stream {:sinks []})
           dependency {:dependency/id :anthropic
@@ -186,7 +187,7 @@
       (is (= :dependency/recovered (:event/type recovered)))
       (is (= :healthy (:dependency/status recovered))))))
 
-(deftest agent-event-constructors-test
+(deftest ^{:stratum 0} agent-event-constructors-test
   (testing "agent-chunk captures delta and done status"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
@@ -207,7 +208,7 @@
       (is (= :generating (:status/type event)))
       (is (= "Writing code" (:message event))))))
 
-(deftest llm-event-constructors-test
+(deftest ^{:stratum 0} llm-event-constructors-test
   (testing "llm-request captures model and tokens"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -229,7 +230,7 @@
       (is (= 850 (:llm/completion-tokens event)))
       (is (= 3200 (:llm/duration-ms event))))))
 
-(deftest get-events-test
+(deftest ^{:stratum 0} get-events-test
   (testing "get-events returns all events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
@@ -266,7 +267,7 @@
       (is (= 1 (count (es/get-events stream {:offset 2}))))
       (is (= 1 (count (es/get-events stream {:offset 1 :limit 1})))))))
 
-(deftest get-latest-status-test
+(deftest ^{:stratum 0} get-latest-status-test
   (testing "returns most recent status event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)]
@@ -286,7 +287,7 @@
       (let [impl-status (es/get-latest-status stream wf-id :implementer)]
         (is (= :implementer (:agent/id impl-status)))))))
 
-(deftest create-streaming-callback-test
+(deftest ^{:stratum 0} create-streaming-callback-test
   (testing "callback publishes agent-chunk events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -342,10 +343,8 @@
         (is (nat-int? (:tool/duration-ms completed)))
         (is (contains? completed :tool/result-digest))))))
 
-
 ;; --------------------------------------------------------------------------- New N3 event constructors
-
-(deftest agent-lifecycle-event-constructors-test
+(deftest ^{:stratum 0} agent-lifecycle-event-constructors-test
   (testing "agent-started creates event with agent-id and optional context"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -371,7 +370,7 @@
       (is (= :reviewer (:agent/id event)))
       (is (= {:message "timeout"} (:agent/error event))))))
 
-(deftest gate-lifecycle-event-constructors-test
+(deftest ^{:stratum 0} gate-lifecycle-event-constructors-test
   (testing "gate-started creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -396,7 +395,7 @@
       (is (= :lint (:gate/id event)))
       (is (= violations (:gate/violations event))))))
 
-(deftest tool-lifecycle-event-constructors-test
+(deftest ^{:stratum 0} tool-lifecycle-event-constructors-test
   (testing "tool-invoked creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -414,7 +413,7 @@
       (is (= :tools/write-file (:tool/id event)))
       (is (= {:success true} (:tool/result-summary event))))))
 
-(deftest milestone-event-constructor-test
+(deftest ^{:stratum 0} milestone-event-constructor-test
   (testing "milestone-reached creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -423,7 +422,7 @@
       (is (= :tests-passing (:milestone/id event)))
       (is (= "All 42 tests pass" (:message event))))))
 
-(deftest task-lifecycle-event-constructors-test
+(deftest ^{:stratum 0} task-lifecycle-event-constructors-test
   (testing "task-state-changed creates event with from/to states"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -451,7 +450,7 @@
       (is (= :task/skip-propagated (:event/type event)))
       (is (= cause (:task/cause-task event))))))
 
-(deftest inter-agent-message-event-constructors-test
+(deftest ^{:stratum 0} inter-agent-message-event-constructors-test
   (testing "inter-agent-message-sent creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -469,7 +468,7 @@
       (is (= :planner (:from-agent/id event)))
       (is (= :implementer (:to-agent/id event))))))
 
-(deftest listener-event-constructors-test
+(deftest ^{:stratum 0} listener-event-constructors-test
   (testing "listener-attached creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -499,7 +498,7 @@
       (is (= :warning (:annotation/type event)))
       (is (= "slow response" (:annotation/content event))))))
 
-(deftest control-action-event-constructors-test
+(deftest ^{:stratum 0} control-action-event-constructors-test
   (testing "control-action-requested creates event"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)

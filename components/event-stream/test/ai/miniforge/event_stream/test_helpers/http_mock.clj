@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.test-helpers.http-mock
   "Shared `java.net.http.HttpClient` stub for sink tests.
 
@@ -23,7 +22,9 @@
    assertions, and so other sink tests (e.g. a future
    logging/fleet-sink_test) can reuse the same stub shape.")
 
-(defn mock-http-client
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} mock-http-client
   "Construct a minimal `HttpClient` stub for tests.
    `send-fn` is called as `(send-fn req handler)` and must return an
    `HttpResponse`; defaults to a 200 no-op.  All other abstract methods

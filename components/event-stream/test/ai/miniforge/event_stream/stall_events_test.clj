@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.stall-events-test
   "Tests for GROUP 1+4 foundation: agent-stream-stalled constructor and
    phase-completed :phase/termination-reason extension, plus GROUP 2
@@ -28,23 +27,25 @@
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.schema :as schema]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn no-op-stream
+;------------------------------------------------------------------------------ Helpers
+(defn ^{:stratum 0} no-op-stream
   "Create a stream with no sinks — event constructors only build maps."
   []
   (core/create-event-stream {:sinks []}))
 
-;------------------------------------------------------------------------------ agent-stream-stalled
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest agent-stream-stalled-type-test
+;------------------------------------------------------------------------------ agent-stream-stalled
+(deftest ^{:stratum 1} agent-stream-stalled-type-test
   (testing "event type is :agent/stream-stalled"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-stream-stalled stream wf-id :implement 95000 :codex)]
       (is (= :agent/stream-stalled (:event/type event))))))
 
-(deftest agent-stream-stalled-fields-test
+(deftest ^{:stratum 1} agent-stream-stalled-fields-test
   (testing "carries phase-id, gap-duration-ms, and backend"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
@@ -76,7 +77,7 @@
       (is (= core/event-version (:event/version event)))
       (is (number? (:event/sequence-number event))))))
 
-(deftest agent-stream-stalled-works-with-any-backend-test
+(deftest ^{:stratum 1} agent-stream-stalled-works-with-any-backend-test
   (testing "backend keyword is preserved as-is"
     (doseq [backend [:codex :claude :openai :local]]
       (let [stream (no-op-stream)
@@ -84,8 +85,7 @@
         (is (= backend (:agent/backend event)))))))
 
 ;------------------------------------------------------------------------------ phase-completed :phase/termination-reason
-
-(deftest phase-completed-termination-reason-test
+(deftest ^{:stratum 1} phase-completed-termination-reason-test
   (testing "termination-reason :normal is passed through"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
@@ -136,15 +136,14 @@
       (is (= :normal (:phase/termination-reason event))))))
 
 ;------------------------------------------------------------------------------ agent-session-captured (GROUP 2)
-
-(deftest agent-session-captured-type-test
+(deftest ^{:stratum 1} agent-session-captured-type-test
   (testing "event type is :agent/session-captured"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
           event  (core/agent-session-captured stream wf-id :implement "cc-abc123" :claude-code)]
       (is (= :agent/session-captured (:event/type event))))))
 
-(deftest agent-session-captured-fields-test
+(deftest ^{:stratum 1} agent-session-captured-fields-test
   (testing "carries phase-id, session-id, and backend"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
@@ -176,7 +175,7 @@
       (is (= core/event-version (:event/version event)))
       (is (number? (:event/sequence-number event))))))
 
-(deftest agent-session-captured-works-with-any-backend-test
+(deftest ^{:stratum 1} agent-session-captured-works-with-any-backend-test
   (testing "backend keyword is preserved as-is"
     (doseq [backend [:codex :claude-code :openai :local]]
       (let [stream (no-op-stream)
@@ -185,8 +184,7 @@
         (is (= backend (:agent/backend event)))))))
 
 ;------------------------------------------------------------------------------ Re-export verification
-
-(deftest interface-events-re-export-test
+(deftest ^{:stratum 1} interface-events-re-export-test
   (testing "agent-stream-stalled is exported through interface.events"
     (is (fn? events/agent-stream-stalled)))
 
@@ -221,8 +219,7 @@
       (is (= (:agent/backend direct) (:agent/backend via-if))))))
 
 ;------------------------------------------------------------------------------ Malli schema validation
-
-(deftest agent-stream-stalled-validates-against-schema-test
+(deftest ^{:stratum 1} agent-stream-stalled-validates-against-schema-test
   (testing "constructed event satisfies schema/AgentStreamStalled"
     (let [stream (no-op-stream)
           event  (core/agent-stream-stalled stream (random-uuid) :implement 95000 :codex)]
@@ -230,7 +227,7 @@
           (str "validation errors: "
                (pr-str (m/explain schema/AgentStreamStalled event)))))))
 
-(deftest agent-session-captured-validates-against-schema-test
+(deftest ^{:stratum 1} agent-session-captured-validates-against-schema-test
   (testing "constructed event satisfies schema/AgentSessionCaptured"
     (let [stream (no-op-stream)
           event  (core/agent-session-captured stream (random-uuid) :implement

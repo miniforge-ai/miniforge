@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.sinks-test
   "Unit tests for event sink functions."
   (:require
@@ -27,9 +26,10 @@
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.test-helpers.http-mock :as http-mock]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn with-temp-dir [f]
+;------------------------------------------------------------------------------ Helpers
+(defn ^{:stratum 0} with-temp-dir [f]
   (let [dir (java.nio.file.Files/createTempDirectory
               "sinks-test-"
               (into-array java.nio.file.attribute.FileAttribute []))]
@@ -39,7 +39,7 @@
         (doseq [file (reverse (file-seq (.toFile dir)))]
           (.delete ^java.io.File file))))))
 
-(defn sample-event [& [overrides]]
+(defn ^{:stratum 0} sample-event [& [overrides]]
   (merge {:event/type :workflow/started
           :event/id (random-uuid)
           :event/timestamp (java.util.Date.)
@@ -49,25 +49,81 @@
           :message "Test event"}
          overrides))
 
-(defn read-transit-json [s]
+(defn ^{:stratum 0} read-transit-json [s]
   (transit/read
    (transit/reader
     (java.io.ByteArrayInputStream. (.getBytes ^String s "UTF-8"))
     :json-verbose)))
 
-(defn list-files [^java.io.File dir]
+(defn ^{:stratum 0} list-files [^java.io.File dir]
   (when (.isDirectory dir)
     (vec (.listFiles dir))))
+
+;; create-sink factory
+(deftest ^{:stratum 0} create-sink-keyword-test
+  (testing ":file produces a function"
+    (is (fn? (sinks/create-sink :file))))
+
+  (testing ":stdout produces a function"
+    (is (fn? (sinks/create-sink :stdout))))
+
+  (testing ":stderr produces a function"
+    (is (fn? (sinks/create-sink :stderr)))))
+
+(deftest ^{:stratum 0} create-sink-map-test
+  (testing "map with :type :file produces file sink"
+    (is (fn? (sinks/create-sink {:type :file}))))
+
+  (testing "map with :type :stdout produces stdout sink"
+    (is (fn? (sinks/create-sink {:type :stdout}))))
+
+  (testing "map with :type :stderr and filter produces stderr sink"
+    (is (fn? (sinks/create-sink {:type :stderr :filter (constantly true)}))))
+
+  (testing "map with unknown type throws"
+    (is (thrown? Exception (sinks/create-sink {:type :unknown})))))
+
+(deftest ^{:stratum 0} create-sink-vector-test
+  (testing "vector creates multi-sink"
+    (let [_received-1 (atom [])
+          _received-2 (atom [])
+          ;; Use a vector of keyword sinks but verify via multi-sink behavior
+          sink (sinks/create-sink [:stdout :stdout])]
+      ;; Should be a function
+      (is (fn? sink)))))
+
+(deftest ^{:stratum 0} create-sink-invalid-test
+  (testing "invalid config throws"
+    (is (thrown? Exception (sinks/create-sink 42)))
+    (is (thrown? Exception (sinks/create-sink "invalid")))))
+
+;; create-sinks-from-config
+(deftest ^{:stratum 0} create-sinks-from-config-test
+  (testing "defaults to file sink when no config"
+    (let [sinks (sinks/create-sinks-from-config {})]
+      (is (= 1 (count sinks)))
+      (is (fn? (first sinks)))))
+
+  (testing "creates sinks from :observability :event-sinks"
+    (let [sinks (sinks/create-sinks-from-config
+                 {:observability {:event-sinks [:stdout]}})]
+      (is (= 1 (count sinks)))
+      (is (fn? (first sinks)))))
+
+  (testing "multiple sinks from config"
+    (let [sinks (sinks/create-sinks-from-config
+                 {:observability {:event-sinks [:file :stdout]}})]
+      (is (= 2 (count sinks)))
+      (is (every? fn? sinks)))))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; `mock-http-client` lives in the shared
 ;; `ai.miniforge.event-stream.test-helpers.http-mock` namespace so other
 ;; sink tests can reuse the same proxy stubs without re-implementing
 ;; HttpClient's ~10 abstract methods.
-
-;------------------------------------------------------------------------------ Layer 0
 ;; workflow-dir / event-file-path normalisation
-
-(deftest workflow-dir-normalizes-keyword-id
+(deftest ^{:stratum 1} workflow-dir-normalizes-keyword-id
   ;; Keyword workflow ids (e.g. `:canonical-sdlc` from `workflow run`)
   ;; must NOT round-trip through `(str ...)` because the result
   ;; (`":canonical-sdlc"`) carries a colon — invalid on Windows and
@@ -85,7 +141,7 @@
         (is (= "wf-abc" (.getName string-path))
             "string id passes through unchanged")))))
 
-(deftest event-file-path-normalizes-keyword-workflow-id
+(deftest ^{:stratum 1} event-file-path-normalizes-keyword-workflow-id
   ;; Same normalisation must apply to event-file-path so events and
   ;; the manifest end up under identical workflow directories.
   (with-temp-dir
@@ -99,7 +155,7 @@
              normalisation as workflow-dir so events sit beside the
              manifest")))))
 
-(deftest event-file-path-test
+(deftest ^{:stratum 1} event-file-path-test
   (testing "returns a File path ending in .json under an explicit base-dir"
     (with-temp-dir
       (fn [dir]
@@ -146,10 +202,8 @@
           (is (re-matches #"\d{8}T\d{9}Z-[0-9a-f-]+\.json" filename)
               (str "expected legacy timestamp-leading filename, got: " filename)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; file-sink
-
-(deftest file-sink-test
+(deftest ^{:stratum 1} file-sink-test
   (testing "writes event to per-workflow file as Transit-JSON"
     (with-temp-dir
       (fn [dir]
@@ -234,10 +288,8 @@
             (is (= :workflow/started
                    (:event/type (read-transit-json (slurp event-file)))))))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; stdout-sink
-
-(deftest stdout-sink-test
+(deftest ^{:stratum 1} stdout-sink-test
   (testing "prints event to stdout in edn format"
     (let [sink (sinks/stdout-sink {:compact true})
           event (sample-event)
@@ -254,10 +306,8 @@
       ;; Compact EDN should be a single line (no internal newlines before the closing brace)
       (is (str/starts-with? output "{")))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; stderr-sink
-
-(deftest stderr-sink-test
+(deftest ^{:stratum 1} stderr-sink-test
   (testing "only passes events matching filter"
     (let [_passed (atom [])
           sink (sinks/stderr-sink {:filter (fn [e] (= :workflow/failed (:event/type e)))})]
@@ -282,10 +332,8 @@
                    (str w))]
       (is (not (str/blank? output))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; multi-sink
-
-(deftest multi-sink-test
+(deftest ^{:stratum 1} multi-sink-test
   (testing "dispatches to all child sinks"
     (let [received-1 (atom [])
           received-2 (atom [])
@@ -311,71 +359,8 @@
       ;; Should not throw
       (is (nil? (multi (sample-event)))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; create-sink factory
-
-(deftest create-sink-keyword-test
-  (testing ":file produces a function"
-    (is (fn? (sinks/create-sink :file))))
-
-  (testing ":stdout produces a function"
-    (is (fn? (sinks/create-sink :stdout))))
-
-  (testing ":stderr produces a function"
-    (is (fn? (sinks/create-sink :stderr)))))
-
-(deftest create-sink-map-test
-  (testing "map with :type :file produces file sink"
-    (is (fn? (sinks/create-sink {:type :file}))))
-
-  (testing "map with :type :stdout produces stdout sink"
-    (is (fn? (sinks/create-sink {:type :stdout}))))
-
-  (testing "map with :type :stderr and filter produces stderr sink"
-    (is (fn? (sinks/create-sink {:type :stderr :filter (constantly true)}))))
-
-  (testing "map with unknown type throws"
-    (is (thrown? Exception (sinks/create-sink {:type :unknown})))))
-
-(deftest create-sink-vector-test
-  (testing "vector creates multi-sink"
-    (let [_received-1 (atom [])
-          _received-2 (atom [])
-          ;; Use a vector of keyword sinks but verify via multi-sink behavior
-          sink (sinks/create-sink [:stdout :stdout])]
-      ;; Should be a function
-      (is (fn? sink)))))
-
-(deftest create-sink-invalid-test
-  (testing "invalid config throws"
-    (is (thrown? Exception (sinks/create-sink 42)))
-    (is (thrown? Exception (sinks/create-sink "invalid")))))
-
-;------------------------------------------------------------------------------ Layer 4
-;; create-sinks-from-config
-
-(deftest create-sinks-from-config-test
-  (testing "defaults to file sink when no config"
-    (let [sinks (sinks/create-sinks-from-config {})]
-      (is (= 1 (count sinks)))
-      (is (fn? (first sinks)))))
-
-  (testing "creates sinks from :observability :event-sinks"
-    (let [sinks (sinks/create-sinks-from-config
-                 {:observability {:event-sinks [:stdout]}})]
-      (is (= 1 (count sinks)))
-      (is (fn? (first sinks)))))
-
-  (testing "multiple sinks from config"
-    (let [sinks (sinks/create-sinks-from-config
-                 {:observability {:event-sinks [:file :stdout]}})]
-      (is (= 2 (count sinks)))
-      (is (every? fn? sinks)))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; fleet-sink
-
-(deftest fleet-sink-test
+(deftest ^{:stratum 1} fleet-sink-test
   (testing "requires :url option"
     (is (thrown? Exception (sinks/fleet-sink {}))))
 
@@ -405,10 +390,8 @@
       (sink (sample-event))
       (is (true? @posted) "flush sends an HTTP POST on batch-size trigger"))))
 
-;------------------------------------------------------------------------------ Layer 1b
 ;; file-sink error reporting
-
-(deftest file-sink-reports-write-errors-to-stderr-test
+(deftest ^{:stratum 1} file-sink-reports-write-errors-to-stderr-test
   (testing "file-sink logs write failures to stderr instead of swallowing"
     (with-temp-dir
       (fn [dir]
@@ -429,10 +412,8 @@
                                 (str w))]
             (is (str/includes? stderr-output "WARNING"))))))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; cleanup-stale-events!
-
-(deftest cleanup-stale-events-test
+(deftest ^{:stratum 1} cleanup-stale-events-test
   (testing "returns 0 when events directory is empty"
     (with-temp-dir
       (fn [dir]

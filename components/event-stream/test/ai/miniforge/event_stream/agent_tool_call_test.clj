@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.agent-tool-call-test
   "Structured :agent/tool-call events carry the tool name(s) the agent
    just invoked. Replaces the opaque :agent/status :tool-calling pings
@@ -24,9 +23,13 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.interface :as es]))
 
-(defn- stream [] (es/create-event-stream {:sinks []}))
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest single-tool-call-carries-name
+(defn- ^{:stratum 0} stream [] (es/create-event-stream {:sinks []}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} single-tool-call-carries-name
   (testing "single tool name from a Claude-style tool_use block"
     (let [s (stream)
           wf-id (random-uuid)
@@ -38,7 +41,7 @@
       (is (= "tu_abc123" (:tool/call-id ev)))
       (is (= :planner (:agent/id ev))))))
 
-(deftest multi-tool-block-carries-names-vector
+(deftest ^{:stratum 1} multi-tool-block-carries-names-vector
   (testing "Claude assistant block containing multiple tool_use items"
     (let [s (stream)
           ev (es/agent-tool-call s (random-uuid) :planner
@@ -48,7 +51,7 @@
       (is (nil? (:tool/name ev))
           "prefer :tool/names for the multi case"))))
 
-(deftest empty-tool-info-does-not-leak-nil-keys
+(deftest ^{:stratum 1} empty-tool-info-does-not-leak-nil-keys
   (testing "missing tool name/id/args do not emit nil-valued keys"
     (let [s (stream)
           ev (es/agent-tool-call s (random-uuid) :planner {})]
@@ -58,7 +61,7 @@
       (is (not (contains? ev :tool/call-id)))
       (is (not (contains? ev :tool/args-preview))))))
 
-(deftest args-preview-is-bounded
+(deftest ^{:stratum 1} args-preview-is-bounded
   (testing "callers pass a pre-truncated args preview; fn stores it as-is"
     (let [s (stream)
           preview "{:path \"components/agent/src/core.clj\"}"
@@ -68,7 +71,7 @@
       (is (< (count (:tool/args-preview ev)) 1024)
           "preview string stays under 1KB per event-sizing convention"))))
 
-(deftest distinct-event-type-from-agent-status
+(deftest ^{:stratum 1} distinct-event-type-from-agent-status
   (testing ":agent/tool-call is a new event type, NOT :agent/status"
     (let [s (stream)
           wf-id (random-uuid)

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.reader
   "Read event streams back from the on-disk file sink.
 
@@ -39,9 +38,9 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Transit-JSON prefix stripping
 
-(defn strip-transit-prefix
+;; Transit-JSON prefix stripping
+(defn ^{:stratum 0} strip-transit-prefix
   "Turn the raw transit-JSON parse back into idiomatic Clojure data.
 
    - strings prefixed with `~:` become keywords
@@ -76,52 +75,7 @@
 
     :else x))
 
-;; ── Single-file reader ─────────────────────────────────────────────────────
-
-(defn read-event-file
-  "Parse one transit-JSON event file into an event map (transit
-   prefixes stripped, so `:event/type` comes back as a keyword and
-   UUID/instant values as plain strings).
-
-   Returns the parsed map, or nil when the file cannot be read or
-   parsed. Callers that must be LOUD about malformed files (the
-   operator-event consumer's append-only contract) branch on the nil
-   themselves — unlike [[read-workflow-events]], nothing is dropped
-   silently without the caller seeing it."
-  [f]
-  (try
-    (strip-transit-prefix
-     (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
-    (catch Exception _e nil)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Directory reader
-
-(defn read-workflow-events
-  "Read every `.json` event file under a workflow directory, sorted by
-   filename (which is timestamp-prefixed). Parse each as transit-JSON
-   and strip the transit prefixes.
-
-   Arguments:
-   - `dir` — java.io.File or String path to the workflow events dir
-     (e.g. `~/.miniforge/events/<workflow-id>/`)
-
-   Returns a vector of parsed event maps, or nil if the directory
-   does not exist. Files that fail to parse are silently dropped —
-   one corrupt event file shouldn't kill a whole replay."
-  [dir]
-  (let [^java.io.File dir (io/file dir)]
-    (when (.exists dir)
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".json"))
-           (sort-by #(.getName ^java.io.File %))
-           (keep (fn [^java.io.File f]
-                   (try
-                     (strip-transit-prefix (json/parse-string (slurp f) false))
-                     (catch Exception _e nil))))
-           vec))))
-
-(defn workflow-events-dir
+(defn ^{:stratum 0} workflow-events-dir
   "Resolve the on-disk events directory for `workflow-id` under
    `base-dir`. Probes three locations in priority order and returns
    the first one that exists:
@@ -145,7 +99,53 @@
       (.isDirectory legacy)   legacy
       :else                   nil)))
 
-(defn read-workflow-events-by-id
+;------------------------------------------------------------------------------ Layer 1
+
+;; ── Single-file reader ─────────────────────────────────────────────────────
+(defn ^{:stratum 1} read-event-file
+  "Parse one transit-JSON event file into an event map (transit
+   prefixes stripped, so `:event/type` comes back as a keyword and
+   UUID/instant values as plain strings).
+
+   Returns the parsed map, or nil when the file cannot be read or
+   parsed. Callers that must be LOUD about malformed files (the
+   operator-event consumer's append-only contract) branch on the nil
+   themselves — unlike [[read-workflow-events]], nothing is dropped
+   silently without the caller seeing it."
+  [f]
+  (try
+    (strip-transit-prefix
+     (json/parse-string (slurp (io/file f) :encoding "UTF-8") false))
+    (catch Exception _e nil)))
+
+;; Directory reader
+(defn ^{:stratum 1} read-workflow-events
+  "Read every `.json` event file under a workflow directory, sorted by
+   filename (which is timestamp-prefixed). Parse each as transit-JSON
+   and strip the transit prefixes.
+
+   Arguments:
+   - `dir` — java.io.File or String path to the workflow events dir
+     (e.g. `~/.miniforge/events/<workflow-id>/`)
+
+   Returns a vector of parsed event maps, or nil if the directory
+   does not exist. Files that fail to parse are silently dropped —
+   one corrupt event file shouldn't kill a whole replay."
+  [dir]
+  (let [^java.io.File dir (io/file dir)]
+    (when (.exists dir)
+      (->> (.listFiles dir)
+           (filter #(.endsWith (.getName ^java.io.File %) ".json"))
+           (sort-by #(.getName ^java.io.File %))
+           (keep (fn [^java.io.File f]
+                   (try
+                     (strip-transit-prefix (json/parse-string (slurp f) false))
+                     (catch Exception _e nil))))
+           vec))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} read-workflow-events-by-id
   "Convenience: read events for a workflow id under a base events dir.
    Probes archived → live → legacy layouts via `workflow-events-dir`
    and reads from the first one that exists.
