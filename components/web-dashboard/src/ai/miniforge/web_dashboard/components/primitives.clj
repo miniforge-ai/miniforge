@@ -44,7 +44,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 0: Primitives
+;; Primitives
 (defn ^{:stratum 1} button
   "Button component with variants and sizes.
 

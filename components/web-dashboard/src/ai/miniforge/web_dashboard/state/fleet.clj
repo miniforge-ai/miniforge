@@ -21,7 +21,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Pure scoring and computation
+;; Scoring, computation, and state-derived reads
 (defn ^{:stratum 0} calculate-risk-score
   "Calculate risk score for a train or PR."
   [entity]
