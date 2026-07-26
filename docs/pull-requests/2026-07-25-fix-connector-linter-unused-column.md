@@ -66,6 +66,23 @@ Removing the binding is the correct fix, not a stopgap.
   Committed with `MINIFORGE_STRATUM_BUDGET_MODE=warn`, the documented
   opt-out for exactly this pre-existing-backlog situation (see
   `docs/pull-requests/2026-07-24-fix-sl003-blocking-by-default.md`).
+- The namespace docstring's Layer 0–2 summary was stale after the
+  autofix produced a real 4-layer structure — updated to Layer 0–3 in a
+  follow-up commit on this branch (flagged by Copilot review, addressed
+  directly).
+- `.github/workflows/ci.yml` — unrelated one-line cleanup made on this
+  branch in response to a separate Copilot review pass: removed
+  `cli: latest` from the Windows `setup-clojure` step. That step's own
+  `cli` install is a PowerShell module on Windows, not a `clojure.exe`
+  binary, so it never satisfied babashka's `p/process` calls anyway —
+  the very next step already installs `deps.clj` specifically to provide
+  a working `clojure.exe`/`clj.exe` on PATH. `cli: latest` was dead
+  weight duplicating (ineffectively) what `deps.clj` already does;
+  removing it doesn't change what actually runs `clojure` on Windows CI.
+  Reworded the adjacent comment to describe the mechanism directly
+  instead of narrating it as "one missing piece." Verified: the Windows
+  CI job (`Test (Windows, bb-platform unit tests)`) is green on this
+  branch with the change in place.
 
 ## Testing Plan
 
