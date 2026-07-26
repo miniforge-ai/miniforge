@@ -4,7 +4,11 @@
 (ns ai.miniforge.context-pack.config
   "Budget configuration loaded from EDN resources.
 
-   Layer 0 — pure config loading, no domain logic."
+   No dependencies on other context-pack namespaces, but a real 4-deep
+   same-file chain (config-path, then load-budget-config, then
+   budget-config, then the public getters) — over the 3-layer budget
+   (SL003), deferred to Wave 2. See the per-def :stratum metadata for
+   the real breakdown."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 

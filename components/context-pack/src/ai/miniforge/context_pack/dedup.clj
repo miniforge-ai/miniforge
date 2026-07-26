@@ -4,7 +4,9 @@
 (ns ai.miniforge.context-pack.dedup
   "Deduplicate context items by identity.
 
-   Layer 0 — pure functions, no dependencies.")
+   No dependencies on other context-pack namespaces. dedup-files calls
+   path-not-seen? in this file, so the two sit at different same-file
+   layers — see the per-def :stratum metadata for the real breakdown.")
 
 ;------------------------------------------------------------------------------ Layer 0
 

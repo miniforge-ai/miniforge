@@ -8,13 +8,29 @@ file's actual same-file reference graph, and to tag every `def`/`defn`/
 `deftest` with real `^{:stratum n}` metadata. One of the smaller
 per-component Wave 1 PRs from `work/stratum-lint-baseline-2026-07-24.md`.
 
-No logic changes. One manual documentation correction beyond the raw
-`--fix` output: `interface.clj`'s namespace docstring claimed an internal
-`Layer 0 / Layer 1 / Layer 2` breakdown left over from the old decorative
-headings; the fix collapsed every def in that file to Layer 0 (each just
-delegates to another namespace, so there's no same-file reference depth
-between them), leaving the docstring's layer claims false. Reworded to
-drop the numbered-layer claim while keeping the section list.
+No logic changes. Four manual documentation corrections beyond the raw
+`--fix` output, all the same shape: a namespace docstring asserting a
+single `Layer N` (or an explicit `Layer 0/1/2` breakdown) that the fix
+falsified once the real same-file reference graph was computed.
+
+- `interface.clj` claimed an internal `Layer 0 / Layer 1 / Layer 2`
+  breakdown left over from the old decorative headings; every def in
+  that file collapsed to Layer 0 (each just delegates to another
+  namespace, so there's no same-file reference depth between them).
+  Reworded to drop the numbered-layer claim while keeping the section
+  list.
+- `dedup.clj`, `schema.clj`, and `config.clj` each claimed "Layer 0" (or
+  "no dependencies" / "no domain logic") for the whole file, which is
+  true of their *inter-file* dependencies (none of these three require
+  another context-pack namespace) but no longer true of their *intra-file*
+  structure once `--fix` exposed real same-file chains: `dedup.clj` and
+  `schema.clj` each have 2 real layers, `config.clj` has 4 (see below).
+  Caught during automated PR review (Copilot flagged `dedup.clj`
+  specifically); checking the other files with the same "Layer 0 — pure
+  X" phrasing turned up the same problem in `schema.clj` and
+  `config.clj`, so all three got the same treatment: drop the blanket
+  single-layer claim, state the real intra-file dependency instead,
+  point at the per-def `:stratum` metadata for the full breakdown.
 
 ## Motivation
 
@@ -97,6 +113,13 @@ Both are Wave 2 scope (real namespace split), not fixed here.
    clear. `SL003` now reports on `builder.clj` and `config.clj` (4 real
    layers each) — both newly surfaced by the corrected grouping, not
    pre-existing findings; documented above and deferred to Wave 2.
+7. Automated PR review flagged the same stale-docstring shape in
+   `dedup.clj`; checking the other files carrying the same "Layer 0 —
+   pure X" phrasing (`schema.clj`, `config.clj`) turned up the identical
+   problem in both. Hand-corrected all three (see Overview), then re-ran
+   `--fix` (no further rewrite — stable), `clj-kondo` (still 0/0), the
+   plain lint (same two `SL003` findings, nothing new), and the test
+   namespace (still 11 tests, 29 assertions, 0 failures/errors).
 
 ## Deployment Plan
 
@@ -119,8 +142,9 @@ them.
 
 - [x] `--fix` run over the whole component (`src` + `test`)
 - [x] Second and third `--fix` passes confirm idempotency (zero diff)
-- [x] Diff read in full for all 8 changed files; one stale docstring
-      hand-corrected (documented above), no logic changes
+- [x] Diff read in full for all 8 changed files; four stale docstrings
+      hand-corrected across two review passes (documented above), no
+      logic changes
 - [x] `clj-kondo` clean before/after (0 errors, 0 warnings)
 - [x] Component tests pass (11 tests, 29 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except `SL003`

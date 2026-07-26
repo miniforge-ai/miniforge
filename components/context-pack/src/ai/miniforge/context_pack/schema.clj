@@ -4,7 +4,10 @@
 (ns ai.miniforge.context-pack.schema
   "Malli schemas for context-pack domain types.
 
-   Layer 0 — pure data definitions.")
+   No dependencies on other context-pack namespaces. ContextPack
+   references Source in this file, so it sits one same-file layer above
+   Source and BudgetAudit — see the per-def :stratum metadata for the
+   real breakdown.")
 
 ;------------------------------------------------------------------------------ Layer 0
 
