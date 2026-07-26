@@ -100,6 +100,74 @@
         (is (some #(clojure.string/includes? (str %) "x-access-token") @cmds))
         (is (some #(clojure.string/includes? (str %) "git@github.com") @cmds)))))
 
+(deftest ^{:stratum 0} push-branch-https-setup-failure-test
+  (testing "push-branch! fails without retrying the push when repointing origin to the token URL fails"
+    (let [push-count (atom 0)
+          tracking-exec (reify
+                            dag/TaskExecutor
+                            (executor-type [_] :mock)
+                            (available? [_] (dag/ok {:available? true}))
+                            (acquire-environment! [_ _ _] (dag/ok {}))
+                            (execute! [_ _env-id command _opts]
+                              (cond
+                                (clojure.string/includes? (str command) "git push")
+                                (do (swap! push-count inc)
+                                    (dag/ok {:exit-code 1 :stdout "" :stderr "signing failed"}))
+
+                                (clojure.string/includes? (str command) "get-url")
+                                (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""})
+
+                                (clojure.string/includes? (str command) "set-url")
+                                (dag/ok {:exit-code 1 :stdout "" :stderr "config locked"})
+
+                                :else (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+                            (copy-to! [_ _ _ _] (dag/ok {}))
+                            (copy-from! [_ _ _ _] (dag/ok {}))
+                            (release-environment! [_ _] (dag/ok {}))
+                            (environment-status [_ _] (dag/ok {:status :running})))
+          result (sandbox/push-branch! tracking-exec "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}})]
+      (is (not (:success? result)))
+      (is (false? (:push-succeeded? result)))
+      (is (= 1 @push-count) "push is not retried when the origin repoint itself failed")
+      (is (clojure.string/includes? (:error result) "token fallback could not be applied")))))
+
+(deftest ^{:stratum 0} push-branch-https-restore-failure-test
+  (testing "push-branch! fails loud when the https-fallback push succeeds but restoring
+            the original origin URL fails, since a token-bearing URL may be left persisted"
+    (let [push-count (atom 0)
+          set-url-count (atom 0)
+          tracking-exec (reify
+                            dag/TaskExecutor
+                            (executor-type [_] :mock)
+                            (available? [_] (dag/ok {:available? true}))
+                            (acquire-environment! [_ _ _] (dag/ok {}))
+                            (execute! [_ _env-id command _opts]
+                              (cond
+                                (clojure.string/includes? (str command) "git push")
+                                (let [n (swap! push-count inc)]
+                                  (if (= n 1)
+                                    (dag/ok {:exit-code 1 :stdout "" :stderr "signing failed"})
+                                    (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+
+                                (clojure.string/includes? (str command) "get-url")
+                                (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""})
+
+                                (clojure.string/includes? (str command) "set-url")
+                                (let [n (swap! set-url-count inc)]
+                                  (if (= n 1)
+                                    (dag/ok {:exit-code 0 :stdout "" :stderr ""})
+                                    (dag/ok {:exit-code 1 :stdout "" :stderr "config locked"})))
+
+                                :else (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+                            (copy-to! [_ _ _ _] (dag/ok {}))
+                            (copy-from! [_ _ _ _] (dag/ok {}))
+                            (release-environment! [_ _] (dag/ok {}))
+                            (environment-status [_ _] (dag/ok {:status :running})))
+          result (sandbox/push-branch! tracking-exec "env-1" "feat/test" {:env {"GH_TOKEN" "tok123"}})]
+      (is (not (:success? result)) "restore failure fails loud even though the push itself succeeded")
+      (is (true? (:push-succeeded? result)))
+      (is (clojure.string/includes? (:error result) "Scrub it")))))
+
 ;; ============================================================================
 ;; safe container path validation tests
 ;; ============================================================================
@@ -266,6 +334,17 @@
       (let [cmd (first @cmds)]
         ;; Should contain escaped single quote
         (is (clojure.string/includes? cmd "it'\\''s working"))))))
+
+(deftest ^{:stratum 1} commit-changes-rev-parse-failure-test
+  (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
+            phantom success with a missing sha"
+    (let [[exec _cmds] (create-mock-executor
+                        :responses {"git commit" {:exit-code 0 :stdout "1 file changed" :stderr ""}
+                                    "git rev-parse" {:exit-code 1 :stdout "" :stderr "fatal: bad revision 'HEAD'"}})
+          result (sandbox/commit-changes! exec "env-1" "feat: add feature")]
+      (is (not (:success? result)))
+      (is (nil? (:commit-sha result)))
+      (is (clojure.string/includes? (:error result) "bad revision")))))
 
 ;; ============================================================================
 ;; push-branch! tests

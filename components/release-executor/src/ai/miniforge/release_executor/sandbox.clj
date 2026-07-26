@@ -216,18 +216,51 @@
         commit-r (exec! executor env-id (str "git commit -m '" escaped-msg "'"))]
     (if (result/succeeded? commit-r)
       (let [sha-r (exec! executor env-id "git rev-parse HEAD")]
-        (result/shell-success {:commit-sha (:output sha-r "")
-                               :output (:output commit-r)}))
+        (if (result/succeeded? sha-r)
+          (result/shell-success {:commit-sha (:output sha-r "")
+                                 :output (:output commit-r)})
+          ;; The commit itself succeeded, but resolving its sha didn't — do
+          ;; NOT report shell-success with an empty/missing :commit-sha, which
+          ;; would mislead callers that expect a real sha. Surface the
+          ;; rev-parse failure instead.
+          (result/shell-failure (:error sha-r) {:commit-sha nil})))
       (result/shell-failure (:error commit-r) {:commit-sha nil}))))
 
 (defn- ^{:stratum 1} push-with-https-fallback!
   "Push using HTTPS + token auth after SSH fails. Temporarily sets the
-   remote URL to include the token, pushes, then restores the original URL."
-  [executor env-id branch-name remote-url https-url opts]
-  (exec! executor env-id (str "git remote set-url origin " https-url) {})
-  (let [retry (exec! executor env-id (str "git push -u origin " branch-name) opts)]
-    (exec! executor env-id (str "git remote set-url origin " remote-url) {})
-    retry))
+   remote URL to include the token, pushes, then restores the original URL
+   so the token never persists in git config.
+
+   The token-bearing URL is passed to `git remote set-url` as an argv
+   vector, never a shell string — `exec!` routes string commands through
+   `sh -c`, which would otherwise expose the embedded token to shell
+   interpolation. Mirrors `git/with-https-token-fallback!`: a failed
+   set-url aborts before pushing against a remote that was never actually
+   repointed; a failed restore fails loud with a scrub command rather than
+   silently leaving the token persisted in git config."
+  [executor env-id branch-name remote-url https-url push-error opts]
+  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] {})]
+    (if-not (result/succeeded? set-r)
+      (result/shell-failure
+       (msg/t :push/https-fallback-setup-failed
+              {:push-error    push-error
+               :set-url-error (:error set-r)})
+       {:push-succeeded? false})
+      (let [retry     (exec! executor env-id (str "git push -u origin " branch-name) opts)
+            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] {})]
+        (if (result/succeeded? restore-r)
+          retry
+          (let [pushed? (result/succeeded? retry)]
+            (result/shell-failure
+             (if pushed?
+               (msg/t :push/https-fallback-restore-failed
+                      {:remote-url    remote-url
+                       :restore-error (:error restore-r)})
+               (msg/t :push/https-fallback-push-and-restore-failed
+                      {:remote-url    remote-url
+                       :push-error    (:error retry)
+                       :restore-error (:error restore-r)}))
+             {:push-succeeded? pushed?})))))))
 
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
@@ -365,7 +398,8 @@
                remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
                https-url (ssh->https-with-token remote-url token)]
            (if https-url
-             (push-with-https-fallback! executor env-id branch-name remote-url https-url opts)
+             (push-with-https-fallback! executor env-id branch-name remote-url https-url
+                                        (:error result) opts)
              result))
          result))))))
 

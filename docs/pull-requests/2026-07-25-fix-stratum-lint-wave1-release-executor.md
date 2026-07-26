@@ -86,6 +86,57 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
+### Two real bugs found by automated review, fixed in `sandbox.clj`
+
+Automated review on this PR flagged two genuine, pre-existing correctness
+issues in `sandbox.clj` (unrelated to the stratum-lint mechanics above,
+but small enough to fold into this PR rather than open a second one).
+Verified both directly against the code before fixing:
+
+1. **`commit-changes!` reported a phantom success on a `rev-parse`
+   failure.** After a successful `git commit`, it ran `git rev-parse HEAD`
+   and put `(:output sha-r "")` straight into `:commit-sha` via
+   `result/shell-success`, without checking whether `rev-parse` itself
+   succeeded. A `rev-parse` failure still reported `:success? true` with
+   an empty/missing `:commit-sha` — misleading to any caller expecting a
+   real sha. Fixed: check `sha-r`'s own success first; on failure, return
+   `shell-failure` with `:commit-sha nil` instead.
+
+2. **`push-with-https-fallback!` interpolated a token-bearing URL into an
+   unescaped shell string, and swallowed both `set-url` calls' results.**
+   `ssh->https-with-token` embeds a literal access token
+   (`https://x-access-token:TOKEN@host/path`), and `exec!` routes string
+   commands through `sh -c` (see `dag-executor/workspace.clj`'s `exec-fn`
+   contract) — so `(str "git remote set-url origin " https-url)` was a
+   real injection/credential-exposure surface, not just a style nit, the
+   same class of thing `commit-changes!`/`stage-files!` already guard
+   against for commit messages and file paths. Worse, neither the
+   repoint-to-https call nor the restore-to-original call checked its own
+   result: a failed repoint let the push proceed against a remote that
+   was never actually changed, and a failed restore left the token
+   persisted in git config with no signal. Fixed by passing both
+   `git remote set-url` calls as argv vectors (`["git" "remote" "set-url"
+   "origin" https-url]`) instead of a shell string — `exec!`/
+   `executor-execute!` already accept either form, and a vector never
+   touches `sh -c` — and checking both results: a failed repoint aborts
+   before pushing, and a failed restore fails loud (surfacing a scrub
+   command) even when the push itself succeeded, mirroring
+   `git/with-https-token-fallback!`'s existing shape and reusing its
+   `:push/https-fallback-*` message catalog entries.
+
+Added 3 regression tests in `sandbox_test.clj`
+(`commit-changes-rev-parse-failure-test`,
+`push-branch-https-setup-failure-test`,
+`push-branch-https-restore-failure-test`), following the existing
+tracking-exec mock pattern already used by
+`push-branch-ssh-fail-https-fallback-test` in the same file. Each
+assertion targets behavior only the fixed code produces — verified by
+inspection that all three would fail against the pre-fix code (the old
+`commit-changes!` always reports `:success? true`; the old
+`push-with-https-fallback!` always retries the push regardless of
+set-url's outcome and always returns the retry result regardless of
+restore's outcome).
+
 ## Testing Plan
 
 1. Ran plain (non-`--fix`) `stratum-lint` before the fix — reproduced the
@@ -98,9 +149,10 @@ Removed it so the component lints clean, per this PR's own bar.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
-   "(require ...) (clojure.test/run-tests ...)"`: 245 tests, 612
-   assertions, 0 failures, 0 errors.
+6. Fixed the two review-flagged `sandbox.clj` bugs (above) and added 3
+   regression tests. Ran all 9 test namespaces directly via `clojure
+   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 248
+   tests, 622 assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
    the old decorative headings under-reported (none of these 5 reported
@@ -116,10 +168,13 @@ Removed it so the component lints clean, per this PR's own bar.
 
 ## Deployment Plan
 
-Merges to `main` like any other component change. No runtime behavior
-change — comment/metadata/order-only (and one dead test binding removed).
-`MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time for the 5
-newly-surfaced `SL003` files above.
+Merges to `main` like any other component change. Almost entirely
+comment/metadata/order-only; the two `sandbox.clj` fixes above are real
+behavior changes (a failure that used to be silently swallowed/misreported
+as success now surfaces correctly), scoped to the HTTPS-token-fallback
+push path and the post-commit sha lookup, both already covered by new
+tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time
+for the 5 newly-surfaced `SL003` files above.
 
 ## Related Issues/PRs
 
@@ -141,7 +196,10 @@ newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Component tests pass (245 tests, 612 assertions, 0 failures/errors)
+- [x] Two review-flagged `sandbox.clj` bugs fixed (phantom success on
+      `rev-parse` failure; unescaped token URL + unchecked `set-url`/
+      restore results), 3 regression tests added
+- [x] Component tests pass (248 tests, 622 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
