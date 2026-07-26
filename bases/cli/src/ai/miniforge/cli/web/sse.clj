@@ -29,6 +29,13 @@
 
 (def ^{:stratum 0} streams (atom {}))
 
+;; `streams` values are event-stream atoms (`es/create-event-stream`), not
+;; maps — assoc-in/update-in on a `streams` entry would try to `assoc`
+;; onto that atom directly and throw `ClassCastException`. Per-channel
+;; subscription ids are tracked separately here instead:
+;; {workflow-id {channel sub-id}}.
+(def ^{:stratum 0} subscriptions (atom {}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} get-or-create-stream [workflow-id]
@@ -41,10 +48,10 @@
         stream)))
 
 (defn ^{:stratum 1} on-close [workflow-id channel]
-  (when-let [sub-id (get-in @streams [workflow-id :subscribers channel])]
+  (when-let [sub-id (get-in @subscriptions [workflow-id channel])]
     (when-let [event-stream (get @streams workflow-id)]
       (es/unsubscribe! event-stream sub-id))
-    (swap! streams update-in [workflow-id :subscribers] dissoc channel)))
+    (swap! subscriptions update workflow-id dissoc channel)))
 
 (defn ^{:stratum 1} register! [workflow-id event-stream]
   (swap! streams assoc workflow-id event-stream)
@@ -52,6 +59,7 @@
 
 (defn ^{:stratum 1} unregister! [workflow-id]
   (swap! streams dissoc workflow-id)
+  (swap! subscriptions dissoc workflow-id)
   nil)
 
 (defn ^{:stratum 1} get-stream [workflow-id]
@@ -62,7 +70,7 @@
 (defn ^{:stratum 2} on-open [workflow-id channel]
   (let [event-stream (get-or-create-stream workflow-id)
         sub-id (random-uuid)]
-    (swap! streams assoc-in [workflow-id :subscribers channel] sub-id)
+    (swap! subscriptions assoc-in [workflow-id channel] sub-id)
     (http/send! channel (response/sse-headers) false)
     (es/subscribe! event-stream sub-id
                    (fn [event]
