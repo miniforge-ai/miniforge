@@ -143,6 +143,18 @@
       (is (= 2 (count (re-seq #"(?m)^---$" fm)))
           "an embedded newline must not introduce a spurious frontmatter delimiter line"))))
 
+(deftest ^{:stratum 0} provenance-frontmatter-escapes-crlf-and-lone-cr
+  (testing "a Windows \\r\\n or a lone \\r doesn't slip through as a raw control character"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "line1\r\nline2" :spec "line1\rline2"}
+               :commit-sha nil})]
+      (is (clojure.string/includes? fm "miniforge-workflow: \"line1\\nline2\"")
+          "\\r\\n collapses to a single \\n escape, not two")
+      (is (clojure.string/includes? fm "spec: \"line1\\nline2\"")
+          "a lone \\r is normalized to \\n, not left as a raw control character")
+      (is (not (clojure.string/includes? fm "\r")) "no raw carriage return survives into the frontmatter")
+      (is (= 2 (count (re-seq #"(?m)^---$" fm)))))))
+
 (deftest ^{:stratum 0} with-provenance-prepends-and-is-idempotent
   (testing "prepends frontmatter to a plain body"
     (let [out (core/with-provenance "## Summary\nbody" {:provenance {:workflow "r1"} :commit-sha "c1"})]

@@ -115,6 +115,12 @@
     (if (re-matches #"[A-Za-z0-9][A-Za-z0-9._/-]*" s)
       s
       (str "\"" (-> s
+                    ;; Normalize every newline variant to bare \n BEFORE
+                    ;; escaping, so a Windows \r\n collapses to one escape
+                    ;; instead of two, and a lone \r (old Mac-style) doesn't
+                    ;; slip through as a raw control character.
+                    (str/replace "\r\n" "\n")
+                    (str/replace "\r" "\n")
                     (str/replace "\\" "\\\\")
                     (str/replace "\"" "\\\"")
                     (str/replace "\n" "\\n")) "\""))))

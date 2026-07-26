@@ -2,11 +2,25 @@
 
 ## Overview
 
-Runs `stratum-lint --fix` over `components/release-executor` (`src` +
-`test`) to replace decorative `Layer N` headings with real ones derived
-from each file's actual same-file reference graph. Mechanical: no logic
-changes. One component from `work/stratum-lint-baseline-2026-07-24.md`'s
-Wave 1 batch 3.
+Started as a mechanical `stratum-lint --fix` pass over
+`components/release-executor` (`src` + `test`) — one component from
+`work/stratum-lint-baseline-2026-07-24.md`'s Wave 1 batch 3 — to replace
+decorative `Layer N` headings with real ones derived from each file's
+actual same-file reference graph.
+
+It grew well beyond that: automated review on this PR found nine
+genuine, pre-existing correctness bugs along the way (a phantom-success
+on `rev-parse` failure in two independent `commit-changes!`
+implementations, a token-bearing URL interpolated unescaped into a shell
+command with unchecked `set-url`/restore results and unthreaded executor
+`opts`, two `exec!` implementations silently dropping `:output` from
+their contract on the error path, an unvalidated shell-injection surface
+in `stage-files!`, an unescaped YAML-injection surface in
+`provenance-frontmatter`, and a CRLF-handling gap in that same fix's own
+first draft). All nine are fixed and tested here — see "Nine real bugs
+found by automated review" below for the full list; each one was
+verified directly against the code before being fixed, not fixed on the
+reviewer's say-so.
 
 ## Motivation
 
@@ -86,9 +100,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Eight real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
+### Nine real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
 
-Automated review on this PR flagged eight genuine, pre-existing
+Automated review on this PR flagged nine genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -190,7 +204,16 @@ second one). Verified each directly against the code before fixing:
    regex now requires the first character to be alphanumeric,
    pushing anything hyphen-led into the quoted branch.
 
-Added 10 regression tests: 5 in `sandbox_test.clj`
+9. **`yaml-scalar` itself (the fix for #8) only normalized `\n`, not
+   `\r`** — a Windows `\r\n` or a lone `\r` (old Mac-style) would pass
+   through the quoted branch as a raw, unescaped control character
+   despite the docstring's claim that newlines are "collapsed." Fixed by
+   normalizing every newline variant to bare `\n` *before* the
+   backslash/quote escaping step — `\r\n` first (so it collapses to one
+   `\n` escape, not two), then any remaining lone `\r` — rather than
+   trying to pattern-match `\r` and `\n` independently after the fact.
+
+Added 12 regression tests: 5 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
@@ -205,13 +228,14 @@ existing `with-redefs [process/shell ...]` pattern (used by
 `gh-token-injection-test`/`force-push-injects-token-test`) rather than the
 real-git-repo round-trip pattern, since simulating a `rev-parse` failure
 or a thrown exception right after/during a real git invocation isn't a
-reachable real-git state to construct directly; 2 in
+reachable real-git state to construct directly; 3 in
 `core_sandbox_test.clj` (`provenance-frontmatter-escapes-yaml-significant-characters`,
-`provenance-frontmatter-escapes-leading-dash-and-newline`). Each assertion
-targets behavior only the fixed code produces — verified by inspection
-(and, for the `yaml-scalar` leading-dash regex, by an actual test failure
-during development that caught the gap) that all ten would fail against
-the pre-fix code.
+`provenance-frontmatter-escapes-leading-dash-and-newline`,
+`provenance-frontmatter-escapes-crlf-and-lone-cr`). Each assertion targets
+behavior only the fixed code produces — verified by inspection (and, for
+the `yaml-scalar` leading-dash regex, by an actual test failure during
+development that caught the gap) that all twelve would fail against the
+pre-fix code.
 
 ## Testing Plan
 
@@ -225,9 +249,9 @@ the pre-fix code.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the eight review-flagged bugs (above) and added 10 regression
+6. Fixed the nine review-flagged bugs (above) and added 12 regression
    tests. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
-   "(require ...) (clojure.test/run-tests ...)"`: 255 tests, 641
+   "(require ...) (clojure.test/run-tests ...)"`: 256 tests, 645
    assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
@@ -245,16 +269,17 @@ the pre-fix code.
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the eight bug fixes above are real behavior
+comment/metadata/order-only; the nine bug fixes above are real behavior
 changes (a failure that used to be silently swallowed, misreported as
 success, dropped from the result shape, or run against the wrong executor
 context now surfaces/behaves correctly; an unvalidated path or an
-unescaped provenance value can no longer corrupt a shell command or a
-committed YAML frontmatter), scoped to the HTTPS-token-fallback push
-path, the post-commit sha lookup, the generic `exec!` error/exception
-branches, `stage-files!`, and `provenance-frontmatter`, all covered by
-new tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit
-time for the 5 newly-surfaced `SL003` files above.
+unescaped/under-escaped provenance value can no longer corrupt a shell
+command or a committed YAML frontmatter), scoped to the
+HTTPS-token-fallback push path, the post-commit sha lookup, the generic
+`exec!` error/exception branches, `stage-files!`, and
+`provenance-frontmatter`/`yaml-scalar`, all covered by new tests.
+`MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time for the 5
+newly-surfaced `SL003` files above.
 
 ## Related Issues/PRs
 
@@ -276,7 +301,7 @@ time for the 5 newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Eight review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
+- [x] Nine review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
       phantom success on `rev-parse` failure; `sandbox.clj`'s
       `push-with-https-fallback!` unescaped token URL + unchecked
       `set-url`/restore results + unthreaded `opts` (including the
@@ -284,9 +309,9 @@ time for the 5 newly-surfaced `SL003` files above.
       bug; `sandbox.clj`'s and `git.clj`'s `exec!` both omitting `:output`
       on their error/exception branch; `sandbox.clj`'s `stage-files!`
       unvalidated shell-injection surface; `core.clj`'s
-      `provenance-frontmatter` unescaped YAML injection surface. 10
-      regression tests added.
-- [x] Component tests pass (255 tests, 641 assertions, 0 failures/errors)
+      `provenance-frontmatter` unescaped YAML injection surface; that same
+      fix's own `\r`-handling gap. 12 regression tests added.
+- [x] Component tests pass (256 tests, 645 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
