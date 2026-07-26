@@ -76,8 +76,8 @@
 
 (defn ^{:stratum 0} infer-test-command
   "Infer the test command from the repo structure.
-   Checks for bb.edn (Clojure), Cargo.toml (Rust), package.json (JS) in that order.
-   Falls back to 'bb test'."
+   Checks for Cargo.toml (Rust) and package.json (JS), in that order.
+   Falls back to 'bb test' (Clojure, or when neither marker is present)."
   [worktree-path]
   (cond
     (fs/exists? (fs/path worktree-path "Cargo.toml")) "cargo test --workspace"
@@ -271,7 +271,7 @@
   [ctx]
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
+        duration-ms (if start-time (- end-time start-time) 0)
         result (get-in ctx [:phase :result])
         agent-status (:status result)
         gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))

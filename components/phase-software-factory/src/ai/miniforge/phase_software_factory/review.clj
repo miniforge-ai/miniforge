@@ -294,6 +294,21 @@
       (record-fingerprint current-fp)
       (record-blocking-count current-blocking-count)))
 
+(def ^{:stratum 1} ^:private validated-and-registered-review-defaults?
+  "Fails fast on a bad defaults.edn (rule 004) rather than surfacing a
+   ClassCastException deep inside the review phase, then registers the
+   validated defaults. Tagged as a def (not a bare top-level call) so
+   stratum-lint's --fix computes and keeps it at its real same-file
+   stratum (references default-config, Layer 0, so it lands at Layer
+   1) -- well before the Layer 4 :review defmethod below. A bare call
+   here gets swept into the file's appendix (after every real layer,
+   defmethod included) regardless of source position, which would
+   silently re-open the partial-registration gap this exists to close
+   on every future --fix pass."
+  (do (conv/validate-convergence-config! default-config)
+      (phase/register-phase-defaults! :review default-config)
+      true))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn- ^{:stratum 2} build-review-task
@@ -457,13 +472,6 @@
               (enter-review (assoc ctx :phase-config merged)))
      :leave leave-review
      :error error-review}))
-
-;; Fail fast on a bad defaults.edn at load (rule 004) rather than surfacing a
-;; ClassCastException deep inside the review phase.
-(conv/validate-convergence-config! default-config)
-
-;; Register defaults on load
-(phase/register-phase-defaults! :review default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

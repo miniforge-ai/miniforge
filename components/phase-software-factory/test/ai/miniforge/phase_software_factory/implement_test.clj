@@ -481,7 +481,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 1: Interceptor Enter Tests
+;; Interceptor Enter Tests
 (deftest ^{:stratum 2} enter-implement-sets-phase-metadata-test
   (testing "implement phase sets correct phase metadata"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})

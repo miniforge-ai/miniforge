@@ -134,7 +134,7 @@
           "absent cause-map → :blocking-defect default"))))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 2 — integration tests via emit-phase-completed! capture
+;; Layer 1 — integration tests via emit-phase-completed! capture
 (deftest ^{:stratum 1} exhausted-verdict-emits-review-cause-in-phase-completed
   (testing "exhausted: :review/cause appears in emit-phase-completed! payload"
     (let [captured (atom nil)
