@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.llm-improvement-generator-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.llm.interface.protocols.llm-client :as llm-client]
             [ai.miniforge.operator.llm-improvement-generator :as sut]
             [ai.miniforge.operator.protocol :as proto]))
 
-(defrecord FakeLLMClient [response requests]
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} FakeLLMClient [response requests]
   llm-client/LLMClient
   (complete* [_this request]
     (swap! requests conj request)
@@ -32,7 +33,9 @@
     response)
   (get-config [_this] {}))
 
-(deftest generate-improvements-uses-public-llm-interface-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} generate-improvements-uses-public-llm-interface-test
   (testing "LLM improvement generator calls the client and parses JSON improvements"
     (let [requests (atom [])
           client (->FakeLLMClient {:success true

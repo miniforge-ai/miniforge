@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.llm-improvement-generator
   "LLM-powered improvement generator for the operator meta-loop.
 
@@ -35,11 +34,10 @@
    [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Prompt construction
-
 ;; System prompt and improvement types sourced from defaults — override via config
-
-(defn summarize-pattern
+(defn ^{:stratum 0} summarize-pattern
   "Create a compact string summary of a single detected pattern."
   [pattern]
   (let [type-str  (name (:pattern/type pattern))
@@ -55,7 +53,17 @@
          "  Description: " desc "\n"
          "  Rationale: " rationale)))
 
-(defn build-generate-prompt
+;; Response parsing
+(defn ^{:stratum 0} parse-improvement-type
+  "Parse an improvement type string to keyword, returning nil for unknown types."
+  [type-str allowed-types]
+  (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
+    (when (contains? allowed-types kw)
+      kw)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-generate-prompt
   "Build prompt for improvement generation from detected patterns.
 
    context may contain :workflow-id, :phase, :budget, etc. for additional grounding."
@@ -75,17 +83,7 @@
          context-text
          "\n\nGenerate improvement proposals for these patterns as JSON.")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Response parsing
-
-(defn parse-improvement-type
-  "Parse an improvement type string to keyword, returning nil for unknown types."
-  [type-str allowed-types]
-  (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
-    (when (contains? allowed-types kw)
-      kw)))
-
-(defn parse-improvement
+(defn ^{:stratum 1} parse-improvement
   "Parse a single improvement map from LLM JSON output into a canonical improvement map."
   [raw allowed-types]
   (let [imp-type (parse-improvement-type (:type raw) allowed-types)]
@@ -105,7 +103,9 @@
        :improvement/created-at   (System/currentTimeMillis)
        :improvement/source       :llm})))
 
-(defn parse-generate-response
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} parse-generate-response
   "Parse LLM JSON response into a sequence of improvement maps.
 
    Returns empty sequence on parse failure (fail-open)."
@@ -122,10 +122,10 @@
     (catch Exception _e
       [])))
 
-;------------------------------------------------------------------------------ Layer 2
-;; LLMImprovementGenerator record
+;------------------------------------------------------------------------------ Layer 3
 
-(defrecord LLMImprovementGenerator [llm-client config]
+;; LLMImprovementGenerator record
+(defrecord ^{:stratum 3} LLMImprovementGenerator [llm-client config]
   proto/ImprovementGenerator
 
   (generate-improvements [_this patterns context]
@@ -159,10 +159,10 @@
       :frequent-rollback
       :recurring-repair}))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Constructor
+;------------------------------------------------------------------------------ Layer 4
 
-(defn create-llm-improvement-generator
+;; Constructor
+(defn ^{:stratum 4} create-llm-improvement-generator
   "Create an LLM-powered improvement generator.
 
    Arguments:

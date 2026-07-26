@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.consumer
   "Operator-event consumer — Phase D D-2.
 
@@ -68,18 +67,18 @@
    [java.util.concurrent Executors ScheduledExecutorService ThreadFactory TimeUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:const intervention-requested-event-type
+;; Constants
+(def ^{:stratum 0} ^:const intervention-requested-event-type
   :supervisory/intervention-requested)
 
-(def ^:const state-changed-event-type
+(def ^{:stratum 0} ^:const state-changed-event-type
   :supervisory/intervention-state-changed)
 
-(def ^:const anomaly-event-type
+(def ^{:stratum 0} ^:const anomaly-event-type
   :operator/intervention-anomaly)
 
-(def auto-approve-request-sources
+(def ^{:stratum 0} auto-approve-request-sources
   "Request sources whose interventions are auto-approved: the operator
    surfaces where a human performed the originating gesture, so a
    second approval step would approve the approver (Phase D decision 4,
@@ -100,28 +99,209 @@
    `:pending-human`."
   #{:cli :dashboard :native-app :tui})
 
-(def ^:private cursor-file-name ".processed")
-(def ^:private consumer-lock-file-name ".consumer.lock")
+(def ^{:stratum 0} ^:private cursor-file-name ".processed")
 
-(def ^:private empty-cursor
+(def ^{:stratum 0} ^:private consumer-lock-file-name ".consumer.lock")
+
+(def ^{:stratum 0} ^:private empty-cursor
   {:schema-version 1
    :processed-intervention-ids #{}
    :processed-files #{}})
 
-(def ^:private empty-pass-result
+(def ^{:stratum 0} ^:private empty-pass-result
   {:routed 0 :skipped 0 :anomalies 0})
 
-;; ── Processed cursor — the idempotency manifest ────────────────────────────
+;; ── File enumeration + parsing ─────────────────────────────────────────────
+(defn- ^{:stratum 0} list-event-files
+  "Event files in `operator-dir`, sorted by filename. Both filename
+   grammars sort by creation: the snowflake hex prefix lexically, the
+   legacy shape via its timestamp prefix."
+  [operator-dir]
+  (let [^java.io.File d (io/file operator-dir)]
+    (if (.isDirectory d)
+      (->> (or (.listFiles d) [])
+           (filter (fn [^java.io.File f]
+                     (and (.isFile f)
+                          (.endsWith (.getName f) ".json"))))
+           (sort-by (fn [^java.io.File f] (.getName f)))
+           vec)
+      [])))
 
-(defn- cursor-file
+(defn- ^{:stratum 0} revive-uuid
+  "Parse a UUID-shaped string back to a java.util.UUID. Non-string /
+   unparseable values pass through unchanged."
+  [v]
+  (if (string? v) (or (parse-uuid v) v) v))
+
+(defn- ^{:stratum 0} revive-inst
+  "Parse an RFC-3339 string back to a java.util.Date. Non-string /
+   unparseable values pass through unchanged."
+  [v]
+  (if (string? v)
+    (try (java.util.Date/from (Instant/parse v))
+         (catch Exception _e v))
+    v))
+
+(defn- ^{:stratum 0} valid-request-identities?
+  "True when request identity fields have their governed runtime types."
+  [event]
+  (and (or (nil? (:event/id event))
+           (uuid? (:event/id event)))
+       (uuid? (:intervention/id event))
+       (or (nil? (:workflow/id event))
+           (uuid? (:workflow/id event)))))
+
+(defn- ^{:stratum 0} remember-intervention-id
+  [acc intervention-id]
+  (update acc :cursor update :processed-intervention-ids conj intervention-id))
+
+(defn- ^{:stratum 0} remember-file
+  [acc file-name]
+  (update acc :cursor update :processed-files conj file-name))
+
+(defn- ^{:stratum 0} accept-every-request?
+  [_event]
+  true)
+
+(defn- ^{:stratum 0} transition-succeeded?
+  [result]
+  (true? (:success? result)))
+
+(defn- ^{:stratum 0} overlapping-file-lock?
+  "Babashka does not expose OverlappingFileLockException as a resolvable
+   catch class, so identify this one contention signal by its JVM class
+   name and rethrow every other exception."
+  [e]
+  (= "java.nio.channels.OverlappingFileLockException"
+     (.getName (class e))))
+
+(defn- ^{:stratum 0} event->request
+  "Extract the InterventionRequest fields from a parsed event map.
+   Only the request-identity fields are trusted from the wire; state
+   and timestamps are server-assigned by `create-intervention`."
+  [event]
+  (cond-> {:intervention/id (:intervention/id event)
+           :intervention/type (:intervention/type event)
+           :intervention/target-type (:intervention/target-type event)
+           :intervention/target-id (:intervention/target-id event)
+           :intervention/requested-by (:intervention/requested-by event)
+           :intervention/request-source (:intervention/request-source event)}
+    (:intervention/justification event)
+    (assoc :intervention/justification (:intervention/justification event))
+
+    (:intervention/details event)
+    (assoc :intervention/details
+           (dissoc (:intervention/details event) :failure/code))))
+
+;; Event publication
+(defn- ^{:stratum 0} intervention-workflow-id
+  "The `:workflow/id` to stamp on lifecycle events — present only when
+   the intervention targets a workflow, so its audit trail lands in the
+   run's own event directory. Coerced to a UUID (target ids arrive as
+   strings from the wire); an unparseable id yields nil rather than a
+   string key that would fork sequence numbering / quiesce fencing
+   away from the runner's UUID-keyed entries."
+  [interv]
+  (when (= :workflow (:intervention/target-type interv))
+    (let [target-id (:intervention/target-id interv)]
+      (if (uuid? target-id)
+        target-id
+        (some-> target-id str parse-uuid)))))
+
+;; ── Polling lifecycle ──────────────────────────────────────────────────────
+(def ^{:stratum 0} ^:const default-poll-interval-ms 1000)
+
+(def ^{:stratum 0} ^:const initial-poll-delay-ms 0)
+
+(defn- ^{:stratum 0} daemon-thread-factory
+  "Named daemon threads for the poller (the repo's background-scheduler
+   idiom — see event-stream `heartbeat.clj`): a consumer that is not
+   stopped on some shutdown path must never keep the JVM alive."
+  ^ThreadFactory []
+  (reify ThreadFactory
+    (newThread [_ runnable]
+      (doto (Thread. ^Runnable runnable "miniforge-operator-consumer")
+        (.setDaemon true)))))
+
+(defn ^{:stratum 0} stop!
+  "Stop a poller started by [[start!]]. Idempotent."
+  [{:keys [^ScheduledExecutorService executor]}]
+  (when executor
+    (.shutdownNow executor))
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ── Processed cursor — the idempotency manifest ────────────────────────────
+(defn- ^{:stratum 1} cursor-file
   ^java.io.File [operator-dir]
   (io/file operator-dir cursor-file-name))
 
-(defn- consumer-lock-file
+(defn- ^{:stratum 1} consumer-lock-file
   ^java.io.File [operator-dir]
   (io/file operator-dir consumer-lock-file-name))
 
-(defn read-cursor
+(defn- ^{:stratum 1} revive-request-event
+  "Restore the typed identity fields `read-event-file`'s tag stripping
+   flattened to strings. Without this, republishing the event would
+   violate the event-stream schema (`:event/id` uuid?, timestamps
+   inst?) and re-serialize without `~u`/`~t` tags — and a string
+   `:workflow/id` would fork per-workflow sequence numbering and
+   quiesce fencing away from the UUID-keyed entries the runner uses."
+  [event]
+  (-> event
+      (update :event/id revive-uuid)
+      (update :intervention/id revive-uuid)
+      (update :event/timestamp revive-inst)
+      (update :intervention/requested-at revive-inst)
+      (update :intervention/updated-at revive-inst)
+      (cond->
+        (contains? event :workflow/id)
+        (update :workflow/id revive-uuid))))
+
+(defn ^{:stratum 1} publish-state-changed!
+  "Publish a `:supervisory/intervention-state-changed` event for
+   `interv`. The single canonical emitter for lifecycle transitions —
+   the application layer (D-3) publishes through here too, so every
+   transition carries the same envelope shape."
+  [stream interv]
+  (let [envelope (es/create-envelope
+                  stream
+                  state-changed-event-type
+                  (intervention-workflow-id interv)
+                  (messages/t :consumer/state-changed
+                              {:type (name (:intervention/type interv))
+                               :state (name (:intervention/state interv))}))]
+    (es/publish! stream (merge envelope interv))))
+
+(defn- ^{:stratum 1} publish-anomaly!
+  [stream file-name anomaly-data]
+  (let [envelope (es/create-envelope
+                  stream
+                  anomaly-event-type
+                  nil
+                  (or (:anomaly/message anomaly-data)
+                      (messages/t :consumer/event-anomaly {:file file-name})))]
+    (es/publish! stream (assoc envelope
+                               :source/file file-name
+                               :anomaly anomaly-data))))
+
+(defn- ^{:stratum 1} governed-request-event
+  "Build the governed audit event from the server-created intervention.
+   The wire event contributes only its valid source identity, already
+   captured in `created` by `event->request`. Everything else is
+   server-assigned: `es/intervention-requested` stamps a fresh
+   envelope, so `:event/id` (snowflake-ordered), `:event/timestamp`
+   (the audit clock), `:event/sequence-number`, and `:workflow/id`
+   routing all come from the server. Client-claimed identity,
+   timestamps, workflow routing, lifecycle state, and sequence are
+   ignored — never preferred over the server envelope."
+  [stream created]
+  (es/intervention-requested stream (intervention-workflow-id created) created))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} read-cursor
   "Read the processed cursor from `operator-dir`. A missing or
    unreadable cursor yields the empty cursor. Consumption is therefore
    at-least-once: a crash between routing and the end-of-pass cursor
@@ -140,7 +320,7 @@
         (catch Exception _e empty-cursor))
       empty-cursor)))
 
-(defn- write-cursor!
+(defn- ^{:stratum 2} write-cursor!
   "Persist `cursor` atomically: temp file + `Files/move` with
    `ATOMIC_MOVE` + `REPLACE_EXISTING` in the same directory (the
    repo-wide atomic-update idiom — see event-stream `archive.clj`
@@ -160,167 +340,8 @@
                             [StandardCopyOption/ATOMIC_MOVE
                              StandardCopyOption/REPLACE_EXISTING]))))
 
-;; ── File enumeration + parsing ─────────────────────────────────────────────
-
-(defn- list-event-files
-  "Event files in `operator-dir`, sorted by filename. Both filename
-   grammars sort by creation: the snowflake hex prefix lexically, the
-   legacy shape via its timestamp prefix."
-  [operator-dir]
-  (let [^java.io.File d (io/file operator-dir)]
-    (if (.isDirectory d)
-      (->> (or (.listFiles d) [])
-           (filter (fn [^java.io.File f]
-                     (and (.isFile f)
-                          (.endsWith (.getName f) ".json"))))
-           (sort-by (fn [^java.io.File f] (.getName f)))
-           vec)
-      [])))
-
-(defn- revive-uuid
-  "Parse a UUID-shaped string back to a java.util.UUID. Non-string /
-   unparseable values pass through unchanged."
-  [v]
-  (if (string? v) (or (parse-uuid v) v) v))
-
-(defn- revive-inst
-  "Parse an RFC-3339 string back to a java.util.Date. Non-string /
-   unparseable values pass through unchanged."
-  [v]
-  (if (string? v)
-    (try (java.util.Date/from (Instant/parse v))
-         (catch Exception _e v))
-    v))
-
-(defn- revive-request-event
-  "Restore the typed identity fields `read-event-file`'s tag stripping
-   flattened to strings. Without this, republishing the event would
-   violate the event-stream schema (`:event/id` uuid?, timestamps
-   inst?) and re-serialize without `~u`/`~t` tags — and a string
-   `:workflow/id` would fork per-workflow sequence numbering and
-   quiesce fencing away from the UUID-keyed entries the runner uses."
-  [event]
-  (-> event
-      (update :event/id revive-uuid)
-      (update :intervention/id revive-uuid)
-      (update :event/timestamp revive-inst)
-      (update :intervention/requested-at revive-inst)
-      (update :intervention/updated-at revive-inst)
-      (cond->
-        (contains? event :workflow/id)
-        (update :workflow/id revive-uuid))))
-
-(defn- valid-request-identities?
-  "True when request identity fields have their governed runtime types."
-  [event]
-  (and (or (nil? (:event/id event))
-           (uuid? (:event/id event)))
-       (uuid? (:intervention/id event))
-       (or (nil? (:workflow/id event))
-           (uuid? (:workflow/id event)))))
-
-(defn- remember-intervention-id
-  [acc intervention-id]
-  (update acc :cursor update :processed-intervention-ids conj intervention-id))
-
-(defn- remember-file
-  [acc file-name]
-  (update acc :cursor update :processed-files conj file-name))
-
-(defn- accept-every-request?
-  [_event]
-  true)
-
-(defn- transition-succeeded?
-  [result]
-  (true? (:success? result)))
-
-(defn- overlapping-file-lock?
-  "Babashka does not expose OverlappingFileLockException as a resolvable
-   catch class, so identify this one contention signal by its JVM class
-   name and rethrow every other exception."
-  [e]
-  (= "java.nio.channels.OverlappingFileLockException"
-     (.getName (class e))))
-
-(defn- event->request
-  "Extract the InterventionRequest fields from a parsed event map.
-   Only the request-identity fields are trusted from the wire; state
-   and timestamps are server-assigned by `create-intervention`."
-  [event]
-  (cond-> {:intervention/id (:intervention/id event)
-           :intervention/type (:intervention/type event)
-           :intervention/target-type (:intervention/target-type event)
-           :intervention/target-id (:intervention/target-id event)
-           :intervention/requested-by (:intervention/requested-by event)
-           :intervention/request-source (:intervention/request-source event)}
-    (:intervention/justification event)
-    (assoc :intervention/justification (:intervention/justification event))
-
-    (:intervention/details event)
-    (assoc :intervention/details
-           (dissoc (:intervention/details event) :failure/code))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Event publication
-
-(defn- intervention-workflow-id
-  "The `:workflow/id` to stamp on lifecycle events — present only when
-   the intervention targets a workflow, so its audit trail lands in the
-   run's own event directory. Coerced to a UUID (target ids arrive as
-   strings from the wire); an unparseable id yields nil rather than a
-   string key that would fork sequence numbering / quiesce fencing
-   away from the runner's UUID-keyed entries."
-  [interv]
-  (when (= :workflow (:intervention/target-type interv))
-    (let [target-id (:intervention/target-id interv)]
-      (if (uuid? target-id)
-        target-id
-        (some-> target-id str parse-uuid)))))
-
-(defn publish-state-changed!
-  "Publish a `:supervisory/intervention-state-changed` event for
-   `interv`. The single canonical emitter for lifecycle transitions —
-   the application layer (D-3) publishes through here too, so every
-   transition carries the same envelope shape."
-  [stream interv]
-  (let [envelope (es/create-envelope
-                  stream
-                  state-changed-event-type
-                  (intervention-workflow-id interv)
-                  (messages/t :consumer/state-changed
-                              {:type (name (:intervention/type interv))
-                               :state (name (:intervention/state interv))}))]
-    (es/publish! stream (merge envelope interv))))
-
-(defn- publish-anomaly!
-  [stream file-name anomaly-data]
-  (let [envelope (es/create-envelope
-                  stream
-                  anomaly-event-type
-                  nil
-                  (or (:anomaly/message anomaly-data)
-                      (messages/t :consumer/event-anomaly {:file file-name})))]
-    (es/publish! stream (assoc envelope
-                               :source/file file-name
-                               :anomaly anomaly-data))))
-
-(defn- governed-request-event
-  "Build the governed audit event from the server-created intervention.
-   The wire event contributes only its valid source identity, already
-   captured in `created` by `event->request`. Everything else is
-   server-assigned: `es/intervention-requested` stamps a fresh
-   envelope, so `:event/id` (snowflake-ordered), `:event/timestamp`
-   (the audit clock), `:event/sequence-number`, and `:workflow/id`
-   routing all come from the server. Client-claimed identity,
-   timestamps, workflow routing, lifecycle state, and sequence are
-   ignored — never preferred over the server envelope."
-  [stream created]
-  (es/intervention-requested stream (intervention-workflow-id created) created))
-
 ;; ── Single-event routing ───────────────────────────────────────────────────
-
-(defn- route-intervention!
+(defn- ^{:stratum 2} route-intervention!
   "Create → approval-gate → (optional) apply. Returns the intervention
    id on success, or nil when the request was rejected as an anomaly."
   [operator-stream destination apply! event file-name]
@@ -350,10 +371,10 @@
                 (apply! destination gated))
               (:intervention/id created)))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Consumption pass
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- consume-operator-dir!
+;; Consumption pass
+(defn- ^{:stratum 3} consume-operator-dir!
   [operator-dir stream apply! accept? stream-for]
   (let [cursor (read-cursor operator-dir)
         files (->> (list-event-files operator-dir)
@@ -421,7 +442,9 @@
       (write-cursor! operator-dir (:cursor result)))
     (dissoc result :cursor)))
 
-(defn consume-pass!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} consume-pass!
   "Run one consumption pass over `{events-dir}/operator/`.
 
    Options:
@@ -490,22 +513,9 @@
             empty-pass-result
             (throw e)))))))
 
-;; ── Polling lifecycle ──────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 5
 
-(def ^:const default-poll-interval-ms 1000)
-(def ^:const initial-poll-delay-ms 0)
-
-(defn- daemon-thread-factory
-  "Named daemon threads for the poller (the repo's background-scheduler
-   idiom — see event-stream `heartbeat.clj`): a consumer that is not
-   stopped on some shutdown path must never keep the JVM alive."
-  ^ThreadFactory []
-  (reify ThreadFactory
-    (newThread [_ runnable]
-      (doto (Thread. ^Runnable runnable "miniforge-operator-consumer")
-        (.setDaemon true)))))
-
-(defn start!
+(defn ^{:stratum 5} start!
   "Start a background poller running [[consume-pass!]] on a fixed
    delay. Options are those of [[consume-pass!]] plus :interval-ms
    (default 1000). Returns a handle for [[stop!]].
@@ -529,10 +539,3 @@
                              (long (or interval-ms default-poll-interval-ms))
                              TimeUnit/MILLISECONDS)
     {:executor executor}))
-
-(defn stop!
-  "Stop a poller started by [[start!]]. Idempotent."
-  [{:keys [^ScheduledExecutorService executor]}]
-  (when executor
-    (.shutdownNow executor))
-  nil)

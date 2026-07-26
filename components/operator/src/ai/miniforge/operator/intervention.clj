@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.intervention
   "Pure bounded intervention lifecycle helpers.
 
@@ -28,90 +27,19 @@
    [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config
 
-(def ^:private intervention-config-resource
+;; Config
+(def ^{:stratum 0} ^:private intervention-config-resource
   "Classpath location of the intervention lifecycle config."
   "config/operator/intervention.edn")
 
-(defn- load-intervention-config
-  []
-  (:operator/intervention
-   (config/load-config-resource intervention-config-resource
-                                [:operator/intervention])))
-
-(def ^:private intervention-config
-  (delay (load-intervention-config)))
-
-(def ^:private initial-state
-  (:initial-state @intervention-config))
-
-(def approval-required-types
-  "Interventions that default to an explicit human approval step because the
-   requested action materially changes runtime posture or execution."
-  (:approval-required-types @intervention-config))
-
-(def terminal-states
-  (:terminal-states @intervention-config))
-
-(def default-target-type-by-intervention
-  "Default target type for each intervention."
-  (:default-target-type-by-intervention @intervention-config))
-
-(def lifecycle-transitions
-  "Valid intervention lifecycle transitions. Map of [from-state event] -> to-state."
-  (:lifecycle-transitions @intervention-config))
-
-(def intervention-types
-  "Bounded v1 intervention vocabulary per N5-delta-supervisory-control-plane
-   §7.1."
-  (set (keys default-target-type-by-intervention)))
-
-(def target-types
-  (set (vals default-target-type-by-intervention)))
-
-(def lifecycle-states
-  "Intervention lifecycle states per N5-delta-supervisory-control-plane §3.3."
-  (-> (set (mapcat (fn [[[from-state _event] to-state]]
-                     [from-state to-state])
-                   lifecycle-transitions))
-      (conj initial-state)
-      (set/union terminal-states)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Construction and validation
-
-(defn approval-required?
-  [intervention-type]
-  (contains? approval-required-types intervention-type))
-
-(defn valid-type?
-  [intervention-type]
-  (contains? intervention-types intervention-type))
-
-(defn valid-target-type?
-  [target-type]
-  (contains? target-types target-type))
-
-(defn valid-state?
-  [state]
-  (contains? lifecycle-states state))
-
-(defn terminal-state?
-  [state]
-  (contains? terminal-states state))
-
-(defn intervention-target-type
-  [intervention-type]
-  (get default-target-type-by-intervention intervention-type))
-
-(defn- intervention-transition-error
+(defn- ^{:stratum 0} intervention-transition-error
   [error message]
   {:success? false
    :error error
    :message message})
 
-(defn- with-optional-intervention-attrs
+(defn- ^{:stratum 0} with-optional-intervention-attrs
   [intervention opts]
   (cond-> intervention
     (:reason opts) (assoc :intervention/reason (:reason opts))
@@ -121,21 +49,12 @@
             (fn [existing]
               (merge (or existing {}) (:details opts))))))
 
-(defn- transition-opts
+(defn- ^{:stratum 0} transition-opts
   [key value]
   (cond-> {}
     value (assoc key value)))
 
-(defn- validate-intervention-type
-  "Return an `:invalid-input` anomaly when `type` is not in the bounded
-   vocabulary, else nil."
-  [type]
-  (when-not (valid-type? type)
-    (anomaly/anomaly :invalid-input
-                     (messages/t :intervention/unknown-type)
-                     {:intervention/type type})))
-
-(defn- validate-target-type-resolvable
+(defn- ^{:stratum 0} validate-target-type-resolvable
   "Return an `:invalid-input` anomaly when no target type can be resolved
    for `type` (neither caller-supplied nor a default in the vocabulary),
    else nil."
@@ -145,31 +64,7 @@
                      (messages/t :intervention/target-type-required)
                      {:intervention/type type})))
 
-(defn- validate-target-type-known
-  "Return an `:invalid-input` anomaly when the resolved target type is
-   not in the recognized set, else nil."
-  [type resolved-target-type]
-  (when-not (valid-target-type? resolved-target-type)
-    (anomaly/anomaly :invalid-input
-                     (messages/t :intervention/unknown-target-type)
-                     {:intervention/type type
-                      :intervention/target-type resolved-target-type})))
-
-(defn- validate-target-type-supported
-  "Return an `:invalid-input` anomaly when a known target category does
-   not match the bounded category assigned to the intervention type."
-  [type resolved-target-type]
-  (let [supported-target-type (intervention-target-type type)]
-    (when (not= supported-target-type resolved-target-type)
-      (anomaly/anomaly :invalid-input
-                       (messages/t :intervention/unsupported-target-type
-                                   {:type type
-                                    :target-type resolved-target-type})
-                       {:intervention/type type
-                        :intervention/target-type resolved-target-type
-                        :intervention/supported-target-type supported-target-type}))))
-
-(defn- validate-target-id
+(defn- ^{:stratum 0} validate-target-id
   "Return an `:invalid-input` anomaly when `target-id` is missing, else
    nil."
   [type target-id]
@@ -178,7 +73,7 @@
                      (messages/t :intervention/target-id-required)
                      {:intervention/type type})))
 
-(defn- validate-requester
+(defn- ^{:stratum 0} validate-requester
   "Return an `:invalid-input` anomaly when either `requested-by` or
    `request-source` is missing, else nil."
   [type requested-by request-source]
@@ -189,7 +84,72 @@
                       :intervention/requested-by requested-by
                       :intervention/request-source request-source})))
 
-(defn- build-intervention
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-intervention-config
+  []
+  (:operator/intervention
+   (config/load-config-resource intervention-config-resource
+                                [:operator/intervention])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private intervention-config
+  (delay (load-intervention-config)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} ^:private initial-state
+  (:initial-state @intervention-config))
+
+(def ^{:stratum 3} approval-required-types
+  "Interventions that default to an explicit human approval step because the
+   requested action materially changes runtime posture or execution."
+  (:approval-required-types @intervention-config))
+
+(def ^{:stratum 3} terminal-states
+  (:terminal-states @intervention-config))
+
+(def ^{:stratum 3} default-target-type-by-intervention
+  "Default target type for each intervention."
+  (:default-target-type-by-intervention @intervention-config))
+
+(def ^{:stratum 3} lifecycle-transitions
+  "Valid intervention lifecycle transitions. Map of [from-state event] -> to-state."
+  (:lifecycle-transitions @intervention-config))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(def ^{:stratum 4} intervention-types
+  "Bounded v1 intervention vocabulary per N5-delta-supervisory-control-plane
+   §7.1."
+  (set (keys default-target-type-by-intervention)))
+
+(def ^{:stratum 4} target-types
+  (set (vals default-target-type-by-intervention)))
+
+(def ^{:stratum 4} lifecycle-states
+  "Intervention lifecycle states per N5-delta-supervisory-control-plane §3.3."
+  (-> (set (mapcat (fn [[[from-state _event] to-state]]
+                     [from-state to-state])
+                   lifecycle-transitions))
+      (conj initial-state)
+      (set/union terminal-states)))
+
+;; Construction and validation
+(defn ^{:stratum 4} approval-required?
+  [intervention-type]
+  (contains? approval-required-types intervention-type))
+
+(defn ^{:stratum 4} terminal-state?
+  [state]
+  (contains? terminal-states state))
+
+(defn ^{:stratum 4} intervention-target-type
+  [intervention-type]
+  (get default-target-type-by-intervention intervention-type))
+
+(defn- ^{:stratum 4} build-intervention
   "Assemble a validated InterventionRequest map from `request`. Assumes
    all preconditions have already been checked."
   [{:as request} resolved-target-type approval-required?* now]
@@ -212,7 +172,118 @@
       approval-required?*
       (assoc :intervention/approval-required? true))))
 
-(defn create-intervention
+;; Lifecycle helpers
+(defn ^{:stratum 4} valid-transition?
+  [current-state event]
+  (contains? lifecycle-transitions [current-state event]))
+
+(defn ^{:stratum 4} next-state
+  [current-state event]
+  (get lifecycle-transitions [current-state event]))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} valid-type?
+  [intervention-type]
+  (contains? intervention-types intervention-type))
+
+(defn ^{:stratum 5} valid-target-type?
+  [target-type]
+  (contains? target-types target-type))
+
+(defn ^{:stratum 5} valid-state?
+  [state]
+  (contains? lifecycle-states state))
+
+(defn- ^{:stratum 5} validate-target-type-supported
+  "Return an `:invalid-input` anomaly when a known target category does
+   not match the bounded category assigned to the intervention type."
+  [type resolved-target-type]
+  (let [supported-target-type (intervention-target-type type)]
+    (when (not= supported-target-type resolved-target-type)
+      (anomaly/anomaly :invalid-input
+                       (messages/t :intervention/unsupported-target-type
+                                   {:type type
+                                    :target-type resolved-target-type})
+                       {:intervention/type type
+                        :intervention/target-type resolved-target-type
+                        :intervention/supported-target-type supported-target-type}))))
+
+(defn ^{:stratum 5} supported-target-types
+  [intervention-type]
+  (let [target-type (intervention-target-type intervention-type)]
+    (if target-type
+      #{target-type}
+      #{})))
+
+(defn ^{:stratum 5} bounded-vocabulary?
+  [types]
+  (empty? (set/difference (set types) intervention-types)))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} validate-intervention-type
+  "Return an `:invalid-input` anomaly when `type` is not in the bounded
+   vocabulary, else nil."
+  [type]
+  (when-not (valid-type? type)
+    (anomaly/anomaly :invalid-input
+                     (messages/t :intervention/unknown-type)
+                     {:intervention/type type})))
+
+(defn- ^{:stratum 6} validate-target-type-known
+  "Return an `:invalid-input` anomaly when the resolved target type is
+   not in the recognized set, else nil."
+  [type resolved-target-type]
+  (when-not (valid-target-type? resolved-target-type)
+    (anomaly/anomaly :invalid-input
+                     (messages/t :intervention/unknown-target-type)
+                     {:intervention/type type
+                      :intervention/target-type resolved-target-type})))
+
+(defn ^{:stratum 6} transition
+  "Apply a lifecycle transition to `intervention`.
+
+   `opts` may carry:
+   - :reason
+   - :outcome
+   - :details
+   - :updated-at"
+  ([intervention event]
+   (transition intervention event {}))
+
+  ([intervention event opts]
+   (let [current-state (:intervention/state intervention)
+         next (next-state current-state event)
+         updated-at (or (:updated-at opts) (java.util.Date.))]
+     (cond
+       (not (valid-state? current-state))
+       (intervention-transition-error
+        :invalid-state
+        (messages/t :intervention/invalid-state {:state current-state}))
+
+       (terminal-state? current-state)
+       (intervention-transition-error
+        :terminal-state
+        (messages/t :intervention/terminal-state {:state current-state}))
+
+       (nil? next)
+       (intervention-transition-error
+        :invalid-transition
+        (messages/t :intervention/invalid-transition
+                    {:state current-state
+                     :event event}))
+
+       :else
+       {:success? true
+        :intervention (-> intervention
+                          (assoc :intervention/state next
+                                 :intervention/updated-at updated-at)
+                          (with-optional-intervention-attrs opts))}))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} create-intervention
   "Create a new InterventionRequest map.
 
    Canonical, anomaly-returning entry point. Returns the constructed
@@ -253,7 +324,46 @@
         (validate-requester type requested-by request-source)
         (build-intervention request resolved-target-type approval-required?* now))))
 
-(defn create-intervention!
+(defn ^{:stratum 7} start-approval
+  [intervention]
+  (transition intervention :require-human))
+
+(defn ^{:stratum 7} approve
+  [intervention]
+  (transition intervention :approve))
+
+(defn ^{:stratum 7} reject
+  ([intervention]
+   (reject intervention nil))
+  ([intervention reason]
+   (transition intervention :reject (transition-opts :reason reason))))
+
+(defn ^{:stratum 7} dispatch
+  "Dispatch an approved intervention to the orchestrator."
+  [intervention]
+  (transition intervention :dispatch))
+
+(defn ^{:stratum 7} apply-result
+  ([intervention]
+   (apply-result intervention nil))
+  ([intervention outcome]
+   (transition intervention :apply (transition-opts :outcome outcome))))
+
+(defn ^{:stratum 7} verify
+  ([intervention]
+   (verify intervention nil))
+  ([intervention outcome]
+   (transition intervention :verify (transition-opts :outcome outcome))))
+
+(defn ^{:stratum 7} fail
+  ([intervention]
+   (fail intervention nil))
+  ([intervention reason]
+   (transition intervention :fail (transition-opts :reason reason))))
+
+;------------------------------------------------------------------------------ Layer 8
+
+(defn ^{:stratum 8} create-intervention!
   "Boundary wrapper around [[create-intervention]]. Calls the canonical
    anomaly-returning fn; on anomaly result raises an `ex-info` carrying
    the anomaly's message and `:anomaly/data` shape so legacy callers
@@ -267,102 +377,3 @@
       (throw (ex-info (:anomaly/message result)
                       (:anomaly/data result)))
       result)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Lifecycle helpers
-
-(defn valid-transition?
-  [current-state event]
-  (contains? lifecycle-transitions [current-state event]))
-
-(defn next-state
-  [current-state event]
-  (get lifecycle-transitions [current-state event]))
-
-(defn transition
-  "Apply a lifecycle transition to `intervention`.
-
-   `opts` may carry:
-   - :reason
-   - :outcome
-   - :details
-   - :updated-at"
-  ([intervention event]
-   (transition intervention event {}))
-
-  ([intervention event opts]
-   (let [current-state (:intervention/state intervention)
-         next (next-state current-state event)
-         updated-at (or (:updated-at opts) (java.util.Date.))]
-     (cond
-       (not (valid-state? current-state))
-       (intervention-transition-error
-        :invalid-state
-        (messages/t :intervention/invalid-state {:state current-state}))
-
-       (terminal-state? current-state)
-       (intervention-transition-error
-        :terminal-state
-        (messages/t :intervention/terminal-state {:state current-state}))
-
-       (nil? next)
-       (intervention-transition-error
-        :invalid-transition
-        (messages/t :intervention/invalid-transition
-                    {:state current-state
-                     :event event}))
-
-       :else
-       {:success? true
-        :intervention (-> intervention
-                          (assoc :intervention/state next
-                                 :intervention/updated-at updated-at)
-                          (with-optional-intervention-attrs opts))}))))
-
-(defn start-approval
-  [intervention]
-  (transition intervention :require-human))
-
-(defn approve
-  [intervention]
-  (transition intervention :approve))
-
-(defn reject
-  ([intervention]
-   (reject intervention nil))
-  ([intervention reason]
-   (transition intervention :reject (transition-opts :reason reason))))
-
-(defn dispatch
-  "Dispatch an approved intervention to the orchestrator."
-  [intervention]
-  (transition intervention :dispatch))
-
-(defn apply-result
-  ([intervention]
-   (apply-result intervention nil))
-  ([intervention outcome]
-   (transition intervention :apply (transition-opts :outcome outcome))))
-
-(defn verify
-  ([intervention]
-   (verify intervention nil))
-  ([intervention outcome]
-   (transition intervention :verify (transition-opts :outcome outcome))))
-
-(defn fail
-  ([intervention]
-   (fail intervention nil))
-  ([intervention reason]
-   (transition intervention :fail (transition-opts :reason reason))))
-
-(defn supported-target-types
-  [intervention-type]
-  (let [target-type (intervention-target-type intervention-type)]
-    (if target-type
-      #{target-type}
-      #{})))
-
-(defn bounded-vocabulary?
-  [types]
-  (empty? (set/difference (set types) intervention-types)))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.core-test
   "Tests for the pure helpers in operator.core. The full SimpleOperator record
    has runtime dependencies on workflow / knowledge / logging components and is
@@ -27,34 +26,20 @@
             [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(defn- signal
+;; Test fixtures
+(defn- ^{:stratum 0} signal
   [type & {:as data}]
   (sut/create-signal type (or data {})))
 
-(defn- failure-signal-for
-  [phase]
-  (signal :workflow-failed :phase phase))
-
-(defn- rollback-signal-from-to
-  [from-phase to-phase]
-  (signal :phase-rollback :from-phase from-phase :to-phase to-phase))
-
-(defn- repair-signal-for
-  [error-type]
-  (signal :repair-pattern :error-type error-type))
-
-(defrecord FakeLLMClient [response]
+(defrecord ^{:stratum 0} FakeLLMClient [response]
   llm-client/LLMClient
   (complete* [_this _request] response)
   (complete-stream* [_this _request _on-chunk] response)
   (get-config [_this] {}))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; default-config
-
-(deftest default-config-shape-test
+(deftest ^{:stratum 0} default-config-shape-test
   (testing "default-config carries the documented retention/window/threshold keys"
     (let [c sut/default-config]
       (is (pos-int? (:signal-retention-ms c)))
@@ -64,10 +49,8 @@
       (is (<= 0.0 (:auto-apply-threshold c) 1.0))
       (is (pos-int? (:shadow-period-ms c))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; create-signal
-
-(deftest create-signal-required-fields-test
+(deftest ^{:stratum 0} create-signal-required-fields-test
   (testing "create-signal stamps id, type, data, and timestamp"
     (let [s (sut/create-signal :workflow-failed {:phase :implement})]
       (is (uuid? (:signal/id s)))
@@ -75,16 +58,14 @@
       (is (= {:phase :implement} (:signal/data s)))
       (is (number? (:signal/timestamp s))))))
 
-(deftest create-signal-uniqueness-test
+(deftest ^{:stratum 0} create-signal-uniqueness-test
   (testing "Each call gets a fresh id"
     (let [a (sut/create-signal :x {})
           b (sut/create-signal :x {})]
       (is (not= (:signal/id a) (:signal/id b))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; prune-old-signals
-
-(deftest prune-old-signals-keeps-recent-test
+(deftest ^{:stratum 0} prune-old-signals-keeps-recent-test
   (testing "Recent signals (within retention) are kept"
     (let [now (System/currentTimeMillis)
           recent {:signal/id (random-uuid) :signal/type :x
@@ -94,104 +75,18 @@
           kept   (sut/prune-old-signals [recent old] 5000)]
       (is (= [recent] kept)))))
 
-(deftest prune-old-signals-keeps-empty-input-test
+(deftest ^{:stratum 0} prune-old-signals-keeps-empty-input-test
   (testing "Empty input returns empty (and is a vector for filterv)"
     (is (= [] (sut/prune-old-signals [] 1000)))
     (is (vector? (sut/prune-old-signals [] 1000)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; detect-repeated-failures
-
-(deftest detect-repeated-failures-yields-pattern-test
-  (testing "When a phase fails ≥ min-occurrences times, a :repeated-phase-failure pattern fires"
-    (let [signals (vec (repeatedly 3 #(failure-signal-for :implement)))
-          [pat] (sut/detect-repeated-failures signals 3)]
-      (is (= :repeated-phase-failure (:pattern/type pat)))
-      (is (= :implement (:pattern/phase pat)))
-      (is (= 3 (:pattern/occurrences pat)))
-      (is (number? (:pattern/confidence pat)))
-      (is (= 3 (count (:pattern/signals pat)))))))
-
-(deftest detect-repeated-failures-below-threshold-test
-  (testing "Fewer than min-occurrences failures yield no pattern"
-    (is (empty? (sut/detect-repeated-failures
-                 [(failure-signal-for :implement)
-                  (failure-signal-for :implement)]
-                 3)))))
-
-(deftest detect-repeated-failures-confidence-clamped-to-1-test
-  (testing "Confidence is clamped to 1.0 even when count exceeds the divisor"
-    (let [signals (vec (repeatedly 50 #(failure-signal-for :implement)))
-          [pat] (sut/detect-repeated-failures signals 3)]
-      (is (= 1.0 (:pattern/confidence pat))))))
-
-(deftest detect-repeated-failures-groups-by-phase-test
-  (testing "Failures across distinct phases yield separate patterns"
-    (let [signals (concat (repeatedly 3 #(failure-signal-for :implement))
-                          (repeatedly 3 #(failure-signal-for :verify)))
-          patterns (sut/detect-repeated-failures signals 3)
-          phases (set (map :pattern/phase patterns))]
-      (is (= #{:implement :verify} phases)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; detect-rollback-patterns
-
-(deftest detect-rollback-patterns-test
-  (testing "Frequent rollbacks from the same phase yield a :frequent-rollback pattern"
-    (let [signals (concat (repeatedly 3 #(rollback-signal-from-to :implement :plan))
-                          [(rollback-signal-from-to :implement :review)])
-          [pat] (sut/detect-rollback-patterns signals 3)]
-      (is (= :frequent-rollback (:pattern/type pat)))
-      (is (= :implement (:pattern/from-phase pat)))
-      (is (= 4 (:pattern/occurrences pat)))
-      (is (= #{:plan :review} (set (:pattern/to-phases pat)))))))
-
-(deftest detect-rollback-patterns-below-threshold-test
-  (testing "Fewer than min-occurrences rollbacks from one phase yield no pattern"
-    (is (empty? (sut/detect-rollback-patterns
-                 [(rollback-signal-from-to :implement :plan)]
-                 3)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; detect-repair-patterns
-
-(deftest detect-repair-patterns-test
-  (testing "Recurring repairs of the same error type yield a :recurring-repair pattern"
-    (let [signals (vec (repeatedly 3 #(repair-signal-for :missing-import)))
-          [pat] (sut/detect-repair-patterns signals 3)]
-      (is (= :recurring-repair (:pattern/type pat)))
-      (is (= :missing-import (:pattern/error-type pat)))
-      (is (= 3 (:pattern/occurrences pat))))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; SimplePatternDetector — protocol composition
-
-(deftest pattern-detector-detect-combines-all-three-detectors-test
-  (testing "SimplePatternDetector runs all three detectors and concatenates results"
-    (let [detector (sut/create-pattern-detector
-                    {:min-pattern-occurrences 3})
-          signals (concat (repeatedly 3 #(failure-signal-for :implement))
-                          (repeatedly 3 #(rollback-signal-from-to :review :plan))
-                          (repeatedly 3 #(repair-signal-for :missing-paren)))
-          patterns (proto/detect detector signals)]
-      (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
-             (set (map :pattern/type patterns)))))))
-
-(deftest pattern-detector-get-pattern-types-test
+(deftest ^{:stratum 0} pattern-detector-get-pattern-types-test
   (testing "get-pattern-types reports the three documented detected types"
     (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
            (proto/get-pattern-types (sut/create-pattern-detector))))))
 
-(deftest create-llm-pattern-detector-direct-constructor-test
-  (testing "LLM pattern detector construction uses the direct component namespace"
-    (let [detector (sut/create-llm-pattern-detector*
-                    (->FakeLLMClient {:success true :content "[]" }))]
-      (is (satisfies? proto/PatternDetector detector)))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generators
-
-(deftest generate-for-repeated-failure-shape-test
+(deftest ^{:stratum 0} generate-for-repeated-failure-shape-test
   (testing "generate-for-repeated-failure produces a :gate-adjustment proposal"
     (let [pattern {:pattern/type :repeated-phase-failure
                    :pattern/phase :implement
@@ -206,7 +101,7 @@
       (is (= pattern (:improvement/source-pattern imp)))
       (is (string? (:improvement/rationale imp))))))
 
-(deftest generate-for-frequent-rollback-shape-test
+(deftest ^{:stratum 0} generate-for-frequent-rollback-shape-test
   (testing "generate-for-frequent-rollback produces a :workflow-modification proposal"
     (let [pattern {:pattern/type :frequent-rollback
                    :pattern/from-phase :review
@@ -218,7 +113,7 @@
       (is (= :review (:improvement/target imp)))
       (is (= [:plan :implement] (-> imp :improvement/change :rollback-targets))))))
 
-(deftest generate-for-recurring-repair-shape-test
+(deftest ^{:stratum 0} generate-for-recurring-repair-shape-test
   (testing "generate-for-recurring-repair produces a :rule-addition proposal"
     (let [pattern {:pattern/type :recurring-repair
                    :pattern/error-type :missing-import
@@ -229,10 +124,8 @@
       (is (= :knowledge-base (:improvement/target imp)))
       (is (= :missing-import (-> imp :improvement/change :error-type))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; SimpleImprovementGenerator — protocol composition
-
-(deftest improvement-generator-dispatches-by-pattern-type-test
+(deftest ^{:stratum 0} improvement-generator-dispatches-by-pattern-type-test
   (testing "Each pattern type generates the corresponding improvement type"
     (let [gen (sut/create-improvement-generator)
           patterns [{:pattern/type :repeated-phase-failure :pattern/phase :implement
@@ -248,42 +141,34 @@
       (is (= 3 (count imps)))
       (is (= #{:gate-adjustment :workflow-modification :rule-addition} types)))))
 
-(deftest improvement-generator-supported-patterns-test
+(deftest ^{:stratum 0} improvement-generator-supported-patterns-test
   (testing "get-supported-patterns reports the three handled pattern types"
     (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
            (proto/get-supported-patterns (sut/create-improvement-generator))))))
 
-(deftest create-llm-improvement-generator-direct-constructor-test
-  (testing "LLM improvement generator construction uses the direct component namespace"
-    (let [generator (sut/create-llm-improvement-generator*
-                     (->FakeLLMClient {:success true :content "[]" }))]
-      (is (satisfies? proto/ImprovementGenerator generator)))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; SimpleGovernance
-
-(deftest governance-requires-approval-for-policy-update-test
+(deftest ^{:stratum 0} governance-requires-approval-for-policy-update-test
   (testing "Policy update is always behind approval, regardless of confidence"
     (let [g (sut/create-governance)]
       (is (true? (proto/requires-approval? g
                                            {:improvement/type :policy-update
                                             :improvement/confidence 1.0}))))))
 
-(deftest governance-requires-approval-for-workflow-modification-test
+(deftest ^{:stratum 0} governance-requires-approval-for-workflow-modification-test
   (testing "Workflow modification is also always behind approval"
     (let [g (sut/create-governance)]
       (is (true? (proto/requires-approval? g
                                            {:improvement/type :workflow-modification
                                             :improvement/confidence 1.0}))))))
 
-(deftest governance-low-confidence-requires-approval-test
+(deftest ^{:stratum 0} governance-low-confidence-requires-approval-test
   (testing "Confidence below auto-apply-threshold triggers approval even for safe types"
     (let [g (sut/create-governance)]
       (is (true? (proto/requires-approval? g
                                            {:improvement/type :gate-adjustment
                                             :improvement/confidence 0.5}))))))
 
-(deftest governance-high-confidence-safe-type-can-auto-apply-test
+(deftest ^{:stratum 0} governance-high-confidence-safe-type-can-auto-apply-test
   (testing "Safe type at high confidence can auto-apply"
     (let [g (sut/create-governance)
           imp {:improvement/type :gate-adjustment
@@ -291,7 +176,7 @@
       (is (false? (proto/requires-approval? g imp)))
       (is (true? (proto/can-auto-apply? g imp))))))
 
-(deftest governance-approval-policy-by-type-test
+(deftest ^{:stratum 0} governance-approval-policy-by-type-test
   (testing "get-approval-policy returns documented policy for each known type"
     (let [g (sut/create-governance)]
       (is (false? (-> (proto/get-approval-policy g :prompt-change)         :auto-approve?)))
@@ -301,9 +186,107 @@
       (is (true?  (-> (proto/get-approval-policy g :budget-adjustment)     :auto-approve?)))
       (is (false? (-> (proto/get-approval-policy g :workflow-modification) :auto-approve?))))))
 
-(deftest governance-approval-policy-default-test
+(deftest ^{:stratum 0} governance-approval-policy-default-test
   (testing "Unknown improvement types fall back to approval-required default"
     (let [g (sut/create-governance)
           policy (proto/get-approval-policy g :totally-unknown-type)]
       (is (false? (:auto-approve? policy)))
       (is (number? (:required-confidence policy))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} failure-signal-for
+  [phase]
+  (signal :workflow-failed :phase phase))
+
+(defn- ^{:stratum 1} rollback-signal-from-to
+  [from-phase to-phase]
+  (signal :phase-rollback :from-phase from-phase :to-phase to-phase))
+
+(defn- ^{:stratum 1} repair-signal-for
+  [error-type]
+  (signal :repair-pattern :error-type error-type))
+
+(deftest ^{:stratum 1} create-llm-pattern-detector-direct-constructor-test
+  (testing "LLM pattern detector construction uses the direct component namespace"
+    (let [detector (sut/create-llm-pattern-detector*
+                    (->FakeLLMClient {:success true :content "[]" }))]
+      (is (satisfies? proto/PatternDetector detector)))))
+
+(deftest ^{:stratum 1} create-llm-improvement-generator-direct-constructor-test
+  (testing "LLM improvement generator construction uses the direct component namespace"
+    (let [generator (sut/create-llm-improvement-generator*
+                     (->FakeLLMClient {:success true :content "[]" }))]
+      (is (satisfies? proto/ImprovementGenerator generator)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; detect-repeated-failures
+(deftest ^{:stratum 2} detect-repeated-failures-yields-pattern-test
+  (testing "When a phase fails ≥ min-occurrences times, a :repeated-phase-failure pattern fires"
+    (let [signals (vec (repeatedly 3 #(failure-signal-for :implement)))
+          [pat] (sut/detect-repeated-failures signals 3)]
+      (is (= :repeated-phase-failure (:pattern/type pat)))
+      (is (= :implement (:pattern/phase pat)))
+      (is (= 3 (:pattern/occurrences pat)))
+      (is (number? (:pattern/confidence pat)))
+      (is (= 3 (count (:pattern/signals pat)))))))
+
+(deftest ^{:stratum 2} detect-repeated-failures-below-threshold-test
+  (testing "Fewer than min-occurrences failures yield no pattern"
+    (is (empty? (sut/detect-repeated-failures
+                 [(failure-signal-for :implement)
+                  (failure-signal-for :implement)]
+                 3)))))
+
+(deftest ^{:stratum 2} detect-repeated-failures-confidence-clamped-to-1-test
+  (testing "Confidence is clamped to 1.0 even when count exceeds the divisor"
+    (let [signals (vec (repeatedly 50 #(failure-signal-for :implement)))
+          [pat] (sut/detect-repeated-failures signals 3)]
+      (is (= 1.0 (:pattern/confidence pat))))))
+
+(deftest ^{:stratum 2} detect-repeated-failures-groups-by-phase-test
+  (testing "Failures across distinct phases yield separate patterns"
+    (let [signals (concat (repeatedly 3 #(failure-signal-for :implement))
+                          (repeatedly 3 #(failure-signal-for :verify)))
+          patterns (sut/detect-repeated-failures signals 3)
+          phases (set (map :pattern/phase patterns))]
+      (is (= #{:implement :verify} phases)))))
+
+;; detect-rollback-patterns
+(deftest ^{:stratum 2} detect-rollback-patterns-test
+  (testing "Frequent rollbacks from the same phase yield a :frequent-rollback pattern"
+    (let [signals (concat (repeatedly 3 #(rollback-signal-from-to :implement :plan))
+                          [(rollback-signal-from-to :implement :review)])
+          [pat] (sut/detect-rollback-patterns signals 3)]
+      (is (= :frequent-rollback (:pattern/type pat)))
+      (is (= :implement (:pattern/from-phase pat)))
+      (is (= 4 (:pattern/occurrences pat)))
+      (is (= #{:plan :review} (set (:pattern/to-phases pat)))))))
+
+(deftest ^{:stratum 2} detect-rollback-patterns-below-threshold-test
+  (testing "Fewer than min-occurrences rollbacks from one phase yield no pattern"
+    (is (empty? (sut/detect-rollback-patterns
+                 [(rollback-signal-from-to :implement :plan)]
+                 3)))))
+
+;; detect-repair-patterns
+(deftest ^{:stratum 2} detect-repair-patterns-test
+  (testing "Recurring repairs of the same error type yield a :recurring-repair pattern"
+    (let [signals (vec (repeatedly 3 #(repair-signal-for :missing-import)))
+          [pat] (sut/detect-repair-patterns signals 3)]
+      (is (= :recurring-repair (:pattern/type pat)))
+      (is (= :missing-import (:pattern/error-type pat)))
+      (is (= 3 (:pattern/occurrences pat))))))
+
+;; SimplePatternDetector — protocol composition
+(deftest ^{:stratum 2} pattern-detector-detect-combines-all-three-detectors-test
+  (testing "SimplePatternDetector runs all three detectors and concatenates results"
+    (let [detector (sut/create-pattern-detector
+                    {:min-pattern-occurrences 3})
+          signals (concat (repeatedly 3 #(failure-signal-for :implement))
+                          (repeatedly 3 #(rollback-signal-from-to :review :plan))
+                          (repeatedly 3 #(repair-signal-for :missing-paren)))
+          patterns (proto/detect detector signals)]
+      (is (= #{:repeated-phase-failure :frequent-rollback :recurring-repair}
+             (set (map :pattern/type patterns)))))))
