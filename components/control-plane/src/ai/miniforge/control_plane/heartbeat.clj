@@ -15,32 +15,39 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane.heartbeat
   "Heartbeat watchdog for the control plane.
 
    Runs a background thread that periodically checks all registered
    agents for missed heartbeats. When an agent misses 3 consecutive
-   heartbeat intervals, it transitions to :unreachable.
-
-   Layer 0: Timeout detection
-   Layer 1: Watchdog thread lifecycle"
+   heartbeat intervals, it transitions to :unreachable."
   (:require
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.state-machine :as sm]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Timeout detection
 
-(def ^:const missed-heartbeat-multiplier
+;; Timeout detection
+(def ^{:stratum 0} ^:const missed-heartbeat-multiplier
   "Number of missed intervals before marking unreachable."
   3)
 
-(def ^:const default-check-interval-ms
+(def ^{:stratum 0} ^:const default-check-interval-ms
   "How often the watchdog checks for stale agents."
   10000)
 
-(defn heartbeat-stale?
+(defn ^{:stratum 0} stop-watchdog
+  "Stop a running heartbeat watchdog.
+
+   Arguments:
+   - watchdog - Map returned by start-watchdog."
+  [watchdog]
+  (when-let [stop (:stop-fn watchdog)]
+    (stop)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} heartbeat-stale?
   "Check if an agent's heartbeat is stale (missed too many intervals).
 
    Arguments:
@@ -55,7 +62,9 @@
     (when last-hb
       (> (- (.getTime now) (.getTime last-hb)) threshold))))
 
-(defn check-stale-agents
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check-stale-agents
   "Check all agents for missed heartbeats and transition stale ones.
 
    Arguments:
@@ -80,10 +89,10 @@
      []
      non-terminal)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Watchdog thread lifecycle
+;------------------------------------------------------------------------------ Layer 3
 
-(defn start-watchdog
+;; Watchdog thread lifecycle
+(defn ^{:stratum 3} start-watchdog
   "Start the heartbeat watchdog background thread.
 
    Arguments:
@@ -114,15 +123,6 @@
      :stop-fn (fn []
                 (reset! running false)
                 (future-cancel fut))}))
-
-(defn stop-watchdog
-  "Stop a running heartbeat watchdog.
-
-   Arguments:
-   - watchdog - Map returned by start-watchdog."
-  [watchdog]
-  (when-let [stop (:stop-fn watchdog)]
-    (stop)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

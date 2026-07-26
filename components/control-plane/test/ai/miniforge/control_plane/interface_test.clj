@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane.interface-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -25,9 +24,10 @@
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.interface :as cp]))
 
-;------------------------------------------------------------------------------ State Machine Tests
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest load-profile-test
+;------------------------------------------------------------------------------ State Machine Tests
+(deftest ^{:stratum 0} load-profile-test
   (testing "Profile loads from classpath"
     (let [profile (cp/load-profile)]
       (is (= :control-plane (:profile/id profile)))
@@ -36,7 +36,7 @@
       (is (contains? (set (:task-statuses profile)) :blocked))
       (is (map? (:valid-transitions profile))))))
 
-(deftest load-profile-missing-resource-carries-invalid-config-marker
+(deftest ^{:stratum 0} load-profile-missing-resource-carries-invalid-config-marker
   (testing "Missing classpath state profile is an invalid configuration fault"
     (let [missing-path "control-plane/state-profiles/missing.edn"
           resource io/resource]
@@ -51,7 +51,7 @@
           (is (= missing-path (:path (ex-data thrown))))
           (is (= :invalid-config (:config/error (ex-data thrown)))))))))
 
-(deftest valid-transition-test
+(deftest ^{:stratum 0} valid-transition-test
   (let [profile (cp/get-profile)]
     (testing "Valid transitions"
       (are [from to] (cp/valid-transition? profile from to)
@@ -71,7 +71,7 @@
         :terminated :running
         :blocked   :completed))))
 
-(deftest validate-transition-result-test
+(deftest ^{:stratum 0} validate-transition-result-test
   (let [profile (cp/get-profile)]
     (testing "valid transitions return nil"
       (is (nil? (cp/validate-transition-result profile :running :blocked))))
@@ -87,7 +87,7 @@
       (is (thrown? clojure.lang.ExceptionInfo
                    (sm/validate-transition profile :completed :running))))))
 
-(deftest terminal-test
+(deftest ^{:stratum 0} terminal-test
   (let [profile (cp/get-profile)]
     (testing "Terminal states"
       (is (cp/terminal? profile :completed))
@@ -98,7 +98,7 @@
       (is (not (cp/terminal? profile :blocked)))
       (is (not (cp/terminal? profile :idle))))))
 
-(deftest event-mapping-test
+(deftest ^{:stratum 0} event-mapping-test
   (let [profile (cp/get-profile)]
     (testing "Event maps to transition"
       (is (= :blocked (:to (cp/event->transition profile :agent/decision-needed))))
@@ -107,8 +107,7 @@
       (is (nil? (cp/event->transition profile :bogus/event))))))
 
 ;------------------------------------------------------------------------------ Registry Tests
-
-(deftest registry-crud-test
+(deftest ^{:stratum 0} registry-crud-test
   (let [reg (cp/create-registry)]
     (testing "Register an agent"
       (let [agent (cp/register-agent! reg {:agent/vendor :claude-code
@@ -147,7 +146,7 @@
             (is (nil? (cp/get-agent reg (:agent/id agent))))
             (is (= 0 (cp/count-agents reg)))))))))
 
-(deftest heartbeat-test
+(deftest ^{:stratum 0} heartbeat-test
   (let [reg (cp/create-registry)
         agent (cp/register-agent! reg {:agent/vendor :claude-code
                                         :agent/name "Test"})
@@ -163,7 +162,7 @@
       (let [updated (cp/record-heartbeat! reg agent-id {:status :unknown})]
         (is (= :running (:agent/status updated)))))))
 
-(deftest transition-agent-test
+(deftest ^{:stratum 0} transition-agent-test
   (testing "Valid transition"
     (let [reg (cp/create-registry)
           agent (cp/register-agent! reg {:agent/vendor :test :agent/name "T"})
@@ -198,7 +197,7 @@
           (is (= {:agent/id agent-id}
                  (:anomaly/data result))))))))
 
-(deftest agents-by-status-test
+(deftest ^{:stratum 0} agents-by-status-test
   (let [reg (cp/create-registry)]
     (cp/register-agent! reg {:agent/vendor :a :agent/name "A"})
     (let [b (cp/register-agent! reg {:agent/vendor :b :agent/name "B"})]
@@ -208,8 +207,7 @@
         (is (= 1 (count (:running grouped))))))))
 
 ;------------------------------------------------------------------------------ Decision Queue Tests
-
-(deftest decision-crud-test
+(deftest ^{:stratum 0} decision-crud-test
   (let [mgr (cp/create-decision-manager)
         agent-id (random-uuid)]
     (testing "Create and submit decision"
@@ -249,7 +247,7 @@
         (testing "Pending count after resolve"
           (is (= 0 (cp/count-pending mgr))))))))
 
-(deftest decision-priority-ordering-test
+(deftest ^{:stratum 0} decision-priority-ordering-test
   (let [mgr (cp/create-decision-manager)
         agent-id (random-uuid)
         d-low (cp/create-decision agent-id "Low priority" {:priority :low})
@@ -266,7 +264,7 @@
         (is (= [:critical :high :medium :low]
                (mapv :decision/priority pending)))))))
 
-(deftest decision-blocked-boost-test
+(deftest ^{:stratum 0} decision-blocked-boost-test
   (let [mgr (cp/create-decision-manager)
         blocked-agent (random-uuid)
         normal-agent (random-uuid)
@@ -284,7 +282,7 @@
       (let [pending (cp/pending-decisions mgr #{blocked-agent})]
         (is (= blocked-agent (:decision/agent-id (first pending))))))))
 
-(deftest decisions-for-agent-test
+(deftest ^{:stratum 0} decisions-for-agent-test
   (let [mgr (cp/create-decision-manager)
         a1 (random-uuid)
         a2 (random-uuid)]
@@ -296,7 +294,7 @@
       (is (= 2 (count (cp/decisions-for-agent mgr a1))))
       (is (= 1 (count (cp/decisions-for-agent mgr a2)))))))
 
-(deftest cancel-decision-test
+(deftest ^{:stratum 0} cancel-decision-test
   (let [mgr (cp/create-decision-manager)
         d (cp/create-decision (random-uuid) "Cancel me")]
     (cp/submit-decision! mgr d)
@@ -306,8 +304,7 @@
     (is (= :cancelled (:decision/status (cp/get-decision mgr (:decision/id d)))))))
 
 ;------------------------------------------------------------------------------ Heartbeat Watchdog Tests
-
-(deftest stale-agent-detection-test
+(deftest ^{:stratum 0} stale-agent-detection-test
   (let [reg (cp/create-registry)
         agent (cp/register-agent! reg {:agent/vendor :test
                                         :agent/name "Stale"

@@ -15,27 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane.registry
   "Atom-backed agent registry for the control plane.
 
    Manages the lifecycle of registered agents from any vendor.
    Each agent gets a control-plane-assigned UUID and is tracked
-   with normalized state, heartbeat timestamps, and metadata.
-
-   Layer 0: Registry creation
-   Layer 1: Agent CRUD
-   Layer 2: Query operations
-   Layer 3: Heartbeat updates"
+   with normalized state, heartbeat timestamps, and metadata."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.control-plane.messages :as messages]
    [ai.miniforge.control-plane.state-machine :as sm]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Registry creation
 
-(defn create-registry
+;; Registry creation
+(defn ^{:stratum 0} create-registry
   "Create a new agent registry.
 
    Returns: Atom containing {:agents {} :by-vendor {} :by-external-id {}}.
@@ -47,10 +41,8 @@
          :by-vendor {}
          :by-external-id {}}))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Agent CRUD
-
-(defn register-agent!
+(defn ^{:stratum 0} register-agent!
   "Register a new agent with the control plane.
 
    Arguments:
@@ -96,7 +88,7 @@
                  (cond-> ext-id (assoc-in [:by-external-id ext-id] agent-id)))))
     agent-record))
 
-(defn deregister-agent!
+(defn ^{:stratum 0} deregister-agent!
   "Remove an agent from the registry.
 
    Arguments:
@@ -117,7 +109,7 @@
                      (cond-> ext-id (update :by-external-id dissoc ext-id))))))
       agent-record)))
 
-(defn update-agent!
+(defn ^{:stratum 0} update-agent!
   "Update fields on an existing agent record.
 
    Arguments:
@@ -138,17 +130,15 @@
                    state))))
     @result))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Query operations
-
-(defn get-agent
+(defn ^{:stratum 0} get-agent
   "Get an agent record by its control-plane UUID.
 
    Returns: Agent record map, or nil if not found."
   [registry agent-id]
   (get-in @registry [:agents agent-id]))
 
-(defn get-agent-by-external-id
+(defn ^{:stratum 0} get-agent-by-external-id
   "Get an agent record by its vendor-specific external ID.
 
    Returns: Agent record map, or nil if not found."
@@ -156,7 +146,7 @@
   (when-let [agent-id (get-in @registry [:by-external-id external-id])]
     (get-in @registry [:agents agent-id])))
 
-(defn list-agents
+(defn ^{:stratum 0} list-agents
   "List all registered agents.
 
    Options:
@@ -173,7 +163,23 @@
       status (filter #(= status (:agent/status %)))
       tag    (filter #(contains? (:agent/tags %) tag)))))
 
-(defn count-agents
+(defn ^{:stratum 0} agents-by-status
+  "Group agents by their current status.
+
+   Returns: Map of status keyword → seq of agent records."
+  [registry]
+  (group-by :agent/status (vals (:agents @registry))))
+
+;; Heartbeat updates
+(defn- ^{:stratum 0} agent-not-found-anomaly
+  [agent-id]
+  (anomaly/anomaly :not-found
+                   (messages/t :registry/agent-not-found)
+                   {:agent/id agent-id}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} count-agents
   "Count agents, optionally filtered by status.
 
    Returns: Integer count."
@@ -182,23 +188,7 @@
     (count (list-agents registry {:status status}))
     (count (:agents @registry))))
 
-(defn agents-by-status
-  "Group agents by their current status.
-
-   Returns: Map of status keyword → seq of agent records."
-  [registry]
-  (group-by :agent/status (vals (:agents @registry))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Heartbeat updates
-
-(defn- agent-not-found-anomaly
-  [agent-id]
-  (anomaly/anomaly :not-found
-                   (messages/t :registry/agent-not-found)
-                   {:agent/id agent-id}))
-
-(defn record-heartbeat!
+(defn ^{:stratum 1} record-heartbeat!
   "Record a heartbeat from an agent, updating timestamp and optional fields.
 
    Arguments:
@@ -226,7 +216,7 @@
                   updates)]
     (update-agent! registry agent-id updates)))
 
-(defn transition-agent!
+(defn ^{:stratum 1} transition-agent!
   "Transition an agent to a new status with validation.
 
    Arguments:
