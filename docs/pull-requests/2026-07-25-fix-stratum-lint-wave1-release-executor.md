@@ -86,9 +86,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Five real bugs found by automated review, fixed in `sandbox.clj` and `git.clj`
+### Six real bugs found by automated review, fixed in `sandbox.clj` and `git.clj`
 
-Automated review on this PR flagged five genuine, pre-existing
+Automated review on this PR flagged six genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -147,11 +147,23 @@ second one). Verified each directly against the code before fixing:
    map) — same docstring contract, same fix: `{:output ""}` (no partial
    output is available once `process/shell` has thrown).
 
-Added 6 regression tests: 4 in `sandbox_test.clj`
+6. **`push-with-https-fallback!`'s repoint and restore `exec!` calls
+   passed `{}` instead of the caller's `opts`, while the push itself
+   (correctly) used `opts`.** `opts` can carry `:workdir` (per `exec!`'s
+   own docstring), so a caller-specified working directory applied to the
+   push but silently dropped for the repoint/restore calls would leave
+   those two running against a different executor context than the push
+   they're supposed to bracket. Fixed by passing `opts` to all three
+   `exec!` calls uniformly — nothing in `opts` (currently just `:env` at
+   the only call site) is push-specific in a way that would be wrong to
+   apply to the repoint/restore calls too.
+
+Added 7 regression tests: 5 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
-`exec-executor-error-includes-output-test`), following the existing
+`exec-executor-error-includes-output-test`,
+`push-with-https-fallback-threads-opts-test`), following the existing
 tracking-exec mock pattern already used by
 `push-branch-ssh-fail-https-fallback-test` in the same file; 2 in
 `git_test.clj` (`commit-changes-rev-parse-failure-test`,
@@ -162,12 +174,13 @@ real-git-repo round-trip pattern, since simulating a `rev-parse` failure
 or a thrown exception right after/during a real git invocation isn't a
 reachable real-git state to construct directly. Each assertion targets
 behavior only the fixed code produces — verified by inspection that all
-six would fail against the pre-fix code (both old `commit-changes!`s
+seven would fail against the pre-fix code (both old `commit-changes!`s
 always report `:success? true`; the old `push-with-https-fallback!`
-always retries the push regardless of set-url's outcome and always
-returns the retry result regardless of restore's outcome; both old
-`exec!`s produce a result with no `:output` key at all on their
-error/exception branch, so `(contains? result :output)` is false).
+always retries the push regardless of set-url's outcome, always returns
+the retry result regardless of restore's outcome, and always passed `{}`
+instead of `opts` to the repoint/restore calls; both old `exec!`s produce
+a result with no `:output` key at all on their error/exception branch, so
+`(contains? result :output)` is false).
 
 ## Testing Plan
 
@@ -181,9 +194,9 @@ error/exception branch, so `(contains? result :output)` is false).
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the five review-flagged bugs (above) and added 6 regression
+6. Fixed the six review-flagged bugs (above) and added 7 regression
    tests. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
-   "(require ...) (clojure.test/run-tests ...)"`: 251 tests, 632
+   "(require ...) (clojure.test/run-tests ...)"`: 252 tests, 634
    assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
@@ -201,14 +214,14 @@ error/exception branch, so `(contains? result :output)` is false).
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the five bug fixes above are real behavior
+comment/metadata/order-only; the six bug fixes above are real behavior
 changes (a failure that used to be silently swallowed, misreported as
-success, or dropped from the result shape now surfaces correctly), scoped
-to the HTTPS-token-fallback push path, the post-commit sha lookup, and
-the generic `exec!` error/exception branches in both the sandbox and
-host-mode backends, all covered by new tests.
-`MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time for the 5
-newly-surfaced `SL003` files above.
+success, dropped from the result shape, or run against the wrong executor
+context now surfaces/behaves correctly), scoped to the HTTPS-token-fallback
+push path, the post-commit sha lookup, and the generic `exec!`
+error/exception branches in both the sandbox and host-mode backends, all
+covered by new tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at
+commit time for the 5 newly-surfaced `SL003` files above.
 
 ## Related Issues/PRs
 
@@ -230,14 +243,14 @@ newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Five review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
+- [x] Six review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
       phantom success on `rev-parse` failure; `sandbox.clj`'s
       `push-with-https-fallback!` unescaped token URL + unchecked
-      `set-url`/restore results; `git.clj`'s `commit-changes!` sibling
-      `rev-parse` bug; `sandbox.clj`'s and `git.clj`'s `exec!` both
-      omitting `:output` on their error/exception branch. 6 regression
-      tests added.
-- [x] Component tests pass (251 tests, 632 assertions, 0 failures/errors)
+      `set-url`/restore results + unthreaded `opts`; `git.clj`'s
+      `commit-changes!` sibling `rev-parse` bug; `sandbox.clj`'s and
+      `git.clj`'s `exec!` both omitting `:output` on their
+      error/exception branch. 7 regression tests added.
+- [x] Component tests pass (252 tests, 634 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

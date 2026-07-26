@@ -187,6 +187,42 @@
           "executor-level failures must still carry an :output key, matching the docstring's contract")
       (is (= "" (:output result))))))
 
+(deftest ^{:stratum 0} push-with-https-fallback-threads-opts-test
+  (testing "push-with-https-fallback! passes the caller's opts (e.g. :workdir) to the
+            set-url and restore calls, not just the push itself"
+    (let [push-count (atom 0)
+          seen-opts (atom [])
+          tracking-exec (reify
+                            dag/TaskExecutor
+                            (executor-type [_] :mock)
+                            (available? [_] (dag/ok {:available? true}))
+                            (acquire-environment! [_ _ _] (dag/ok {}))
+                            (execute! [_ _env-id command opts]
+                              (cond
+                                (clojure.string/includes? (str command) "git push")
+                                (let [n (swap! push-count inc)]
+                                  (if (= n 1)
+                                    (dag/ok {:exit-code 1 :stdout "" :stderr "signing failed"})
+                                    (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+
+                                (clojure.string/includes? (str command) "get-url")
+                                (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""})
+
+                                (clojure.string/includes? (str command) "set-url")
+                                (do (swap! seen-opts conj opts)
+                                    (dag/ok {:exit-code 0 :stdout "" :stderr ""}))
+
+                                :else (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
+                            (copy-to! [_ _ _ _] (dag/ok {}))
+                            (copy-from! [_ _ _ _] (dag/ok {}))
+                            (release-environment! [_ _] (dag/ok {}))
+                            (environment-status [_ _] (dag/ok {:status :running})))]
+      (sandbox/push-branch! tracking-exec "env-1" "feat/test"
+                            {:env {"GH_TOKEN" "tok123"} :workdir "/repo"})
+      (is (= 2 (count @seen-opts)) "repoint + restore both hit the tracked branch")
+      (is (every? #(= "/repo" (:workdir %)) @seen-opts)
+          "both set-url calls carry the caller's :workdir, matching the push"))))
+
 ;; ============================================================================
 ;; safe container path validation tests
 ;; ============================================================================

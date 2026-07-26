@@ -237,9 +237,13 @@
    interpolation. Mirrors `git/with-https-token-fallback!`: a failed
    set-url aborts before pushing against a remote that was never actually
    repointed; a failed restore fails loud with a scrub command rather than
-   silently leaving the token persisted in git config."
+   silently leaving the token persisted in git config. All three exec!
+   calls share the caller's `opts` (e.g. `:workdir`) so the repoint, push,
+   and restore all target the same executor context — a `:workdir`
+   applied only to the push would otherwise leave set-url/restore running
+   against the wrong directory."
   [executor env-id branch-name remote-url https-url push-error opts]
-  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] {})]
+  (let [set-r (exec! executor env-id ["git" "remote" "set-url" "origin" https-url] opts)]
     (if-not (result/succeeded? set-r)
       (result/shell-failure
        (msg/t :push/https-fallback-setup-failed
@@ -247,7 +251,7 @@
                :set-url-error (:error set-r)})
        {:push-succeeded? false})
       (let [retry     (exec! executor env-id (str "git push -u origin " branch-name) opts)
-            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] {})]
+            restore-r (exec! executor env-id ["git" "remote" "set-url" "origin" remote-url] opts)]
         (if (result/succeeded? restore-r)
           retry
           (let [pushed? (result/succeeded? retry)]
