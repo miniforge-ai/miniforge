@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.workaround-detector
   "Automatic detection and application of workarounds for known issues.
 
@@ -29,17 +28,16 @@
    [clojure.java.io :as io]
    [ai.miniforge.self-healing.workaround-registry :as registry]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Result predicates
+;------------------------------------------------------------------------------ Layer 0
 
-(defn succeeded?
+;; Result predicates
+(defn ^{:stratum 0} succeeded?
   "Check if a result map indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; Pattern loading with workaround metadata
-
-(defn load-workaround-patterns
+(defn ^{:stratum 0} load-workaround-patterns
   "Load workaround patterns from resources.
 
    Returns: Vector of pattern maps with :id, :regex, :workaround"
@@ -53,14 +51,8 @@
          (mapcat :patterns)
          (filter :workaround))))
 
-(def workaround-patterns
-  "Cached workaround patterns with auto-fix metadata"
-  (load-workaround-patterns))
-
-;;------------------------------------------------------------------------------ Layer 1
 ;; Pattern matching
-
-(defn matches-workaround-pattern?
+(defn ^{:stratum 0} matches-workaround-pattern?
   "Check if error message matches a workaround pattern.
 
    Arguments:
@@ -72,78 +64,16 @@
   (when (and error-msg (:regex pattern))
     (boolean (re-find (re-pattern (:regex pattern)) error-msg))))
 
-(defn match-error-to-workaround
-  "Match error to a workaround pattern.
-
-   Arguments:
-     error-result - Map with :message or exception
-
-   Returns: Pattern map with :workaround or nil"
-  [error-result]
-  (let [error-msg (if (string? error-result)
-                    error-result
-                    (or (:message error-result)
-                        (when (instance? Exception error-result)
-                          (ex-message error-result))
-                        (str error-result)))]
-    (first (filter #(matches-workaround-pattern? error-msg %) workaround-patterns))))
-
-;;------------------------------------------------------------------------------ Layer 2
 ;; User approval tracking
-
-(defn approval-file-path
+(defn ^{:stratum 0} approval-file-path
   "Get path to workaround approval tracking file.
 
    Returns: String path to ~/.miniforge/workaround_approvals.edn"
   []
   (str (config/miniforge-home) "/workaround_approvals.edn"))
 
-(defn load-approvals
-  "Load workaround approval history.
-
-   Returns: Map of pattern-id -> approval status"
-  []
-  (let [path (approval-file-path)]
-    (if (.exists (io/file path))
-      (try
-        (edn/read-string (slurp path))
-        (catch Exception _
-          {}))
-      {})))
-
-(defn save-approval!
-  "Save workaround approval.
-
-   Arguments:
-     pattern-id - Keyword pattern ID
-     approval - :always | :never | :once"
-  [pattern-id approval]
-  (let [path (approval-file-path)
-        approvals (assoc (load-approvals) pattern-id approval)]
-    (io/make-parents path)
-    (spit path (pr-str approvals))))
-
-(defn check-approval
-  "Check if workaround is approved.
-
-   Arguments:
-     pattern-id - Keyword pattern ID
-     requires-sudo? - Boolean if sudo required
-
-   Returns: :approved | :denied | :prompt"
-  [pattern-id requires-sudo?]
-  (let [approvals (load-approvals)
-        approval (get approvals pattern-id)]
-    (case approval
-      :always :approved
-      :never :denied
-      ;; No prior approval - prompt if sudo required
-      (if requires-sudo? :prompt :approved))))
-
-;;------------------------------------------------------------------------------ Layer 3
 ;; Workaround execution
-
-(defn execute-shell-command
+(defn ^{:stratum 0} execute-shell-command
   "Execute shell command and return result.
 
    Arguments:
@@ -164,7 +94,71 @@
       {:success? false
        :error (ex-message e)})))
 
-(defn apply-shell-workaround
+(defn ^{:stratum 0} apply-env-var-workaround
+  "Apply environment variable workaround.
+
+   Arguments:
+     workaround - Map with :env-var
+     _pattern-id - Keyword pattern ID (unused but kept for consistency)
+
+   Returns: Map with :success?, :message"
+  [workaround _pattern-id]
+  ;; Note: Can't set env vars for parent process, but can suggest
+  {:success? false
+   :message (str "Please set environment variable: " (:env-var workaround))
+   :suggestion (str "export " (:env-var workaround) "='your-value-here'")})
+
+(defn ^{:stratum 0} apply-backend-switch-workaround
+  "Apply backend switch workaround.
+
+   Arguments:
+     workaround - Map with :to-backend
+     _pattern-id - Keyword pattern ID (unused but kept for consistency)
+
+   Returns: Map with :success?, :message"
+  [workaround _pattern-id]
+  {:success? true
+   :message (str "Switching to backend: " (:to-backend workaround))
+   :to-backend (:to-backend workaround)})
+
+;; GitHub issue integration (for future enhancement)
+(defn ^{:stratum 0} fetch-workaround-from-github
+  "Fetch workaround suggestions from GitHub issues.
+
+   This is a placeholder for future GitHub API integration.
+
+   Arguments:
+     _error-message - String error message (unused - future implementation)
+     _repo - String repo (unused - future implementation)
+
+   Returns: Vector of suggested workarounds or nil"
+  [_error-message _repo]
+  ;; TODO: Implement GitHub API search for issues matching error message
+  ;; Search for closed issues with labels: 'workaround', 'resolved'
+  ;; Parse issue body for commands/fixes
+  ;; Return structured workaround suggestions
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} workaround-patterns
+  "Cached workaround patterns with auto-fix metadata"
+  (load-workaround-patterns))
+
+(defn ^{:stratum 1} load-approvals
+  "Load workaround approval history.
+
+   Returns: Map of pattern-id -> approval status"
+  []
+  (let [path (approval-file-path)]
+    (if (.exists (io/file path))
+      (try
+        (edn/read-string (slurp path))
+        (catch Exception _
+          {}))
+      {})))
+
+(defn ^{:stratum 1} apply-shell-workaround
   "Apply shell command workaround.
 
    Arguments:
@@ -183,34 +177,56 @@
        :message (str "Failed to execute: " command)
        :error (or (:error result) (:output result))})))
 
-(defn apply-env-var-workaround
-  "Apply environment variable workaround.
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} match-error-to-workaround
+  "Match error to a workaround pattern.
 
    Arguments:
-     workaround - Map with :env-var
-     _pattern-id - Keyword pattern ID (unused but kept for consistency)
+     error-result - Map with :message or exception
 
-   Returns: Map with :success?, :message"
-  [workaround _pattern-id]
-  ;; Note: Can't set env vars for parent process, but can suggest
-  {:success? false
-   :message (str "Please set environment variable: " (:env-var workaround))
-   :suggestion (str "export " (:env-var workaround) "='your-value-here'")})
+   Returns: Pattern map with :workaround or nil"
+  [error-result]
+  (let [error-msg (if (string? error-result)
+                    error-result
+                    (or (:message error-result)
+                        (when (instance? Exception error-result)
+                          (ex-message error-result))
+                        (str error-result)))]
+    (first (filter #(matches-workaround-pattern? error-msg %) workaround-patterns))))
 
-(defn apply-backend-switch-workaround
-  "Apply backend switch workaround.
+(defn ^{:stratum 2} save-approval!
+  "Save workaround approval.
 
    Arguments:
-     workaround - Map with :to-backend
-     _pattern-id - Keyword pattern ID (unused but kept for consistency)
+     pattern-id - Keyword pattern ID
+     approval - :always | :never | :once"
+  [pattern-id approval]
+  (let [path (approval-file-path)
+        approvals (assoc (load-approvals) pattern-id approval)]
+    (io/make-parents path)
+    (spit path (pr-str approvals))))
 
-   Returns: Map with :success?, :message"
-  [workaround _pattern-id]
-  {:success? true
-   :message (str "Switching to backend: " (:to-backend workaround))
-   :to-backend (:to-backend workaround)})
+(defn ^{:stratum 2} check-approval
+  "Check if workaround is approved.
 
-(defn apply-workaround
+   Arguments:
+     pattern-id - Keyword pattern ID
+     requires-sudo? - Boolean if sudo required
+
+   Returns: :approved | :denied | :prompt"
+  [pattern-id requires-sudo?]
+  (let [approvals (load-approvals)
+        approval (get approvals pattern-id)]
+    (case approval
+      :always :approved
+      :never :denied
+      ;; No prior approval - prompt if sudo required
+      (if requires-sudo? :prompt :approved))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} apply-workaround
   "Apply workaround based on type.
 
    Arguments:
@@ -281,10 +297,10 @@
         :applied? false
         :message "Unknown approval state"}))))
 
-;;------------------------------------------------------------------------------ Layer 4
-;; High-level API
+;------------------------------------------------------------------------------ Layer 4
 
-(defn detect-and-apply-workaround
+;; High-level API
+(defn ^{:stratum 4} detect-and-apply-workaround
   "Detect workaround for error and apply it.
 
    Arguments:
@@ -323,23 +339,3 @@
       :applied? false
       :success? false
       :message "No workaround found for this error"})))
-
-;;------------------------------------------------------------------------------ Layer 5
-;; GitHub issue integration (for future enhancement)
-
-(defn fetch-workaround-from-github
-  "Fetch workaround suggestions from GitHub issues.
-
-   This is a placeholder for future GitHub API integration.
-
-   Arguments:
-     _error-message - String error message (unused - future implementation)
-     _repo - String repo (unused - future implementation)
-
-   Returns: Vector of suggested workarounds or nil"
-  [_error-message _repo]
-  ;; TODO: Implement GitHub API search for issues matching error message
-  ;; Search for closed issues with labels: 'workaround', 'resolved'
-  ;; Parse issue body for commands/fixes
-  ;; Return structured workaround suggestions
-  nil)
