@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.interface
   "Public API for the evidence-bundle component.
    Handles evidence collection, storage, and provenance tracing per N6 spec."
@@ -29,31 +28,29 @@
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol re-exports
 
-(def EvidenceBundle
+;; Protocol re-exports
+(def ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Methods: create-bundle, get-bundle, get-bundle-by-workflow,
    query-bundles, validate-bundle, export-bundle.
    Implemented by the manager returned from create-evidence-manager."
   p/EvidenceBundle)
 
-(def ProvenanceTracer
+(def ^{:stratum 0} ProvenanceTracer
   "Protocol for tracing artifact provenance chains.
    Methods: query-provenance, trace-artifact-chain, query-intent-mismatches.
    Implemented by the manager returned from create-evidence-manager."
   p/ProvenanceTracer)
 
-(def SemanticValidator
+(def ^{:stratum 0} SemanticValidator
   "Protocol for semantic intent validation.
    Methods: validate-intent, analyze-terraform-plan, analyze-kubernetes-manifest.
    Implemented by the manager returned from create-evidence-manager."
   p/SemanticValidator)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Evidence Bundle Manager Creation
-
-(defn create-evidence-manager
+(defn ^{:stratum 0} create-evidence-manager
   "Create an evidence bundle manager.
 
    Options:
@@ -71,10 +68,8 @@
   [opts]
   (records/create-evidence-bundle-manager opts))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Evidence Bundle Operations
-
-(defn create-bundle
+(defn ^{:stratum 0} create-bundle
   "Create an evidence bundle for a completed workflow.
 
    Arguments:
@@ -94,19 +89,19 @@
   [manager workflow-id opts]
   (p/create-bundle manager workflow-id opts))
 
-(defn get-bundle
+(defn ^{:stratum 0} get-bundle
   "Retrieve an evidence bundle by ID.
    Returns evidence bundle map or nil if not found."
   [manager bundle-id]
   (p/get-bundle manager bundle-id))
 
-(defn get-bundle-by-workflow
+(defn ^{:stratum 0} get-bundle-by-workflow
   "Retrieve evidence bundle for a specific workflow.
    Returns evidence bundle map or nil if not found."
   [manager workflow-id]
   (p/get-bundle-by-workflow manager workflow-id))
 
-(defn query-bundles
+(defn ^{:stratum 0} query-bundles
   "Query evidence bundles by criteria.
 
    Criteria options:
@@ -122,13 +117,13 @@
   [manager criteria]
   (p/query-bundles manager criteria))
 
-(defn validate-bundle
+(defn ^{:stratum 0} validate-bundle
   "Validate evidence bundle structure and integrity.
    Returns {:valid? bool :errors [...]}"
   [manager bundle]
   (p/validate-bundle manager bundle))
 
-(defn export-bundle
+(defn ^{:stratum 0} export-bundle
   "Export evidence bundle to file (EDN format).
 
    Arguments:
@@ -143,10 +138,8 @@
   [manager bundle-id output-path]
   (p/export-bundle manager bundle-id output-path))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Provenance Tracing
-
-(defn query-provenance
+(defn ^{:stratum 0} query-provenance
   "Get full provenance for an artifact.
 
    Returns map with:
@@ -164,7 +157,7 @@
   [manager artifact-id]
   (p/query-provenance manager artifact-id))
 
-(defn trace-artifact-chain
+(defn ^{:stratum 0} trace-artifact-chain
   "Trace complete artifact chain for a workflow.
 
    Returns map with:
@@ -177,7 +170,7 @@
   [manager workflow-id]
   (p/trace-artifact-chain manager workflow-id))
 
-(defn query-intent-mismatches
+(defn ^{:stratum 0} query-intent-mismatches
   "Find workflows where declared intent != actual behavior.
 
    Options:
@@ -195,10 +188,8 @@
   [manager opts]
   (p/query-intent-mismatches manager opts))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Semantic Validation
-
-(defn validate-intent
+(defn ^{:stratum 0} validate-intent
   "Validate implementation matches declared intent.
 
    Arguments:
@@ -216,7 +207,7 @@
   [manager intent implementation-artifacts]
   (p/validate-intent manager intent implementation-artifacts))
 
-(defn analyze-terraform-plan
+(defn ^{:stratum 0} analyze-terraform-plan
   "Analyze Terraform plan for resource changes.
 
    Returns map with:
@@ -229,7 +220,7 @@
   [manager plan-artifact]
   (p/analyze-terraform-plan manager plan-artifact))
 
-(defn analyze-kubernetes-manifest
+(defn ^{:stratum 0} analyze-kubernetes-manifest
   "Analyze Kubernetes manifest for resource changes.
 
    Returns map with:
@@ -242,10 +233,8 @@
   [manager manifest-artifact]
   (p/analyze-kubernetes-manifest manager manifest-artifact))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Evidence Collection Helpers
-
-(defn extract-intent
+(defn ^{:stratum 0} extract-intent
   "Extract intent from workflow specification.
    Returns intent evidence map per N6 spec.
 
@@ -254,7 +243,7 @@
   [workflow-spec]
   (collector/extract-intent workflow-spec))
 
-(defn assemble-evidence-bundle
+(defn ^{:stratum 0} assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state.
 
    This is a convenience function that combines all evidence collection steps.
@@ -281,7 +270,7 @@
   [workflow-id workflow-state artifact-store & [opts]]
   (collector/assemble-evidence-bundle workflow-id workflow-state artifact-store opts))
 
-(defn append-access-log-entry
+(defn ^{:stratum 0} append-access-log-entry
   "Append an access log entry to the bundle's :evidence/access-log.
    Stamps :access-log/timestamp on the entry when absent.
    Append-only contract: existing entries are never removed or mutated.
@@ -298,7 +287,7 @@
   [bundle entry]
   (collector/append-access-log-entry bundle entry))
 
-(defn auto-collect-evidence
+(defn ^{:stratum 0} auto-collect-evidence
   "Automatically collect evidence when workflow reaches terminal state.
 
    This function checks if the workflow is complete/failed and automatically
@@ -312,10 +301,8 @@
   [workflow-id workflow-state artifact-store]
   (collector/auto-collect-evidence workflow-id workflow-state artifact-store))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Content Hashing
-
-(defn content-hash
+(defn ^{:stratum 0} content-hash
   "Compute SHA-256 digest of artifact content.
    Returns hex-encoded hash string.
 
@@ -329,66 +316,60 @@
   [content]
   (content-hash/content-hash content))
 
-;------------------------------------------------------------------------------ Layer 7b
 ;; Chain Evidence
-
-(defn create-chain-evidence
+(defn ^{:stratum 0} create-chain-evidence
   "Create a chain-level evidence record from chain results."
   [chain-def chain-result & [opts]]
   (chain-evidence/create-chain-evidence chain-def chain-result opts))
 
-(defn summarize-step
+(defn ^{:stratum 0} summarize-step
   "Create a summary of a single chain step."
   [step-result step-index]
   (chain-evidence/summarize-step step-result step-index))
 
-(defn aggregate-metrics
+(defn ^{:stratum 0} aggregate-metrics
   "Aggregate metrics across chain step results."
   [step-results]
   (chain-evidence/aggregate-metrics step-results))
 
-;------------------------------------------------------------------------------ Layer 7
 ;; Schema Exports
-
-(def intent-types
+(def ^{:stratum 0} intent-types
   "Valid intent types per N6 spec."
   schema/intent-types)
 
-(def semantic-validation-rules
+(def ^{:stratum 0} semantic-validation-rules
   "Validation rules per N6 section 2.4.1."
   schema/semantic-validation-rules)
 
-(def data-classifications
+(def ^{:stratum 0} data-classifications
   "Valid data classification levels for evidence bundles.
    Members: :public :internal :confidential :restricted."
   schema/data-classifications)
 
-(def regulatory-tag-values
+(def ^{:stratum 0} regulatory-tag-values
   "Regulatory frameworks that may apply to an evidence bundle.
    Members: :gdpr :hipaa :sox :pci."
   schema/regulatory-tag-values)
 
-(def default-retention-days
+(def ^{:stratum 0} default-retention-days
   "Default retention period for evidence bundles — 90 days.
    Callers can override per-bundle retention through :evidence/retention-policy
    in workflow-spec or opts compliance metadata."
   schema/default-retention-days)
 
-(def default-data-classification
+(def ^{:stratum 0} default-data-classification
   "Default data classification for new evidence bundles — :internal.
    Operators must explicitly assign :public, :confidential, or :restricted."
   schema/default-data-classification)
 
-(defn create-evidence-template
+(defn ^{:stratum 0} create-evidence-template
   "Create an empty evidence bundle template.
    Useful for testing or manual bundle construction."
   []
   (schema/create-evidence-bundle-template))
 
-;------------------------------------------------------------------------------ Layer 8
 ;; Artifact Extraction
-
-(defn extract-file
+(defn ^{:stratum 0} extract-file
   "Extract a single file from artifact and write to disk.
 
    File map should contain:
@@ -405,7 +386,7 @@
   [file-map]
   (extraction/extract-file file-map))
 
-(defn extract-files
+(defn ^{:stratum 0} extract-files
   "Extract multiple files from artifact and write to disk.
 
    Artifact should be a map containing:
@@ -424,7 +405,7 @@
   [artifact]
   (extraction/extract-files artifact))
 
-(defn load-artifact
+(defn ^{:stratum 0} load-artifact
   "Load artifact from an EDN file.
 
    Arguments:
@@ -437,7 +418,7 @@
   [artifact-path]
   (extraction/load-artifact artifact-path))
 
-(defn extract-artifact-from-file
+(defn ^{:stratum 0} extract-artifact-from-file
   "Load artifact from file and extract all files to disk.
 
    Convenience function combining load-artifact and extract-files.
@@ -452,7 +433,7 @@
   [artifact-path]
   (extraction/extract-artifact-from-file artifact-path))
 
-(defn validate-artifact
+(defn ^{:stratum 0} validate-artifact
   "Validate artifact structure for extraction.
 
    Returns map with:
@@ -465,7 +446,6 @@
   (extraction/validate-artifact artifact))
 
 ;------------------------------------------------------------------------------ Rich Comment
-
 (comment
   (require '[ai.miniforge.artifact.interface :as artifact])
 

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.compliance-metadata-test
   "Tests for compliance metadata assembly, defaults, overrides, and access-log.
 
@@ -34,51 +33,75 @@
    [ai.miniforge.evidence-bundle.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fixtures and Named Constants
 
-(def ^:private workflow-id
+;; Fixtures and Named Constants
+(def ^{:stratum 0} ^:private workflow-id
   #uuid "cafebabe-0000-0000-0000-000000000001")
 
-(def ^:private base-workflow-state
+(def ^{:stratum 0} ^:private base-workflow-state
   {:workflow/status :completed
    :workflow/spec   {:intent/type :update
                      :description "compliance-metadata test workflow"}
    :workflow/phases {}})
 
-(def ^:private one-year-retention-days
+(def ^{:stratum 0} ^:private one-year-retention-days
   "Retention period used in override tests to verify a non-default value
    is accepted and survives the round-trip through assemble-evidence-bundle."
   365)
 
-(def ^:private two-year-retention-days
+(def ^{:stratum 0} ^:private two-year-retention-days
   "Two-year retention used in the validate-schema round-trip test to exercise
    a non-default :retain-days value end-to-end through assemble-evidence-bundle."
   730)
 
-(def ^:private seven-year-retention-days
+(def ^{:stratum 0} ^:private seven-year-retention-days
   "Seven-year retention (2555 days) used to test full override of all three
    retention-policy sub-keys simultaneously. SOX mandates 7 years."
   2555)
 
-(def ^:private preserved-access-log-first-timestamp
+(def ^{:stratum 0} ^:private preserved-access-log-first-timestamp
   "Stable timestamp for the first pre-existing access-log entry; verifies
    append-access-log-entry preserves earlier entries without mutation."
   (java.time.Instant/parse "2024-01-01T00:00:00Z"))
 
-(def ^:private preserved-access-log-second-timestamp
+(def ^{:stratum 0} ^:private preserved-access-log-second-timestamp
   "Stable timestamp for the second pre-existing access-log entry; verifies
    append ordering across multiple pre-existing entries."
   (java.time.Instant/parse "2024-06-01T00:00:00Z"))
 
-(def ^:private caller-supplied-access-log-timestamp
+(def ^{:stratum 0} ^:private caller-supplied-access-log-timestamp
   "Stable timestamp supplied by the caller; verifies append-access-log-entry
    does not replace a timestamp that is already present."
   (java.time.Instant/parse "2024-03-15T12:00:00Z"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; assemble-evidence-bundle: Defaults and Overrides
+;; append-access-log-entry and validate-schema Round-Trips
+(deftest ^{:stratum 0} append-access-log-entry-appends-entries-correctly
+  (testing "entry is appended to an empty access log"
+    (let [result (collector/append-access-log-entry
+                  {:evidence/access-log []}
+                  {:access-log/principal "alice@example.com"
+                   :access-log/action    :read
+                   :access-log/timestamp (java.time.Instant/now)})]
+      (is (= 1 (count (:evidence/access-log result))))
+      (is (= "alice@example.com"
+             (:access-log/principal (first (:evidence/access-log result)))))))
+  (testing "entry lands after pre-existing entries"
+    (let [existing {:access-log/principal "bob"
+                    :access-log/action    :export
+                    :access-log/timestamp (java.time.Instant/now)}
+          result   (collector/append-access-log-entry
+                    {:evidence/access-log [existing]}
+                    {:access-log/principal "alice"
+                     :access-log/action    :read
+                     :access-log/timestamp (java.time.Instant/now)})]
+      (is (= 2 (count (:evidence/access-log result))))
+      (is (= "bob"   (:access-log/principal (first  (:evidence/access-log result)))))
+      (is (= "alice" (:access-log/principal (second (:evidence/access-log result))))))))
 
-(deftest assemble-produces-default-compliance-metadata
+;------------------------------------------------------------------------------ Layer 1
+
+;; assemble-evidence-bundle: Defaults and Overrides
+(deftest ^{:stratum 1} assemble-produces-default-compliance-metadata
   (testing "assembled bundle carries default data-classification (:internal)"
     (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
       (is (= schema/default-data-classification
@@ -104,7 +127,7 @@
       (is (vector? (:evidence/access-log bundle)))
       (is (empty? (:evidence/access-log bundle))))))
 
-(deftest assemble-applies-workflow-spec-compliance-overrides
+(deftest ^{:stratum 1} assemble-applies-workflow-spec-compliance-overrides
   (testing "workflow-spec :compliance overrides :evidence/data-classification"
     (let [state  (assoc base-workflow-state :workflow/spec
                         {:intent/type :update :description "classified"
@@ -124,7 +147,7 @@
           bundle (collector/assemble-evidence-bundle workflow-id state nil)]
       (is (= #{:gdpr :sox} (:evidence/regulatory-tags bundle))))))
 
-(deftest assemble-applies-opts-compliance-overrides
+(deftest ^{:stratum 1} assemble-applies-opts-compliance-overrides
   (testing "opts :compliance overrides :evidence/data-classification"
     (let [bundle (collector/assemble-evidence-bundle
                   workflow-id base-workflow-state nil
@@ -141,7 +164,7 @@
                   {:compliance {:evidence/created-by "operator-alice"}})]
       (is (= "operator-alice" (:evidence/created-by bundle))))))
 
-(deftest assemble-partial-retention-policy-merges-with-defaults
+(deftest ^{:stratum 1} assemble-partial-retention-policy-merges-with-defaults
   (testing "only :legal-hold? true — :retain-days and :auto-delete? survive from defaults"
     (let [bundle (collector/assemble-evidence-bundle
                   workflow-id base-workflow-state nil
@@ -169,33 +192,7 @@
       (is (false? (get-in bundle [:evidence/retention-policy :auto-delete?])))
       (is (true?  (get-in bundle [:evidence/retention-policy :legal-hold?]))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; append-access-log-entry and validate-schema Round-Trips
-
-(deftest append-access-log-entry-appends-entries-correctly
-  (testing "entry is appended to an empty access log"
-    (let [result (collector/append-access-log-entry
-                  {:evidence/access-log []}
-                  {:access-log/principal "alice@example.com"
-                   :access-log/action    :read
-                   :access-log/timestamp (java.time.Instant/now)})]
-      (is (= 1 (count (:evidence/access-log result))))
-      (is (= "alice@example.com"
-             (:access-log/principal (first (:evidence/access-log result)))))))
-  (testing "entry lands after pre-existing entries"
-    (let [existing {:access-log/principal "bob"
-                    :access-log/action    :export
-                    :access-log/timestamp (java.time.Instant/now)}
-          result   (collector/append-access-log-entry
-                    {:evidence/access-log [existing]}
-                    {:access-log/principal "alice"
-                     :access-log/action    :read
-                     :access-log/timestamp (java.time.Instant/now)})]
-      (is (= 2 (count (:evidence/access-log result))))
-      (is (= "bob"   (:access-log/principal (first  (:evidence/access-log result)))))
-      (is (= "alice" (:access-log/principal (second (:evidence/access-log result))))))))
-
-(deftest append-access-log-entry-preserves-existing-entries
+(deftest ^{:stratum 1} append-access-log-entry-preserves-existing-entries
   (testing "append-only: existing entries are never removed or mutated"
     (let [e1     {:access-log/principal "alice"
                   :access-log/action :read
@@ -219,7 +216,7 @@
              (:access-log/timestamp (nth log 1))))
       (is (= "carol" (:access-log/principal (nth log 2)))))))
 
-(deftest append-access-log-entry-stamps-timestamp-when-absent
+(deftest ^{:stratum 1} append-access-log-entry-stamps-timestamp-when-absent
   (testing ":access-log/timestamp is auto-added when missing"
     (let [result (collector/append-access-log-entry
                   {:evidence/access-log []}
@@ -238,7 +235,7 @@
       (is (= caller-supplied-access-log-timestamp
              (:access-log/timestamp logged))))))
 
-(deftest assembled-bundle-passes-validate-schema
+(deftest ^{:stratum 1} assembled-bundle-passes-validate-schema
   (testing "default assembled bundle satisfies evidence-bundle-schema"
     (let [result (schema/validate-schema schema/evidence-bundle-schema
                                          (collector/assemble-evidence-bundle

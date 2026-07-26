@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.schema-test
   "Tests for evidence bundle schema validation.
 
@@ -28,9 +27,9 @@
    [ai.miniforge.evidence-bundle.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Core Schema Validation
 
-(deftest test-validate-schema-basic
+;; Core Schema Validation
+(deftest ^{:stratum 0} test-validate-schema-basic
   (testing "validate-schema accepts valid data"
     (let [valid-data {:constraint/type :pre
                       :constraint/description "Must exist"}
@@ -50,10 +49,8 @@
       (is (not (:valid? result)))
       (is (some #(= :constraint/description (:key %)) (:errors result))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Compliance Metadata Schema
-
-(deftest test-data-classifications-enum-contains-expected-members
+(deftest ^{:stratum 0} test-data-classifications-enum-contains-expected-members
   (testing "data-classifications contains all four N6-specified levels"
     (is (contains? schema/data-classifications :public))
     (is (contains? schema/data-classifications :internal))
@@ -62,7 +59,7 @@
   (testing "data-classifications has no extra members beyond the four specified"
     (is (= 4 (count schema/data-classifications)))))
 
-(deftest test-regulatory-tag-values-enum-contains-expected-members
+(deftest ^{:stratum 0} test-regulatory-tag-values-enum-contains-expected-members
   (testing "regulatory-tag-values contains all four N6-specified frameworks"
     (is (contains? schema/regulatory-tag-values :gdpr))
     (is (contains? schema/regulatory-tag-values :hipaa))
@@ -71,14 +68,14 @@
   (testing "regulatory-tag-values has no extra members beyond the four specified"
     (is (= 4 (count schema/regulatory-tag-values)))))
 
-(deftest test-retention-policy-schema-accepts-valid-map
+(deftest ^{:stratum 0} test-retention-policy-schema-accepts-valid-map
   (testing "retention-policy-schema accepts a correctly shaped policy"
     (let [result (schema/validate-schema schema/retention-policy-schema
                                          {:retain-days 30 :auto-delete? true :legal-hold? false})]
       (is (:valid? result))
       (is (empty? (:errors result))))))
 
-(deftest test-retention-policy-schema-rejects-missing-keys
+(deftest ^{:stratum 0} test-retention-policy-schema-rejects-missing-keys
   (testing "retention-policy-schema rejects a map missing :retain-days"
     (let [result (schema/validate-schema schema/retention-policy-schema
                                          {:auto-delete? true :legal-hold? false})]
@@ -95,7 +92,7 @@
       (is (not (:valid? result)))
       (is (some #(= :auto-delete? (:key %)) (:errors result))))))
 
-(deftest test-access-log-entry-schema-accepts-valid-entry
+(deftest ^{:stratum 0} test-access-log-entry-schema-accepts-valid-entry
   (testing "access-log-entry-schema accepts a correctly shaped entry"
     (let [entry  {:access-log/principal "alice@example.com"
                   :access-log/action    :read
@@ -111,7 +108,7 @@
           result (schema/validate-schema schema/access-log-entry-schema entry)]
       (is (:valid? result)))))
 
-(deftest test-access-log-entry-schema-rejects-missing-fields
+(deftest ^{:stratum 0} test-access-log-entry-schema-rejects-missing-fields
   (testing "rejects entry missing :access-log/action"
     (let [result (schema/validate-schema schema/access-log-entry-schema
                                          {:access-log/principal "alice"
@@ -131,7 +128,7 @@
       (is (not (:valid? result)))
       (is (some #(= :access-log/timestamp (:key %)) (:errors result))))))
 
-(deftest test-evidence-bundle-schema-accepts-bundle-with-new-optional-fields
+(deftest ^{:stratum 0} test-evidence-bundle-schema-accepts-bundle-with-new-optional-fields
   (testing "evidence-bundle-schema accepts a bundle carrying all six new compliance fields"
     (let [bundle (-> (schema/create-evidence-bundle-template)
                      (assoc :evidence-bundle/workflow-id (random-uuid))
@@ -173,7 +170,7 @@
       (is (not (:valid? result)))
       (is (some #(= :evidence/regulatory-tags (:key %)) (:errors result))))))
 
-(deftest test-evidence-bundle-schema-backwards-compatible
+(deftest ^{:stratum 0} test-evidence-bundle-schema-backwards-compatible
   (testing "Bundles without the new compliance fields still pass validation"
     (let [legacy {:evidence-bundle/id (random-uuid)
                   :evidence-bundle/workflow-id (random-uuid)
@@ -187,7 +184,7 @@
           "Legacy bundle without compliance fields must pass schema validation")
       (is (empty? (:errors result))))))
 
-(deftest test-evidence-bundle-schema-validates-nested-compliance-fields
+(deftest ^{:stratum 0} test-evidence-bundle-schema-validates-nested-compliance-fields
   (testing "evidence-bundle-schema validates :evidence/retention-policy via retention-policy-schema"
     (let [bundle (-> (schema/create-evidence-bundle-template)
                      (assoc :evidence-bundle/workflow-id (random-uuid))
@@ -215,7 +212,7 @@
       (is (not (:valid? result)))
       (is (some #(= :evidence/access-log (:key %)) (:errors result))))))
 
-(deftest test-create-evidence-bundle-template-compliance-defaults
+(deftest ^{:stratum 0} test-create-evidence-bundle-template-compliance-defaults
   (testing "Template emits all six compliance fields with correct defaults"
     (let [bundle (schema/create-evidence-bundle-template)]
       (is (= :internal (:evidence/data-classification bundle))

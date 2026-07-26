@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle
   "Public protocol for evidence bundle management.
    This is the main extensibility point for evidence collection and retrieval.")
 
-(defprotocol EvidenceBundle
+;------------------------------------------------------------------------------ Layer 0
+
+(defprotocol ^{:stratum 0} EvidenceBundle
   "Protocol for creating, storing, and querying evidence bundles.
    Evidence bundles provide complete audit trails from intent to outcome."
 
@@ -49,7 +50,7 @@
     "Export evidence bundle to file (EDN or JSON).
      Returns true on success, false on error."))
 
-(defprotocol ProvenanceTracer
+(defprotocol ^{:stratum 0} ProvenanceTracer
   "Protocol for tracing artifact provenance chains."
 
   (query-provenance [this artifact-id]
@@ -64,7 +65,7 @@
     "Find workflows where declared intent != actual behavior.
      Returns vector of mismatch records."))
 
-(defprotocol SemanticValidator
+(defprotocol ^{:stratum 0} SemanticValidator
   "Protocol for semantic intent validation."
 
   (validate-intent [this intent implementation-artifacts]

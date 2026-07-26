@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.workflow-integration
   "Integration hooks for automatic evidence collection in workflows.
    Provides WorkflowObserver implementation for evidence bundle generation."
@@ -25,49 +24,17 @@
    [ai.miniforge.workflow.interface :as workflow]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Observer Record
 
-(defrecord EvidenceCollector [evidence-manager artifact-store logger]
+;; Observer Record
+(defrecord ^{:stratum 0} EvidenceCollector [evidence-manager artifact-store logger]
   ;; Implement WorkflowObserver protocol if it exists in workflow component
   ;; This enables automatic evidence collection on workflow completion
 
   Object
   (toString [_] "EvidenceCollector"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Observer Factory
-
-(defn create-evidence-collector
-  "Create an evidence collector for workflow integration.
-
-   The evidence collector acts as a workflow observer that automatically
-   creates evidence bundles when workflows complete (success or failure).
-
-   Options:
-   - :evidence-manager - Evidence bundle manager (required)
-   - :artifact-store - Artifact store for provenance (required)
-   - :logger - Optional logger instance
-
-   Example:
-     (def collector (create-evidence-collector
-                     {:evidence-manager mgr
-                      :artifact-store store}))
-     (workflow/add-observer workflow collector)"
-  [opts]
-  (let [{:keys [evidence-manager artifact-store logger]} opts]
-    (when-not evidence-manager
-      (throw (ex-info "evidence-manager required" {:opts opts})))
-    (when-not artifact-store
-      (throw (ex-info "artifact-store required" {:opts opts})))
-    (->EvidenceCollector
-     evidence-manager
-     artifact-store
-     (or logger (log/create-logger {:min-level :info})))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Workflow Completion Handler
-
-(defn on-workflow-complete
+(defn ^{:stratum 0} on-workflow-complete
   "Handle workflow completion event.
    Automatically creates evidence bundle for the completed workflow.
 
@@ -102,10 +69,8 @@
                          :trace (vec (.getStackTrace e))}})
       nil)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Integration Utilities
-
-(defn attach-to-workflow
+(defn ^{:stratum 0} attach-to-workflow
   "Attach evidence collector to a workflow instance.
 
    This is a convenience function that adds the evidence collector
@@ -125,7 +90,39 @@
   (workflow/add-observer workflow-instance collector)
   workflow-instance)
 
-(defn create-and-attach-evidence-collector
+;------------------------------------------------------------------------------ Layer 1
+
+;; Observer Factory
+(defn ^{:stratum 1} create-evidence-collector
+  "Create an evidence collector for workflow integration.
+
+   The evidence collector acts as a workflow observer that automatically
+   creates evidence bundles when workflows complete (success or failure).
+
+   Options:
+   - :evidence-manager - Evidence bundle manager (required)
+   - :artifact-store - Artifact store for provenance (required)
+   - :logger - Optional logger instance
+
+   Example:
+     (def collector (create-evidence-collector
+                     {:evidence-manager mgr
+                      :artifact-store store}))
+     (workflow/add-observer workflow collector)"
+  [opts]
+  (let [{:keys [evidence-manager artifact-store logger]} opts]
+    (when-not evidence-manager
+      (throw (ex-info "evidence-manager required" {:opts opts})))
+    (when-not artifact-store
+      (throw (ex-info "artifact-store required" {:opts opts})))
+    (->EvidenceCollector
+     evidence-manager
+     artifact-store
+     (or logger (log/create-logger {:min-level :info})))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-and-attach-evidence-collector
   "Create evidence collector and attach to workflow in one step.
 
    This is the simplest way to enable automatic evidence collection.
@@ -149,7 +146,6 @@
     (attach-to-workflow workflow collector)))
 
 ;------------------------------------------------------------------------------ Rich Comment
-
 (comment
   (require '[ai.miniforge.artifact.interface :as artifact])
 

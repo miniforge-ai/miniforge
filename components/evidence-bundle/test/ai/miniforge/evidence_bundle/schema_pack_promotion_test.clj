@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.schema-pack-promotion-test
   "Tests for pack-promotion-schema and evidence-bundle pack-promotions integration."
   (:require
@@ -23,9 +22,9 @@
    [ai.miniforge.evidence-bundle.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test Helpers
 
-(defn- make-test-promotion
+;; Test Helpers
+(defn- ^{:stratum 0} make-test-promotion
   "Build a minimal valid pack-promotion map with the given justification string.
    All other fields use stable test values to isolate justification-specific tests."
   [justification]
@@ -40,10 +39,8 @@
    :pack-hash               "sha256:test"
    :pack-signature          ""})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack Promotion Schema and Bundle Integration Tests
-
-(deftest test-pack-promotion-schema-valid
+(deftest ^{:stratum 0} test-pack-promotion-schema-valid
   (testing "Valid pack promotion record passes schema validation"
     (let [promotion {:pack/id "test-pack-001"
                      :pack/type :knowledge
@@ -60,7 +57,7 @@
           "Valid promotion record should pass schema validation")
       (is (empty? (:errors result))))))
 
-(deftest test-pack-promotion-schema-requires-justification
+(deftest ^{:stratum 0} test-pack-promotion-schema-requires-justification
   (testing "Missing :promotion-justification fails validation"
     (let [promotion {:pack/id "test-pack-001"
                      :pack/type :knowledge
@@ -78,31 +75,7 @@
                 (:errors result))
           "Should report promotion-justification as missing"))))
 
-(deftest test-pack-promotion-justification-field
-  (testing "Promotion without justification fails; with justification passes"
-    (let [base             (dissoc (make-test-promotion "") :promotion-justification)
-          result-without   (schema/validate-schema schema/pack-promotion-schema base)
-          result-with      (schema/validate-schema schema/pack-promotion-schema
-                                                   (assoc base :promotion-justification
-                                                          "passed knowledge-safety scans"))]
-      (is (not (:valid? result-without))
-          "Promotion without justification should fail")
-      (is (:valid? result-with)
-          "Promotion with justification should pass")
-      (is (empty? (:errors result-with))))))
-
-(deftest test-pack-promotion-trust-levels
-  (testing "Valid trust levels pass; invalid trust level fails"
-    (let [valid-promotion   (make-test-promotion "passed scans")
-          invalid-promotion (assoc valid-promotion :from-trust :invalid-level)
-          result-valid      (schema/validate-schema schema/pack-promotion-schema valid-promotion)
-          result-invalid    (schema/validate-schema schema/pack-promotion-schema invalid-promotion)]
-      (is (:valid? result-valid)
-          "Valid trust levels should pass")
-      (is (not (:valid? result-invalid))
-          "Invalid trust level should fail"))))
-
-(deftest test-evidence-bundle-with-pack-promotions
+(deftest ^{:stratum 0} test-evidence-bundle-with-pack-promotions
   (testing "Evidence bundle accepts pack-promotions field"
     (let [bundle    (assoc (schema/create-evidence-bundle-template)
                            :evidence-bundle/workflow-id (random-uuid))
@@ -125,14 +98,40 @@
           (str "Bundle with pack promotions should pass evidence-bundle-schema; errors: "
                (:errors result))))))
 
-(deftest test-evidence-bundle-template-includes-pack-promotions
+(deftest ^{:stratum 0} test-evidence-bundle-template-includes-pack-promotions
   (testing "Evidence bundle template initializes pack-promotions as empty vector"
     (let [bundle (schema/create-evidence-bundle-template)]
       (is (contains? bundle :evidence/pack-promotions))
       (is (vector? (:evidence/pack-promotions bundle)))
       (is (empty? (:evidence/pack-promotions bundle))))))
 
-(deftest test-justification-content-examples
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} test-pack-promotion-justification-field
+  (testing "Promotion without justification fails; with justification passes"
+    (let [base             (dissoc (make-test-promotion "") :promotion-justification)
+          result-without   (schema/validate-schema schema/pack-promotion-schema base)
+          result-with      (schema/validate-schema schema/pack-promotion-schema
+                                                   (assoc base :promotion-justification
+                                                          "passed knowledge-safety scans"))]
+      (is (not (:valid? result-without))
+          "Promotion without justification should fail")
+      (is (:valid? result-with)
+          "Promotion with justification should pass")
+      (is (empty? (:errors result-with))))))
+
+(deftest ^{:stratum 1} test-pack-promotion-trust-levels
+  (testing "Valid trust levels pass; invalid trust level fails"
+    (let [valid-promotion   (make-test-promotion "passed scans")
+          invalid-promotion (assoc valid-promotion :from-trust :invalid-level)
+          result-valid      (schema/validate-schema schema/pack-promotion-schema valid-promotion)
+          result-invalid    (schema/validate-schema schema/pack-promotion-schema invalid-promotion)]
+      (is (:valid? result-valid)
+          "Valid trust levels should pass")
+      (is (not (:valid? result-invalid))
+          "Invalid trust level should fail"))))
+
+(deftest ^{:stratum 1} test-justification-content-examples
   (testing "Common justification strings all pass schema validation"
     (let [justifications ["passed knowledge-safety scans with no violations"
                           "manual review approved by security team"
@@ -145,7 +144,7 @@
       (is (every? :valid? results))
       (is (every? #(empty? (:errors %)) results)))))
 
-(deftest test-schema-does-not-enforce-justification-content
+(deftest ^{:stratum 1} test-schema-does-not-enforce-justification-content
   (testing "Schema accepts empty justification string; content enforcement is business-layer concern"
     (let [result (schema/validate-schema schema/pack-promotion-schema
                                          (make-test-promotion ""))]

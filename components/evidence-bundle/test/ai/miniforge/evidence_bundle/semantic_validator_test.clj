@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.semantic-validator-test
   "Tests for semantic validation logic."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as sem-val]))
 
-;------------------------------------------------------------------------------ Terraform Plan Analysis
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest analyze-terraform-plan-test
+;------------------------------------------------------------------------------ Terraform Plan Analysis
+(deftest ^{:stratum 0} analyze-terraform-plan-test
   (testing "Counts resource creates"
     (let [plan-artifact {:artifact/type :terraform-plan
                         :artifact/content "aws_instance.web will be created\naws_s3_bucket.data will be created"}
@@ -69,8 +69,7 @@
       (is (= 1 (:destroys result))))))
 
 ;------------------------------------------------------------------------------ Kubernetes Manifest Analysis
-
-(deftest analyze-kubernetes-manifest-test
+(deftest ^{:stratum 0} analyze-kubernetes-manifest-test
   (testing "Counts resources in manifest"
     (let [manifest-artifact {:artifact/type :kubernetes-manifest
                             :artifact/content
@@ -81,8 +80,7 @@
       (is (= 3 (:creates result))))))
 
 ;------------------------------------------------------------------------------ Intent Validation
-
-(deftest validate-intent-import-test
+(deftest ^{:stratum 0} validate-intent-import-test
   (testing "Import intent passes with no changes"
     (let [intent {:intent/type :import}
           artifacts []
@@ -102,7 +100,7 @@
       (is (= 1 (:semantic-validation/resource-creates result)))
       (is (= :create (:semantic-validation/actual-behavior result))))))
 
-(deftest validate-intent-create-test
+(deftest ^{:stratum 0} validate-intent-create-test
   (testing "Create intent passes with creates"
     (let [intent {:intent/type :create}
           artifacts [{:artifact/type :terraform-plan
@@ -120,7 +118,7 @@
       (is (seq (:violations result)))
       (is (= 0 (:semantic-validation/resource-creates result))))))
 
-(deftest validate-intent-update-test
+(deftest ^{:stratum 0} validate-intent-update-test
   (testing "Update intent passes with updates only"
     (let [intent {:intent/type :update}
           artifacts [{:artifact/type :terraform-plan
@@ -137,7 +135,7 @@
       (is (not (:passed? result)))
       (is (seq (:violations result))))))
 
-(deftest validate-intent-destroy-test
+(deftest ^{:stratum 0} validate-intent-destroy-test
   (testing "Destroy intent passes with destroys"
     (let [intent {:intent/type :destroy}
           artifacts [{:artifact/type :terraform-plan
@@ -153,7 +151,7 @@
           result (sem-val/validate-intent-impl intent artifacts)]
       (is (not (:passed? result))))))
 
-(deftest validate-intent-migrate-test
+(deftest ^{:stratum 0} validate-intent-migrate-test
   (testing "Migrate intent passes with creates and destroys"
     (let [intent {:intent/type :migrate}
           artifacts [{:artifact/type :terraform-plan
@@ -172,7 +170,7 @@
           result (sem-val/validate-intent-impl intent artifacts)]
       (is (not (:passed? result))))))
 
-(deftest validate-intent-refactor-test
+(deftest ^{:stratum 0} validate-intent-refactor-test
   (testing "Refactor intent passes with no resource changes"
     (let [intent {:intent/type :refactor}
           artifacts []
