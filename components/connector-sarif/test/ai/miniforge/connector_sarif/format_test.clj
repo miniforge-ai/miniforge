@@ -19,6 +19,7 @@
   (:require [clojure.test :refer [deftest testing is]]
             [cheshire.core :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [ai.miniforge.connector-sarif.format :as sut]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -111,11 +112,11 @@
 (defn- ^{:stratum 1} temp-csv!
   "Build a CSV temp file from a vector of header strings and a vector of row vectors."
   [headers rows]
-  (let [header-line (clojure.string/join "," headers)
+  (let [header-line (str/join "," headers)
         body (when (seq rows)
                (str "\n"
-                    (clojure.string/join "\n"
-                                         (map #(clojure.string/join "," %) rows))))
+                    (str/join "\n"
+                              (map #(str/join "," %) rows))))
         content (str header-line body "\n")]
     (temp-file! ".csv" content)))
 
