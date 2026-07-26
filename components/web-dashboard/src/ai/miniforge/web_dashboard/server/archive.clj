@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.archive
   "HTTP handlers for archived workflow endpoints."
   (:require
@@ -25,32 +24,30 @@
    [ai.miniforge.web-dashboard.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Archive API handlers
 
-(defn handle-archived-workflows
+;; Archive API handlers
+(defn ^{:stratum 0} handle-archived-workflows
   "GET /api/archived-workflows — archived workflow list fragment."
   [state _params]
   (let [archived (state/get-archived-workflows state)
         loading? (state/archive-loading? state)]
     (responses/html-response (views/archived-workflow-list-fragment archived loading?))))
 
-(defn handle-archived-workflow-events
+(defn ^{:stratum 0} handle-archived-workflow-events
   "GET /api/archive/{id}/events — load full events on-demand."
   [state workflow-id]
   (responses/html-response
    (views/workflow-events-fragment
     (state/get-archived-workflow-events state workflow-id))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Mutation handlers
-
-(defn handle-delete
+(defn ^{:stratum 0} handle-delete
   "POST /api/archive/{id}/delete — delete an archived workflow and its file."
   [state workflow-id]
   (state/delete-archived-workflow! state workflow-id)
   (responses/json-response {:status "deleted"}))
 
-(defn handle-retention
+(defn ^{:stratum 0} handle-retention
   "POST /api/archive/retention — apply retention policy."
   [state body]
   (try

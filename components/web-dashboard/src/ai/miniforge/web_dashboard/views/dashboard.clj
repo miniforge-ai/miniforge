@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.dashboard
   "Dashboard view components with high information density."
   (:require
@@ -20,9 +19,9 @@
    [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Dashboard fragments
 
-(defn stats-fragment
+;; Dashboard fragments
+(defn ^{:stratum 0} stats-fragment
   "Stats cards fragment for htmx updates."
   [stats]
   (html
@@ -44,7 +43,7 @@
                  {:trend (if (> (get-in stats [:health :critical]) 0) :down :neutral)
                   :href "/dag"})]))
 
-(defn risk-analysis-fragment
+(defn ^{:stratum 0} risk-analysis-fragment
   "Risk analysis fragment for htmx updates."
   [risk-data]
   (html
@@ -66,7 +65,7 @@
             (msg/t :dash/risk-factor
                    {:type (name (:type factor)) :count (:count factor)})])]])]]))
 
-(defn activity-fragment
+(defn ^{:stratum 0} activity-fragment
   "Recent activity fragment for htmx updates."
   [activities]
   (html
@@ -84,7 +83,7 @@
         [:span.activity-message (:message activity)]
         [:a.activity-link {:href (str "/train/" (:train-id activity))} "→"]])]]))
 
-(defn workflow-summary-fragment
+(defn ^{:stratum 0} workflow-summary-fragment
   "Workflow summary fragment for dashboard."
   [workflows]
   (html
@@ -109,7 +108,7 @@
             [:div.wf-progress-fill
              {:style (str "width:" (get wf :progress 0) "%")}]]]])])]))
 
-(defn fleet-grid-fragment
+(defn ^{:stratum 0} fleet-grid-fragment
   "Fleet status grid fragment for htmx updates."
   [fleet-state]
   (html
@@ -122,9 +121,9 @@
         [:div.pr-count (msg/t :pr/count {:count (count prs)})]])]]))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Main dashboard view
 
-(defn dashboard-view
+;; Main dashboard view
+(defn ^{:stratum 1} dashboard-view
   "Main dashboard view with high information density."
   [layout state]
   (layout (msg/t :layout/nav-dashboard)

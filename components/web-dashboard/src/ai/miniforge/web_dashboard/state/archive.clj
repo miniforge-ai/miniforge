@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.archive
   "Archived workflow state — queries, deletion, retention."
   (:require
@@ -24,9 +23,9 @@
    [ai.miniforge.web-dashboard.state.workflows :as workflows]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure helpers
 
-(defn normalize-ts
+;; Pure helpers
+(defn ^{:stratum 0} normalize-ts
   "Normalize timestamp to java.util.Date for comparison."
   [ts]
   (cond
@@ -36,44 +35,21 @@
                       (catch Exception _ nil))
     :else nil))
 
-(defn ts->epoch-ms
-  "Timestamp → epoch millis, or 0 if unparseable."
-  [ts]
-  (if-let [d (normalize-ts ts)] (.getTime d) 0))
-
-(defn exclude-live-ids
+(defn ^{:stratum 0} exclude-live-ids
   "Remove any archived workflows whose IDs also appear in the live list.
    Arg order supports ->> threading: live-workflows first, archived-vals last."
   [live-workflows archived-vals]
   (let [live-ids (->> live-workflows (map (comp str :id)) set)]
     (remove #(contains? live-ids (str (:id %))) archived-vals)))
 
-(defn newest-first
-  "Sort workflows by :started-at descending."
-  [workflows]
-  (sort-by #(- (ts->epoch-ms (:started-at %))) workflows))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Queries
-
-(defn archive-loading?
+(defn ^{:stratum 0} archive-loading?
   "True while the background archive scan is still running."
   [state]
   (let [flag (:archive-loading? @state)]
     (if flag @flag false)))
 
-(defn get-archived-workflows
-  "Archived workflows sorted newest-first, excluding any in the live list."
-  [state]
-  (let [archive-atom (:archived-workflows @state)
-        archived     (when archive-atom (vals @archive-atom))
-        live         (workflows/get-workflows state)]
-    (->> archived
-         (exclude-live-ids live)
-         newest-first
-         vec)))
-
-(defn get-archived-workflow-events
+(defn ^{:stratum 0} get-archived-workflow-events
   "Read full events from an archived workflow's .edn file on demand.
    Returns events vector (most recent first, limited to 200)."
   [state workflow-id]
@@ -92,10 +68,8 @@
         (catch Exception _ []))
       [])))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Mutations
-
-(defn delete-archived-workflow!
+(defn ^{:stratum 0} delete-archived-workflow!
   "Remove an archived workflow from state and delete its .edn file."
   [state workflow-id]
   (let [archive-atom (:archived-workflows @state)
@@ -109,7 +83,21 @@
         (catch Exception _ nil)))
     true))
 
-(defn apply-retention!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ts->epoch-ms
+  "Timestamp → epoch millis, or 0 if unparseable."
+  [ts]
+  (if-let [d (normalize-ts ts)] (.getTime d) 0))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} newest-first
+  "Sort workflows by :started-at descending."
+  [workflows]
+  (sort-by #(- (ts->epoch-ms (:started-at %))) workflows))
+
+(defn ^{:stratum 2} apply-retention!
   "Delete archived workflows older than max-age-days. Returns count deleted."
   [state max-age-days]
   (let [archive-atom (:archived-workflows @state)
@@ -121,3 +109,16 @@
     (doseq [wf to-delete]
       (delete-archived-workflow! state (:id wf)))
     (count to-delete)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} get-archived-workflows
+  "Archived workflows sorted newest-first, excluding any in the live list."
+  [state]
+  (let [archive-atom (:archived-workflows @state)
+        archived     (when archive-atom (vals @archive-atom))
+        live         (workflows/get-workflows state)]
+    (->> archived
+         (exclude-live-ids live)
+         newest-first
+         vec)))

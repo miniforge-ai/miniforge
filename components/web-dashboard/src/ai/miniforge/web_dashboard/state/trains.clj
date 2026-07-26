@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.trains
   "PR Train, DAG, and fleet repository onboarding/sync accessors."
   (:require
@@ -36,57 +35,57 @@
    [java.nio.file Paths StandardOpenOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fleet repository config and provider helpers
 
-(def default-fleet-config-path
+;; Fleet repository config and provider helpers
+(def ^{:stratum 0} default-fleet-config-path
   (str (config/miniforge-home) "/config.edn"))
 
-(def external-train-prefix
+(def ^{:stratum 0} external-train-prefix
   "External PRs: ")
 
-(def external-dag-name
+(def ^{:stratum 0} external-dag-name
   "External PR Fleet")
 
-(def repo-slug-pattern
+(def ^{:stratum 0} repo-slug-pattern
   #"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
-(def failed-check-conclusions
+(def ^{:stratum 0} failed-check-conclusions
   #{"FAILURE" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE"})
 
-(def passing-check-conclusions
+(def ^{:stratum 0} passing-check-conclusions
   #{"SUCCESS" "NEUTRAL" "SKIPPED"})
 
-(def pending-check-states
+(def ^{:stratum 0} pending-check-states
   #{"PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED"})
 
-(def readiness-factor-order
+(def ^{:stratum 0} readiness-factor-order
   [:deps-merged :ci-passed :approved :gates-passed :behind-main])
 
-(def readiness-weights
+(def ^{:stratum 0} readiness-weights
   {:deps-merged 0.25
    :ci-passed 0.25
    :approved 0.20
    :gates-passed 0.15
    :behind-main 0.15})
 
-(def readiness-threshold 0.85)
+(def ^{:stratum 0} readiness-threshold 0.85)
 
-(def ^:private config-lock-timeout-ms
+(def ^{:stratum 0} ^:private config-lock-timeout-ms
   "Upper bound (ms) on how long `with-config-lock!` polls for the advisory
    file lock before giving up."
   500)
 
-(def ^:private config-lock-poll-ms
+(def ^{:stratum 0} ^:private config-lock-poll-ms
   "Backoff (ms) between `.tryLock` attempts while waiting for the config lock."
   25)
 
-(def ci-scores
+(def ^{:stratum 0} ci-scores
   {:passed 1.0
    :running 0.5
    :pending 0.5
    :failed 0.0})
 
-(def approval-scores
+(def ^{:stratum 0} approval-scores
   {:approved 1.0
    :merged 1.0
    :merging 1.0
@@ -97,51 +96,230 @@
    :closed 0.0
    :failed 0.0})
 
-(def blocker-rank
+(def ^{:stratum 0} blocker-rank
   {:dependency 0
    :review 1
    :ci 2
    :policy 3
    :conflict 4})
 
-(defn now []
+(defn ^{:stratum 0} now []
   (java.util.Date.))
 
-(defn ex-msg
+(defn ^{:stratum 0} ex-msg
   [^Throwable e]
   (or (.getMessage e)
       (some-> e class .getName)
       "unknown exception"))
 
-(defn caught-message
+(defn ^{:stratum 0} ensure-message
+  [message fallback]
+  (or (some-> message str str/trim not-empty)
+      fallback))
+
+(defn ^{:stratum 0} normalized-limit
+  [limit default]
+  (let [n (if (integer? limit) limit default)]
+    (if (pos? n) n default)))
+
+(defn ^{:stratum 0} succeeded?
+  "Check if a result map indicates success."
+  [result]
+  (boolean (:success? result)))
+
+(defn ^{:stratum 0} result-success
+  [data]
+  (merge {:success? true
+          :success true}
+         data))
+
+(defn ^{:stratum 0} normalize-repo-slug
+  [repo]
+  (-> (str repo)
+      str/trim
+      str/lower-case))
+
+(def ^{:stratum 0} error-hint-rules
+  "Data-driven error categorization: [pattern-keywords hint-string]."
+  [[["auth" "authentication" "not logged"]
+    "Run `gh auth login` and retry."]
+   [["not found" "forbidden" "permission" "access denied"]
+    "Verify repository slug and access permissions, then retry sync."]
+   [["rate limit" "secondary rate"]
+    "Provider rate-limited this request. Wait briefly, then retry sync."]
+   [["parse" "malformed" "invalid json"]
+    "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."]
+   [["timeout" "network" "connection"]
+    "Transient provider/network failure. Retry sync."]])
+
+(def ^{:stratum 0} default-error-hint
+  "Retry sync. If it keeps failing, run the equivalent `gh` command locally for details.")
+
+(defn ^{:stratum 0} empty-sync-summary []
+  {:added-prs 0 :removed-prs 0 :tracked-prs 0})
+
+(defn ^{:stratum 0} pr-status-from-provider
+  [pr]
+  (let [state (some-> (:state pr) str str/upper-case)
+        draft? (boolean (:isDraft pr))
+        decision (some-> (:reviewDecision pr) str str/upper-case)]
+    (cond
+      (and state (not= "OPEN" state)) :closed
+      draft? :draft
+      (= "APPROVED" decision) :approved
+      (= "CHANGES_REQUESTED" decision) :changes-requested
+      (= "REVIEW_REQUIRED" decision) :reviewing
+      :else :open)))
+
+(defn ^{:stratum 0} merge-state-status->behind?
+  [merge-state-status]
+  (contains? #{"BEHIND" "DIRTY"}
+             (some-> merge-state-status str str/upper-case)))
+
+;; Deterministic train rendering enrichment
+(defn ^{:stratum 0} gate-results
+  [pr]
+  (let [gates (:pr/gate-results pr)]
+    (if (sequential? gates) gates [])))
+
+(defn ^{:stratum 0} pr-sort-key
+  [pr]
+  [(or (:pr/merge-order pr) Long/MAX_VALUE)
+   (or (:pr/number pr) Long/MAX_VALUE)])
+
+(defn ^{:stratum 0} pr-map
+  [prs]
+  (into {} (map (juxt :pr/number identity) prs)))
+
+(defn ^{:stratum 0} unresolved-deps
+  [prs-by-number pr]
+  (->> (:pr/depends-on pr [])
+       (filter #(not= :merged (:pr/status (get prs-by-number %))))
+       sort
+       vec))
+
+(defn ^{:stratum 0} readiness-summary
+  [prs]
+  (->> prs
+       (map (fn [pr]
+              (get-in pr [:pr/readiness :readiness/state] :unknown)))
+       frequencies
+       (into (sorted-map))))
+
+;; PR Train and DAG state
+(def ^{:stratum 0} train-actions
+  {"pause" :pause
+   "resume" :resume
+   "merge-next" :merge-next
+   :pause :pause
+   :resume :resume
+   :merge-next :merge-next})
+
+(defn ^{:stratum 0} parse-train-id
+  [train-id]
+  (try+
+    (parse-uuid train-id)
+    (catch Object _ nil)))
+
+(defn ^{:stratum 0} execute-train-action!
+  [mgr tid action]
+  (try+
+    (case action
+      :pause (pr-train/pause-train mgr tid "Manual pause")
+      :resume (pr-train/resume-train mgr tid)
+      :merge-next (pr-train/merge-next mgr tid)
+      nil)
+    (catch Object _ nil)))
+
+;; External PR onboarding and sync
+(defn ^{:stratum 0} classify-error-category
+  [error-msg]
+  (let [msg (str/lower-case (or error-msg ""))]
+    (cond
+      (or (str/includes? msg "auth")
+          (str/includes? msg "authentication")
+          (str/includes? msg "not logged"))
+      :auth
+
+      (or (str/includes? msg "not found")
+          (str/includes? msg "forbidden")
+          (str/includes? msg "permission")
+          (str/includes? msg "access denied"))
+      :access
+
+      (or (str/includes? msg "rate limit")
+          (str/includes? msg "secondary rate"))
+      :rate-limit
+
+      (or (str/includes? msg "parse")
+          (str/includes? msg "malformed")
+          (str/includes? msg "invalid json"))
+      :parse
+
+      (or (str/includes? msg "timeout")
+          (str/includes? msg "timed out")
+          (str/includes? msg "network")
+          (str/includes? msg "connection"))
+      :network
+
+      :else
+      :unknown)))
+
+(defn ^{:stratum 0} ensure-repo-in-dag!
+  [state dag-id repo]
+  (when-let [mgr (:repo-dag-manager @state)]
+    (let [dag (try+
+                (repo-dag/get-dag mgr dag-id)
+                (catch Object _ nil))
+          exists? (some #(= repo (:repo/name %)) (:dag/repos dag))]
+      (when-not exists?
+        (let [[org _name] (str/split repo #"/" 2)]
+          (try+
+            (let [result (repo-dag/add-repo-anomaly
+                          mgr dag-id
+                          {:repo/url (str "https://github.com/" repo)
+                           :repo/name repo
+                           :repo/org org
+                           :repo/type :application
+                           :repo/default-branch "main"})]
+              (when-not (anomaly/anomaly? result)
+                result))
+            (catch Object _ nil)))))))
+
+(defn ^{:stratum 0} prs->status-map
+  [prs]
+  (into {}
+        (map (fn [pr]
+               [(:pr/number pr)
+                {:pr/status (:pr/status pr)
+                 :pr/ci-status (:pr/ci-status pr)}])
+             prs)))
+
+(defn ^{:stratum 0} add-prs!
+  [mgr train-id repo prs]
+  (doseq [pr prs]
+    (try+
+      (pr-train/add-pr mgr train-id repo (:pr/number pr) (:pr/url pr)
+                       (:pr/branch pr) (:pr/title pr))
+      (catch Object _ nil))))
+
+(defn ^{:stratum 0} remove-prs!
+  [mgr train-id pr-nums]
+  (doseq [pr-num pr-nums]
+    (try+
+      (pr-train/remove-pr mgr train-id pr-num)
+      (catch Object _ nil))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} caught-message
   [caught throwable]
   (cond
     (instance? Throwable caught) (ex-msg caught)
     throwable (ex-msg throwable)
     :else (str caught)))
 
-(defn ensure-message
-  [message fallback]
-  (or (some-> message str str/trim not-empty)
-      fallback))
-
-(defn normalized-limit
-  [limit default]
-  (let [n (if (integer? limit) limit default)]
-    (if (pos? n) n default)))
-
-(defn succeeded?
-  "Check if a result map indicates success."
-  [result]
-  (boolean (:success? result)))
-
-(defn result-success
-  [data]
-  (merge {:success? true
-          :success true}
-         data))
-
-(defn result-failure
+(defn ^{:stratum 1} result-failure
   "Build a canonical failure-shaped result map.
 
    W2 convergence: the embedded `:anomaly` is a canonical
@@ -158,7 +336,7 @@
              :anomaly (anomaly/anomaly :fault msg {})}
             data))))
 
-(defn result-exception
+(defn ^{:stratum 1} result-exception
   "Build a canonical exception-result map.
 
    W2 convergence: the embedded `:anomaly` is a canonical
@@ -180,68 +358,12 @@
                        ex)}
             data))))
 
-(defn gh-error-message
+(defn ^{:stratum 1} gh-error-message
   [out err]
   (ensure-message (if (str/blank? err) out err)
                   "Provider command failed. Check authentication and repository access."))
 
-(defn- with-config-lock!
-  "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
-
-   Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
-   (25 ms) increments before giving up.  Returns `(result-failure ...)` when
-   the lock cannot be acquired — the expected no-op for concurrent callers.
-   Exception: same-JVM re-entrancy (OverlappingFileLockException) and a
-   concurrently closed channel (ClosedChannelException) return a failure
-   immediately without entering the poll loop.
-
-   The file at `path` is created if absent so the FileChannel can open before
-   the first write occurs.
-
-   Why advisory locking: the OS provides no blocking tryLock-with-timeout on
-   file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
-   with a bounded deadline (≤ 500 ms); callers block for at most one timeout
-   window regardless of calling context (CLI, HTTP handler, etc.)."
-  [path thunk]
-  (let [_        (some-> (io/file path) .getParentFile .mkdirs)
-        nio-path (Paths/get path (make-array String 0))
-        opts     (into-array StandardOpenOption
-                             [StandardOpenOption/READ
-                              StandardOpenOption/WRITE
-                              StandardOpenOption/CREATE])]
-    (try
-      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
-        (let [deadline (+ (System/currentTimeMillis) config-lock-timeout-ms)]
-          (loop []
-            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
-              ;; FileLock implements AutoCloseable; .close releases the lock.
-              ;; Hinting AutoCloseable keeps the ns loadable under babashka,
-              ;; which does not expose java.nio.channels.FileLock.
-              (try
-                (thunk)
-                (catch Exception thunk-e
-                  (result-exception (messages/t :config-lock/update-failed) thunk-e {:path path}))
-                (finally (.close lk)))
-              (if (< (System/currentTimeMillis) deadline)
-                (do (Thread/sleep config-lock-poll-ms) (recur))
-                (result-failure (messages/t :config-lock/locked)
-                                {:path path}))))))
-      (catch InterruptedException _
-        ;; Restore interrupt flag for cooperative-cancellation callers.
-        (.interrupt (Thread/currentThread))
-        (result-failure (messages/t :config-lock/interrupted) {:path path}))
-      (catch Exception e
-        ;; OverlappingFileLockException — same-JVM re-entrant attempt.
-        ;; ClosedChannelException — channel closed concurrently.
-        ;; Both mean the lock is unavailable; surface the expected no-op.
-        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
-                         "java.nio.channels.ClosedChannelException"}
-                       (.getName (class e)))
-          (result-failure (messages/t :config-lock/unavailable) {:path path})
-          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
-                          {:path path}))))))
-
-(defn load-fleet-config
+(defn ^{:stratum 1} load-fleet-config
   []
   (try
     (if (.exists (io/file default-fleet-config-path))
@@ -250,39 +372,17 @@
     (catch Exception _
       {:fleet {:repos []}})))
 
-(defn save-fleet-config!
+(defn ^{:stratum 1} save-fleet-config!
   [config]
   (let [file (io/file default-fleet-config-path)]
     (.mkdirs (.getParentFile file))
     (spit file (pr-str config))))
 
-(defn normalize-repo-slug
-  [repo]
-  (-> (str repo)
-      str/trim
-      str/lower-case))
-
-(defn valid-repo-slug?
+(defn ^{:stratum 1} valid-repo-slug?
   [repo]
   (boolean (re-matches repo-slug-pattern repo)))
 
-(def error-hint-rules
-  "Data-driven error categorization: [pattern-keywords hint-string]."
-  [[["auth" "authentication" "not logged"]
-    "Run `gh auth login` and retry."]
-   [["not found" "forbidden" "permission" "access denied"]
-    "Verify repository slug and access permissions, then retry sync."]
-   [["rate limit" "secondary rate"]
-    "Provider rate-limited this request. Wait briefly, then retry sync."]
-   [["parse" "malformed" "invalid json"]
-    "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."]
-   [["timeout" "network" "connection"]
-    "Transient provider/network failure. Retry sync."]])
-
-(def default-error-hint
-  "Retry sync. If it keeps failing, run the equivalent `gh` command locally for details.")
-
-(defn actionable-error-hint
+(defn ^{:stratum 1} actionable-error-hint
   [error-msg]
   (let [msg (str/lower-case (or error-msg ""))]
     (or (some (fn [[patterns hint]]
@@ -291,86 +391,7 @@
               error-hint-rules)
         default-error-hint)))
 
-(defn with-actionable-error
-  [result]
-  (if (succeeded? result)
-    result
-    (assoc result :action (or (:action result)
-                              (actionable-error-hint (:error result))))))
-
-(defn empty-sync-summary []
-  {:added-prs 0 :removed-prs 0 :tracked-prs 0})
-
-(defn aggregate-sync-results
-  "Aggregate per-repo sync results into a single sync result."
-  [repos results]
-  (let [ok (->> results (filter succeeded?) vec)
-        failed (->> results (remove succeeded?) (mapv with-actionable-error))
-        failures (->> failed
-                      (map (fn [entry]
-                             {:repo (:repo entry)
-                              :error (:error entry)
-                              :action (:action entry)}))
-                      (sort-by :repo)
-                      vec)
-        summary {:added-prs (reduce + 0 (map :added ok))
-                 :removed-prs (reduce + 0 (map :removed ok))
-                 :tracked-prs (reduce + 0 (map :tracked-prs ok))}]
-    (if (empty? failed)
-      (result-success
-       {:repos repos :synced (count ok) :failed 0
-        :failures [] :results results :summary summary})
-      (result-failure
-       (if (seq ok)
-         (str "Sync completed with failures for " (count failed) " repo(s).")
-         (str "Sync failed for " (count failed) " configured repo(s)."))
-       {:repos repos :synced (count ok) :failed (count failed)
-        :failures failures :results (vec (concat ok failed))
-        :summary summary :partial? (boolean (seq ok))}))))
-
-(defn get-configured-repos
-  "Get configured fleet repositories from ~/.miniforge/config.edn."
-  [_state]
-  (->> (get-in (load-fleet-config) [:fleet :repos] [])
-       (map normalize-repo-slug)
-       (filter valid-repo-slug?)
-       distinct
-       vec))
-
-(defn add-configured-repo!
-  "Add a repository slug (owner/name) to fleet configuration."
-  [_state repo]
-  (let [repo* (normalize-repo-slug repo)]
-    (cond
-      (str/blank? repo*)
-      (result-failure
-       (messages/t :repo/required)
-       {:repo repo*})
-
-      (not (valid-repo-slug? repo*))
-      (result-failure
-       (messages/t :repo/invalid-format)
-       {:repo repo*})
-
-      :else
-      (merge {:repo repo*}
-             (with-config-lock! default-fleet-config-path
-               (fn []
-                 (let [cfg (load-fleet-config)
-                       repos (->> (get-in cfg [:fleet :repos] [])
-                                  (map normalize-repo-slug)
-                                  (filter valid-repo-slug?)
-                                  vec)
-                       exists? (some #{repo*} repos)
-                       next-repos (if exists? repos (conj repos repo*))
-                       next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
-                   (save-fleet-config! next-cfg)
-                   (result-success
-                    {:added? (not exists?)
-                     :repo repo*
-                     :repos (get-in next-cfg [:fleet :repos])}))))))))
-
-(defn run-gh
+(defn ^{:stratum 1} run-gh
   [& args]
   (try
     (let [{:keys [exit out err]} (apply shell/sh "gh" args)]
@@ -382,82 +403,7 @@
        :out ""
        :err (ex-msg e)})))
 
-(defn gh-api-json
-  [endpoint]
-  (let [{:keys [success? out err]} (run-gh "api" endpoint)]
-    (if success?
-      (try
-        (result-success
-         {:data (json/parse-string out true)})
-        (catch Exception e
-          (result-exception
-           "Failed to parse provider response."
-           e
-           {:endpoint endpoint
-            :action "Retry discovery. If this persists, check `gh api` output."})))
-      (result-failure
-       (gh-error-message out err)
-       {:endpoint endpoint
-        :action (actionable-error-hint (gh-error-message out err))}))))
-
-(defn discover-configured-repos!
-  "Discover repositories from GitHub and add them to fleet config.
-
-   Options map supports:
-   - :owner - org/user owner to scope discovery (optional)
-   - :limit - max repos to ingest (default 50)."
-  [_state {:keys [owner limit]
-           :or {limit 50}}]
-  (let [owner* (some-> owner str/trim not-empty)
-        limit* (normalized-limit limit 50)
-        endpoint (if owner*
-                   (str "orgs/" owner* "/repos?per_page=100")
-                   "user/repos?per_page=100")
-        result (gh-api-json endpoint)]
-    (if-not (succeeded? result)
-      result
-      (let [repos (->> (:data result)
-                       (keep :full_name)
-                       (map normalize-repo-slug)
-                       (filter valid-repo-slug?)
-                       distinct
-                       (take limit*)
-                       vec)]
-        ;; Hold the advisory lock across the read→merge→write so a concurrent
-        ;; add-configured-repo! cannot overwrite our merged result.
-        (merge {:owner owner*}
-               (with-config-lock! default-fleet-config-path
-                 (fn []
-                   (let [cfg (load-fleet-config)
-                         existing (->> (get-in cfg [:fleet :repos] [])
-                                       (map normalize-repo-slug)
-                                       (filter valid-repo-slug?)
-                                       vec)
-                         merged (vec (distinct (concat existing repos)))
-                         added (vec (remove (set existing) merged))
-                         next-cfg (assoc-in cfg [:fleet :repos] merged)]
-                     (save-fleet-config! next-cfg)
-                     (result-success
-                      {:owner owner*
-                       :discovered (count repos)
-                       :added (count added)
-                       :repos merged
-                       :added-repos added})))))))))
-
-(defn pr-status-from-provider
-  [pr]
-  (let [state (some-> (:state pr) str str/upper-case)
-        draft? (boolean (:isDraft pr))
-        decision (some-> (:reviewDecision pr) str str/upper-case)]
-    (cond
-      (and state (not= "OPEN" state)) :closed
-      draft? :draft
-      (= "APPROVED" decision) :approved
-      (= "CHANGES_REQUESTED" decision) :changes-requested
-      (= "REVIEW_REQUIRED" decision) :reviewing
-      :else :open)))
-
-(defn check-rollup->ci-status
+(defn ^{:stratum 1} check-rollup->ci-status
   [rollup]
   (let [entries (cond
                   (nil? rollup) []
@@ -473,66 +419,13 @@
       (seq entries) :pending
       :else :pending)))
 
-(defn merge-state-status->behind?
-  [merge-state-status]
-  (contains? #{"BEHIND" "DIRTY"}
-             (some-> merge-state-status str str/upper-case)))
-
-(defn provider-pr->train-pr
-  [pr]
-  {:pr/number (:number pr)
-   :pr/title (:title pr)
-   :pr/url (:url pr)
-   :pr/branch (:headRefName pr)
-   :pr/status (pr-status-from-provider pr)
-   :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))
-   :pr/behind-main? (merge-state-status->behind? (:mergeStateStatus pr))})
-
-(defn parse-provider-pr-list
-  [repo out]
-  (try
-    (let [rows (json/parse-string out true)]
-      (result-success
-       {:repo repo
-        :prs (->> rows
-                  (map provider-pr->train-pr)
-                  (sort-by :pr/number)
-                  vec)}))
-    (catch Exception e
-      (result-exception
-       (str "Failed to parse PR list for " repo ".")
-       e
-       {:repo repo
-        :action "Retry sync. If this persists, inspect `gh pr list --json ...` output."}))))
-
-(defn fetch-open-prs
-  [repo]
-  (let [{:keys [success? out err]} (run-gh "pr" "list"
-                                            "--repo" repo
-                                            "--state" "open"
-                                            "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus")]
-    (if-not success?
-      (result-failure
-       (gh-error-message out err)
-       {:repo repo
-        :action (actionable-error-hint (gh-error-message out err))})
-      (parse-provider-pr-list repo out))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Deterministic train rendering enrichment
-
-(defn gate-results
-  [pr]
-  (let [gates (:pr/gate-results pr)]
-    (if (sequential? gates) gates [])))
-
-(defn gates-passed?
+(defn ^{:stratum 1} gates-passed?
   [pr]
   (let [gates (gate-results pr)]
     (or (empty? gates)
         (every? :gate/passed? gates))))
 
-(defn gates-score
+(defn ^{:stratum 1} gates-score
   [pr]
   (let [gates (gate-results pr)]
     (if (empty? gates)
@@ -540,29 +433,13 @@
       (let [passed (count (filter :gate/passed? gates))]
         (double (/ passed (count gates)))))))
 
-(defn pr-sort-key
-  [pr]
-  [(or (:pr/merge-order pr) Long/MAX_VALUE)
-   (or (:pr/number pr) Long/MAX_VALUE)])
-
-(defn sort-prs
+(defn ^{:stratum 1} sort-prs
   [prs]
   (->> prs
        (sort-by pr-sort-key)
        vec))
 
-(defn pr-map
-  [prs]
-  (into {} (map (juxt :pr/number identity) prs)))
-
-(defn unresolved-deps
-  [prs-by-number pr]
-  (->> (:pr/depends-on pr [])
-       (filter #(not= :merged (:pr/status (get prs-by-number %))))
-       sort
-       vec))
-
-(defn deps-score
+(defn ^{:stratum 1} deps-score
   [prs-by-number pr]
   (let [deps (:pr/depends-on pr [])]
     (if (empty? deps)
@@ -570,31 +447,7 @@
       (let [merged-count (count (remove #(contains? (set (unresolved-deps prs-by-number pr)) %) deps))]
         (double (/ merged-count (count deps)))))))
 
-(defn pr-ready?
-  [prs-by-number pr]
-  (let [status (:pr/status pr)
-        ci-passed? (= :passed (:pr/ci-status pr))
-        deps-clear? (empty? (unresolved-deps prs-by-number pr))]
-    (and deps-clear?
-         (#{:approved :merging :merged} status)
-         ci-passed?
-         (gates-passed? pr)
-         (not (:pr/behind-main? pr)))))
-
-(defn readiness-state
-  [prs-by-number pr]
-  (let [status (:pr/status pr)]
-    (cond
-      (= status :merged) :merge-ready
-      (= :failed (:pr/ci-status pr)) :ci-failing
-      (= :changes-requested status) :changes-requested
-      (seq (unresolved-deps prs-by-number pr)) :dep-blocked
-      (:pr/behind-main? pr) :merge-conflicts
-      (not (gates-passed? pr)) :policy-failing
-      (pr-ready? prs-by-number pr) :merge-ready
-      :else :needs-review)))
-
-(defn blockers
+(defn ^{:stratum 1} blockers
   [prs-by-number pr]
   (let [status (:pr/status pr)
         ci-status (:pr/ci-status pr)
@@ -653,7 +506,164 @@
                         :blocker/message))
          vec)))
 
-(defn readiness-factors
+(defn ^{:stratum 1} blocking-details
+  [prs blocking-prs]
+  (let [prs-by-number (pr-map prs)]
+    (->> blocking-prs
+         (keep (fn [pr-number]
+                 (when-let [pr (get prs-by-number pr-number)]
+                   {:pr/number pr-number
+                    :pr/repo (:pr/repo pr)
+                    :pr/title (:pr/title pr)
+                    :blocking/reasons (:pr/blocking-reasons pr)})))
+         vec)))
+
+(defn ^{:stratum 1} normalize-train-action
+  [action]
+  (get train-actions action))
+
+(defn ^{:stratum 1} train-name-for-repo
+  [repo]
+  (str external-train-prefix repo))
+
+(defn ^{:stratum 1} train-sync-plan
+  [before-train prs]
+  (let [open-numbers (set (map :pr/number prs))
+        existing-numbers (set (map :pr/number (:train/prs before-train)))]
+    {:to-add (->> prs
+                  (remove #(contains? existing-numbers (:pr/number %)))
+                  vec)
+     :to-remove (->> existing-numbers
+                     (remove open-numbers)
+                     vec)
+     :status-map (prs->status-map prs)}))
+
+(defn ^{:stratum 1} apply-sync-plan!
+  [mgr train-id repo {:keys [to-add to-remove status-map]}]
+  ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
+  (add-prs! mgr train-id repo to-add)
+  (remove-prs! mgr train-id to-remove)
+  (try+
+    (pr-train/sync-pr-status mgr train-id status-map)
+    (catch Object _ nil))
+  (try+
+    (pr-train/link-prs mgr train-id)
+    (catch Object _ nil)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} with-config-lock!
+  "Acquire an exclusive advisory JVM file lock on `path`, call `thunk`, release.
+
+   Polls for up to `config-lock-timeout-ms` (500 ms) in `config-lock-poll-ms`
+   (25 ms) increments before giving up.  Returns `(result-failure ...)` when
+   the lock cannot be acquired — the expected no-op for concurrent callers.
+   Exception: same-JVM re-entrancy (OverlappingFileLockException) and a
+   concurrently closed channel (ClosedChannelException) return a failure
+   immediately without entering the poll loop.
+
+   The file at `path` is created if absent so the FileChannel can open before
+   the first write occurs.
+
+   Why advisory locking: the OS provides no blocking tryLock-with-timeout on
+   file locks; `.tryLock` is non-blocking and `.lock` waits forever.  We poll
+   with a bounded deadline (≤ 500 ms); callers block for at most one timeout
+   window regardless of calling context (CLI, HTTP handler, etc.)."
+  [path thunk]
+  (let [_        (some-> (io/file path) .getParentFile .mkdirs)
+        nio-path (Paths/get path (make-array String 0))
+        opts     (into-array StandardOpenOption
+                             [StandardOpenOption/READ
+                              StandardOpenOption/WRITE
+                              StandardOpenOption/CREATE])]
+    (try
+      (with-open [^FileChannel ch (FileChannel/open nio-path opts)]
+        (let [deadline (+ (System/currentTimeMillis) config-lock-timeout-ms)]
+          (loop []
+            (if-let [^java.lang.AutoCloseable lk (.tryLock ch)]
+              ;; FileLock implements AutoCloseable; .close releases the lock.
+              ;; Hinting AutoCloseable keeps the ns loadable under babashka,
+              ;; which does not expose java.nio.channels.FileLock.
+              (try
+                (thunk)
+                (catch Exception thunk-e
+                  (result-exception (messages/t :config-lock/update-failed) thunk-e {:path path}))
+                (finally (.close lk)))
+              (if (< (System/currentTimeMillis) deadline)
+                (do (Thread/sleep config-lock-poll-ms) (recur))
+                (result-failure (messages/t :config-lock/locked)
+                                {:path path}))))))
+      (catch InterruptedException _
+        ;; Restore interrupt flag for cooperative-cancellation callers.
+        (.interrupt (Thread/currentThread))
+        (result-failure (messages/t :config-lock/interrupted) {:path path}))
+      (catch Exception e
+        ;; OverlappingFileLockException — same-JVM re-entrant attempt.
+        ;; ClosedChannelException — channel closed concurrently.
+        ;; Both mean the lock is unavailable; surface the expected no-op.
+        (if (contains? #{"java.nio.channels.OverlappingFileLockException"
+                         "java.nio.channels.ClosedChannelException"}
+                       (.getName (class e)))
+          (result-failure (messages/t :config-lock/unavailable) {:path path})
+          (result-failure (messages/t :config-lock/acquire-failed {:error (ex-msg e)})
+                          {:path path}))))))
+
+(defn ^{:stratum 2} with-actionable-error
+  [result]
+  (if (succeeded? result)
+    result
+    (assoc result :action (or (:action result)
+                              (actionable-error-hint (:error result))))))
+
+(defn ^{:stratum 2} get-configured-repos
+  "Get configured fleet repositories from ~/.miniforge/config.edn."
+  [_state]
+  (->> (get-in (load-fleet-config) [:fleet :repos] [])
+       (map normalize-repo-slug)
+       (filter valid-repo-slug?)
+       distinct
+       vec))
+
+(defn ^{:stratum 2} gh-api-json
+  [endpoint]
+  (let [{:keys [success? out err]} (run-gh "api" endpoint)]
+    (if success?
+      (try
+        (result-success
+         {:data (json/parse-string out true)})
+        (catch Exception e
+          (result-exception
+           "Failed to parse provider response."
+           e
+           {:endpoint endpoint
+            :action "Retry discovery. If this persists, check `gh api` output."})))
+      (result-failure
+       (gh-error-message out err)
+       {:endpoint endpoint
+        :action (actionable-error-hint (gh-error-message out err))}))))
+
+(defn ^{:stratum 2} provider-pr->train-pr
+  [pr]
+  {:pr/number (:number pr)
+   :pr/title (:title pr)
+   :pr/url (:url pr)
+   :pr/branch (:headRefName pr)
+   :pr/status (pr-status-from-provider pr)
+   :pr/ci-status (check-rollup->ci-status (:statusCheckRollup pr))
+   :pr/behind-main? (merge-state-status->behind? (:mergeStateStatus pr))})
+
+(defn ^{:stratum 2} pr-ready?
+  [prs-by-number pr]
+  (let [status (:pr/status pr)
+        ci-passed? (= :passed (:pr/ci-status pr))
+        deps-clear? (empty? (unresolved-deps prs-by-number pr))]
+    (and deps-clear?
+         (#{:approved :merging :merged} status)
+         ci-passed?
+         (gates-passed? pr)
+         (not (:pr/behind-main? pr)))))
+
+(defn ^{:stratum 2} readiness-factors
   [prs-by-number pr]
   (let [scores {:deps-merged (deps-score prs-by-number pr)
                 :ci-passed (get ci-scores (:pr/ci-status pr) 0.0)
@@ -669,132 +679,7 @@
                :contribution (* weight score)}))
           readiness-factor-order)))
 
-(defn readiness
-  [prs-by-number pr]
-  (let [factors (readiness-factors prs-by-number pr)
-        score (transduce (map :contribution) + 0.0 factors)
-        state (readiness-state prs-by-number pr)
-        blocking (blockers prs-by-number pr)]
-    {:readiness/state state
-     :readiness/score score
-     :readiness/threshold readiness-threshold
-     :readiness/ready? (and (= state :merge-ready)
-                            (>= score readiness-threshold))
-     :readiness/factors factors
-     :readiness/blockers blocking}))
-
-(defn enrich-pr
-  [prs-by-number pr]
-  (let [r (readiness prs-by-number pr)]
-    (assoc pr
-           :pr/readiness r
-           :pr/blocking-reasons (mapv :blocker/message (:readiness/blockers r)))))
-
-(defn blocking-details
-  [prs blocking-prs]
-  (let [prs-by-number (pr-map prs)]
-    (->> blocking-prs
-         (keep (fn [pr-number]
-                 (when-let [pr (get prs-by-number pr-number)]
-                   {:pr/number pr-number
-                    :pr/repo (:pr/repo pr)
-                    :pr/title (:pr/title pr)
-                    :blocking/reasons (:pr/blocking-reasons pr)})))
-         vec)))
-
-(defn readiness-summary
-  [prs]
-  (->> prs
-       (map (fn [pr]
-              (get-in pr [:pr/readiness :readiness/state] :unknown)))
-       frequencies
-       (into (sorted-map))))
-
-(defn enrich-train
-  [train]
-  (let [sorted-prs (sort-prs (:train/prs train))
-        raw-pr-map (pr-map sorted-prs)
-        annotated-prs (mapv (partial enrich-pr raw-pr-map) sorted-prs)
-        merge-order-by-pr (into {} (map (juxt :pr/number :pr/merge-order) annotated-prs))
-        sorted-ready (->> (:train/ready-to-merge train)
-                          (sort-by #(get merge-order-by-pr % Long/MAX_VALUE))
-                          vec)
-        sorted-blocking (->> (:train/blocking-prs train)
-                             (sort-by #(get merge-order-by-pr % Long/MAX_VALUE))
-                             vec)]
-    (-> train
-        (assoc :train/prs annotated-prs)
-        (assoc :train/ready-to-merge sorted-ready)
-        (assoc :train/blocking-prs sorted-blocking)
-        (assoc :train/blocking-details (blocking-details annotated-prs sorted-blocking))
-        (assoc :train/readiness-summary (readiness-summary annotated-prs)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; PR Train and DAG state
-
-(def train-actions
-  {"pause" :pause
-   "resume" :resume
-   "merge-next" :merge-next
-   :pause :pause
-   :resume :resume
-   :merge-next :merge-next})
-
-(defn normalize-train-action
-  [action]
-  (get train-actions action))
-
-(defn parse-train-id
-  [train-id]
-  (try+
-    (parse-uuid train-id)
-    (catch Object _ nil)))
-
-(defn fetch-trains
-  [state]
-  (if-let [mgr (:pr-train-manager @state)]
-    (try+
-      (->> (or (pr-train/list-trains mgr) [])
-           (map enrich-train)
-           vec)
-      (catch Object e
-        (println "Error listing PR trains:"
-                 (caught-message e (:throwable &throw-context)))
-        []))
-    []))
-
-(def get-trains
-  "Get all PR trains (cached 10s)."
-  (core/ttl-memoize 10000 fetch-trains))
-
-(defn get-train-detail
-  "Get detailed view of a PR train."
-  [state train-id]
-  (if-let [mgr (:pr-train-manager @state)]
-    (let [tid (parse-train-id train-id)]
-      (if-not tid
-        {:error "Invalid train id."}
-        (try+
-          (if-let [train (pr-train/get-train mgr tid)]
-            (enrich-train train)
-            {:error "Train not found"})
-          (catch Object e
-            (println "Error getting PR train:"
-                     (caught-message e (:throwable &throw-context)))
-            {:error "Train not found"}))))
-    {:error "PR train manager not available"}))
-
-(defn execute-train-action!
-  [mgr tid action]
-  (try+
-    (case action
-      :pause (pr-train/pause-train mgr tid "Manual pause")
-      :resume (pr-train/resume-train mgr tid)
-      :merge-next (pr-train/merge-next mgr tid)
-      nil)
-    (catch Object _ nil)))
-
-(defn train-action!
+(defn ^{:stratum 2} train-action!
   "Execute action on a PR train."
   [state train-id action]
   (when-let [mgr (:pr-train-manager @state)]
@@ -802,7 +687,7 @@
       (when-let [normalized-action (normalize-train-action action)]
         (execute-train-action! mgr tid normalized-action)))))
 
-(defn fetch-dags
+(defn ^{:stratum 2} fetch-dags
   [state]
   (if-let [mgr (:repo-dag-manager @state)]
     (try+
@@ -813,47 +698,159 @@
         []))
     []))
 
-(def get-dags
+(defn ^{:stratum 2} find-existing-repo-train-id
+  [state repo]
+  (if-let [mgr (:pr-train-manager @state)]
+    (let [expected (train-name-for-repo repo)]
+      (try+
+        (some (fn [train]
+                (when (= expected (:train/name train))
+                  (:train/id train)))
+              (or (pr-train/list-trains mgr) []))
+        (catch Object _ nil)))
+    nil))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} aggregate-sync-results
+  "Aggregate per-repo sync results into a single sync result."
+  [repos results]
+  (let [ok (->> results (filter succeeded?) vec)
+        failed (->> results (remove succeeded?) (mapv with-actionable-error))
+        failures (->> failed
+                      (map (fn [entry]
+                             {:repo (:repo entry)
+                              :error (:error entry)
+                              :action (:action entry)}))
+                      (sort-by :repo)
+                      vec)
+        summary {:added-prs (reduce + 0 (map :added ok))
+                 :removed-prs (reduce + 0 (map :removed ok))
+                 :tracked-prs (reduce + 0 (map :tracked-prs ok))}]
+    (if (empty? failed)
+      (result-success
+       {:repos repos :synced (count ok) :failed 0
+        :failures [] :results results :summary summary})
+      (result-failure
+       (if (seq ok)
+         (str "Sync completed with failures for " (count failed) " repo(s).")
+         (str "Sync failed for " (count failed) " configured repo(s)."))
+       {:repos repos :synced (count ok) :failed (count failed)
+        :failures failures :results (vec (concat ok failed))
+        :summary summary :partial? (boolean (seq ok))}))))
+
+(defn ^{:stratum 3} add-configured-repo!
+  "Add a repository slug (owner/name) to fleet configuration."
+  [_state repo]
+  (let [repo* (normalize-repo-slug repo)]
+    (cond
+      (str/blank? repo*)
+      (result-failure
+       (messages/t :repo/required)
+       {:repo repo*})
+
+      (not (valid-repo-slug? repo*))
+      (result-failure
+       (messages/t :repo/invalid-format)
+       {:repo repo*})
+
+      :else
+      (merge {:repo repo*}
+             (with-config-lock! default-fleet-config-path
+               (fn []
+                 (let [cfg (load-fleet-config)
+                       repos (->> (get-in cfg [:fleet :repos] [])
+                                  (map normalize-repo-slug)
+                                  (filter valid-repo-slug?)
+                                  vec)
+                       exists? (some #{repo*} repos)
+                       next-repos (if exists? repos (conj repos repo*))
+                       next-cfg (assoc-in cfg [:fleet :repos] (vec (distinct next-repos)))]
+                   (save-fleet-config! next-cfg)
+                   (result-success
+                    {:added? (not exists?)
+                     :repo repo*
+                     :repos (get-in next-cfg [:fleet :repos])}))))))))
+
+(defn ^{:stratum 3} discover-configured-repos!
+  "Discover repositories from GitHub and add them to fleet config.
+
+   Options map supports:
+   - :owner - org/user owner to scope discovery (optional)
+   - :limit - max repos to ingest (default 50)."
+  [_state {:keys [owner limit]
+           :or {limit 50}}]
+  (let [owner* (some-> owner str/trim not-empty)
+        limit* (normalized-limit limit 50)
+        endpoint (if owner*
+                   (str "orgs/" owner* "/repos?per_page=100")
+                   "user/repos?per_page=100")
+        result (gh-api-json endpoint)]
+    (if-not (succeeded? result)
+      result
+      (let [repos (->> (:data result)
+                       (keep :full_name)
+                       (map normalize-repo-slug)
+                       (filter valid-repo-slug?)
+                       distinct
+                       (take limit*)
+                       vec)]
+        ;; Hold the advisory lock across the read→merge→write so a concurrent
+        ;; add-configured-repo! cannot overwrite our merged result.
+        (merge {:owner owner*}
+               (with-config-lock! default-fleet-config-path
+                 (fn []
+                   (let [cfg (load-fleet-config)
+                         existing (->> (get-in cfg [:fleet :repos] [])
+                                       (map normalize-repo-slug)
+                                       (filter valid-repo-slug?)
+                                       vec)
+                         merged (vec (distinct (concat existing repos)))
+                         added (vec (remove (set existing) merged))
+                         next-cfg (assoc-in cfg [:fleet :repos] merged)]
+                     (save-fleet-config! next-cfg)
+                     (result-success
+                      {:owner owner*
+                       :discovered (count repos)
+                       :added (count added)
+                       :repos merged
+                       :added-repos added})))))))))
+
+(defn ^{:stratum 3} parse-provider-pr-list
+  [repo out]
+  (try
+    (let [rows (json/parse-string out true)]
+      (result-success
+       {:repo repo
+        :prs (->> rows
+                  (map provider-pr->train-pr)
+                  (sort-by :pr/number)
+                  vec)}))
+    (catch Exception e
+      (result-exception
+       (str "Failed to parse PR list for " repo ".")
+       e
+       {:repo repo
+        :action "Retry sync. If this persists, inspect `gh pr list --json ...` output."}))))
+
+(defn ^{:stratum 3} readiness-state
+  [prs-by-number pr]
+  (let [status (:pr/status pr)]
+    (cond
+      (= status :merged) :merge-ready
+      (= :failed (:pr/ci-status pr)) :ci-failing
+      (= :changes-requested status) :changes-requested
+      (seq (unresolved-deps prs-by-number pr)) :dep-blocked
+      (:pr/behind-main? pr) :merge-conflicts
+      (not (gates-passed? pr)) :policy-failing
+      (pr-ready? prs-by-number pr) :merge-ready
+      :else :needs-review)))
+
+(def ^{:stratum 3} get-dags
   "Get all repository DAGs (cached 10s)."
   (core/ttl-memoize 10000 fetch-dags))
 
-;------------------------------------------------------------------------------ Layer 3
-;; External PR onboarding and sync
-
-(defn classify-error-category
-  [error-msg]
-  (let [msg (str/lower-case (or error-msg ""))]
-    (cond
-      (or (str/includes? msg "auth")
-          (str/includes? msg "authentication")
-          (str/includes? msg "not logged"))
-      :auth
-
-      (or (str/includes? msg "not found")
-          (str/includes? msg "forbidden")
-          (str/includes? msg "permission")
-          (str/includes? msg "access denied"))
-      :access
-
-      (or (str/includes? msg "rate limit")
-          (str/includes? msg "secondary rate"))
-      :rate-limit
-
-      (or (str/includes? msg "parse")
-          (str/includes? msg "malformed")
-          (str/includes? msg "invalid json"))
-      :parse
-
-      (or (str/includes? msg "timeout")
-          (str/includes? msg "timed out")
-          (str/includes? msg "network")
-          (str/includes? msg "connection"))
-      :network
-
-      :else
-      :unknown)))
-
-(defn sync-status
+(defn ^{:stratum 3} sync-status
   [result]
   (let [failed-repos (->> (:results result)
                           (remove succeeded?)
@@ -878,12 +875,7 @@
      :summary (:summary result)
      :failures failed-repos}))
 
-(defn record-last-sync!
-  [state result]
-  (swap! state assoc :fleet/last-sync (sync-status result))
-  result)
-
-(defn ensure-default-dag-id!
+(defn ^{:stratum 3} ensure-default-dag-id!
   [state]
   (or (:fleet/default-dag-id @state)
       (let [mgr (:repo-dag-manager @state)
@@ -903,44 +895,41 @@
         (swap! state assoc :fleet/default-dag-id dag-id)
         dag-id)))
 
-(defn ensure-repo-in-dag!
-  [state dag-id repo]
-  (when-let [mgr (:repo-dag-manager @state)]
-    (let [dag (try+
-                (repo-dag/get-dag mgr dag-id)
-                (catch Object _ nil))
-          exists? (some #(= repo (:repo/name %)) (:dag/repos dag))]
-      (when-not exists?
-        (let [[org _name] (str/split repo #"/" 2)]
-          (try+
-            (let [result (repo-dag/add-repo-anomaly
-                          mgr dag-id
-                          {:repo/url (str "https://github.com/" repo)
-                           :repo/name repo
-                           :repo/org org
-                           :repo/type :application
-                           :repo/default-branch "main"})]
-              (when-not (anomaly/anomaly? result)
-                result))
-            (catch Object _ nil)))))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn train-name-for-repo
+(defn ^{:stratum 4} fetch-open-prs
   [repo]
-  (str external-train-prefix repo))
+  (let [{:keys [success? out err]} (run-gh "pr" "list"
+                                            "--repo" repo
+                                            "--state" "open"
+                                            "--json" "number,title,url,state,headRefName,isDraft,reviewDecision,statusCheckRollup,mergeStateStatus")]
+    (if-not success?
+      (result-failure
+       (gh-error-message out err)
+       {:repo repo
+        :action (actionable-error-hint (gh-error-message out err))})
+      (parse-provider-pr-list repo out))))
 
-(defn find-existing-repo-train-id
-  [state repo]
-  (if-let [mgr (:pr-train-manager @state)]
-    (let [expected (train-name-for-repo repo)]
-      (try+
-        (some (fn [train]
-                (when (= expected (:train/name train))
-                  (:train/id train)))
-              (or (pr-train/list-trains mgr) []))
-        (catch Object _ nil)))
-    nil))
+(defn ^{:stratum 4} readiness
+  [prs-by-number pr]
+  (let [factors (readiness-factors prs-by-number pr)
+        score (transduce (map :contribution) + 0.0 factors)
+        state (readiness-state prs-by-number pr)
+        blocking (blockers prs-by-number pr)]
+    {:readiness/state state
+     :readiness/score score
+     :readiness/threshold readiness-threshold
+     :readiness/ready? (and (= state :merge-ready)
+                            (>= score readiness-threshold))
+     :readiness/factors factors
+     :readiness/blockers blocking}))
 
-(defn ensure-repo-train!
+(defn ^{:stratum 4} record-last-sync!
+  [state result]
+  (swap! state assoc :fleet/last-sync (sync-status result))
+  result)
+
+(defn ^{:stratum 4} ensure-repo-train!
   [state repo]
   (when-let [mgr (:pr-train-manager @state)]
     (let [known-id (get-in @state [:fleet/repo-trains repo])
@@ -961,66 +950,7 @@
         (swap! state assoc-in [:fleet/repo-trains repo] train-id)
         train-id))))
 
-(defn prs->status-map
-  [prs]
-  (into {}
-        (map (fn [pr]
-               [(:pr/number pr)
-                {:pr/status (:pr/status pr)
-                 :pr/ci-status (:pr/ci-status pr)}])
-             prs)))
-
-(defn train-sync-plan
-  [before-train prs]
-  (let [open-numbers (set (map :pr/number prs))
-        existing-numbers (set (map :pr/number (:train/prs before-train)))]
-    {:to-add (->> prs
-                  (remove #(contains? existing-numbers (:pr/number %)))
-                  vec)
-     :to-remove (->> existing-numbers
-                     (remove open-numbers)
-                     vec)
-     :status-map (prs->status-map prs)}))
-
-(defn add-prs!
-  [mgr train-id repo prs]
-  (doseq [pr prs]
-    (try+
-      (pr-train/add-pr mgr train-id repo (:pr/number pr) (:pr/url pr)
-                       (:pr/branch pr) (:pr/title pr))
-      (catch Object _ nil))))
-
-(defn remove-prs!
-  [mgr train-id pr-nums]
-  (doseq [pr-num pr-nums]
-    (try+
-      (pr-train/remove-pr mgr train-id pr-num)
-      (catch Object _ nil))))
-
-(defn apply-sync-plan!
-  [mgr train-id repo {:keys [to-add to-remove status-map]}]
-  ;; Side effects are intentionally ordered: membership first, then status, then dependency linking.
-  (add-prs! mgr train-id repo to-add)
-  (remove-prs! mgr train-id to-remove)
-  (try+
-    (pr-train/sync-pr-status mgr train-id status-map)
-    (catch Object _ nil))
-  (try+
-    (pr-train/link-prs mgr train-id)
-    (catch Object _ nil)))
-
-(defn fetch-repo-prs
-  "Fetch open PRs for a repo, returning a result map."
-  [repo]
-  (try
-    (fetch-open-prs repo)
-    (catch Exception e
-      (result-exception
-       (str "Failed to fetch PRs for " repo ".")
-       e
-       {:repo repo}))))
-
-(defn apply-pr-sync!
+(defn ^{:stratum 4} apply-pr-sync!
   "Apply a sync plan for a repo's PRs into its train. Returns result-success."
   [state mgr train-id repo prs]
   (let [dag-id (ensure-default-dag-id! state)
@@ -1038,7 +968,48 @@
       :open-prs (count prs)
       :tracked-prs (count (:train/prs after-train))})))
 
-(defn sync-repo-prs-into-train!
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} enrich-pr
+  [prs-by-number pr]
+  (let [r (readiness prs-by-number pr)]
+    (assoc pr
+           :pr/readiness r
+           :pr/blocking-reasons (mapv :blocker/message (:readiness/blockers r)))))
+
+(defn ^{:stratum 5} fetch-repo-prs
+  "Fetch open PRs for a repo, returning a result map."
+  [repo]
+  (try
+    (fetch-open-prs repo)
+    (catch Exception e
+      (result-exception
+       (str "Failed to fetch PRs for " repo ".")
+       e
+       {:repo repo}))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} enrich-train
+  [train]
+  (let [sorted-prs (sort-prs (:train/prs train))
+        raw-pr-map (pr-map sorted-prs)
+        annotated-prs (mapv (partial enrich-pr raw-pr-map) sorted-prs)
+        merge-order-by-pr (into {} (map (juxt :pr/number :pr/merge-order) annotated-prs))
+        sorted-ready (->> (:train/ready-to-merge train)
+                          (sort-by #(get merge-order-by-pr % Long/MAX_VALUE))
+                          vec)
+        sorted-blocking (->> (:train/blocking-prs train)
+                             (sort-by #(get merge-order-by-pr % Long/MAX_VALUE))
+                             vec)]
+    (-> train
+        (assoc :train/prs annotated-prs)
+        (assoc :train/ready-to-merge sorted-ready)
+        (assoc :train/blocking-prs sorted-blocking)
+        (assoc :train/blocking-details (blocking-details annotated-prs sorted-blocking))
+        (assoc :train/readiness-summary (readiness-summary annotated-prs)))))
+
+(defn ^{:stratum 6} sync-repo-prs-into-train!
   [state repo]
   (let [fetch-result (fetch-repo-prs repo)]
     (if-not (succeeded? fetch-result)
@@ -1055,7 +1026,39 @@
          {:repo repo
           :action "Start dashboard with a PR train manager and retry sync."})))))
 
-(defn sync-configured-repos!
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} fetch-trains
+  [state]
+  (if-let [mgr (:pr-train-manager @state)]
+    (try+
+      (->> (or (pr-train/list-trains mgr) [])
+           (map enrich-train)
+           vec)
+      (catch Object e
+        (println "Error listing PR trains:"
+                 (caught-message e (:throwable &throw-context)))
+        []))
+    []))
+
+(defn ^{:stratum 7} get-train-detail
+  "Get detailed view of a PR train."
+  [state train-id]
+  (if-let [mgr (:pr-train-manager @state)]
+    (let [tid (parse-train-id train-id)]
+      (if-not tid
+        {:error "Invalid train id."}
+        (try+
+          (if-let [train (pr-train/get-train mgr tid)]
+            (enrich-train train)
+            {:error "Train not found"})
+          (catch Object e
+            (println "Error getting PR train:"
+                     (caught-message e (:throwable &throw-context)))
+            {:error "Train not found"}))))
+    {:error "PR train manager not available"}))
+
+(defn ^{:stratum 7} sync-configured-repos!
   "Sync configured repositories into PR trains and ingest open PRs from provider."
   [state]
   (let [repos (get-configured-repos state)]
@@ -1075,10 +1078,16 @@
        :else
        (aggregate-sync-results repos (mapv #(sync-repo-prs-into-train! state %) repos))))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; DAG composite state
+;------------------------------------------------------------------------------ Layer 8
 
-(defn get-dag-state
+(def ^{:stratum 8} get-trains
+  "Get all PR trains (cached 10s)."
+  (core/ttl-memoize 10000 fetch-trains))
+
+;------------------------------------------------------------------------------ Layer 9
+
+;; DAG composite state
+(defn ^{:stratum 9} get-dag-state
   "Get DAG kanban state for visualization."
   [state]
   (let [dags (get-dags state)

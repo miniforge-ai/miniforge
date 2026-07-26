@@ -11,22 +11,25 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.messages
   "Component-level message catalog for web-dashboard.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def ^:private catalog
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private catalog
   (messages/load-catalog "config/web-dashboard/messages/en-US.edn"
                          :web-dashboard/messages))
 
-(defn t
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} t
   "Look up a web-dashboard message by key, with optional param substitution."
   ([k] (messages/t catalog k))
   ([k params] (messages/t catalog k params)))
 
-(defn all-as-json-map
+(defn ^{:stratum 1} all-as-json-map
   "Return the full catalog with keyword keys flattened to ns/name strings,
    suitable for direct JSON serialization into window.MINIFORGE_MESSAGES."
   []

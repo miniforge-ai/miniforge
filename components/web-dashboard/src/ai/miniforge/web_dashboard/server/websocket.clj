@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.websocket
   "WebSocket handling and real-time event streaming."
   (:require
@@ -25,9 +24,9 @@
    [java.util UUID Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event normalization and envelopes
 
-(defn serialize-for-json
+;; Event normalization and envelopes
+(defn ^{:stratum 0} serialize-for-json
   "Recursively convert Clojure types to JSON-safe equivalents.
 
    - Keywords → namespace-preserving strings WITHOUT colon prefix
@@ -58,7 +57,39 @@
     (sequential? v) (mapv serialize-for-json v)
     :else v))
 
-(defn ws-event-envelope
+(defn ^{:stratum 0} maybe-uuid
+  "Parse UUID strings when possible, preserving non-UUID identifiers."
+  [value]
+  (cond
+    (instance? java.util.UUID value) value
+    (string? value) (try
+                      (parse-uuid value)
+                      (catch Exception _
+                        value))
+    :else value))
+
+(defn ^{:stratum 0} maybe-keyword
+  "Normalize string-ish values to keywords."
+  [value]
+  (cond
+    (keyword? value) value
+    (string? value) (keyword value)
+    (symbol? value) (keyword (name value))
+    :else value))
+
+(defn ^{:stratum 0} unsubscribe-client!
+  "Unsubscribe WebSocket client from event stream."
+  [event-stream ch]
+  (when event-stream
+    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
+      (try
+        (es/unsubscribe! event-stream subscriber-id)
+        (catch Exception e
+          (println "Error unsubscribing from event stream:" (ex-message e)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} ws-event-envelope
   "Build a browser-friendly event wrapper while preserving the raw event payload.
 
    Uses string keys with underscores for JavaScript dot-notation access, plus
@@ -79,27 +110,7 @@
      "timestamp"   timestamp
      "data"        safe-data}))
 
-(defn maybe-uuid
-  "Parse UUID strings when possible, preserving non-UUID identifiers."
-  [value]
-  (cond
-    (instance? java.util.UUID value) value
-    (string? value) (try
-                      (parse-uuid value)
-                      (catch Exception _
-                        value))
-    :else value))
-
-(defn maybe-keyword
-  "Normalize string-ish values to keywords."
-  [value]
-  (cond
-    (keyword? value) value
-    (string? value) (keyword value)
-    (symbol? value) (keyword (name value))
-    :else value))
-
-(defn normalize-workflow-event
+(defn ^{:stratum 1} normalize-workflow-event
   "Normalize workflow events arriving over JSON transport.
    Coalesces legacy camelCase/unqualified keys to qualified namespaced keys
    and ensures type/UUID fields have the right runtime types."
@@ -118,38 +129,8 @@
       spec                      (assoc :workflow/spec spec)
       true                      (dissoc :workflow-id :timestamp :phase :status :workflow-spec))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; WebSocket operations — subscribe, unsubscribe, message dispatch
-
-(defn subscribe-client!
-  "Subscribe WebSocket client to event stream."
-  [event-stream ch]
-  (when event-stream
-    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
-      (try
-        (es/subscribe! event-stream subscriber-id
-                       (fn [event]
-                         (try
-                           (http/send! ch (json/generate-string
-                                           (ws-event-envelope event)))
-                           (catch Exception e
-                             (println "Error sending event to WebSocket:" (ex-message e))))))
-        (catch Exception e
-          (println "Error subscribing to event stream:" (ex-message e)))))))
-
-(defn unsubscribe-client!
-  "Unsubscribe WebSocket client from event stream."
-  [event-stream ch]
-  (when event-stream
-    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
-      (try
-        (es/unsubscribe! event-stream subscriber-id)
-        (catch Exception e
-          (println "Error unsubscribing from event stream:" (ex-message e)))))))
-
 ;; Message handling
-
-(defn handle-ws-message
+(defn ^{:stratum 1} handle-ws-message
   "Handle incoming WebSocket message from dashboard UI."
   [state workflow-connections ch data]
   (try
@@ -178,7 +159,26 @@
     (catch Exception e
       (println "Error handling WebSocket message:" (ex-message e)))))
 
-(defn handle-workflow-event
+;------------------------------------------------------------------------------ Layer 2
+
+;; WebSocket operations — subscribe, unsubscribe, message dispatch
+(defn ^{:stratum 2} subscribe-client!
+  "Subscribe WebSocket client to event stream."
+  [event-stream ch]
+  (when event-stream
+    (let [subscriber-id (keyword (str "ws-" (hash ch)))]
+      (try
+        (es/subscribe! event-stream subscriber-id
+                       (fn [event]
+                         (try
+                           (http/send! ch (json/generate-string
+                                           (ws-event-envelope event)))
+                           (catch Exception e
+                             (println "Error sending event to WebSocket:" (ex-message e))))))
+        (catch Exception e
+          (println "Error subscribing to event stream:" (ex-message e)))))))
+
+(defn ^{:stratum 2} handle-workflow-event
   "Handle incoming event from workflow process.
   Publishes event to dashboard's event stream."
   [state data]
@@ -194,10 +194,10 @@
     (catch Exception e
       (println "Error parsing workflow event:" (ex-message e)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Handler constructors
+;------------------------------------------------------------------------------ Layer 3
 
-(defn create-ws-handler
+;; Handler constructors
+(defn ^{:stratum 3} create-ws-handler
   "Create WebSocket handler with event streaming and workflow control."
   [state workflow-connections]
   (let [connections (atom #{})]
@@ -222,7 +222,7 @@
                         (fn [ch data]
                           (handle-ws-message state workflow-connections ch data))}))))
 
-(defn create-events-ws-handler
+(defn ^{:stratum 3} create-events-ws-handler
   "WebSocket handler for workflow processes to publish events."
   [state workflow-connections]
   (fn [req]

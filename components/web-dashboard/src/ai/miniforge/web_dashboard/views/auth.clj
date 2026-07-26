@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.auth
   "Login view for the web dashboard."
   (:require
@@ -19,9 +18,9 @@
    [hiccup.page :as page]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; View
 
-(defn login-view
+;; View
+(defn ^{:stratum 0} login-view
   "Render the login page."
   [{:keys [error username return-to]}]
   (page/html5

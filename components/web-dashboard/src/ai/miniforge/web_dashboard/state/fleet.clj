@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.fleet
   "Fleet aggregation, risk scoring, and composite state."
   (:require
@@ -21,9 +20,9 @@
    [ai.miniforge.web-dashboard.state.archive :as archive]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure scoring and computation
 
-(defn calculate-risk-score
+;; Pure scoring and computation
+(defn ^{:stratum 0} calculate-risk-score
   "Calculate risk score for a train or PR."
   [entity]
   (let [base-score 0
@@ -45,91 +44,7 @@
         blocking-penalty (* 5 (count (:train/blocking-prs entity [])))]
     (min 100 (+ base-score ci-penalty dep-penalty status-penalty blocking-penalty))))
 
-(defn compute-stats
-  "Compute dashboard statistics from trains and workflows data (pure)."
-  [trains wfs]
-  (let [risk-scores (map calculate-risk-score trains)]
-    {:trains {:total (count trains)
-              :active (count (filter #(#{:open :reviewing :merging} (:train/status %)) trains))}
-     :prs {:total (reduce + 0 (map #(count (:train/prs %)) trains))
-           :ready (reduce + 0 (map #(count (:train/ready-to-merge %)) trains))
-           :blocked (reduce + 0 (map #(count (:train/blocking-prs %)) trains))}
-     :health {:healthy (count (filter #(< % 20) risk-scores))
-              :warning (count (filter #(and (>= % 20) (< % 50)) risk-scores))
-              :critical (count (filter #(>= % 50) risk-scores))}
-     :workflows {:total (count wfs)
-                 :running (count (filter #(= :running (:status %)) wfs))
-                 :completed (count (filter #(= :completed (:status %)) wfs))}}))
-
-(defn compute-risk-analysis
-  "Compute risk analysis from trains data (pure)."
-  [trains]
-  (let [risks (map (fn [train]
-                     (let [score (calculate-risk-score train)]
-                       {:train-id (:train/id train)
-                        :train-name (:train/name train)
-                        :risk-score score
-                        :risk-level (cond
-                                      (< score 20) :low
-                                      (< score 50) :medium
-                                      :else :high)
-                        :factors (cond-> []
-                                   (seq (:train/blocking-prs train))
-                                   (conj {:type :blocking-prs
-                                          :count (count (:train/blocking-prs train))
-                                          :severity :high})
-
-                                   (some #(= :failed (:pr/ci-status %)) (:train/prs train))
-                                   (conj {:type :ci-failures
-                                          :count (count (filter #(= :failed (:pr/ci-status %)) (:train/prs train)))
-                                          :severity :high})
-
-                                   (> (count (:train/prs train)) 5)
-                                   (conj {:type :large-train
-                                          :count (count (:train/prs train))
-                                          :severity :medium}))}))
-                   trains)]
-    {:risks (sort-by :risk-score > risks)
-     :summary {:high (count (filter #(= :high (:risk-level %)) risks))
-               :medium (count (filter #(= :medium (:risk-level %)) risks))
-               :low (count (filter #(= :low (:risk-level %)) risks))}}))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Fleet state aggregation
-
-(def get-fleet-state
-  "Get aggregated fleet state across all repos and trains (cached 10s)."
-  (core/ttl-memoize 10000
-               (fn [state]
-                 (let [trains (trains/get-trains state)
-                       dags (trains/get-dags state)
-                       configured-repos (trains/get-configured-repos state)
-                       total-prs (reduce + 0 (map #(count (:train/prs %)) trains))
-                       active-trains (filter #(#{:open :reviewing :merging} (:train/status %)) trains)
-                       repos (set (mapcat #(map :pr/repo (:train/prs %)) trains))]
-                   {:summary {:total-trains (count trains)
-                              :active-trains (count active-trains)
-                              :total-prs total-prs
-                              :repos (count repos)
-                              :configured-repos (count configured-repos)
-                              :dags (count dags)}
-                    :trains trains
-                    :configured-repos configured-repos
-                    :repos (group-by identity (mapcat #(map :pr/repo (:train/prs %)) trains))
-                    :health {:healthy (count (filter #(< (calculate-risk-score %) 20) trains))
-                             :warning (count (filter #(and (>= (calculate-risk-score %) 20)
-                                                           (< (calculate-risk-score %) 50)) trains))
-                             :critical (count (filter #(>= (calculate-risk-score %) 50) trains))}}))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Composite state
-
-(defn get-risk-analysis
-  "Get risk analysis for fleet."
-  [state]
-  (compute-risk-analysis (trains/get-trains state)))
-
-(defn get-recent-activity
+(defn ^{:stratum 0} get-recent-activity
   "Get recent activity across fleet."
   [state]
   (try
@@ -153,7 +68,7 @@
       (println "Error getting recent activity:" (ex-message e))
       [])))
 
-(defn get-evidence-state
+(defn ^{:stratum 0} get-evidence-state
   "Get evidence artifacts state from PR trains, live workflows, and archived workflows."
   [state]
   (let [trains (trains/get-trains state)
@@ -191,3 +106,87 @@
                                 archived)]
     {:trains train-evidence
      :workflows (vec (concat live-evidence archived-evidence))}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} compute-stats
+  "Compute dashboard statistics from trains and workflows data (pure)."
+  [trains wfs]
+  (let [risk-scores (map calculate-risk-score trains)]
+    {:trains {:total (count trains)
+              :active (count (filter #(#{:open :reviewing :merging} (:train/status %)) trains))}
+     :prs {:total (reduce + 0 (map #(count (:train/prs %)) trains))
+           :ready (reduce + 0 (map #(count (:train/ready-to-merge %)) trains))
+           :blocked (reduce + 0 (map #(count (:train/blocking-prs %)) trains))}
+     :health {:healthy (count (filter #(< % 20) risk-scores))
+              :warning (count (filter #(and (>= % 20) (< % 50)) risk-scores))
+              :critical (count (filter #(>= % 50) risk-scores))}
+     :workflows {:total (count wfs)
+                 :running (count (filter #(= :running (:status %)) wfs))
+                 :completed (count (filter #(= :completed (:status %)) wfs))}}))
+
+(defn ^{:stratum 1} compute-risk-analysis
+  "Compute risk analysis from trains data (pure)."
+  [trains]
+  (let [risks (map (fn [train]
+                     (let [score (calculate-risk-score train)]
+                       {:train-id (:train/id train)
+                        :train-name (:train/name train)
+                        :risk-score score
+                        :risk-level (cond
+                                      (< score 20) :low
+                                      (< score 50) :medium
+                                      :else :high)
+                        :factors (cond-> []
+                                   (seq (:train/blocking-prs train))
+                                   (conj {:type :blocking-prs
+                                          :count (count (:train/blocking-prs train))
+                                          :severity :high})
+
+                                   (some #(= :failed (:pr/ci-status %)) (:train/prs train))
+                                   (conj {:type :ci-failures
+                                          :count (count (filter #(= :failed (:pr/ci-status %)) (:train/prs train)))
+                                          :severity :high})
+
+                                   (> (count (:train/prs train)) 5)
+                                   (conj {:type :large-train
+                                          :count (count (:train/prs train))
+                                          :severity :medium}))}))
+                   trains)]
+    {:risks (sort-by :risk-score > risks)
+     :summary {:high (count (filter #(= :high (:risk-level %)) risks))
+               :medium (count (filter #(= :medium (:risk-level %)) risks))
+               :low (count (filter #(= :low (:risk-level %)) risks))}}))
+
+;; Fleet state aggregation
+(def ^{:stratum 1} get-fleet-state
+  "Get aggregated fleet state across all repos and trains (cached 10s)."
+  (core/ttl-memoize 10000
+               (fn [state]
+                 (let [trains (trains/get-trains state)
+                       dags (trains/get-dags state)
+                       configured-repos (trains/get-configured-repos state)
+                       total-prs (reduce + 0 (map #(count (:train/prs %)) trains))
+                       active-trains (filter #(#{:open :reviewing :merging} (:train/status %)) trains)
+                       repos (set (mapcat #(map :pr/repo (:train/prs %)) trains))]
+                   {:summary {:total-trains (count trains)
+                              :active-trains (count active-trains)
+                              :total-prs total-prs
+                              :repos (count repos)
+                              :configured-repos (count configured-repos)
+                              :dags (count dags)}
+                    :trains trains
+                    :configured-repos configured-repos
+                    :repos (group-by identity (mapcat #(map :pr/repo (:train/prs %)) trains))
+                    :health {:healthy (count (filter #(< (calculate-risk-score %) 20) trains))
+                             :warning (count (filter #(and (>= (calculate-risk-score %) 20)
+                                                           (< (calculate-risk-score %) 50)) trains))
+                             :critical (count (filter #(>= (calculate-risk-score %) 50) trains))}}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Composite state
+(defn ^{:stratum 2} get-risk-analysis
+  "Get risk analysis for fleet."
+  [state]
+  (compute-risk-analysis (trains/get-trains state)))

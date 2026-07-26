@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.websocket-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.web-dashboard.server.websocket :as sut]))
 
-(deftest ws-event-envelope-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} ws-event-envelope-test
   (testing "browser envelope preserves wrapped payload and adds string metadata"
     (let [wf-id (random-uuid)
           event {:event/type :workflow/phase-started
@@ -33,7 +34,7 @@
       (is (= (str wf-id) (get envelope "workflow-id")))
       (is (map? (get envelope "data"))))))
 
-(deftest normalize-workflow-event-test
+(deftest ^{:stratum 0} normalize-workflow-event-test
   (testing "workflow websocket ingestion re-keywordizes fields and restores UUID ids"
     (let [wf-id (random-uuid)
           normalized (sut/normalize-workflow-event

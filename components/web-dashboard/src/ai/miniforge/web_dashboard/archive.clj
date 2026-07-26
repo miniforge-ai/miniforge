@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.archive
   "Archive scanning — build lightweight workflow summaries from event files.
 
@@ -28,13 +27,13 @@
    [java.io RandomAccessFile]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure summary derivation — data in, data out
 
-(defn extract-wf-id
+;; Pure summary derivation — data in, data out
+(defn ^{:stratum 0} extract-wf-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn extract-wf-name
+(defn ^{:stratum 0} extract-wf-name
   [event wf-id]
   (or (get-in event [:workflow/spec :spec/title])
       (get-in event [:workflow/spec :title])
@@ -45,16 +44,16 @@
       (get-in event [:spec :name])
       (str "Workflow " (subs (str wf-id) 0 (min 8 (count (str wf-id)))))))
 
-(defn extract-timestamp
+(defn ^{:stratum 0} extract-timestamp
   [event]
   (or (:event/timestamp event) (:timestamp event)))
 
-(defn find-by-type
+(defn ^{:stratum 0} find-by-type
   "First event from coll whose :event/type is in type-set."
   [type-set events]
   (first (filter #(contains? type-set (:event/type %)) events)))
 
-(defn derive-status
+(defn ^{:stratum 0} derive-status
   [terminal-event tail-line-count]
   (cond
     (= :workflow/failed (:event/type terminal-event))
@@ -70,7 +69,37 @@
 
     :else :stale))
 
-(defn derive-summary
+;; I/O: read first+last lines from event file
+(defn ^{:stratum 0} read-first-event
+  "Read and parse the first line of a RandomAccessFile."
+  [^RandomAccessFile raf]
+  (-> (.readLine raf) watcher/parse-edn-line))
+
+(defn ^{:stratum 0} read-tail-events
+  "Seek near EOF, read last ~2KB of lines, parse and return most-recent-first."
+  [^RandomAccessFile raf ^long length]
+  (let [seek-pos (max 0 (- length 2048))]
+    (.seek raf seek-pos)
+    (when (pos? seek-pos) (.readLine raf))           ; skip partial line
+    (->> (loop [lines []]
+           (if-let [line (.readLine raf)]
+             (recur (conj lines line))
+             lines))
+         (keep watcher/parse-edn-line)
+         reverse
+         vec)))
+
+;; Archive scan orchestration
+(defn ^{:stratum 0} list-edn-files
+  [events-dir]
+  (let [dir (io/file events-dir)]
+    (when (and (.exists dir) (.isDirectory dir))
+      (->> (.listFiles dir)
+           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} derive-summary
   "Pure: first-event + tail-events + file metadata → summary map or nil."
   [first-event tail-events file-path file-size]
   (let [wf-id (extract-wf-id first-event)]
@@ -88,29 +117,9 @@
          :file-path    file-path
          :file-size    file-size}))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; I/O: read first+last lines from event file
+;------------------------------------------------------------------------------ Layer 2
 
-(defn read-first-event
-  "Read and parse the first line of a RandomAccessFile."
-  [^RandomAccessFile raf]
-  (-> (.readLine raf) watcher/parse-edn-line))
-
-(defn read-tail-events
-  "Seek near EOF, read last ~2KB of lines, parse and return most-recent-first."
-  [^RandomAccessFile raf ^long length]
-  (let [seek-pos (max 0 (- length 2048))]
-    (.seek raf seek-pos)
-    (when (pos? seek-pos) (.readLine raf))           ; skip partial line
-    (->> (loop [lines []]
-           (if-let [line (.readLine raf)]
-             (recur (conj lines line))
-             lines))
-         (keep watcher/parse-edn-line)
-         reverse
-         vec)))
-
-(defn read-workflow-summary
+(defn ^{:stratum 2} read-workflow-summary
   "Read a lightweight summary from an .edn event file.
    Opens file, reads first event + tail events, derives summary.
    Returns summary map or nil on error."
@@ -125,17 +134,9 @@
           (.close raf))))
     (catch Exception _ nil)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Archive scan orchestration
+;------------------------------------------------------------------------------ Layer 3
 
-(defn list-edn-files
-  [events-dir]
-  (let [dir (io/file events-dir)]
-    (when (and (.exists dir) (.isDirectory dir))
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))))))
-
-(defn scan-archive!
+(defn ^{:stratum 3} scan-archive!
   "Scan all .edn files in events-dir, build lightweight summaries.
    Calls (on-workflow! summary) for each successfully parsed file.
    Calls (on-complete!) when scan finishes. Returns nil."

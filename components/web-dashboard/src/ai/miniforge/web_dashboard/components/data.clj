@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.components.data
   "Data display components for web dashboard.
 
@@ -22,16 +21,18 @@
   (:require
    [clojure.string :as str]))
 
-;------------------------------------------------------------------------------ Helper
+;------------------------------------------------------------------------------ Layer 0
 
-(defn build-class
+;------------------------------------------------------------------------------ Helper
+(defn ^{:stratum 0} build-class
   "Build CSS class string from opts and modifiers."
   [{:keys [class]} base-class & modifiers]
   (str/join " " (filter some? (concat [base-class] modifiers [class]))))
 
-;------------------------------------------------------------------------------ Layer 2: Data Display
+;------------------------------------------------------------------------------ Layer 1
 
-(defn table
+;------------------------------------------------------------------------------ Layer 2: Data Display
+(defn ^{:stratum 1} table
   "Sortable, filterable table component.
 
    Options:
@@ -59,7 +60,7 @@
          [:td {:style (str "text-align: " (name align) ";")}
           (get row key)])])]])
 
-(defn tree
+(defn ^{:stratum 1} tree
   "Expandable hierarchical tree component.
 
    Options:
@@ -88,7 +89,7 @@
     [:div {:class (build-class opts "tree")}
      (map render-node nodes)]))
 
-(defn timeline
+(defn ^{:stratum 1} timeline
   "Chronological event list with timestamps.
 
    Options:

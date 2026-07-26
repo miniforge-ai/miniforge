@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.components.layouts
   "Layout components for web dashboard.
 
@@ -23,16 +22,18 @@
   (:require
    [clojure.string :as str]))
 
-;------------------------------------------------------------------------------ Helper
+;------------------------------------------------------------------------------ Layer 0
 
-(defn build-class
+;------------------------------------------------------------------------------ Helper
+(defn ^{:stratum 0} build-class
   "Build CSS class string from opts and modifiers."
   [{:keys [class]} base-class & modifiers]
   (str/join " " (filter some? (concat [base-class] modifiers [class]))))
 
-;------------------------------------------------------------------------------ Layer 1: Layouts
+;------------------------------------------------------------------------------ Layer 1
 
-(defn page
+;------------------------------------------------------------------------------ Layer 1: Layouts
+(defn ^{:stratum 1} page
   "Main page wrapper with header, nav, content, footer.
 
    Options:
@@ -52,7 +53,7 @@
     (when nav [:nav.page-nav nav])
     [:main.page-content content]]])
 
-(defn panel
+(defn ^{:stratum 1} panel
   "Generic content container with optional header and footer.
 
    Options:
@@ -71,7 +72,7 @@
    [:div.panel-body content]
    (when footer [:div.panel-footer footer])])
 
-(defn grid
+(defn ^{:stratum 1} grid
   "Responsive multi-column grid layout.
 
    Options:
@@ -86,7 +87,7 @@
     :style (str "grid-template-columns: repeat(" columns ", 1fr);")}
    items])
 
-(defn split
+(defn ^{:stratum 1} split
   "Two-column layout with adjustable split ratio.
 
    Options:

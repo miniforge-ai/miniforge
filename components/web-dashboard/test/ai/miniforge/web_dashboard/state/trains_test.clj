@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.trains-test
   (:require
    [clojure.java.io :as io]
@@ -28,21 +27,22 @@
    [ai.miniforge.web-dashboard.state.trains :as sut]
    [slingshot.slingshot :refer [throw+]]))
 
-;; ---------------------------------------------------------------------------- Fixture text
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private provider-unavailable-message
+;; ---------------------------------------------------------------------------- Fixture text
+(def ^{:stratum 0} ^:private provider-unavailable-message
   "Anomaly message used in the failing-sync fixture — mirrors a real
    upstream provider-unavailable error so the aggregation behaviour
    tested matches what production callers see."
   "Provider unavailable")
 
-(def ^:private aggregate-fault-clause
+(def ^{:stratum 0} ^:private aggregate-fault-clause
   "Test-clause rationale for the aggregate :fault assertion: the
    bricks's aggregated failure result emits a generic canonical
    :fault anomaly with no domain subtype."
   "aggregate failure anomaly is generic :fault, no subtype")
 
-(defn temp-config-path
+(defn ^{:stratum 0} temp-config-path
   []
   (let [dir (.toFile (java.nio.file.Files/createTempDirectory
                       "fleet-config"
@@ -53,8 +53,7 @@
 ;; ============================================================================
 ;; Layer 0: Helper and utility function tests
 ;; ============================================================================
-
-(deftest normalized-limit-test
+(deftest ^{:stratum 0} normalized-limit-test
   (testing "Returns the integer when positive"
     (is (= 10 (sut/normalized-limit 10 50))))
   (testing "Falls back to default for non-integer"
@@ -64,7 +63,7 @@
     (is (= 50 (sut/normalized-limit 0 50)))
     (is (= 50 (sut/normalized-limit -5 50)))))
 
-(deftest ensure-message-test
+(deftest ^{:stratum 0} ensure-message-test
   (testing "Returns message when present and non-blank"
     (is (= "hello" (sut/ensure-message "hello" "fallback"))))
   (testing "Returns fallback for nil"
@@ -74,13 +73,13 @@
   (testing "Trims the message"
     (is (= "hello" (sut/ensure-message "  hello  " "fallback")))))
 
-(deftest normalize-repo-slug-test
+(deftest ^{:stratum 0} normalize-repo-slug-test
   (testing "Normalizes case and trims whitespace"
     (is (= "acme/service" (sut/normalize-repo-slug "  Acme/Service  "))))
   (testing "Handles already-normalized slugs"
     (is (= "acme/service" (sut/normalize-repo-slug "acme/service")))))
 
-(deftest valid-repo-slug-test
+(deftest ^{:stratum 0} valid-repo-slug-test
   (testing "Valid slugs"
     (is (true? (sut/valid-repo-slug? "acme/service")))
     (is (true? (sut/valid-repo-slug? "my-org/my-repo")))
@@ -91,14 +90,14 @@
     (is (false? (sut/valid-repo-slug? "")))
     (is (false? (sut/valid-repo-slug? "has spaces/repo")))))
 
-(deftest result-success-test
+(deftest ^{:stratum 0} result-success-test
   (testing "result-success sets success flags"
     (let [r (sut/result-success {:foo :bar})]
       (is (true? (:success? r)))
       (is (true? (:success r)))
       (is (= :bar (:foo r))))))
 
-(deftest result-failure-test
+(deftest ^{:stratum 0} result-failure-test
   (testing "result-failure sets failure flags with message"
     (let [r (sut/result-failure "bad thing")]
       (is (false? (:success? r)))
@@ -111,7 +110,7 @@
       (is (string? (:error r)))
       (is (not (str/blank? (:error r)))))))
 
-(deftest result-exception-test
+(deftest ^{:stratum 0} result-exception-test
   (testing "result-exception captures exception info"
     (let [ex (ex-info "boom" {:detail 1})
           r (sut/result-exception "wrapped" ex)]
@@ -120,7 +119,7 @@
       (is (string? (:exception r)))
       (is (some? (:anomaly r))))))
 
-(deftest succeeded?-test
+(deftest ^{:stratum 0} succeeded?-test
   (testing "Returns true for success maps"
     (is (true? (sut/succeeded? {:success? true}))))
   (testing "Returns false for failure maps"
@@ -129,55 +128,13 @@
     (is (false? (sut/succeeded? {})))
     (is (false? (sut/succeeded? nil)))))
 
-;; ============================================================================
-;; Layer 0: Config management tests
-;; ============================================================================
-
-(deftest add-configured-repo-validates-and-dedupes-test
-  (let [config-path (temp-config-path)
-        state (atom {})]
-    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
-      (fn []
-        (let [invalid (sut/add-configured-repo! state "not-a-repo-slug")]
-          (is (false? (:success? invalid)))
-          (is (= :fault (get-in invalid [:anomaly :anomaly/type])))
-          (is (nil? (get-in invalid [:anomaly :anomaly/subtype]))
-              "generic-standard :anomalies/fault maps 1:1 to :fault, no subtype"))
-
-        (let [first-add (sut/add-configured-repo! state "Acme/Service")
-              second-add (sut/add-configured-repo! state "acme/service")]
-          (is (true? (:success? first-add)))
-          (is (true? (:added? first-add)))
-          (is (= "acme/service" (:repo first-add)))
-          (is (true? (:success? second-add)))
-          (is (false? (:added? second-add)))
-          (is (= ["acme/service"] (sut/get-configured-repos state))))))))
-
-(deftest add-configured-repo-blank-test
-  (let [config-path (temp-config-path)
-        state (atom {})]
-    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
-      (fn []
-        (let [r (sut/add-configured-repo! state "  ")]
-          (is (false? (:success? r)))
-          (is (clojure.string/includes? (:error r) "required")))))))
-
-(deftest get-configured-repos-filters-invalid-test
-  (let [config-path (temp-config-path)
-        state (atom {})]
-    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
-      (fn []
-        ;; Write config with a mix of valid and invalid slugs
-        (spit config-path (pr-str {:fleet {:repos ["acme/good" "bad" "org/ok" "a/b/c"]}}))
-        (is (= ["acme/good" "org/ok"] (sut/get-configured-repos state)))))))
-
-(deftest get-configured-repos-missing-config-test
+(deftest ^{:stratum 0} get-configured-repos-missing-config-test
   (let [state (atom {})]
     (with-redefs-fn {#'sut/default-fleet-config-path "/nonexistent/path/config.edn"}
       (fn []
         (is (= [] (sut/get-configured-repos state)))))))
 
-(deftest with-config-lock-timeout-test
+(deftest ^{:stratum 0} with-config-lock-timeout-test
   (testing "returns lock-failure within timeout when another thread holds the lock"
     (let [path    (str (System/getProperty "java.io.tmpdir") "/mf-trains-lock-test-" (System/nanoTime) ".edn")
           latch   (java.util.concurrent.CountDownLatch. 1)
@@ -203,8 +160,7 @@
 ;; ============================================================================
 ;; Layer 0: Provider PR field parsing
 ;; ============================================================================
-
-(deftest pr-status-from-provider-test
+(deftest ^{:stratum 0} pr-status-from-provider-test
   (testing "Closed state"
     (is (= :closed (sut/pr-status-from-provider {:state "CLOSED"})))
     (is (= :closed (sut/pr-status-from-provider {:state "MERGED"}))))
@@ -219,7 +175,7 @@
   (testing "Open with no review decision"
     (is (= :open (sut/pr-status-from-provider {:state "OPEN" :isDraft false})))))
 
-(deftest check-rollup->ci-status-test
+(deftest ^{:stratum 0} check-rollup->ci-status-test
   (testing "Nil rollup returns :pending"
     (is (= :pending (sut/check-rollup->ci-status nil))))
   (testing "Empty list returns :pending"
@@ -239,7 +195,7 @@
   (testing "Single non-sequential rollup treated as single-element list"
     (is (= :failed (sut/check-rollup->ci-status {:conclusion "FAILURE"})))))
 
-(deftest merge-state-status->behind-test
+(deftest ^{:stratum 0} merge-state-status->behind-test
   (testing "BEHIND is behind"
     (is (true? (sut/merge-state-status->behind? "BEHIND"))))
   (testing "DIRTY is behind"
@@ -249,7 +205,7 @@
   (testing "nil is not behind"
     (is (false? (sut/merge-state-status->behind? nil)))))
 
-(deftest provider-pr->train-pr-test
+(deftest ^{:stratum 0} provider-pr->train-pr-test
   (testing "Maps all provider fields to train PR map"
     (let [pr {:number 42
               :title "My PR"
@@ -268,7 +224,7 @@
       (is (= :passed (:pr/ci-status result)))
       (is (false? (:pr/behind-main? result))))))
 
-(deftest fetch-open-prs-parses-provider-fields-test
+(deftest ^{:stratum 0} fetch-open-prs-parses-provider-fields-test
   (with-redefs-fn {#'sut/run-gh
                    (fn [& _args]
                      {:success? true
@@ -302,7 +258,7 @@
         (is (= :draft (get-in by-number [40 :pr/status])))
         (is (= :running (get-in by-number [40 :pr/ci-status])))))))
 
-(deftest fetch-open-prs-failure-test
+(deftest ^{:stratum 0} fetch-open-prs-failure-test
   (testing "Provider failure returns error with actionable hint"
     (with-redefs-fn {#'sut/run-gh
                      (fn [& _args]
@@ -313,7 +269,7 @@
           (is (= "acme/service" (:repo result)))
           (is (string? (:action result))))))))
 
-(deftest fetch-open-prs-malformed-json-test
+(deftest ^{:stratum 0} fetch-open-prs-malformed-json-test
   (testing "Malformed JSON from provider returns parse error"
     (with-redefs-fn {#'sut/run-gh
                      (fn [& _args]
@@ -324,10 +280,9 @@
           (is (string? (:error result))))))))
 
 ;; ============================================================================
-;; Layer 1: Deterministic train enrichment tests
+;; Deterministic train enrichment tests
 ;; ============================================================================
-
-(deftest gates-passed-test
+(deftest ^{:stratum 0} gates-passed-test
   (testing "No gates means passed"
     (is (true? (sut/gates-passed? {}))))
   (testing "All gates passed"
@@ -335,7 +290,7 @@
   (testing "One gate failed"
     (is (false? (sut/gates-passed? {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
 
-(deftest gates-score-test
+(deftest ^{:stratum 0} gates-score-test
   (testing "Empty gates => 1.0"
     (is (= 1.0 (sut/gates-score {}))))
   (testing "All passed => 1.0"
@@ -343,13 +298,13 @@
   (testing "Half passed => 0.5"
     (is (= 0.5 (sut/gates-score {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]})))))
 
-(deftest pr-sort-key-test
+(deftest ^{:stratum 0} pr-sort-key-test
   (testing "Uses merge-order then number"
     (is (= [1 42] (sut/pr-sort-key {:pr/merge-order 1 :pr/number 42}))))
   (testing "Missing merge-order uses MAX_VALUE"
     (is (= [Long/MAX_VALUE 10] (sut/pr-sort-key {:pr/number 10})))))
 
-(deftest sort-prs-test
+(deftest ^{:stratum 0} sort-prs-test
   (testing "PRs sorted by merge-order then number"
     (let [prs [{:pr/number 3 :pr/merge-order 2}
                {:pr/number 1 :pr/merge-order 1}
@@ -357,7 +312,7 @@
           sorted (sut/sort-prs prs)]
       (is (= [1 2 3] (mapv :pr/number sorted))))))
 
-(deftest unresolved-deps-test
+(deftest ^{:stratum 0} unresolved-deps-test
   (testing "No deps returns empty"
     (let [pm {1 {:pr/number 1 :pr/status :open}}]
       (is (= [] (sut/unresolved-deps pm (get pm 1))))))
@@ -375,7 +330,7 @@
               5 {:pr/number 5 :pr/status :open :pr/depends-on [1 3]}}]
       (is (= [3] (sut/unresolved-deps pm (get pm 5)))))))
 
-(deftest deps-score-test
+(deftest ^{:stratum 0} deps-score-test
   (testing "No deps => 1.0"
     (let [pm {1 {:pr/number 1 :pr/status :open}}]
       (is (= 1.0 (sut/deps-score pm (get pm 1))))))
@@ -389,10 +344,9 @@
       (is (= 0.0 (sut/deps-score pm (get pm 2)))))))
 
 ;; ============================================================================
-;; Layer 1: Readiness state tests
+;; Readiness state tests
 ;; ============================================================================
-
-(deftest readiness-state-deterministic-test
+(deftest ^{:stratum 0} readiness-state-deterministic-test
   (testing "readiness-state returns deterministic keyword for known inputs"
     (let [pr-map {1 {:pr/number 1 :pr/status :merged}
                   2 {:pr/number 2 :pr/status :approved :pr/ci-status :passed
@@ -402,39 +356,39 @@
       (is (= :merge-ready (sut/readiness-state pr-map merged-pr)))
       (is (= :merge-ready (sut/readiness-state pr-map ready-pr))))))
 
-(deftest readiness-state-dep-blocked-test
+(deftest ^{:stratum 0} readiness-state-dep-blocked-test
   (testing "PR with unmerged dep is :dep-blocked"
     (let [pr-map {1 {:pr/number 1 :pr/status :open}
                   2 {:pr/number 2 :pr/status :approved :pr/ci-status :passed
                      :pr/depends-on [1] :pr/behind-main? false}}]
       (is (= :dep-blocked (sut/readiness-state pr-map (get pr-map 2)))))))
 
-(deftest readiness-state-ci-failing-test
+(deftest ^{:stratum 0} readiness-state-ci-failing-test
   (testing "PR with failed CI is :ci-failing"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :failed
                      :pr/behind-main? false}}]
       (is (= :ci-failing (sut/readiness-state pr-map (get pr-map 1)))))))
 
-(deftest readiness-state-merge-conflicts-test
+(deftest ^{:stratum 0} readiness-state-merge-conflicts-test
   (testing "PR behind main is :merge-conflicts"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed
                      :pr/behind-main? true}}]
       (is (= :merge-conflicts (sut/readiness-state pr-map (get pr-map 1)))))))
 
-(deftest readiness-state-changes-requested-test
+(deftest ^{:stratum 0} readiness-state-changes-requested-test
   (testing "PR with changes-requested is :changes-requested"
     (let [pr-map {1 {:pr/number 1 :pr/status :changes-requested :pr/ci-status :passed
                      :pr/behind-main? false}}]
       (is (= :changes-requested (sut/readiness-state pr-map (get pr-map 1)))))))
 
-(deftest readiness-state-policy-failing-test
+(deftest ^{:stratum 0} readiness-state-policy-failing-test
   (testing "PR with failed gates is :policy-failing"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed
                      :pr/behind-main? false
                      :pr/gate-results [{:gate/passed? false}]}}]
       (is (= :policy-failing (sut/readiness-state pr-map (get pr-map 1)))))))
 
-(deftest readiness-state-needs-review-test
+(deftest ^{:stratum 0} readiness-state-needs-review-test
   (testing "Open PR with no blockers is :needs-review"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :passed
                      :pr/behind-main? false}}]
@@ -449,10 +403,9 @@
       (is (= :needs-review (sut/readiness-state pr-map (get pr-map 1)))))))
 
 ;; ============================================================================
-;; Layer 1: Blockers tests
+;; Blockers tests
 ;; ============================================================================
-
-(deftest blockers-deterministic-sorted-test
+(deftest ^{:stratum 0} blockers-deterministic-sorted-test
   (testing "Blockers are sorted by type rank, then message — deterministic output"
     (let [pr-map {1 {:pr/number 1 :pr/status :open}}
           pr {:pr/number 2
@@ -468,7 +421,7 @@
       ;; Messages are strings
       (is (every? string? (map :blocker/message result))))))
 
-(deftest blockers-empty-for-ready-pr-test
+(deftest ^{:stratum 0} blockers-empty-for-ready-pr-test
   (testing "Merge-ready PR has no blockers"
     (let [pr-map {1 {:pr/number 1 :pr/status :merged}
                   2 {:pr/number 2 :pr/status :approved :pr/ci-status :passed
@@ -476,7 +429,7 @@
           result (sut/blockers pr-map (get pr-map 2))]
       (is (empty? result)))))
 
-(deftest blockers-draft-pr-test
+(deftest ^{:stratum 0} blockers-draft-pr-test
   (testing "Draft PR has review blocker"
     (let [pr-map {1 {:pr/number 1 :pr/status :draft :pr/ci-status :passed
                      :pr/behind-main? false}}
@@ -484,7 +437,7 @@
       (is (= [:review] (mapv :blocker/type result)))
       (is (clojure.string/includes? (:blocker/message (first result)) "draft")))))
 
-(deftest blockers-reviewing-pr-test
+(deftest ^{:stratum 0} blockers-reviewing-pr-test
   (testing "Reviewing PR has review blocker about approval"
     (let [pr-map {1 {:pr/number 1 :pr/status :reviewing :pr/ci-status :passed
                      :pr/behind-main? false}}
@@ -492,7 +445,7 @@
       (is (some #(= :review (:blocker/type %)) result))
       (is (some #(clojure.string/includes? (:blocker/message %) "approval") result)))))
 
-(deftest blockers-running-ci-test
+(deftest ^{:stratum 0} blockers-running-ci-test
   (testing "Running CI adds ci blocker"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :running
                      :pr/behind-main? false}}
@@ -500,7 +453,7 @@
       (is (some #(= :ci (:blocker/type %)) result))
       (is (some #(clojure.string/includes? (:blocker/message %) "running") result)))))
 
-(deftest blockers-multiple-failed-gates-test
+(deftest ^{:stratum 0} blockers-multiple-failed-gates-test
   (testing "Multiple failed gates produce single policy blocker with count"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed
                      :pr/behind-main? false
@@ -512,7 +465,7 @@
       (is (= 1 (count policy-blockers)))
       (is (clojure.string/includes? (:blocker/message (first policy-blockers)) "2")))))
 
-(deftest blockers-source-field-test
+(deftest ^{:stratum 0} blockers-source-field-test
   (testing "Each blocker has a :blocker/source"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :failed
                      :pr/behind-main? true}}
@@ -520,10 +473,9 @@
       (is (every? #(string? (:blocker/source %)) result)))))
 
 ;; ============================================================================
-;; Layer 1: Readiness composite tests
+;; Readiness composite tests
 ;; ============================================================================
-
-(deftest readiness-complete-test
+(deftest ^{:stratum 0} readiness-complete-test
   (testing "readiness returns all expected keys"
     (let [pr-map {1 {:pr/number 1 :pr/status :merged}}
           pr {:pr/number 2 :pr/status :approved :pr/ci-status :passed
@@ -538,7 +490,7 @@
       (is (= 5 (count (:readiness/factors result))))
       (is (double? (:readiness/score result))))))
 
-(deftest readiness-score-range-test
+(deftest ^{:stratum 0} readiness-score-range-test
   (testing "Readiness score is between 0.0 and 1.0"
     (let [test-prs [{:pr/number 1 :pr/status :open :pr/ci-status :failed :pr/behind-main? true}
                     {:pr/number 2 :pr/status :approved :pr/ci-status :passed :pr/behind-main? false}
@@ -548,20 +500,20 @@
         (let [score (:readiness/score (sut/readiness pr-map pr))]
           (is (<= 0.0 score 1.0) (str "Score out of range for PR#" (:pr/number pr))))))))
 
-(deftest readiness-factors-sum-to-score-test
+(deftest ^{:stratum 0} readiness-factors-sum-to-score-test
   (testing "Sum of factor contributions equals readiness score"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed :pr/behind-main? false}}
           r (sut/readiness pr-map (get pr-map 1))
           computed-sum (reduce + 0.0 (map :contribution (:readiness/factors r)))]
       (is (< (Math/abs (- computed-sum (:readiness/score r))) 0.001)))))
 
-(deftest readiness-ready-requires-merge-ready-state-test
+(deftest ^{:stratum 0} readiness-ready-requires-merge-ready-state-test
   (testing "ready? is false even with high score if not :merge-ready"
     (let [pr-map {1 {:pr/number 1 :pr/status :open :pr/ci-status :passed :pr/behind-main? false}}
           r (sut/readiness pr-map (get pr-map 1))]
       (is (false? (:readiness/ready? r))))))
 
-(deftest readiness-factor-weights-sum-to-one-test
+(deftest ^{:stratum 0} readiness-factor-weights-sum-to-one-test
   (testing "All factor weights sum to 1.0"
     (let [pr-map {1 {:pr/number 1 :pr/status :approved :pr/ci-status :passed :pr/behind-main? false}}
           r (sut/readiness pr-map (get pr-map 1))
@@ -569,10 +521,9 @@
       (is (< (Math/abs (- weight-sum 1.0)) 0.001)))))
 
 ;; ============================================================================
-;; Layer 1: Train enrichment tests
+;; Train enrichment tests
 ;; ============================================================================
-
-(deftest enrich-train-adds-readiness-and-blocking-test
+(deftest ^{:stratum 0} enrich-train-adds-readiness-and-blocking-test
   (testing "enrich-train annotates PRs with readiness and blocking details"
     (let [train {:train/prs [{:pr/number 1 :pr/status :approved :pr/ci-status :passed
                               :pr/merge-order 1 :pr/behind-main? false}
@@ -593,53 +544,51 @@
 ;; ============================================================================
 ;; Error classification tests
 ;; ============================================================================
-
 ;; classify-error-category — direct unit tests for the category-classifier.
 ;; Action-string mapping is tested separately via the actionable-error-hint family.
-
-(deftest classify-error-category-auth-test
+(deftest ^{:stratum 0} classify-error-category-auth-test
   (testing "Auth-related messages classify as :auth"
     (is (= :auth (sut/classify-error-category "authentication required")))
     (is (= :auth (sut/classify-error-category "not logged in to any GitHub hosts")))
     (is (= :auth (sut/classify-error-category "auth failure")))))
 
-(deftest classify-error-category-access-test
+(deftest ^{:stratum 0} classify-error-category-access-test
   (testing "Access/permission errors classify as :access"
     (is (= :access (sut/classify-error-category "repository not found")))
     (is (= :access (sut/classify-error-category "403 Forbidden")))
     (is (= :access (sut/classify-error-category "permission denied")))
     (is (= :access (sut/classify-error-category "access denied for repo")))))
 
-(deftest classify-error-category-rate-limit-test
+(deftest ^{:stratum 0} classify-error-category-rate-limit-test
   (testing "Rate-limit errors classify as :rate-limit"
     (is (= :rate-limit (sut/classify-error-category "API rate limit exceeded")))
     (is (= :rate-limit (sut/classify-error-category "secondary rate limit hit")))))
 
-(deftest classify-error-category-parse-test
+(deftest ^{:stratum 0} classify-error-category-parse-test
   (testing "Parse errors classify as :parse"
     (is (= :parse (sut/classify-error-category "failed to parse JSON")))
     (is (= :parse (sut/classify-error-category "malformed response body")))
     (is (= :parse (sut/classify-error-category "invalid json token")))))
 
-(deftest classify-error-category-network-test
+(deftest ^{:stratum 0} classify-error-category-network-test
   (testing "Network/timeout errors classify as :network"
     (is (= :network (sut/classify-error-category "connection timed out")))
     (is (= :network (sut/classify-error-category "network unreachable")))
     (is (= :network (sut/classify-error-category "connection refused")))
     (is (= :network (sut/classify-error-category "request timeout")))))
 
-(deftest classify-error-category-unknown-test
+(deftest ^{:stratum 0} classify-error-category-unknown-test
   (testing "Unrecognized messages classify as :unknown"
     (is (= :unknown (sut/classify-error-category "some weird error we haven't seen")))
     (is (= :unknown (sut/classify-error-category nil)))
     (is (= :unknown (sut/classify-error-category "")))))
 
-(deftest classify-error-category-case-insensitive-test
+(deftest ^{:stratum 0} classify-error-category-case-insensitive-test
   (testing "Classification is case-insensitive"
     (is (= :auth    (sut/classify-error-category "AUTHENTICATION REQUIRED")))
     (is (= :network (sut/classify-error-category "CONNECTION TIMED OUT")))))
 
-(deftest with-actionable-error-test
+(deftest ^{:stratum 0} with-actionable-error-test
   (testing "Adds action to failure result"
     (let [r (sut/with-actionable-error {:success? false :error "authentication required"})]
       (is (string? (:action r)))))
@@ -648,10 +597,9 @@
       (is (nil? (:action r))))))
 
 ;; ============================================================================
-;; Layer 2: Train/DAG state access tests
+;; Train/DAG state access tests
 ;; ============================================================================
-
-(deftest get-trains-manager-exception-test
+(deftest ^{:stratum 0} get-trains-manager-exception-test
   (testing "Manager exceptions return an empty train list"
     (let [state (atom {:pr-train-manager ::boom-manager})]
       (with-redefs-fn {#'pr-train/list-trains
@@ -659,7 +607,7 @@
         (fn []
           (is (= [] (sut/fetch-trains state))))))))
 
-(deftest fetch-trains-non-throwable-sling-test
+(deftest ^{:stratum 0} fetch-trains-non-throwable-sling-test
   (testing "Slingshot data throws still return the safe empty list"
     (let [state (atom {:pr-train-manager ::boom-manager})]
       (with-redefs-fn {#'pr-train/list-trains
@@ -667,7 +615,7 @@
         (fn []
           (is (= [] (sut/fetch-trains state))))))))
 
-(deftest normalize-train-action-test
+(deftest ^{:stratum 0} normalize-train-action-test
   (testing "Request strings are normalized to app-local action keywords"
     (is (= :pause (sut/normalize-train-action "pause")))
     (is (= :resume (sut/normalize-train-action "resume")))
@@ -677,19 +625,19 @@
   (testing "Unknown actions are rejected"
     (is (nil? (sut/normalize-train-action "unknown")))))
 
-(deftest get-train-detail-invalid-id-test
+(deftest ^{:stratum 0} get-train-detail-invalid-id-test
   (testing "Invalid train id returns error"
     (let [state (atom {:pr-train-manager :mgr})]
       (is (= {:error "Invalid train id."}
              (sut/get-train-detail state "not-a-uuid"))))))
 
-(deftest get-train-detail-no-manager-test
+(deftest ^{:stratum 0} get-train-detail-no-manager-test
   (testing "No pr-train-manager returns error"
     (let [state (atom {})]
       (is (= {:error "PR train manager not available"}
              (sut/get-train-detail state (str (random-uuid))))))))
 
-(deftest get-train-detail-not-found-test
+(deftest ^{:stratum 0} get-train-detail-not-found-test
   (testing "Valid UUID but train not found returns error"
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
@@ -698,7 +646,7 @@
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
 
-(deftest get-train-detail-manager-exception-test
+(deftest ^{:stratum 0} get-train-detail-manager-exception-test
   (testing "Manager exceptions return the not-found error map"
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
@@ -708,7 +656,7 @@
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
 
-(deftest get-train-detail-non-throwable-sling-test
+(deftest ^{:stratum 0} get-train-detail-non-throwable-sling-test
   (testing "Slingshot data throws return the not-found error map"
     (let [state (atom {:pr-train-manager :mgr})
           tid (str (random-uuid))]
@@ -718,17 +666,17 @@
           (is (= {:error "Train not found"}
                  (sut/get-train-detail state tid))))))))
 
-(deftest train-action-no-manager-test
+(deftest ^{:stratum 0} train-action-no-manager-test
   (testing "No manager returns nil"
     (let [state (atom {})]
       (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))
 
-(deftest train-action-invalid-id-test
+(deftest ^{:stratum 0} train-action-invalid-id-test
   (testing "Invalid train id returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
       (is (nil? (sut/train-action! state "not-a-uuid" "pause"))))))
 
-(deftest train-action-manager-exception-test
+(deftest ^{:stratum 0} train-action-manager-exception-test
   (testing "Manager exceptions return nil"
     (let [state (atom {:pr-train-manager :mgr})]
       (with-redefs-fn {#'pr-train/pause-train
@@ -736,7 +684,7 @@
         (fn []
           (is (nil? (sut/train-action! state (str (random-uuid)) "pause"))))))))
 
-(deftest train-action-keyword-action-test
+(deftest ^{:stratum 0} train-action-keyword-action-test
   (testing "Keyword actions are dispatched internally"
     (let [state (atom {:pr-train-manager :mgr})
           train-id (random-uuid)
@@ -749,12 +697,12 @@
           (is (= :resumed (sut/train-action! state (str train-id) :resume)))
           (is (= [:mgr train-id] @captured)))))))
 
-(deftest train-action-unknown-action-test
+(deftest ^{:stratum 0} train-action-unknown-action-test
   (testing "Unknown action returns nil"
     (let [state (atom {:pr-train-manager :mgr})]
       (is (nil? (sut/train-action! state (str (random-uuid)) "unknown"))))))
 
-(deftest get-dags-manager-exception-test
+(deftest ^{:stratum 0} get-dags-manager-exception-test
   (testing "Manager exceptions return an empty DAG list"
     (let [state (atom {:repo-dag-manager ::boom-manager})]
       (with-redefs-fn {#'repo-dag/get-all-dags
@@ -762,7 +710,7 @@
         (fn []
           (is (= [] (sut/fetch-dags state))))))))
 
-(deftest fetch-dags-non-throwable-sling-test
+(deftest ^{:stratum 0} fetch-dags-non-throwable-sling-test
   (testing "Slingshot data throws still return the safe empty list"
     (let [state (atom {:repo-dag-manager ::boom-manager})]
       (with-redefs-fn {#'repo-dag/get-all-dags
@@ -770,7 +718,7 @@
         (fn []
           (is (= [] (sut/fetch-dags state))))))))
 
-(deftest ensure-default-dag-id-create-exception-test
+(deftest ^{:stratum 0} ensure-default-dag-id-create-exception-test
   (testing "DAG creation failure falls back to a generated DAG id"
     (let [state (atom {:repo-dag-manager :mgr})]
       (with-redefs-fn {#'repo-dag/get-all-dags (fn [_] [])
@@ -780,7 +728,7 @@
             (is (uuid? dag-id))
             (is (= dag-id (:fleet/default-dag-id @state)))))))))
 
-(deftest ensure-repo-train-create-exception-test
+(deftest ^{:stratum 0} ensure-repo-train-create-exception-test
   (testing "Train creation failure returns nil instead of aborting sync"
     (let [state (atom {:pr-train-manager :mgr
                        :repo-dag-manager :dag-mgr
@@ -791,7 +739,7 @@
         (fn []
           (is (nil? (sut/ensure-repo-train! state "acme/service"))))))))
 
-(deftest apply-sync-plan-continues-through-side-effect-exceptions-test
+(deftest ^{:stratum 0} apply-sync-plan-continues-through-side-effect-exceptions-test
   (testing "Sync side effects remain ordered and do not abort on one failure"
     (let [calls (atom [])
           train-id (random-uuid)
@@ -814,10 +762,9 @@
           (is (= [:add :remove :sync :link] @calls)))))))
 
 ;; ============================================================================
-;; Layer 3: Sync status rendering tests
+;; Sync status rendering tests
 ;; ============================================================================
-
-(deftest sync-status-success-test
+(deftest ^{:stratum 0} sync-status-success-test
   (testing "Fully successful sync produces :success status"
     (let [result {:success? true :success true
                   :synced 3 :failed 0
@@ -833,7 +780,7 @@
       (is (empty? (:failures ss)))
       (is (inst? (:timestamp ss))))))
 
-(deftest sync-status-partial-test
+(deftest ^{:stratum 0} sync-status-partial-test
   (testing "Partial sync produces :partial status with classified failures"
     (let [result {:success? false :success false
                   :synced 2 :failed 1
@@ -851,7 +798,7 @@
       (is (= :auth (:error-category (first (:failures ss)))))
       (is (string? (:action (first (:failures ss))))))))
 
-(deftest sync-status-total-failure-test
+(deftest ^{:stratum 0} sync-status-total-failure-test
   (testing "Total failure produces :failed status"
     (let [result {:success? false :success false
                   :synced 0 :failed 2
@@ -869,7 +816,7 @@
       (is (= :access (:error-category (first (:failures ss)))))
       (is (= :rate-limit (:error-category (second (:failures ss))))))))
 
-(deftest sync-status-no-results-test
+(deftest ^{:stratum 0} sync-status-no-results-test
   (testing "Result with no results key still works"
     (let [result {:success? true :synced 0 :failed 0}
           ss (sut/sync-status result)]
@@ -877,10 +824,9 @@
       (is (empty? (:failures ss))))))
 
 ;; ============================================================================
-;; Layer 3: Sync plan tests
+;; Sync plan tests
 ;; ============================================================================
-
-(deftest train-sync-plan-test
+(deftest ^{:stratum 0} train-sync-plan-test
   (testing "Identifies PRs to add, remove, and status map"
     (let [before-train {:train/prs [{:pr/number 1} {:pr/number 2}]}
           prs [{:pr/number 2 :pr/status :open :pr/ci-status :passed}
@@ -895,7 +841,7 @@
               3 {:pr/status :open :pr/ci-status :pending}}
              (:status-map plan))))))
 
-(deftest train-sync-plan-no-changes-test
+(deftest ^{:stratum 0} train-sync-plan-no-changes-test
   (testing "No changes when PRs are the same"
     (let [before-train {:train/prs [{:pr/number 1}]}
           prs [{:pr/number 1 :pr/status :open :pr/ci-status :passed}]
@@ -903,7 +849,7 @@
       (is (empty? (:to-add plan)))
       (is (empty? (:to-remove plan))))))
 
-(deftest apply-sync-plan-orders-mutations-test
+(deftest ^{:stratum 0} apply-sync-plan-orders-mutations-test
   (let [calls (atom [])
         train-id (random-uuid)
         plan {:to-add [{:pr/number 101
@@ -926,10 +872,9 @@
                @calls))))))
 
 ;; ============================================================================
-;; Layer 3: Fleet sync integration tests
+;; Fleet sync integration tests
 ;; ============================================================================
-
-(deftest sync-configured-repos-no-repos-test
+(deftest ^{:stratum 0} sync-configured-repos-no-repos-test
   (testing "No configured repos returns failure"
     (let [state (atom {:pr-train-manager :mgr})]
       (with-redefs-fn {#'sut/get-configured-repos (fn [_] [])}
@@ -939,7 +884,7 @@
             (is (= 0 (:synced result)))
             (is (some? (:fleet/last-sync @state)))))))))
 
-(deftest sync-configured-repos-no-manager-test
+(deftest ^{:stratum 0} sync-configured-repos-no-manager-test
   (testing "No pr-train-manager returns failure"
     (let [state (atom {})]
       (with-redefs-fn {#'sut/get-configured-repos (fn [_] ["acme/repo"])}
@@ -948,38 +893,7 @@
             (is (false? (:success? result)))
             (is (= 1 (:failed result)))))))))
 
-(deftest sync-configured-repos-aggregates-results-and-failures-test
-  (let [state (atom {:pr-train-manager :manager})
-        sync-results {"acme/service"
-                      {:success? true
-                       :success true
-                       :repo "acme/service"
-                       :added 2
-                       :removed 1
-                       :tracked-prs 3}
-                      "acme/web"
-                      {:success? false
-                       :success false
-                       :repo "acme/web"
-                       :error provider-unavailable-message
-                       :anomaly (anomaly/anomaly :unavailable provider-unavailable-message {})}}]
-    (with-redefs-fn {#'sut/get-configured-repos (fn [_] ["acme/service" "acme/web"])
-                     #'sut/sync-repo-prs-into-train! (fn [_ repo] (get sync-results repo))}
-      (fn []
-        (let [result (sut/sync-configured-repos! state)]
-          (is (false? (:success? result)))
-          (is (= 1 (:synced result)))
-          (is (= 1 (:failed result)))
-          (is (= 2 (count (:results result))))
-          (is (= {:added-prs 2
-                  :removed-prs 1
-                  :tracked-prs 3}
-                 (:summary result)))
-          (is (= :fault (get-in result [:anomaly :anomaly/type])))
-          (is (nil? (get-in result [:anomaly :anomaly/subtype]))
-              aggregate-fault-clause))))))
-
-(deftest sync-configured-repos-all-success-test
+(deftest ^{:stratum 0} sync-configured-repos-all-success-test
   (testing "All repos succeed produces success result"
     (let [state (atom {:pr-train-manager :manager})]
       (with-redefs-fn {#'sut/get-configured-repos (fn [_] ["acme/a"])
@@ -996,8 +910,7 @@
 ;; ============================================================================
 ;; Integration: flaky provider response simulation
 ;; ============================================================================
-
-(deftest flaky-provider-intermittent-failure-test
+(deftest ^{:stratum 0} flaky-provider-intermittent-failure-test
   (testing "When provider fails intermittently, partial sync is recorded"
     (let [call-count (atom 0)
           state (atom {:pr-train-manager :manager})]
@@ -1027,7 +940,7 @@
               (is (= "acme/web" (:repo (first (:failures ls)))))
               (is (= :network (:error-category (first (:failures ls))))))))))))
 
-(deftest flaky-provider-all-repos-fail-test
+(deftest ^{:stratum 0} flaky-provider-all-repos-fail-test
   (testing "When all repos fail, status is :failed"
     (let [state (atom {:pr-train-manager :manager})]
       (with-redefs-fn {#'sut/get-configured-repos
@@ -1045,7 +958,7 @@
               (is (= 2 (count (:failures ls))))
               (is (every? #(= :access (:error-category %)) (:failures ls))))))))))
 
-(deftest sync-exception-in-repo-does-not-crash-fleet-test
+(deftest ^{:stratum 0} sync-exception-in-repo-does-not-crash-fleet-test
   (testing "Exception in one repo sync is caught and does not crash fleet sync"
     (let [state (atom {:pr-train-manager :manager})]
       (with-redefs-fn {#'sut/get-configured-repos
@@ -1077,8 +990,7 @@
 ;; ============================================================================
 ;; Integration: multi-repo train with blocked dependency
 ;; ============================================================================
-
-(deftest multi-repo-train-blocked-dependency-readiness-test
+(deftest ^{:stratum 0} multi-repo-train-blocked-dependency-readiness-test
   (testing "Multi-repo train: one dep blocked, deterministic readiness rendering"
     (let [prs [{:pr/number 1 :pr/repo "acme/repo-a" :pr/title "Infra change"
                 :pr/status :open :pr/ci-status :failed
@@ -1118,7 +1030,7 @@
           (is (> s3 s1) "Ready PR scores higher than CI-failing")
           (is (> s3 s2) "Ready PR scores higher than dep-blocked"))))))
 
-(deftest multi-repo-train-one-dep-resolves-test
+(deftest ^{:stratum 0} multi-repo-train-one-dep-resolves-test
   (testing "When upstream dep merges, downstream becomes merge-ready"
     (let [prs-before [{:pr/number 1 :pr/repo "acme/repo-a" :pr/title "Infra"
                        :pr/status :open :pr/ci-status :failed
@@ -1138,10 +1050,9 @@
       (is (= :merge-ready (:readiness/state (sut/readiness pm-after (get pm-after 2))))))))
 
 ;; ============================================================================
-;; Layer 4: DAG composite state
+;; DAG composite state
 ;; ============================================================================
-
-(deftest get-dag-state-empty-test
+(deftest ^{:stratum 0} get-dag-state-empty-test
   (testing "Returns empty structure when no dags/trains"
     (let [state (atom {})]
       (with-redefs-fn {#'sut/get-dags (fn [_] [])
@@ -1153,7 +1064,7 @@
             (is (empty? (:repos result)))
             (is (empty? (:tasks result)))))))))
 
-(deftest get-dag-state-maps-pr-statuses-test
+(deftest ^{:stratum 0} get-dag-state-maps-pr-statuses-test
   (testing "PR statuses map to task statuses correctly"
     (let [state (atom {})
           trains [{:train/id (random-uuid)
@@ -1180,10 +1091,205 @@
             (is (= :blocked (:status (get tasks-by-id 5))))))))))
 
 ;; ============================================================================
+;; Data-driven error hints (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+(deftest ^{:stratum 0} error-hint-rules-structure-test
+  (testing "Each rule has non-empty patterns and a non-blank hint"
+    (doseq [[patterns hint] sut/error-hint-rules]
+      (is (seq patterns) "Pattern list must not be empty")
+      (is (string? hint) "Hint must be a string")
+      (is (pos? (count hint)) "Hint must be non-blank"))))
+
+(deftest ^{:stratum 0} actionable-error-hint-auth-test
+  (testing "Auth-related messages match the auth rule"
+    (let [expected "Run `gh auth login` and retry."]
+      (is (= expected (sut/actionable-error-hint "authentication failed")))
+      (is (= expected (sut/actionable-error-hint "You are not logged in")))
+      (is (= expected (sut/actionable-error-hint "AUTH error"))))))
+
+(deftest ^{:stratum 0} actionable-error-hint-access-test
+  (testing "Access-related messages match the access rule"
+    (let [expected "Verify repository slug and access permissions, then retry sync."]
+      (is (= expected (sut/actionable-error-hint "repository not found")))
+      (is (= expected (sut/actionable-error-hint "403 Forbidden")))
+      (is (= expected (sut/actionable-error-hint "permission denied")))
+      (is (= expected (sut/actionable-error-hint "Access Denied"))))))
+
+(deftest ^{:stratum 0} actionable-error-hint-rate-limit-test
+  (testing "Rate limit messages match"
+    (is (= "Provider rate-limited this request. Wait briefly, then retry sync."
+           (sut/actionable-error-hint "secondary rate limit exceeded")))))
+
+(deftest ^{:stratum 0} actionable-error-hint-parse-test
+  (testing "Parse/malformed messages match"
+    (is (= "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."
+           (sut/actionable-error-hint "invalid json response")))))
+
+(deftest ^{:stratum 0} actionable-error-hint-network-test
+  (testing "Network/timeout messages match"
+    (let [expected "Transient provider/network failure. Retry sync."]
+      (is (= expected (sut/actionable-error-hint "connection refused")))
+      (is (= expected (sut/actionable-error-hint "request timeout"))))))
+
+(deftest ^{:stratum 0} actionable-error-hint-default-test
+  (testing "Unknown errors return default hint"
+    (is (= sut/default-error-hint (sut/actionable-error-hint "something totally unknown")))
+    (is (= sut/default-error-hint (sut/actionable-error-hint nil)))
+    (is (= sut/default-error-hint (sut/actionable-error-hint "")))))
+
+(deftest ^{:stratum 0} actionable-error-hint-case-insensitive-test
+  (testing "Matching is case-insensitive"
+    (is (= "Run `gh auth login` and retry."
+           (sut/actionable-error-hint "AUTHENTICATION FAILURE")))))
+
+;; ============================================================================
+;; empty-sync-summary (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+(deftest ^{:stratum 0} empty-sync-summary-test
+  (testing "Returns zeroed summary map with expected keys"
+    (let [s (sut/empty-sync-summary)]
+      (is (= {:added-prs 0 :removed-prs 0 :tracked-prs 0} s)))))
+
+;; ============================================================================
+;; aggregate-sync-results (extracted in refactor/elevate-trains-state-fns)
+;; ============================================================================
+(deftest ^{:stratum 0} aggregate-sync-results-all-success-test
+  (testing "All repos succeed → success result with summed counts"
+    (let [repos ["org/a" "org/b"]
+          results [{:success? true :added 3 :removed 1 :tracked-prs 5 :repo "org/a"}
+                   {:success? true :added 0 :removed 2 :tracked-prs 3 :repo "org/b"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (true? (:success? agg)))
+      (is (= 2 (:synced agg)))
+      (is (= 0 (:failed agg)))
+      (is (= 3 (get-in agg [:summary :added-prs])))
+      (is (= 3 (get-in agg [:summary :removed-prs])))
+      (is (= 8 (get-in agg [:summary :tracked-prs])))
+      (is (empty? (:failures agg))))))
+
+(deftest ^{:stratum 0} aggregate-sync-results-partial-failure-test
+  (testing "Some repos fail → partial result with failure details"
+    (let [repos ["org/a" "org/b"]
+          results [{:success? true :added 2 :removed 0 :tracked-prs 4 :repo "org/a"}
+                   {:success? false :error "not found" :repo "org/b"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (false? (:success? agg)))
+      (is (= 1 (:synced agg)))
+      (is (= 1 (:failed agg)))
+      (is (true? (:partial? agg)))
+      (is (= 1 (count (:failures agg))))
+      (is (= "org/b" (-> agg :failures first :repo))))))
+
+(deftest ^{:stratum 0} aggregate-sync-results-all-fail-test
+  (testing "All repos fail → failure result"
+    (let [repos ["org/a"]
+          results [{:success? false :error "timeout" :repo "org/a"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (false? (:success? agg)))
+      (is (= 0 (:synced agg)))
+      (is (= 1 (:failed agg)))
+      (is (false? (:partial? agg))))))
+
+(deftest ^{:stratum 0} aggregate-sync-results-empty-test
+  (testing "No results → success with zero counts"
+    (let [agg (sut/aggregate-sync-results [] [])]
+      (is (true? (:success? agg)))
+      (is (= 0 (:synced agg))))))
+
+(deftest ^{:stratum 0} aggregate-sync-results-failures-sorted-by-repo-test
+  (testing "Failures are sorted by repo name"
+    (let [repos ["z/repo" "a/repo"]
+          results [{:success? false :error "err" :repo "z/repo"}
+                   {:success? false :error "err" :repo "a/repo"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (= ["a/repo" "z/repo"] (mapv :repo (:failures agg)))))))
+
+(deftest ^{:stratum 0} aggregate-sync-results-failures-have-action-hints-test
+  (testing "Each failure entry gets an actionable :action hint"
+    (let [repos ["org/a"]
+          results [{:success? false :error "authentication failed" :repo "org/a"}]
+          agg (sut/aggregate-sync-results repos results)]
+      (is (= "Run `gh auth login` and retry."
+             (-> agg :failures first :action))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; Config management tests
+;; ============================================================================
+(deftest ^{:stratum 1} add-configured-repo-validates-and-dedupes-test
+  (let [config-path (temp-config-path)
+        state (atom {})]
+    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
+      (fn []
+        (let [invalid (sut/add-configured-repo! state "not-a-repo-slug")]
+          (is (false? (:success? invalid)))
+          (is (= :fault (get-in invalid [:anomaly :anomaly/type])))
+          (is (nil? (get-in invalid [:anomaly :anomaly/subtype]))
+              "generic-standard :anomalies/fault maps 1:1 to :fault, no subtype"))
+
+        (let [first-add (sut/add-configured-repo! state "Acme/Service")
+              second-add (sut/add-configured-repo! state "acme/service")]
+          (is (true? (:success? first-add)))
+          (is (true? (:added? first-add)))
+          (is (= "acme/service" (:repo first-add)))
+          (is (true? (:success? second-add)))
+          (is (false? (:added? second-add)))
+          (is (= ["acme/service"] (sut/get-configured-repos state))))))))
+
+(deftest ^{:stratum 1} add-configured-repo-blank-test
+  (let [config-path (temp-config-path)
+        state (atom {})]
+    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
+      (fn []
+        (let [r (sut/add-configured-repo! state "  ")]
+          (is (false? (:success? r)))
+          (is (clojure.string/includes? (:error r) "required")))))))
+
+(deftest ^{:stratum 1} get-configured-repos-filters-invalid-test
+  (let [config-path (temp-config-path)
+        state (atom {})]
+    (with-redefs-fn {#'sut/default-fleet-config-path config-path}
+      (fn []
+        ;; Write config with a mix of valid and invalid slugs
+        (spit config-path (pr-str {:fleet {:repos ["acme/good" "bad" "org/ok" "a/b/c"]}}))
+        (is (= ["acme/good" "org/ok"] (sut/get-configured-repos state)))))))
+
+(deftest ^{:stratum 1} sync-configured-repos-aggregates-results-and-failures-test
+  (let [state (atom {:pr-train-manager :manager})
+        sync-results {"acme/service"
+                      {:success? true
+                       :success true
+                       :repo "acme/service"
+                       :added 2
+                       :removed 1
+                       :tracked-prs 3}
+                      "acme/web"
+                      {:success? false
+                       :success false
+                       :repo "acme/web"
+                       :error provider-unavailable-message
+                       :anomaly (anomaly/anomaly :unavailable provider-unavailable-message {})}}]
+    (with-redefs-fn {#'sut/get-configured-repos (fn [_] ["acme/service" "acme/web"])
+                     #'sut/sync-repo-prs-into-train! (fn [_ repo] (get sync-results repo))}
+      (fn []
+        (let [result (sut/sync-configured-repos! state)]
+          (is (false? (:success? result)))
+          (is (= 1 (:synced result)))
+          (is (= 1 (:failed result)))
+          (is (= 2 (count (:results result))))
+          (is (= {:added-prs 2
+                  :removed-prs 1
+                  :tracked-prs 3}
+                 (:summary result)))
+          (is (= :fault (get-in result [:anomaly :anomaly/type])))
+          (is (nil? (get-in result [:anomaly :anomaly/subtype]))
+              aggregate-fault-clause))))))
+
+;; ============================================================================
 ;; Discover configured repos tests
 ;; ============================================================================
-
-(deftest discover-configured-repos-success-test
+(deftest ^{:stratum 1} discover-configured-repos-success-test
   (testing "Discovers and adds repos from provider"
     (let [config-path (temp-config-path)
           state (atom {})]
@@ -1202,7 +1308,7 @@
             (is (= 2 (:added result)))
             (is (= ["acme/repo1" "acme/repo2"] (:repos result)))))))))
 
-(deftest discover-configured-repos-deduplicates-test
+(deftest ^{:stratum 1} discover-configured-repos-deduplicates-test
   (testing "Does not re-add existing repos"
     (let [config-path (temp-config-path)
           state (atom {})]
@@ -1221,7 +1327,7 @@
             (is (= 1 (:added result)))
             (is (= 2 (count (:repos result))))))))))
 
-(deftest discover-configured-repos-provider-failure-test
+(deftest ^{:stratum 1} discover-configured-repos-provider-failure-test
   (testing "Provider failure is propagated"
     (let [config-path (temp-config-path)
           state (atom {})]
@@ -1233,7 +1339,7 @@
           (let [result (sut/discover-configured-repos! state {:owner "acme"})]
             (is (false? (:success? result)))))))))
 
-(deftest discover-configured-repos-limit-test
+(deftest ^{:stratum 1} discover-configured-repos-limit-test
   (testing "Respects limit parameter"
     (let [config-path (temp-config-path)
           state (atom {})
@@ -1248,128 +1354,3 @@
           (let [result (sut/discover-configured-repos! state {:limit 5})]
             (is (true? (:success? result)))
             (is (= 5 (:discovered result)))))))))
-
-;; ============================================================================
-;; Data-driven error hints (extracted in refactor/elevate-trains-state-fns)
-;; ============================================================================
-
-(deftest error-hint-rules-structure-test
-  (testing "Each rule has non-empty patterns and a non-blank hint"
-    (doseq [[patterns hint] sut/error-hint-rules]
-      (is (seq patterns) "Pattern list must not be empty")
-      (is (string? hint) "Hint must be a string")
-      (is (pos? (count hint)) "Hint must be non-blank"))))
-
-(deftest actionable-error-hint-auth-test
-  (testing "Auth-related messages match the auth rule"
-    (let [expected "Run `gh auth login` and retry."]
-      (is (= expected (sut/actionable-error-hint "authentication failed")))
-      (is (= expected (sut/actionable-error-hint "You are not logged in")))
-      (is (= expected (sut/actionable-error-hint "AUTH error"))))))
-
-(deftest actionable-error-hint-access-test
-  (testing "Access-related messages match the access rule"
-    (let [expected "Verify repository slug and access permissions, then retry sync."]
-      (is (= expected (sut/actionable-error-hint "repository not found")))
-      (is (= expected (sut/actionable-error-hint "403 Forbidden")))
-      (is (= expected (sut/actionable-error-hint "permission denied")))
-      (is (= expected (sut/actionable-error-hint "Access Denied"))))))
-
-(deftest actionable-error-hint-rate-limit-test
-  (testing "Rate limit messages match"
-    (is (= "Provider rate-limited this request. Wait briefly, then retry sync."
-           (sut/actionable-error-hint "secondary rate limit exceeded")))))
-
-(deftest actionable-error-hint-parse-test
-  (testing "Parse/malformed messages match"
-    (is (= "Provider returned malformed data. Retry sync; if it repeats, inspect provider CLI output."
-           (sut/actionable-error-hint "invalid json response")))))
-
-(deftest actionable-error-hint-network-test
-  (testing "Network/timeout messages match"
-    (let [expected "Transient provider/network failure. Retry sync."]
-      (is (= expected (sut/actionable-error-hint "connection refused")))
-      (is (= expected (sut/actionable-error-hint "request timeout"))))))
-
-(deftest actionable-error-hint-default-test
-  (testing "Unknown errors return default hint"
-    (is (= sut/default-error-hint (sut/actionable-error-hint "something totally unknown")))
-    (is (= sut/default-error-hint (sut/actionable-error-hint nil)))
-    (is (= sut/default-error-hint (sut/actionable-error-hint "")))))
-
-(deftest actionable-error-hint-case-insensitive-test
-  (testing "Matching is case-insensitive"
-    (is (= "Run `gh auth login` and retry."
-           (sut/actionable-error-hint "AUTHENTICATION FAILURE")))))
-
-;; ============================================================================
-;; empty-sync-summary (extracted in refactor/elevate-trains-state-fns)
-;; ============================================================================
-
-(deftest empty-sync-summary-test
-  (testing "Returns zeroed summary map with expected keys"
-    (let [s (sut/empty-sync-summary)]
-      (is (= {:added-prs 0 :removed-prs 0 :tracked-prs 0} s)))))
-
-;; ============================================================================
-;; aggregate-sync-results (extracted in refactor/elevate-trains-state-fns)
-;; ============================================================================
-
-(deftest aggregate-sync-results-all-success-test
-  (testing "All repos succeed → success result with summed counts"
-    (let [repos ["org/a" "org/b"]
-          results [{:success? true :added 3 :removed 1 :tracked-prs 5 :repo "org/a"}
-                   {:success? true :added 0 :removed 2 :tracked-prs 3 :repo "org/b"}]
-          agg (sut/aggregate-sync-results repos results)]
-      (is (true? (:success? agg)))
-      (is (= 2 (:synced agg)))
-      (is (= 0 (:failed agg)))
-      (is (= 3 (get-in agg [:summary :added-prs])))
-      (is (= 3 (get-in agg [:summary :removed-prs])))
-      (is (= 8 (get-in agg [:summary :tracked-prs])))
-      (is (empty? (:failures agg))))))
-
-(deftest aggregate-sync-results-partial-failure-test
-  (testing "Some repos fail → partial result with failure details"
-    (let [repos ["org/a" "org/b"]
-          results [{:success? true :added 2 :removed 0 :tracked-prs 4 :repo "org/a"}
-                   {:success? false :error "not found" :repo "org/b"}]
-          agg (sut/aggregate-sync-results repos results)]
-      (is (false? (:success? agg)))
-      (is (= 1 (:synced agg)))
-      (is (= 1 (:failed agg)))
-      (is (true? (:partial? agg)))
-      (is (= 1 (count (:failures agg))))
-      (is (= "org/b" (-> agg :failures first :repo))))))
-
-(deftest aggregate-sync-results-all-fail-test
-  (testing "All repos fail → failure result"
-    (let [repos ["org/a"]
-          results [{:success? false :error "timeout" :repo "org/a"}]
-          agg (sut/aggregate-sync-results repos results)]
-      (is (false? (:success? agg)))
-      (is (= 0 (:synced agg)))
-      (is (= 1 (:failed agg)))
-      (is (false? (:partial? agg))))))
-
-(deftest aggregate-sync-results-empty-test
-  (testing "No results → success with zero counts"
-    (let [agg (sut/aggregate-sync-results [] [])]
-      (is (true? (:success? agg)))
-      (is (= 0 (:synced agg))))))
-
-(deftest aggregate-sync-results-failures-sorted-by-repo-test
-  (testing "Failures are sorted by repo name"
-    (let [repos ["z/repo" "a/repo"]
-          results [{:success? false :error "err" :repo "z/repo"}
-                   {:success? false :error "err" :repo "a/repo"}]
-          agg (sut/aggregate-sync-results repos results)]
-      (is (= ["a/repo" "z/repo"] (mapv :repo (:failures agg)))))))
-
-(deftest aggregate-sync-results-failures-have-action-hints-test
-  (testing "Each failure entry gets an actionable :action hint"
-    (let [repos ["org/a"]
-          results [{:success? false :error "authentication failed" :repo "org/a"}]
-          agg (sut/aggregate-sync-results repos results)]
-      (is (= "Run `gh auth login` and retry."
-             (-> agg :failures first :action))))))

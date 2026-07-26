@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.fleet
   "Fleet view (PR train management) components."
   (:require
@@ -24,9 +23,9 @@
    [java.text SimpleDateFormat]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fleet fragments
 
-(defn readiness-state-label
+;; Fleet fragments
+(defn ^{:stratum 0} readiness-state-label
   "Maps readiness state keywords to human-readable labels."
   [state]
   (case state
@@ -39,7 +38,7 @@
     :needs-review (messages/t :readiness/needs-review)
     (if state (name state) (messages/t :readiness/unknown))))
 
-(defn readiness-state-variant
+(defn ^{:stratum 0} readiness-state-variant
   "Maps readiness state keywords to badge variant keywords."
   [state]
   (case state
@@ -52,7 +51,7 @@
     :needs-review :info
     :neutral))
 
-(defn error-category-variant
+(defn ^{:stratum 0} error-category-variant
   "Maps error category keywords to badge variant keywords."
   [cat]
   (case cat
@@ -60,7 +59,7 @@
     (:rate-limit :rate-limited :parse :parse-error :network :network-error) :warning
     :error))
 
-(defn error-category-label
+(defn ^{:stratum 0} error-category-label
   "Maps error category keywords to human-readable labels."
   [cat]
   (case cat
@@ -76,19 +75,7 @@
     :network-error (messages/t :error-category/network)
     (if cat (name cat) (messages/t :error-category/fallback))))
 
-(defn sync-failure-entry
-  "Renders a single sync failure entry with optional error-category badge."
-  [{:keys [repo error action error-category]}]
-  [:div.sync-failure
-   [:span.sync-repo repo]
-   [:span.sync-error error]
-   (when (and action (not (str/blank? action)))
-     [:span.sync-action action])
-   (when error-category
-     (c/badge (error-category-label error-category)
-              {:variant (error-category-variant error-category)}))])
-
-(defn blocking-reason-line
+(defn ^{:stratum 0} blocking-reason-line
   "Renders a blocking reason with type-appropriate variant."
   [{:keys [blocker/type blocker/message]}]
   (let [variant (case type
@@ -102,16 +89,7 @@
      (c/badge (name type) {:variant variant})
      [:span.blocker-message (or message (messages/t :blocker/fallback-message))]]))
 
-(defn pr-readiness-fragment
-  "Renders a readiness state label with optional score."
-  [{:keys [readiness/state readiness/score]}]
-  [:div.pr-readiness
-   (c/badge (readiness-state-label state)
-            {:variant (readiness-state-variant state)})
-   (when (some? score)
-     [:span.readiness-score (format "%.2f" (double score))])])
-
-(defn fleet-action-onclick
+(defn ^{:stratum 0} fleet-action-onclick
   [action]
   (case action
     :add-repo "window.miniforge.fleet.addRepo()"
@@ -120,14 +98,37 @@
     :discover-sync "window.miniforge.fleet.discoverAndSync()"
     ""))
 
-(defn format-sync-time
+(defn ^{:stratum 0} format-sync-time
   [ts]
   (when ts
     (try
       (.format (SimpleDateFormat. "yyyy-MM-dd HH:mm:ss") ts)
       (catch Exception _ nil))))
 
-(defn sync-status-fragment
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} sync-failure-entry
+  "Renders a single sync failure entry with optional error-category badge."
+  [{:keys [repo error action error-category]}]
+  [:div.sync-failure
+   [:span.sync-repo repo]
+   [:span.sync-error error]
+   (when (and action (not (str/blank? action)))
+     [:span.sync-action action])
+   (when error-category
+     (c/badge (error-category-label error-category)
+              {:variant (error-category-variant error-category)}))])
+
+(defn ^{:stratum 1} pr-readiness-fragment
+  "Renders a readiness state label with optional score."
+  [{:keys [readiness/state readiness/score]}]
+  [:div.pr-readiness
+   (c/badge (readiness-state-label state)
+            {:variant (readiness-state-variant state)})
+   (when (some? score)
+     [:span.readiness-score (format "%.2f" (double score))])])
+
+(defn ^{:stratum 1} sync-status-fragment
   [last-sync]
   (if-not last-sync
     [:div.fleet-sync-status
@@ -159,7 +160,7 @@
              [:span.sync-error error]
              [:span.sync-action action]])])])))
 
-(defn train-list-fragment
+(defn ^{:stratum 1} train-list-fragment
   "Train list fragment for htmx updates."
   [trains]
   (html
@@ -216,10 +217,73 @@
                              (max 1 (count (:train/prs train))))))
                {:variant (if (seq (:train/blocking-prs train)) :error :success)})]]))]]])))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Fleet list view
+;; Train detail view
+(defn ^{:stratum 1} train-detail-view
+  "Detailed view of a single PR train."
+  [layout train]
+  (if (:error train)
+    (layout (messages/t :status/error) [:div.error (:error train)])
+    (layout (messages/t :fleet/train-detail-title {:name (:train/name train)})
+     [:div.train-detail
+      [:div.train-detail-header
+       [:div.train-info
+        [:h2 (:train/name train)]
+        [:p.train-description (:train/description train)]]
+       [:div.train-actions
+        (c/button (messages/t :cp/btn-pause)
+                  {:variant :ghost
+                   :onclick (str "fetch('/api/train/action?train-id="
+                                 (:train/id train)
+                                 "&action=pause', {method: 'POST'})")})
+        (c/button (messages/t :fleet/btn-merge-next)
+                  {:variant :primary
+                   :onclick (str "fetch('/api/train/action?train-id="
+                                 (:train/id train)
+                                 "&action=merge-next', {method: 'POST'})")})]]
 
-(defn fleet-view
+      [:div.train-detail-grid
+       ;; PR list
+       [:section.prs-section
+        [:h3 (messages/t :fleet/prs-heading)]
+        [:div.pr-list
+         (for [pr (sort-by :pr/merge-order (:train/prs train))]
+           [:div.pr-card {:class (name (:pr/status pr))}
+            [:div.pr-header
+             [:span.pr-number (str "#" (:pr/number pr))]
+             [:span.pr-repo (:pr/repo pr)]
+             (c/badge (name (:pr/status pr)))]
+            [:div.pr-title (:pr/title pr)]
+            [:div.pr-details
+             [:span.pr-ci (messages/t :fleet/pr-ci {:status (name (:pr/ci-status pr))})]
+             (when-let [readiness (:pr/readiness pr)]
+               [:span.pr-readiness
+                (messages/t :fleet/pr-readiness
+                            {:label (readiness-state-label (:readiness/state readiness))
+                             :score (format "%.2f" (double (:readiness/score readiness)))})])
+             (when (seq (:pr/depends-on pr))
+               [:span.pr-deps
+                (messages/t :fleet/pr-depends
+                            {:deps (str/join ", " (:pr/depends-on pr))})])
+             (when (seq (:pr/blocking-reasons pr))
+               [:span.pr-blockers
+                (messages/t :fleet/pr-blockers
+                            {:reasons (str/join " | " (:pr/blocking-reasons pr))})])]])]]
+
+       ;; Merge graph
+       [:section.graph-section
+        [:h3 (messages/t :fleet/merge-order-heading)]
+        [:div.merge-graph
+         (for [[idx pr] (map-indexed vector (sort-by :pr/merge-order (:train/prs train)))]
+           [:div.graph-node
+            [:div.node-order (str (inc idx))]
+            [:div.node-content
+             [:span.node-number (str "#" (:pr/number pr))]
+             [:span.node-status (c/status-dot (:pr/status pr))]]])]]]])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Fleet list view
+(defn ^{:stratum 2} fleet-view
   "Fleet management view showing all PR trains."
   [layout fleet-state]
   (layout (messages/t :layout/nav-pr-fleet)
@@ -282,68 +346,3 @@
       :hx-swap "innerHTML"
       :data-filter-refresh "true"}
      (train-list-fragment (:trains fleet-state))]]))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Train detail view
-
-(defn train-detail-view
-  "Detailed view of a single PR train."
-  [layout train]
-  (if (:error train)
-    (layout (messages/t :status/error) [:div.error (:error train)])
-    (layout (messages/t :fleet/train-detail-title {:name (:train/name train)})
-     [:div.train-detail
-      [:div.train-detail-header
-       [:div.train-info
-        [:h2 (:train/name train)]
-        [:p.train-description (:train/description train)]]
-       [:div.train-actions
-        (c/button (messages/t :cp/btn-pause)
-                  {:variant :ghost
-                   :onclick (str "fetch('/api/train/action?train-id="
-                                 (:train/id train)
-                                 "&action=pause', {method: 'POST'})")})
-        (c/button (messages/t :fleet/btn-merge-next)
-                  {:variant :primary
-                   :onclick (str "fetch('/api/train/action?train-id="
-                                 (:train/id train)
-                                 "&action=merge-next', {method: 'POST'})")})]]
-
-      [:div.train-detail-grid
-       ;; PR list
-       [:section.prs-section
-        [:h3 (messages/t :fleet/prs-heading)]
-        [:div.pr-list
-         (for [pr (sort-by :pr/merge-order (:train/prs train))]
-           [:div.pr-card {:class (name (:pr/status pr))}
-            [:div.pr-header
-             [:span.pr-number (str "#" (:pr/number pr))]
-             [:span.pr-repo (:pr/repo pr)]
-             (c/badge (name (:pr/status pr)))]
-            [:div.pr-title (:pr/title pr)]
-            [:div.pr-details
-             [:span.pr-ci (messages/t :fleet/pr-ci {:status (name (:pr/ci-status pr))})]
-             (when-let [readiness (:pr/readiness pr)]
-               [:span.pr-readiness
-                (messages/t :fleet/pr-readiness
-                            {:label (readiness-state-label (:readiness/state readiness))
-                             :score (format "%.2f" (double (:readiness/score readiness)))})])
-             (when (seq (:pr/depends-on pr))
-               [:span.pr-deps
-                (messages/t :fleet/pr-depends
-                            {:deps (str/join ", " (:pr/depends-on pr))})])
-             (when (seq (:pr/blocking-reasons pr))
-               [:span.pr-blockers
-                (messages/t :fleet/pr-blockers
-                            {:reasons (str/join " | " (:pr/blocking-reasons pr))})])]])]]
-
-       ;; Merge graph
-       [:section.graph-section
-        [:h3 (messages/t :fleet/merge-order-heading)]
-        [:div.merge-graph
-         (for [[idx pr] (map-indexed vector (sort-by :pr/merge-order (:train/prs train)))]
-           [:div.graph-node
-            [:div.node-order (str (inc idx))]
-            [:div.node-content
-             [:span.node-number (str "#" (:pr/number pr))]
-             [:span.node-status (c/status-dot (:pr/status pr))]]])]]]])))

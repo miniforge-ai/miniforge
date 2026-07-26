@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.watcher
   "File-based event watcher for the dashboard.
 
@@ -30,9 +29,9 @@
    [java.io RandomAccessFile]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File reading
 
-(defn read-new-lines
+;; File reading
+(defn ^{:stratum 0} read-new-lines
   "Read new lines from file starting at byte offset.
    Returns [new-offset lines] where lines is a vector of strings."
   [^java.io.File file ^long offset]
@@ -49,7 +48,7 @@
           (finally
             (.close raf)))))))
 
-(defn parse-edn-line
+(defn ^{:stratum 0} parse-edn-line
   "Parse a single EDN line, returning nil on parse failure."
   [line]
   (try
@@ -58,10 +57,24 @@
     (catch Exception _
       nil)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Polling
+;; Watcher lifecycle
+(defn ^{:stratum 0} initialize-offsets
+  "Scan existing .edn files and set offsets to end-of-file.
+   This skips historical data so the watcher only sees new events."
+  [events-dir]
+  (let [dir (io/file events-dir)]
+    (if (and (.exists dir) (.isDirectory dir))
+      (->> (.listFiles dir)
+           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
+           (reduce (fn [acc ^java.io.File file]
+                     (assoc acc (.getPath file) (.length file)))
+                   {}))
+      {})))
 
-(defn poll-once!
+;------------------------------------------------------------------------------ Layer 1
+
+;; Polling
+(defn ^{:stratum 1} poll-once!
   "Scan events dir, read new EDN lines from each .edn file,
    call publish-fn for each parsed event. Returns updated offsets map."
   [events-dir offsets publish-fn]
@@ -85,22 +98,8 @@
       offsets)))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Watcher lifecycle
 
-(defn initialize-offsets
-  "Scan existing .edn files and set offsets to end-of-file.
-   This skips historical data so the watcher only sees new events."
-  [events-dir]
-  (let [dir (io/file events-dir)]
-    (if (and (.exists dir) (.isDirectory dir))
-      (->> (.listFiles dir)
-           (filter #(.endsWith (.getName ^java.io.File %) ".edn"))
-           (reduce (fn [acc ^java.io.File file]
-                     (assoc acc (.getPath file) (.length file)))
-                   {}))
-      {})))
-
-(defn start-watcher!
+(defn ^{:stratum 2} start-watcher!
   "Start a daemon thread that polls events dir every 500ms.
    Publishes parsed events via publish-fn.
 

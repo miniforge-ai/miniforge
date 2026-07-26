@@ -15,18 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.workflows-test
   (:require
    [ai.miniforge.web-dashboard.views.workflows :as sut]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
-(defn- render-str
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} render-str
   [form]
   (str form))
 
-(deftest workflow-detail-panel-renders-dependency-issues
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} workflow-detail-panel-renders-dependency-issues
   (testing "workflow panel shows dependency attribution and dependency section"
     (let [workflow {:id "wf-1"
                     :status :failed
@@ -50,7 +53,7 @@
       (is (str/includes? result "Provider"))
       (is (str/includes? result "Dependency anthropic unavailable")))))
 
-(deftest workflow-list-fragment-renders-dependency-issue-count
+(deftest ^{:stratum 1} workflow-list-fragment-renders-dependency-issue-count
   (testing "workflow cards show dependency issue count badge"
     (let [workflows [{:id "wf-2"
                       :name "Dependency Count"
@@ -64,7 +67,7 @@
           result (render-str (sut/workflow-list-fragment workflows))]
       (is (str/includes? result "1 dependency issue(s)")))))
 
-(deftest workflow-list-fragment-normalizes-dependency-severity
+(deftest ^{:stratum 1} workflow-list-fragment-normalizes-dependency-severity
   (testing "valid keyword severities are preserved"
     (let [workflow {:id "wf-severity"
                     :name "Severity"

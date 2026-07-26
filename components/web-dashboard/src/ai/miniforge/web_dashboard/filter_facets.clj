@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.filter-facets
   "Facet computation for filter options."
   (:require
    [ai.miniforge.web-dashboard.filter-specs :as specs]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Value extraction (duplicated from filter_eval for now, could be shared)
 
-(defn extract-value
+;; Value extraction (duplicated from filter_eval for now, could be shared)
+(defn ^{:stratum 0} extract-value
   "Extract value from item using filter spec."
   [item {:keys [filter/value]}]
   (case (:kind value)
@@ -42,9 +41,9 @@
     nil))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Facet computation
 
-(defn compute-facets
+;; Facet computation
+(defn ^{:stratum 1} compute-facets
   "Compute faceted counts for filter options.
 
    Arguments:
@@ -62,7 +61,9 @@
            frequencies
            (sort-by val >)))))
 
-(defn compute-all-facets
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} compute-all-facets
   "Compute facets for all applicable filters in a pane.
 
    Arguments:
