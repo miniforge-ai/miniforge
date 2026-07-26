@@ -188,8 +188,8 @@
       (is (= "" (:output result))))))
 
 (deftest ^{:stratum 0} push-with-https-fallback-threads-opts-test
-  (testing "push-with-https-fallback! passes the caller's opts (e.g. :workdir) to the
-            set-url and restore calls, not just the push itself"
+  (testing "push-branch!'s get-url probe and push-with-https-fallback!'s set-url/restore
+            calls all pass the caller's opts (e.g. :workdir), not just the push itself"
     (let [push-count (atom 0)
           seen-opts (atom [])
           tracking-exec (reify
@@ -206,7 +206,8 @@
                                     (dag/ok {:exit-code 0 :stdout "" :stderr ""})))
 
                                 (clojure.string/includes? (str command) "get-url")
-                                (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""})
+                                (do (swap! seen-opts conj opts)
+                                    (dag/ok {:exit-code 0 :stdout "git@github.com:org/repo.git" :stderr ""}))
 
                                 (clojure.string/includes? (str command) "set-url")
                                 (do (swap! seen-opts conj opts)
@@ -219,9 +220,9 @@
                             (environment-status [_ _] (dag/ok {:status :running})))]
       (sandbox/push-branch! tracking-exec "env-1" "feat/test"
                             {:env {"GH_TOKEN" "tok123"} :workdir "/repo"})
-      (is (= 2 (count @seen-opts)) "repoint + restore both hit the tracked branch")
+      (is (= 3 (count @seen-opts)) "get-url probe + repoint + restore all hit the tracked branch")
       (is (every? #(= "/repo" (:workdir %)) @seen-opts)
-          "both set-url calls carry the caller's :workdir, matching the push"))))
+          "the get-url probe and both set-url calls carry the caller's :workdir, matching the push"))))
 
 ;; ============================================================================
 ;; safe container path validation tests

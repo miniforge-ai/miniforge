@@ -147,16 +147,19 @@ second one). Verified each directly against the code before fixing:
    map) — same docstring contract, same fix: `{:output ""}` (no partial
    output is available once `process/shell` has thrown).
 
-6. **`push-with-https-fallback!`'s repoint and restore `exec!` calls
-   passed `{}` instead of the caller's `opts`, while the push itself
-   (correctly) used `opts`.** `opts` can carry `:workdir` (per `exec!`'s
-   own docstring), so a caller-specified working directory applied to the
-   push but silently dropped for the repoint/restore calls would leave
-   those two running against a different executor context than the push
-   they're supposed to bracket. Fixed by passing `opts` to all three
+6. **`push-branch!`/`push-with-https-fallback!`'s three non-push `exec!`
+   calls — the `git remote get-url origin` probe and the repoint/restore
+   `set-url` calls — all passed `{}` instead of the caller's `opts`, while
+   the push itself (correctly) used `opts`.** `opts` can carry `:workdir`
+   (per `exec!`'s own docstring), so a caller-specified working directory
+   applied to the push but silently dropped for the other three calls
+   would leave them running against a different executor context than the
+   push they're resolving/bracketing. Fixed by passing `opts` to all four
    `exec!` calls uniformly — nothing in `opts` (currently just `:env` at
    the only call site) is push-specific in a way that would be wrong to
-   apply to the repoint/restore calls too.
+   apply to the others too. (Automated review flagged the repoint/restore
+   pair and the `get-url` probe as two related comments; both are the same
+   defect class and are fixed together here.)
 
 Added 7 regression tests: 5 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,

@@ -398,7 +398,7 @@
          (if (result/succeeded? result)
        result
        (if-let [token (get-in opts [:env "GH_TOKEN"])]
-         (let [url-r (exec! executor env-id "git remote get-url origin" {})
+         (let [url-r (exec! executor env-id "git remote get-url origin" opts)
                remote-url (when (result/succeeded? url-r) (str/trim (get url-r :output "")))
                https-url (ssh->https-with-token remote-url token)]
            (if https-url
