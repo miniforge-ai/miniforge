@@ -71,7 +71,7 @@ the diff for the known `foo])  ; comment` migration pattern; no matches.
 One pre-existing oddity survives unchanged in `stream_recovery.clj`: a
 `;; => [...]` illustrative-output comment after the file's `(comment ...)`
 block was already outside that form before the fix (the form closes one
-line earlier); `--fix` only dedented it. Not a func­tional change and not
+line earlier); `--fix` only dedented it. Not a functional change and not
 attached to any def.
 
 ## Testing Plan

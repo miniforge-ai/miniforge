@@ -368,6 +368,6 @@
   ;; => {:action :failover, :new-backend :openai}
 
   ;; Build command without launching a process
-  (build-resume-command :anthropic "sess-xyz" ["--timeout" "120"]))
-
-;; => ["claude" "--resume" "sess-xyz" "--timeout" "120"]
+  (build-resume-command :anthropic "sess-xyz" ["--timeout" "120"])
+  ;; => ["claude" "--resume" "sess-xyz" "--timeout" "120"]
+  )
