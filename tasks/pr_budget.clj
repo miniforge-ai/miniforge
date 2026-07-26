@@ -84,14 +84,6 @@
               (println (str/trim err))))
           (System/exit 1)))))
 
-;; report (composes Layer 1)
-(defn ^{:stratum 0} print-report!
-  "Same shape as `commit-budget/print-report!`; kept separate (rather
-   than calling it directly) since PR-level output carries different
-   framing text below it."
-  [annotated total]
-  (cb/print-report! annotated total))
-
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} override-rationale
@@ -130,7 +122,7 @@
           (when (> total budget)
             (println (format "  WARNING: %d > %d — budget intentionally bypassed."
                               total budget)))
-          (print-report! annotated total))
+          (cb/print-report! annotated total))
 
       (<= total budget)
       (println (format "📏 pr-budget: %d / %d lines OK" total budget))
@@ -141,7 +133,7 @@
           (println (format "❌ PR BUDGET EXCEEDED: %d > %d lines" total budget))
           (println "════════════════════════════════════════════════════════════════")
           (println "")
-          (print-report! annotated total)
+          (cb/print-report! annotated total)
           (println "")
           (println "Why this exists:")
           (println "  Reviewer defect-detection drops sharply past ~200 LOC, and")
@@ -165,7 +157,8 @@
   "CI entry point. Reads `PR_BASE_SHA`/`PR_HEAD_SHA`/`PR_BODY` from the
    environment (set by the calling GitHub Actions step from the
    `pull_request` event payload) rather than taking CLI args, so the
-   workflow YAML stays a plain `bb -m pr-budget` invocation."
+   workflow YAML stays a plain `bb pr-budget` invocation (the bb.edn
+   task, not `bb -m pr-budget` -- this namespace has no `-main`)."
   [_opts]
   (let [base (System/getenv "PR_BASE_SHA")
         head (System/getenv "PR_HEAD_SHA")]
