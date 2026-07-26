@@ -8,17 +8,11 @@
    violation shape using declarative mapping specs loaded from EDN.
    No parser code per linter — all extraction is driven by data.
 
-<<<<<<< HEAD
-   Layer 0: Field extraction, severity mapping, and parsing utilities
-   Layer 1: Record-to-violation transformation and mapping registry
-   Layer 2: Format-specific record extraction dispatch
-=======
    Layer 0: Field extraction, severity mapping, JSON parsing, and the
             mapping registry's resource name
    Layer 1: Per-record transform, filter matching, format-specific
             record extraction, and the mapping registry itself
    Layer 2: Format dispatch and mapping lookup
->>>>>>> origin/main
    Layer 3: Apply mapping spec to produce violations"
   (:require
    [ai.miniforge.compliance-scanner.interface :as factory]
@@ -53,11 +47,7 @@
     (get severity-map key
          (get severity-map raw-value :low))))
 
-<<<<<<< HEAD
-;; Format-specific record extraction
-=======
 ;; JSON parsing
->>>>>>> origin/main
 (defn- ^{:stratum 0} parse-json-safe
   "Parse JSON string, returning nil on failure."
   [s]
