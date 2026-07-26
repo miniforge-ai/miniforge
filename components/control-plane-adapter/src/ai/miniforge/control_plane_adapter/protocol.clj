@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane-adapter.protocol
   "Protocol definition for vendor-specific control plane adapters.
 
@@ -28,9 +27,9 @@
    plane API) or pull mode (adapter discovers and polls agents).")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Core adapter protocol
 
-(defprotocol ControlPlaneAdapter
+;; Core adapter protocol
+(defprotocol ^{:stratum 0} ControlPlaneAdapter
   "Protocol for vendor-specific agent integration.
    Adapters bridge between vendor-native agent APIs and
    the control plane's normalized model."
@@ -89,10 +88,8 @@
 
      Returns {:success? bool :error string-or-nil}"))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Optional extended protocol
-
-(defprotocol ControlPlaneAdapterLogs
+(defprotocol ^{:stratum 0} ControlPlaneAdapterLogs
   "Optional protocol for adapters that support log retrieval."
 
   (agent-logs [this agent-record opts]
