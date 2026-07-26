@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.interface.protocols.artifact-store
   "Public protocol for artifact persistence and retrieval.
 
    This is an extensibility point - users can implement custom artifact stores
    to persist artifacts to different backends (databases, file systems, cloud storage, etc.).")
 
-(defprotocol ArtifactStore
+;------------------------------------------------------------------------------ Layer 0
+
+(defprotocol ^{:stratum 0} ArtifactStore
   "Protocol for artifact persistence and retrieval."
 
   (save [this artifact]
