@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.ast
   "Tree-sitter CLI wrapper for language-agnostic AST analysis.
 
@@ -31,9 +30,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; CLI helpers
 
-(defn tree-sitter-available?
+;; CLI helpers
+(defn ^{:stratum 0} tree-sitter-available?
   "Check if the tree-sitter CLI is available on PATH."
   []
   (try
@@ -43,14 +42,14 @@
       (zero? (.exitValue proc)))
     (catch Exception _ false)))
 
-(defn file-extension
+(defn ^{:stratum 0} file-extension
   "Extract the file extension from a path (without the dot)."
   [path]
   (let [filename (.getName (java.io.File. (str path)))]
     (when-let [idx (str/last-index-of filename ".")]
       (subs filename (inc idx)))))
 
-(def ^:private extension->lang
+(def ^{:stratum 0} ^:private extension->lang
   "Map file extensions to tree-sitter language names."
   {"clj"  "clojure"
    "cljs" "clojure"
@@ -73,17 +72,8 @@
    "sh"   "bash"
    "bash" "bash"})
 
-(defn detect-language
-  "Detect tree-sitter language from file path or explicit :lang option."
-  [file-path lang-override]
-  (or lang-override
-      (get extension->lang (file-extension file-path))
-      "text"))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Query execution
-
-(defn- write-temp-query
+(defn- ^{:stratum 0} write-temp-query
   "Write a query pattern to a temporary .scm file. Returns the File."
   [query-str]
   (let [f (java.io.File/createTempFile "ts-query-" ".scm")]
@@ -91,7 +81,7 @@
     (spit f query-str)
     f))
 
-(defn- write-temp-source
+(defn- ^{:stratum 0} write-temp-source
   "Write source content to a temporary file with the right extension.
    Returns the File."
   [content extension]
@@ -100,7 +90,7 @@
     (spit f content)
     f))
 
-(defn- parse-query-output
+(defn- ^{:stratum 0} parse-query-output
   "Parse tree-sitter query output into match maps.
 
    Tree-sitter query output format (one match per line):
@@ -121,14 +111,48 @@
                     :text    (nth m 5)})))
          vec)))
 
-(def ^:const tree-sitter-query-timeout-ms
+(def ^{:stratum 0} ^:const tree-sitter-query-timeout-ms
   "Wall-clock cap on a single `tree-sitter query` invocation. A query over a
    well-formed source file completes in well under a second; the cap exists so
    a wedged/runaway tree-sitter process fails the check instead of hanging the
    JVM (which previously stalled an entire dogfood implement phase)."
   30000)
 
-(defn run-query
+;; Match-to-violation helpers
+(defn ^{:stratum 0} matches->violations
+  "Convert tree-sitter query matches to violation-shaped maps.
+
+   Arguments:
+   - matches   — Vector of match maps from run-query
+   - rule-id   — Rule keyword
+   - rule-cat  — Rule category string
+   - title     — Rule title string
+   - file-path — Source file path
+
+   Returns vector of violation-shaped maps."
+  [matches rule-id rule-cat title file-path]
+  (mapv (fn [{:keys [row text]}]
+          {:rule/id       rule-id
+           :rule/category rule-cat
+           :rule/title    title
+           :file          file-path
+           :line          (inc row) ; tree-sitter is 0-indexed
+           :current       text
+           :suggested     nil
+           :auto-fixable? false
+           :rationale     ""})
+        matches))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} detect-language
+  "Detect tree-sitter language from file path or explicit :lang option."
+  [file-path lang-override]
+  (or lang-override
+      (get extension->lang (file-extension file-path))
+      "text"))
+
+(defn ^{:stratum 1} run-query
   "Execute a tree-sitter query against source content.
 
    Arguments:
@@ -186,33 +210,6 @@
       (finally
         (.delete query-file)
         (.delete source-file)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Match-to-violation helpers
-
-(defn matches->violations
-  "Convert tree-sitter query matches to violation-shaped maps.
-
-   Arguments:
-   - matches   — Vector of match maps from run-query
-   - rule-id   — Rule keyword
-   - rule-cat  — Rule category string
-   - title     — Rule title string
-   - file-path — Source file path
-
-   Returns vector of violation-shaped maps."
-  [matches rule-id rule-cat title file-path]
-  (mapv (fn [{:keys [row text]}]
-          {:rule/id       rule-id
-           :rule/category rule-cat
-           :rule/title    title
-           :file          file-path
-           :line          (inc row) ; tree-sitter is 0-indexed
-           :current       text
-           :suggested     nil
-           :auto-fixable? false
-           :rationale     ""})
-        matches))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

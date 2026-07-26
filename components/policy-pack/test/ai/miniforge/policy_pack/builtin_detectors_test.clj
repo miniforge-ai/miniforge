@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.builtin-detectors-test
   (:require
    [clojure.edn :as edn]
@@ -26,16 +25,20 @@
    ;; loaded for its registration side effect
    [ai.miniforge.policy-pack.builtin-detectors]))
 
-(defn- tf-rule [id]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} tf-rule [id]
   (->> (edn/read-string (slurp (io/resource "policy_pack/packs/terraform-aws-1.0.0.pack.edn")))
        :pack/rules
        (filter #(= id (:rule/id %)))
        first))
 
-(defn- fires? [rule content]
+(defn- ^{:stratum 0} fires? [rule content]
   (boolean (detection/detect-custom rule {:artifact/content content} {})))
 
-(deftest approved-instance-types-detector-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} approved-instance-types-detector-test
   (let [rule (tf-rule :tf-aws/approved-instance-types)]
     (testing "the rule is a registered :custom detector (binds :custom, not the judge)"
       (is (some? rule))

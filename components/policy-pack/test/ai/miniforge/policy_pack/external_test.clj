@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.external-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.external :as external]
    [ai.miniforge.policy-pack.core :as core]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Diff parsing tests
 ;; ============================================================================
-
-(deftest parse-pr-diff-test
+(deftest ^{:stratum 0} parse-pr-diff-test
   (testing "parses single-file diff"
     (let [diff "diff --git a/main.tf b/main.tf\n--- a/main.tf\n+++ b/main.tf\n@@ -1,3 +1,4 @@\n resource \"aws_vpc\" \"main\" {\n+  enable_dns = true\n   cidr_block = var.vpc_cidr\n }"
           result (external/parse-pr-diff diff)]
@@ -50,8 +50,7 @@
 ;; ============================================================================
 ;; Read-only mode tests
 ;; ============================================================================
-
-(deftest evaluate-external-pr-read-only-test
+(deftest ^{:stratum 0} evaluate-external-pr-read-only-test
   (testing "evaluation runs in read-only mode"
     (let [pack (core/create-pack "test" "Test" "desc" "author"
                                  :rules [(core/create-rule :no-todo "No TODOs" "desc"
@@ -69,8 +68,7 @@
 ;; ============================================================================
 ;; Severity grouping tests
 ;; ============================================================================
-
-(deftest evaluation-summary-test
+(deftest ^{:stratum 0} evaluation-summary-test
   (testing "summary groups by severity"
     (let [pack (core/create-pack "test" "Test" "desc" "author"
                                  :rules [(core/create-rule :no-todo "No TODOs" "desc"
@@ -90,8 +88,7 @@
 ;; ============================================================================
 ;; Report structure tests
 ;; ============================================================================
-
-(deftest report-structure-test
+(deftest ^{:stratum 0} report-structure-test
   (testing "report has all required keys"
     (let [pack (core/create-pack "test" "Test" "desc" "author")
           result (external/evaluate-external-pr pack {:diff ""})]

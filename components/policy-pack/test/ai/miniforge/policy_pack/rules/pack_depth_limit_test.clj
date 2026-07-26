@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.rules.pack-depth-limit-test
   "Tests for pack dependency depth limit validation."
   (:require
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ Tests: Depth Limits
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest test-depth-limit-not-exceeded
+;------------------------------------------------------------------------------ Tests: Depth Limits
+(deftest ^{:stratum 0} test-depth-limit-not-exceeded
   (testing "Dependency depth within limit passes validation"
     (let [depth-1 {:pack/id "depth-1"
                    :pack/version "1.0.0"
@@ -64,7 +64,7 @@
       (is (empty? (:violations result)))
       (is (empty? (:warnings result))))))
 
-(deftest test-depth-limit-exceeded
+(deftest ^{:stratum 0} test-depth-limit-exceeded
   (testing "Dependency depth exceeding limit triggers warning"
     (let [depth-1 {:pack/id "depth-1"
                    :pack/version "1.0.0"

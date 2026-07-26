@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.scanner-protocol
   "Formalized scanner interface for policy-pack rule detection.
 
@@ -30,9 +29,9 @@
    Layer 2: Built-in scanners")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol definitions
 
-(defprotocol Scanner
+;; Protocol definitions
+(defprotocol ^{:stratum 0} Scanner
   "Protocol for artifact scanning.
 
    Scanners detect violations in artifacts. Each scanner focuses on a specific
@@ -62,7 +61,7 @@
                :scanned? bool
                :scanner-id keyword}"))
 
-(defprotocol RepairableScanner
+(defprotocol ^{:stratum 0} RepairableScanner
   "Extension protocol for scanners that can suggest or apply repairs."
 
   (can-repair? [this violation]
@@ -77,12 +76,12 @@
     "Apply a repair for a violation.
      Returns: {:success? bool :artifact map :applied-fix string?}"))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Scanner registry
+(defonce ^{:stratum 0} scanner-registry (atom {}))
 
-(defonce scanner-registry (atom {}))
+;------------------------------------------------------------------------------ Layer 1
 
-(defn register-scanner!
+(defn ^{:stratum 1} register-scanner!
   "Register a scanner in the global registry.
 
    Arguments:
@@ -94,18 +93,18 @@
     (swap! scanner-registry assoc id scanner)
     id))
 
-(defn deregister-scanner!
+(defn ^{:stratum 1} deregister-scanner!
   "Remove a scanner from the registry."
   [scanner-id-kw]
   (swap! scanner-registry dissoc scanner-id-kw)
   nil)
 
-(defn get-scanner
+(defn ^{:stratum 1} get-scanner
   "Get a scanner by ID from the registry."
   [scanner-id-kw]
   (get @scanner-registry scanner-id-kw))
 
-(defn list-scanners
+(defn ^{:stratum 1} list-scanners
   "List all registered scanners.
    Returns: [{:id keyword :type keyword}]"
   []
@@ -113,17 +112,15 @@
           {:id id :type (scanner-type scanner)})
         @scanner-registry))
 
-(defn scanners-for-type
+(defn ^{:stratum 1} scanners-for-type
   "Get all scanners that handle a given detection type."
   [detection-type]
   (filterv (fn [[_id scanner]]
              (= detection-type (scanner-type scanner)))
            @scanner-registry))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Built-in scanners
-
-(defrecord RegexScanner [id patterns]
+(defrecord ^{:stratum 1} RegexScanner [id patterns]
   Scanner
   (scanner-id [_] id)
   (scanner-type [_] :content-scan)
@@ -146,7 +143,9 @@
        :scanned? true
        :scanner-id id})))
 
-(defn create-regex-scanner
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-regex-scanner
   "Create a regex-based content scanner.
 
    Arguments:

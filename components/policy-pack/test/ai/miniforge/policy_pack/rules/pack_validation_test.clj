@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.rules.pack-validation-test
   "Tests for single pack validation and trust placeholders."
   (:require
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ Test Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def valid-pack-a
+;------------------------------------------------------------------------------ Test Fixtures
+(def ^{:stratum 0} valid-pack-a
   "Simple pack with no dependencies."
   {:pack/id "pack-a"
    :pack/version "2026.01.25"
@@ -36,7 +36,7 @@
    :pack/created-at (java.time.Instant/now)
    :pack/updated-at (java.time.Instant/now)})
 
-(def valid-pack-b
+(def ^{:stratum 0} valid-pack-b
   "Pack that depends on pack-a."
   {:pack/id "pack-b"
    :pack/version "2026.01.25"
@@ -49,10 +49,11 @@
    :pack/created-at (java.time.Instant/now)
    :pack/updated-at (java.time.Instant/now)})
 
+;------------------------------------------------------------------------------ Layer 1
+
 ;------------------------------------------------------------------------------ Tests: Trust Constraints
 ;; Note: These are placeholder tests for when PR14 (Transitive Trust Rules) is merged
-
-(deftest test-trust-validation-placeholder
+(deftest ^{:stratum 1} test-trust-validation-placeholder
   (testing "Trust validation is disabled by default (waiting for PR14)"
     (let [result (sut/validate-pack-dependencies
                   [valid-pack-a]
@@ -62,8 +63,7 @@
       (is (not-any? #(= :trust-violation (:type %)) (:violations result))))))
 
 ;------------------------------------------------------------------------------ Tests: Validate Single Pack
-
-(deftest test-validate-single-pack
+(deftest ^{:stratum 1} test-validate-single-pack
   (testing "Validate single pack against registry"
     (let [registry [valid-pack-a valid-pack-b]
           new-pack {:pack/id "pack-d"
@@ -81,7 +81,7 @@
       (is (:valid? result))
       (is (empty? (:violations result))))))
 
-(deftest test-validate-single-pack-with-missing-dep
+(deftest ^{:stratum 1} test-validate-single-pack-with-missing-dep
   (testing "Single pack validation catches missing dependency"
     (let [registry [valid-pack-a]
           new-pack {:pack/id "pack-d"
