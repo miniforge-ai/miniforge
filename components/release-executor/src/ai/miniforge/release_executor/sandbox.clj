@@ -308,10 +308,20 @@
    any path is unsafe (see validate-safe-container-path) — an unvalidated
    path containing a single quote or other shell metacharacter would
    otherwise break out of the single-quoting below, since exec! routes
-   string commands through `sh -c`."
+   string commands through `sh -c`. An empty/nil `file-paths` short-circuits
+   to a no-op success without shelling out at all — relying on git's own
+   no-args behavior for `git add` (currently a harmless advisory exit 0,
+   but unstated and not something to depend on) would also leak that
+   advisory message into :output."
   [executor env-id file-paths]
-  (if (= file-paths :all)
+  (cond
+    (= file-paths :all)
     (exec! executor env-id "git add .")
+
+    (empty? file-paths)
+    (result/shell-success {:output ""})
+
+    :else
     (if-let [invalid (some validate-safe-container-path file-paths)]
       invalid
       (exec! executor env-id
@@ -502,15 +512,22 @@
   "Create a new git branch inside the sandbox container, off the current
    HEAD (so phase-boundary commits already on the task branch carry
    forward). Fetches `origin/<default-branch>` first so the PR-creation
-   step has a fresh merge base to compare against.
+   step has a fresh merge base to compare against. `default-branch` is
+   validated with `validate-safe-branch-name` and the fetch is issued as
+   an argv vector (never a shell string) — the same guard and pattern
+   already used elsewhere in this file — even though it's normally
+   derived from git's own symbolic-ref output, not directly attacker
+   controlled.
 
    Returns {:success? bool :branch string :base-branch string :error string}"
   [executor env-id branch-name]
-  (let [default-branch (detect-default-branch executor env-id)
-        fetch-r (exec! executor env-id (str "git fetch origin " default-branch))]
-    (if-not (result/succeeded? fetch-r)
-      (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
-      (try-checkout-branch executor env-id branch-name default-branch))))
+  (let [default-branch (detect-default-branch executor env-id)]
+    (if-let [invalid (validate-safe-branch-name default-branch)]
+      invalid
+      (let [fetch-r (exec! executor env-id ["git" "fetch" "origin" default-branch])]
+        (if-not (result/succeeded? fetch-r)
+          (result/shell-failure (str "Failed to fetch: " (:error fetch-r)) {:branch nil})
+          (try-checkout-branch executor env-id branch-name default-branch))))))
 
 ;; File batch operations (mirrors files.clj write-and-stage-files!)
 (defn ^{:stratum 3} apply-file-operation!

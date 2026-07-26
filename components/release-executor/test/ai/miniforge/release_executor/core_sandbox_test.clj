@@ -155,6 +155,20 @@
       (is (not (clojure.string/includes? fm "\r")) "no raw carriage return survives into the frontmatter")
       (is (= 2 (count (re-seq #"(?m)^---$" fm)))))))
 
+(deftest ^{:stratum 0} provenance-frontmatter-force-quotes-yaml-reserved-words
+  (testing "a value that would otherwise pass the safe-character-set check but reads
+            back as a YAML boolean/null/number (true/false/yes/no/null/~, or a bare
+            number) is force-quoted so it round-trips as a string"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "true" :spec "123" :task "NO"}
+               :commit-sha "false"})]
+      (is (clojure.string/includes? fm "miniforge-workflow: \"true\""))
+      (is (clojure.string/includes? fm "spec: \"123\""))
+      (is (clojure.string/includes? fm "task: \"NO\"")
+          "case-insensitive: YAML 1.1 parsers also read NO/Yes/etc. as booleans")
+      (is (clojure.string/includes? fm "commit: \"false\""))
+      (is (= 2 (count (re-seq #"(?m)^---$" fm)))))))
+
 (deftest ^{:stratum 0} with-provenance-prepends-and-is-idempotent
   (testing "prepends frontmatter to a plain body"
     (let [out (core/with-provenance "## Summary\nbody" {:provenance {:workflow "r1"} :commit-sha "c1"})]

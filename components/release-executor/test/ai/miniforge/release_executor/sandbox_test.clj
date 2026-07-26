@@ -31,36 +31,16 @@
 ;; ============================================================================
 ;; Mock executor
 ;; ============================================================================
-(defn ^{:stratum 0} create-mock-executor
-  "Create a mock executor that records commands and returns configurable results.
-
-   Options:
-   - :responses - map of command-substring -> {:exit-code :stdout :stderr}
-   - :default-response - default response for unmatched commands
-
-   Returns [executor commands-atom] where commands-atom captures all executed commands."
-  [& {:keys [responses default-response]
-      :or {responses {}
-           default-response {:exit-code 0 :stdout "" :stderr ""}}}]
-  (let [commands (atom [])]
-    [(reify
-       dag/TaskExecutor
-       (executor-type [_] :mock)
-       (available? [_] (dag/ok {:available? true}))
-       (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
-       (execute! [_ _env-id command _opts]
-         (swap! commands conj command)
-         (let [response (or (some (fn [[substr resp]]
-                                    (when (clojure.string/includes? (str command) substr)
-                                      resp))
-                                  responses)
-                            default-response)]
-           (dag/ok response)))
-       (copy-to! [_ _ _ _] (dag/ok {}))
-       (copy-from! [_ _ _ _] (dag/ok {}))
-       (release-environment! [_ _] (dag/ok {:released? true}))
-       (environment-status [_ _] (dag/ok {:status :running})))
-     commands]))
+(defn ^{:stratum 0} cmd-str
+  "Normalize an exec! command (a shell string or an argv vector) into a
+   plain space-joined string for substring matching in tests. A vector's
+   own (str ...) form quotes each element (e.g. [\"git\" \"fetch\"]),
+   which breaks a multi-word substring check like \"git fetch\" — joining
+   instead reproduces the same plain text a string command would have."
+  [command]
+  (if (vector? command)
+    (clojure.string/join " " command)
+    (str command)))
 
 (deftest ^{:stratum 0} write-file-roundtrip-base64-test
   (testing "write-file! base64 encoding is valid"
@@ -235,10 +215,43 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} create-mock-executor
+  "Create a mock executor that records commands and returns configurable results.
+
+   Options:
+   - :responses - map of command-substring -> {:exit-code :stdout :stderr}
+   - :default-response - default response for unmatched commands
+
+   Returns [executor commands-atom] where commands-atom captures all executed commands."
+  [& {:keys [responses default-response]
+      :or {responses {}
+           default-response {:exit-code 0 :stdout "" :stderr ""}}}]
+  (let [commands (atom [])]
+    [(reify
+       dag/TaskExecutor
+       (executor-type [_] :mock)
+       (available? [_] (dag/ok {:available? true}))
+       (acquire-environment! [_ _ _] (dag/ok {:environment-id "mock-env"}))
+       (execute! [_ _env-id command _opts]
+         (swap! commands conj command)
+         (let [response (or (some (fn [[substr resp]]
+                                    (when (clojure.string/includes? (cmd-str command) substr)
+                                      resp))
+                                  responses)
+                            default-response)]
+           (dag/ok response)))
+       (copy-to! [_ _ _ _] (dag/ok {}))
+       (copy-from! [_ _ _ _] (dag/ok {}))
+       (release-environment! [_ _] (dag/ok {:released? true}))
+       (environment-status [_ _] (dag/ok {:status :running})))
+     commands]))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; ============================================================================
 ;; check-gh-auth! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} check-gh-auth-success-test
+(deftest ^{:stratum 2} check-gh-auth-success-test
   (testing "check-gh-auth! returns authenticated when gh auth status succeeds"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
@@ -246,7 +259,7 @@
       (is (:available? result))
       (is (:authenticated? result)))))
 
-(deftest ^{:stratum 1} check-gh-auth-failure-test
+(deftest ^{:stratum 2} check-gh-auth-failure-test
   (testing "check-gh-auth! returns unauthenticated when gh auth status fails"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh auth status" {:exit-code 1 :stdout "" :stderr "not logged in"}})
@@ -254,7 +267,7 @@
       (is (:available? result))
       (is (not (:authenticated? result))))))
 
-(deftest ^{:stratum 1} check-gh-auth-with-token-opts-test
+(deftest ^{:stratum 2} check-gh-auth-with-token-opts-test
   (testing "check-gh-auth! accepts opts for GH_TOKEN injection"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
@@ -262,7 +275,7 @@
       (is (:available? result))
       (is (:authenticated? result)))))
 
-(deftest ^{:stratum 1} check-gh-auth-two-arity-backward-compatible-test
+(deftest ^{:stratum 2} check-gh-auth-two-arity-backward-compatible-test
   (testing "check-gh-auth! works with 2-arg call (no opts)"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh auth status" {:exit-code 0 :stdout "Logged in" :stderr ""}})
@@ -272,7 +285,7 @@
 ;; ============================================================================
 ;; create-branch! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} create-branch-success-test
+(deftest ^{:stratum 2} create-branch-success-test
   (testing "create-branch! issues fetch and checkout commands"
     (let [[exec cmds] (create-mock-executor
                        :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
@@ -282,11 +295,12 @@
       (is (:success? result))
       (is (= "feat/my-branch" (:branch result)))
       (is (= "main" (:base-branch result)))
-      ;; Verify commands were issued
-      (is (some #(clojure.string/includes? % "git fetch origin main") @cmds))
-      (is (some #(clojure.string/includes? % "git checkout -b feat/my-branch") @cmds)))))
+      ;; Verify commands were issued — fetch is now an argv vector (not a
+      ;; shell string), so match via cmd-str rather than assuming a string
+      (is (some #(clojure.string/includes? (cmd-str %) "git fetch origin main") @cmds))
+      (is (some #(clojure.string/includes? (cmd-str %) "git checkout -b feat/my-branch") @cmds)))))
 
-(deftest ^{:stratum 1} create-branch-fetch-failure-test
+(deftest ^{:stratum 2} create-branch-fetch-failure-test
   (testing "create-branch! fails when fetch fails"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"git symbolic-ref" {:exit-code 0 :stdout "refs/remotes/origin/main\n" :stderr ""}
@@ -295,7 +309,18 @@
       (is (not (:success? result)))
       (is (clojure.string/includes? (:error result) "fetch")))))
 
-(deftest ^{:stratum 1} create-branch-uses-head-not-origin-base-test
+(deftest ^{:stratum 2} create-branch-rejects-unsafe-default-branch-test
+  (testing "create-branch! validates the detected default branch before fetching —
+            an unsafe default-branch (e.g. an option-injection name) aborts before
+            any fetch/checkout is attempted"
+    (let [[exec cmds] (create-mock-executor
+                       :responses {"git symbolic-ref" {:exit-code 0 :stdout "-x\n" :stderr ""}})
+          result (sandbox/create-branch! exec "env-1" "feat/branch")]
+      (is (not (:success? result)))
+      (is (empty? (filter #(clojure.string/includes? (cmd-str %) "fetch") @cmds))
+          "no fetch is attempted once the default branch itself fails validation"))))
+
+(deftest ^{:stratum 2} create-branch-uses-head-not-origin-base-test
   (testing "create-branch! checks out off HEAD so phase-boundary commits
             already on the task branch carry forward into the release branch"
     (let [[exec cmds] (create-mock-executor
@@ -305,14 +330,15 @@
           result (sandbox/create-branch! exec "env-1" "release/x")]
       (is (:success? result))
       (is (= "main" (:base-branch result)))
-      (let [checkout (some #(when (clojure.string/includes? % "git checkout -b release/x") %) @cmds)]
+      (let [checkout (some #(when (clojure.string/includes? (str %) "git checkout -b release/x") %)
+                           @cmds)]
         (is (some? checkout)
             "checkout command must be issued for the new branch")
-        (is (not (clojure.string/includes? checkout "origin/main"))
+        (is (not (clojure.string/includes? (str checkout) "origin/main"))
             "checkout must not reset to origin/<base>; HEAD is the source of truth
              so prior phase-boundary commits stay on the new branch")))))
 
-(deftest ^{:stratum 1} commits-ahead-of-base-parses-count-test
+(deftest ^{:stratum 2} commits-ahead-of-base-parses-count-test
   (testing "commits-ahead-of-base returns the parsed integer count"
     (let [[exec _] (create-mock-executor
                     :responses {"git rev-list" {:exit-code 0 :stdout "3\n" :stderr ""}})]
@@ -329,7 +355,7 @@
 ;; ============================================================================
 ;; write-file! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} write-file-generates-base64-command-test
+(deftest ^{:stratum 2} write-file-generates-base64-command-test
   (testing "write-file! encodes content as base64 and creates parent dirs"
     (let [[exec cmds] (create-mock-executor)
           result (sandbox/write-file! exec "env-1" "src/foo.clj" "(ns foo)")]
@@ -343,7 +369,7 @@
 ;; ============================================================================
 ;; delete-file! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} delete-file-command-test
+(deftest ^{:stratum 2} delete-file-command-test
   (testing "delete-file! issues rm -f command"
     (let [[exec cmds] (create-mock-executor)]
       (sandbox/delete-file! exec "env-1" "src/old.clj")
@@ -353,13 +379,13 @@
 ;; ============================================================================
 ;; stage-files! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} stage-all-files-test
+(deftest ^{:stratum 2} stage-all-files-test
   (testing "stage-files! with :all issues git add ."
     (let [[exec cmds] (create-mock-executor)]
       (sandbox/stage-files! exec "env-1" :all)
       (is (= "git add ." (first @cmds))))))
 
-(deftest ^{:stratum 1} stage-specific-files-test
+(deftest ^{:stratum 2} stage-specific-files-test
   (testing "stage-files! with specific paths issues git add with paths"
     (let [[exec cmds] (create-mock-executor)]
       (sandbox/stage-files! exec "env-1" ["src/a.clj" "src/b.clj"])
@@ -368,7 +394,7 @@
         (is (clojure.string/includes? cmd "src/a.clj"))
         (is (clojure.string/includes? cmd "src/b.clj"))))))
 
-(deftest ^{:stratum 1} stage-files-rejects-unsafe-path-test
+(deftest ^{:stratum 2} stage-files-rejects-unsafe-path-test
   (testing "stage-files! rejects a path containing a shell metacharacter instead of
             interpolating it unescaped into the git add command"
     (let [[exec cmds] (create-mock-executor)
@@ -376,10 +402,19 @@
       (is (false? (:success? result)))
       (is (empty? @cmds) "no command is shelled out once an unsafe path is found"))))
 
+(deftest ^{:stratum 2} stage-files-empty-paths-is-a-no-op-test
+  (testing "stage-files! with an empty or nil file-paths short-circuits to a no-op
+            success without shelling out — not relying on git's own bare `git add`
+            no-args behavior"
+    (let [[exec cmds] (create-mock-executor)]
+      (is (:success? (sandbox/stage-files! exec "env-1" [])))
+      (is (:success? (sandbox/stage-files! exec "env-1" nil)))
+      (is (empty? @cmds) "no exec! call is made for an empty/nil file-paths"))))
+
 ;; ============================================================================
 ;; commit-changes! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} commit-changes-success-test
+(deftest ^{:stratum 2} commit-changes-success-test
   (testing "commit-changes! commits and returns sha"
     (let [[exec cmds] (create-mock-executor
                        :responses {"git commit" {:exit-code 0 :stdout "1 file changed" :stderr ""}
@@ -389,7 +424,7 @@
       (is (= "abc1234" (:commit-sha result)))
       (is (some #(clojure.string/includes? % "git commit") @cmds)))))
 
-(deftest ^{:stratum 1} commit-changes-escapes-quotes-test
+(deftest ^{:stratum 2} commit-changes-escapes-quotes-test
   (testing "commit-changes! escapes single quotes in commit message"
     (let [[exec cmds] (create-mock-executor
                        :responses {"git commit" {:exit-code 0 :stdout "" :stderr ""}
@@ -399,7 +434,7 @@
         ;; Should contain escaped single quote
         (is (clojure.string/includes? cmd "it'\\''s working"))))))
 
-(deftest ^{:stratum 1} commit-changes-rev-parse-failure-test
+(deftest ^{:stratum 2} commit-changes-rev-parse-failure-test
   (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
             phantom success with a missing sha"
     (let [[exec _cmds] (create-mock-executor
@@ -413,7 +448,7 @@
 ;; ============================================================================
 ;; push-branch! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} push-branch-command-test
+(deftest ^{:stratum 2} push-branch-command-test
   (testing "push-branch! issues git push -u origin"
     (let [[exec cmds] (create-mock-executor)
           result (sandbox/push-branch! exec "env-1" "feat/branch")]
@@ -423,7 +458,7 @@
 ;; ============================================================================
 ;; create-pr! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} create-pr-success-test
+(deftest ^{:stratum 2} create-pr-success-test
   (testing "create-pr! calls gh pr create and parses PR URL"
     (let [[exec cmds] (create-mock-executor
                        :responses {"gh pr create" {:exit-code 0
@@ -441,7 +476,7 @@
         (is (clojure.string/includes? cmd "--title"))
         (is (clojure.string/includes? cmd "--base main"))))))
 
-(deftest ^{:stratum 1} create-pr-failure-test
+(deftest ^{:stratum 2} create-pr-failure-test
   (testing "create-pr! returns failure when gh pr create fails"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh pr create" {:exit-code 1
@@ -452,7 +487,7 @@
       (is (not (:success? result)))
       (is (some? (:error result))))))
 
-(deftest ^{:stratum 1} create-pr-unconfirmed-is-failure-test
+(deftest ^{:stratum 2} create-pr-unconfirmed-is-failure-test
   (testing "gh pr create exits 0 but prints no PR URL → FAILURE, not a phantom
             success (the original 'doc but no PR' symptom)"
     (let [[exec _cmds] (create-mock-executor
@@ -465,7 +500,7 @@
       (is (nil? (:pr-number result)))
       (is (some? (:error result))))))
 
-(deftest ^{:stratum 1} create-pr-reuses-existing-pr-test
+(deftest ^{:stratum 2} create-pr-reuses-existing-pr-test
   (testing "a branch that already has an open PR reuses it (no duplicate)"
     (let [[exec cmds] (create-mock-executor
                        :responses {"gh pr create"
@@ -482,7 +517,7 @@
       (is (some #(clojure.string/includes? % "gh pr view") @cmds)
           "resolves the existing PR via gh pr view"))))
 
-(deftest ^{:stratum 1} create-pr-already-exists-but-unresolvable-fails-test
+(deftest ^{:stratum 2} create-pr-already-exists-but-unresolvable-fails-test
   (testing "PR already exists but gh pr view can't resolve it → failure (no phantom)"
     (let [[exec _cmds] (create-mock-executor
                         :responses {"gh pr create"
@@ -500,7 +535,7 @@
 ;; ============================================================================
 ;; write-and-stage-files! tests
 ;; ============================================================================
-(deftest ^{:stratum 1} write-and-stage-files-success-test
+(deftest ^{:stratum 2} write-and-stage-files-success-test
   (testing "write-and-stage-files! processes all code artifacts"
     (let [[exec cmds] (create-mock-executor)
           code-artifacts [{:code/files [{:action :create :path "src/a.clj" :content "(ns a)"}
@@ -517,7 +552,7 @@
       ;; Last command should be path-specific git add
       (is (= "git add 'src/a.clj' 'src/b.clj' 'src/old.clj'" (last @cmds))))))
 
-(deftest ^{:stratum 1} write-and-stage-files-failure-test
+(deftest ^{:stratum 2} write-and-stage-files-failure-test
   (testing "write-and-stage-files! reports errors from failed operations"
     (let [[exec _cmds] (create-mock-executor
                         :default-response {:exit-code 1 :stdout "" :stderr "permission denied"})
@@ -529,7 +564,7 @@
 ;; ============================================================================
 ;; push-branch! HTTPS fallback tests
 ;; ============================================================================
-(deftest ^{:stratum 1} push-branch-success-test
+(deftest ^{:stratum 2} push-branch-success-test
   (testing "push-branch! succeeds on first try without fallback"
     (let [[exec cmds] (create-mock-executor
                        :responses {"git push" {:exit-code 0 :stdout "" :stderr ""}})]
@@ -537,7 +572,7 @@
       (is (= 1 (count @cmds)))
       (is (clojure.string/includes? (first @cmds) "git push")))))
 
-(deftest ^{:stratum 1} push-branch-no-token-no-fallback-test
+(deftest ^{:stratum 2} push-branch-no-token-no-fallback-test
   (testing "push-branch! returns failure without fallback when no GH_TOKEN"
     (let [[exec _cmds] (create-mock-executor
                         :default-response {:exit-code 1 :stdout "" :stderr "signing failed"})
@@ -547,7 +582,7 @@
               :output ""}
              result)))))
 
-(deftest ^{:stratum 1} write-file-rejects-path-traversal-test
+(deftest ^{:stratum 2} write-file-rejects-path-traversal-test
   (testing "write-file! returns failure on path containing .. segment"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -555,7 +590,7 @@
        :path-traversal
        #"Path traversal rejected"))))
 
-(deftest ^{:stratum 1} write-file-rejects-embedded-traversal-test
+(deftest ^{:stratum 2} write-file-rejects-embedded-traversal-test
   (testing "write-file! returns failure on path with embedded .. segment"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -563,7 +598,7 @@
        :path-traversal
        #"Path traversal rejected"))))
 
-(deftest ^{:stratum 1} write-file-rejects-single-quote-injection-test
+(deftest ^{:stratum 2} write-file-rejects-single-quote-injection-test
   (testing "write-file! returns failure on path containing single-quote (shell injection)"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -571,7 +606,7 @@
        :shell-injection
        #"Shell injection rejected"))))
 
-(deftest ^{:stratum 1} write-file-rejects-dollar-injection-test
+(deftest ^{:stratum 2} write-file-rejects-dollar-injection-test
   (testing "write-file! returns failure on path containing $ (shell injection)"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -579,7 +614,7 @@
        :shell-injection
        #"Shell injection rejected"))))
 
-(deftest ^{:stratum 1} write-file-rejects-semicolon-injection-test
+(deftest ^{:stratum 2} write-file-rejects-semicolon-injection-test
   (testing "write-file! returns failure on path containing ; (shell injection)"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -587,7 +622,7 @@
        :shell-injection
        #"Shell injection rejected"))))
 
-(deftest ^{:stratum 1} delete-file-rejects-path-traversal-test
+(deftest ^{:stratum 2} delete-file-rejects-path-traversal-test
   (testing "delete-file! returns failure on path containing .. segment"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -595,7 +630,7 @@
        :path-traversal
        #"Path traversal rejected"))))
 
-(deftest ^{:stratum 1} delete-file-rejects-single-quote-injection-test
+(deftest ^{:stratum 2} delete-file-rejects-single-quote-injection-test
   (testing "delete-file! returns failure on path containing single-quote (shell injection)"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
@@ -603,19 +638,19 @@
        :shell-injection
        #"Shell injection rejected"))))
 
-(deftest ^{:stratum 1} write-file-accepts-normal-paths-test
+(deftest ^{:stratum 2} write-file-accepts-normal-paths-test
   (testing "write-file! accepts well-formed relative source paths"
     (let [[exec _cmds] (create-mock-executor)]
       (is (:success? (sandbox/write-file! exec "env-1" "src/foo/bar.clj" "(ns foo.bar)"))))))
 
-(deftest ^{:stratum 1} write-file-accepts-deep-paths-test
+(deftest ^{:stratum 2} write-file-accepts-deep-paths-test
   (testing "write-file! accepts deep nested paths without traversal"
     (let [[exec _cmds] (create-mock-executor)]
       (is (:success? (sandbox/write-file! exec "env-1"
                                           "components/my-comp/src/ai/company/my_comp/core.clj"
                                           "(ns ai.company.my-comp.core)"))))))
 
-(deftest ^{:stratum 1} write-file-rejects-absolute-path-test
+(deftest ^{:stratum 2} write-file-rejects-absolute-path-test
   (testing "write-file! returns failure on absolute path (cannot escape container workspace)"
     (let [[exec _cmds] (create-mock-executor)]
       (assert-rejected-path
