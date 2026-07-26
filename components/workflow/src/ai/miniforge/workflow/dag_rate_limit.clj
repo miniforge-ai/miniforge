@@ -80,9 +80,11 @@
    - {:action :continue ...} to re-queue tasks (short wait or backend switch)
    - {:action :pause :result <paused-map>} to checkpoint and stop execution
 
-   For medium waits (30min-2hrs), emits a :dag/paused event with :reset-at
-   so external schedulers can auto-resume. For long waits (>2hrs), emits
-   the same event but flags it as requiring manual resume."
+   On the pause path, always emits :dag/paused (completed IDs + reason).
+   When a reset time is known, also emits :dag/resume-hint with
+   :reset-at so external schedulers can auto-resume — flagged
+   auto-resumable for medium waits (30min-2hrs), manual-resume-only for
+   long waits (>2hrs)."
   [context rate-limited-ids new-completed failed-ids all-results batch-results
    event-stream workflow-id logger]
   (let [decision (resilience/handle-rate-limited-batch
@@ -98,7 +100,10 @@
             {:keys [artifacts]} (dag-finalize/aggregate-results merged-results)
             reset-at (:reset-at decision)
             auto-resume? (= :checkpoint-and-resume (:action decision))]
-        ;; Emit enriched pause event with reset time for scheduler
+        ;; :dag/paused itself carries only completed-ids + reason; the
+        ;; reset time (when known) goes out separately below via
+        ;; :dag/resume-hint so schedulers can auto-resume without
+        ;; parsing the free-text reason.
         (resilience/emit-dag-paused! event-stream workflow-id new-completed
                                      (:reason decision))
         (emit-resume-hint! event-stream workflow-id reset-at auto-resume?
