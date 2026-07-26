@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.plan
   "Planning phase interceptor.
 
@@ -30,19 +29,14 @@
             [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :plan))
 
-;; Register defaults on load
-(phase/register-phase-defaults! :plan default-config)
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Plan from spec tasks (fast path — no LLM)
-
-(defn plan-from-spec-tasks
+(defn ^{:stratum 0} plan-from-spec-tasks
   "Build a plan directly from spec-provided tasks. No LLM call, 0 tokens."
   [input spec-tasks]
   (let [plan {:plan/id (random-uuid)
@@ -54,10 +48,8 @@
                                       :tokens 0
                                       :source :spec-provided}})))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Plan result validation (GROUP 1 — plan-from-agent-dag-wiring)
-
-(defn- validate-dag-readiness
+(defn- ^{:stratum 0} validate-dag-readiness
   "Validate that the agent result is DAG-ready after a successful plan.
 
    Returns the result unchanged when valid, or a failure response with a
@@ -107,10 +99,8 @@
                            :anomaly      :anomalies.dag/unknown-deps}))
             agent-result))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Plan from LLM agent (normal path)
-
-(defn build-planner-task
+(defn ^{:stratum 0} build-planner-task
   "Build the task map to pass to the planner agent.
 
    The planner receives a `:task/behavior-addendum` produced by
@@ -142,61 +132,12 @@
     {:task task
      :rules-manifest manifest}))
 
-(defn create-streaming-callback
+(defn ^{:stratum 0} create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
   [ctx]
   (phase/create-streaming-callback ctx :plan))
 
-(defn plan-from-agent
-  "Invoke the planner agent to generate a plan via LLM.
-   Returns {:result agent-result :rules-manifest manifest-or-nil}."
-  [ctx input]
-  (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        {:keys [task rules-manifest]} (build-planner-task input explore-result (:knowledge-store ctx))
-        on-chunk (create-streaming-callback ctx)
-        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
-        planner-agent (agent/create-planner {})]
-    {:result (validate-dag-readiness
-              (try
-                (agent/invoke planner-agent task agent-ctx)
-                (catch Exception e
-                  ;; Preserve the spent-token count from the agent's failure
-                  ;; anomaly (planner tags ex-data with :tokens) into the
-                  ;; failure result's :metrics, so leave-plan still merges the
-                  ;; real cost into :execution/metrics instead of reporting $0.
-                  (let [ed   (ex-data e)
-                        toks (get ed :tokens 0)]
-                    (response/failure e {:data ed
-                                         :tokens toks
-                                         :metrics {:tokens toks}})))))
-     :rules-manifest rules-manifest}))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Interceptor implementation
-
-(defn enter-plan
-  "Execute planning phase.
-
-   Reads specification from context, invokes planner agent,
-   runs through inner loop with gates.
-
-   When the spec provides :plan/tasks directly, builds the plan from those
-   tasks and skips the LLM call entirely."
-  [ctx]
-  (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
-        {:keys [gates budget]} config
-        start-time (System/currentTimeMillis)
-        input (get-in ctx [:execution/input])
-        spec-tasks (:plan/tasks input)
-        {:keys [result rules-manifest]}
-        (if spec-tasks
-          {:result (plan-from-spec-tasks input spec-tasks)
-           :rules-manifest nil}
-          (plan-from-agent ctx input))]
-    (-> (phase/enter-context ctx :plan :planner gates budget start-time result)
-        (assoc-in [:phase :rules-manifest] rules-manifest))))
-
-(defn leave-plan
+(defn ^{:stratum 0} leave-plan
   "Post-processing for planning phase.
 
    Records metrics and updates execution state."
@@ -242,17 +183,68 @@
              (phase-terminal/derive-termination-reason result nil)))
     updated-ctx))
 
-(defn error-plan
+(defn ^{:stratum 0} error-plan
   "Handle planning phase errors. Retry within budget, then fail in
    place (Plan historically never honored `:on-fail`; pass
    `redirect? = false` to preserve that semantics)."
   [ctx ex]
   (phase/handle-error ctx ex 3 false))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registry method
+;------------------------------------------------------------------------------ Layer 1
 
-(defmethod phase/get-phase-interceptor-method :plan
+(defn ^{:stratum 1} plan-from-agent
+  "Invoke the planner agent to generate a plan via LLM.
+   Returns {:result agent-result :rules-manifest manifest-or-nil}."
+  [ctx input]
+  (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
+        {:keys [task rules-manifest]} (build-planner-task input explore-result (:knowledge-store ctx))
+        on-chunk (create-streaming-callback ctx)
+        agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
+        planner-agent (agent/create-planner {})]
+    {:result (validate-dag-readiness
+              (try
+                (agent/invoke planner-agent task agent-ctx)
+                (catch Exception e
+                  ;; Preserve the spent-token count from the agent's failure
+                  ;; anomaly (planner tags ex-data with :tokens) into the
+                  ;; failure result's :metrics, so leave-plan still merges the
+                  ;; real cost into :execution/metrics instead of reporting $0.
+                  (let [ed   (ex-data e)
+                        toks (get ed :tokens 0)]
+                    (response/failure e {:data ed
+                                         :tokens toks
+                                         :metrics {:tokens toks}})))))
+     :rules-manifest rules-manifest}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Interceptor implementation
+(defn ^{:stratum 2} enter-plan
+  "Execute planning phase.
+
+   Reads specification from context, invokes planner agent,
+   runs through inner loop with gates.
+
+   When the spec provides :plan/tasks directly, builds the plan from those
+   tasks and skips the LLM call entirely."
+  [ctx]
+  (let [config (phase/merge-with-defaults (get-in ctx [:phase-config]))
+        {:keys [gates budget]} config
+        start-time (System/currentTimeMillis)
+        input (get-in ctx [:execution/input])
+        spec-tasks (:plan/tasks input)
+        {:keys [result rules-manifest]}
+        (if spec-tasks
+          {:result (plan-from-spec-tasks input spec-tasks)
+           :rules-manifest nil}
+          (plan-from-agent ctx input))]
+    (-> (phase/enter-context ctx :plan :planner gates budget start-time result)
+        (assoc-in [:phase :rules-manifest] rules-manifest))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Registry method
+(defmethod ^{:stratum 3} phase/get-phase-interceptor-method :plan
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::plan
@@ -261,6 +253,9 @@
               (enter-plan (assoc ctx :phase-config merged)))
      :leave leave-plan
      :error error-plan}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :plan default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.verify
   "Verification phase interceptor.
 
@@ -34,20 +33,20 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Defaults
 
-(def default-config
+;; Defaults
+(def ^{:stratum 0} default-config
   "Phase defaults loaded from config/phase/defaults.edn."
   (phase-config/defaults-for :verify))
 
-(def ^:private timeout-message-fragment
+(def ^{:stratum 0} ^:private timeout-message-fragment
   "Substring that marks a non-actionable verify timeout.
    Produced by `run-tests!` when the test command exceeds its deadline,
    and matched by `leave-verify` to skip the redirect-to-implement path
    (retrying implement won't fix a stalled test process)."
   "timed out")
 
-(def default-test-timeout-ms
+(def ^{:stratum 0} default-test-timeout-ms
   "Default wall-clock budget for `run-tests!` before the test process is
    destroyed. Picked so an absent override still bounds the verify phase:
    30 min covers slow Polylith suites + CI cold cache, but stops the
@@ -55,31 +54,130 @@
    Override per spec via :spec/test-timeout-ms or per phase-config."
   (* 30 60 1000))
 
-(def ^:private verify-rate-limit-pattern
+(def ^{:stratum 0} ^:private verify-rate-limit-pattern
   "Pattern for non-actionable verify failures caused by provider throttling."
   #"(?i)rate.?limit|429|you've hit your limit|quota.?exceeded")
 
-(def ^:private verify-error-preview-limit
+(def ^{:stratum 0} ^:private verify-error-preview-limit
   "Maximum test-runner output included in the verify phase error message."
   2000)
 
-(def ^:private truncated-output-suffix
+(def ^{:stratum 0} ^:private truncated-output-suffix
   "Suffix appended when test-runner output is truncated for display."
   "\n...")
 
-;; Register defaults on load
-(phase/register-phase-defaults! :verify default-config)
-
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Test execution helpers
-
-(defn- test-error-result
+(defn- ^{:stratum 0} test-error-result
   "Build a test-results map representing an error (exception, unparseable output, etc.)."
   [message]
   {:passed? false :test-count 0 :assertion-count 0
    :fail-count 0 :error-count 1 :output message})
 
-(defn parse-test-output
+(defn ^{:stratum 0} infer-test-command
+  "Infer the test command from the repo structure.
+   Checks for Cargo.toml (Rust) and package.json (JS), in that order.
+   Falls back to 'bb test' (Clojure, or when neither marker is present)."
+  [worktree-path]
+  (cond
+    (fs/exists? (fs/path worktree-path "Cargo.toml")) "cargo test --workspace"
+    (fs/exists? (fs/path worktree-path "package.json")) "npm test"
+    :else "bb test"))
+
+(defn- ^{:stratum 0} destroy-process-tree!
+  "Forcefully kill `proc` and all of its descendants.
+
+   `.destroyForcibly` on a parent `sh -c ...` does NOT propagate to children,
+   so the JVM running `bb test` is left orphaned after we time out. Walks the
+   descendant tree explicitly (children first, then the parent) so we don't
+   leak processes or hold file/port locks across verify runs."
+  [^Process proc]
+  (try
+    (doseq [^java.lang.ProcessHandle child (.. proc descendants (toArray))]
+      (try (.destroyForcibly child) (catch Throwable _)))
+    (catch Throwable _))
+  (try (.destroyForcibly proc) (catch Throwable _)))
+
+;; Interceptor implementation
+(defn- ^{:stratum 0} require-environment-result
+  "Return nil when the verify execution environment exists, otherwise return a
+   canonical anomaly describing the fail-closed phase entry error."
+  [ctx]
+  (when-not (get ctx :execution/environment-id)
+    (anomaly/sub-anomaly :invalid-input
+                         :anomalies.phase/enter-failed
+                         (messages/t :verify/no-environment)
+                         {:phase :verify
+                          :hint (messages/t :verify/no-environment-hint)})))
+
+(def ^{:stratum 0} ^:private verdicts
+  "Phase 3 verdict tag set for verify. Mirrors review's shape (Phase 2b)
+   with verify-specific terminal kinds:
+
+     :approved            — gates passed; `:phase/succeed` event
+     :repair-requested    — generic test failure with `:on-fail` set;
+                            FSM redirects to implement (subject to
+                            budget)
+     :verify/timeout      — test process timed out (hung BB/cargo); FSM
+                            terminates because retrying implement won't
+                            unstick the process
+     :verify/rate-limited — provider quota blocked the phase; FSM
+                            terminates because retrying implement won't
+                            change LLM quota
+     :exhausted           — failed but no redirect target configured"
+  #{:approved :repair-requested :verify/timeout :verify/rate-limited :exhausted})
+
+(defn- ^{:stratum 0} compute-verdict
+  "Pick the verdict that should flow on the phase result.
+
+   `:verify/timeout` and `:verify/rate-limited` take priority over
+   `:repair-requested` — those failure modes are not code-quality
+   issues, so retrying implement is wasted work (this was the
+   2026-05-28 dogfood's bottleneck: verify hit a 30-min timeout, the
+   loop redirected to implement, implement wrote a recovery, verify
+   timed out AGAIN, repeat. The FSM's `:verdict/terminal?` guard now
+   short-circuits the loop)."
+  [{:keys [phase-failed? on-fail-configured? timeout? rate-limited?]}]
+  (cond
+    timeout?
+    :verify/timeout
+
+    rate-limited?
+    :verify/rate-limited
+
+    (and phase-failed? on-fail-configured?)
+    :repair-requested
+
+    phase-failed?
+    :exhausted
+
+    :else
+    :approved))
+
+(defn- ^{:stratum 0} attach-verify-error
+  "Attach the verify error map to the phase result for the evidence
+   bundle. Carries the legacy `:timeout?` / `:rate-limited?` flag bits
+   too so consumers reading those keys keep working until Phase 4
+   removes them."
+  [ctx error-message agent-status timeout? rate-limited? gate-failed?]
+  (assoc-in ctx [:phase :error]
+            {:message       error-message
+             :agent-status  agent-status
+             :timeout?      timeout?
+             :rate-limited? rate-limited?
+             :gate-failed?  gate-failed?}))
+
+(defn ^{:stratum 0} error-verify
+  "Handle verification phase errors. Retries within budget; on
+   exhaustion redirects via `:on-fail` (typically to `:implement`)
+   when set, otherwise propagates as a failed phase. Delegates to the
+   shared `phase/handle-error` helper."
+  [ctx ex]
+  (phase/handle-error ctx ex 3))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-test-output
   "Parse test summary output. Handles Clojure (bb test) and Rust (cargo test) formats.
 
    Clojure: 'Ran N tests containing M assertions. F failures, E errors.'
@@ -136,7 +234,7 @@
            :output output})
         (assoc (test-error-result output) :parse-error? true)))))
 
-(defn- bounded-output-preview
+(defn- ^{:stratum 1} bounded-output-preview
   "Return a bounded, trimmed preview of test runner output."
   [output]
   (let [trimmed (str/trim (str output))]
@@ -144,7 +242,97 @@
       (> (count trimmed) verify-error-preview-limit)
       (str truncated-output-suffix))))
 
-(defn- verify-failure-message
+(defn- ^{:stratum 1} require-environment!
+  "Boundary wrapper around the anomaly-returning
+   `require-environment-result`; retained for existing exception callers."
+  [ctx]
+  (when-let [result (require-environment-result ctx)]
+    (throw (ex-info (:anomaly/message result)
+                    (:anomaly/data result)))))
+
+(defn ^{:stratum 1} leave-verify
+  "Post-processing for verification phase.
+
+   Records test metrics: count, pass rate, coverage.
+
+   Phase 3 (Phase 2b shape generalized to verify): when verification
+   fails, attaches a `:phase/verdict` to the result so the FSM's
+   verdict-driven guarded `:phase/fail` array (see
+   `workflow/fsm/build-phase-state` and
+   `workflow/standard-guards-and-actions`) decides between an on-fail
+   redirect and a terminal `:failed`. No more `phase/request-redirect`
+   — the FSM owns routing.
+
+   `:verify/timeout` and `:verify/rate-limited` are TERMINAL verdicts:
+   the FSM bypasses on-fail and lands on `:failed` because retrying
+   the implement target wouldn't help (a hung test process is a
+   process issue; a provider rate-limit is a quota issue; implementing
+   different code doesn't fix either)."
+  [ctx]
+  (let [start-time (get-in ctx [:phase :started-at])
+        end-time (System/currentTimeMillis)
+        duration-ms (if start-time (- end-time start-time) 0)
+        result (get-in ctx [:phase :result])
+        agent-status (:status result)
+        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
+        parse-error? (true? (get-in result [:metrics :parse-error?]))
+        timeout? (and (= :error agent-status)
+                      (not parse-error?)
+                      (some-> (get-in result [:error :message])
+                              (str/includes? timeout-message-fragment)))
+        rate-limited? (and (= :error agent-status)
+                           (not parse-error?)
+                           (let [msg (str (get-in result [:error :message]))]
+                             (re-find verify-rate-limit-pattern msg)))
+        phase-status (cond
+                       gate-failed?                :failed
+                       (= :error agent-status)     :failed
+                       :else                       :completed)
+        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
+                    (assoc :duration-ms duration-ms))
+        iterations (get-in ctx [:phase :iterations] 1)
+        on-fail (get-in ctx [:phase-config :on-fail])
+        error-message (or (not-empty (get-in result [:error :message]))
+                          (when gate-failed? (messages/t :verify/gate-failed))
+                          (messages/t :verify/failed))
+        verdict (compute-verdict {:phase-failed?       (= :failed phase-status)
+                                  :on-fail-configured? (some? on-fail)
+                                  :timeout?            timeout?
+                                  :rate-limited?       rate-limited?})
+        updated-ctx (-> ctx
+                        (assoc-in [:phase :ended-at] end-time)
+                        (assoc-in [:phase :duration-ms] duration-ms)
+                        (assoc-in [:phase :status] phase-status)
+                        (assoc-in [:phase :metrics] metrics)
+                        (assoc-in [:phase :verdict] verdict)
+                        (assoc-in [:phase :result :output :phase/verdict] verdict)
+                        (assoc-in [:metrics :verification :duration-ms] duration-ms)
+                        (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
+                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
+                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
+                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
+        next-ctx (cond
+                   (= :completed phase-status)
+                   (update-in updated-ctx [:execution :phases-completed] (fnil conj []) :verify)
+
+                   (= :failed phase-status)
+                   (attach-verify-error updated-ctx error-message agent-status
+                                        timeout? rate-limited? gate-failed?)
+
+                   :else
+                   updated-ctx)]
+    (phase/emit-phase-completed! next-ctx :verify
+      (merge {:outcome     (phase/outcome result (= :completed phase-status))
+              :duration-ms duration-ms
+              :tokens      (get metrics :tokens 0)}
+             (phase-terminal/derive-termination-reason result
+               {:stalled?      timeout?
+                :rate-limited? rate-limited?})))
+    next-ctx))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} verify-failure-message
   "Build the user-facing verify failure message from parsed test results."
   [test-results raw-fails raw-errors]
   (cond
@@ -162,31 +350,7 @@
     :else
     (messages/t :verify/tests-failed {:fail-count raw-fails :error-count raw-errors})))
 
-(defn infer-test-command
-  "Infer the test command from the repo structure.
-   Checks for bb.edn (Clojure), Cargo.toml (Rust), package.json (JS) in that order.
-   Falls back to 'bb test'."
-  [worktree-path]
-  (cond
-    (fs/exists? (fs/path worktree-path "Cargo.toml")) "cargo test --workspace"
-    (fs/exists? (fs/path worktree-path "package.json")) "npm test"
-    :else "bb test"))
-
-(defn- destroy-process-tree!
-  "Forcefully kill `proc` and all of its descendants.
-
-   `.destroyForcibly` on a parent `sh -c ...` does NOT propagate to children,
-   so the JVM running `bb test` is left orphaned after we time out. Walks the
-   descendant tree explicitly (children first, then the parent) so we don't
-   leak processes or hold file/port locks across verify runs."
-  [^Process proc]
-  (try
-    (doseq [^java.lang.ProcessHandle child (.. proc descendants (toArray))]
-      (try (.destroyForcibly child) (catch Throwable _)))
-    (catch Throwable _))
-  (try (.destroyForcibly proc) (catch Throwable _)))
-
-(defn run-tests!
+(defn ^{:stratum 2} run-tests!
   "Run tests in the worktree. Infers the test command from the repo structure
    unless test-cmd is supplied explicitly.
 
@@ -232,7 +396,7 @@
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
-(defn run-tests-in-capsule!
+(defn ^{:stratum 2} run-tests-in-capsule!
   "Run tests inside a task capsule via execute-fn (N11 §6).
    Routes the test command through the executor instead of host process/shell.
    execute-fn is dag-exec/execute! passed through context to avoid cross-component requires.
@@ -267,29 +431,9 @@
       (catch Exception e
         (test-error-result (.getMessage e))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Interceptor implementation
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- require-environment-result
-  "Return nil when the verify execution environment exists, otherwise return a
-   canonical anomaly describing the fail-closed phase entry error."
-  [ctx]
-  (when-not (get ctx :execution/environment-id)
-    (anomaly/sub-anomaly :invalid-input
-                         :anomalies.phase/enter-failed
-                         (messages/t :verify/no-environment)
-                         {:phase :verify
-                          :hint (messages/t :verify/no-environment-hint)})))
-
-(defn- require-environment!
-  "Boundary wrapper around the anomaly-returning
-   `require-environment-result`; retained for existing exception callers."
-  [ctx]
-  (when-let [result (require-environment-result ctx)]
-    (throw (ex-info (:anomaly/message result)
-                    (:anomaly/data result)))))
-
-(defn enter-verify
+(defn ^{:stratum 3} enter-verify
   "Execute verification phase.
 
    Runs the test suite directly inside the executor environment.
@@ -359,155 +503,10 @@
 
     (phase/enter-context ctx :verify nil gates budget start-time result)))
 
-(def ^:private verdicts
-  "Phase 3 verdict tag set for verify. Mirrors review's shape (Phase 2b)
-   with verify-specific terminal kinds:
+;------------------------------------------------------------------------------ Layer 4
 
-     :approved            — gates passed; `:phase/succeed` event
-     :repair-requested    — generic test failure with `:on-fail` set;
-                            FSM redirects to implement (subject to
-                            budget)
-     :verify/timeout      — test process timed out (hung BB/cargo); FSM
-                            terminates because retrying implement won't
-                            unstick the process
-     :verify/rate-limited — provider quota blocked the phase; FSM
-                            terminates because retrying implement won't
-                            change LLM quota
-     :exhausted           — failed but no redirect target configured"
-  #{:approved :repair-requested :verify/timeout :verify/rate-limited :exhausted})
-
-(defn- compute-verdict
-  "Pick the verdict that should flow on the phase result.
-
-   `:verify/timeout` and `:verify/rate-limited` take priority over
-   `:repair-requested` — those failure modes are not code-quality
-   issues, so retrying implement is wasted work (this was the
-   2026-05-28 dogfood's bottleneck: verify hit a 30-min timeout, the
-   loop redirected to implement, implement wrote a recovery, verify
-   timed out AGAIN, repeat. The FSM's `:verdict/terminal?` guard now
-   short-circuits the loop)."
-  [{:keys [phase-failed? on-fail-configured? timeout? rate-limited?]}]
-  (cond
-    timeout?
-    :verify/timeout
-
-    rate-limited?
-    :verify/rate-limited
-
-    (and phase-failed? on-fail-configured?)
-    :repair-requested
-
-    phase-failed?
-    :exhausted
-
-    :else
-    :approved))
-
-(defn- attach-verify-error
-  "Attach the verify error map to the phase result for the evidence
-   bundle. Carries the legacy `:timeout?` / `:rate-limited?` flag bits
-   too so consumers reading those keys keep working until Phase 4
-   removes them."
-  [ctx error-message agent-status timeout? rate-limited? gate-failed?]
-  (assoc-in ctx [:phase :error]
-            {:message       error-message
-             :agent-status  agent-status
-             :timeout?      timeout?
-             :rate-limited? rate-limited?
-             :gate-failed?  gate-failed?}))
-
-(defn leave-verify
-  "Post-processing for verification phase.
-
-   Records test metrics: count, pass rate, coverage.
-
-   Phase 3 (Phase 2b shape generalized to verify): when verification
-   fails, attaches a `:phase/verdict` to the result so the FSM's
-   verdict-driven guarded `:phase/fail` array (see
-   `workflow/fsm/build-phase-state` and
-   `workflow/standard-guards-and-actions`) decides between an on-fail
-   redirect and a terminal `:failed`. No more `phase/request-redirect`
-   — the FSM owns routing.
-
-   `:verify/timeout` and `:verify/rate-limited` are TERMINAL verdicts:
-   the FSM bypasses on-fail and lands on `:failed` because retrying
-   the implement target wouldn't help (a hung test process is a
-   process issue; a provider rate-limit is a quota issue; implementing
-   different code doesn't fix either)."
-  [ctx]
-  (let [start-time (get-in ctx [:phase :started-at])
-        end-time (System/currentTimeMillis)
-        duration-ms (- end-time start-time)
-        result (get-in ctx [:phase :result])
-        agent-status (:status result)
-        gate-failed? (= :failed (:phase/status (get-in ctx [:phase])))
-        parse-error? (true? (get-in result [:metrics :parse-error?]))
-        timeout? (and (= :error agent-status)
-                      (not parse-error?)
-                      (some-> (get-in result [:error :message])
-                              (str/includes? timeout-message-fragment)))
-        rate-limited? (and (= :error agent-status)
-                           (not parse-error?)
-                           (let [msg (str (get-in result [:error :message]))]
-                             (re-find verify-rate-limit-pattern msg)))
-        phase-status (cond
-                       gate-failed?                :failed
-                       (= :error agent-status)     :failed
-                       :else                       :completed)
-        metrics (-> (get result :metrics {:tokens 0 :duration-ms duration-ms})
-                    (assoc :duration-ms duration-ms))
-        iterations (get-in ctx [:phase :iterations] 1)
-        on-fail (get-in ctx [:phase-config :on-fail])
-        error-message (or (not-empty (get-in result [:error :message]))
-                          (when gate-failed? (messages/t :verify/gate-failed))
-                          (messages/t :verify/failed))
-        verdict (compute-verdict {:phase-failed?       (= :failed phase-status)
-                                  :on-fail-configured? (some? on-fail)
-                                  :timeout?            timeout?
-                                  :rate-limited?       rate-limited?})
-        updated-ctx (-> ctx
-                        (assoc-in [:phase :ended-at] end-time)
-                        (assoc-in [:phase :duration-ms] duration-ms)
-                        (assoc-in [:phase :status] phase-status)
-                        (assoc-in [:phase :metrics] metrics)
-                        (assoc-in [:phase :verdict] verdict)
-                        (assoc-in [:phase :result :output :phase/verdict] verdict)
-                        (assoc-in [:metrics :verification :duration-ms] duration-ms)
-                        (assoc-in [:metrics :verification :repair-cycles] (dec iterations))
-                        (update-in [:execution/metrics :tokens] (fnil + 0) (:tokens metrics 0))
-                        (update-in [:execution/metrics :cost-usd] (fnil + 0.0) (:cost-usd metrics 0.0))
-                        (update-in [:execution/metrics :duration-ms] (fnil + 0) (:duration-ms metrics 0)))
-        next-ctx (cond
-                   (= :completed phase-status)
-                   (update-in updated-ctx [:execution :phases-completed] (fnil conj []) :verify)
-
-                   (= :failed phase-status)
-                   (attach-verify-error updated-ctx error-message agent-status
-                                        timeout? rate-limited? gate-failed?)
-
-                   :else
-                   updated-ctx)]
-    (phase/emit-phase-completed! next-ctx :verify
-      (merge {:outcome     (phase/outcome result (= :completed phase-status))
-              :duration-ms duration-ms
-              :tokens      (get metrics :tokens 0)}
-             (phase-terminal/derive-termination-reason result
-               {:stalled?      timeout?
-                :rate-limited? rate-limited?})))
-    next-ctx))
-
-(defn error-verify
-  "Handle verification phase errors. Retries within budget; on
-   exhaustion redirects via `:on-fail` (typically to `:implement`)
-   when set, otherwise propagates as a failed phase. Delegates to the
-   shared `phase/handle-error` helper."
-  [ctx ex]
-  (phase/handle-error ctx ex 3))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Registry method
-
-(defmethod phase/get-phase-interceptor-method :verify
+(defmethod ^{:stratum 4} phase/get-phase-interceptor-method :verify
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name ::verify
@@ -516,6 +515,9 @@
               (enter-verify (assoc ctx :phase-config merged)))
      :leave leave-verify
      :error error-verify}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :verify default-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
