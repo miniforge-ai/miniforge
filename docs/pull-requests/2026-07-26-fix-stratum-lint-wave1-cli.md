@@ -6,15 +6,27 @@
 
 ## Overview
 
+**Update after initial review:** the base commit (`3fa5cc503`) is the
+mechanical `stratum-lint --fix` pass described below and does carry no
+logic changes. Two follow-up commits were added afterward in direct
+response to genuine bugs Copilot's review found in files this pass
+already touches — a `ClassCastException` in `web/sse.clj` and an
+unhandled-exception-on-malformed-input bug in `web/handlers.clj`, both
+pre-existing and unrelated to the stratum-lint reordering itself. See
+"Post-Review Fixes" below for the full detail on both; flagged here
+per review feedback so this description doesn't undersell the PR's
+actual scope.
+
 Runs `stratum-lint --fix` over `bases/cli` (`src` + `test`) to replace
 decorative `Layer N` banners and missing headings with real `Layer N`
 headings and `^{:stratum n}` metadata derived from each file's actual
-same-file reference graph. Mechanical: no logic changes. Also hand-fixes
-26 stale decorative `Layer N` comments across 11 files that are now
-invisible to `--fix`'s heading regex and contradict the recomputed real
-headings, and one stale docstring (`workflow_runner/gc_hooks.clj`) whose
-"Layer 0 / Layer 1" description no longer matched the real (single-layer)
-structure. One of the Wave 1 batch 6 per-component/base PRs from
+same-file reference graph. The autofix pass itself is mechanical: no
+logic changes. Also hand-fixes 26 stale decorative `Layer N` comments
+across 11 files that are now invisible to `--fix`'s heading regex and
+contradict the recomputed real headings, and one stale docstring
+(`workflow_runner/gc_hooks.clj`) whose "Layer 0 / Layer 1" description
+no longer matched the real (single-layer) structure. One of the Wave 1
+batch 6 per-component/base PRs from
 `work/stratum-lint-baseline-2026-07-24.md`; `bases/cli` is a Polylith
 BASE, not a component, but the same fix mechanics apply.
 
@@ -124,6 +136,46 @@ Left their docstrings as-is rather than hand-writing a description of a
 structure that Wave 2 will restructure again; flagged here for whoever
 picks up the split.
 
+## Post-Review Fixes
+
+Two genuine, pre-existing bugs Copilot's review found in files the
+mechanical pass already touches — both verified independently before
+fixing, both untouched by the autofix itself (confirmed via `git diff
+origin/main` on each file: only heading/metadata/reordering churn
+before these commits, logic byte-identical), both landed as their own
+commit with a dedicated regression test:
+
+1. **`web/sse.clj` (`0813e3716`, then `0fb24f09b`):** `streams` maps
+   `workflow-id -> event-stream atom` (`es/create-event-stream` returns
+   `(atom {...})`, confirmed via `components/event-stream`). `on-open`
+   and `on-close` were doing `assoc-in`/`update-in` directly on a
+   `streams` entry to track per-channel subscriber ids — this tries to
+   `assoc` onto that atom and throws `ClassCastException: class
+   clojure.lang.Atom cannot be cast to class clojure.lang.Associative`
+   on the first SSE connect for any workflow. Fixed by tracking
+   channel→sub-id in a separate `subscriptions` atom instead. A
+   follow-up review comment also caught that `on-close` left an empty
+   `{workflow-id {}}` entry behind once the last channel closed
+   (unbounded growth on a long-running server) — fixed by dropping the
+   `workflow-id` key entirely once its channel map goes empty. Added
+   `bases/cli/test/ai/miniforge/cli/web/sse_test.clj` (6 tests).
+   Reproduced both bugs by reverting the fix locally and re-running the
+   new tests against the original logic before restoring it — both
+   throw/leak exactly as described.
+2. **`web/handlers.clj` (`101bc5a0c`):** `parse-pr-path` unconditionally
+   ran `Integer/parseInt` on the second path segment of an
+   `/api/pr/<repo>/<number>` URI with no validation, so a malformed
+   request (`GET /api/pr/`, a non-numeric PR number, etc.) threw
+   `NullPointerException`/`NumberFormatException` straight out of
+   request handling instead of a 400 — this is externally reachable,
+   untrusted input. Fixed by wrapping the parse in `try`/`catch` (nil on
+   failure, matching the existing `workflow-stream` pattern already in
+   the same file) and updating all 5 callers (`pr-detail`, `approve`,
+   `reject`, `chat`, `summary`) to return `response/bad-request` instead
+   of proceeding with a nil repo/number. Added
+   `bases/cli/test/ai/miniforge/cli/web/handlers_test.clj` (4 tests).
+   Same revert-and-reproduce verification as above.
+
 ## Testing Plan
 
 1. Ran plain `stratum-lint` before the fix — reproduced the 28 findings
@@ -142,13 +194,15 @@ picks up the split.
    `git show origin/main:<path>` comparison on the unmodified tree — same
    2 warnings (different line numbers only, from reordering), nothing
    else.
-5. Ran the base's 40 test namespaces directly via `clojure -M:dev:test
+5. Ran the base's 42 test namespaces directly via `clojure -M:dev:test
    -e` (both `src` and `test`, requiring every namespace under
-   `bases/cli/test` and calling `clojure.test/run-tests` on all of them):
-   **302 tests, 845 assertions, 1 failure, 1 error** — both confirmed
-   pre-existing and unrelated to this diff by running the same two test
-   namespaces against the unmodified `origin/main` tree (identical
-   failure/error, same messages):
+   `bases/cli/test` — including the two new namespaces added by the
+   Post-Review Fixes above, `web/sse_test.clj` and
+   `web/handlers_test.clj` — and calling `clojure.test/run-tests` on all
+   of them): **312 tests, 863 assertions, 1 failure, 1 error** — both
+   confirmed pre-existing and unrelated to this diff by running the same
+   two test namespaces against the unmodified `origin/main` tree
+   (identical failure/error, same messages):
    - `ai.miniforge.cli.scan-test` `negative-mode-uses-rule-title-test`:
      `NullPointerException` inside `ai.miniforge.compliance-scanner.scan`
      (a different component entirely, not touched by this diff).
@@ -183,8 +237,13 @@ carry-over) alongside `MINIFORGE_COMMIT_BUDGET_OVERRIDE=1`.
 
 ## Deployment Plan
 
-Merges to `main` like any other base change. No runtime behavior change —
-purely heading/metadata/comment/one-docstring-sentence churn. Pre-commit's
+Merges to `main` like any other base change. The stratum-lint autofix
+itself is purely heading/metadata/comment/one-docstring-sentence churn,
+no runtime behavior change. The two Post-Review Fixes above do change
+runtime behavior, both strictly toward correctness: SSE subscribe/close
+no longer throws on the first connect for a workflow, and a malformed
+`/api/pr/...` request now returns 400 instead of crashing the handler —
+no existing caller relied on either failure mode. Pre-commit's
 `lint:stratum` autofixer keeps this base clean going forward; the 37
 `SL003` files stay advisory (`MINIFORGE_STRATUM_BUDGET_MODE=warn` at
 commit time) until Wave 2 splits them.
@@ -214,8 +273,13 @@ commit time) until Wave 2 splits them.
       actual reference graph and correctly left unchanged
 - [x] `clj-kondo` clean (0 errors, 2 pre-existing warnings, confirmed via
       comparison against `origin/main`)
-- [x] Base tests pass (302 tests, 845 assertions, 1 pre-existing failure
+- [x] Base tests pass (312 tests, 863 assertions, 1 pre-existing failure
       + 1 pre-existing error, both confirmed unrelated on `origin/main`)
 - [x] Plain lint re-run post-fix: `SL003` remains on 37 files, documented
       above with precise counts, tracked as Wave 2
+- [x] Two genuine bugs found in Copilot review (`web/sse.clj`
+      `ClassCastException` + unbounded subscription-map growth,
+      `web/handlers.clj` unhandled exception on malformed input) fixed
+      with dedicated regression tests; each reproduced against the
+      original logic before the fix was restored
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
