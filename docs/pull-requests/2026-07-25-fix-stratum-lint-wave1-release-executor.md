@@ -8,7 +8,7 @@ Started as a mechanical `stratum-lint --fix` pass over
 decorative `Layer N` headings with real ones derived from each file's
 actual same-file reference graph.
 
-It grew well beyond that: automated review on this PR found fourteen
+It grew well beyond that: automated review on this PR found fifteen
 genuine, pre-existing correctness issues along the way (a phantom-success
 on `rev-parse` failure in two independent `commit-changes!`
 implementations, a token-bearing URL interpolated unescaped into a shell
@@ -20,11 +20,13 @@ function), an unescaped YAML-injection surface in
 `provenance-frontmatter` (plus a CRLF gap and a reserved-word/number
 ambiguity — including an incomplete first cut of the reserved-word set
 itself — in that same fix's own first drafts), a plain-string-concat
-fetch call in `create-branch!`, and a docstring in two files that said
-the opposite of what the code does). All fourteen are fixed here — see
-"Fourteen real bugs found by automated review" below for the full list;
-each one was verified directly against the code before being fixed, not
-fixed on the reviewer's say-so.
+fetch call in `create-branch!`, a docstring in two files that said the
+opposite of what the code does, and — a regression this PR's own earlier
+`exec!` fix introduced — `detect-default-branch`'s blank-vs-absent
+fallback bug. All fifteen are fixed here — see "Fifteen real bugs found
+by automated review" below for the full list; each one was verified
+directly against the code before being fixed, not fixed on the
+reviewer's say-so.
 
 ## Motivation
 
@@ -104,9 +106,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Fourteen real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
+### Fifteen real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
 
-Automated review on this PR flagged fourteen genuine, pre-existing
+Automated review on this PR flagged fifteen genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -269,7 +271,23 @@ second one). Verified each directly against the code before fixing:
     itself. Added both (and their case variants, via the existing
     case-insensitive check) to the reserved set.
 
-Added 15 regression tests: 8 in `sandbox_test.clj`
+15. **`detect-default-branch` used `(:output r "refs/remotes/origin/main")`
+    as its fallback, which only substitutes the default when `:output` is
+    *absent* — not when it's present but blank.** This PR's own fix #4
+    made `exec!`'s executor-error branch always include `:output ""`, so
+    an executor-level failure here (as opposed to a plain nonzero git
+    exit) now produces a *present* `:output ""`, meaning the intended
+    "main" fallback was never reached: blank output trims to `""`, the
+    `refs/remotes/origin/` replace is a no-op, and `default-branch` ends
+    up `""`. `create-branch!`'s `validate-safe-branch-name` guard (fix
+    #12) does catch this downstream — a blank branch name is rejected —
+    but with a misleading "must not be blank" message instead of the real
+    executor error, and only because that guard happened to exist; a
+    genuine regression this PR itself introduced. Fixed by checking
+    `str/blank?` on the output explicitly and falling back to
+    `"refs/remotes/origin/main"` in that case, before trimming/replacing.
+
+Added 16 regression tests: 9 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
@@ -277,8 +295,9 @@ Added 15 regression tests: 8 in `sandbox_test.clj`
 `push-with-https-fallback-threads-opts-test`,
 `stage-files-rejects-unsafe-path-test`,
 `stage-files-empty-paths-is-a-no-op-test`,
-`create-branch-rejects-unsafe-default-branch-test`), following the
-existing tracking-exec mock pattern already used by
+`create-branch-rejects-unsafe-default-branch-test`,
+`detect-default-branch-falls-back-when-output-is-blank-test`), following
+the existing tracking-exec mock pattern already used by
 `push-branch-ssh-fail-https-fallback-test` in the same file (and, for the
 `create-branch!` fix, the new `cmd-str` helper that normalizes a
 string-or-vector command for substring matching — needed once the fetch
@@ -299,7 +318,7 @@ behavior only the fixed code produces — verified by inspection (and, for
 the `yaml-scalar` leading-dash regex, by an actual test failure during
 development that caught the gap, and again for the `create-branch!`
 argv-vector conversion, which broke two existing tests'
-substring assertions until `cmd-str` was added) that all fifteen would
+substring assertions until `cmd-str` was added) that all sixteen would
 fail against the pre-fix code.
 
 ## Testing Plan
@@ -314,10 +333,10 @@ fail against the pre-fix code.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the fourteen review-flagged issues (above) and added 15
+6. Fixed the fifteen review-flagged issues (above) and added 16
    regression tests. Ran all 9 test namespaces directly via `clojure
-   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 260
-   tests, 658 assertions, 0 failures, 0 errors.
+   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 261
+   tests, 659 assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
    the old decorative headings under-reported (none of these 5 reported
@@ -334,15 +353,16 @@ fail against the pre-fix code.
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the fourteen fixes above are mostly real
+comment/metadata/order-only; the fifteen fixes above are mostly real
 behavior changes (one is docstring-only) — a failure that used to be
 silently swallowed, misreported as success, dropped from the result
 shape, or run against the wrong executor context now surfaces/behaves
-correctly; an unvalidated path, a plain-string-concat git command, or an
-unescaped/under-escaped provenance value can no longer corrupt a shell
-command or a committed YAML frontmatter — scoped to the
-HTTPS-token-fallback push path, the post-commit sha lookup, the generic
-`exec!` error/exception branches, `stage-files!`, `create-branch!`, and
+correctly; an unvalidated path, a plain-string-concat git command, a
+blank-vs-absent fallback bug, or an unescaped/under-escaped provenance
+value can no longer corrupt a shell command or a committed YAML
+frontmatter — scoped to the HTTPS-token-fallback push path, the
+post-commit sha lookup, the generic `exec!` error/exception branches,
+`stage-files!`, `create-branch!`/`detect-default-branch`, and
 `provenance-frontmatter`/`yaml-scalar`, all covered by new tests.
 `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time for the 5
 newly-surfaced `SL003` files above.
@@ -367,7 +387,7 @@ newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Fourteen review-flagged issues fixed: `sandbox.clj`'s
+- [x] Fifteen review-flagged issues fixed: `sandbox.clj`'s
       `commit-changes!` phantom success on `rev-parse` failure;
       `sandbox.clj`'s `push-with-https-fallback!` unescaped token URL +
       unchecked `set-url`/restore results + unthreaded `opts` (including
@@ -381,8 +401,10 @@ newly-surfaced `SL003` files above.
       of the reserved-word set itself, missing `on`/`off`);
       `sandbox.clj`'s `create-branch!` plain-string-concat fetch call;
       `reuse-existing-pr!`'s inverted docstring in both `sandbox.clj` and
-      `git.clj`. 15 regression tests added.
-- [x] Component tests pass (260 tests, 658 assertions, 0 failures/errors)
+      `git.clj`; `detect-default-branch`'s blank-vs-absent fallback bug —
+      a regression this PR's own `exec!` fix introduced. 16 regression
+      tests added.
+- [x] Component tests pass (261 tests, 659 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

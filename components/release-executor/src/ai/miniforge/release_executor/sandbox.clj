@@ -191,11 +191,17 @@
        {:available? true :authenticated? false :error (:error r)}))))
 
 (defn ^{:stratum 1} detect-default-branch
-  "Detect the default branch from the remote."
+  "Detect the default branch from the remote. Falls back to
+   \"refs/remotes/origin/main\" when :output is blank, not merely absent —
+   exec!'s executor-error branch always includes :output (as \"\"), so
+   (:output r default) alone would never reach the default in that case,
+   quietly producing an empty branch name downstream instead of masking
+   nothing."
   [executor env-id]
   (let [r (exec! executor env-id
-                 "git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/remotes/origin/main")]
-    (-> (:output r "refs/remotes/origin/main")
+                 "git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null || echo refs/remotes/origin/main")
+        out (:output r)]
+    (-> (if (str/blank? out) "refs/remotes/origin/main" out)
         str/trim
         (str/replace #"refs/remotes/origin/" ""))))
 

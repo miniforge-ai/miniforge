@@ -213,6 +213,26 @@
   (is (re-find expected-message-pattern (:error result)))
   (is (= expected-type (:type result))))
 
+;; ============================================================================
+;; detect-default-branch tests
+;; ============================================================================
+(deftest ^{:stratum 0} detect-default-branch-falls-back-when-output-is-blank-test
+  (testing "detect-default-branch falls back to main when exec! returns a blank
+            :output (e.g. the executor-error branch, which always includes
+            :output \"\") rather than producing an empty branch name"
+    (let [failing-exec (reify
+                          dag/TaskExecutor
+                          (executor-type [_] :mock)
+                          (available? [_] (dag/ok {:available? true}))
+                          (acquire-environment! [_ _ _] (dag/ok {}))
+                          (execute! [_ _env-id _command _opts]
+                            (dag/err :executor-unavailable "container is gone"))
+                          (copy-to! [_ _ _ _] (dag/ok {}))
+                          (copy-from! [_ _ _ _] (dag/ok {}))
+                          (release-environment! [_ _] (dag/ok {}))
+                          (environment-status [_ _] (dag/ok {:status :running})))]
+      (is (= "main" (sandbox/detect-default-branch failing-exec "env-1"))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} create-mock-executor
