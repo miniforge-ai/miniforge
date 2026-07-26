@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.heartbeat-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -24,13 +23,15 @@
   (:import
    [java.util.concurrent ScheduledExecutorService TimeUnit]))
 
-(defn- collecting-stream []
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} collecting-stream []
   (let [events (atom [])]
     {:events events
      :stream (core/create-event-stream
                {:sinks [(fn [event] (swap! events conj event))]})}))
 
-(defn- wait-for-events [events n]
+(defn- ^{:stratum 0} wait-for-events [events n]
   (let [deadline (+ (System/currentTimeMillis) 500)]
     (loop []
       (if (or (>= (count @events) n)
@@ -39,7 +40,22 @@
         (do (Thread/sleep 10)
             (recur))))))
 
-(deftest start-heartbeat!-returns-handle
+(deftest ^{:stratum 0} start-heartbeat!-rejects-non-IDeref-stream
+  (testing "WebSocket-backed (non-IDeref) stream is rejected at the call site, not inside the scheduler thread"
+    ;; The scheduled task uses swap!/swap-vals! on the event stream
+    ;; via core/publish!. Passing a plain map (WebSocket dispatch
+    ;; shape from the dashboard layer) would only crash inside the
+    ;; scheduler thread, after the executor was already alive.
+    ;; Fail loud at start time instead — caller sees the
+    ;; misconfiguration before any resource is allocated.
+    (let [ws-stream {:websocket :dummy-conn}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"IDeref"
+                            (heartbeat/start-heartbeat! ws-stream (random-uuid) :plan))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} start-heartbeat!-returns-handle
   (let [{:keys [stream]} (collecting-stream)
         handle (heartbeat/start-heartbeat! stream (random-uuid) :plan
                                            {:interval-ms 5000})]
@@ -51,7 +67,7 @@
       (finally
         (heartbeat/stop-heartbeat! handle)))))
 
-(deftest heartbeat-emits-phase-liveness-events
+(deftest ^{:stratum 1} heartbeat-emits-phase-liveness-events
   (testing "heartbeat events carry workflow, phase, gap, and monotonic sequence"
     (let [{:keys [stream events]} (collecting-stream)
           workflow-id (random-uuid)
@@ -71,7 +87,7 @@
         (finally
           (heartbeat/stop-heartbeat! handle))))))
 
-(deftest stop-heartbeat!-halts-emissions
+(deftest ^{:stratum 1} stop-heartbeat!-halts-emissions
   (let [{:keys [stream events]} (collecting-stream)
         handle (heartbeat/start-heartbeat! stream (random-uuid) :test
                                            {:interval-ms 25})]
@@ -83,34 +99,21 @@
       (Thread/sleep 75)
       (is (= count-at-stop (count @events))))))
 
-(deftest stop-heartbeat!-is-safe
+(deftest ^{:stratum 1} stop-heartbeat!-is-safe
   (is (nil? (heartbeat/stop-heartbeat! nil)))
   (let [{:keys [stream]} (collecting-stream)
         handle (heartbeat/start-heartbeat! stream (random-uuid) :plan)]
     (heartbeat/stop-heartbeat! handle)
     (is (nil? (heartbeat/stop-heartbeat! handle)))))
 
-(deftest start-heartbeat!-rejects-invalid-interval
+(deftest ^{:stratum 1} start-heartbeat!-rejects-invalid-interval
   (let [{:keys [stream]} (collecting-stream)]
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"positive integer"
                           (heartbeat/start-heartbeat! stream (random-uuid) :plan
                                                       {:interval-ms 0})))))
 
-(deftest start-heartbeat!-rejects-non-IDeref-stream
-  (testing "WebSocket-backed (non-IDeref) stream is rejected at the call site, not inside the scheduler thread"
-    ;; The scheduled task uses swap!/swap-vals! on the event stream
-    ;; via core/publish!. Passing a plain map (WebSocket dispatch
-    ;; shape from the dashboard layer) would only crash inside the
-    ;; scheduler thread, after the executor was already alive.
-    ;; Fail loud at start time instead — caller sees the
-    ;; misconfiguration before any resource is allocated.
-    (let [ws-stream {:websocket :dummy-conn}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"IDeref"
-                            (heartbeat/start-heartbeat! ws-stream (random-uuid) :plan))))))
-
-(deftest stop-heartbeat!-cancels-scheduled-future
+(deftest ^{:stratum 1} stop-heartbeat!-cancels-scheduled-future
   (testing "the retained ScheduledFuture is cancelled (not just executor-shut-down)"
     ;; Lifecycle hygiene: cancelling the future explicitly is what
     ;; stops the periodic task, independent of the executor's

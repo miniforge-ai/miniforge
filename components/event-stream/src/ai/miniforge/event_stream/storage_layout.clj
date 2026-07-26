@@ -15,16 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.storage-layout
   "Configuration-as-data for the event-stream on-disk storage layout."
   (:require
    [ai.miniforge.config.interface :as config]))
 
-(def ^:private resource-path
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private resource-path
   "config/event-stream/storage-layout.edn")
 
-(def ^:private required-keys
+(def ^{:stratum 0} ^:private required-keys
   [:live-subdir
    :archived-subdir
    :operator-subdir
@@ -32,7 +33,9 @@
    :snapshot-tmp-filename
    :archived-marker-filename])
 
-(defn- load-layout
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-layout
   []
   (let [layout (config/load-config-resource resource-path required-keys)
         missing (seq (remove #(string? (get layout %)) required-keys))]
@@ -42,29 +45,33 @@
                        :missing-string-keys (vec missing)})))
     layout))
 
-(def ^:private layout
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} ^:private layout
   (delay (load-layout)))
 
-(defn live-subdir
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} live-subdir
   []
   (:live-subdir @layout))
 
-(defn archived-subdir
+(defn ^{:stratum 3} archived-subdir
   []
   (:archived-subdir @layout))
 
-(defn operator-subdir
+(defn ^{:stratum 3} operator-subdir
   []
   (:operator-subdir @layout))
 
-(defn snapshot-filename
+(defn ^{:stratum 3} snapshot-filename
   []
   (:snapshot-filename @layout))
 
-(defn snapshot-tmp-filename
+(defn ^{:stratum 3} snapshot-tmp-filename
   []
   (:snapshot-tmp-filename @layout))
 
-(defn archived-marker-filename
+(defn ^{:stratum 3} archived-marker-filename
   []
   (:archived-marker-filename @layout))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.archive
   "BD-2b sub-3b: atomic workflow archive.
 
@@ -59,19 +58,22 @@
    [java.io File RandomAccessFile]
    [java.nio.file Files StandardCopyOption]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; STRATIFIED-DESIGN LAYERING
 ;;
 ;;   Layer 0  atomic file primitives (fsync, atomic rename, marker)
 ;;   Layer 1  manifest-bound transitions (stage-archiving!,
-;;            complete-snapshot-rename!, mark-archive-complete!)
+;;            complete-snapshot-rename!, mark-archive-complete!) and
+;;            the fleet-wide incomplete-archive scan
+;;            (scan-incomplete-archives — no upward calls, so it sits
+;;            alongside the other Layer 1 transitions rather than
+;;            with the Layer 3 driver below)
 ;;   Layer 2  workflow-bound orchestration
 ;;            (archive-workflow!, recover-incomplete-archive!)
-;;   Layer 3  fleet-level scan + recover
+;;   Layer 3  fleet-level recovery driver
 ;;            (recover-all-incomplete!)
-
-;------------------------------------------------------------------------------ Layer 0 — atomic file primitives
-
-(defn- fsync-file!
+(defn- ^{:stratum 0} fsync-file!
   "Force-flush `file`'s data + metadata to disk. No-op when `file`
    doesn't exist (the snapshot-tmp step may legitimately skip when
    there's no snapshot yet — sub-3c fills it in)."
@@ -80,7 +82,7 @@
     (with-open [raf (RandomAccessFile. file "rw")]
       (.force (.getChannel raf) true))))
 
-(defn- fsync-dir!
+(defn- ^{:stratum 0} fsync-dir!
   "Best-effort fsync on a directory. On macOS / Linux this commits
    the directory entries (renames, marker touches) to disk; on
    filesystems that don't support directory sync the call is a
@@ -98,7 +100,7 @@
         ;; clean shutdown.
         nil))))
 
-(defn- atomic-rename!
+(defn- ^{:stratum 0} atomic-rename!
   "Atomic rename `src` → `dst` via `Files/move` with `ATOMIC_MOVE` +
    `REPLACE_EXISTING`. Requires same filesystem. Returns the dst
    `Path` on success."
@@ -109,7 +111,7 @@
                           [StandardCopyOption/ATOMIC_MOVE
                            StandardCopyOption/REPLACE_EXISTING])))
 
-(defn- touch-marker!
+(defn- ^{:stratum 0} touch-marker!
   "Create an empty marker file at `path`. Used for
    `archived.marker` so a partial archive (missing the marker) is
    identifiable on next boot."
@@ -117,21 +119,21 @@
   (.mkdirs (.getParentFile path))
   (.createNewFile path))
 
-(defn- snapshot-path
+(defn- ^{:stratum 0} snapshot-path
   ^File [^File workflow-dir]
   (io/file workflow-dir (layout/snapshot-filename)))
 
-(defn- snapshot-tmp-path
+(defn- ^{:stratum 0} snapshot-tmp-path
   ^File [^File workflow-dir]
   (io/file workflow-dir (layout/snapshot-tmp-filename)))
 
-(defn- marker-path
+(defn- ^{:stratum 0} marker-path
   ^File [^File workflow-dir]
   (io/file workflow-dir (layout/archived-marker-filename)))
 
-;------------------------------------------------------------------------------ Layer 1 — manifest-bound transitions over Layer 0
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- stage-archiving!
+(defn- ^{:stratum 1} stage-archiving!
   "Step 3–4: update the manifest to `archive_status = :archiving`,
    merge any snapshot watermark, and fsync. The manifest writer
    itself is already atomic + fsynced, so the file-level guarantee
@@ -147,7 +149,7 @@
       (fsync-dir! live-dir)
       staged-manifest)))
 
-(defn- complete-snapshot-rename!
+(defn- ^{:stratum 1} complete-snapshot-rename!
   "Step 5: rename `snapshot.transit.json.tmp` → `snapshot.transit.json`
    when the tmp exists. Sub-3c writes the tmp; sub-3b tolerates its
    absence (the manifest's `snapshot_status` stays `:none`)."
@@ -157,7 +159,7 @@
     (when (.exists tmp)
       (atomic-rename! tmp final))))
 
-(defn- mark-archive-complete!
+(defn- ^{:stratum 1} mark-archive-complete!
   "Step 7–8: stamp `archived_at` and `archive_status = :archived` on the
    manifest FIRST, then touch the archived marker, then fsync the archive
    directory plus its parent so both writes hit disk.
@@ -178,9 +180,30 @@
       (fsync-dir! (.getParentFile archived-dir))
       completed)))
 
-;------------------------------------------------------------------------------ Layer 2 — workflow-bound orchestration over Layer 1
+(defn ^{:stratum 1} scan-incomplete-archives
+  "List workflow-ids whose archive is half-completed under
+   `base-dir`. Result is a vector of `{:workflow-id ... :state ...}`
+   where `:state` is one of `:archiving-in-live` (step 5 onward
+   pending) or `:archived-no-marker` (step 7 pending). Useful for
+   the cleanup pass (sub-3c) and for startup recovery."
+  [base-dir]
+  (let [live     (sinks/live-dir base-dir)
+        archived (sinks/archived-dir base-dir)]
+    (vec
+      (concat
+        (for [^File d (when (.isDirectory live) (.listFiles live))
+              :when (.isDirectory d)
+              :let [m (manifest/load-manifest d)]
+              :when (and m (= :archiving (:archive_status m)))]
+          {:workflow-id (.getName d) :state :archiving-in-live})
+        (for [^File d (when (.isDirectory archived) (.listFiles archived))
+              :when (.isDirectory d)
+              :when (not (.exists (marker-path d)))]
+          {:workflow-id (.getName d) :state :archived-no-marker})))))
 
-(defn archive-workflow!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} archive-workflow!
   "Archive a workflow's directory from `live/{wid}/` to
    `archived/{wid}/`. Returns the final `archived/{wid}/` `File`.
 
@@ -238,7 +261,7 @@
       (anomaly/let-ok [_completed (mark-archive-complete! archived)]
         archived))))
 
-(defn recover-incomplete-archive!
+(defn ^{:stratum 2} recover-incomplete-archive!
   "Resume a half-finished archive at `live-dir` (manifest's
    `archive_status` is `:archiving`) or `archived-dir` (missing
    `archived.marker`). Idempotent — completes whatever steps are
@@ -269,30 +292,9 @@
       ;; Nothing to do.
       :else nil)))
 
-;------------------------------------------------------------------------------ Layer 3 — fleet-level scan + recover over Layer 2
+;------------------------------------------------------------------------------ Layer 3
 
-(defn scan-incomplete-archives
-  "List workflow-ids whose archive is half-completed under
-   `base-dir`. Result is a vector of `{:workflow-id ... :state ...}`
-   where `:state` is one of `:archiving-in-live` (step 5 onward
-   pending) or `:archived-no-marker` (step 7 pending). Useful for
-   the cleanup pass (sub-3c) and for startup recovery."
-  [base-dir]
-  (let [live     (sinks/live-dir base-dir)
-        archived (sinks/archived-dir base-dir)]
-    (vec
-      (concat
-        (for [^File d (when (.isDirectory live) (.listFiles live))
-              :when (.isDirectory d)
-              :let [m (manifest/load-manifest d)]
-              :when (and m (= :archiving (:archive_status m)))]
-          {:workflow-id (.getName d) :state :archiving-in-live})
-        (for [^File d (when (.isDirectory archived) (.listFiles archived))
-              :when (.isDirectory d)
-              :when (not (.exists (marker-path d)))]
-          {:workflow-id (.getName d) :state :archived-no-marker})))))
-
-(defn recover-all-incomplete!
+(defn ^{:stratum 3} recover-all-incomplete!
   "Walk `base-dir` and finish every half-completed archive found by
    `scan-incomplete-archives`. Returns a vector of recovered
    workflow-ids, or the first anomaly returned by recovery. Intended

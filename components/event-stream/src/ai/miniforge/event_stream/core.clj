@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.core
   "Event bus and event constructors for workflow observability."
   (:require
@@ -26,47 +25,26 @@
    [ai.miniforge.event-stream.sinks :as sinks]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Constants
+(def ^{:stratum 0} ^:const event-version "1.0.0")
 
-(def ^:const event-version "1.0.0")
-
-(def ^:private redirect-transition-type
+(def ^{:stratum 0} ^:private redirect-transition-type
   :transition/redirect)
 
-(def ^:private phase-transition-request-key
+(def ^{:stratum 0} ^:private phase-transition-request-key
   :phase/transition-request)
 
-(def ^:private transition-type-key
+(def ^{:stratum 0} ^:private transition-type-key
   :transition/type)
 
-(def ^:private transition-target-key
+(def ^{:stratum 0} ^:private transition-target-key
   :transition/target)
 
-(defn- phase-transition-request
-  [result]
-  (get result phase-transition-request-key))
-
-(defn- redirect-target
-  "Project a redirect target for legacy consumers.
-
-   The workflow runner now emits :phase/transition-request. This helper keeps
-   :phase/redirect-to available only when the transition request represents a
-  redirect, so older event consumers do not break while the newer event shape
-  remains authoritative."
-  [result]
-  (let [request (phase-transition-request result)
-        transition-type (get request transition-type-key)]
-    (when (= redirect-transition-type transition-type)
-      (get request transition-target-key))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Event persistence via configurable sinks
 ;; Note: File persistence moved to sinks.clj for configurability
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Event envelope constructor
-
-(defn- next-event-id
+(defn- ^{:stratum 0} next-event-id
   [generator]
   (cond
     (response/anomaly-map? generator) generator
@@ -75,7 +53,240 @@
     :else
     (random-uuid)))
 
-(defn create-envelope
+;; Event bus operations
+(defn ^{:stratum 0} create-event-stream
+  "Create an event stream with configurable sinks.
+
+   Options:
+     :logger              - Optional logger instance
+     :sinks               - Vector of sink functions (default: file sink)
+     :config              - Config map to create sinks from
+     :snowflake-generator - Optional snowflake event-id generator
+                            (BD-2b). When supplied, `create-envelope`
+                            uses it for `:event/id` so events sort
+                            lexically by creation order. Without it,
+                            `:event/id` falls back to `random-uuid`
+                            and the file sink uses the legacy
+                            `{timestamp}-{uuid}.json` filename.
+
+   Returns: Event stream atom
+
+   Example:
+     ;; Default file sink
+     (create-event-stream)
+
+     ;; Custom sinks
+     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
+
+     ;; From config
+     (create-event-stream {:config user-config})
+
+     ;; With a Snowflake event-id generator (BD-2b)
+     (create-event-stream {:snowflake-generator (snowflake/create-generator)})"
+  [& [opts]]
+  (let [;; Create sinks from config or use provided sinks or default
+        event-sinks (cond
+                      (:sinks opts) (:sinks opts)
+                      (:config opts) (sinks/create-sinks-from-config (:config opts))
+                      :else [(sinks/file-sink)])] ;; Default to file sink
+    (atom {:events []
+           :subscribers {}
+           :filters {}
+           :sequence-numbers {}
+           :logger (:logger opts)
+           :sinks event-sinks
+           ;; BD-2a: workflow-scoped publisher fence. Once a workflow id
+           ;; is in this set, `publish!` rejects further events for that
+           ;; workflow rather than running sinks/subscribers.
+           :quiesced-workflows #{}
+           ;; BD-2a: in-flight publish counter. `drain!` waits on this
+           ;; reaching zero before draining sinks. `publish!` increments
+           ;; on entry (after the quiesce check) and decrements in a
+           ;; finally so a sink exception still releases the slot.
+           :in-flight 0
+           ;; BD-2b: optional Snowflake event-id generator. When present,
+           ;; `create-envelope` calls it for `:event/id` so events sort
+           ;; lexically by creation order. nil = random-uuid fallback.
+           :snowflake-generator (:snowflake-generator opts)})))
+
+;; publish! helpers — small, single-purpose pieces composed by publish!
+;; itself. Each helper is testable in isolation; tests live in
+;; `publish_helpers_test.clj`.
+(defn- ^{:stratum 0} workflow-quiesced?
+  "True when `event`'s workflow id has been fenced via `quiesce!`."
+  [stream event]
+  (when-let [wid (:workflow/id event)]
+    (contains? (:quiesced-workflows @stream) wid)))
+
+(defn- ^{:stratum 0} rejection-result
+  "Build the structured rejection map returned to a publisher whose
+   workflow has been quiesced. Stable shape so callers can pattern-match."
+  [event reason]
+  {:rejected?   true
+   :reason      reason
+   :workflow-id (:workflow/id event)
+   :event-type  (:event/type event)})
+
+(defn- ^{:stratum 0} log-rejection!
+  "Surface a quiesce rejection at warn level if a logger is configured."
+  [logger event]
+  (when logger
+    (log/warn logger :event-stream :event/rejected-after-quiesce
+              {:message "publish! rejected: workflow quiesced"
+               :data    {:event-type  (:event/type event)
+                         :workflow-id (:workflow/id event)}})))
+
+(def ^{:stratum 0} ^:private quiesced-sentinel
+  "Sentinel value returned by `with-in-flight` when the event's workflow was
+   quiesced between the caller's fast-path check and the atomic increment,
+   closing the TOCTOU window. Distinct from nil so callers can distinguish
+   'quiesced-during-acquire' from 'no-workflow-id event'."
+  ::quiesced)
+
+(defn- ^{:stratum 0} try-acquire-in-flight!
+  "Atomically check the quiesce fence for `event`'s workflow and, if not
+   fenced, increment the in-flight counter.
+
+   Uses a decision volatile captured inside the `swap!` fn to signal the
+   outcome to the caller without polluting the stream map with temporary keys.
+   The `swap!` fn may be retried by the atom under contention — the volatile
+   is reset on each retry so the final value always reflects the last
+   successful swap.
+
+   Returns true when the slot was acquired (in-flight incremented), false
+   when the workflow was quiesced at the moment of the swap."
+  [stream event]
+  (let [wid      (:workflow/id event)
+        acquired (volatile! false)]
+    (swap! stream
+           (fn [s]
+             (if (and wid (contains? (:quiesced-workflows s) wid))
+               (do (vreset! acquired false) s)
+               (do (vreset! acquired true)
+                   (update s :in-flight inc)))))
+    @acquired))
+
+(defn- ^{:stratum 0} record-event!
+  "Append `event` to the in-memory event log."
+  [stream event]
+  (swap! stream update :events conj event))
+
+(defn- ^{:stratum 0} deliver-to-sink!
+  "Invoke `sink` with `event`, swallowing exceptions and logging them.
+   A failing sink must not break others or the publish path."
+  [sink event logger]
+  (try
+    (sink event)
+    (catch Exception e
+      (when logger
+        (log/warn logger :event-stream :sink-error
+                  {:message "Event sink failed"
+                   :data    {:event-type (:event/type event)
+                             :anomaly    (response/from-exception e)}})))))
+
+(defn- ^{:stratum 0} deliver-to-subscriber!
+  "Invoke `callback` for `event` when `filter-fn` accepts it,
+   swallowing exceptions and logging them."
+  [sub-id callback filter-fn event logger]
+  (when (filter-fn event)
+    (try
+      (callback event)
+      (catch Exception e
+        (when logger
+          (log/error logger :event-stream :event/callback-error
+                     {:message "Event callback failed"
+                      :data    {:subscriber-id sub-id
+                                :event-type    (:event/type event)
+                                :anomaly       (response/from-exception e)}}))))))
+
+(defn- ^{:stratum 0} log-published!
+  "Debug-log that `event` reached the subscribers."
+  [logger event]
+  (when logger
+    (log/debug logger :event-stream :event/published
+               {:message "Event published"
+                :data    {:event-type  (:event/type event)
+                          :workflow-id (:workflow/id event)
+                          :sequence    (:event/sequence-number event)}})))
+
+(defn ^{:stratum 0} subscribe!
+  ([stream subscriber-id callback]
+   (subscribe! stream subscriber-id callback (constantly true)))
+  ([stream subscriber-id callback filter-fn]
+   (swap! stream
+          (fn [s]
+            (-> s
+                (assoc-in [:subscribers subscriber-id] callback)
+                (assoc-in [:filters subscriber-id] filter-fn))))
+   subscriber-id))
+
+(defn ^{:stratum 0} unsubscribe! [stream subscriber-id]
+  (swap! stream
+         (fn [s]
+           (-> s
+               (update :subscribers dissoc subscriber-id)
+               (update :filters dissoc subscriber-id))))
+  nil)
+
+;; BD-2a: workflow-scoped publisher quiesce + sink drain barrier.
+;;
+;; `quiesce!` fences future publishes for a workflow so the terminal event
+;; for that workflow is genuinely the last. `drain!` waits for in-flight
+;; publishes to complete and then asks each sink that exposes a drain hook
+;; (under the sink's metadata) to flush. Together they replace the
+;; pre-BD-2a race where headless exits could land before background
+;; producers finished publishing or sinks finished writing.
+(defn- ^{:stratum 0} wait-for-condition
+  "Spin-wait until `pred` returns truthy or the deadline passes. Returns
+   the final pred value (truthy = condition met before deadline)."
+  [pred deadline-ms]
+  (loop []
+    (let [v (pred)]
+      (cond
+        v v
+        (>= (System/currentTimeMillis) deadline-ms) nil
+        :else (do (Thread/sleep 10) (recur))))))
+
+;; Query API
+(defn ^{:stratum 0} get-events [stream & [opts]]
+  (let [{:keys [workflow-id event-type offset limit]} opts
+        events (:events @stream)]
+    (cond->> events
+      workflow-id (filter #(= workflow-id (:workflow/id %)))
+      event-type (filter #(= event-type (:event/type %)))
+      offset (drop offset)
+      limit (take limit)
+      true vec)))
+
+(defn ^{:stratum 0} get-latest-status [stream workflow-id & [agent-id]]
+  (->> (:events @stream)
+       (filter #(= :agent/status (:event/type %)))
+       (filter #(= workflow-id (:workflow/id %)))
+       (filter #(or (nil? agent-id) (= agent-id (:agent/id %))))
+       last))
+
+(defn- ^{:stratum 0} dependency-id-string
+  [dependency-id]
+  (if (keyword? dependency-id)
+    (name dependency-id)
+    (str dependency-id)))
+
+;; Observer / knowledge failure events
+(defn- ^{:stratum 0} failure-message
+  [failure]
+  (cond
+    (instance? Throwable failure) (ex-message failure)
+    (map? failure) (or (:error failure) (:message failure) (pr-str failure))
+    (some? failure) (str failure)
+    :else nil))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} phase-transition-request
+  [result]
+  (get result phase-transition-request-key))
+
+(defn ^{:stratum 1} create-envelope
   "Create an event envelope with sequence numbering.
 
    When the stream carries a `:snowflake-generator` (BD-2b), the
@@ -133,94 +344,7 @@
            (:agent/id opts)          (assoc :agent/id (:agent/id opts))
            (:agent/instance-id opts) (assoc :agent/instance-id (:agent/instance-id opts))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Event bus operations
-
-(defn create-event-stream
-  "Create an event stream with configurable sinks.
-
-   Options:
-     :logger              - Optional logger instance
-     :sinks               - Vector of sink functions (default: file sink)
-     :config              - Config map to create sinks from
-     :snowflake-generator - Optional snowflake event-id generator
-                            (BD-2b). When supplied, `create-envelope`
-                            uses it for `:event/id` so events sort
-                            lexically by creation order. Without it,
-                            `:event/id` falls back to `random-uuid`
-                            and the file sink uses the legacy
-                            `{timestamp}-{uuid}.json` filename.
-
-   Returns: Event stream atom
-
-   Example:
-     ;; Default file sink
-     (create-event-stream)
-
-     ;; Custom sinks
-     (create-event-stream {:sinks [(sinks/file-sink) (sinks/stdout-sink)]})
-
-     ;; From config
-     (create-event-stream {:config user-config})
-
-     ;; With a Snowflake event-id generator (BD-2b)
-     (create-event-stream {:snowflake-generator (snowflake/create-generator)})"
-  [& [opts]]
-  (let [;; Create sinks from config or use provided sinks or default
-        event-sinks (cond
-                      (:sinks opts) (:sinks opts)
-                      (:config opts) (sinks/create-sinks-from-config (:config opts))
-                      :else [(sinks/file-sink)])] ;; Default to file sink
-    (atom {:events []
-           :subscribers {}
-           :filters {}
-           :sequence-numbers {}
-           :logger (:logger opts)
-           :sinks event-sinks
-           ;; BD-2a: workflow-scoped publisher fence. Once a workflow id
-           ;; is in this set, `publish!` rejects further events for that
-           ;; workflow rather than running sinks/subscribers.
-           :quiesced-workflows #{}
-           ;; BD-2a: in-flight publish counter. `drain!` waits on this
-           ;; reaching zero before draining sinks. `publish!` increments
-           ;; on entry (after the quiesce check) and decrements in a
-           ;; finally so a sink exception still releases the slot.
-           :in-flight 0
-           ;; BD-2b: optional Snowflake event-id generator. When present,
-           ;; `create-envelope` calls it for `:event/id` so events sort
-           ;; lexically by creation order. nil = random-uuid fallback.
-           :snowflake-generator (:snowflake-generator opts)})))
-
-;------------------------------------------------------------------------------ Layer 0
-;; publish! helpers — small, single-purpose pieces composed by publish!
-;; itself. Each helper is testable in isolation; tests live in
-;; `publish_helpers_test.clj`.
-
-(defn- workflow-quiesced?
-  "True when `event`'s workflow id has been fenced via `quiesce!`."
-  [stream event]
-  (when-let [wid (:workflow/id event)]
-    (contains? (:quiesced-workflows @stream) wid)))
-
-(defn- rejection-result
-  "Build the structured rejection map returned to a publisher whose
-   workflow has been quiesced. Stable shape so callers can pattern-match."
-  [event reason]
-  {:rejected?   true
-   :reason      reason
-   :workflow-id (:workflow/id event)
-   :event-type  (:event/type event)})
-
-(defn- log-rejection!
-  "Surface a quiesce rejection at warn level if a logger is configured."
-  [logger event]
-  (when logger
-    (log/warn logger :event-stream :event/rejected-after-quiesce
-              {:message "publish! rejected: workflow quiesced"
-               :data    {:event-type  (:event/type event)
-                         :workflow-id (:workflow/id event)}})))
-
-(defn- rejection-if-quiesced
+(defn- ^{:stratum 1} rejection-if-quiesced
   "Return the structured rejection map when `event`'s workflow is fenced,
    else nil. Logs the rejection as a side effect so callers don't have
    to do it twice."
@@ -229,37 +353,7 @@
     (log-rejection! (:logger @stream) event)
     (rejection-result event :workflow-quiesced)))
 
-(def ^:private quiesced-sentinel
-  "Sentinel value returned by `with-in-flight` when the event's workflow was
-   quiesced between the caller's fast-path check and the atomic increment,
-   closing the TOCTOU window. Distinct from nil so callers can distinguish
-   'quiesced-during-acquire' from 'no-workflow-id event'."
-  ::quiesced)
-
-(defn- try-acquire-in-flight!
-  "Atomically check the quiesce fence for `event`'s workflow and, if not
-   fenced, increment the in-flight counter.
-
-   Uses a decision volatile captured inside the `swap!` fn to signal the
-   outcome to the caller without polluting the stream map with temporary keys.
-   The `swap!` fn may be retried by the atom under contention — the volatile
-   is reset on each retry so the final value always reflects the last
-   successful swap.
-
-   Returns true when the slot was acquired (in-flight incremented), false
-   when the workflow was quiesced at the moment of the swap."
-  [stream event]
-  (let [wid      (:workflow/id event)
-        acquired (volatile! false)]
-    (swap! stream
-           (fn [s]
-             (if (and wid (contains? (:quiesced-workflows s) wid))
-               (do (vreset! acquired false) s)
-               (do (vreset! acquired true)
-                   (update s :in-flight inc)))))
-    @acquired))
-
-(defn- with-in-flight
+(defn- ^{:stratum 1} with-in-flight
   "Run `body-fn` while incrementing the stream's in-flight publish
    counter, decrementing in a finally so an exception still releases the
    slot. Returns body-fn's result, or `quiesced-sentinel` when the
@@ -277,145 +371,21 @@
       (finally
         (swap! stream update :in-flight dec)))))
 
-(defn- record-event!
-  "Append `event` to the in-memory event log."
-  [stream event]
-  (swap! stream update :events conj event))
-
-(defn- deliver-to-sink!
-  "Invoke `sink` with `event`, swallowing exceptions and logging them.
-   A failing sink must not break others or the publish path."
-  [sink event logger]
-  (try
-    (sink event)
-    (catch Exception e
-      (when logger
-        (log/warn logger :event-stream :sink-error
-                  {:message "Event sink failed"
-                   :data    {:event-type (:event/type event)
-                             :anomaly    (response/from-exception e)}})))))
-
-(defn- deliver-to-sinks!
+(defn- ^{:stratum 1} deliver-to-sinks!
   "Fan `event` out to every configured sink. Each sink runs in
    isolation via `deliver-to-sink!`."
   [sinks event logger]
   (doseq [sink sinks]
     (deliver-to-sink! sink event logger)))
 
-(defn- deliver-to-subscriber!
-  "Invoke `callback` for `event` when `filter-fn` accepts it,
-   swallowing exceptions and logging them."
-  [sub-id callback filter-fn event logger]
-  (when (filter-fn event)
-    (try
-      (callback event)
-      (catch Exception e
-        (when logger
-          (log/error logger :event-stream :event/callback-error
-                     {:message "Event callback failed"
-                      :data    {:subscriber-id sub-id
-                                :event-type    (:event/type event)
-                                :anomaly       (response/from-exception e)}}))))))
-
-(defn- deliver-to-subscribers!
+(defn- ^{:stratum 1} deliver-to-subscribers!
   "Fan `event` out to every subscriber that accepts it via its filter."
   [subscribers filters event logger]
   (doseq [[sub-id callback] subscribers]
     (let [filter-fn (get filters sub-id (constantly true))]
       (deliver-to-subscriber! sub-id callback filter-fn event logger))))
 
-(defn- log-published!
-  "Debug-log that `event` reached the subscribers."
-  [logger event]
-  (when logger
-    (log/debug logger :event-stream :event/published
-               {:message "Event published"
-                :data    {:event-type  (:event/type event)
-                          :workflow-id (:workflow/id event)
-                          :sequence    (:event/sequence-number event)}})))
-
-;------------------------------------------------------------------------------ Layer 1
-;; publish! orchestrates the helpers above as a small pipeline.
-
-(defn publish!
-  "Publish `event` to the stream.
-
-   When the event's workflow has been quiesced (BD-2a), short-circuits
-   with a structured `{:rejected? true ...}` map and runs no sinks or
-   subscribers. Otherwise: fan out to sinks, append to the in-memory
-   log, fan out to subscribers, log, and return `event`.
-
-   In-flight publishes are tracked so `quiesce!` / `drain!` can wait
-   for the stream to settle before reporting at-rest.
-
-   The quiesce fence is enforced atomically: `with-in-flight` fuses the
-   quiesce-check and the in-flight increment into a single `swap!`,
-   eliminating the TOCTOU window that allowed a publish to slip through
-   after `quiesce!` fenced the workflow."
-  [stream event]
-  (if (response/anomaly-map? event)
-    event
-    ;; Fast path: check quiesce before acquiring the in-flight slot so
-    ;; already-quiesced workflows skip the swap! entirely.
-    (or (rejection-if-quiesced stream event)
-        (let [result (with-in-flight stream event
-                       (fn []
-                         (let [{:keys [sinks subscribers filters logger]} @stream]
-                           (deliver-to-sinks! sinks event logger)
-                           (record-event! stream event)
-                           (deliver-to-subscribers! subscribers filters event logger)
-                           (log-published! logger event)
-                           event)))]
-          ;; with-in-flight returns quiesced-sentinel when the workflow was
-          ;; fenced during the atomic acquire (the TOCTOU window). Convert
-          ;; to the canonical rejection shape so callers see a consistent
-          ;; {:rejected? true ...} map regardless of which path triggered it.
-          (if (= result quiesced-sentinel)
-            (do (log-rejection! (:logger @stream) event)
-                (rejection-result event :workflow-quiesced))
-            result)))))
-
-(defn subscribe!
-  ([stream subscriber-id callback]
-   (subscribe! stream subscriber-id callback (constantly true)))
-  ([stream subscriber-id callback filter-fn]
-   (swap! stream
-          (fn [s]
-            (-> s
-                (assoc-in [:subscribers subscriber-id] callback)
-                (assoc-in [:filters subscriber-id] filter-fn))))
-   subscriber-id))
-
-(defn unsubscribe! [stream subscriber-id]
-  (swap! stream
-         (fn [s]
-           (-> s
-               (update :subscribers dissoc subscriber-id)
-               (update :filters dissoc subscriber-id))))
-  nil)
-
-;------------------------------------------------------------------------------ Layer 1
-;; BD-2a: workflow-scoped publisher quiesce + sink drain barrier.
-;;
-;; `quiesce!` fences future publishes for a workflow so the terminal event
-;; for that workflow is genuinely the last. `drain!` waits for in-flight
-;; publishes to complete and then asks each sink that exposes a drain hook
-;; (under the sink's metadata) to flush. Together they replace the
-;; pre-BD-2a race where headless exits could land before background
-;; producers finished publishing or sinks finished writing.
-
-(defn- wait-for-condition
-  "Spin-wait until `pred` returns truthy or the deadline passes. Returns
-   the final pred value (truthy = condition met before deadline)."
-  [pred deadline-ms]
-  (loop []
-    (let [v (pred)]
-      (cond
-        v v
-        (>= (System/currentTimeMillis) deadline-ms) nil
-        :else (do (Thread/sleep 10) (recur))))))
-
-(defn quiesce!
+(defn ^{:stratum 1} quiesce!
   "Fence publishers for `workflow-id` and wait for any in-flight publishes
    to settle. After return, `publish!` for that workflow returns
    `{:rejected? true :reason :workflow-quiesced ...}` instead of running
@@ -453,7 +423,7 @@
        {:ok? true :pending-publishers pending}
        {:ok? false :reason :timeout :pending-publishers pending}))))
 
-(defn drain!
+(defn ^{:stratum 1} drain!
   "Wait until every event accepted by `publish!` before this call has
    reached all configured sinks, including any sink-specific flush hook.
 
@@ -524,29 +494,61 @@
            {:ok? true :drained-count (count results)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Query API
 
-(defn get-events [stream & [opts]]
-  (let [{:keys [workflow-id event-type offset limit]} opts
-        events (:events @stream)]
-    (cond->> events
-      workflow-id (filter #(= workflow-id (:workflow/id %)))
-      event-type (filter #(= event-type (:event/type %)))
-      offset (drop offset)
-      limit (take limit)
-      true vec)))
+(defn- ^{:stratum 2} redirect-target
+  "Project a redirect target for legacy consumers.
 
-(defn get-latest-status [stream workflow-id & [agent-id]]
-  (->> (:events @stream)
-       (filter #(= :agent/status (:event/type %)))
-       (filter #(= workflow-id (:workflow/id %)))
-       (filter #(or (nil? agent-id) (= agent-id (:agent/id %))))
-       last))
+   The workflow runner now emits :phase/transition-request. This helper keeps
+   :phase/redirect-to available only when the transition request represents a
+  redirect, so older event consumers do not break while the newer event shape
+  remains authoritative."
+  [result]
+  (let [request (phase-transition-request result)
+        transition-type (get request transition-type-key)]
+    (when (= redirect-transition-type transition-type)
+      (get request transition-target-key))))
 
-;------------------------------------------------------------------------------ Layer 3
+;; publish! orchestrates the helpers above as a small pipeline.
+(defn ^{:stratum 2} publish!
+  "Publish `event` to the stream.
+
+   When the event's workflow has been quiesced (BD-2a), short-circuits
+   with a structured `{:rejected? true ...}` map and runs no sinks or
+   subscribers. Otherwise: fan out to sinks, append to the in-memory
+   log, fan out to subscribers, log, and return `event`.
+
+   In-flight publishes are tracked so `quiesce!` / `drain!` can wait
+   for the stream to settle before reporting at-rest.
+
+   The quiesce fence is enforced atomically: `with-in-flight` fuses the
+   quiesce-check and the in-flight increment into a single `swap!`,
+   eliminating the TOCTOU window that allowed a publish to slip through
+   after `quiesce!` fenced the workflow."
+  [stream event]
+  (if (response/anomaly-map? event)
+    event
+    ;; Fast path: check quiesce before acquiring the in-flight slot so
+    ;; already-quiesced workflows skip the swap! entirely.
+    (or (rejection-if-quiesced stream event)
+        (let [result (with-in-flight stream event
+                       (fn []
+                         (let [{:keys [sinks subscribers filters logger]} @stream]
+                           (deliver-to-sinks! sinks event logger)
+                           (record-event! stream event)
+                           (deliver-to-subscribers! subscribers filters event logger)
+                           (log-published! logger event)
+                           event)))]
+          ;; with-in-flight returns quiesced-sentinel when the workflow was
+          ;; fenced during the atomic acquire (the TOCTOU window). Convert
+          ;; to the canonical rejection shape so callers see a consistent
+          ;; {:rejected? true ...} map regardless of which path triggered it.
+          (if (= result quiesced-sentinel)
+            (do (log-rejection! (:logger @stream) event)
+                (rejection-result event :workflow-quiesced))
+            result)))))
+
 ;; Event constructors (N3 compliant)
-
-(defn workflow-started
+(defn ^{:stratum 2} workflow-started
   "Build a :workflow/started envelope. Multi-arity to preserve the legacy
    2/3-arg call shape used across the workspace.
 
@@ -567,36 +569,13 @@
        spec             (assoc :workflow/spec spec)
        trigger-event-id (assoc :routing/trigger-event-id trigger-event-id)))))
 
-(defn phase-started [stream workflow-id phase & [context]]
+(defn ^{:stratum 2} phase-started [stream workflow-id phase & [context]]
   (-> (create-envelope stream :workflow/phase-started workflow-id
                        (str (name phase) " phase started"))
       (assoc :workflow/phase phase)
       (cond-> context (assoc :phase/context context))))
 
-(defn phase-completed [stream workflow-id phase & [result]]
-  (let [outcome (get result :outcome :success)
-        request (phase-transition-request result)
-        redirect-to (or (redirect-target result)
-                        (:redirect-to result))]
-    (-> (create-envelope stream :workflow/phase-completed workflow-id
-                         (str (name phase) " phase " (name outcome)))
-        (assoc :workflow/phase phase
-               :phase/outcome outcome)
-        (cond->
-          (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
-          (:review-decision result) (assoc :phase/review-decision (:review-decision result))
-          (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
-          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
-          (:error result) (assoc :phase/error (:error result))
-          request (assoc :phase/transition-request request)
-          redirect-to (assoc :phase/redirect-to redirect-to)
-          (:tokens result) (assoc :phase/tokens (:tokens result))
-          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
-          (:meta result) (assoc :phase/meta (:meta result))
-          (:phase/termination-reason result)
-          (assoc :phase/termination-reason (:phase/termination-reason result))))))
-
-(defn workspace-persisted
+(defn ^{:stratum 2} workspace-persisted
   "Build a :workspace/persisted event recording that a phase's worktree was
    archived to a checkpoint. Surfaces the bundle path so dashboards and
    evidence bundles can offer 'inspect/resume from this checkpoint'
@@ -622,19 +601,19 @@
              :workspace/bundle-path (:bundle-path data)
              :workspace/tier        (get data :persist-tier :worktree))))
 
-(defn agent-chunk [stream workflow-id agent-id delta & [done?]]
+(defn ^{:stratum 2} agent-chunk [stream workflow-id agent-id delta & [done?]]
   (-> (create-envelope stream :agent/chunk workflow-id
                        (if done? "Agent stream completed" "Agent streaming"))
       (assoc :agent/id agent-id
              :chunk/delta delta)
       (cond-> done? (assoc :chunk/done? true))))
 
-(defn agent-status [stream workflow-id agent-id status-type message]
+(defn ^{:stratum 2} agent-status [stream workflow-id agent-id status-type message]
   (-> (create-envelope stream :agent/status workflow-id message)
       (assoc :agent/id agent-id
              :status/type status-type)))
 
-(defn agent-tool-call
+(defn ^{:stratum 2} agent-tool-call
   "Publish a :agent/tool-call event carrying the tool name(s) the agent
    just invoked, per N3 §3.x. Replaces the generic :agent/status
    :tool-calling emission for consumers that want structured tool data.
@@ -658,7 +637,7 @@
     tool-call-id        (assoc :tool/call-id tool-call-id)
     tool-args-preview   (assoc :tool/args-preview tool-args-preview)))
 
-(defn agent-tool-call-started
+(defn ^{:stratum 2} agent-tool-call-started
   "Build an :agent/tool-call-started event marking the moment an agent
    begins executing a named tool call or tool-use block.
 
@@ -682,7 +661,7 @@
     args-digest     (assoc :tool/args-digest args-digest)
     call-id         (assoc :tool/call-id call-id)))
 
-(defn tool-call-completed
+(defn ^{:stratum 2} tool-call-completed
   "Build a :tool/call-completed event closing the latency span opened by
    :agent/tool-call-started.
 
@@ -708,7 +687,7 @@
     (some? success?) (assoc :tool/success? success?)
     error           (assoc :tool/error error)))
 
-(defn phase-heartbeat
+(defn ^{:stratum 2} phase-heartbeat
   "Build a :workflow/phase-heartbeat event for long-running phase liveness
    signalling.
 
@@ -733,7 +712,7 @@
     (some? gap-since-last-event-ms)
     (assoc :phase/gap-since-last-event-ms gap-since-last-event-ms)))
 
-(defn workflow-completed [stream workflow-id status & [duration-ms opts]]
+(defn ^{:stratum 2} workflow-completed [stream workflow-id status & [duration-ms opts]]
   (-> (create-envelope stream :workflow/completed workflow-id
                        (str "Workflow " (name status)))
       (assoc :workflow/status status)
@@ -745,7 +724,7 @@
               (:workflow/evidence-bundle-id opts)
               (assoc :workflow/evidence-bundle-id (:workflow/evidence-bundle-id opts)))))
 
-(defn workflow-failed [stream workflow-id error & [{:keys [failure/class]}]]
+(defn ^{:stratum 2} workflow-failed [stream workflow-id error & [{:keys [failure/class]}]]
   (let [;; Handle anomaly maps, Throwables, and plain error maps
         anomaly-map (cond
                       (response/anomaly-map? error) error
@@ -771,7 +750,7 @@
                :workflow/retryable? (:retryable? event-data false))
         (cond-> class (assoc :failure/class class)))))
 
-(defn llm-request [stream workflow-id agent-id model & [prompt-tokens]]
+(defn ^{:stratum 2} llm-request [stream workflow-id agent-id model & [prompt-tokens]]
   (-> (create-envelope stream :llm/request workflow-id
                        (str "Calling " model (when prompt-tokens (str " (" prompt-tokens " tokens)"))))
       (assoc :agent/id agent-id
@@ -779,7 +758,7 @@
              :llm/request-id (random-uuid))
       (cond-> prompt-tokens (assoc :llm/prompt-tokens prompt-tokens))))
 
-(defn llm-response [stream workflow-id agent-id model request-id & [metrics]]
+(defn ^{:stratum 2} llm-response [stream workflow-id agent-id model request-id & [metrics]]
   (-> (create-envelope stream :llm/response workflow-id
                        (str "Response from " model
                             (when (:completion-tokens metrics)
@@ -793,51 +772,47 @@
         (:duration-ms metrics) (assoc :llm/duration-ms (:duration-ms metrics))
         (:cost-usd metrics) (assoc :llm/cost-usd (:cost-usd metrics)))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Agent lifecycle events
-
-(defn agent-started [stream workflow-id agent-id & [context]]
+(defn ^{:stratum 2} agent-started [stream workflow-id agent-id & [context]]
   (-> (create-envelope stream :agent/started workflow-id
                        (str "Agent " (name agent-id) " started"))
       (assoc :agent/id agent-id)
       (cond-> context (assoc :agent/context context))))
 
-(defn agent-completed [stream workflow-id agent-id & [result]]
+(defn ^{:stratum 2} agent-completed [stream workflow-id agent-id & [result]]
   (-> (create-envelope stream :agent/completed workflow-id
                        (str "Agent " (name agent-id) " completed"))
       (assoc :agent/id agent-id)
       (cond-> result (assoc :agent/result result))))
 
-(defn agent-failed [stream workflow-id agent-id & [error {:keys [failure/class]}]]
+(defn ^{:stratum 2} agent-failed [stream workflow-id agent-id & [error {:keys [failure/class]}]]
   (-> (create-envelope stream :agent/failed workflow-id
                        (str "Agent " (name agent-id) " failed"))
       (assoc :agent/id agent-id)
       (cond-> error (assoc :agent/error error)
               class (assoc :failure/class class))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Gate lifecycle events
-
-(defn gate-started [stream workflow-id gate-id & [artifact-summary]]
+(defn ^{:stratum 2} gate-started [stream workflow-id gate-id & [artifact-summary]]
   (-> (create-envelope stream :gate/started workflow-id
                        (str "Gate " (name gate-id) " started"))
       (assoc :gate/id gate-id)
       (cond-> artifact-summary (assoc :gate/artifact-summary artifact-summary))))
 
-(defn gate-passed [stream workflow-id gate-id & [duration-ms]]
+(defn ^{:stratum 2} gate-passed [stream workflow-id gate-id & [duration-ms]]
   (-> (create-envelope stream :gate/passed workflow-id
                        (str "Gate " (name gate-id) " passed"))
       (assoc :gate/id gate-id)
       (cond-> duration-ms (assoc :gate/duration-ms duration-ms))))
 
-(defn gate-failed [stream workflow-id gate-id & [violations {:keys [failure/class]}]]
+(defn ^{:stratum 2} gate-failed [stream workflow-id gate-id & [violations {:keys [failure/class]}]]
   (-> (create-envelope stream :gate/failed workflow-id
                        (str "Gate " (name gate-id) " failed"))
       (assoc :gate/id gate-id)
       (cond-> violations (assoc :gate/violations violations)
               class (assoc :failure/class class))))
 
-(defn gate-rule-applied
+(defn ^{:stratum 2} gate-rule-applied
   "Per-rule policy evidence event: records that policy `rule-id` was evaluated
    in `phase` with `status` (one of :passed, :failed, :skipped-by-phase,
    :not-applicable). Emitted for considered AND skipped rules so the full
@@ -856,50 +831,44 @@
               (:enforcement extra) (assoc :rule/enforcement (:enforcement extra))
               (:violation extra)   (assoc :rule/violation (:violation extra)))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Tool lifecycle events
-
-(defn tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]
+(defn ^{:stratum 2} tool-invoked [stream workflow-id agent-id tool-id & [params-summary]]
   (-> (create-envelope stream :tool/invoked workflow-id
                        (str "Tool " (name tool-id) " invoked by " (name agent-id)))
       (assoc :agent/id agent-id
              :tool/id tool-id)
       (cond-> params-summary (assoc :tool/params-summary params-summary))))
 
-(defn tool-completed [stream workflow-id agent-id tool-id & [result-summary]]
+(defn ^{:stratum 2} tool-completed [stream workflow-id agent-id tool-id & [result-summary]]
   (-> (create-envelope stream :tool/completed workflow-id
                        (str "Tool " (name tool-id) " completed"))
       (assoc :agent/id agent-id
              :tool/id tool-id)
       (cond-> result-summary (assoc :tool/result-summary result-summary))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Milestone event
-
-(defn milestone-reached [stream workflow-id milestone-id & [description]]
+(defn ^{:stratum 2} milestone-reached [stream workflow-id milestone-id & [description]]
   (-> (create-envelope stream :workflow/milestone-reached workflow-id
                        (or description (str "Milestone " (name milestone-id) " reached")))
       (assoc :milestone/id milestone-id)))
 
-(defn milestone-started [stream workflow-id milestone-id & [description]]
+(defn ^{:stratum 2} milestone-started [stream workflow-id milestone-id & [description]]
   (-> (create-envelope stream :phase/milestone-started workflow-id
                        (or description (str "Milestone " (name milestone-id) " started")))
       (assoc :milestone/id milestone-id)))
 
-(defn milestone-completed [stream workflow-id milestone-id & [description]]
+(defn ^{:stratum 2} milestone-completed [stream workflow-id milestone-id & [description]]
   (-> (create-envelope stream :phase/milestone-completed workflow-id
                        (or description (str "Milestone " (name milestone-id) " completed")))
       (assoc :milestone/id milestone-id)))
 
-(defn milestone-failed [stream workflow-id milestone-id & [reason]]
+(defn ^{:stratum 2} milestone-failed [stream workflow-id milestone-id & [reason]]
   (-> (create-envelope stream :phase/milestone-failed workflow-id
                        (or reason (str "Milestone " (name milestone-id) " failed")))
       (assoc :milestone/id milestone-id)))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Task lifecycle (DAG) events
-
-(defn task-state-changed [stream workflow-id dag-id task-id from-state to-state & [context]]
+(defn ^{:stratum 2} task-state-changed [stream workflow-id dag-id task-id from-state to-state & [context]]
   (-> (create-envelope stream :task/state-changed workflow-id
                        (str "Task " task-id " " (name from-state) " -> " (name to-state)))
       (assoc :dag/id dag-id
@@ -908,24 +877,22 @@
              :task/to-state to-state)
       (cond-> context (assoc :task/context context))))
 
-(defn task-frontier-entered [stream workflow-id dag-id task-id & [frontier-size]]
+(defn ^{:stratum 2} task-frontier-entered [stream workflow-id dag-id task-id & [frontier-size]]
   (-> (create-envelope stream :task/frontier-entered workflow-id
                        (str "Task " task-id " entered frontier"))
       (assoc :dag/id dag-id
              :task/id task-id)
       (cond-> frontier-size (assoc :task/frontier-size frontier-size))))
 
-(defn task-skip-propagated [stream workflow-id dag-id task-id & [cause-task]]
+(defn ^{:stratum 2} task-skip-propagated [stream workflow-id dag-id task-id & [cause-task]]
   (-> (create-envelope stream :task/skip-propagated workflow-id
                        (str "Task " task-id " skip propagated"))
       (assoc :dag/id dag-id
              :task/id task-id)
       (cond-> cause-task (assoc :task/cause-task cause-task))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Inter-agent messaging events
-
-(defn inter-agent-message-sent [stream workflow-id from-agent to-agent & [message-type]]
+(defn ^{:stratum 2} inter-agent-message-sent [stream workflow-id from-agent to-agent & [message-type]]
   (-> (create-envelope stream :agent/message-sent workflow-id
                        (str (name from-agent) " -> " (name to-agent)
                             (when message-type (str " (" (name message-type) ")"))))
@@ -933,7 +900,7 @@
              :to-agent/id to-agent)
       (cond-> message-type (assoc :message/type message-type))))
 
-(defn inter-agent-message-received [stream workflow-id from-agent to-agent & [message-type]]
+(defn ^{:stratum 2} inter-agent-message-received [stream workflow-id from-agent to-agent & [message-type]]
   (-> (create-envelope stream :agent/message-received workflow-id
                        (str (name to-agent) " <- " (name from-agent)
                             (when message-type (str " (" (name message-type) ")"))))
@@ -941,10 +908,8 @@
              :to-agent/id to-agent)
       (cond-> message-type (assoc :message/type message-type))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Listener lifecycle events (N8)
-
-(defn listener-attached [stream workflow-id listener-id & [listener-type capability]]
+(defn ^{:stratum 2} listener-attached [stream workflow-id listener-id & [listener-type capability]]
   (-> (create-envelope stream :listener/attached workflow-id
                        (str "Listener " listener-id " attached"))
       (assoc :listener/id listener-id)
@@ -952,89 +917,44 @@
         listener-type (assoc :listener/type listener-type)
         capability (assoc :listener/capability capability))))
 
-(defn listener-detached [stream workflow-id listener-id & [reason]]
+(defn ^{:stratum 2} listener-detached [stream workflow-id listener-id & [reason]]
   (-> (create-envelope stream :listener/detached workflow-id
                        (str "Listener " listener-id " detached"))
       (assoc :listener/id listener-id)
       (cond-> reason (assoc :listener/reason reason))))
 
-(defn annotation-created [stream workflow-id listener-id annotation-type & [content]]
+(defn ^{:stratum 2} annotation-created [stream workflow-id listener-id annotation-type & [content]]
   (-> (create-envelope stream :annotation/created workflow-id
                        (str "Annotation from " listener-id ": " (name annotation-type)))
       (assoc :listener/id listener-id
              :annotation/type annotation-type)
       (cond-> content (assoc :annotation/content content))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Chain lifecycle events
 ;; Chains are not workflow-scoped, so workflow-id is nil.
 ;; Message is derived from the event-type keyword.
-
-(defn chain-envelope
+(defn ^{:stratum 2} chain-envelope
   "Create an envelope for chain events. Chains are not workflow-scoped,
    so workflow-id is nil. Message is derived from the event-type keyword."
   [stream event-type]
   (create-envelope stream event-type nil (name event-type)))
 
-(defn chain-started [stream chain-id step-count]
-  (-> (chain-envelope stream :chain/started)
-      (assoc :chain/id chain-id
-             :chain/step-count step-count)))
-
-(defn chain-step-started [stream chain-id step-id step-index workflow-id]
-  (-> (chain-envelope stream :chain/step-started)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index
-             :step/workflow-id workflow-id)))
-
-(defn chain-step-completed [stream chain-id step-id step-index]
-  (-> (chain-envelope stream :chain/step-completed)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index)))
-
-(defn chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
-  (-> (chain-envelope stream :chain/step-failed)
-      (assoc :chain/id chain-id
-             :step/id step-id
-             :step/index step-index
-             :chain/error error)
-      (cond-> class (assoc :failure/class class))))
-
-(defn chain-completed [stream chain-id duration-ms step-count]
-  (-> (chain-envelope stream :chain/completed)
-      (assoc :chain/id chain-id
-             :chain/duration-ms duration-ms
-             :chain/step-count step-count)))
-
-(defn chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
-  (-> (chain-envelope stream :chain/failed)
-      (assoc :chain/id chain-id
-             :chain/failed-step step-id
-             :chain/error error)
-      (cond-> class (assoc :failure/class class))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Control action events (N8)
-
-(defn control-action-requested [stream workflow-id action-id action-type & [requester]]
+(defn ^{:stratum 2} control-action-requested [stream workflow-id action-id action-type & [requester]]
   (-> (create-envelope stream :control-action/requested workflow-id
                        (str "Control action " (name action-type) " requested"))
       (assoc :action/id action-id
              :action/type action-type)
       (cond-> requester (assoc :action/requester requester))))
 
-(defn control-action-executed [stream workflow-id action-id & [result]]
+(defn ^{:stratum 2} control-action-executed [stream workflow-id action-id & [result]]
   (-> (create-envelope stream :control-action/executed workflow-id
                        (str "Control action " action-id " executed"))
       (assoc :action/id action-id)
       (cond-> result (assoc :action/result result))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; OCI container events (N8)
-
-(defn container-started [stream workflow-id container-id & [opts]]
+(defn ^{:stratum 2} container-started [stream workflow-id container-id & [opts]]
   (-> (create-envelope stream :oci/container-started workflow-id
                        (str "Container " container-id " started"))
       (assoc :oci/container-id container-id)
@@ -1042,17 +962,15 @@
         (:image-digest opts) (assoc :oci/image-digest (:image-digest opts))
         (:trust-level opts)  (assoc :oci/trust-level (:trust-level opts)))))
 
-(defn container-completed [stream workflow-id container-id exit-code & [duration-ms]]
+(defn ^{:stratum 2} container-completed [stream workflow-id container-id exit-code & [duration-ms]]
   (-> (create-envelope stream :oci/container-completed workflow-id
                        (str "Container " container-id " completed (exit " exit-code ")"))
       (assoc :oci/container-id container-id
              :oci/exit-code exit-code)
       (cond-> duration-ms (assoc :oci/duration-ms duration-ms))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Tool supervision events (N6/N8)
-
-(defn tool-use-evaluated
+(defn ^{:stratum 2} tool-use-evaluated
   "Emit when a tool-use request is evaluated by the supervisor.
 
    Captures both regex and meta-eval decisions for evidence trail."
@@ -1067,7 +985,7 @@
         (:confidence opts) (assoc :supervision/confidence (:confidence opts))
         (:phase opts)      (assoc :workflow/phase (:phase opts)))))
 
-(defn meta-loop-halt-requested
+(defn ^{:stratum 2} meta-loop-halt-requested
   "Emit when a meta-agent signals the meta-loop must halt the workflow.
 
    The REFUSE act for meta-supervision: makes the halt first-class on the stream
@@ -1084,10 +1002,8 @@
         (:detail opts) (assoc :halt/detail (:detail opts))
         (:phase opts)  (assoc :workflow/phase (:phase opts)))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Control plane events
-
-(defn cp-agent-registered
+(defn ^{:stratum 2} cp-agent-registered
   "Emit when an external agent registers with the control plane."
   [stream workflow-id agent-id vendor & [opts]]
   (-> (create-envelope stream :control-plane/agent-registered workflow-id
@@ -1103,7 +1019,7 @@
         (:heartbeat-interval-ms opts)
         (assoc :cp/heartbeat-interval-ms (:heartbeat-interval-ms opts)))))
 
-(defn cp-agent-heartbeat
+(defn ^{:stratum 2} cp-agent-heartbeat
   "Emit when the control plane receives a heartbeat from an agent."
   [stream workflow-id agent-id status & [opts]]
   (-> (create-envelope stream :control-plane/agent-heartbeat workflow-id
@@ -1114,7 +1030,7 @@
         (:task opts) (assoc :cp/task (:task opts))
         (:metrics opts) (assoc :cp/metrics (:metrics opts)))))
 
-(defn cp-agent-state-changed
+(defn ^{:stratum 2} cp-agent-state-changed
   "Emit when an agent's normalized state changes."
   [stream workflow-id agent-id from-status to-status]
   (-> (create-envelope stream :control-plane/agent-state-changed workflow-id
@@ -1123,7 +1039,7 @@
              :cp/from-status from-status
              :cp/to-status to-status)))
 
-(defn cp-decision-created
+(defn ^{:stratum 2} cp-decision-created
   "Emit when an agent submits a decision request."
   [stream workflow-id agent-id decision-id summary & [priority-or-opts]]
   (let [opts (if (map? priority-or-opts)
@@ -1141,7 +1057,7 @@
         (:options opts) (assoc :cp/options (vec (:options opts)))
         (:deadline opts) (assoc :cp/deadline (:deadline opts))))))
 
-(defn cp-decision-resolved
+(defn ^{:stratum 2} cp-decision-resolved
   "Emit when a human resolves a decision."
   [stream workflow-id decision-id resolution & [comment]]
   (-> (create-envelope stream :control-plane/decision-resolved workflow-id
@@ -1150,7 +1066,7 @@
              :cp/resolution resolution)
       (cond-> comment (assoc :cp/comment comment))))
 
-(defn intervention-requested
+(defn ^{:stratum 2} intervention-requested
   "Emit when a bounded supervisory intervention is created."
   [stream workflow-id intervention]
   (let [message (messages/t :supervisory/intervention-requested
@@ -1159,7 +1075,7 @@
                          message)
         (merge intervention))))
 
-(defn intervention-state-changed
+(defn ^{:stratum 2} intervention-state-changed
   "Emit when an InterventionRequest changes lifecycle state."
   [stream workflow-id intervention-id to-state & [opts]]
   (let [message (messages/t :supervisory/intervention-state-changed
@@ -1210,12 +1126,10 @@
           (assoc :intervention/approval-required?
                  (:intervention/approval-required? opts))))))
 
-;------------------------------------------------------------------------------ Layer 5.5
 ;; Zettelkasten lifecycle events (added for miniforge-fleet's Phase
 ;; E.3 outbox path — Fleet's ingest consumes these to grow the
 ;; cross-instance event log).
-
-(defn zettel-promoted
+(defn ^{:stratum 2} zettel-promoted
   "Emit when a zettel revision transitions to `:trusted` state and
    becomes eligible to ride the Fleet event log.
 
@@ -1277,10 +1191,8 @@
       (:repo/id opts)      (assoc :repo/id (:repo/id opts))
       (:auth/context opts) (assoc :auth/context (:auth/context opts)))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; PR scoring events (N5-delta-2 §4.1)
-
-(defn pr-created
+(defn ^{:stratum 2} pr-created
   "Emit when a workflow-owned PR is created.
 
    This is the canonical fine-grained event that lets `supervisory-state`
@@ -1298,7 +1210,7 @@
         author      (assoc :pr/author author)
         merge-order (assoc :pr/merge-order merge-order))))
 
-(defn pr-scored
+(defn ^{:stratum 2} pr-scored
   "Emit when the pr-scoring component has computed readiness, risk, and
    policy scores for a PR, per N5-delta-2 §4.1. Produces the only event
    carrying the four `:pr/readiness`, `:pr/risk`, `:pr/policy`, and
@@ -1327,10 +1239,8 @@
         policy         (assoc :pr/policy policy)
         recommendation (assoc :pr/recommendation recommendation))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Reliability metric events (N3 §3.17, N1 §5.5)
-
-(defn sli-computed
+(defn ^{:stratum 2} sli-computed
   "Emit when an SLI value is computed over a rolling window."
   [stream sli-name value window & [opts]]
   (-> (create-envelope stream :reliability/sli-computed nil
@@ -1345,7 +1255,7 @@
         (:tier opts)       (assoc :sli/tier (:tier opts))
         (:dimensions opts) (assoc :sli/dimensions (:dimensions opts)))))
 
-(defn slo-breach
+(defn ^{:stratum 2} slo-breach
   "Emit when an SLO target is missed for :standard or :critical tiers."
   [stream sli-name target actual tier window]
   (-> (create-envelope stream :reliability/slo-breach nil
@@ -1360,7 +1270,7 @@
              :slo/tier tier
              :slo/window window)))
 
-(defn error-budget-update
+(defn ^{:stratum 2} error-budget-update
   "Emit when error budget state is recomputed."
   [stream tier sli remaining burn-rate window]
   (-> (create-envelope stream :reliability/error-budget-update nil
@@ -1375,7 +1285,7 @@
              :budget/burn-rate burn-rate
              :budget/window window)))
 
-(defn degradation-mode-changed
+(defn ^{:stratum 2} degradation-mode-changed
   "Emit when the system transitions between degradation modes (N1 §5.5.5)."
   [stream from-mode to-mode trigger]
   (-> (create-envelope stream :reliability/degradation-mode-changed nil
@@ -1387,7 +1297,7 @@
              :degradation/to to-mode
              :degradation/trigger trigger)))
 
-(defn safe-mode-entered
+(defn ^{:stratum 2} safe-mode-entered
   "Emit when safe-mode is activated (N8 §3.4.4)."
   [stream trigger & [details]]
   (-> (create-envelope stream :safe-mode/entered nil
@@ -1395,7 +1305,7 @@
       (assoc :safe-mode/trigger trigger)
       (cond-> details (assoc :safe-mode/trigger-details details))))
 
-(defn safe-mode-exited
+(defn ^{:stratum 2} safe-mode-exited
   "Emit when safe-mode is deactivated (N8 §3.4.4)."
   [stream exited-by justification duration-ms workflows-queued]
   (-> (create-envelope stream :safe-mode/exited nil
@@ -1405,13 +1315,7 @@
              :safe-mode/duration-ms duration-ms
              :safe-mode/workflows-queued workflows-queued)))
 
-(defn- dependency-id-string
-  [dependency-id]
-  (if (keyword? dependency-id)
-    (name dependency-id)
-    (str dependency-id)))
-
-(defn- dependency-event
+(defn- ^{:stratum 2} dependency-event
   [stream event-type dependency previous-status message-key]
   (let [dependency-id (:dependency/id dependency)
         status (:dependency/status dependency)
@@ -1423,28 +1327,8 @@
         (cond-> previous-status
           (assoc :dependency/previous-status previous-status)))))
 
-(defn dependency-health-updated
-  "Emit when a dependency health projection changes."
-  [stream dependency & [previous-status]]
-  (dependency-event stream
-                    :dependency/health-updated
-                    dependency
-                    previous-status
-                    :dependency/health-updated))
-
-(defn dependency-recovered
-  "Emit when a dependency returns to healthy status."
-  [stream dependency & [previous-status]]
-  (dependency-event stream
-                    :dependency/recovered
-                    dependency
-                    previous-status
-                    :dependency/recovered))
-
-;------------------------------------------------------------------------------ Layer 6.1
 ;; Repository intelligence event constructors (RN-19/20)
-
-(defn repo-index-quality-measured
+(defn ^{:stratum 2} repo-index-quality-measured
   "Build a :repo-index/quality-measured event.
 
    Emitted by the index quality tracker (RN-19) when it samples the
@@ -1468,7 +1352,7 @@
              :index/staleness-ms staleness-ms)
       (cond-> (:measured-at opts) (assoc :index/measured-at (:measured-at opts)))))
 
-(defn repo-index-coverage-changed
+(defn ^{:stratum 2} repo-index-coverage-changed
   "Build a :repo-index/coverage-changed event.
 
    Emitted by the index quality tracker (RN-20) when the coverage ratio
@@ -1491,10 +1375,8 @@
              :index/coverage coverage)
       (cond-> (:changed-files opts) (assoc :index/changed-files (:changed-files opts)))))
 
-;------------------------------------------------------------------------------ Layer 6.2
 ;; Meta-loop events
-
-(defn meta-loop-cycle-completed
+(defn ^{:stratum 2} meta-loop-cycle-completed
   "Emit when a meta-loop cycle completes."
   [stream summary]
   (-> (create-envelope stream :meta-loop/cycle-completed nil
@@ -1504,7 +1386,7 @@
                                (:proposals summary 0)))
       (merge summary)))
 
-(defn meta-loop-cycle-failed
+(defn ^{:stratum 2} meta-loop-cycle-failed
   "Emit when a meta-loop cycle throws an unhandled exception."
   [stream error]
   (-> (create-envelope stream :meta-loop/cycle-failed nil
@@ -1512,10 +1394,8 @@
       (assoc :meta-loop/error (ex-message error)
              :meta-loop/error-class (.getName (class error)))))
 
-;------------------------------------------------------------------------------ Layer 6.5
 ;; Agent stream-stall and session events (GROUP 1+4, GROUP 2)
-
-(defn agent-session-captured
+(defn ^{:stratum 2} agent-session-captured
   "Build an :agent/session-captured event recording the backend session ID
    captured from the initial agent handshake.
 
@@ -1537,7 +1417,7 @@
              :agent/backend backend
              :agent/session-id session-id)))
 
-(defn agent-stream-stalled
+(defn ^{:stratum 2} agent-stream-stalled
   "Build an :agent/stream-stalled event indicating the agent output stream
    has gone silent beyond the configured gap threshold.
 
@@ -1562,39 +1442,27 @@
              :stream/gap-duration-ms gap-duration-ms
              :agent/backend backend)))
 
-;------------------------------------------------------------------------------ Layer 7
-;; Observer / knowledge failure events
-
-(defn- failure-message
-  [failure]
-  (cond
-    (instance? Throwable failure) (ex-message failure)
-    (map? failure) (or (:error failure) (:message failure) (pr-str failure))
-    (some? failure) (str failure)
-    :else nil))
-
-(defn observer-signal-failed
+(defn ^{:stratum 2} observer-signal-failed
   "Emit when observe-workflow-signal! fails to forward a signal to the meta-loop."
   [stream workflow-id error]
   (-> (create-envelope stream :observer/signal-failed workflow-id
                        (str "Observer signal failed: " (failure-message error)))
       (assoc :observer/error (failure-message error))))
 
-(defn knowledge-synthesis-failed
+(defn ^{:stratum 2} knowledge-synthesis-failed
   "Emit when synthesize-patterns! fails."
   [stream error]
   (-> (create-envelope stream :knowledge/synthesis-failed nil
                        (str "Knowledge synthesis failed: " (failure-message error)))
       (assoc :knowledge/error (failure-message error))))
 
-(defn knowledge-promotion-failed
+(defn ^{:stratum 2} knowledge-promotion-failed
   "Emit when promote-mature-learnings! fails."
   [stream error]
   (-> (create-envelope stream :knowledge/promotion-failed nil
                        (str "Knowledge promotion failed: " (failure-message error)))
       (assoc :knowledge/error (failure-message error))))
 
-;------------------------------------------------------------------------------ Layer 9
 ;; Routing trigger events (N5-delta-4 §4.2)
 ;;
 ;; The automation-edge-correlator classifies these via
@@ -1603,8 +1471,7 @@
 ;; triggers are PR-scoped, not workflow-scoped; the handler workflow's
 ;; `:workflow/started` (with `:routing/trigger-event-id` per N15-4) is
 ;; what brings the workflow id into scope on the correlator side.
-
-(defn pr-monitor-review-comments-arrived
+(defn ^{:stratum 2} pr-monitor-review-comments-arrived
   "Emit when the GitHub webhook (or polling fallback) reports new review
    comments on a PR Miniforge owns (N5-delta-4 §4.2.1).
 
@@ -1623,7 +1490,7 @@
                       :comments/count comments-count))
      agent-session-id (assoc :comments/agent-session-id agent-session-id))))
 
-(defn pr-monitor-ci-failed
+(defn ^{:stratum 2} pr-monitor-ci-failed
   "Emit when a CI status transitions to a non-success terminal state on a
    PR Miniforge owns (N5-delta-4 §4.2.2).
 
@@ -1639,7 +1506,7 @@
              :ci/check-name check-name
              :ci/conclusion conclusion)))
 
-(defn standards-review-posted
+(defn ^{:stratum 2} standards-review-posted
   "Emit when a standards-review comment lands on a PR (N5-delta-4 §4.2.3).
 
    `severity` is an open keyword — known values: `:advisory`, `:blocking`.
@@ -1657,6 +1524,88 @@
                       :review/severity severity))
      affected-workflow-run-id (assoc :affected/workflow-run-id
                                      affected-workflow-run-id))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} phase-completed [stream workflow-id phase & [result]]
+  (let [outcome (get result :outcome :success)
+        request (phase-transition-request result)
+        redirect-to (or (redirect-target result)
+                        (:redirect-to result))]
+    (-> (create-envelope stream :workflow/phase-completed workflow-id
+                         (str (name phase) " phase " (name outcome)))
+        (assoc :workflow/phase phase
+               :phase/outcome outcome)
+        (cond->
+          (:duration-ms result) (assoc :phase/duration-ms (:duration-ms result))
+          (:review-decision result) (assoc :phase/review-decision (:review-decision result))
+          (:phase/blocked-reason result) (assoc :phase/blocked-reason (:phase/blocked-reason result))
+          (:artifacts result) (assoc :phase/artifacts (:artifacts result))
+          (:error result) (assoc :phase/error (:error result))
+          request (assoc :phase/transition-request request)
+          redirect-to (assoc :phase/redirect-to redirect-to)
+          (:tokens result) (assoc :phase/tokens (:tokens result))
+          (:cost-usd result) (assoc :phase/cost-usd (:cost-usd result))
+          (:meta result) (assoc :phase/meta (:meta result))
+          (:phase/termination-reason result)
+          (assoc :phase/termination-reason (:phase/termination-reason result))))))
+
+(defn ^{:stratum 3} chain-started [stream chain-id step-count]
+  (-> (chain-envelope stream :chain/started)
+      (assoc :chain/id chain-id
+             :chain/step-count step-count)))
+
+(defn ^{:stratum 3} chain-step-started [stream chain-id step-id step-index workflow-id]
+  (-> (chain-envelope stream :chain/step-started)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index
+             :step/workflow-id workflow-id)))
+
+(defn ^{:stratum 3} chain-step-completed [stream chain-id step-id step-index]
+  (-> (chain-envelope stream :chain/step-completed)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index)))
+
+(defn ^{:stratum 3} chain-step-failed [stream chain-id step-id step-index error & [{:keys [failure/class]}]]
+  (-> (chain-envelope stream :chain/step-failed)
+      (assoc :chain/id chain-id
+             :step/id step-id
+             :step/index step-index
+             :chain/error error)
+      (cond-> class (assoc :failure/class class))))
+
+(defn ^{:stratum 3} chain-completed [stream chain-id duration-ms step-count]
+  (-> (chain-envelope stream :chain/completed)
+      (assoc :chain/id chain-id
+             :chain/duration-ms duration-ms
+             :chain/step-count step-count)))
+
+(defn ^{:stratum 3} chain-failed [stream chain-id step-id error & [{:keys [failure/class]}]]
+  (-> (chain-envelope stream :chain/failed)
+      (assoc :chain/id chain-id
+             :chain/failed-step step-id
+             :chain/error error)
+      (cond-> class (assoc :failure/class class))))
+
+(defn ^{:stratum 3} dependency-health-updated
+  "Emit when a dependency health projection changes."
+  [stream dependency & [previous-status]]
+  (dependency-event stream
+                    :dependency/health-updated
+                    dependency
+                    previous-status
+                    :dependency/health-updated))
+
+(defn ^{:stratum 3} dependency-recovered
+  "Emit when a dependency returns to healthy status."
+  [stream dependency & [previous-status]]
+  (dependency-event stream
+                    :dependency/recovered
+                    dependency
+                    previous-status
+                    :dependency/recovered))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

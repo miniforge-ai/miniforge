@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.anomaly.listeners-anomaly-test
   "Coverage for `listeners/register-listener!`, `submit-annotation!`,
    and `submit-control-action!` boundary escalation via
@@ -33,9 +32,10 @@
   (:import
    (clojure.lang ExceptionInfo)))
 
-;------------------------------------------------------------------------------ register-listener! — invalid capability
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest register-listener-invalid-capability-throws-anomaly
+;------------------------------------------------------------------------------ register-listener! — invalid capability
+(deftest ^{:stratum 0} register-listener-invalid-capability-throws-anomaly
   (testing "invalid capability raises :anomalies/incorrect via throw-anomaly!"
     (let [stream (es/create-event-stream {:sinks []})]
       (is (thrown-with-msg?
@@ -48,7 +48,7 @@
              :listener/identity {:principal "test"}
              :listener/callback (fn [_])}))))))
 
-(deftest register-listener-invalid-capability-carries-data
+(deftest ^{:stratum 0} register-listener-invalid-capability-carries-data
   (testing "anomaly ex-data carries :capability and :valid set"
     (let [stream (es/create-event-stream {:sinks []})
           thrown (try
@@ -66,8 +66,7 @@
       (is (= :anomalies/incorrect (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ submit-annotation! — listener not found
-
-(deftest submit-annotation-listener-not-found-throws-anomaly
+(deftest ^{:stratum 0} submit-annotation-listener-not-found-throws-anomaly
   (testing "missing listener raises :anomalies/not-found via throw-anomaly!"
     (let [stream (es/create-event-stream {:sinks []})]
       (is (thrown-with-msg?
@@ -80,8 +79,7 @@
              :annotation/content "test"}))))))
 
 ;------------------------------------------------------------------------------ submit-annotation! — insufficient capability
-
-(deftest submit-annotation-insufficient-capability-throws-anomaly
+(deftest ^{:stratum 0} submit-annotation-insufficient-capability-throws-anomaly
   (testing "observe-only listener cannot submit annotation"
     (let [stream (es/create-event-stream {:sinks []})
           listener-id (es/register-listener!
@@ -99,7 +97,7 @@
             {:annotation/type :warning
              :annotation/content "x"}))))))
 
-(deftest submit-annotation-insufficient-capability-carries-data
+(deftest ^{:stratum 0} submit-annotation-insufficient-capability-carries-data
   (testing "anomaly ex-data carries listener-id + capability + required"
     (let [stream (es/create-event-stream {:sinks []})
           listener-id (es/register-listener!
@@ -123,8 +121,7 @@
       (is (= :anomalies/forbidden (:anomaly/category (ex-data thrown)))))))
 
 ;------------------------------------------------------------------------------ submit-control-action! — listener not found
-
-(deftest submit-control-action-listener-not-found-throws-anomaly
+(deftest ^{:stratum 0} submit-control-action-listener-not-found-throws-anomaly
   (testing "missing listener raises :anomalies/not-found via throw-anomaly!"
     (let [stream (es/create-event-stream {:sinks []})]
       (is (thrown-with-msg?
@@ -137,8 +134,7 @@
             (fn [_] :ok)))))))
 
 ;------------------------------------------------------------------------------ submit-control-action! — insufficient capability
-
-(deftest submit-control-action-insufficient-capability-throws-anomaly
+(deftest ^{:stratum 0} submit-control-action-insufficient-capability-throws-anomaly
   (testing "advise-only listener cannot submit control action"
     (let [stream (es/create-event-stream {:sinks []})
           listener-id (es/register-listener!
