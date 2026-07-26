@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.datalevin-store
   "Datalevin-based artifact store implementation (JVM only).
 
@@ -28,9 +27,9 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Datalevin schema
 
-(def datalevin-schema
+;; Datalevin schema
+(def ^{:stratum 0} datalevin-schema
   "Datalevin schema for artifact storage."
   {:artifact/id       {:db/unique :db.unique/identity}
    :artifact/type     {}
@@ -38,10 +37,8 @@
    :artifact/parents  {:db/cardinality :db.cardinality/many}
    :artifact/children {:db/cardinality :db.cardinality/many}})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; DatalevinStore implementation
-
-(defrecord DatalevinStore [conn logger]
+(defrecord ^{:stratum 0} DatalevinStore [conn logger]
   p/ArtifactStore
   (save [_this artifact]
     (let [id (:artifact/id artifact)]
@@ -93,10 +90,10 @@
   (close [_this]
     (d/close conn)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public API
+;------------------------------------------------------------------------------ Layer 1
 
-(defn create-datalevin-store
+;; Public API
+(defn ^{:stratum 1} create-datalevin-store
   "Create a new Datalevin-based artifact store (JVM only).
 
    Options:

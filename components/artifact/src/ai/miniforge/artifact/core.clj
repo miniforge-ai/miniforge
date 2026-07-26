@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.core
   "Artifact storage and provenance tracking.
    Layer 0: Pure functions for artifact operations
@@ -28,9 +27,9 @@
    - ai.miniforge.artifact.datalevin-store (JVM only)")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure functions
 
-(defn build-artifact
+;; Pure functions
+(defn ^{:stratum 0} build-artifact
   "Build an artifact map from components."
   [{:keys [id type version content origin parents metadata]
     :or {parents [] metadata {}}}]
@@ -42,12 +41,12 @@
            :artifact/metadata metadata}
     origin (assoc :artifact/origin origin)))
 
-(defn add-parent
+(defn ^{:stratum 0} add-parent
   "Add a parent artifact ID to an artifact's parents list."
   [artifact parent-id]
   (update artifact :artifact/parents (fnil conj []) parent-id))
 
-(defn add-child
+(defn ^{:stratum 0} add-child
   "Add a child artifact ID to an artifact's children list."
   [artifact child-id]
   (update artifact :artifact/children (fnil conj []) child-id))
