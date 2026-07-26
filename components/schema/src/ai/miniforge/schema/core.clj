@@ -28,7 +28,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Base types and registries
+;; Base enum vocabularies and severity helpers
 (def ^{:stratum 0} agent-roles
   [:planner :architect :implementer :tester :reviewer :sre :security :release :historian :operator])
 
