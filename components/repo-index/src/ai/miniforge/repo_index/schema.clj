@@ -32,7 +32,7 @@
    [:language [:maybe :string]]
    [:generated? :boolean]])
 
-;; Repo Map Slice
+;; RepoMapEntry
 (def ^{:stratum 0} RepoMapEntry
   [:map
    [:path [:string {:min 1}]]
@@ -40,7 +40,7 @@
    [:lines :int]
    [:size :int]])
 
-;; Search Hit
+;; Snippet
 (def ^{:stratum 0} Snippet
   [:map
    [:start-line :int]
@@ -60,6 +60,7 @@
    [:languages [:map-of :string :int]]
    [:indexed-at inst?]])
 
+;; RepoMapSlice
 (def ^{:stratum 1} RepoMapSlice
   [:map
    [:tree-sha [:string {:min 7}]]
@@ -69,6 +70,7 @@
    [:truncated? :boolean]
    [:token-estimate :int]])
 
+;; SearchHit
 (def ^{:stratum 1} SearchHit
   [:map
    [:path [:string {:min 1}]]
