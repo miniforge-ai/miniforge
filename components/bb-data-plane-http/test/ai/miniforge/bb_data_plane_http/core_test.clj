@@ -16,9 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.bb-data-plane-http.core-test
-  "Exercises core's resolution and HTTP-helper layers. Process lifecycle
-   (`build!`/`start!`) is exercised by consumer repos running
-   `bb test:signals:fixtures` or equivalent."
+  "Exercises core's pure helpers: base-URL resolution, path builders, HTTP
+   helpers, and `wait-ready!`. Process lifecycle (`build!`/`start!`) is exercised
+   by consumer repos running `bb test:signals:fixtures` or equivalent."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
             [babashka.process :as p]
             [clojure.test :refer [deftest testing is]]
