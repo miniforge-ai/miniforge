@@ -56,7 +56,7 @@
    :library          :foundations
    :documentation    :adapters})
 
-;; RepoNode and RepoEdge schemas
+;; Standalone map schemas (no dependency on the registry or each other)
 (def ^{:stratum 0} WatchConfig
   [:map
    [:labels-include {:optional true} [:vector string?]]
