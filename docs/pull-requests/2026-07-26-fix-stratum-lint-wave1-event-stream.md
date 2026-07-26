@@ -232,6 +232,26 @@ decision — see Related Issues for the follow-up. Re-ran `--fix` (zero
 diff), `clj-kondo` (0 errors/warnings), and `listeners_test.clj` (5
 tests, 21 assertions, 0 failures/errors) after the change.
 
+### Review-round fix: a stale namespace-docstring layer summary on `approval.clj`
+
+GitHub Copilot's third review pass flagged `approval.clj`'s namespace
+docstring: it claimed a 4-layer breakdown (`Layer 0: Approval request
+creation`, `Layer 1: Approval signing and status checking`, `Layer 2:
+Approval manager`, `Layer 3: Approval event constructors`) that no
+longer matches the file's real `^{:stratum n}` tags — verified
+directly by listing every top-level def's stratum: the file collapsed
+to 3 real layers (0, 1, 2) when `--fix` first ran, with a completely
+different grouping (response predicates, expiry/signing checks, the
+manager, and the event constructors are ALL real stratum 0; request
+creation/signing/status-checking is stratum 1; `list-approvals` alone
+is stratum 2). The same bug class this program has hit repeatedly
+(`adapter-claude-code`, `reliability`, `observer` — a stratum-lint
+`--fix` pass changes the real layer count/grouping but never touches
+prose describing the old one). Rewrote the docstring's layer summary
+to match the verified real structure. Re-ran `--fix` (zero diff),
+`clj-kondo` (0 errors/warnings), and `approval_test.clj` (9 tests, 45
+assertions, 0 failures/errors) after the change.
+
 ## Testing Plan
 
 1. Confirmed the stratum-lint pin in `tasks/stratum.clj`
@@ -330,6 +350,11 @@ tests, 21 assertions, 0 failures/errors) after the change.
     `listeners.clj`'s stale `privacy->min-capability` docstring above.
     Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
     warnings), and `listeners_test.clj` directly (5 tests, 21
+    assertions, 0 failures/errors).
+13. Third Copilot review pass (after the `listeners.clj` push) flagged
+    `approval.clj`'s stale namespace-docstring layer summary above.
+    Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
+    warnings), and `approval_test.clj` directly (9 tests, 45
     assertions, 0 failures/errors).
 
 ## Deployment Plan
@@ -473,4 +498,7 @@ time for these 12 files until Wave 2 splits them.
       map from code/spec alone; fixed the docstring to match current
       behavior rather than changing runtime access-control behavior;
       underlying policy question flagged separately in Related Issues
+- [x] Third Copilot review pass comment (`approval.clj`'s stale
+      namespace-docstring layer summary) verified directly against the
+      file's actual `^{:stratum n}` tags and fixed
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

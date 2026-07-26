@@ -22,10 +22,10 @@
    signing from authorized signers. Approval states flow:
    pending → approved | rejected | expired | cancelled.
 
-   Layer 0: Approval request creation
-   Layer 1: Approval signing and status checking
-   Layer 2: Approval manager (atom-backed store)
-   Layer 3: Approval event constructors"
+   Layer 0: Response predicates, expiry/signing checks, the approval
+            manager (atom-backed store), and approval event constructors
+   Layer 1: Approval request creation, signing, and status checks
+   Layer 2: Approval listing"
   (:require
    [ai.miniforge.event-stream.core :as core]
    [ai.miniforge.response.interface :as response]))
