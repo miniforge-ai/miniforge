@@ -255,7 +255,13 @@
   (testing "empty body does not alter description"
     (let [content "---\ntitle: T\ndescription: Only frontmatter\n---\n"
           result  (spec-parser/parse-content :markdown content)]
-      (is (= "Only frontmatter" (:spec/description result))))))
+      (is (= "Only frontmatter" (:spec/description result)))))
+
+  (testing "frontmatter missing :description does not leave a stray leading blank line"
+    (let [content (str "---\ntitle: T\n---\n\n"
+                       "Body prose only, no frontmatter description.")
+          result  (spec-parser/parse-content :markdown content)]
+      (is (= "Body prose only, no frontmatter description." (:spec/description result))))))
 
 (deftest ^{:stratum 0} normalize-workflow-type-default-test
   (testing "workflow-type defaults to :canonical-sdlc when not provided"

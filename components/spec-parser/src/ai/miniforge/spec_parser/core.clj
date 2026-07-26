@@ -212,7 +212,9 @@
 
    Returns:
    - {:valid? true} if valid
-   - {:valid? false :errors [...]} if invalid"
+   - {:valid? false :errors {...}} if invalid — :errors is the map
+     `malli.error/humanize` returns (field key -> list of error strings),
+     not a flat vector"
   [spec]
   (if (schema/valid-spec-payload? spec)
     {:valid? true}
@@ -259,6 +261,8 @@
 
    With frontmatter: structured fields are namespaced (:title → :spec/title)
    and the body is appended to :spec/description for full agent context.
+   If frontmatter has no :description, the appended body becomes the
+   whole (trimmed) description rather than trailing a blank one.
 
    Without frontmatter: title is inferred from the first H1 heading and the
    remaining body becomes :spec/description. No error is raised — the document
@@ -271,7 +275,8 @@
           body   (:body parsed)]
       (cond-> fm
         (and body (not (str/blank? body)))
-        (update :spec/description #(str % "\n\n" (str/trim body)))))
+        (update :spec/description
+                #(str/trim (str (or % "") "\n\n" (str/trim body))))))
     ;; No frontmatter — synthesize spec metadata from document structure
     (decorate-from-body content)))
 

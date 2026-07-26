@@ -111,7 +111,9 @@
 
    Returns:
    - {:valid? true} if valid
-   - {:valid? false :errors [...]} if invalid"
+   - {:valid? false :errors {...}} if invalid — :errors is the map
+     `malli.error/humanize` returns (field key -> list of error strings),
+     not a flat vector"
   [spec]
   (core/validate-spec spec))
 
