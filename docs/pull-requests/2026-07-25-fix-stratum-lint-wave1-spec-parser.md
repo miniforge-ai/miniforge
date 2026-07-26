@@ -83,9 +83,9 @@ component has none (all comments already own-line).
 
 ### Review follow-up
 
-Two rounds of Copilot review comments landed on this PR and were folded
-in as a second commit (`a6894c452`), separate from the mechanical `--fix`
-commit above:
+Three rounds of Copilot review comments landed on this PR and were
+folded in as follow-up commits (`a6894c452`, `8da2807f0`, and one more),
+separate from the mechanical `--fix` commit above:
 
 1. `parse-markdown`'s frontmatter/body merge used `(str % "\n\n" ...)`.
    Copilot claimed this produces a literal `"nil\n\n..."` description
@@ -111,6 +111,17 @@ commit above:
    `spec-key->ns` (the Layer 0 key -> namespace map), it isn't itself
    Layer 0. Corrected the docstring's layer breakdown to name
    `spec-key->ns` at Layer 0 and `namespace-frontmatter-keys` at Layer 1.
+5. A further comment caught that `parse-spec-file`'s docstring listed
+   "Invalid spec schema" among its throw conditions. Verified against
+   the full function body and the `(comment ...)` block after it:
+   `parse-spec-file` never calls `validate-spec` or any Malli check —
+   it only escalates anomalies from `detect-format`, `parse-content`,
+   and `normalize-spec` (whose only shape check is presence of
+   `:spec/title`/`:spec/description`, not full schema validation).
+   `validate-spec` is a separate, uncalled function from this one's
+   perspective. Replaced the false throw condition with the real one
+   (missing title/description) and added a note that full schema
+   validation is a separate, caller-invoked step.
 
 Each Copilot thread was replied to with the empirical finding (correct,
 partially correct, or — for #3/#4 — direct fixes) before being resolved.

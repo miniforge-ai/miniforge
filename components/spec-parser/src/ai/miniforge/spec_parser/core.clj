@@ -334,7 +334,10 @@
    - File not found
    - Unsupported format
    - Parse errors
-   - Invalid spec schema"
+   - Missing :spec/title or :spec/description (normalize-spec's shape check)
+
+   Full Malli schema validation (`validate-spec`) is a separate,
+   caller-invoked step — this function does not call it."
   [path]
   (when-let [anom (file-not-found-anomaly path)]
     (escalate! anom))
