@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.taxonomy
   "First-class taxonomy artifact — independently versioned category trees.
 
@@ -23,9 +22,16 @@
    the runtime resolves category IDs to display labels and sort orders
    without any knowledge of Dewey codes or MDC format.
 
-   Layer 0: Malli schemas for Taxonomy, TaxonomyCategory, TaxonomyAlias
-   Layer 1: Loading and validation
-   Layer 2: Canonical taxonomy export from mdc-compiler dewey-ranges
+   Layer 0: TaxonomyCategory/TaxonomyAlias/TaxonomyRef schemas, category-by-id,
+     resolve-alias
+   Layer 1: Taxonomy schema (composes TaxonomyCategory/TaxonomyAlias),
+     category-title, category-order (over category-by-id)
+   Layer 2: valid-taxonomy?, validate-taxonomy (over the Taxonomy schema)
+   Layer 3: load-taxonomy, load-taxonomy-from-classpath (over
+     validate-taxonomy)
+
+   4 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem.
 
    Related:
      specs/normative/N4-policy-packs.md §2.1 — Taxonomy artifact spec
@@ -37,9 +43,9 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas
 
-(def TaxonomyCategory
+;; Schemas
+(def ^{:stratum 0} TaxonomyCategory
   "Schema for a single category within a taxonomy.
 
    :category/id     — Stable namespaced keyword, immutable after publication
@@ -54,14 +60,39 @@
    [:category/parent {:optional true} [:maybe keyword?]]
    [:category/order int?]])
 
-(def TaxonomyAlias
+(def ^{:stratum 0} TaxonomyAlias
   "Schema for a taxonomy alias — stable logical name to category ID mapping.
    Allows decoupling rule category references from taxonomy reorganization."
   [:map
    [:alias/name keyword?]
    [:alias/target keyword?]])
 
-(def Taxonomy
+(def ^{:stratum 0} TaxonomyRef
+  "Schema for a taxonomy reference within a pack manifest.
+   Packs declare which taxonomy they target and the minimum version required."
+  [:map
+   [:taxonomy/id keyword?]
+   [:taxonomy/min-version string?]])
+
+;; Lookup helpers
+(defn ^{:stratum 0} category-by-id
+  [taxonomy category-id]
+  (some (fn [cat]
+          (when (= category-id (:category/id cat))
+            cat))
+        (:taxonomy/categories taxonomy)))
+
+(defn ^{:stratum 0} resolve-alias
+  [taxonomy alias-kw]
+  (or (some (fn [a]
+              (when (= alias-kw (:alias/name a))
+                (:alias/target a)))
+            (:taxonomy/aliases taxonomy))
+      alias-kw))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Taxonomy
   "Schema for a taxonomy artifact.
 
    Taxonomies are independently versioned category trees. Each pack
@@ -75,31 +106,35 @@
    [:taxonomy/categories [:vector TaxonomyCategory]]
    [:taxonomy/aliases {:optional true} [:vector TaxonomyAlias]]])
 
-(def TaxonomyRef
-  "Schema for a taxonomy reference within a pack manifest.
-   Packs declare which taxonomy they target and the minimum version required."
-  [:map
-   [:taxonomy/id keyword?]
-   [:taxonomy/min-version string?]])
+(defn ^{:stratum 1} category-title
+  [taxonomy category-id]
+  (let [resolved (resolve-alias taxonomy category-id)]
+    (:category/title (category-by-id taxonomy resolved))))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 1} category-order
+  [taxonomy category-id]
+  (let [resolved (resolve-alias taxonomy category-id)]
+    (or (:category/order (category-by-id taxonomy resolved))
+        Integer/MAX_VALUE)))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Validation
-
-(defn valid-taxonomy?
+(defn ^{:stratum 2} valid-taxonomy?
   [value]
   (m/validate Taxonomy value))
 
-(defn validate-taxonomy
+(defn ^{:stratum 2} validate-taxonomy
   [value]
   (if (m/validate Taxonomy value)
     {:valid? true :errors nil}
     {:valid? false
      :errors (me/humanize (m/explain Taxonomy value))}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Loading
+;------------------------------------------------------------------------------ Layer 3
 
-(defn load-taxonomy
+;; Loading
+(defn ^{:stratum 3} load-taxonomy
   "Load a taxonomy artifact from an EDN file.
 
    Arguments:
@@ -121,7 +156,7 @@
     (catch Exception e
       {:success? false :error (.getMessage e)})))
 
-(defn load-taxonomy-from-classpath
+(defn ^{:stratum 3} load-taxonomy-from-classpath
   "Load a taxonomy from the classpath resources.
 
    Arguments:
@@ -143,35 +178,6 @@
       (catch Exception e
         {:success? false :error (.getMessage e)}))
     {:success? false :error (str "Resource not found: " resource-path)}))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Lookup helpers
-
-(defn category-by-id
-  [taxonomy category-id]
-  (some (fn [cat]
-          (when (= category-id (:category/id cat))
-            cat))
-        (:taxonomy/categories taxonomy)))
-
-(defn resolve-alias
-  [taxonomy alias-kw]
-  (or (some (fn [a]
-              (when (= alias-kw (:alias/name a))
-                (:alias/target a)))
-            (:taxonomy/aliases taxonomy))
-      alias-kw))
-
-(defn category-title
-  [taxonomy category-id]
-  (let [resolved (resolve-alias taxonomy category-id)]
-    (:category/title (category-by-id taxonomy resolved))))
-
-(defn category-order
-  [taxonomy category-id]
-  (let [resolved (resolve-alias taxonomy category-id)]
-    (or (:category/order (category-by-id taxonomy resolved))
-        Integer/MAX_VALUE)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

@@ -15,17 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.knowledge-safety-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.knowledge-safety :as ks]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Prompt injection pattern tests
 ;; ============================================================================
-
-(deftest prompt-injection-patterns-test
+(deftest ^{:stratum 0} prompt-injection-patterns-test
   (testing "pack contains expanded injection patterns"
     (let [pack (ks/create-knowledge-safety-pack)
           tripwire-rule (first (filter #(= :prompt-injection-tripwire (:rule/id %))
@@ -80,8 +80,7 @@
 ;; ============================================================================
 ;; Trust label enforcement tests
 ;; ============================================================================
-
-(deftest check-trust-labels-test
+(deftest ^{:stratum 0} check-trust-labels-test
   (testing "returns nil when no metadata (not a knowledge unit)"
     (is (nil? (ks/check-trust-labels {:artifact/path "test.txt"} {}))))
 
@@ -110,8 +109,7 @@
 ;; ============================================================================
 ;; Instruction authority blocking tests
 ;; ============================================================================
-
-(deftest check-instruction-authority-test
+(deftest ^{:stratum 0} check-instruction-authority-test
   (testing "blocks untrusted content with instruction authority"
     (let [result (ks/check-instruction-authority
                   {:artifact/path "evil.edn"
@@ -139,8 +137,7 @@
 ;; ============================================================================
 ;; Pack root allowlist tests
 ;; ============================================================================
-
-(deftest check-pack-root-test
+(deftest ^{:stratum 0} check-pack-root-test
   (testing "allows packs from default roots"
     (is (nil? (ks/check-pack-root
                {:artifact/path ".miniforge/packs/safety.edn"} {})))
@@ -168,8 +165,7 @@
 ;; ============================================================================
 ;; Pack assembly tests
 ;; ============================================================================
-
-(deftest create-knowledge-safety-pack-test
+(deftest ^{:stratum 0} create-knowledge-safety-pack-test
   (testing "pack has correct structure"
     (let [pack (ks/create-knowledge-safety-pack)]
       (is (= "ai.miniforge/knowledge-safety" (:pack/id pack)))

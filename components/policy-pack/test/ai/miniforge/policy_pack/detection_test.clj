@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.detection-test
   "Tests for the policy-pack detection logic."
   (:require
@@ -25,9 +24,9 @@
    [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Content scan detection tests
 
-(deftest content-scan-test
+;; Content scan detection tests
+(deftest ^{:stratum 0} content-scan-test
   (testing "Detects pattern in content"
     (let [rule {:rule/id :no-todos
                 :rule/detection {:type :content-scan
@@ -76,8 +75,7 @@
 ;; pattern, e.g. a copyright header or a k8s resource limit). Regression: the
 ;; detector previously ignored :mode and always flagged presence, so every
 ;; negative-mode rule (require-*, header-copyright) ran inverted.
-
-(deftest content-scan-negative-mode-test
+(deftest ^{:stratum 0} content-scan-negative-mode-test
   (let [require-header {:rule/id :require-header
                         :rule/detection {:type :content-scan
                                          :pattern "Christopher Lester"
@@ -105,10 +103,8 @@
         (is (some? (detection/detect-content-scan pos {:artifact/content "x TODO"} {})))
         (is (nil? (detection/detect-content-scan pos {:artifact/content "clean"} {})))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Diff analysis detection tests
-
-(deftest diff-analysis-test
+(deftest ^{:stratum 0} diff-analysis-test
   (testing "Detects pattern in diff"
     (let [rule {:rule/id :import-removal
                 :rule/detection {:type :diff-analysis
@@ -140,10 +136,8 @@
           artifact {:artifact/diff "+ added line\n+ another line"}]
       (is (nil? (detection/detect-diff-analysis rule artifact {}))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Plan output detection tests
-
-(deftest plan-output-test
+(deftest ^{:stratum 0} plan-output-test
   (testing "Detects terraform plan patterns"
     (let [rule {:rule/id :network-recreation
                 :rule/detection {:type :plan-output
@@ -165,19 +159,17 @@
           context {:terraform-plan "# aws_vpc.main will be destroyed\n# aws_subnet.private[0] must be replaced"}
           result (detection/detect-plan-output rule {} context)]
       (is (some? result))
-      (is (= 2 (count (:resource-violations result)))))))
+      (is (= 2 (count (:resource-violations result))))))
 
   (testing "No violations when no matching resources"
     (let [rule {:rule/id :test
                 :rule/detection {:type :plan-output}
                 :rule/applies-to {:resource-patterns ["aws_vpc"]}}
           context {:terraform-plan "# aws_s3_bucket.example will be created"}]
-      (is (nil? (detection/detect-plan-output rule {} context)))))
+      (is (nil? (detection/detect-plan-output rule {} context))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Unified detection tests
-
-(deftest detect-violation-test
+(deftest ^{:stratum 0} detect-violation-test
   (testing "Dispatches to correct detection type"
     (let [content-rule {:rule/id :content
                         :rule/detection {:type :content-scan :pattern "TODO"}
@@ -202,10 +194,8 @@
                 :rule/detection {:type :state-comparison}}]
       (is (nil? (detection/detect-violation rule {} {}))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Check rules tests
-
-(deftest check-rules-test
+(deftest ^{:stratum 0} check-rules-test
   (testing "Checks multiple rules and returns violations"
     (let [rules [{:rule/id :no-todos
                   :rule/detection {:type :content-scan :pattern "TODO"}
@@ -226,10 +216,8 @@
           artifact {:artifact/content "# Clean code"}]
       (is (empty? (detection/check-rules rules artifact {}))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Violation classification tests
-
-(deftest violation-classification-test
+(deftest ^{:stratum 0} violation-classification-test
   (testing "Filters blocking violations"
     (let [violations [{:rule {:rule/enforcement {:action :hard-halt}}}
                       {:rule {:rule/enforcement {:action :warn}}}]]
@@ -250,7 +238,7 @@
                       {:rule {:rule/enforcement {:action :warn}}}]]
       (is (= 1 (count (detection/audit-violations violations)))))))
 
-(deftest violation-conversion-test
+(deftest ^{:stratum 0} violation-conversion-test
   (testing "Converts violation to error"
     (let [violation {:rule {:rule/id :test-rule
                             :rule/severity :high
@@ -325,44 +313,17 @@
       (is (= :test-rule (:code warning)))
       (is (= :low (:severity warning))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Capability detection tests
 ;;
 ;; A stub :lint capability is registered via register-capability! so these
 ;; tests do not depend on clj-kondo or the gate layer.
-
-(defn- stub-lint-check
+(defn- ^{:stratum 0} stub-lint-check
   "Flags a violation when the artifact content contains the token BADLINT."
   [artifact _context]
   (when (clojure.string/includes? (str (:artifact/content artifact)) "BADLINT")
     {:type :capability :capability :lint :message "lint error"}))
 
-(deftest detect-capability-registered-violation-test
-  (testing "a :capability :lint rule surfaces the registered check's violation"
-    (capability/register-capability!
-     ::stub-lint {:meta {:tool :stub} :check stub-lint-check})
-    (let [rule     {:rule/id :no-lint-errors
-                    :rule/severity :high
-                    :rule/detection {:type :capability :capability ::stub-lint}}
-          artifact {:artifact/content "(defn x [] BADLINT)"
-                    :artifact/path "core.clj"}
-          result   (detection/detect-capability rule artifact {})]
-      (is (some? result))
-      (is (= :no-lint-errors (:rule-id result)))
-      (is (= :high (:severity result)) "severity is preserved onto the violation")
-      (is (= :lint (:capability result)) "check's own violation fields pass through"))))
-
-(deftest detect-capability-clean-test
-  (testing "a clean artifact yields nil (no violation) through the registered check"
-    (capability/register-capability!
-     ::stub-lint-clean {:meta {:tool :stub} :check stub-lint-check})
-    (let [rule     {:rule/id :no-lint-errors
-                    :rule/severity :high
-                    :rule/detection {:type :capability :capability ::stub-lint-clean}}
-          artifact {:artifact/content "(defn x [] 42)" :artifact/path "core.clj"}]
-      (is (nil? (detection/detect-capability rule artifact {}))))))
-
-(deftest detect-capability-unregistered-fails-loud-test
+(deftest ^{:stratum 0} detect-capability-unregistered-fails-loud-test
   (testing "an unregistered capability returns a :capability-error, not a silent pass"
     (let [rule   {:rule/id :missing-cap
                   :rule/severity :critical
@@ -373,40 +334,17 @@
       (is (= :critical (:severity result)))
       (is (= ::never-registered (:capability result))))))
 
-(deftest detect-violation-dispatches-capability-test
-  (testing "detect-violation routes :capability detection to detect-capability"
-    (capability/register-capability!
-     ::stub-dispatch {:meta {:tool :stub} :check stub-lint-check})
-    (let [rule     {:rule/id :dispatched
-                    :rule/severity :low
-                    :rule/detection {:type :capability :capability ::stub-dispatch}}
-          artifact {:artifact/content "BADLINT" :artifact/path "core.clj"}
-          result   (detection/detect-violation rule artifact {})]
-      (is (= :dispatched (:rule-id result)))
-      (is (= :low (:severity result))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Semantic (LLM-as-judge) detection tests
-
-(def ^:private resolvable-custom-fn-sym
+(def ^{:stratum 0} ^:private resolvable-custom-fn-sym
   'ai.miniforge.policy-pack.detection-test/a-resolvable-custom-fn)
 
-(defn a-resolvable-custom-fn
+(defn ^{:stratum 0} a-resolvable-custom-fn
   "A real custom detection fn used to prove resolvable :custom-fn rules stay
    on the deterministic detect-custom path (not routed to the judge)."
   [_artifact _context]
   {:matches ["custom-hit"]})
 
-(use-fixtures
-  :once
-  (fn [run-tests]
-    (detection/register-custom-fn! resolvable-custom-fn-sym a-resolvable-custom-fn)
-    (try
-      (run-tests)
-      (finally
-        (detection/unregister-custom-fn! resolvable-custom-fn-sym)))))
-
-(deftest register-custom-fn-validates-detector-predicate-test
+(deftest ^{:stratum 0} register-custom-fn-validates-detector-predicate-test
   (testing "custom detector registration rejects non-functions"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo
@@ -423,19 +361,7 @@
                       (detection/register-custom-fn! 'test/two-arity detector)))
       (detection/unregister-custom-fn! 'test/two-arity))))
 
-(deftest custom-fn-resolvable-test
-  (testing "a :custom rule with a resolvable :custom-fn is resolvable"
-    (is (detection/custom-fn-resolvable?
-         {:rule/detection
-          {:type :custom
-           :custom-fn resolvable-custom-fn-sym}})))
-  (testing "a :custom rule with no :custom-fn is not resolvable"
-    (is (not (detection/custom-fn-resolvable? {:rule/detection {:type :custom}}))))
-  (testing "a :custom rule with an unresolvable :custom-fn is not resolvable"
-    (is (not (detection/custom-fn-resolvable?
-              {:rule/detection {:type :custom :custom-fn 'no.such.ns/missing}})))))
-
-(deftest detect-semantic-routes-no-custom-fn-rule-test
+(deftest ^{:stratum 0} detect-semantic-routes-no-custom-fn-rule-test
   (testing "a :custom rule with no :custom-fn routes to analyze-rule and adapts the shape"
     (let [captured (atom nil)
           rule     {:rule/id :dry-violation
@@ -467,7 +393,7 @@
         (is (= [{:file "a.clj" :reason "dup"}] (:violations result)))
         (is (= "Do not repeat yourself" (:message result)))))))
 
-(deftest detect-semantic-no-violation-returns-nil-test
+(deftest ^{:stratum 0} detect-semantic-no-violation-returns-nil-test
   (testing "judge reporting no violations yields nil"
     (let [rule    {:rule/id :clean :rule/severity :error :rule/detection {:type :custom}}
           analyze (fn [_ _ _ _] {:violations [] :status :completed})
@@ -475,7 +401,7 @@
                    :llm-client :c :complete-fn (fn [_])}]
       (is (nil? (detection/detect-violation rule {} context))))))
 
-(deftest detect-semantic-absent-wiring-returns-nil-test
+(deftest ^{:stratum 0} detect-semantic-absent-wiring-returns-nil-test
   (testing "no semantic wiring in context -> nil, no throw"
     (let [rule {:rule/id :unwired :rule/severity :error :rule/detection {:type :custom}}]
       (is (nil? (detection/detect-violation rule {} {})))
@@ -483,7 +409,58 @@
         (is (nil? (detection/detect-violation
                    rule {} {:semantic-analyze-fn (fn [_ _ _ _] {:violations [{:x 1}]})})))))))
 
-(deftest detect-custom-still-used-for-resolvable-fn-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} detect-capability-registered-violation-test
+  (testing "a :capability :lint rule surfaces the registered check's violation"
+    (capability/register-capability!
+     ::stub-lint {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :no-lint-errors
+                    :rule/severity :high
+                    :rule/detection {:type :capability :capability ::stub-lint}}
+          artifact {:artifact/content "(defn x [] BADLINT)"
+                    :artifact/path "core.clj"}
+          result   (detection/detect-capability rule artifact {})]
+      (is (some? result))
+      (is (= :no-lint-errors (:rule-id result)))
+      (is (= :high (:severity result)) "severity is preserved onto the violation")
+      (is (= :lint (:capability result)) "check's own violation fields pass through"))))
+
+(deftest ^{:stratum 1} detect-capability-clean-test
+  (testing "a clean artifact yields nil (no violation) through the registered check"
+    (capability/register-capability!
+     ::stub-lint-clean {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :no-lint-errors
+                    :rule/severity :high
+                    :rule/detection {:type :capability :capability ::stub-lint-clean}}
+          artifact {:artifact/content "(defn x [] 42)" :artifact/path "core.clj"}]
+      (is (nil? (detection/detect-capability rule artifact {}))))))
+
+(deftest ^{:stratum 1} detect-violation-dispatches-capability-test
+  (testing "detect-violation routes :capability detection to detect-capability"
+    (capability/register-capability!
+     ::stub-dispatch {:meta {:tool :stub} :check stub-lint-check})
+    (let [rule     {:rule/id :dispatched
+                    :rule/severity :low
+                    :rule/detection {:type :capability :capability ::stub-dispatch}}
+          artifact {:artifact/content "BADLINT" :artifact/path "core.clj"}
+          result   (detection/detect-violation rule artifact {})]
+      (is (= :dispatched (:rule-id result)))
+      (is (= :low (:severity result))))))
+
+(deftest ^{:stratum 1} custom-fn-resolvable-test
+  (testing "a :custom rule with a resolvable :custom-fn is resolvable"
+    (is (detection/custom-fn-resolvable?
+         {:rule/detection
+          {:type :custom
+           :custom-fn resolvable-custom-fn-sym}})))
+  (testing "a :custom rule with no :custom-fn is not resolvable"
+    (is (not (detection/custom-fn-resolvable? {:rule/detection {:type :custom}}))))
+  (testing "a :custom rule with an unresolvable :custom-fn is not resolvable"
+    (is (not (detection/custom-fn-resolvable?
+              {:rule/detection {:type :custom :custom-fn 'no.such.ns/missing}})))))
+
+(deftest ^{:stratum 1} detect-custom-still-used-for-resolvable-fn-test
   (testing "a :custom rule WITH a resolvable :custom-fn stays on detect-custom"
     (let [rule   {:rule/id :resolvable
                   :rule/detection
@@ -495,6 +472,15 @@
       (is (= :custom (:type result)))
       (is (= :resolvable (:rule-id result)))
       (is (= ["custom-hit"] (:matches result))))))
+
+(use-fixtures
+  :once
+  (fn [run-tests]
+    (detection/register-custom-fn! resolvable-custom-fn-sym a-resolvable-custom-fn)
+    (try
+      (run-tests)
+      (finally
+        (detection/unregister-custom-fn! resolvable-custom-fn-sym)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

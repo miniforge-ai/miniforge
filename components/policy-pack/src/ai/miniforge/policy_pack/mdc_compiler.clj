@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.mdc-compiler
   "Compile .standards/*.mdc files into policy-pack rules.
 
@@ -25,9 +24,23 @@
 
    Designed to be called by the ETL task (bb standards:pack) at build time.
 
-   Layer 0: MDC parsing (frontmatter + body extraction)
-   Layer 1: Field mapping transforms (Dewey→phases, slug→id, behavior extraction)
-   Layer 2: Rule compilation (single-file + pack assembly)
+   Layer 0: Parsing/config primitives — strip-quotes, split-frontmatter,
+     group-dotted-keys, build-exclude-context, build-detection-config,
+     dewey-ranges, default-phases, slug->rule-id/title, agent-behavior
+     paragraph/bullet helpers, format-pack-version, validate-no-duplicate-slugs
+   Layer 1: parse-inline-array, parse-list-item, build-remediation-config,
+     find-dewey-range, bullet-line?, condense-prose, export-canonical-taxonomy
+   Layer 2: parse-frontmatter-value, dewey->phases/category-id/category-label,
+     condense-bullets
+   Layer 3: parse-kv-line, condense-to-length, build-categories
+   Layer 4: process-frontmatter-line, extract-agent-behavior
+   Layer 5: parse-frontmatter
+   Layer 6: parse-mdc
+   Layer 7: mdc->rule
+   Layer 8: compile-standards-pack
+
+   9 real strata — over the rule 210 budget of 3; a genuine namespace
+   split (Wave 2), not a labeling problem.
 
    Related:
      work/designs/mdc-to-pack-field-mapping.edn — authoritative field mapping spec
@@ -40,9 +53,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; MDC parsing — frontmatter and body extraction
 
-(defn- strip-quotes
+;; MDC parsing — frontmatter and body extraction
+(defn- ^{:stratum 0} strip-quotes
   "Strip surrounding single or double quotes from a string."
   [s]
   (cond
@@ -50,90 +63,7 @@
     (and (str/starts-with? s "'")  (str/ends-with? s "'"))  (subs s 1 (dec (count s)))
     :else s))
 
-(defn- parse-inline-array
-  "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].
-
-   Arguments:
-   - s - String starting with [ and ending with ]
-
-   Returns:
-   - Vector of parsed string items, or empty vector for empty array."
-  [s]
-  (let [inner (-> s
-                  (str/replace #"^\[" "")
-                  (str/replace #"\]$" "")
-                  str/trim)]
-    (if (str/blank? inner)
-      []
-      (->> (str/split inner #",")
-           (mapv (comp strip-quotes str/trim))))))
-
-(defn- parse-frontmatter-value
-  "Parse a single YAML-like frontmatter value string into a Clojure value.
-
-   Handles: booleans, quoted strings, inline arrays, bare strings."
-  [raw]
-  (let [v (str/trim raw)]
-    (cond
-      (= v "true")               true
-      (= v "false")              false
-      (str/starts-with? v "[")   (parse-inline-array v)
-      :else                      (strip-quotes v))))
-
-(defn- parse-list-item
-  "Parse a '- <value>' frontmatter list line to its string value."
-  [trimmed]
-  (strip-quotes (str/trim (subs trimmed 2))))
-
-(defn- parse-kv-line
-  "Parse a 'key: value' frontmatter line.
-   Returns [new-current-key updated-acc]."
-  [trimmed acc]
-  (let [idx (str/index-of trimmed ":")
-        k   (str/trim (subs trimmed 0 idx))
-        v   (str/trim (subs trimmed (inc idx)))]
-    (if (str/blank? v)
-      [k (assoc acc k [])]
-      [nil (assoc acc k (parse-frontmatter-value v))])))
-
-(defn- process-frontmatter-line
-  "Process one frontmatter line. Returns [current-key acc]."
-  [trimmed current-key acc]
-  (cond
-    (str/blank? trimmed)
-    [current-key acc]
-
-    (and current-key (str/starts-with? trimmed "- "))
-    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
-
-    (str/includes? trimmed ":")
-    (parse-kv-line trimmed acc)
-
-    :else [current-key acc]))
-
-(defn- parse-frontmatter
-  "Parse YAML-like frontmatter text into a string-keyed map.
-
-   Handles simple key: value pairs, inline arrays [a, b], and
-   multi-line list items (- value) under a key.
-
-   Arguments:
-   - frontmatter-str - Raw text between --- delimiters
-
-   Returns:
-   - Map of {string-key parsed-value}, or empty map."
-  [frontmatter-str]
-  (if (str/blank? frontmatter-str)
-    {}
-    (loop [[line & remaining] (str/split-lines frontmatter-str)
-           current-key nil
-           acc {}]
-      (if (nil? line)
-        acc
-        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
-          (recur remaining current-key' acc'))))))
-
-(defn split-frontmatter
+(defn ^{:stratum 0} split-frontmatter
   "Split MDC content into frontmatter string and body string.
 
    Expects --- delimited YAML frontmatter at the top of the file.
@@ -156,23 +86,8 @@
       {:frontmatter ""
        :body        trimmed})))
 
-(defn parse-mdc
-  "Parse an MDC file into its structured components.
-
-   Arguments:
-   - content - Full .mdc file content string
-
-   Returns:
-   - {:frontmatter {string-key value} :body string}"
-  [content]
-  (let [{:keys [frontmatter body]} (split-frontmatter content)]
-    {:frontmatter (parse-frontmatter frontmatter)
-     :body        body}))
-
-;------------------------------------------------------------------------------ Layer 0.5
 ;; Detection and remediation config builders
-
-(defn- group-dotted-keys
+(defn- ^{:stratum 0} group-dotted-keys
   "Group dot-notation keys into nested maps.
    e.g., {\"detection.mode\" \"positive\" \"detection.pattern\" \"...\"} →
          {\"detection\" {\"mode\" \"positive\" \"pattern\" \"...\"}}"
@@ -187,7 +102,7 @@
    {}
    fm))
 
-(defn- build-exclude-context
+(defn- ^{:stratum 0} build-exclude-context
   "Convert path/current exclude lists from MDC remediation config into
    ExcludeContext maps for the RuleRemediation schema."
   [remediation-map]
@@ -200,7 +115,7 @@
       (seq current-contains)
       (conj {:current-contains (vec current-contains)}))))
 
-(defn- build-detection-config
+(defn- ^{:stratum 0} build-detection-config
   "Build :rule/detection map from grouped frontmatter detection block.
    Returns {:type :content-scan ...} when detection config is present,
    {:type :custom} otherwise."
@@ -213,29 +128,7 @@
       (assoc :email-pattern (get detection-map "emailPattern")))
     {:type :custom}))
 
-(defn- build-remediation-config
-  "Build :rule/remediation map from grouped frontmatter remediation block.
-   Returns nil if no remediation config is present."
-  [remediation-map]
-  (when (and remediation-map (get remediation-map "strategy"))
-    (let [excludes (build-exclude-context remediation-map)]
-      (cond-> {:strategy (keyword (get remediation-map "strategy"))}
-        (get remediation-map "type")
-        (assoc :type (keyword (get remediation-map "type")))
-
-        (get remediation-map "replacement")
-        (assoc :replacement (get remediation-map "replacement"))
-
-        (get remediation-map "template")
-        (assoc :template (get remediation-map "template"))
-
-        (some? (get remediation-map "autoFixable"))
-        (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
-
-        (seq excludes)
-        (assoc :exclude-contexts excludes)))))
-
-(def ^:private valid-enforcement-actions
+(def ^{:stratum 0} ^:private valid-enforcement-actions
   "Enforcement actions a rule may opt into via frontmatter `enforcement.action`,
    derived from the ONE canonical source (`schema/enforcement-actions`) so the
    compiler can never accept an action the rule schema rejects. `:hard-halt`
@@ -243,15 +136,12 @@
    value falls back to the alwaysApply default — a typo can't produce garbage."
   (set schema/enforcement-actions))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Field mapping transforms
-
 ;; ── Dewey code → phases ─────────────────────────────────────────────────────
 ;;
 ;; This table lives ONLY in the compiler. After compilation, phases are plain
 ;; keyword sets on the rule map. The runtime product never sees Dewey codes.
-
-(def ^:private dewey-ranges
+(def ^{:stratum 0} ^:private dewey-ranges
   "Dewey ranges with category metadata and applicable phase sets.
    Each entry: {:lo <int> :hi <int> :id <string> :label <string> :phases <set>}"
   [{:lo 0   :hi 99  :id "foundations"   :label "Foundations & Core Principles"     :phases #{:plan :implement :review :verify :release}}
@@ -265,62 +155,12 @@
    {:lo 800 :hi 899 :id "project"       :label "Project-Specific"                  :phases #{:implement :review}}
    {:lo 900 :hi 999 :id "meta"          :label "Meta & Templates"                  :phases #{}}])
 
-(def ^:private default-phases
+(def ^{:stratum 0} ^:private default-phases
   "Fallback phases when Dewey code is outside defined ranges or unparseable."
   #{:implement :review})
 
-(defn- find-dewey-range
-  "Find the dewey-ranges entry for a given Dewey code string.
-   Returns the matching range map, or nil."
-  [dewey-str]
-  (when-let [code (coerce/safe-parse-int (str/trim (str dewey-str)))]
-    (some (fn [{:keys [lo hi] :as entry}]
-            (when (and (<= lo code) (<= code hi))
-              entry))
-          dewey-ranges)))
-
-(defn dewey->phases
-  "Map a Dewey code string to a set of applicable workflow phases.
-
-   Arguments:
-   - dewey-str - Dewey code string, e.g. \"001\", \"210\", \"900\"
-
-   Returns:
-   - Set of phase keywords, e.g. #{:plan :implement :review}"
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:phases entry)
-    default-phases))
-
-(defn dewey->category-id
-  "Map a Dewey code to its category ID string.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category ID string (e.g. \"foundations\", \"languages\"), or \"other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:id entry)
-    "other"))
-
-(defn dewey->category-label
-  "Map a Dewey code to its human-readable category label.
-
-   Arguments:
-   - dewey-str - Dewey code string
-
-   Returns:
-   - Category label string, or \"Other\"."
-  [dewey-str]
-  (if-let [entry (find-dewey-range dewey-str)]
-    (:label entry)
-    "Other"))
-
 ;; ── Filename slug → rule ID ─────────────────────────────────────────────────
-
-(defn slug->rule-id
+(defn ^{:stratum 0} slug->rule-id
   "Convert an MDC filename to a namespaced rule ID keyword.
 
    Directory path is NOT included — only the bare filename matters.
@@ -335,7 +175,7 @@
   (let [slug (str/replace filename #"\.mdc$" "")]
     (keyword "std" slug)))
 
-(defn- slug->title
+(defn- ^{:stratum 0} slug->title
   "Derive a fallback title from a filename slug.
    Replaces hyphens with spaces and title-cases each word.
 
@@ -346,10 +186,9 @@
        (str/join " ")))
 
 ;; ── Agent behavior extraction ───────────────────────────────────────────────
+(def ^{:stratum 0} ^:private behavior-condensation-target 500)
 
-(def ^:private behavior-condensation-target 500)
-
-(defn- extract-agent-behavior-section
+(defn- ^{:stratum 0} extract-agent-behavior-section
   "Extract content from a \"## Agent behavior\" section in the MDC body.
 
    Scans for a heading matching /^## Agent behavior/i, extracts everything
@@ -376,7 +215,7 @@
         (when-not (str/blank? content)
           content)))))
 
-(defn- extract-first-paragraph
+(defn- ^{:stratum 0} extract-first-paragraph
   "Extract the first non-heading paragraph from the MDC body.
 
    Skips any leading # headings and blank lines, then takes text
@@ -398,7 +237,7 @@
     (when-not (str/blank? content)
       content)))
 
-(def ^:private bullet-line-pattern
+(def ^{:stratum 0} ^:private bullet-line-pattern
   "Markdown list-item line: leading whitespace, then either `-` / `*`
    or a numbered prefix like `1.` / `42.`, then a space. Numbered
    prefixes are recognized so MDC authors can write `1. … 2. …` lists
@@ -409,13 +248,7 @@
    miniforge#765)."
   #"^\s*(?:[-*]|\d+\.)\s+.*")
 
-(defn- bullet-line?
-  "True when `line` is a markdown list-item — `-`/`*` bullet OR
-   numbered prefix."
-  [line]
-  (boolean (re-matches bullet-line-pattern line)))
-
-(defn- keep-whole-sentences
+(defn- ^{:stratum 0} keep-whole-sentences
   "Largest prefix of `text` made of whole sentences (split on `.!?` +
    whitespace) that fits within `target-length`, rejoined with single
    spaces. Falls back to a hard character cut ONLY when the first
@@ -431,7 +264,190 @@
       (subs text 0 (min (count text) target-length))
       condensed)))
 
-(defn- condense-bullets
+;; ── Globs normalization ─────────────────────────────────────────────────────
+(defn- ^{:stratum 0} normalize-globs
+  "Normalize the globs frontmatter value to a vector of strings.
+   Handles: nil, string, vector, other sequential."
+  [globs-raw]
+  (cond
+    (nil? globs-raw)        nil
+    (string? globs-raw)     [globs-raw]
+    (sequential? globs-raw) (vec globs-raw)
+    :else                   nil))
+
+(defn- ^{:stratum 0} format-pack-version
+  "Generate a DateVer version string (YYYY.MM) from the current date."
+  []
+  (let [date (java.time.LocalDate/now)]
+    (format "%d.%02d" (.getYear date) (.getMonthValue date))))
+
+;; ── Pack assembly ───────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} validate-no-duplicate-slugs
+  "Check for duplicate filename slugs across directories.
+   Returns nil if no duplicates, or a vector of error strings."
+  [mdc-files]
+  (let [slugs (map #(str/replace (.getName %) #"\.mdc$" "") mdc-files)
+        slug-counts (frequencies slugs)
+        duplicates (filterv (fn [[_ cnt]] (> cnt 1)) slug-counts)]
+    (when (seq duplicates)
+      [(str "Duplicate filename slugs detected: "
+            (str/join ", " (map first duplicates))
+            ". Rule IDs must be unique across all subdirectories.")])))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} parse-inline-array
+  "Parse a JSON/YAML-style inline array string: [\"a\", \"b\", c].
+
+   Arguments:
+   - s - String starting with [ and ending with ]
+
+   Returns:
+   - Vector of parsed string items, or empty vector for empty array."
+  [s]
+  (let [inner (-> s
+                  (str/replace #"^\[" "")
+                  (str/replace #"\]$" "")
+                  str/trim)]
+    (if (str/blank? inner)
+      []
+      (->> (str/split inner #",")
+           (mapv (comp strip-quotes str/trim))))))
+
+(defn- ^{:stratum 1} parse-list-item
+  "Parse a '- <value>' frontmatter list line to its string value."
+  [trimmed]
+  (strip-quotes (str/trim (subs trimmed 2))))
+
+(defn- ^{:stratum 1} build-remediation-config
+  "Build :rule/remediation map from grouped frontmatter remediation block.
+   Returns nil if no remediation config is present."
+  [remediation-map]
+  (when (and remediation-map (get remediation-map "strategy"))
+    (let [excludes (build-exclude-context remediation-map)]
+      (cond-> {:strategy (keyword (get remediation-map "strategy"))}
+        (get remediation-map "type")
+        (assoc :type (keyword (get remediation-map "type")))
+
+        (get remediation-map "replacement")
+        (assoc :replacement (get remediation-map "replacement"))
+
+        (get remediation-map "template")
+        (assoc :template (get remediation-map "template"))
+
+        (some? (get remediation-map "autoFixable"))
+        (assoc :auto-fixable-default (boolean (get remediation-map "autoFixable")))
+
+        (seq excludes)
+        (assoc :exclude-contexts excludes)))))
+
+(defn- ^{:stratum 1} find-dewey-range
+  "Find the dewey-ranges entry for a given Dewey code string.
+   Returns the matching range map, or nil."
+  [dewey-str]
+  (when-let [code (coerce/safe-parse-int (str/trim (str dewey-str)))]
+    (some (fn [{:keys [lo hi] :as entry}]
+            (when (and (<= lo code) (<= code hi))
+              entry))
+          dewey-ranges)))
+
+(defn- ^{:stratum 1} bullet-line?
+  "True when `line` is a markdown list-item — `-`/`*` bullet OR
+   numbered prefix."
+  [line]
+  (boolean (re-matches bullet-line-pattern line)))
+
+(defn- ^{:stratum 1} condense-prose
+  "Keep complete sentences up to target-length, falling back to hard truncation."
+  [text target-length]
+  (keep-whole-sentences (str/replace text #"\n+" " ") target-length))
+
+;; Canonical taxonomy export
+(defn ^{:stratum 1} export-canonical-taxonomy
+  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
+
+   This bridges the compiler's internal category table to the N4 four-artifact
+   model. The exported taxonomy is the authoritative source of truth; the
+   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
+   should match this output.
+
+   Returns:
+   - A valid Taxonomy map per taxonomy/Taxonomy schema."
+  []
+  {:taxonomy/id      :miniforge/dewey
+   :taxonomy/version "1.0.0"
+   :taxonomy/title   "Miniforge Dewey Taxonomy"
+   :taxonomy/description
+   "Dewey-decimal-inspired category tree for miniforge engineering standards.
+    Ten top-level ranges (000-999) covering foundations, tools, languages,
+    frameworks, testing, operations, documentation, workflows, project, and meta."
+   :taxonomy/categories
+   (mapv (fn [{:keys [lo id label]}]
+           {:category/id    (keyword "mf.cat" id)
+            :category/code  (format "%03d-%03d" lo (+ lo 99))
+            :category/title label
+            :category/order lo})
+         dewey-ranges)
+   :taxonomy/aliases
+   (mapv (fn [{:keys [id]}]
+           {:alias/name   (keyword id)
+            :alias/target (keyword "mf.cat" id)})
+         dewey-ranges)})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} parse-frontmatter-value
+  "Parse a single YAML-like frontmatter value string into a Clojure value.
+
+   Handles: booleans, quoted strings, inline arrays, bare strings."
+  [raw]
+  (let [v (str/trim raw)]
+    (cond
+      (= v "true")               true
+      (= v "false")              false
+      (str/starts-with? v "[")   (parse-inline-array v)
+      :else                      (strip-quotes v))))
+
+(defn ^{:stratum 2} dewey->phases
+  "Map a Dewey code string to a set of applicable workflow phases.
+
+   Arguments:
+   - dewey-str - Dewey code string, e.g. \"001\", \"210\", \"900\"
+
+   Returns:
+   - Set of phase keywords, e.g. #{:plan :implement :review}"
+  [dewey-str]
+  (if-let [entry (find-dewey-range dewey-str)]
+    (:phases entry)
+    default-phases))
+
+(defn ^{:stratum 2} dewey->category-id
+  "Map a Dewey code to its category ID string.
+
+   Arguments:
+   - dewey-str - Dewey code string
+
+   Returns:
+   - Category ID string (e.g. \"foundations\", \"languages\"), or \"other\"."
+  [dewey-str]
+  (if-let [entry (find-dewey-range dewey-str)]
+    (:id entry)
+    "other"))
+
+(defn ^{:stratum 2} dewey->category-label
+  "Map a Dewey code to its human-readable category label.
+
+   Arguments:
+   - dewey-str - Dewey code string
+
+   Returns:
+   - Category label string, or \"Other\"."
+  [dewey-str]
+  (if-let [entry (find-dewey-range dewey-str)]
+    (:label entry)
+    "Other"))
+
+(defn- ^{:stratum 2} condense-bullets
   "Keep the first 3 bullets. If the joined result exceeds target-length,
    trim to whole sentences so the directive never ends mid-word (a raw
    char cut here once shipped a truncated `named-constants` directive
@@ -443,12 +459,20 @@
       result
       (keep-whole-sentences result target-length))))
 
-(defn- condense-prose
-  "Keep complete sentences up to target-length, falling back to hard truncation."
-  [text target-length]
-  (keep-whole-sentences (str/replace text #"\n+" " ") target-length))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- condense-to-length
+(defn- ^{:stratum 3} parse-kv-line
+  "Parse a 'key: value' frontmatter line.
+   Returns [new-current-key updated-acc]."
+  [trimmed acc]
+  (let [idx (str/index-of trimmed ":")
+        k   (str/trim (subs trimmed 0 idx))
+        v   (str/trim (subs trimmed (inc idx)))]
+    (if (str/blank? v)
+      [k (assoc acc k [])]
+      [nil (assoc acc k (parse-frontmatter-value v))])))
+
+(defn- ^{:stratum 3} condense-to-length
   "Condense text to approximately target-length characters.
    Bullet lists (including numbered): keeps first 3 bullets.
    Prose: keeps complete sentences."
@@ -461,7 +485,49 @@
         (condense-bullets lines target-length)
         (condense-prose text target-length)))))
 
-(defn extract-agent-behavior
+;; ── Category builder ────────────────────────────────────────────────────────
+(defn- ^{:stratum 3} build-categories
+  "Build PackCategory entries from compiled rules.
+
+   Groups rules by Dewey-range-derived category and produces
+   {:category/id :category/name :category/rules} entries.
+
+   Arguments:
+   - rules - Vector of compiled rule maps
+
+   Returns:
+   - Sorted vector of PackCategory maps."
+  [rules]
+  (let [by-cat (group-by (fn [rule]
+                           (dewey->category-id (:rule/category rule)))
+                         rules)]
+    (->> by-cat
+         (map (fn [[cat-id cat-rules]]
+                {:category/id    cat-id
+                 :category/name  (dewey->category-label
+                                  (:rule/category (first cat-rules)))
+                 :category/rules (mapv :rule/id cat-rules)}))
+         (sort-by :category/id)
+         vec)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} process-frontmatter-line
+  "Process one frontmatter line. Returns [current-key acc]."
+  [trimmed current-key acc]
+  (cond
+    (str/blank? trimmed)
+    [current-key acc]
+
+    (and current-key (str/starts-with? trimmed "- "))
+    [current-key (update acc current-key (fnil conj []) (parse-list-item trimmed))]
+
+    (str/includes? trimmed ":")
+    (parse-kv-line trimmed acc)
+
+    :else [current-key acc]))
+
+(defn ^{:stratum 4} extract-agent-behavior
   "Extract a concise agent behavior directive from an MDC body.
 
    Priority 1: If the body contains a '## Agent behavior' section,
@@ -482,22 +548,49 @@
       (when content
         (condense-to-length content behavior-condensation-target)))))
 
-;; ── Globs normalization ─────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 5
 
-(defn- normalize-globs
-  "Normalize the globs frontmatter value to a vector of strings.
-   Handles: nil, string, vector, other sequential."
-  [globs-raw]
-  (cond
-    (nil? globs-raw)        nil
-    (string? globs-raw)     [globs-raw]
-    (sequential? globs-raw) (vec globs-raw)
-    :else                   nil))
+(defn- ^{:stratum 5} parse-frontmatter
+  "Parse YAML-like frontmatter text into a string-keyed map.
 
-;------------------------------------------------------------------------------ Layer 2
+   Handles simple key: value pairs, inline arrays [a, b], and
+   multi-line list items (- value) under a key.
+
+   Arguments:
+   - frontmatter-str - Raw text between --- delimiters
+
+   Returns:
+   - Map of {string-key parsed-value}, or empty map."
+  [frontmatter-str]
+  (if (str/blank? frontmatter-str)
+    {}
+    (loop [[line & remaining] (str/split-lines frontmatter-str)
+           current-key nil
+           acc {}]
+      (if (nil? line)
+        acc
+        (let [[current-key' acc'] (process-frontmatter-line (str/trim line) current-key acc)]
+          (recur remaining current-key' acc'))))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} parse-mdc
+  "Parse an MDC file into its structured components.
+
+   Arguments:
+   - content - Full .mdc file content string
+
+   Returns:
+   - {:frontmatter {string-key value} :body string}"
+  [content]
+  (let [{:keys [frontmatter body]} (split-frontmatter content)]
+    {:frontmatter (parse-frontmatter frontmatter)
+     :body        body}))
+
+;------------------------------------------------------------------------------ Layer 7
+
 ;; Rule compilation
-
-(defn mdc->rule
+(defn ^{:stratum 7} mdc->rule
   "Compile a single MDC file into a policy-pack rule map.
 
    Implements the field mapping from the design spec
@@ -589,53 +682,9 @@
       (merge (schema/failure :rule (.getMessage e))
              {:filename filename}))))
 
-;; ── Category builder ────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 8
 
-(defn- build-categories
-  "Build PackCategory entries from compiled rules.
-
-   Groups rules by Dewey-range-derived category and produces
-   {:category/id :category/name :category/rules} entries.
-
-   Arguments:
-   - rules - Vector of compiled rule maps
-
-   Returns:
-   - Sorted vector of PackCategory maps."
-  [rules]
-  (let [by-cat (group-by (fn [rule]
-                           (dewey->category-id (:rule/category rule)))
-                         rules)]
-    (->> by-cat
-         (map (fn [[cat-id cat-rules]]
-                {:category/id    cat-id
-                 :category/name  (dewey->category-label
-                                  (:rule/category (first cat-rules)))
-                 :category/rules (mapv :rule/id cat-rules)}))
-         (sort-by :category/id)
-         vec)))
-
-(defn- format-pack-version
-  "Generate a DateVer version string (YYYY.MM) from the current date."
-  []
-  (let [date (java.time.LocalDate/now)]
-    (format "%d.%02d" (.getYear date) (.getMonthValue date))))
-
-;; ── Pack assembly ───────────────────────────────────────────────────────────
-
-(defn- validate-no-duplicate-slugs
-  "Check for duplicate filename slugs across directories.
-   Returns nil if no duplicates, or a vector of error strings."
-  [mdc-files]
-  (let [slugs (map #(str/replace (.getName %) #"\.mdc$" "") mdc-files)
-        slug-counts (frequencies slugs)
-        duplicates (filterv (fn [[_ cnt]] (> cnt 1)) slug-counts)]
-    (when (seq duplicates)
-      [(str "Duplicate filename slugs detected: "
-            (str/join ", " (map first duplicates))
-            ". Rule IDs must be unique across all subdirectories.")])))
-
-(defn compile-standards-pack
+(defn ^{:stratum 8} compile-standards-pack
   "Compile all .mdc files from a standards directory into a pack manifest.
 
    Discovers all .mdc files recursively, compiles each via mdc->rule,
@@ -714,40 +763,6 @@
             (schema/success :pack pack {:warnings       warnings
                                         :compiled-count (count successes)
                                         :failed-count   (count failures)})))))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Canonical taxonomy export
-
-(defn export-canonical-taxonomy
-  "Export the compiler's dewey-ranges as a first-class Taxonomy artifact.
-
-   This bridges the compiler's internal category table to the N4 four-artifact
-   model. The exported taxonomy is the authoritative source of truth; the
-   bundled EDN resource at resources/taxonomies/miniforge-dewey-1.0.0.edn
-   should match this output.
-
-   Returns:
-   - A valid Taxonomy map per taxonomy/Taxonomy schema."
-  []
-  {:taxonomy/id      :miniforge/dewey
-   :taxonomy/version "1.0.0"
-   :taxonomy/title   "Miniforge Dewey Taxonomy"
-   :taxonomy/description
-   "Dewey-decimal-inspired category tree for miniforge engineering standards.
-    Ten top-level ranges (000-999) covering foundations, tools, languages,
-    frameworks, testing, operations, documentation, workflows, project, and meta."
-   :taxonomy/categories
-   (mapv (fn [{:keys [lo id label]}]
-           {:category/id    (keyword "mf.cat" id)
-            :category/code  (format "%03d-%03d" lo (+ lo 99))
-            :category/title label
-            :category/order lo})
-         dewey-ranges)
-   :taxonomy/aliases
-   (mapv (fn [{:keys [id]}]
-           {:alias/name   (keyword id)
-            :alias/target (keyword "mf.cat" id)})
-         dewey-ranges)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
