@@ -21,6 +21,7 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.workflow.dag-orchestrator :as dag-orch]
    [ai.miniforge.workflow.dag-task-runner :as task-runner]
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.logging.interface :as log]))
 
@@ -256,6 +257,26 @@
                {:a (dag/ok {}) :b (dag/err :f "err" {})}
                nil "wf-1")))))
 
+;; traverse-levels termination tests — a cycle or a dependency on a task
+;; id outside the plan must not spin `traverse-levels` forever (it used
+;; to: `ready` came back empty every iteration, so `remaining` never
+;; shrank). Covers the unschedulable-plan path feeding
+;; `estimate-parallel-speedup` / `parallelizable-plan?` /
+;; `maybe-parallelize-plan`.
+(deftest ^{:stratum 0} test-traverse-levels-cyclic-terminates
+  (testing "a dependency cycle among real task ids returns an anomaly instead of looping forever"
+    (let [result (dag-orch/traverse-levels [:a :b] {:a #{:b} :b #{:a}})]
+      (is (anomaly/anomaly? result))
+      (is (= :anomalies/dag-unschedulable (:anomaly/subtype result)))
+      (is (= #{:a :b} (set (:unresolved-task-ids (:anomaly/data result))))))))
+
+(deftest ^{:stratum 0} test-traverse-levels-dangling-dep-terminates
+  (testing "a dependency on a task id absent from task-ids returns an anomaly instead of looping forever"
+    (let [result (dag-orch/traverse-levels [:a] {:a #{:ghost}})]
+      (is (anomaly/anomaly? result))
+      (is (= :anomalies/dag-unschedulable (:anomaly/subtype result)))
+      (is (= #{:a} (set (:unresolved-task-ids (:anomaly/data result))))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-parallelizable-plan-single-task
@@ -339,6 +360,33 @@
       (is (= 2 (:levels result)))
       (is (true? (:parallelizable? result)))
       (is (= 2.5 (:estimated-speedup result))))))
+
+(deftest ^{:stratum 1} test-parallelizable-plan-cyclic-terminates
+  (testing "cyclic plan is treated as not parallelizable rather than hanging"
+    (let [plan (make-plan [(make-task :a [:b])
+                           (make-task :b [:a])])]
+      (is (not (dag-orch/parallelizable-plan? plan))))))
+
+(deftest ^{:stratum 1} test-parallelizable-plan-dangling-dep-terminates
+  (testing "plan with a dependency on an unknown task id is treated as not parallelizable rather than hanging"
+    (let [plan (make-plan [(make-task :a [:ghost])
+                           (make-task :b [:ghost])])]
+      (is (not (dag-orch/parallelizable-plan? plan))))))
+
+(deftest ^{:stratum 1} test-estimate-speedup-cyclic-terminates
+  (testing "cyclic plan reports non-parallelizable and surfaces the anomaly"
+    (let [plan (make-plan [(make-task :a [:b])
+                           (make-task :b [:a])])
+          result (dag-orch/estimate-parallel-speedup plan)]
+      (is (false? (:parallelizable? result)))
+      (is (anomaly/anomaly? (:anomaly result))))))
+
+(deftest ^{:stratum 1} test-maybe-parallelize-plan-cyclic-terminates
+  (testing "maybe-parallelize-plan does not hang and skips DAG execution for a cyclic plan"
+    (let [plan (make-plan [(make-task :a [:b])
+                           (make-task :b [:a])])
+          logger (log/create-logger {:min-level :error})]
+      (is (nil? (dag-orch/maybe-parallelize-plan plan {:logger logger}))))))
 
 ;; plan->dag-tasks tests
 (deftest ^{:stratum 1} test-plan-to-dag-tasks-basic

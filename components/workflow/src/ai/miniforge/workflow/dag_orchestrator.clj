@@ -35,6 +35,7 @@
    surfaces as a typed anomaly, which Stage 2 will replace with the
    resolution sub-workflow."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
@@ -98,7 +99,19 @@
        (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
        (into {})))
 
-(defn ^{:stratum 0} traverse-levels [task-ids deps-map]
+(defn ^{:stratum 0} traverse-levels
+  "BFS the dependency graph in ready-batches (\"levels\"), tracking the
+   widest batch for parallelism estimation.
+
+   A task id whose dependency never becomes `completed` — because it
+   participates in a cycle, or because it names an id absent from
+   `task-ids` entirely — would leave `ready` empty forever and spin the
+   loop with no progress. Detect that stall directly (empty `ready`
+   while `remaining` is non-empty) and return an anomaly instead,
+   following the `:anomalies/dag-non-forest` convention in
+   `ai.miniforge.dag-executor.branch-registry` for plan-shape defects
+   the runtime can't reconcile."
+  [task-ids deps-map]
   (loop [remaining (set task-ids)
          completed #{}
          level-count 0
@@ -108,10 +121,15 @@
       (let [ready (->> remaining
                        (filter #(every? completed (get deps-map % #{}))))
             width (count ready)]
-        (recur (apply disj remaining ready)
-               (into completed ready)
-               (inc level-count)
-               (max max-width width))))))
+        (if (zero? width)
+          (anomaly/sub-anomaly
+           :conflict :anomalies/dag-unschedulable
+           "Plan has unschedulable tasks: a dependency cycle, or a task dependency id absent from the plan's own task ids"
+           {:unresolved-task-ids (vec remaining)})
+          (recur (apply disj remaining ready)
+                 (into completed ready)
+                 (inc level-count)
+                 (max max-width width)))))))
 
 ;--- Layer 1: Plan to DAG Conversion
 (defn ^{:stratum 0} normalize-task-id
@@ -793,22 +811,36 @@
    :error error
    :metrics (or metrics zero-metrics)})
 
-(defn ^{:stratum 1} compute-max-level-width [tasks]
-  (-> tasks
-      ((juxt #(map :task/id %) build-deps-map))
-      ((fn [[ids deps]] (traverse-levels ids deps)))
-      :max-width))
+(defn ^{:stratum 1} compute-max-level-width
+  "Widest ready-batch across the plan's dependency graph, or the
+   `:anomalies/dag-unschedulable` anomaly from `traverse-levels` when the
+   graph can't be fully traversed."
+  [tasks]
+  (let [result (-> tasks
+                   ((juxt #(map :task/id %) build-deps-map))
+                   ((fn [[ids deps]] (traverse-levels ids deps))))]
+    (if (anomaly/anomaly? result)
+      result
+      (:max-width result))))
 
 (defn ^{:stratum 1} estimate-parallel-speedup [plan]
   (let [tasks (:plan/tasks plan [])
         task-count (count tasks)
         deps-map (build-deps-map tasks)
-        {:keys [levels max-width]} (traverse-levels (map :task/id tasks) deps-map)]
-    {:parallelizable? (> max-width 1)
-     :task-count task-count
-     :max-parallel max-width
-     :levels levels
-     :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))
+        result (traverse-levels (map :task/id tasks) deps-map)]
+    (if (anomaly/anomaly? result)
+      {:parallelizable? false
+       :task-count task-count
+       :max-parallel 0
+       :levels 0
+       :estimated-speedup 1.0
+       :anomaly result}
+      (let [{:keys [levels max-width]} result]
+        {:parallelizable? (> max-width 1)
+         :task-count task-count
+         :max-parallel max-width
+         :levels levels
+         :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))))
 
 (defn ^{:stratum 1} plan-task->dag-task
   "Convert a single plan task to a DAG task with validated deps."
@@ -1138,7 +1170,9 @@
 (defn ^{:stratum 2} parallelizable-plan? [plan]
   (let [tasks (:plan/tasks plan [])]
     (when (> (count tasks) 1)
-      (> (compute-max-level-width tasks) 1))))
+      (let [width (compute-max-level-width tasks)]
+        (when-not (anomaly/anomaly? width)
+          (> width 1))))))
 
 (defn ^{:stratum 2} plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
