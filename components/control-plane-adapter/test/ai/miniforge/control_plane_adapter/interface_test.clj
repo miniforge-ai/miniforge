@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane-adapter.interface-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -23,15 +22,15 @@
    [ai.miniforge.control-plane-adapter.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures and factories
 
-(def ^:private openai-status-map
+;; Test fixtures and factories
+(def ^{:stratum 0} ^:private openai-status-map
   {:requires_action :blocked
    :in_progress     :running
    :completed       :completed
    :failed          :failed})
 
-(defn- agent-record
+(defn- ^{:stratum 0} agent-record
   [& {:as overrides}]
   (merge {:agent/id          (random-uuid)
           :agent/external-id "ext-1"
@@ -40,7 +39,7 @@
           :agent/status      :running}
          overrides))
 
-(defn- mock-adapter
+(defn- ^{:stratum 0} mock-adapter
   "Build an adapter from a map of method overrides. Defaults are no-op."
   [{:keys [adapter-id discover-agents poll-agent-status
            deliver-decision send-command]
@@ -56,10 +55,8 @@
     (deliver-decision  [_ rec res]    (deliver-decision rec res))
     (send-command      [_ rec cmd]    (send-command rec cmd))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Protocol re-export tests
-
-(deftest interface-re-exports-protocol-test
+(deftest ^{:stratum 0} interface-re-exports-protocol-test
   (testing "interface namespace re-exports the ControlPlaneAdapter protocol"
     (is (= proto/ControlPlaneAdapter sut/ControlPlaneAdapter))
     (is (= proto/ControlPlaneAdapterLogs sut/ControlPlaneAdapterLogs)))
@@ -71,68 +68,62 @@
     (is (= proto/send-command      sut/send-command))
     (is (= proto/agent-logs        sut/agent-logs))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; normalize-status
-
-(deftest normalize-status-known-mapping-test
-  (testing "Known vendor status maps to control-plane keyword"
-    (is (= :blocked   (sut/normalize-status "requires_action" openai-status-map)))
-    (is (= :running   (sut/normalize-status "in_progress"     openai-status-map)))
-    (is (= :completed (sut/normalize-status "completed"       openai-status-map)))
-    (is (= :failed    (sut/normalize-status "failed"          openai-status-map)))))
-
-(deftest normalize-status-keyword-input-test
-  (testing "Keyword input is preserved (no double-keywording)"
-    (is (= :blocked (sut/normalize-status :requires_action openai-status-map)))))
-
-(deftest normalize-status-unknown-test
-  (testing "Unmapped status defaults to :unknown"
-    (is (= :unknown (sut/normalize-status "weird-state" openai-status-map)))
-    (is (= :unknown (sut/normalize-status :weird-state  openai-status-map)))))
-
-(deftest normalize-status-empty-mapping-test
+(deftest ^{:stratum 0} normalize-status-empty-mapping-test
   (testing "Empty mapping returns :unknown for any input"
     (is (= :unknown (sut/normalize-status "anything" {})))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; ms-since
-
-(deftest ms-since-past-timestamp-test
+(deftest ^{:stratum 0} ms-since-past-timestamp-test
   (testing "ms-since returns positive elapsed milliseconds for a past timestamp"
     (let [past (java.util.Date. (- (System/currentTimeMillis) 1000))
           elapsed (sut/ms-since past)]
       (is (number? elapsed))
       (is (>= elapsed 1000) "Should reflect at least the backdate amount"))))
 
-(deftest ms-since-nil-test
+(deftest ^{:stratum 0} ms-since-nil-test
   (testing "ms-since returns nil for a nil timestamp"
     (is (nil? (sut/ms-since nil)))))
 
-(deftest ms-since-recent-test
+(deftest ^{:stratum 0} ms-since-recent-test
   (testing "ms-since for ~now returns small non-negative ms"
     (let [now-ish (java.util.Date.)
           elapsed (sut/ms-since now-ish)]
       (is (>= elapsed 0)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; heartbeat-interval-for-vendor
-
-(deftest heartbeat-interval-known-vendors-test
+(deftest ^{:stratum 0} heartbeat-interval-known-vendors-test
   (testing "Each known vendor returns its tuned interval"
     (is (= 15000 (sut/heartbeat-interval-for-vendor :claude-code)))
     (is (= 10000 (sut/heartbeat-interval-for-vendor :miniforge)))
     (is (= 60000 (sut/heartbeat-interval-for-vendor :openai)))
     (is (= 30000 (sut/heartbeat-interval-for-vendor :cursor)))))
 
-(deftest heartbeat-interval-unknown-vendor-test
+(deftest ^{:stratum 0} heartbeat-interval-unknown-vendor-test
   (testing "Unknown vendor falls back to 30s default"
     (is (= 30000 (sut/heartbeat-interval-for-vendor :acme-newcomer)))
     (is (= 30000 (sut/heartbeat-interval-for-vendor nil)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Protocol shape — verify an adapter can be implemented and called via interface fns
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest adapter-can-be-invoked-via-interface-test
+;; normalize-status
+(deftest ^{:stratum 1} normalize-status-known-mapping-test
+  (testing "Known vendor status maps to control-plane keyword"
+    (is (= :blocked   (sut/normalize-status "requires_action" openai-status-map)))
+    (is (= :running   (sut/normalize-status "in_progress"     openai-status-map)))
+    (is (= :completed (sut/normalize-status "completed"       openai-status-map)))
+    (is (= :failed    (sut/normalize-status "failed"          openai-status-map)))))
+
+(deftest ^{:stratum 1} normalize-status-keyword-input-test
+  (testing "Keyword input is preserved (no double-keywording)"
+    (is (= :blocked (sut/normalize-status :requires_action openai-status-map)))))
+
+(deftest ^{:stratum 1} normalize-status-unknown-test
+  (testing "Unmapped status defaults to :unknown"
+    (is (= :unknown (sut/normalize-status "weird-state" openai-status-map)))
+    (is (= :unknown (sut/normalize-status :weird-state  openai-status-map)))))
+
+;; Protocol shape — verify an adapter can be implemented and called via interface fns
+(deftest ^{:stratum 1} adapter-can-be-invoked-via-interface-test
   (testing "An adapter implementing ControlPlaneAdapter is callable via interface fns"
     (let [discovered (atom nil)
           delivered  (atom nil)
@@ -160,12 +151,12 @@
           (is (true? (:delivered? ret)))
           (is (= [rec res] @delivered)))))))
 
-(deftest adapter-defaults-to-unreachable-when-no-poll-result-test
+(deftest ^{:stratum 1} adapter-defaults-to-unreachable-when-no-poll-result-test
   (testing "poll-agent-status returning nil signals unreachable"
     (let [adapter (mock-adapter {:poll-agent-status (constantly nil)})]
       (is (nil? (sut/poll-agent-status adapter (agent-record)))))))
 
-(deftest send-command-failure-shape-test
+(deftest ^{:stratum 1} send-command-failure-shape-test
   (testing "send-command returns a failure shape with :error string"
     (let [adapter (mock-adapter
                    {:send-command (fn [_ _]
