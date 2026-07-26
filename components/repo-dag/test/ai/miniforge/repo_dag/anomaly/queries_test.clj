@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.anomaly.queries-test
   "Coverage for the read-only anomaly-returning protocol methods:
    compute-topo-order, affected-repos, upstream-repos, merge-order,
@@ -26,10 +25,13 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
-(def ^:dynamic *manager* nil)
-(def ^:dynamic *dag-id* nil)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn manager-and-dag-fixture [f]
+(def ^{:stratum 0} ^:dynamic *manager* nil)
+
+(def ^{:stratum 0} ^:dynamic *dag-id* nil)
+
+(defn ^{:stratum 0} manager-and-dag-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (let [d (dag/create-dag *manager* "test-dag")]
       (dag/add-repo-anomaly *manager* (:dag/id d)
@@ -45,107 +47,104 @@
       (binding [*dag-id* (:dag/id d)]
         (f)))))
 
-(use-fixtures :each manager-and-dag-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
 ;------------------------------------------------------------------------------ compute-topo-order
-
-(deftest compute-topo-order-anomaly-happy-path
+(deftest ^{:stratum 1} compute-topo-order-anomaly-happy-path
   (testing "successful topo-order returns the result map, not an anomaly"
     (let [result (dag/compute-topo-order-anomaly *manager* *dag-id*)]
       (is (not (anomaly/anomaly? result)))
       (is (true? (:success result)))
       (is (= ["repo-a" "repo-b"] (:order result))))))
 
-(deftest compute-topo-order-anomaly-not-found
+(deftest ^{:stratum 1} compute-topo-order-anomaly-not-found
   (testing "missing DAG yields :not-found anomaly"
     (let [result (dag/compute-topo-order-anomaly *manager* (random-uuid))]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest compute-topo-order-alias-not-found
+(deftest ^{:stratum 1} compute-topo-order-alias-not-found
   (testing "stable alias returns :not-found anomaly"
     (let [result (dag/compute-topo-order *manager* (random-uuid))]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ affected-repos
-
-(deftest affected-repos-anomaly-happy-path
+(deftest ^{:stratum 1} affected-repos-anomaly-happy-path
   (testing "successful query returns downstream set, not an anomaly"
     (let [result (dag/affected-repos-anomaly *manager* *dag-id* "repo-a")]
       (is (not (anomaly/anomaly? result)))
       (is (= #{"repo-b"} result)))))
 
-(deftest affected-repos-anomaly-not-found
+(deftest ^{:stratum 1} affected-repos-anomaly-not-found
   (testing "missing DAG yields :not-found anomaly"
     (let [result (dag/affected-repos-anomaly *manager* (random-uuid) "repo-a")]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest affected-repos-alias-not-found
+(deftest ^{:stratum 1} affected-repos-alias-not-found
   (testing "stable alias returns :not-found anomaly"
     (let [result (dag/affected-repos *manager* (random-uuid) "repo-a")]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ upstream-repos
-
-(deftest upstream-repos-anomaly-happy-path
+(deftest ^{:stratum 1} upstream-repos-anomaly-happy-path
   (testing "successful query returns upstream set, not an anomaly"
     (let [result (dag/upstream-repos-anomaly *manager* *dag-id* "repo-b")]
       (is (not (anomaly/anomaly? result)))
       (is (= #{"repo-a"} result)))))
 
-(deftest upstream-repos-anomaly-not-found
+(deftest ^{:stratum 1} upstream-repos-anomaly-not-found
   (testing "missing DAG yields :not-found anomaly"
     (let [result (dag/upstream-repos-anomaly *manager* (random-uuid) "repo-b")]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest upstream-repos-alias-not-found
+(deftest ^{:stratum 1} upstream-repos-alias-not-found
   (testing "stable alias returns :not-found anomaly"
     (let [result (dag/upstream-repos *manager* (random-uuid) "repo-b")]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ merge-order
-
-(deftest merge-order-anomaly-happy-path
+(deftest ^{:stratum 1} merge-order-anomaly-happy-path
   (testing "successful query returns merge-order map, not an anomaly"
     (let [result (dag/merge-order-anomaly *manager* *dag-id* #{"repo-a" "repo-b"})]
       (is (not (anomaly/anomaly? result)))
       (is (true? (:success result)))
       (is (= ["repo-a" "repo-b"] (:order result))))))
 
-(deftest merge-order-anomaly-not-found
+(deftest ^{:stratum 1} merge-order-anomaly-not-found
   (testing "missing DAG yields :not-found anomaly"
     (let [result (dag/merge-order-anomaly *manager* (random-uuid) #{"repo-a"})]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest merge-order-alias-not-found
+(deftest ^{:stratum 1} merge-order-alias-not-found
   (testing "stable alias returns :not-found anomaly"
     (let [result (dag/merge-order *manager* (random-uuid) #{"repo-a"})]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
 ;------------------------------------------------------------------------------ validate-dag
-
-(deftest validate-dag-anomaly-happy-path
+(deftest ^{:stratum 1} validate-dag-anomaly-happy-path
   (testing "successful validate returns the result map, not an anomaly"
     (let [result (dag/validate-dag-anomaly *manager* *dag-id*)]
       (is (not (anomaly/anomaly? result)))
       (is (true? (:valid? result)))
       (is (= [] (:errors result))))))
 
-(deftest validate-dag-anomaly-not-found
+(deftest ^{:stratum 1} validate-dag-anomaly-not-found
   (testing "missing DAG yields :not-found anomaly"
     (let [result (dag/validate-dag-anomaly *manager* (random-uuid))]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest validate-dag-alias-not-found
+(deftest ^{:stratum 1} validate-dag-alias-not-found
   (testing "stable alias returns :not-found anomaly"
     (let [result (dag/validate-dag *manager* (random-uuid))]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
+
+(use-fixtures :each manager-and-dag-fixture)

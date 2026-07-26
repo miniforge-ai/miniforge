@@ -15,27 +15,23 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.dag-crud-test
-  "Tests for DAG schema, creation, and CRUD operations (Layers 0-2)."
+  "Tests for DAG schema, creation, and CRUD operations."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *manager* nil)
 
-(def ^:dynamic *manager* nil)
-
-(defn manager-fixture [f]
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Schema validation tests
-
-(deftest schema-validation-test
+(deftest ^{:stratum 0} schema-validation-test
   (testing "valid-repo-node? validates correctly"
     (is (dag/valid-repo-node?
          {:repo/url "https://github.com/acme/tf-modules"
@@ -64,9 +60,9 @@
     (is (= :foundations (dag/infer-layer :library)))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; DAG CRUD tests
 
-(deftest create-dag-test
+;; DAG CRUD tests
+(deftest ^{:stratum 1} create-dag-test
   (testing "creates DAG with required fields"
     (let [d (dag/create-dag *manager* "test-dag")]
       (is (uuid? (:dag/id d)))
@@ -82,7 +78,7 @@
     (let [d (dag/create-dag *manager* "test-dag")]
       (is (= d (dag/get-dag *manager* (:dag/id d)))))))
 
-(deftest add-repo-test
+(deftest ^{:stratum 1} add-repo-test
   (testing "adds repo with explicit layer"
     (let [d (dag/create-dag *manager* "test-dag")
           updated (dag/add-repo *manager* (:dag/id d)
@@ -116,7 +112,7 @@
         (is (= :conflict (:anomaly/type result)))
         (is (= "tf-modules" (get-in result [:anomaly/data :repo-name])))))))
 
-(deftest remove-repo-test
+(deftest ^{:stratum 1} remove-repo-test
   (testing "removes repo from DAG"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -142,10 +138,8 @@
       (is (= 1 (count (:dag/repos updated))))
       (is (= 0 (count (:dag/edges updated)))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Edge operations tests
-
-(deftest add-edge-test
+(deftest ^{:stratum 1} add-edge-test
   (testing "adds edge between repos"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -208,7 +202,7 @@
       (is (= "repo-a" (get-in result [:anomaly/data :from])))
       (is (= "repo-b" (get-in result [:anomaly/data :to]))))))
 
-(deftest remove-edge-test
+(deftest ^{:stratum 1} remove-edge-test
   (testing "removes edge from DAG"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -223,3 +217,5 @@
                           :library-before-consumer :sequential)
           updated (dag/remove-edge *manager* (:dag/id d) "repo-a" "repo-b")]
       (is (= 0 (count (:dag/edges updated)))))))
+
+(use-fixtures :each manager-fixture)

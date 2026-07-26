@@ -15,27 +15,25 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.dag-validation-test
-  "Tests for DAG validation, layers, and edge cases (Layers 7-9)."
+  "Tests for DAG validation, layers, and edge cases."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.repo-dag.interface :as dag]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *manager* nil)
 
-(def ^:dynamic *manager* nil)
-
-(defn manager-fixture [f]
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 7
 ;; DAG validation tests
-
-(deftest validate-dag-test
+(deftest ^{:stratum 1} validate-dag-test
   (testing "valid DAG passes validation"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -53,10 +51,8 @@
       (is (:valid? result))
       (is (empty? (:errors result))))))
 
-;------------------------------------------------------------------------------ Layer 8
 ;; Compute layers tests
-
-(deftest compute-layers-test
+(deftest ^{:stratum 1} compute-layers-test
   (testing "groups repos by layer"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -78,10 +74,8 @@
       (is (= ["k8s"] (:platform layers)))
       (is (= ["app"] (:application layers))))))
 
-;------------------------------------------------------------------------------ Layer 9
 ;; Edge cases and error handling tests
-
-(deftest edge-cases-test
+(deftest ^{:stratum 1} edge-cases-test
   (testing "operations on nonexistent DAG"
     (let [fake-id (random-uuid)]
       (is (nil? (dag/get-dag *manager* fake-id)))
@@ -104,3 +98,5 @@
     (dag/create-dag *manager* "dag-1")
     (dag/reset-manager! *manager*)
     (is (= 0 (count (dag/get-all-dags *manager*))))))
+
+(use-fixtures :each manager-fixture)
