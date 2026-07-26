@@ -117,14 +117,16 @@
 
 (defn ^{:stratum 0} applicable-gates
   "Filter gates to only those applicable to the given artifact type.
-   If a gate has no :applies-to config, it applies to all artifacts."
+   If a gate has no :gate/applies-to config, it applies to all artifacts.
+   :gate/applies-to matches the GateConfig malli schema
+   (ai.miniforge.loop.schema/GateConfig)."
   [gates artifact]
   (let [artifact-type (:artifact/type artifact)]
     (filter
      (fn [gate]
-       (let [config (when (satisfies? clojure.lang.ILookup gate)
+       (let [config (when (instance? clojure.lang.ILookup gate)
                       (:config gate))
-             applies-to (when config (:applies-to config))]
+             applies-to (when config (:gate/applies-to config))]
          (or (nil? applies-to)
              (contains? applies-to artifact-type))))
      gates)))
