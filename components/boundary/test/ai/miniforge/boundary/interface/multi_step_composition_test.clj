@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.multi-step-composition-test
   "Threading semantics. `execute` returns the updated chain so each
    call composes with the next. The chain is the *second* positional
@@ -28,9 +27,11 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(defn- boom! [] (throw (RuntimeException. "boom")))
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest steps-accumulate-in-append-order
+(defn- ^{:stratum 0} boom! [] (throw (RuntimeException. "boom")))
+
+(deftest ^{:stratum 0} steps-accumulate-in-append-order
   (testing "operations are recorded in the order they were executed"
     (let [c (as-> (chain/create-chain :flow) c
               (boundary/execute :db      c :a (constantly 1))
@@ -38,7 +39,16 @@
               (boundary/execute :network c :c (constantly 3)))]
       (is (= [:a :b :c] (mapv :operation (chain/steps c)))))))
 
-(deftest mixed-success-and-failure-records-all-steps
+(deftest ^{:stratum 0} threading-is-pure
+  (testing "each execute returns a new chain; the original is unchanged"
+    (let [c0 (chain/create-chain :flow)
+          c1 (boundary/execute :db c0 :a (constantly 1))]
+      (is (= 0 (count (chain/steps c0))))
+      (is (= 1 (count (chain/steps c1)))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} mixed-success-and-failure-records-all-steps
   (testing "a throw mid-flow does not stop subsequent steps from being appended"
     (let [c (as-> (chain/create-chain :flow) c
               (boundary/execute :db      c :a (constantly 1))
@@ -49,7 +59,7 @@
       (is (= [true false true]
              (mapv :succeeded? (chain/steps c)))))))
 
-(deftest chain-stays-schema-valid-through-composition
+(deftest ^{:stratum 1} chain-stays-schema-valid-through-composition
   (testing "after each execute the chain still validates against the schema"
     (let [c (as-> (chain/create-chain :flow) c
               (boundary/execute :db      c :a (constantly 1))
@@ -58,16 +68,9 @@
       (is (m/validate chain/Chain c))
       (is (every? #(m/validate chain/Step %) (chain/steps c))))))
 
-(deftest last-successful-or-finds-the-pre-failure-success
+(deftest ^{:stratum 1} last-successful-or-finds-the-pre-failure-success
   (testing "after a failure, last-successful-or returns the most recent successful response"
     (let [c (as-> (chain/create-chain :flow) c
               (boundary/execute :db      c :a (constantly {:user 1}))
               (boundary/execute :network c :b boom!))]
       (is (= {:user 1} (chain/last-successful-or c ::none))))))
-
-(deftest threading-is-pure
-  (testing "each execute returns a new chain; the original is unchanged"
-    (let [c0 (chain/create-chain :flow)
-          c1 (boundary/execute :db c0 :a (constantly 1))]
-      (is (= 0 (count (chain/steps c0))))
-      (is (= 1 (count (chain/steps c1)))))))

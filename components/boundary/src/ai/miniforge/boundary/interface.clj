@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface
   "Public API for the boundary component.
 
@@ -46,20 +45,20 @@
    [ai.miniforge.boundary.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Vocabulary and schema re-exports
 
-(def exception-categories
+;; Vocabulary and schema re-exports
+(def ^{:stratum 0} exception-categories
   "Set of standard exception-category keywords. See
    `ai.miniforge.boundary.contract/exception-categories`."
   contract/exception-categories)
 
-(def CapturedException
+(def ^{:stratum 0} CapturedException
   "Malli schema for the captured-exception payload that lives inside
    an anomaly's `:anomaly/data`. See
    `ai.miniforge.boundary.contract/CapturedException`."
   contract/CapturedException)
 
-(def CheckFn
+(def ^{:stratum 0} CheckFn
   "Malli schema for an advisory pre-flight `check-fn` consumers may
    layer on top of `execute`. Returns nil when its inputs are
    acceptable, or a canonical `Anomaly` when they are not. Boundary
@@ -68,7 +67,7 @@
    `ai.miniforge.boundary.contract/CheckFn`."
   contract/CheckFn)
 
-(def category->anomaly-type
+(def ^{:stratum 0} category->anomaly-type
   "Read-only mapping from boundary category to canonical anomaly type.
    See `ai.miniforge.boundary.core/category->anomaly-type`.
 
@@ -86,21 +85,8 @@
    unknown keys."
   core/category->anomaly-type)
 
-(defn classify-category
-  "Return the canonical anomaly type for `category`, falling back to
-   `:fault` when the category is not in `exception-categories`.
-
-   This is the function form of the lookup. The underlying
-   `category->anomaly-type` mapping is also re-exported as a map for
-   inspection (e.g. listing every (category, type) pair, or asserting
-   coverage in tests)."
-  [category]
-  (get category->anomaly-type category :fault))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Canonical wrapper
-
-(defn execute-with-exception-handling
+(defn ^{:stratum 0} execute-with-exception-handling
   "Run `(apply f args)` and convert the outcome into a chain step.
 
    - On success: appends a successful step under `operation-key` to
@@ -119,14 +105,26 @@
   (apply core/execute-with-exception-handling
          category chain operation-key f args))
 
-(defn execute
+(defn ^{:stratum 0} execute
   "Short alias for `execute-with-exception-handling`."
   [category chain operation-key f & args]
   (apply core/execute-with-exception-handling
          category chain operation-key f args))
 
-;------------------------------------------------------------------------------ Rich Comment
+;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} classify-category
+  "Return the canonical anomaly type for `category`, falling back to
+   `:fault` when the category is not in `exception-categories`.
+
+   This is the function form of the lookup. The underlying
+   `category->anomaly-type` mapping is also re-exported as a map for
+   inspection (e.g. listing every (category, type) pair, or asserting
+   coverage in tests)."
+  [category]
+  (get category->anomaly-type category :fault))
+
+;------------------------------------------------------------------------------ Rich Comment
 (comment
   (require '[ai.miniforge.response-chain.interface :as chain])
 
