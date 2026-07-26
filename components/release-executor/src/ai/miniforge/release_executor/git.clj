@@ -489,8 +489,9 @@
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
    release retry reuses it instead of opening a duplicate.
-   Falls back to a failure carrying the original create error when the PR
-   cannot be resolved via gh pr view."
+   Falls back to a failure carrying the `gh pr view` resolution error (not
+   the original create error) when the PR cannot be resolved via gh pr
+   view — so retries are debuggable."
   [worktree-path github-token]
   (try
     (let [r (process/shell

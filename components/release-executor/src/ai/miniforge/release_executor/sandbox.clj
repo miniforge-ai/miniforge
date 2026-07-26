@@ -261,7 +261,8 @@
 (defn- ^{:stratum 1} reuse-existing-pr!
   "Resolve the PR already open for the current branch via gh pr view, so a
    release retry reuses it instead of opening a duplicate. Falls back to a
-   failure carrying the original create error when it can't be resolved."
+   failure carrying the `gh pr view` resolution error (not the original
+   create error) when it can't be resolved — see the comment below."
   [executor env-id exec-opts _create-error]
   (let [r (exec! executor env-id "gh pr view --json url --jq '.url'" exec-opts)]
     (if-let [pr (and (result/succeeded? r) (parse-pr-ref (:output r "")))]

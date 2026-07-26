@@ -8,19 +8,19 @@ Started as a mechanical `stratum-lint --fix` pass over
 decorative `Layer N` headings with real ones derived from each file's
 actual same-file reference graph.
 
-It grew well beyond that: automated review on this PR found nine
-genuine, pre-existing correctness bugs along the way (a phantom-success
-on `rev-parse` failure in two independent `commit-changes!`
-implementations, a token-bearing URL interpolated unescaped into a shell
-command with unchecked `set-url`/restore results and unthreaded executor
-`opts`, two `exec!` implementations silently dropping `:output` from
-their contract on the error path, an unvalidated shell-injection surface
-in `stage-files!`, an unescaped YAML-injection surface in
-`provenance-frontmatter`, and a CRLF-handling gap in that same fix's own
-first draft). All nine are fixed and tested here — see "Nine real bugs
-found by automated review" below for the full list; each one was
-verified directly against the code before being fixed, not fixed on the
-reviewer's say-so.
+It grew well beyond that: automated review on this PR found ten genuine,
+pre-existing correctness issues along the way (a phantom-success on
+`rev-parse` failure in two independent `commit-changes!` implementations,
+a token-bearing URL interpolated unescaped into a shell command with
+unchecked `set-url`/restore results and unthreaded executor `opts`, two
+`exec!` implementations silently dropping `:output` from their contract
+on the error path, an unvalidated shell-injection surface in
+`stage-files!`, an unescaped YAML-injection surface in
+`provenance-frontmatter`, a CRLF-handling gap in that same fix's own
+first draft, and a docstring in two files that said the opposite of what
+the code does). All ten are fixed here — see "Ten real bugs found by
+automated review" below for the full list; each one was verified directly
+against the code before being fixed, not fixed on the reviewer's say-so.
 
 ## Motivation
 
@@ -100,9 +100,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Nine real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
+### Ten real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
 
-Automated review on this PR flagged nine genuine, pre-existing
+Automated review on this PR flagged ten genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -213,6 +213,14 @@ second one). Verified each directly against the code before fixing:
    `\n` escape, not two), then any remaining lone `\r` — rather than
    trying to pattern-match `\r` and `\n` independently after the fact.
 
+10. **`reuse-existing-pr!`'s docstring said the opposite of what the code
+    does, in both `sandbox.clj` and `git.clj`** — "Falls back to a failure
+    carrying the original create error", while the code (and its own
+    inline comment in `sandbox.clj`) explicitly surfaces the `gh pr view`
+    resolution error instead, specifically so retries stay debuggable.
+    Fixed both docstrings to match the actual (correct) behavior; no code
+    change, since the behavior itself was already right.
+
 Added 12 regression tests: 5 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
@@ -249,7 +257,7 @@ pre-fix code.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the nine review-flagged bugs (above) and added 12 regression
+6. Fixed the ten review-flagged issues (above) and added 12 regression
    tests. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
    "(require ...) (clojure.test/run-tests ...)"`: 256 tests, 645
    assertions, 0 failures, 0 errors.
@@ -269,8 +277,8 @@ pre-fix code.
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the nine bug fixes above are real behavior
-changes (a failure that used to be silently swallowed, misreported as
+comment/metadata/order-only; the ten fixes above are mostly real behavior
+changes (one is docstring-only) (a failure that used to be silently swallowed, misreported as
 success, dropped from the result shape, or run against the wrong executor
 context now surfaces/behaves correctly; an unvalidated path or an
 unescaped/under-escaped provenance value can no longer corrupt a shell
@@ -301,7 +309,7 @@ newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Nine review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
+- [x] Ten review-flagged issues fixed: `sandbox.clj`'s `commit-changes!`
       phantom success on `rev-parse` failure; `sandbox.clj`'s
       `push-with-https-fallback!` unescaped token URL + unchecked
       `set-url`/restore results + unthreaded `opts` (including the
@@ -310,7 +318,9 @@ newly-surfaced `SL003` files above.
       on their error/exception branch; `sandbox.clj`'s `stage-files!`
       unvalidated shell-injection surface; `core.clj`'s
       `provenance-frontmatter` unescaped YAML injection surface; that same
-      fix's own `\r`-handling gap. 12 regression tests added.
+      fix's own `\r`-handling gap; `reuse-existing-pr!`'s inverted
+      docstring in both `sandbox.clj` and `git.clj`. 12 regression tests
+      added.
 - [x] Component tests pass (256 tests, 645 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
