@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.filters
   "Filter parsing and normalization for request parameters."
   (:require
@@ -20,9 +19,9 @@
    [ai.miniforge.web-dashboard.filters-new :as filters]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Parameter parsing utilities
 
-(defn param-value
+;; Parameter parsing utilities
+(defn ^{:stratum 0} param-value
   "Read request parameter by keyword or string key."
   [params key default]
   (or (get params key)
@@ -30,7 +29,7 @@
       (when (string? key) (get params (keyword key)))
       default))
 
-(defn ->keyword
+(defn ^{:stratum 0} ->keyword
   "Convert string/keyword value to keyword when possible."
   [v]
   (cond
@@ -43,7 +42,7 @@
                     (keyword cleaned)))
     :else nil))
 
-(defn parse-bool
+(defn ^{:stratum 0} parse-bool
   "Parse boolean-like string values."
   [v]
   (cond
@@ -54,29 +53,13 @@
                   v)
     :else v))
 
-(defn decode-url-part
+(defn ^{:stratum 0} decode-url-part
   "Decode a URL query-string key/value."
   [s]
   (java.net.URLDecoder/decode (str s) "UTF-8"))
 
-(defn query-string->params
-  "Parse raw query-string into a string-keyed map."
-  [query-string]
-  (if (str/blank? query-string)
-    {}
-    (reduce
-     (fn [acc pair]
-       (let [[k v] (str/split pair #"=" 2)
-             key (decode-url-part k)
-             value (decode-url-part (or v ""))]
-         (assoc acc key value)))
-     {}
-     (remove str/blank? (str/split query-string #"&")))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Operator and value normalization
-
-(defn normalize-op
+(defn ^{:stratum 0} normalize-op
   "Normalize operation token to keyword."
   [op]
   (let [token (str/lower-case (str/trim (str op)))]
@@ -103,7 +86,7 @@
       "between" :between
       :=)))
 
-(defn normalize-ast-op
+(defn ^{:stratum 0} normalize-ast-op
   "Normalize AST boolean operator."
   [op]
   (let [token (str/lower-case (str/trim (str op)))]
@@ -116,7 +99,23 @@
       "not" :not
       :and)))
 
-(defn normalize-filter-value
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} query-string->params
+  "Parse raw query-string into a string-keyed map."
+  [query-string]
+  (if (str/blank? query-string)
+    {}
+    (reduce
+     (fn [acc pair]
+       (let [[k v] (str/split pair #"=" 2)
+             key (decode-url-part k)
+             value (decode-url-part (or v ""))]
+         (assoc acc key value)))
+     {}
+     (remove str/blank? (str/split query-string #"&")))))
+
+(defn ^{:stratum 1} normalize-filter-value
   "Coerce clause value based on filter spec type/value configuration."
   [spec value]
   (let [filter-type (:filter/type spec)
@@ -139,7 +138,9 @@
 
       :else value)))
 
-(defn normalize-filter-clause
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} normalize-filter-clause
   "Normalize a single JSON clause to evaluator-friendly shape."
   [clause]
   (let [filter-id (->keyword (or (:filter/id clause)
@@ -153,10 +154,10 @@
               (normalize-filter-value spec value)
               value)}))
 
-;------------------------------------------------------------------------------ Layer 2
-;; AST parsing
+;------------------------------------------------------------------------------ Layer 3
 
-(defn normalize-filter-ast
+;; AST parsing
+(defn ^{:stratum 3} normalize-filter-ast
   "Normalize JSON AST from browser before evaluation."
   [ast]
   (let [clauses (get ast :clauses (get ast "clauses" []))]
@@ -166,7 +167,9 @@
                    (filter :filter/id)
                    vec)}))
 
-(defn parse-filter-ast
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} parse-filter-ast
   "Parse filter AST from request parameters.
 
    Expects JSON-encoded filter AST in 'filters' parameter."

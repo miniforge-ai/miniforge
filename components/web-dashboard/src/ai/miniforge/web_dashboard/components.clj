@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.components
   "Reusable Hiccup component library for web dashboard.
 
@@ -29,24 +28,36 @@
    [ai.miniforge.web-dashboard.components.layouts :as layouts]
    [ai.miniforge.web-dashboard.components.data :as data]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Re-exports
+;; Primitives
+(def ^{:stratum 0} button primitives/button)
 
-;; Layer 0: Primitives
-(def button primitives/button)
-(def badge primitives/badge)
-(def card primitives/card)
-(def stat-card primitives/stat-card)
-(def progress-bar primitives/progress-bar)
-(def status-dot primitives/status-dot)
-(def icon primitives/icon)
+(def ^{:stratum 0} badge primitives/badge)
 
-;; Layer 1: Layouts
-(def page layouts/page)
-(def panel layouts/panel)
-(def grid layouts/grid)
-(def split layouts/split)
+(def ^{:stratum 0} card primitives/card)
 
-;; Layer 2: Data Display
-(def table data/table)
-(def tree data/tree)
-(def timeline data/timeline)
+(def ^{:stratum 0} stat-card primitives/stat-card)
+
+(def ^{:stratum 0} progress-bar primitives/progress-bar)
+
+(def ^{:stratum 0} status-dot primitives/status-dot)
+
+(def ^{:stratum 0} icon primitives/icon)
+
+;; Layouts
+(def ^{:stratum 0} page layouts/page)
+
+(def ^{:stratum 0} panel layouts/panel)
+
+(def ^{:stratum 0} grid layouts/grid)
+
+(def ^{:stratum 0} split layouts/split)
+
+;; Data Display
+(def ^{:stratum 0} table data/table)
+
+(def ^{:stratum 0} tree data/tree)
+
+(def ^{:stratum 0} timeline data/timeline)

@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.filter-schema
   "Malli schemas for filter specification validation."
   (:require [malli.core :as m]))
 
-(def FilterValueSpec
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} FilterValueSpec
   "Schema for filter value extraction specification."
   [:or
    ;; Path-based extraction
@@ -38,7 +39,9 @@
     [:kind [:= :multi-path]]
     [:paths [:vector [:vector keyword?]]]]])
 
-(def FilterSpec
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} FilterSpec
   "Schema for a filter specification.
 
    Filter specs define filterable fields including:
@@ -60,21 +63,25 @@
      [:= :dynamic]
      [:vector [:or keyword? string?]]]]])
 
-(def FilterSpecs
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} FilterSpecs
   "Schema for a collection of filter specifications."
   [:vector FilterSpec])
 
-(defn valid-filter-spec?
+(defn ^{:stratum 2} valid-filter-spec?
   "Validate a single filter specification."
   [spec]
   (m/validate FilterSpec spec))
 
-(defn valid-filter-specs?
-  "Validate a collection of filter specifications."
-  [specs]
-  (m/validate FilterSpecs specs))
-
-(defn explain-filter-spec
+(defn ^{:stratum 2} explain-filter-spec
   "Get human-readable explanation of validation errors."
   [spec]
   (m/explain FilterSpec spec))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} valid-filter-specs?
+  "Validate a collection of filter specifications."
+  [specs]
+  (m/validate FilterSpecs specs))

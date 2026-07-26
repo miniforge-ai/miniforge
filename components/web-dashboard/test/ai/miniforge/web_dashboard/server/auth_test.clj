@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.auth-test
   "Route-level tests for dashboard login."
   (:require
@@ -26,9 +25,9 @@
    [ai.miniforge.web-dashboard.state.core :as state-core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test helpers
 
-(defn fresh-state
+;; Test helpers
+(defn ^{:stratum 0} fresh-state
   []
   (state-core/create-state
    {:auth (auth/build-auth-state
@@ -36,28 +35,30 @@
                      :password "wonderland"
                      :role :operator}]})}))
 
-(defn body-stream
+(defn ^{:stratum 0} body-stream
   [content]
   (java.io.ByteArrayInputStream. (.getBytes content "UTF-8")))
 
-(defn form-request
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} form-request
   [uri body & [headers]]
   {:uri uri
    :request-method :post
    :headers (merge {"content-type" "application/x-www-form-urlencoded"} headers)
    :body (body-stream body)})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Route tests
-
-(deftest protected-route-redirects-to-login-test
+(deftest ^{:stratum 1} protected-route-redirects-to-login-test
   (testing "GET / redirects to login when auth is enabled"
     (let [handler (server/create-handler (fresh-state))
           response (handler {:uri "/" :request-method :get :headers {}})]
       (is (= 302 (:status response)))
       (is (str/starts-with? (get-in response [:headers "Location"]) "/login?return-to=")))))
 
-(deftest login-flow-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} login-flow-test
   (testing "GET /login serves a login form"
     (let [handler (server/create-handler (fresh-state))
           response (handler {:uri "/login" :request-method :get :headers {}})]
@@ -85,7 +86,7 @@
       (is (= 401 (:status response)))
       (is (str/includes? (:body response) "Invalid username or password.")))))
 
-(deftest logout-clears-session-test
+(deftest ^{:stratum 2} logout-clears-session-test
   (testing "POST /logout clears the current session cookie"
     (let [state (fresh-state)
           handler (server/create-handler state)

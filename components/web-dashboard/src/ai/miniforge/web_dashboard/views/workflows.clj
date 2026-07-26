@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.workflows
   "Workflow list and detail views."
   (:require
@@ -20,14 +19,15 @@
    [ai.miniforge.web-dashboard.components :as c]
    [ai.miniforge.web-dashboard.messages :as msg]))
 
-;; Duration thresholds — not locale-dependent (math, not translation)
-(def ^:private ms-per-second 1000)
-(def ^:private ms-per-minute 60000)
-
 ;------------------------------------------------------------------------------ Layer 0
-;; Workflow fragments
 
-(defn format-time
+;; Duration thresholds — not locale-dependent (math, not translation)
+(def ^{:stratum 0} ^:private ms-per-second 1000)
+
+(def ^{:stratum 0} ^:private ms-per-minute 60000)
+
+;; Workflow fragments
+(defn ^{:stratum 0} format-time
   [ts]
   (let [date (cond
                (instance? java.util.Date ts) ts
@@ -41,71 +41,35 @@
       (.format (java.text.SimpleDateFormat. "HH:mm:ss") date)
       (msg/t :time/none))))
 
-(defn format-duration-ms
-  [duration-ms]
-  (when (number? duration-ms)
-    (cond
-      (< duration-ms ms-per-second) (str duration-ms (msg/t :duration/ms-suffix))
-      (< duration-ms ms-per-minute) (format "%.1f%s" (/ duration-ms (double ms-per-second))
-                                            (msg/t :duration/s-suffix))
-      :else                         (format "%.1f%s" (/ duration-ms (double ms-per-minute))
-                                            (msg/t :duration/min-suffix)))))
-
-(defn format-cost
+(defn ^{:stratum 0} format-cost
   [cost-usd]
   (when (number? cost-usd)
     (format "$%.4f" (double cost-usd))))
 
-(defn- humanize-keyword
+(defn- ^{:stratum 0} humanize-keyword
   [kw]
   (-> (name kw)
       (str/replace "-" " ")
       (str/replace "_" " ")))
 
-(defn dependency-display-name
-  [dependency]
-  (let [dependency-id (:dependency/id dependency)
-        vendor (:dependency/vendor dependency)]
-    (cond
-      vendor (str/capitalize (humanize-keyword vendor))
-      (keyword? dependency-id) (str/capitalize (humanize-keyword dependency-id))
-      (string? dependency-id) dependency-id
-      dependency-id (str dependency-id)
-      :else (msg/t :time/none))))
-
-(defn dependency-kind-label
+(defn ^{:stratum 0} dependency-kind-label
   [dependency]
   (msg/t (keyword "workflow.dependency-kind" (name (or (:dependency/kind dependency)
                                                        :environment)))))
 
-(defn dependency-status-label
+(defn ^{:stratum 0} dependency-status-label
   [dependency]
   (msg/t (keyword "workflow.dependency-status" (name (or (:dependency/status dependency)
                                                          :healthy)))))
 
-(defn dependency-badge-variant
+(defn ^{:stratum 0} dependency-badge-variant
   [dependency]
   (case (:dependency/status dependency)
     (:operator-action-required :misconfigured :unavailable) :error
     :degraded :warning
     :success))
 
-(defn dependency-summary
-  [dependency]
-  (msg/t :workflow/dependency-summary
-         {:dependency (dependency-display-name dependency)
-          :status (dependency-status-label dependency)}))
-
-(defn dependency-detail-items
-  [dependency]
-  (cond-> [(dependency-kind-label dependency)]
-    (:dependency/class dependency)
-    (conj (humanize-keyword (:dependency/class dependency)))
-
-    (:dependency/retryability dependency)
-    (conj (humanize-keyword (:dependency/retryability dependency)))))
-
-(defn event-message
+(defn ^{:stratum 0} event-message
   "Return the best human-readable message string for an event, or nil.
 
   The event schema uses different fields depending on event type:
@@ -126,12 +90,107 @@
           ;; failure events don't set :event/message — surface reason with i18n prefix
           (str (msg/t :metric/failure-prefix) reason)))))
 
-(defn- coalesce-metric
+(defn- ^{:stratum 0} coalesce-metric
   "Return the first non-nil metric value across phase and workflow namespaces."
   [evt phase-key wf-key]
   (or (get evt phase-key) (get evt wf-key)))
 
-(defn event-metric-items
+(defn ^{:stratum 0} status-label
+  "Human-readable status label."
+  [status]
+  (msg/t (keyword "workflow.status" (name (or status :unknown)))))
+
+(defn- ^{:stratum 0} workflow-empty-state
+  "Empty-state placeholder shown when there are no workflow runs."
+  []
+  [:div.empty-state
+   [:div.empty-icon "⚙️"]
+   [:h3 (msg/t :workflow/none-heading)]
+   [:p (msg/t :workflow/none-body)]
+   [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
+   [:p.empty-hint (msg/t :workflow/none-hint)]])
+
+(defn- ^{:stratum 0} workflow-panel-controls
+  "Pause/resume/cancel buttons — only rendered for running workflows.
+   Each posts the matching intervention verb; `cancel` is the operation
+   the pre-D-4 command channel called `stop`."
+  [workflow-id]
+  [:div.workflow-panel-controls
+   [:button.btn.btn-sm
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','pause')")
+     :title (msg/t :cp/btn-pause)}
+    (msg/t :cp/btn-pause)]
+   [:button.btn.btn-sm
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','resume')")
+     :title (msg/t :cp/btn-resume)}
+    (msg/t :cp/btn-resume)]
+   [:button.btn.btn-sm.btn-danger
+    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','cancel')")
+     :title (msg/t :workflow/btn-cancel)}
+    (msg/t :workflow/btn-cancel)]])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-duration-ms
+  [duration-ms]
+  (when (number? duration-ms)
+    (cond
+      (< duration-ms ms-per-second) (str duration-ms (msg/t :duration/ms-suffix))
+      (< duration-ms ms-per-minute) (format "%.1f%s" (/ duration-ms (double ms-per-second))
+                                            (msg/t :duration/s-suffix))
+      :else                         (format "%.1f%s" (/ duration-ms (double ms-per-minute))
+                                            (msg/t :duration/min-suffix)))))
+
+(defn ^{:stratum 1} dependency-display-name
+  [dependency]
+  (let [dependency-id (:dependency/id dependency)
+        vendor (:dependency/vendor dependency)]
+    (cond
+      vendor (str/capitalize (humanize-keyword vendor))
+      (keyword? dependency-id) (str/capitalize (humanize-keyword dependency-id))
+      (string? dependency-id) dependency-id
+      dependency-id (str dependency-id)
+      :else (msg/t :time/none))))
+
+(defn ^{:stratum 1} dependency-detail-items
+  [dependency]
+  (cond-> [(dependency-kind-label dependency)]
+    (:dependency/class dependency)
+    (conj (humanize-keyword (:dependency/class dependency)))
+
+    (:dependency/retryability dependency)
+    (conj (humanize-keyword (:dependency/retryability dependency)))))
+
+(defn- ^{:stratum 1} workflow-card-summary
+  "The [:summary ...] element for a single workflow card."
+  [wf status]
+  [:summary.workflow-card-summary
+   [:span.wf-status-dot (c/status-dot status)]
+   [:span.wf-name (:name wf)]
+   [:span.wf-badge {:class (str "badge-" (name status))}
+    (status-label status)]
+   (when-let [dependency-issues (seq (:dependency-issues wf))]
+     (c/badge (msg/t :workflow/dependency-issue-count
+                     {:count (count dependency-issues)})
+              {:variant (let [severity (get wf :dependency-severity)]
+                          (if (keyword? severity) severity :warning))}))
+   [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
+   [:div.wf-progress-inline
+    [:div.wf-progress-track
+     [:div.wf-progress-fill
+      {:style (str "width:" (get wf :progress 0) "%")}]]]
+   [:span.wf-time (format-time (:started-at wf))]
+   [:span.wf-expand-icon "▸"]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} dependency-summary
+  [dependency]
+  (msg/t :workflow/dependency-summary
+         {:dependency (dependency-display-name dependency)
+          :status (dependency-status-label dependency)}))
+
+(defn ^{:stratum 2} event-metric-items
   "Render compact per-event metrics as a seq of display strings."
   [evt]
   (let [duration-ms (coalesce-metric evt :phase/duration-ms :workflow/duration-ms)
@@ -143,7 +202,66 @@
       tokens               (conj (str tokens (msg/t :metric/tokens-suffix)))
       cost-usd             (conj (format-cost cost-usd)))))
 
-(defn workflow-events-fragment
+(defn- ^{:stratum 2} workflow-card
+  "One full [:details ...] card for a single workflow."
+  [wf]
+  (let [wf-id  (str (:id wf))
+        status (get wf :status :unknown)]
+    [:details.workflow-card
+     {:id                wf-id
+      :data-workflow-id  wf-id
+      :hx-get            (str "/api/workflow/" wf-id "/panel")
+      :hx-trigger        "toggle once"
+      :hx-target         (str "#wf-panel-" wf-id)
+      :hx-swap           "innerHTML"}
+     (workflow-card-summary wf status)
+     [:div.workflow-card-body
+      {:id               (str "wf-panel-" wf-id)
+       :data-workflow-id wf-id}]]))
+
+(defn- ^{:stratum 2} workflow-metric-fields
+  "Return a seq of [css-class label-text] tuples for non-nil metric fields.
+   Used by workflow-panel-meta to render each metric span generically."
+  [workflow]
+  (cond-> []
+    (get-in workflow [:metrics :tokens])
+    (conj [:workflow-tokens (msg/t :workflow/metric-tokens
+                                   {:value (str (get-in workflow [:metrics :tokens]))})])
+
+    (format-duration-ms (get-in workflow [:metrics :duration-ms]))
+    (conj [:workflow-duration (msg/t :workflow/metric-duration
+                                     {:value (format-duration-ms (get-in workflow [:metrics :duration-ms]))})])
+
+    (format-cost (get-in workflow [:metrics :cost-usd]))
+    (conj [:workflow-cost (msg/t :workflow/metric-cost
+                                 {:value (format-cost (get-in workflow [:metrics :cost-usd]))})])
+
+    (:started-at workflow)
+    (conj [:workflow-started (msg/t :workflow/metric-started
+                                    {:value (format-time (:started-at workflow))})])))
+
+(defn- ^{:stratum 2} workflow-dependency-section
+  [workflow]
+  (let [dependency-issues (:dependency-issues workflow)]
+    [:div.workflow-panel-dependencies
+     [:h4.section-title (msg/t :workflow/dependency-section)]
+     (if (seq dependency-issues)
+       [:div.workflow-dependency-list
+        (for [dependency dependency-issues]
+          [:div.workflow-dependency-item
+           [:div.workflow-dependency-header
+            (c/badge (dependency-status-label dependency)
+                     {:variant (dependency-badge-variant dependency)})
+            [:span.workflow-dependency-name (dependency-display-name dependency)]]
+           [:div.workflow-dependency-details
+            (str/join " • " (dependency-detail-items dependency))]
+           (when-let [message (:dependency/message dependency)]
+             [:div.workflow-dependency-message message])])]
+       [:div.workflow-dependency-empty (msg/t :workflow/dependency-none)])]))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} workflow-events-fragment
   "Event list fragment for htmx updates."
   [events]
   (html
@@ -166,60 +284,7 @@
            (when (seq metric-items)
              [:span.event-metrics (str/join " • " metric-items)])]))])))
 
-(defn status-label
-  "Human-readable status label."
-  [status]
-  (msg/t (keyword "workflow.status" (name (or status :unknown)))))
-
-(defn- workflow-empty-state
-  "Empty-state placeholder shown when there are no workflow runs."
-  []
-  [:div.empty-state
-   [:div.empty-icon "⚙️"]
-   [:h3 (msg/t :workflow/none-heading)]
-   [:p (msg/t :workflow/none-body)]
-   [:code.empty-code "miniforge workflow run examples/workflows/simple.edn"]
-   [:p.empty-hint (msg/t :workflow/none-hint)]])
-
-(defn- workflow-card-summary
-  "The [:summary ...] element for a single workflow card."
-  [wf status]
-  [:summary.workflow-card-summary
-   [:span.wf-status-dot (c/status-dot status)]
-   [:span.wf-name (:name wf)]
-   [:span.wf-badge {:class (str "badge-" (name status))}
-    (status-label status)]
-   (when-let [dependency-issues (seq (:dependency-issues wf))]
-     (c/badge (msg/t :workflow/dependency-issue-count
-                     {:count (count dependency-issues)})
-              {:variant (let [severity (get wf :dependency-severity)]
-                          (if (keyword? severity) severity :warning))}))
-   [:span.wf-phase (or (some-> (:phase wf) name) (msg/t :time/none))]
-   [:div.wf-progress-inline
-    [:div.wf-progress-track
-     [:div.wf-progress-fill
-      {:style (str "width:" (get wf :progress 0) "%")}]]]
-   [:span.wf-time (format-time (:started-at wf))]
-   [:span.wf-expand-icon "▸"]])
-
-(defn- workflow-card
-  "One full [:details ...] card for a single workflow."
-  [wf]
-  (let [wf-id  (str (:id wf))
-        status (get wf :status :unknown)]
-    [:details.workflow-card
-     {:id                wf-id
-      :data-workflow-id  wf-id
-      :hx-get            (str "/api/workflow/" wf-id "/panel")
-      :hx-trigger        "toggle once"
-      :hx-target         (str "#wf-panel-" wf-id)
-      :hx-swap           "innerHTML"}
-     (workflow-card-summary wf status)
-     [:div.workflow-card-body
-      {:id               (str "wf-panel-" wf-id)
-       :data-workflow-id wf-id}]]))
-
-(defn workflow-list-fragment
+(defn ^{:stratum 3} workflow-list-fragment
   "Workflow list fragment — expandable cards."
   [workflows]
   (html
@@ -227,47 +292,7 @@
      (workflow-empty-state)
      [:div.workflow-card-list (map workflow-card workflows)])))
 
-(defn- workflow-metric-fields
-  "Return a seq of [css-class label-text] tuples for non-nil metric fields.
-   Used by workflow-panel-meta to render each metric span generically."
-  [workflow]
-  (cond-> []
-    (get-in workflow [:metrics :tokens])
-    (conj [:workflow-tokens (msg/t :workflow/metric-tokens
-                                   {:value (str (get-in workflow [:metrics :tokens]))})])
-
-    (format-duration-ms (get-in workflow [:metrics :duration-ms]))
-    (conj [:workflow-duration (msg/t :workflow/metric-duration
-                                     {:value (format-duration-ms (get-in workflow [:metrics :duration-ms]))})])
-
-    (format-cost (get-in workflow [:metrics :cost-usd]))
-    (conj [:workflow-cost (msg/t :workflow/metric-cost
-                                 {:value (format-cost (get-in workflow [:metrics :cost-usd]))})])
-
-    (:started-at workflow)
-    (conj [:workflow-started (msg/t :workflow/metric-started
-                                    {:value (format-time (:started-at workflow))})])))
-
-(defn- workflow-panel-controls
-  "Pause/resume/cancel buttons — only rendered for running workflows.
-   Each posts the matching intervention verb; `cancel` is the operation
-   the pre-D-4 command channel called `stop`."
-  [workflow-id]
-  [:div.workflow-panel-controls
-   [:button.btn.btn-sm
-    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','pause')")
-     :title (msg/t :cp/btn-pause)}
-    (msg/t :cp/btn-pause)]
-   [:button.btn.btn-sm
-    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','resume')")
-     :title (msg/t :cp/btn-resume)}
-    (msg/t :cp/btn-resume)]
-   [:button.btn.btn-sm.btn-danger
-    {:onclick (str "window.miniforge.postWorkflowCommand('" workflow-id "','cancel')")
-     :title (msg/t :workflow/btn-cancel)}
-    (msg/t :workflow/btn-cancel)]])
-
-(defn- workflow-panel-meta
+(defn- ^{:stratum 3} workflow-panel-meta
   "Meta row: status badge, phase, progress, and any available metric fields."
   [workflow]
   [:div.workflow-panel-meta
@@ -288,26 +313,9 @@
    (for [[css-class label-text] (workflow-metric-fields workflow)]
      [:span {:class (name css-class)} label-text])])
 
-(defn- workflow-dependency-section
-  [workflow]
-  (let [dependency-issues (:dependency-issues workflow)]
-    [:div.workflow-panel-dependencies
-     [:h4.section-title (msg/t :workflow/dependency-section)]
-     (if (seq dependency-issues)
-       [:div.workflow-dependency-list
-        (for [dependency dependency-issues]
-          [:div.workflow-dependency-item
-           [:div.workflow-dependency-header
-            (c/badge (dependency-status-label dependency)
-                     {:variant (dependency-badge-variant dependency)})
-            [:span.workflow-dependency-name (dependency-display-name dependency)]]
-           [:div.workflow-dependency-details
-            (str/join " • " (dependency-detail-items dependency))]
-           (when-let [message (:dependency/message dependency)]
-             [:div.workflow-dependency-message message])])]
-       [:div.workflow-dependency-empty (msg/t :workflow/dependency-none)])]))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn workflow-detail-panel
+(defn ^{:stratum 4} workflow-detail-panel
   "Inline detail panel loaded on card expand."
   [workflow events]
   (html
@@ -337,10 +345,8 @@
             :hx-swap          "innerHTML"}
       (workflow-events-fragment events)]]]))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Page views
-
-(defn workflows-view
+(defn ^{:stratum 4} workflows-view
   "Workflows list page view."
   [layout workflows]
   (layout (msg/t :layout/nav-workflows)
@@ -388,10 +394,10 @@
        :hx-swap "innerHTML"}
       [:div.loading-spinner (msg/t :archived/scanning)]]]]))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Workflow detail view (direct URL fallback)
+;------------------------------------------------------------------------------ Layer 5
 
-(defn workflow-detail-view
+;; Workflow detail view (direct URL fallback)
+(defn ^{:stratum 5} workflow-detail-view
   "Detailed workflow view for direct URL access. Redirects to workflows page."
   [layout workflow events]
   (if (:error workflow)

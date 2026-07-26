@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.control-plane
   "Control Plane view — unified agent management dashboard.
 
@@ -31,9 +30,9 @@
    [ai.miniforge.web-dashboard.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Data-driven mappings
 
-(def ^:private status->css
+;; Data-driven mappings
+(def ^{:stratum 0} ^:private status->css
   "Map of agent status keyword to CSS class."
   {:running      "status-running"
    :idle         "status-idle"
@@ -45,7 +44,7 @@
    :terminated   "status-terminated"
    :initializing "status-initializing"})
 
-(def ^:private vendor->icon
+(def ^{:stratum 0} ^:private vendor->icon
   "Map of vendor keyword to display icon."
   {:claude-code "C"
    :miniforge   "M"
@@ -53,33 +52,21 @@
    :cursor      "Cu"
    :ollama      "L"})
 
-(def ^:private priority->css
+(def ^{:stratum 0} ^:private priority->css
   "Map of decision priority to CSS class."
   {:critical "priority-critical"
    :high     "priority-high"
    :medium   "priority-medium"
    :low      "priority-low"})
 
-(def ^:private status->sort-order
+(def ^{:stratum 0} ^:private status->sort-order
   "Sort priority for agent statuses (lower = first)."
   {:blocked     0
    :running     1
    :idle        2
    :unreachable 3})
 
-;------------------------------------------------------------------------------ Layer 0
-;; Helpers
-
-(defn- status-class [status]
-  (get status->css status "status-unknown"))
-
-(defn- vendor-icon [vendor]
-  (get vendor->icon vendor "?"))
-
-(defn- priority-class [priority]
-  (get priority->css priority "priority-medium"))
-
-(defn- relative-time
+(defn- ^{:stratum 0} relative-time
   "Simple relative time string from a Date."
   [date]
   (when date
@@ -91,10 +78,42 @@
         (< mins 60) (messages/t :cp/time-minutes-ago {:n mins})
         :else       (messages/t :cp/time-hours-ago   {:n (quot mins 60)})))))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Agent card fragments
+;; Summary bar
+(defn ^{:stratum 0} summary-bar
+  "Top-level stats bar."
+  [stats]
+  (let [{:keys [total-agents by-status pending-decisions]} stats]
+    [:div.cp-summary-bar
+     [:div.cp-stat
+      [:span.cp-stat-value (str total-agents)]
+      [:span.cp-stat-label (messages/t :cp/stat-agents)]]
+     [:div.cp-stat
+      [:span.cp-stat-value (str (get by-status :running 0))]
+      [:span.cp-stat-label (messages/t :cp/stat-running)]]
+     [:div.cp-stat.stat-attention
+      [:span.cp-stat-value (str (+ (get by-status :blocked 0)
+                                    (get by-status :unreachable 0)))]
+      [:span.cp-stat-label (messages/t :cp/stat-attention)]]
+     [:div.cp-stat.stat-decisions
+      [:span.cp-stat-value (str pending-decisions)]
+      [:span.cp-stat-label (messages/t :cp/stat-decisions)]]]))
 
-(defn agent-card
+;------------------------------------------------------------------------------ Layer 1
+
+;; Helpers
+(defn- ^{:stratum 1} status-class [status]
+  (get status->css status "status-unknown"))
+
+(defn- ^{:stratum 1} vendor-icon [vendor]
+  (get vendor->icon vendor "?"))
+
+(defn- ^{:stratum 1} priority-class [priority]
+  (get priority->css priority "priority-medium"))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Agent card fragments
+(defn ^{:stratum 2} agent-card
   "Single agent card for the grid."
   [agent-record]
   (let [agent-id (str (:agent/id agent-record))
@@ -135,28 +154,8 @@
           :hx-confirm (messages/t :cp/confirm-terminate)}
          (messages/t :cp/btn-kill)])]]))
 
-(defn agents-grid-fragment
-  "Agent cards grid fragment for htmx updates."
-  [agents]
-  (html
-   (if (empty? agents)
-     [:div.cp-empty-state
-      [:div.empty-icon "\uD83E\uDD16"]
-      [:h3 (messages/t :cp/no-agents-heading)]
-      [:p (messages/t :cp/no-agents-body)]
-      [:div.cp-register-hint
-       [:code (messages/t :cp/no-agents-hint)]]]
-     [:div.cp-agents-grid
-      (for [agent (sort-by (fn [a]
-                             [(get status->sort-order (:agent/status a) 9)
-                              (str (:agent/name a))])
-                           agents)]
-        (agent-card agent))])))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Decision queue fragments
-
-(defn decision-item
+(defn ^{:stratum 2} decision-item
   "Single decision row in the queue."
   [decision]
   (let [decision-id (str (:decision/id decision))]
@@ -190,7 +189,27 @@
                            :placeholder (messages/t :cp/input-placeholder)}]
          [:button.btn.btn-sm.btn-primary {:type "submit"} (messages/t :cp/btn-send)]])]]))
 
-(defn decision-queue-fragment
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} agents-grid-fragment
+  "Agent cards grid fragment for htmx updates."
+  [agents]
+  (html
+   (if (empty? agents)
+     [:div.cp-empty-state
+      [:div.empty-icon "\uD83E\uDD16"]
+      [:h3 (messages/t :cp/no-agents-heading)]
+      [:p (messages/t :cp/no-agents-body)]
+      [:div.cp-register-hint
+       [:code (messages/t :cp/no-agents-hint)]]]
+     [:div.cp-agents-grid
+      (for [agent (sort-by (fn [a]
+                             [(get status->sort-order (:agent/status a) 9)
+                              (str (:agent/name a))])
+                           agents)]
+        (agent-card agent))])))
+
+(defn ^{:stratum 3} decision-queue-fragment
   "Decision queue fragment for htmx updates."
   [decisions]
   (html
@@ -202,32 +221,10 @@
       (for [d decisions]
         (decision-item d))])))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Summary bar
+;------------------------------------------------------------------------------ Layer 4
 
-(defn summary-bar
-  "Top-level stats bar."
-  [stats]
-  (let [{:keys [total-agents by-status pending-decisions]} stats]
-    [:div.cp-summary-bar
-     [:div.cp-stat
-      [:span.cp-stat-value (str total-agents)]
-      [:span.cp-stat-label (messages/t :cp/stat-agents)]]
-     [:div.cp-stat
-      [:span.cp-stat-value (str (get by-status :running 0))]
-      [:span.cp-stat-label (messages/t :cp/stat-running)]]
-     [:div.cp-stat.stat-attention
-      [:span.cp-stat-value (str (+ (get by-status :blocked 0)
-                                    (get by-status :unreachable 0)))]
-      [:span.cp-stat-label (messages/t :cp/stat-attention)]]
-     [:div.cp-stat.stat-decisions
-      [:span.cp-stat-value (str pending-decisions)]
-      [:span.cp-stat-label (messages/t :cp/stat-decisions)]]]))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Full page content
-
-(defn control-plane-content
+(defn ^{:stratum 4} control-plane-content
   "Main control plane page content (used inside layout)."
   [agents decisions stats]
   [:div.cp-page

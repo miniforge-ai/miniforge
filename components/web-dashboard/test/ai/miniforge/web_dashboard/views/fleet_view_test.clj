@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.fleet-view-test
   "Tests for fleet-view and train-detail-view rendering:
    - fleet-view renders summary, sync status, train list
@@ -27,25 +26,88 @@
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.views.fleet :as sut]))
 
-(defn mock-layout [title body]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} mock-layout [title body]
   [:html [:head [:title title]] [:body body]])
 
-(defn flat-strings
+(defn ^{:stratum 0} flat-strings
   "Extract all string leaves from a nested hiccup structure."
   [hiccup]
   (->> (tree-seq coll? seq hiccup)
        (filter string?)))
 
-(defn contains-string?
+;; ============================================================================
+;; train-list-fragment edge cases
+;; ============================================================================
+(deftest ^{:stratum 0} train-list-fragment-multiple-blocking-details-test
+  (testing "Train list shows up to 2 blocking details"
+    (let [trains [{:train/id (random-uuid)
+                   :train/name "Multi Block"
+                   :train/status :reviewing
+                   :train/prs [{:pr/number 1 :pr/status :open :pr/merge-order 1}
+                               {:pr/number 2 :pr/status :open :pr/merge-order 2}
+                               {:pr/number 3 :pr/status :open :pr/merge-order 3}]
+                   :train/ready-to-merge []
+                   :train/blocking-prs [1 2 3]
+                   :train/blocking-details [{:pr/number 1 :blocking/reasons ["CI failing"]}
+                                            {:pr/number 2 :blocking/reasons ["Changes requested"]}
+                                            {:pr/number 3 :blocking/reasons ["Behind main"]}]
+                   :train/readiness-summary {:ci-failing 3}}]
+          html-str (str (sut/train-list-fragment trains))]
+      ;; Shows first 2 blocking details
+      (is (str/includes? html-str "#1"))
+      (is (str/includes? html-str "#2")))))
+
+(deftest ^{:stratum 0} train-list-fragment-merged-train-test
+  (testing "Merged train renders with success variant"
+    (let [trains [{:train/id (random-uuid)
+                   :train/name "Done Train"
+                   :train/status :merged
+                   :train/prs [{:pr/number 1 :pr/status :merged :pr/merge-order 1}]
+                   :train/ready-to-merge [1]
+                   :train/blocking-prs []
+                   :train/blocking-details []
+                   :train/readiness-summary {:merge-ready 1}}]
+          html-str (str (sut/train-list-fragment trains))]
+      (is (str/includes? html-str "Done Train"))
+      (is (str/includes? html-str "merged")))))
+
+(deftest ^{:stratum 0} train-list-fragment-progress-bar-test
+  (testing "Progress bar reflects merged percentage"
+    (let [trains [{:train/id (random-uuid)
+                   :train/name "Half Done"
+                   :train/status :merging
+                   :train/prs [{:pr/number 1 :pr/status :merged :pr/merge-order 1}
+                               {:pr/number 2 :pr/status :open :pr/merge-order 2}]
+                   :train/ready-to-merge []
+                   :train/blocking-prs []
+                   :train/blocking-details []
+                   :train/readiness-summary {:merge-ready 1 :needs-review 1}}]
+          html-str (str (sut/train-list-fragment trains))]
+      (is (str/includes? html-str "Half Done")))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} contains-string?
   "Check if any string in the hiccup tree contains the substring."
   [hiccup substr]
   (some #(str/includes? % substr) (flat-strings hiccup)))
 
+(deftest ^{:stratum 1} fleet-view-renders-htmx-attributes-test
+  (testing "fleet-view includes htmx refresh attributes"
+    (let [fleet-state {:summary {} :trains [] :last-sync nil}
+          result (sut/fleet-view mock-layout fleet-state)
+          flat (flatten (tree-seq coll? seq result))]
+      ;; Check for hx-get endpoint
+      (is (some #(and (string? %) (str/includes? % "/api/trains")) flat)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; ============================================================================
 ;; fleet-view rendering
 ;; ============================================================================
-
-(deftest fleet-view-renders-summary-counts-test
+(deftest ^{:stratum 2} fleet-view-renders-summary-counts-test
   (testing "fleet-view renders train/PR/repo counts from summary"
     (let [fleet-state {:summary {:active-trains 3
                                  :total-prs 12
@@ -59,14 +121,14 @@
       (is (contains-string? result "4 repos with PRs"))
       (is (contains-string? result "6 configured")))))
 
-(deftest fleet-view-renders-empty-summary-test
+(deftest ^{:stratum 2} fleet-view-renders-empty-summary-test
   (testing "fleet-view handles missing summary gracefully (defaults to 0)"
     (let [fleet-state {:trains [] :last-sync nil}
           result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "0 trains"))
       (is (contains-string? result "0 PRs")))))
 
-(deftest fleet-view-renders-sync-status-test
+(deftest ^{:stratum 2} fleet-view-renders-sync-status-test
   (testing "fleet-view renders last sync info"
     (let [fleet-state {:summary {:active-trains 1 :total-prs 2 :repos 1 :configured-repos 1}
                        :trains []
@@ -77,7 +139,7 @@
           result (sut/fleet-view mock-layout fleet-state)]
       (is (contains-string? result "success")))))
 
-(deftest fleet-view-renders-action-buttons-test
+(deftest ^{:stratum 2} fleet-view-renders-action-buttons-test
   (testing "fleet-view contains action buttons"
     (let [fleet-state {:summary {} :trains [] :last-sync nil}
           result (sut/fleet-view mock-layout fleet-state)]
@@ -86,19 +148,10 @@
       (is (contains-string? result "Discover Repos"))
       (is (contains-string? result "Sync PRs")))))
 
-(deftest fleet-view-renders-htmx-attributes-test
-  (testing "fleet-view includes htmx refresh attributes"
-    (let [fleet-state {:summary {} :trains [] :last-sync nil}
-          result (sut/fleet-view mock-layout fleet-state)
-          flat (flatten (tree-seq coll? seq result))]
-      ;; Check for hx-get endpoint
-      (is (some #(and (string? %) (str/includes? % "/api/trains")) flat)))))
-
 ;; ============================================================================
 ;; train-detail-view with dependencies
 ;; ============================================================================
-
-(deftest train-detail-view-renders-dependencies-test
+(deftest ^{:stratum 2} train-detail-view-renders-dependencies-test
   (testing "Train detail shows dependency info"
     (let [train {:train/id (random-uuid)
                  :train/name "Dep Train"
@@ -126,7 +179,7 @@
           result (sut/train-detail-view mock-layout train)]
       (is (contains-string? result "Depends: 1")))))
 
-(deftest train-detail-view-renders-blocking-reasons-test
+(deftest ^{:stratum 2} train-detail-view-renders-blocking-reasons-test
   (testing "Train detail shows blocking reasons"
     (let [train {:train/id (random-uuid)
                  :train/name "Blocked Train"
@@ -145,7 +198,7 @@
       (is (contains-string? result "CI checks failed"))
       (is (contains-string? result "Awaiting review")))))
 
-(deftest train-detail-view-renders-readiness-score-test
+(deftest ^{:stratum 2} train-detail-view-renders-readiness-score-test
   (testing "Train detail shows readiness score formatted to 2 decimals"
     (let [train {:train/id (random-uuid)
                  :train/name "Score Train"
@@ -164,7 +217,7 @@
       ;; Should contain formatted score
       (is (contains-string? result "0.88")))))
 
-(deftest train-detail-view-renders-merge-graph-test
+(deftest ^{:stratum 2} train-detail-view-renders-merge-graph-test
   (testing "Train detail renders merge graph with order numbers"
     (let [train {:train/id (random-uuid)
                  :train/name "Graph Train"
@@ -184,7 +237,7 @@
       (is (contains-string? result "#10"))
       (is (contains-string? result "#20")))))
 
-(deftest train-detail-view-actions-test
+(deftest ^{:stratum 2} train-detail-view-actions-test
   (testing "Train detail renders Pause and Merge Next buttons"
     (let [train-id (random-uuid)
           train {:train/id train-id
@@ -198,61 +251,9 @@
       (is (contains-string? result (str train-id))))))
 
 ;; ============================================================================
-;; train-list-fragment edge cases
-;; ============================================================================
-
-(deftest train-list-fragment-multiple-blocking-details-test
-  (testing "Train list shows up to 2 blocking details"
-    (let [trains [{:train/id (random-uuid)
-                   :train/name "Multi Block"
-                   :train/status :reviewing
-                   :train/prs [{:pr/number 1 :pr/status :open :pr/merge-order 1}
-                               {:pr/number 2 :pr/status :open :pr/merge-order 2}
-                               {:pr/number 3 :pr/status :open :pr/merge-order 3}]
-                   :train/ready-to-merge []
-                   :train/blocking-prs [1 2 3]
-                   :train/blocking-details [{:pr/number 1 :blocking/reasons ["CI failing"]}
-                                            {:pr/number 2 :blocking/reasons ["Changes requested"]}
-                                            {:pr/number 3 :blocking/reasons ["Behind main"]}]
-                   :train/readiness-summary {:ci-failing 3}}]
-          html-str (str (sut/train-list-fragment trains))]
-      ;; Shows first 2 blocking details
-      (is (str/includes? html-str "#1"))
-      (is (str/includes? html-str "#2")))))
-
-(deftest train-list-fragment-merged-train-test
-  (testing "Merged train renders with success variant"
-    (let [trains [{:train/id (random-uuid)
-                   :train/name "Done Train"
-                   :train/status :merged
-                   :train/prs [{:pr/number 1 :pr/status :merged :pr/merge-order 1}]
-                   :train/ready-to-merge [1]
-                   :train/blocking-prs []
-                   :train/blocking-details []
-                   :train/readiness-summary {:merge-ready 1}}]
-          html-str (str (sut/train-list-fragment trains))]
-      (is (str/includes? html-str "Done Train"))
-      (is (str/includes? html-str "merged")))))
-
-(deftest train-list-fragment-progress-bar-test
-  (testing "Progress bar reflects merged percentage"
-    (let [trains [{:train/id (random-uuid)
-                   :train/name "Half Done"
-                   :train/status :merging
-                   :train/prs [{:pr/number 1 :pr/status :merged :pr/merge-order 1}
-                               {:pr/number 2 :pr/status :open :pr/merge-order 2}]
-                   :train/ready-to-merge []
-                   :train/blocking-prs []
-                   :train/blocking-details []
-                   :train/readiness-summary {:merge-ready 1 :needs-review 1}}]
-          html-str (str (sut/train-list-fragment trains))]
-      (is (str/includes? html-str "Half Done")))))
-
-;; ============================================================================
 ;; sync-status-fragment with no timestamp
 ;; ============================================================================
-
-(deftest sync-status-fragment-no-timestamp-test
+(deftest ^{:stratum 2} sync-status-fragment-no-timestamp-test
   (testing "Sync with nil timestamp omits time display"
     (let [result (sut/sync-status-fragment {:status :success
                                               :timestamp nil
@@ -263,7 +264,7 @@
       (is (contains-string? result "success"))
       (is (contains-string? result "synced 1")))))
 
-(deftest sync-status-fragment-with-message-test
+(deftest ^{:stratum 2} sync-status-fragment-with-message-test
   (testing "Sync with message renders message div"
     (let [result (sut/sync-status-fragment {:status :partial
                                               :timestamp (java.util.Date.)
