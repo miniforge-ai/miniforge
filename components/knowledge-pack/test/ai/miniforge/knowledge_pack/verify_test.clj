@@ -9,7 +9,6 @@
 ;; You may obtain a copy of the License at
 ;;
 ;;     http://www.apache.org/licenses/LICENSE-2.0
-
 (ns ai.miniforge.knowledge-pack.verify-test
   "Tests for `verify-pack` — the boundary that turns a stored pack
    manifest back into a trusted citation. Covers each named outcome:
@@ -27,9 +26,9 @@
    [java.util UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers — build a tiny in-memory zettel store + a lookup-fn.
 
-(defn- store-of
+;; Helpers — build a tiny in-memory zettel store + a lookup-fn.
+(defn- ^{:stratum 0} store-of
   "Build a `(zettel-id, revision-id) → zettel` map from a sequence
    of zettels. The lookup-fn closes over this map."
   [zettels]
@@ -37,16 +36,16 @@
         (map (fn [z] [[(:zettel/id z) (:zettel/revision-id z)] z]))
         zettels))
 
-(defn- lookup-from
+(defn- ^{:stratum 0} lookup-from
   "Build a lookup-fn over an in-memory store map."
   [store]
   (fn [id revision-id]
     (get store [id revision-id])))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Happy path.
 
-(deftest test-verify-pack-happy-path
+;; Happy path.
+(deftest ^{:stratum 1} test-verify-pack-happy-path
   (testing "every triple resolves + digests match → :valid? true"
     (let [z1 (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
           z2 (knowledge/create-zettel "z-2" "Z2" "Body 2." :rule)
@@ -56,10 +55,8 @@
       (is (nil? (:pack/discrepancy result)))
       (is (empty? (:ref/discrepancies result))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Per-ref discrepancies.
-
-(deftest test-verify-pack-missing-zettel
+(deftest ^{:stratum 1} test-verify-pack-missing-zettel
   (testing "a triple that doesn't resolve in the store surfaces :zettel-not-found"
     (let [z1   (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
           pack (kp/build-pack "p" "Pack" "1.0.0" [z1])
@@ -70,7 +67,7 @@
       (is (= :zettel-not-found
              (-> result :ref/discrepancies first :reason))))))
 
-(deftest test-verify-pack-digest-drift
+(deftest ^{:stratum 1} test-verify-pack-digest-drift
   (testing "a stored zettel's digest differing from the pack triple surfaces :digest-mismatch"
     ;; The pack references z1 with its original digest; the store
     ;; has the SAME id+revision but a tampered digest. Real-world
@@ -86,7 +83,7 @@
       (is (= :digest-mismatch
              (-> result :ref/discrepancies first :reason))))))
 
-(deftest test-verify-pack-lookup-fn-invariant-violation
+(deftest ^{:stratum 1} test-verify-pack-lookup-fn-invariant-violation
   (testing "lookup-fn returning a zettel with mismatched :zettel/id surfaces :id-mismatch"
     (let [z1     (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
           pack   (kp/build-pack "p" "Pack" "1.0.0" [z1])
@@ -99,7 +96,7 @@
       (is (= :id-mismatch
              (-> result :ref/discrepancies first :reason))))))
 
-(deftest test-verify-pack-multiple-discrepancies
+(deftest ^{:stratum 1} test-verify-pack-multiple-discrepancies
   (testing "verify accumulates every per-ref problem, not just the first"
     (let [z1   (knowledge/create-zettel "z-1" "Z1" "Body 1." :rule)
           z2   (knowledge/create-zettel "z-2" "Z2" "Body 2." :rule)
@@ -113,10 +110,8 @@
       (is (= #{:zettel-not-found :digest-mismatch}
              (set (map :reason (:ref/discrepancies result))))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Manifest-level discrepancies.
-
-(deftest test-verify-pack-detects-tampered-manifest
+(deftest ^{:stratum 1} test-verify-pack-detects-tampered-manifest
   (testing "a pack whose body was edited without going through update-pack surfaces :pack/digest-mismatch"
     ;; Forge a pack: build, then mutate :pack/title directly without
     ;; update-pack — :pack/digest stays at the old content's digest.
@@ -128,7 +123,7 @@
       (is (= :pack/digest-mismatch
              (-> result :pack/discrepancy :reason))))))
 
-(deftest test-verify-pack-detects-missing-manifest-digest
+(deftest ^{:stratum 1} test-verify-pack-detects-missing-manifest-digest
   (testing "a legacy pack without :pack/digest fails verification with :pack/digest-missing"
     (let [legacy {:pack/id      (UUID/randomUUID)
                   :pack/uid     "legacy"
@@ -142,7 +137,7 @@
       (is (= :pack/digest-missing
              (-> result :pack/discrepancy :reason))))))
 
-(deftest test-verify-pack-detects-missing-revision-id
+(deftest ^{:stratum 1} test-verify-pack-detects-missing-revision-id
   (testing "a pack with :pack/digest but no :pack/revision-id surfaces :pack/revision-id-missing"
     ;; Partial stamping should never happen via the constructors
     ;; (build-pack / update-pack always stamp both), but a forged
@@ -155,7 +150,7 @@
       (is (= :pack/revision-id-missing
              (-> result :pack/discrepancy :reason))))))
 
-(deftest test-verify-pack-detects-forged-revision-id
+(deftest ^{:stratum 1} test-verify-pack-detects-forged-revision-id
   (testing ":pack/revision-id forged independent of :pack/digest fails with :pack/revision-id-mismatch"
     ;; An attacker-rotated `:pack/revision-id` (e.g. attempting to
     ;; ride existing trust onto new content by stamping a forged
