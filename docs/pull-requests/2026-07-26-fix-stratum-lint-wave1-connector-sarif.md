@@ -66,13 +66,12 @@ than deferring it.
    double-semicolon `;;---- Layer N` banners left behind, and no
    same-line trailing comment displaced onto the wrong def — checked
    visually file by file.
-4. `clj-kondo --lint components/connector-sarif`: 0 errors. 1 pre-existing
-   warning (`format_test.clj`, unresolved `clojure.string` namespace —
-   the file uses fully-qualified `clojure.string/join` without a
-   `:require`) present before this change too (confirmed via `git stash`
-   - re-lint); only its reported line number shifted, from 94 to 114, as
-   a direct result of `--fix` reordering `temp-csv!` further down the
-   file. Not introduced by this change, not touched.
+4. `clj-kondo --lint components/connector-sarif`: 0 errors, 0 warnings.
+   `format_test.clj` previously used fully-qualified `clojure.string/join`
+   without a `:require` (a pre-existing warning, confirmed via `git
+   stash` + re-lint); added `[clojure.string :as str]` and switched
+   `temp-csv!` to the aliased `str/join` while touching the file for
+   the heading fix, clearing it.
 5. Ran all 5 test namespaces directly (`clojure -M:dev:test`, since
    `:poly test` can sweep in an unrelated pre-existing environment flake
    on this machine): `format-test`, `impl-test`, `interface-test`,
