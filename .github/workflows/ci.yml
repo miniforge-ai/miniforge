@@ -232,7 +232,6 @@ jobs:
       - name: Install Clojure + bb (Windows)
         uses: DeLaGuardo/setup-clojure@12.5
         with:
-          cli: latest
           bb: latest
 
       - name: Cache Clojure dependencies
@@ -245,14 +244,11 @@ jobs:
           restore-keys: |
             clojure-${{ runner.os }}-
 
-      # One missing piece on windows-latest after setup-clojure runs:
-      #
-      #   clojure as a binary — setup-clojure on Windows installs
-      #      clojure as a PowerShell module, not clojure.exe. babashka's
-      #      p/process invokes via Java ProcessBuilder which does not
-      #      resolve PowerShell modules, so `bb test:integration`
-      #      (which shells out to `clojure`) fails. Drop deps.clj as
-      #      clojure.exe to provide a real binary clojure on PATH.
+      # setup-clojure on Windows installs clojure as a PowerShell module,
+      # not a clojure.exe binary. babashka's p/process invokes via Java
+      # ProcessBuilder which cannot resolve PowerShell modules, so any step
+      # shelling out to `clojure` would fail. deps.clj provides a real
+      # clojure.exe / clj.exe on PATH, replacing the need for `cli: latest`.
       - name: Install deps.clj shim (Windows)
         shell: pwsh
         run: |
