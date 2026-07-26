@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-excel.interface
   "Public API for the Excel connector component.
 
@@ -24,12 +23,14 @@
   {:miniforge/runtime :jvm-only}
   (:require [ai.miniforge.connector-excel.core :as core]))
 
-(defn create-excel-connector
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} create-excel-connector
   "Create a new ExcelConnector instance."
   []
   (core/->ExcelConnector))
 
-(def connector-metadata
+(def ^{:stratum 0} connector-metadata
   "Registration metadata for the Excel connector."
   {:connector/name         "Excel File Connector"
    :connector/type         :source
