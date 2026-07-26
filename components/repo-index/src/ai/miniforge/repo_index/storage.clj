@@ -18,7 +18,7 @@
 (ns ai.miniforge.repo-index.storage
   "Persist and load repo indexes to `.miniforge/index/`.
 
-   Layer 1 — depends on schema (Layer 0)."
+   Layer 0 — filesystem I/O only; no dependency on schema or factory."
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]))
 
