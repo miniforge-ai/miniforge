@@ -20,6 +20,7 @@
    must produce an anomaly step on the chain — the throw never escapes
    `execute`."
   (:require
+   [clojure.string :as str]
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.boundary.interface :as boundary]
@@ -38,7 +39,7 @@
                               (fn [] (throw (RuntimeException.))))
           msg (:anomaly/message (chain/last-anomaly c))]
       (is (string? msg))
-      (is (not (clojure.string/blank? msg))))))
+      (is (not (str/blank? msg))))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
