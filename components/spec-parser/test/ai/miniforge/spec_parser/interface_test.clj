@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.interface-test
   "Tests for spec-parser component: schema validation, normalization, and parsing."
   (:require
@@ -27,10 +26,10 @@
    [malli.core :as m]
    [malli.generator :as mg]))
 
-;------------------------------------------------------------------------------ Layer 0: Schema Tests
-;; Verify Malli schemas accept/reject correctly
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest spec-input-schema-test
+;; Verify Malli schemas accept/reject correctly
+(deftest ^{:stratum 0} spec-input-schema-test
   (testing "minimal valid SpecInput"
     (is (true? (m/validate schema/SpecInput
                            {:spec/title "Refactor logging"
@@ -63,7 +62,7 @@
     (is (false? (m/validate schema/SpecInput
                             {:spec/title "" :spec/description "D"})))))
 
-(deftest spec-payload-schema-test
+(deftest ^{:stratum 0} spec-payload-schema-test
   (testing "valid normalized SpecPayload"
     (is (true? (m/validate schema/SpecPayload
                            {:spec/title "T"
@@ -93,16 +92,14 @@
                             :spec/plan-tasks [{:task/id :step-1
                                                :task/description "Do stuff"}]})))))
 
-(deftest malli-generator-round-trip-test
+(deftest ^{:stratum 0} malli-generator-round-trip-test
   (testing "generated SpecInput values validate as SpecInput"
     (doseq [_ (range 5)]
       (let [sample (mg/generate schema/SpecInput)]
         (is (m/validate schema/SpecInput sample)
             (str "Generated SpecInput should validate: " (pr-str sample)))))))
 
-;------------------------------------------------------------------------------ Layer 1: Normalization Tests
-
-(deftest normalize-canonical-format-test
+(deftest ^{:stratum 0} normalize-canonical-format-test
   (testing "canonical :spec/* input normalizes correctly"
     (let [input  {:spec/title "Refactor logging"
                   :spec/description "Extract logging to separate module"
@@ -131,7 +128,7 @@
       (is (true? (:spec/sandbox result)))
       (is (= input (:spec/raw-data result))))))
 
-(deftest normalize-plan-tasks-test
+(deftest ^{:stratum 0} normalize-plan-tasks-test
   (testing ":spec/plan-tasks passes through"
     (let [tasks [{:task/id :step-1 :task/description "First" :task/type :implement}
                  {:task/id :step-2 :task/description "Second" :task/dependencies [:step-1]}]
@@ -143,9 +140,7 @@
       (is (= 2 (count (:spec/plan-tasks result))))
       (is (= :step-1 (:task/id (first (:spec/plan-tasks result))))))))
 
-;------------------------------------------------------------------------------ Layer 2: Defaults Tests
-
-(deftest defaults-test
+(deftest ^{:stratum 0} defaults-test
   (testing "intent defaults to {:type :general}"
     (let [result (spec-parser/normalize-spec {:spec/title "T" :spec/description "D"})]
       (is (= {:type :general} (:spec/intent result)))))
@@ -172,9 +167,7 @@
       (is (nil? (:spec/sandbox result)))
       (is (nil? (:spec/plan-tasks result))))))
 
-;------------------------------------------------------------------------------ Layer 3: Validation Error Tests
-
-(deftest validation-errors-test
+(deftest ^{:stratum 0} validation-errors-test
   (testing "spec must be a map — returns :invalid-input anomaly"
     (let [result (spec-parser/normalize-spec "not a map")]
       (is (anomaly/anomaly? result))
@@ -193,7 +186,7 @@
       (is (= :invalid-input (:anomaly/type result)))
       (is (str/includes? (:anomaly/message result) ":spec/description")))))
 
-(deftest validate-spec-with-malli-test
+(deftest ^{:stratum 0} validate-spec-with-malli-test
   (testing "valid normalized spec passes Malli validation"
     (let [result (spec-parser/validate-spec
                   {:spec/title "T"
@@ -215,10 +208,8 @@
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
 
-;------------------------------------------------------------------------------ Layer 5: Markdown Parsing Tests
 ;; Regression coverage for parse-markdown frontmatter key namespacing and body appending
-
-(deftest parse-markdown-key-namespacing-test
+(deftest ^{:stratum 0} parse-markdown-key-namespacing-test
   (testing "title and description map to :spec/* namespace"
     (let [result (spec-parser/parse-content
                   :markdown
@@ -253,7 +244,7 @@
     (let [result (spec-parser/parse-content :markdown "Just some prose without a heading.")]
       (is (= "Untitled" (:spec/title result))))))
 
-(deftest parse-markdown-body-appended-test
+(deftest ^{:stratum 0} parse-markdown-body-appended-test
   (testing "markdown body prose is appended to :spec/description"
     (let [content (str "---\ntitle: T\ndescription: Frontmatter desc\n---\n\n"
                        "# Design\n\nBody prose goes here.")
@@ -264,9 +255,15 @@
   (testing "empty body does not alter description"
     (let [content "---\ntitle: T\ndescription: Only frontmatter\n---\n"
           result  (spec-parser/parse-content :markdown content)]
-      (is (= "Only frontmatter" (:spec/description result))))))
+      (is (= "Only frontmatter" (:spec/description result)))))
 
-(deftest normalize-workflow-type-default-test
+  (testing "frontmatter missing :description does not leave a stray leading blank line"
+    (let [content (str "---\ntitle: T\n---\n\n"
+                       "Body prose only, no frontmatter description.")
+          result  (spec-parser/parse-content :markdown content)]
+      (is (= "Body prose only, no frontmatter description." (:spec/description result))))))
+
+(deftest ^{:stratum 0} normalize-workflow-type-default-test
   (testing "workflow-type defaults to :canonical-sdlc when not provided"
     (let [result (spec-parser/normalize-spec {:spec/title "T" :spec/description "D"})]
       (is (= :canonical-sdlc (:spec/workflow-type result)))))
@@ -276,7 +273,7 @@
                   {:spec/title "T" :spec/description "D" :workflow/type :canonical-sdlc})]
       (is (= :canonical-sdlc (:spec/workflow-type result))))))
 
-(deftest markdown-round-trip-test
+(deftest ^{:stratum 0} markdown-round-trip-test
   (testing "markdown design doc parses and normalizes to valid SpecPayload"
     (let [content (str "---\n"
                        "title: Compliance Scanner\n"
@@ -294,9 +291,7 @@
       (is (= [:compliance :scanner] (:spec/tags normalized)))
       (is (true? (:valid? validation))))))
 
-;------------------------------------------------------------------------------ Layer 4: Schema Validation Helpers
-
-(deftest schema-validation-helpers-test
+(deftest ^{:stratum 0} schema-validation-helpers-test
   (testing "valid-spec-input? accepts canonical input"
     (is (true? (spec-parser/valid-spec-input?
                 {:spec/title "T" :spec/description "D"}))))

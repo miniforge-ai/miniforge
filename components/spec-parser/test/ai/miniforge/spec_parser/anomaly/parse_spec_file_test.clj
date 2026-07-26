@@ -15,13 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.parse-spec-file-test
   "Coverage for `core/parse-spec-file` (boundary fn) — file-not-found
    path and the boundary escalation contract.
 
    `parse-spec-file` is the public escalation point for the spec-parser
-   component. Layer 0/1/2 fns return anomalies; this fn rethrows them
+   component. Layer 0-4 fns return anomalies; this fn rethrows them
    as ex-info so existing slingshot callers (CLI `run`, task-executor
    pre-flight) keep their exception-shaped contract.
 
@@ -33,9 +32,10 @@
             [babashka.fs :as fs]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest parse-spec-file-valid-edn
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 0} parse-spec-file-valid-edn
   (testing "valid EDN spec parses and normalizes"
     (let [tmp (fs/create-temp-file {:suffix ".edn"})]
       (try
@@ -48,8 +48,7 @@
           (fs/delete-if-exists tmp))))))
 
 ;------------------------------------------------------------------------------ File-not-found anomaly + boundary escalation
-
-(defn- nonexistent-path
+(defn- ^{:stratum 0} nonexistent-path
   "Generate a path under the system temp dir that is guaranteed not to
    exist. Avoids `/tmp/...` hardcodes that can be flaky if the file
    happens to be present on the test machine."
@@ -57,7 +56,9 @@
   (str (fs/path (fs/temp-dir)
                 (str "spec-parser-anomaly-" (random-uuid) "-" suffix))))
 
-(deftest parse-spec-file-not-found-escalates
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} parse-spec-file-not-found-escalates
   (testing "missing path surfaces as :not-found ex-info"
     (let [path   (nonexistent-path "missing.edn")
           thrown (try
@@ -68,7 +69,7 @@
       (is (= :not-found (:anomaly/type (ex-data thrown))))
       (is (re-find #"Spec file not found" (ex-message thrown))))))
 
-(deftest parse-spec-file-ex-data-carries-anomaly-type
+(deftest ^{:stratum 1} parse-spec-file-ex-data-carries-anomaly-type
   (testing "every escalated anomaly tags ex-data with :anomaly/type"
     (let [path   (nonexistent-path "ex-data.edn")
           thrown (try

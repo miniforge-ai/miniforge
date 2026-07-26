@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.interface
   "Public API for the spec-parser component.
 
@@ -26,9 +25,9 @@
    [ai.miniforge.spec-parser.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def SpecPayload
+;; Schema re-exports
+(def ^{:stratum 0} SpecPayload
   "Malli `[:map ...]` schema for a normalized spec payload — the canonical
    :spec/* format the workflow engine consumes. Required (non-optional) keys:
    :spec/title, :spec/description, :spec/intent, :spec/constraints, :spec/tags,
@@ -38,50 +37,48 @@
    fns or `valid-spec-payload?`."
   schema/SpecPayload)
 
-(def SpecInput
+(def ^{:stratum 0} SpecInput
   "Malli `[:map ...]` schema for raw user spec input in :spec/* format,
    before normalization. Required keys :spec/title and :spec/description;
    all other :spec/* keys plus :workflow/type and :workflow/version are
    optional. Pass to malli.core fns or `valid-spec-input?`."
   schema/SpecInput)
 
-(def SpecIntent
+(def ^{:stratum 0} SpecIntent
   "Malli `[:map ...]` schema for :spec/intent — the kind of work. Requires
    :type (one of `intent-types`); optional :scope is a vector of strings."
   schema/SpecIntent)
 
-(def SpecProvenance
+(def ^{:stratum 0} SpecProvenance
   "Malli `[:map ...]` schema for :spec/provenance source metadata: requires
    :source-file (string), :source-format (one of `source-formats`),
    :loaded-at (inst), :file-size (int). Attached by `parse-spec-file`."
   schema/SpecProvenance)
 
-(def PlanTask
+(def ^{:stratum 0} PlanTask
   "Malli `[:map ...]` schema for one task within :spec/plan-tasks. Requires
    :task/id (keyword or uuid) and :task/description (string); optional
    :task/type (keyword) and :task/dependencies (vector of keyword/uuid)."
   schema/PlanTask)
 
-(def CodeArtifact
+(def ^{:stratum 0} CodeArtifact
   "Malli `[:map ...]` schema for a code artifact reference. Requires
    :code/id (string or uuid); optional :code/files is a vector of strings."
   schema/CodeArtifact)
 
 ;; Enum values
-(def intent-types
+(def ^{:stratum 0} intent-types
   "Vector of valid :spec/intent :type keywords:
    [:refactor :feature :bugfix :general :chore :docs :test :performance]."
   schema/intent-types)
 
-(def source-formats
+(def ^{:stratum 0} source-formats
   "Vector of supported spec file format keywords:
    [:yaml :edn :json :markdown]."
   schema/source-formats)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Parsing
-
-(defn parse-spec-file
+(defn ^{:stratum 0} parse-spec-file
   "Parse a workflow specification file and normalize to canonical :spec/* format.
 
    Supported formats: .edn, .json, .md, .yaml/.yml (coming soon)
@@ -90,54 +87,52 @@
   [path]
   (core/parse-spec-file path))
 
-(defn parse-content
+(defn ^{:stratum 0} parse-content
   "Parse raw content string using the specified format parser.
    Returns the raw parsed data (not yet normalized)."
   [format content]
   (core/parse-content format content))
 
-(defn detect-format
+(defn ^{:stratum 0} detect-format
   "Detect file format from path extension."
   [path]
   (core/detect-format path))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Normalization
-
-(defn normalize-spec
+(defn ^{:stratum 0} normalize-spec
   "Normalize a parsed spec map to canonical :spec/* format.
    Applies defaults for missing optional fields."
   [spec]
   (core/normalize-spec spec))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Validation
-
-(defn validate-spec
+(defn ^{:stratum 0} validate-spec
   "Validate a normalized spec against the Malli SpecPayload schema.
 
    Returns:
    - {:valid? true} if valid
-   - {:valid? false :errors [...]} if invalid"
+   - {:valid? false :errors {...}} if invalid — :errors is the map
+     `malli.error/humanize` returns (field key -> list of error strings),
+     not a flat vector"
   [spec]
   (core/validate-spec spec))
 
-(defn valid-spec-input?
+(defn ^{:stratum 0} valid-spec-input?
   "Returns true if value is a valid SpecInput (pre-normalization)."
   [value]
   (schema/valid-spec-input? value))
 
-(defn valid-spec-payload?
+(defn ^{:stratum 0} valid-spec-payload?
   "Returns true if value is a valid normalized SpecPayload."
   [value]
   (schema/valid-spec-payload? value))
 
-(defn explain-spec-input
+(defn ^{:stratum 0} explain-spec-input
   "Returns human-readable explanation of input validation errors, or nil if valid."
   [value]
   (schema/explain-spec-input value))
 
-(defn explain-spec-payload
+(defn ^{:stratum 0} explain-spec-payload
   "Returns human-readable explanation of payload validation errors, or nil if valid."
   [value]
   (schema/explain-spec-payload value))

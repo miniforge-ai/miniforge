@@ -15,18 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.core
   "Spec normalization and format-specific parsers.
 
-   Layer 0: File format detection
-   Layer 1: Format-specific parsers (EDN, JSON, Markdown)
-   Layer 2: Spec normalization — canonical :spec/* only
+   Layer 0: leaf-level parsers, anomaly helpers, and the frontmatter
+     key -> namespace map (detect-format, parse-yaml/edn/json,
+     validate-spec, spec-key->ns)
+   Layer 1: normalize-spec, the frontmatter key-mapping helper
+     (namespace-frontmatter-keys), and markdown-decoration helpers,
+     built on Layer 0
+   Layer 2: parse-markdown, composing the Layer 1 helpers
+   Layer 3: format-parsers, the format -> parser-fn registry
+   Layer 4: parse-content, dispatching through format-parsers
+   Layer 5: parse-spec-file, the single escalation boundary
 
-   Failure model: layer 0/1/2 fns return canonical anomaly maps
+   Failure model: layer 0-4 fns return canonical anomaly maps
    (`ai.miniforge.anomaly.interface/anomaly`) on caller-supplied input
-   problems. The single boundary fn `parse-spec-file` escalates anomalies
-   to `ex-info` so existing slingshot callers (CLI `run` command,
+   problems. The single boundary fn `parse-spec-file` (layer 5) escalates
+   anomalies to `ex-info` so existing slingshot callers (CLI `run` command,
    task-executor pre-flight) keep their exception-shaped contract."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -38,9 +44,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File format detection
 
-(defn detect-format
+;; File format detection
+(defn ^{:stratum 0} detect-format
   "Detect file format from extension.
 
    Returns the format keyword on success, or an `:invalid-input` anomaly
@@ -59,10 +65,8 @@
                         :extension ext
                         :supported #{"yaml" "yml" "edn" "json" "md"}}))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Format-specific parsers
-
-(defn parse-yaml
+(defn ^{:stratum 0} parse-yaml
   "Parse YAML file content.
 
    Returns an `:unsupported` anomaly — YAML support is not yet
@@ -74,7 +78,7 @@
                    {:format :yaml
                     :workaround "Convert your YAML to EDN or JSON"}))
 
-(defn parse-edn
+(defn ^{:stratum 0} parse-edn
   "Parse EDN file content.
 
    Returns the parsed value on success, or an `:invalid-input` anomaly
@@ -87,7 +91,7 @@
                        "Failed to parse EDN file"
                        {:error (ex-message e)}))))
 
-(defn parse-json
+(defn ^{:stratum 0} parse-json
   "Parse JSON file content.
 
    Returns the parsed value on success, or an `:invalid-input` anomaly
@@ -100,7 +104,7 @@
                        "Failed to parse JSON file"
                        {:error (ex-message e)}))))
 
-(def ^:private spec-key->ns
+(def ^{:stratum 0} ^:private spec-key->ns
   "Map plain YAML keys to their :spec/* or :workflow/* namespace.
    The YAML parser produces unnamespaced keywords; normalize-spec requires
    namespaced ones.
@@ -128,86 +132,19 @@
    :type                 "workflow"
    :version              "workflow"})
 
-(defn- namespace-frontmatter-keys
-  "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
-   Underscore key names (from YAML parser limitation) are normalized to hyphens
-   so :acceptance_criteria becomes :spec/acceptance-criteria."
-  [m]
-  (reduce-kv (fn [acc k v]
-               (if-let [ns (get spec-key->ns k)]
-                 (let [canonical (str/replace (name k) "_" "-")]
-                   (assoc acc (keyword ns canonical) v))
-                 (assoc acc k v)))
-             {} m))
-
-(defn- h1-title
+(defn- ^{:stratum 0} h1-title
   "Extract the first H1 heading text from a markdown body, or nil if absent."
   [body]
   (when-let [[_ title] (re-find #"(?m)^#\s+(.+)$" body)]
     (str/trim title)))
 
-(defn- body-without-h1
+(defn- ^{:stratum 0} body-without-h1
   "Remove the first H1 heading line from a markdown body."
   [body]
   (str/trim (str/replace-first body #"(?m)^#[^\n]*\n?" "")))
 
-(defn- decorate-from-body
-  "Synthesize a :spec/* map from a plain markdown document with no frontmatter.
-   Title is inferred from the first H1; the remainder becomes the description."
-  [body]
-  (let [title (or (h1-title body) "Untitled")]
-    {:spec/title       title
-     :spec/description (let [remainder (body-without-h1 body)]
-                         (if (str/blank? remainder) title remainder))}))
-
-(defn parse-markdown
-  "Parse Markdown file with optional YAML frontmatter.
-
-   With frontmatter: structured fields are namespaced (:title → :spec/title)
-   and the body is appended to :spec/description for full agent context.
-
-   Without frontmatter: title is inferred from the first H1 heading and the
-   remaining body becomes :spec/description. No error is raised — the document
-   is decorated automatically so any design doc can be fed directly to the
-   workflow engine."
-  [content]
-  (if-let [parsed (knowledge/split-frontmatter content)]
-    (let [raw-fm (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
-          fm     (namespace-frontmatter-keys raw-fm)
-          body   (:body parsed)]
-      (cond-> fm
-        (and body (not (str/blank? body)))
-        (update :spec/description #(str % "\n\n" (str/trim body)))))
-    ;; No frontmatter — synthesize spec metadata from document structure
-    (decorate-from-body content)))
-
-(def format-parsers
-  "Registry of format -> parser-fn. Extend this to add new formats."
-  {:yaml     parse-yaml
-   :edn      parse-edn
-   :json     parse-json
-   :markdown parse-markdown})
-
-(defn parse-content
-  "Parse file content using the appropriate format parser.
-
-   Returns the parser's result (which may itself be an anomaly when the
-   content is malformed), or a `:fault` anomaly when no parser is
-   registered for the requested format. The fault case is exhaustive —
-   `detect-format` only emits formats that have parsers — so reaching it
-   indicates a programmer error in the registry."
-  [format content]
-  (if-let [parser (get format-parsers format)]
-    (parser content)
-    (anomaly/anomaly :fault
-                     (str "No parser registered for format: " format)
-                     {:format format
-                      :available (keys format-parsers)})))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Spec normalization — canonical :spec/* only
-
-(defn- spec-shape-anomaly
+(defn- ^{:stratum 0} spec-shape-anomaly
   "Return an `:invalid-input` anomaly when `spec` violates the minimum
    shape required by `normalize-spec`, otherwise nil."
   [spec]
@@ -227,7 +164,7 @@
                      "Workflow spec must have :spec/description"
                      {:spec spec})))
 
-(defn- assemble-normalized-spec
+(defn- ^{:stratum 0} assemble-normalized-spec
   "Build the normalized :spec/* payload. Caller is responsible for running
    [[spec-shape-anomaly]] first; reaching this fn with a malformed spec is
    a programmer error."
@@ -252,7 +189,64 @@
       (some? sandbox)     (assoc :spec/sandbox sandbox)
       plan-tasks          (assoc :spec/plan-tasks plan-tasks))))
 
-(defn normalize-spec
+;; File loading + boundary escalation
+(defn- ^{:stratum 0} escalate!
+  "Boundary helper — translate a canonical anomaly into the legacy
+   ex-info shape so existing slingshot callers (CLI `run`, task-executor
+   pre-flight) keep their exception contract.
+
+   `parse-spec-file` is the single escalation point in this component;
+   layer 0-4 fns return anomalies."
+  [anom]
+  (throw (ex-info (:anomaly/message anom)
+                  (assoc (:anomaly/data anom)
+                         :anomaly/type (:anomaly/type anom)))))
+
+(defn- ^{:stratum 0} file-not-found-anomaly
+  "Return a `:not-found` anomaly when `path` does not resolve, otherwise nil."
+  [path]
+  (when-not (fs/exists? path)
+    (anomaly/anomaly :not-found
+                     (str "Spec file not found: " path)
+                     {:path path})))
+
+(defn ^{:stratum 0} validate-spec
+  "Validate a normalized spec using the Malli SpecPayload schema.
+
+   Returns:
+   - {:valid? true} if valid
+   - {:valid? false :errors {...}} if invalid — :errors is the map
+     `malli.error/humanize` returns (field key -> list of error strings),
+     not a flat vector"
+  [spec]
+  (if (schema/valid-spec-payload? spec)
+    {:valid? true}
+    {:valid? false :errors (schema/explain-spec-payload spec)}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} namespace-frontmatter-keys
+  "Remap plain YAML keys to :spec/* / :workflow/* namespaces for normalize-spec.
+   Underscore key names (from YAML parser limitation) are normalized to hyphens
+   so :acceptance_criteria becomes :spec/acceptance-criteria."
+  [m]
+  (reduce-kv (fn [acc k v]
+               (if-let [ns (get spec-key->ns k)]
+                 (let [canonical (str/replace (name k) "_" "-")]
+                   (assoc acc (keyword ns canonical) v))
+                 (assoc acc k v)))
+             {} m))
+
+(defn- ^{:stratum 1} decorate-from-body
+  "Synthesize a :spec/* map from a plain markdown document with no frontmatter.
+   Title is inferred from the first H1; the remainder becomes the description."
+  [body]
+  (let [title (or (h1-title body) "Untitled")]
+    {:spec/title       title
+     :spec/description (let [remainder (body-without-h1 body)]
+                         (if (str/blank? remainder) title remainder))}))
+
+(defn ^{:stratum 1} normalize-spec
   "Normalize parsed spec to canonical :spec/* workflow format.
 
    Accepts canonical :spec/* input and applies defaults for missing
@@ -263,30 +257,62 @@
   (or (spec-shape-anomaly spec)
       (assemble-normalized-spec spec)))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} parse-markdown
+  "Parse Markdown file with optional YAML frontmatter.
+
+   With frontmatter: structured fields are namespaced (:title → :spec/title)
+   and the body is appended to :spec/description for full agent context.
+   If frontmatter has no :description, the appended body becomes the
+   whole (trimmed) description rather than trailing a blank one.
+
+   Without frontmatter: title is inferred from the first H1 heading and the
+   remaining body becomes :spec/description. No error is raised — the document
+   is decorated automatically so any design doc can be fed directly to the
+   workflow engine."
+  [content]
+  (if-let [parsed (knowledge/split-frontmatter content)]
+    (let [raw-fm (knowledge/parse-yaml-frontmatter (:frontmatter parsed))
+          fm     (namespace-frontmatter-keys raw-fm)
+          body   (:body parsed)]
+      (cond-> fm
+        (and body (not (str/blank? body)))
+        (update :spec/description
+                #(str/trim (str (or % "") "\n\n" (str/trim body))))))
+    ;; No frontmatter — synthesize spec metadata from document structure
+    (decorate-from-body content)))
+
 ;------------------------------------------------------------------------------ Layer 3
-;; File loading + boundary escalation
 
-(defn- escalate!
-  "Boundary helper — translate a canonical anomaly into the legacy
-   ex-info shape so existing slingshot callers (CLI `run`, task-executor
-   pre-flight) keep their exception contract.
+(def ^{:stratum 3} format-parsers
+  "Registry of format -> parser-fn. Extend this to add new formats."
+  {:yaml     parse-yaml
+   :edn      parse-edn
+   :json     parse-json
+   :markdown parse-markdown})
 
-   `parse-spec-file` is the single escalation point in this component;
-   layer 0/1/2 fns return anomalies."
-  [anom]
-  (throw (ex-info (:anomaly/message anom)
-                  (assoc (:anomaly/data anom)
-                         :anomaly/type (:anomaly/type anom)))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn- file-not-found-anomaly
-  "Return a `:not-found` anomaly when `path` does not resolve, otherwise nil."
-  [path]
-  (when-not (fs/exists? path)
-    (anomaly/anomaly :not-found
-                     (str "Spec file not found: " path)
-                     {:path path})))
+(defn ^{:stratum 4} parse-content
+  "Parse file content using the appropriate format parser.
 
-(defn parse-spec-file
+   Returns the parser's result (which may itself be an anomaly when the
+   content is malformed), or a `:fault` anomaly when no parser is
+   registered for the requested format. The fault case is exhaustive —
+   `detect-format` only emits formats that have parsers — so reaching it
+   indicates a programmer error in the registry."
+  [format content]
+  (if-let [parser (get format-parsers format)]
+    (parser content)
+    (anomaly/anomaly :fault
+                     (str "No parser registered for format: " format)
+                     {:format format
+                      :available (keys format-parsers)})))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} parse-spec-file
   "Parse a workflow specification file and normalize to canonical format.
 
    Supported formats:
@@ -308,7 +334,10 @@
    - File not found
    - Unsupported format
    - Parse errors
-   - Invalid spec schema"
+   - Missing :spec/title or :spec/description (normalize-spec's shape check)
+
+   Full Malli schema validation (`validate-spec`) is a separate,
+   caller-invoked step — this function does not call it."
   [path]
   (when-let [anom (file-not-found-anomaly path)]
     (escalate! anom))
@@ -328,17 +357,6 @@
             :source-format format
             :loaded-at (java.util.Date.)
             :file-size (.length (fs/file path))})))
-
-(defn validate-spec
-  "Validate a normalized spec using the Malli SpecPayload schema.
-
-   Returns:
-   - {:valid? true} if valid
-   - {:valid? false :errors [...]} if invalid"
-  [spec]
-  (if (schema/valid-spec-payload? spec)
-    {:valid? true}
-    {:valid? false :errors (schema/explain-spec-payload spec)}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
