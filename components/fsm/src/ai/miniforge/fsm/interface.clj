@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.fsm.interface
   "Finite State Machine public interface.
 
@@ -31,9 +30,9 @@
    [ai.miniforge.fsm.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Machine definition
 
-(def define-machine
+;; Machine definition
+(def ^{:stratum 0} define-machine
   "Create a state machine definition from config.
 
    Config format:
@@ -53,17 +52,15 @@
    Returns compiled machine definition."
   core/define-machine)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; State operations
-
-(def initialize
+(def ^{:stratum 0} initialize
   "Initialize a machine, returning the initial state.
 
    Example:
      (def state (initialize machine))"
   core/initialize)
 
-(def transition
+(def ^{:stratum 0} transition
   "Transition given an event.
 
    Arguments:
@@ -76,44 +73,42 @@
      (transition machine state {:type :fail :data {:error \"timeout\"}})"
   core/transition)
 
-(def transition-result
+(def ^{:stratum 0} transition-result
   "Transition given an event, returning a state or a canonical anomaly for a
    state-local unknown event. Non-unknown statechart failures are thrown
    unchanged."
   core/transition-result)
 
-(def current-state
+(def ^{:stratum 0} current-state
   "Get current state keyword from state map.
 
    Example:
      (current-state state) ;; => :running"
   core/current-state)
 
-(def context
+(def ^{:stratum 0} context
   "Get context data from state map.
 
    Example:
      (context state) ;; => {:phase-index 2}"
   core/context)
 
-(def in-state?
+(def ^{:stratum 0} in-state?
   "Check if machine is in a specific state.
 
    Example:
      (in-state? state :running) ;; => true"
   core/in-state?)
 
-(def final?
+(def ^{:stratum 0} final?
   "Check if current state is a final state.
 
    Example:
      (final? machine state) ;; => false"
   core/final?)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Context manipulation
-
-(def assign
+(def ^{:stratum 0} assign
   "Create action that assigns values to context.
 
    Values can be constants or functions (context, event) -> value.
@@ -123,31 +118,29 @@
               :last-event (fn [ctx event] (:type event))})"
   core/assign)
 
-(def update-context
+(def ^{:stratum 0} update-context
   "Update context with a function.
 
    Example:
      (update-context state assoc :key value)"
   core/update-context)
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Guard helpers
-
-(def guard
+(def ^{:stratum 0} guard
   "Create a guard from predicate (context, event) -> boolean.
 
    Example:
      (guard (fn [ctx event] (< (:attempts ctx) 3)))"
   core/guard)
 
-(def all-guards
+(def ^{:stratum 0} all-guards
   "Combine guards with AND logic.
 
    Example:
      (all-guards has-budget? has-permission?)"
   core/all-guards)
 
-(def any-guard
+(def ^{:stratum 0} any-guard
   "Combine guards with OR logic.
 
    Example:
