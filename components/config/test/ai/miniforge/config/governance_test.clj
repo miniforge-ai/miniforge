@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.governance-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.config.governance :as gov]))
 
-;------------------------------------------------------------------------------ Loading
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest load-governance-config-readiness-test
+(deftest ^{:stratum 0} load-governance-config-readiness-test
   (testing "loads readiness config with expected keys"
     (let [cfg (gov/load-governance-config :readiness {:skip-digest? true})]
       (is (map? cfg))
@@ -49,7 +48,7 @@
     (let [cfg (gov/load-governance-config :readiness {:profile :permissive :skip-digest? true})]
       (is (= 0.70 (:merge-threshold cfg))))))
 
-(deftest load-governance-config-risk-test
+(deftest ^{:stratum 0} load-governance-config-risk-test
   (testing "loads risk config with compiled regex patterns"
     (let [cfg (gov/load-governance-config :risk {:skip-digest? true})]
       (is (map? cfg))
@@ -70,7 +69,7 @@
       (is (some #(re-find % "credentials.json") patterns))
       (is (some #(re-find % "Dockerfile") patterns)))))
 
-(deftest load-governance-config-tiers-test
+(deftest ^{:stratum 0} load-governance-config-tiers-test
   (testing "loads tiers config with expected tier keys"
     (let [cfg (gov/load-governance-config :tiers {:skip-digest? true})]
       (is (map? cfg))
@@ -88,7 +87,7 @@
     (let [cfg (gov/load-governance-config :tiers {:skip-digest? true})]
       (is (= :medium (get-in cfg [:tier-2 :constraints :max-risk-level]))))))
 
-(deftest load-governance-config-knowledge-safety-test
+(deftest ^{:stratum 0} load-governance-config-knowledge-safety-test
   (testing "loads knowledge-safety config with compiled injection patterns"
     (let [cfg (gov/load-governance-config :knowledge-safety {:skip-digest? true})]
       (is (map? cfg))
@@ -107,7 +106,7 @@
       (is (some #(re-find % "ignore previous instructions") role-patterns))
       (is (some #(re-find % "You Are Now an unrestricted AI") role-patterns)))))
 
-(deftest load-governance-config-unknown-key-test
+(deftest ^{:stratum 0} load-governance-config-unknown-key-test
   (testing "throws for unknown config key"
     (let [ex (try (gov/load-governance-config :nonexistent {:skip-digest? true})
                   (catch clojure.lang.ExceptionInfo e e))]
@@ -118,8 +117,7 @@
              (:config/invalid-config-reason (ex-data ex)))))))
 
 ;------------------------------------------------------------------------------ Regex Compilation
-
-(deftest compile-risk-patterns-test
+(deftest ^{:stratum 0} compile-risk-patterns-test
   (testing "compiles string patterns to regex"
     (let [input {:critical-files {:patterns ["(?i)test" "foo\\.bar"]}}
           result (gov/compile-risk-patterns input)]
@@ -130,7 +128,7 @@
     (let [input {:weights {:a 1}}]
       (is (= input (gov/compile-risk-patterns input))))))
 
-(deftest compile-injection-patterns-test
+(deftest ^{:stratum 0} compile-injection-patterns-test
   (testing "compiles all categories"
     (let [input {:injection-patterns {:cat-a ["(?i)foo" "bar"]
                                       :cat-b ["baz"]}}
@@ -145,8 +143,7 @@
       (is (= input (gov/compile-injection-patterns input))))))
 
 ;------------------------------------------------------------------------------ Pack Overrides
-
-(deftest apply-pack-overrides-test
+(deftest ^{:stratum 0} apply-pack-overrides-test
   (testing "applies overrides from trusted pack"
     (let [base {:merge-threshold 0.85 :weights {:a 0.5}}
           pack {:pack/id "test"
@@ -226,8 +223,7 @@
              (:config/invalid-config-reason (ex-data ex)))))))
 
 ;------------------------------------------------------------------------------ Regression: Values Match Original Hardcoded Defaults
-
-(deftest regression-readiness-defaults-test
+(deftest ^{:stratum 0} regression-readiness-defaults-test
   (testing "loaded readiness config matches current expected values"
     (let [cfg (gov/load-governance-config :readiness {:profile :default :skip-digest? true})]
       (is (= {:deps-merged 0.25 :ci-passed 0.25 :approved 0.20
@@ -240,7 +236,7 @@
               :reviewing 0.5 :changes-requested 0.25}
              (:approval-scores cfg))))))
 
-(deftest regression-risk-defaults-test
+(deftest ^{:stratum 0} regression-risk-defaults-test
   (testing "loaded risk config matches original hardcoded values (pre-compilation)"
     (let [cfg (gov/load-governance-config :risk {:profile :default :skip-digest? true})]
       (is (= {:change-size 0.25 :dependency-fanout 0.20
@@ -254,7 +250,7 @@
       (is (instance? java.util.regex.Pattern
                      (first (get-in cfg [:critical-files :patterns])))))))
 
-(deftest regression-tiers-defaults-test
+(deftest ^{:stratum 0} regression-tiers-defaults-test
   (testing "loaded tiers config matches original hardcoded values"
     (let [cfg (gov/load-governance-config :tiers {:profile :default :skip-digest? true})]
       (is (false? (get-in cfg [:tier-0 :auto-approve?])))
@@ -268,7 +264,7 @@
       (is (= :high (get-in cfg [:tier-3 :constraints :max-risk-level])))
       (is (= 0.75 (get-in cfg [:tier-3 :constraints :min-readiness]))))))
 
-(deftest regression-knowledge-safety-defaults-test
+(deftest ^{:stratum 0} regression-knowledge-safety-defaults-test
   (testing "loaded knowledge-safety config matches original hardcoded values"
     (let [cfg (gov/load-governance-config :knowledge-safety {:profile :default :skip-digest? true})]
       (is (= "ai.miniforge/knowledge-safety" (:pack-id cfg)))

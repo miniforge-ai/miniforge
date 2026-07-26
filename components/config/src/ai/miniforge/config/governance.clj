@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.governance
   "Governance config loading with aero profiles, regex compilation,
    digest verification, and merge chain.
@@ -41,20 +40,20 @@
    [ai.miniforge.config.user :as user]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants and helpers
 
-(def config-key->filename
+;; Constants and helpers
+(def ^{:stratum 0} config-key->filename
   "Map from config key to EDN filename."
   {:readiness        "readiness.edn"
    :risk             "risk.edn"
    :tiers            "tiers.edn"
    :knowledge-safety "knowledge-safety.edn"})
 
-(def user-config-path
+(def ^{:stratum 0} user-config-path
   "Default path to user config file."
   (str (user/miniforge-home) "/config.edn"))
 
-(defn resolve-profile
+(defn ^{:stratum 0} resolve-profile
   "Resolve governance profile from env var or opts.
    Defaults to :default."
   [opts]
@@ -62,7 +61,7 @@
       (some-> (System/getenv "MINIFORGE_GOVERNANCE_PROFILE") keyword)
       :default))
 
-(defn deep-merge
+(defn ^{:stratum 0} deep-merge
   "Recursively merge maps. Later values win for non-map keys."
   [& maps]
   (reduce (fn [acc m]
@@ -73,10 +72,8 @@
                        acc m))
           {} maps))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Regex compilation
-
-(defn compile-risk-patterns
+(defn ^{:stratum 0} compile-risk-patterns
   "Compile regex pattern strings in risk config under :critical-files :patterns.
    Returns config with compiled patterns."
   [config]
@@ -85,7 +82,7 @@
               (mapv re-pattern patterns))
     config))
 
-(defn compile-injection-patterns
+(defn ^{:stratum 0} compile-injection-patterns
   "Compile all regex pattern string vectors under :injection-patterns.
    Returns config with compiled patterns."
   [config]
@@ -96,29 +93,7 @@
                       {} categories))
     config))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Config loading and merge chain
-
-(defn load-resource-config
-  "Load a governance EDN file from classpath using aero for profile resolution."
-  [config-key profile]
-  (when-let [filename (get config-key->filename config-key)]
-    (when-let [resource (io/resource (str "config/governance/" filename))]
-      (aero/read-config resource {:profile profile}))))
-
-(defn load-user-overrides
-  "Load governance overrides from user config file.
-   Returns the map at [:governance <config-key>] or nil."
-  [config-key]
-  (try
-    (let [path user-config-path]
-      (when (fs/exists? path)
-        (let [user-cfg (edn/read-string (slurp path))]
-          (get-in user-cfg [:governance config-key]))))
-    (catch Exception _e
-      nil)))
-
-(defn verify-and-warn
+(defn ^{:stratum 0} verify-and-warn
   "Verify governance file content against digest manifest.
    For :knowledge-safety, mismatch throws. For others, logs a warning."
   [config-key content]
@@ -138,12 +113,34 @@
                                    (name config-key)
                                    ". File may have been modified.")))))))
 
-(defn needs-regex-compilation?
+(defn ^{:stratum 0} needs-regex-compilation?
   "Return true if this config key has regex strings that need compilation."
   [config-key]
   (contains? #{:risk :knowledge-safety} config-key))
 
-(defn compile-patterns
+;------------------------------------------------------------------------------ Layer 1
+
+;; Config loading and merge chain
+(defn ^{:stratum 1} load-resource-config
+  "Load a governance EDN file from classpath using aero for profile resolution."
+  [config-key profile]
+  (when-let [filename (get config-key->filename config-key)]
+    (when-let [resource (io/resource (str "config/governance/" filename))]
+      (aero/read-config resource {:profile profile}))))
+
+(defn ^{:stratum 1} load-user-overrides
+  "Load governance overrides from user config file.
+   Returns the map at [:governance <config-key>] or nil."
+  [config-key]
+  (try
+    (let [path user-config-path]
+      (when (fs/exists? path)
+        (let [user-cfg (edn/read-string (slurp path))]
+          (get-in user-cfg [:governance config-key]))))
+    (catch Exception _e
+      nil)))
+
+(defn ^{:stratum 1} compile-patterns
   "Compile regex patterns for configs that need it."
   [config-key config]
   (case config-key
@@ -151,7 +148,7 @@
     :knowledge-safety (compile-injection-patterns config)
     config))
 
-(defn apply-pack-overrides
+(defn ^{:stratum 1} apply-pack-overrides
   "Apply pack config overrides with safety checks.
 
    Safety rules:
@@ -201,7 +198,9 @@
           ;; Non-safety configs: merge freely
           (deep-merge base-config overrides))))))
 
-(defn load-governance-config
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} load-governance-config
   "Load governance config with full merge chain.
 
    Merge chain (precedence lowest -> highest):

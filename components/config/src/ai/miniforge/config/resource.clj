@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.resource
   "Generic classpath EDN config-resource loading. One home for the
    load-this-component's-config-resource pattern so components stop
@@ -35,14 +34,16 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-(def ^:private t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private t
   "System-locale translator for this component. The loader's fail-fast
    diagnostics are operator-facing (system-locale, not user UI), but routed
    through the catalog so the one place to audit or override them is data."
   (messages/create-translator "config/config/messages/system.edn"
                               :config/system))
 
-(defn- extra-ex-data-map
+(defn- ^{:stratum 0} extra-ex-data-map
   [path extra-ex-data]
   (cond
     (nil? extra-ex-data) {}
@@ -51,7 +52,23 @@
                           {:config/resource path
                            :config/extra-ex-data extra-ex-data}))))
 
-(defn load-config-resource
+(defn ^{:stratum 0} read-config-resource-or
+  "Read an EDN config resource, returning `fallback` if the resource is
+   absent, unreadable, malformed, or not a map (fail-open). Cancellation
+   (`InterruptedException`) is propagated, not swallowed."
+  [path fallback]
+  (try
+    (let [url    (io/resource path)
+          parsed (when url (edn/read-string (slurp url :encoding "UTF-8")))]
+      (if (map? parsed) parsed fallback))
+    (catch InterruptedException e
+      (.interrupt (Thread/currentThread))
+      (throw e))
+    (catch Exception _ fallback)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} load-config-resource
   "Read an EDN config resource from the classpath, failing fast with a
    clear ex-info when the resource is absent, malformed, not a map, or
    missing a required key. Returns the parsed map.
@@ -98,17 +115,3 @@
            (throw (ex-info (t :resource/missing-keys {:path path :keys missing})
                            (assoc ex-data :config/missing-keys missing))))
          parsed)))))
-
-(defn read-config-resource-or
-  "Read an EDN config resource, returning `fallback` if the resource is
-   absent, unreadable, malformed, or not a map (fail-open). Cancellation
-   (`InterruptedException`) is propagated, not swallowed."
-  [path fallback]
-  (try
-    (let [url    (io/resource path)
-          parsed (when url (edn/read-string (slurp url :encoding "UTF-8")))]
-      (if (map? parsed) parsed fallback))
-    (catch InterruptedException e
-      (.interrupt (Thread/currentThread))
-      (throw e))
-    (catch Exception _ fallback)))

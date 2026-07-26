@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.user
   "User configuration management for Miniforge.
 
@@ -31,53 +30,29 @@
    [babashka.process]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants and utilities
 
-(defn miniforge-home
+;; Constants and utilities
+(defn ^{:stratum 0} miniforge-home
   []
   (or (System/getenv "MINIFORGE_HOME")
       (str (System/getProperty "user.home") "/.miniforge")))
 
-(def default-user-config-path
-  (str (miniforge-home) "/config.edn"))
-
-(def ^:private default-config-resource-path
+(def ^{:stratum 0} ^:private default-config-resource-path
   "Primary resource path for shipped user config defaults."
   "config/default-user-config.edn")
 
-(def ^:private fallback-config-resource-path
+(def ^{:stratum 0} ^:private fallback-config-resource-path
   "Fallback resource path when the primary config cannot be loaded."
   "config/default-user-config-fallback.edn")
 
-(defn find-resource
+(defn ^{:stratum 0} find-resource
   "Resource lookup seam. Public so tests can rebind it via `with-redefs`
    when validating the fallback resource path; not part of the external
    API."
   [resource-path]
   (io/resource resource-path))
 
-(defn- read-config-resource
-  "Read an EDN config resource, returning nil on missing resource or parse failure."
-  [resource-path]
-  (when-let [resource (find-resource resource-path)]
-    (try
-      (edn/read-string (slurp resource))
-      (catch Exception _e
-        nil))))
-
-(defn load-default-config
-  "Load default configuration from resources.
-
-   Returns: Default config map or resource-backed fallback."
-  []
-  (or (some-> (read-config-resource default-config-resource-path) :config)
-      (some-> (read-config-resource fallback-config-resource-path) :config)
-      {}))
-
-(def default-config
-  (load-default-config))
-
-(defn read-edn-file
+(defn ^{:stratum 0} read-edn-file
   "Safely read an EDN file, returning nil on error."
   [path]
   (try
@@ -86,19 +61,46 @@
     (catch Exception _e
       nil)))
 
-(defn write-edn-file
+(defn ^{:stratum 0} write-edn-file
   "Write EDN data to a file, creating parent directories if needed."
   [path data]
   (fs/create-dirs (fs/parent path))
   (spit path (with-out-str (clojure.pprint/pprint data))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Repo-level configuration
-
-(def repo-config-dir-name
+(def ^{:stratum 0} repo-config-dir-name
   ".miniforge")
 
-(defn repo-config-path
+;; Environment variable overrides
+(defn ^{:stratum 0} get-env-var
+  "Get environment variable value."
+  [var-name]
+  (System/getenv var-name))
+
+(defn ^{:stratum 0} parse-env-value
+  "Parse environment variable value (string -> EDN)."
+  [value]
+  (when value
+    (try
+      (edn/read-string value)
+      (catch Exception _
+        value))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} default-user-config-path
+  (str (miniforge-home) "/config.edn"))
+
+(defn- ^{:stratum 1} read-config-resource
+  "Read an EDN config resource, returning nil on missing resource or parse failure."
+  [resource-path]
+  (when-let [resource (find-resource resource-path)]
+    (try
+      (edn/read-string (slurp resource))
+      (catch Exception _e
+        nil))))
+
+(defn ^{:stratum 1} repo-config-path
   "Return the path to .miniforge/config.edn in the given working directory.
 
    Uses the JVM's current working directory by default. Pass an explicit
@@ -114,40 +116,7 @@
         repo-config-dir-name java.io.File/separator
         "config.edn")))
 
-(defn load-repo-config
-  "Load repo-level configuration from .miniforge/config.edn.
-
-   Reads from the current working directory by default. Returns nil when
-   the file does not exist or cannot be parsed — never throws.
-
-   This layer lets individual repositories declare :policy-packs settings,
-   governance overrides, or other project-specific config without touching
-   the user's global ~/.miniforge/config.edn.
-
-   Arguments:
-   - path - Optional explicit path (defaults to (repo-config-path))"
-  ([] (load-repo-config (repo-config-path)))
-  ([path]
-   (read-edn-file path)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Environment variable overrides
-
-(defn get-env-var
-  "Get environment variable value."
-  [var-name]
-  (System/getenv var-name))
-
-(defn parse-env-value
-  "Parse environment variable value (string -> EDN)."
-  [value]
-  (when value
-    (try
-      (edn/read-string value)
-      (catch Exception _
-        value))))
-
-(defn apply-env-overrides
+(defn ^{:stratum 1} apply-env-overrides
   "Apply environment variable overrides to config.
 
    Supports these env vars:
@@ -236,16 +205,41 @@
     (assoc-in [:self-healing :backend-health-threshold] (parse-env-value (get-env-var "MINIFORGE_BACKEND_HEALTH_THRESHOLD")))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Config loading and merging
 
-(defn load-user-config
+(defn ^{:stratum 2} load-default-config
+  "Load default configuration from resources.
+
+   Returns: Default config map or resource-backed fallback."
+  []
+  (or (some-> (read-config-resource default-config-resource-path) :config)
+      (some-> (read-config-resource fallback-config-resource-path) :config)
+      {}))
+
+(defn ^{:stratum 2} load-repo-config
+  "Load repo-level configuration from .miniforge/config.edn.
+
+   Reads from the current working directory by default. Returns nil when
+   the file does not exist or cannot be parsed — never throws.
+
+   This layer lets individual repositories declare :policy-packs settings,
+   governance overrides, or other project-specific config without touching
+   the user's global ~/.miniforge/config.edn.
+
+   Arguments:
+   - path - Optional explicit path (defaults to (repo-config-path))"
+  ([] (load-repo-config (repo-config-path)))
+  ([path]
+   (read-edn-file path)))
+
+;; Config loading and merging
+(defn ^{:stratum 2} load-user-config
   "Load user configuration from file.
    Returns nil if file doesn't exist."
   ([] (load-user-config default-user-config-path))
   ([path]
    (read-edn-file path)))
 
-(defn merge-configs
+(defn ^{:stratum 2} merge-configs
   "Merge configurations with precedence: user > env > defaults.
 
    Returns fully merged configuration map."
@@ -258,7 +252,21 @@
                     configs)]
     (apply-env-overrides base)))
 
-(defn load-merged-config
+;; Config saving and initialization
+(defn ^{:stratum 2} save-user-config
+  ([config] (save-user-config config default-user-config-path))
+  ([config path]
+   (write-edn-file path config)
+   config))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} default-config
+  (load-default-config))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} load-merged-config
   "Load and merge all configuration sources.
 
    Precedence: user config > env vars > defaults."
@@ -269,7 +277,7 @@
        (merge-configs default-config user-config)
        (merge-configs default-config)))))
 
-(defn load-merged-config-with-repo
+(defn ^{:stratum 4} load-merged-config-with-repo
   "Load and merge all configuration sources, including repo-level config.
 
    Precedence (lowest to highest):
@@ -291,16 +299,7 @@
                   (load-user-config user-path)
                   (load-repo-config repo-path))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Config saving and initialization
-
-(defn save-user-config
-  ([config] (save-user-config config default-user-config-path))
-  ([config path]
-   (write-edn-file path config)
-   config))
-
-(defn init-user-config
+(defn ^{:stratum 4} init-user-config
   "Initialize user config file with defaults if it doesn't exist.
    Returns path to config file."
   ([] (init-user-config default-user-config-path))
@@ -309,7 +308,7 @@
      (save-user-config default-config path))
    path))
 
-(defn update-user-config
+(defn ^{:stratum 4} update-user-config
   "Update a specific key in user config.
    Loads existing config, updates key, and saves.
 
@@ -322,12 +321,14 @@
          updated-config (assoc-in current-config key-path value)]
      (save-user-config updated-config path))))
 
-(defn reset-user-config
+(defn ^{:stratum 4} reset-user-config
   ([] (reset-user-config default-user-config-path))
   ([path]
    (save-user-config default-config path)))
 
-(defn edit-user-config
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} edit-user-config
   "Open user config in $EDITOR.
    Creates config file if it doesn't exist.
    Returns path to config file."
