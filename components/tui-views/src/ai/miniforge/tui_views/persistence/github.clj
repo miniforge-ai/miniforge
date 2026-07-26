@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence.github
   "GitHub CLI wrappers for fetching PR diffs and details.
 
@@ -27,37 +26,39 @@
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Validation and CLI helpers
 
-(def ^:private shell-opts
+;; Validation and CLI helpers
+(def ^{:stratum 0} ^:private shell-opts
   {:out :string :err :string})
 
-(def ^:private detail-fields
+(def ^{:stratum 0} ^:private detail-fields
   "title,body,labels,files")
 
-(defn- assert-request! [repo number]
+(defn- ^{:stratum 0} assert-request! [repo number]
   (assert (string? repo) "repo must be a string")
   (assert (some? number) "number must be present"))
 
-(defn- assert-composite-request! [repo number]
-  (assert-request! repo number)
-  (assert (or (integer? number) (string? number))
-          "number must be an integer or string"))
-
-(defn- coerce-number [number]
+(defn- ^{:stratum 0} coerce-number [number]
   (long (if (string? number) (Long/parseLong number) number)))
 
-(defn- run-gh [& args]
-  (apply process/shell shell-opts args))
-
-(defn- successful-output [result]
+(defn- ^{:stratum 0} successful-output [result]
   (when (zero? (:exit result))
     (or (get result :out) "")))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Individual fetchers
 
-(defn fetch-pr-diff
+(defn- ^{:stratum 1} assert-composite-request! [repo number]
+  (assert-request! repo number)
+  (assert (or (integer? number) (string? number))
+          "number must be an integer or string"))
+
+(defn- ^{:stratum 1} run-gh [& args]
+  (apply process/shell shell-opts args))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Individual fetchers
+(defn ^{:stratum 2} fetch-pr-diff
   "Fetch the diff for a PR via `gh pr diff`.
 
    Returns the trimmed diff string on success, nil on failure."
@@ -70,7 +71,7 @@
     (catch Exception _
       nil)))
 
-(defn fetch-pr-detail
+(defn ^{:stratum 2} fetch-pr-detail
   "Fetch PR detail (title, body, labels, files) via `gh pr view --json`.
 
    Returns a parsed map with keyword keys on success, nil on failure."
@@ -84,10 +85,10 @@
     (catch Exception _
       nil)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Composite fetcher
+;------------------------------------------------------------------------------ Layer 3
 
-(defn fetch-pr-diff-and-detail
+;; Composite fetcher
+(defn ^{:stratum 3} fetch-pr-diff-and-detail
   "Fetch both diff and detail for a PR. Coerces number to long.
 
    Returns {:diff string-or-nil, :detail map-or-nil, :repo string, :number long}."

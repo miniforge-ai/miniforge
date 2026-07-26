@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence.github-integration-test
   "Integration tests for the GitHub PR fetch pipeline.
 
@@ -40,9 +39,10 @@
    [ai.miniforge.tui-views.msg :as msg]
    [babashka.process :as process]))
 
-;; ---------------------------------------------------------------------------- Test data
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private multi-file-diff
+;; ---------------------------------------------------------------------------- Test data
+(def ^{:stratum 0} ^:private multi-file-diff
   "A realistic multi-file unified diff with additions, deletions, renames."
   (str "diff --git a/src/core.clj b/src/core.clj\n"
        "index 1234567..abcdef0 100644\n"
@@ -79,7 +79,7 @@
        "+(deftest process-test\n"
        "+  (is (= \"42\" (sut/process 42))))\n"))
 
-(def ^:private detail-with-all-fields
+(def ^{:stratum 0} ^:private detail-with-all-fields
   "JSON with title, body, labels, and files — comprehensive."
   (str "{\"title\":\"Add input validation to process fn\","
        "\"body\":\"## Summary\\nAdds precondition checks and transforms.\\n\\n"
@@ -91,33 +91,17 @@
        "{\"path\":\"test/core_test.clj\",\"additions\":8,\"deletions\":0}"
        "]}"))
 
-(def ^:private empty-pr-json
+(def ^{:stratum 0} ^:private empty-pr-json
   "{\"title\":\"Empty PR\",\"body\":\"\",\"labels\":[],\"files\":[]}")
 
-(defn- mock-shell-success [out]
+(defn- ^{:stratum 0} mock-shell-success [out]
   {:exit 0 :out out :err ""})
 
-(defn- mock-shell-failure [exit err]
+(defn- ^{:stratum 0} mock-shell-failure [exit err]
   {:exit exit :out "" :err err})
 
-(defn- route-gh-command
-  "Create a mock process/shell that routes based on gh subcommand.
-   diff-response and detail-response are [exit-code output] pairs."
-  [diff-response detail-response]
-  (fn [_opts & args]
-    (let [a (vec args)
-          cmd (nth a 2)]
-      (case cmd
-        "diff" (if (zero? (first diff-response))
-                 (mock-shell-success (second diff-response))
-                 (mock-shell-failure (first diff-response) (second diff-response)))
-        "view" (if (zero? (first detail-response))
-                 (mock-shell-success (second detail-response))
-                 (mock-shell-failure (first detail-response) (second detail-response)))))))
-
 ;; ---------------------------------------------------------------------------- msg/pr-diff-fetched unit tests
-
-(deftest pr-diff-fetched-msg-structure-test
+(deftest ^{:stratum 0} pr-diff-fetched-msg-structure-test
   (testing "produces :msg/pr-diff-fetched with pr-id, diff, detail"
     (let [m (msg/pr-diff-fetched ["r" 1] "patch" {:title "T"} nil)]
       (is (= :msg/pr-diff-fetched (first m)))
@@ -139,7 +123,7 @@
       (is (nil? (:diff payload)))
       (is (nil? (:detail payload))))))
 
-(deftest pr-diff-fetched-msg-always-vector-test
+(deftest ^{:stratum 0} pr-diff-fetched-msg-always-vector-test
   (testing "always returns a two-element vector"
     (doseq [args [[["r" 1] "d" {:title "T"} nil]
                   [["r" 1] nil nil "err"]
@@ -151,9 +135,70 @@
         (is (= :msg/pr-diff-fetched (first m)))
         (is (map? (second m)))))))
 
-;; ---------------------------------------------------------------------------- Integration: handle-fetch-pr-diff
+(deftest ^{:stratum 0} handle-fetch-pr-diff-exception-wraps-error-test
+  (testing "exception from github layer is caught and wrapped"
+    (with-redefs [github/fetch-pr-diff-and-detail
+                  (fn [_ _] (throw (java.net.SocketTimeoutException. "Read timed out")))]
+      (let [[msg-type payload] (iface/handle-fetch-pr-diff
+                                {:repo "r" :number 5})]
+        (is (= :msg/pr-diff-fetched msg-type))
+        (is (= ["r" 5] (:pr-id payload)))
+        (is (nil? (:diff payload)))
+        (is (str/includes? (:error payload) "Read timed out"))))))
 
-(deftest handle-fetch-pr-diff-full-success-pipeline-test
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} route-gh-command
+  "Create a mock process/shell that routes based on gh subcommand.
+   diff-response and detail-response are [exit-code output] pairs."
+  [diff-response detail-response]
+  (fn [_opts & args]
+    (let [a (vec args)
+          cmd (nth a 2)]
+      (case cmd
+        "diff" (if (zero? (first diff-response))
+                 (mock-shell-success (second diff-response))
+                 (mock-shell-failure (first diff-response) (second diff-response)))
+        "view" (if (zero? (first detail-response))
+                 (mock-shell-success (second detail-response))
+                 (mock-shell-failure (first detail-response) (second detail-response)))))))
+
+(deftest ^{:stratum 1} handle-fetch-pr-diff-both-fail-sets-error-test
+  (testing "both diff and detail fail → error message set"
+    (with-redefs [process/shell (fn [_opts & _] (mock-shell-failure 1 "nope"))]
+      (let [[_ payload] (iface/handle-fetch-pr-diff
+                         {:repo "r" :number 1})]
+        (is (nil? (:diff payload)))
+        (is (nil? (:detail payload)))
+        (is (string? (:error payload)))))))
+
+(deftest ^{:stratum 1} dispatch-effect-fetch-pr-diff-total-failure-test
+  (testing "dispatch-effect with total failure returns error in payload"
+    (with-redefs [process/shell (fn [_opts & _] (mock-shell-failure 127 "gh: command not found"))]
+      (let [[msg-type payload] (iface/dispatch-effect nil {:type :fetch-pr-diff
+                                                           :repo "r"
+                                                           :number 1})]
+        (is (= :msg/pr-diff-fetched msg-type))
+        (is (string? (:error payload)))))))
+
+;; ---------------------------------------------------------------------------- Edge cases: diff content
+(deftest ^{:stratum 1} diff-with-binary-file-markers-test
+  (testing "diff containing binary file markers is returned intact"
+    (let [diff "diff --git a/img.png b/img.png\nBinary files differ"]
+      (with-redefs [process/shell (fn [_opts & _] (mock-shell-success diff))]
+        (is (= diff (github/fetch-pr-diff "r" 1)))))))
+
+(deftest ^{:stratum 1} diff-with-unicode-content-test
+  (testing "diff with unicode characters is preserved"
+    (let [diff "diff --git a/i18n.clj b/i18n.clj\n+;; 日本語テスト — émojis: 🎉"]
+      (with-redefs [process/shell (fn [_opts & _] (mock-shell-success diff))]
+        (is (= diff (github/fetch-pr-diff "r" 1)))
+        (is (str/includes? (github/fetch-pr-diff "r" 1) "🎉"))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ---------------------------------------------------------------------------- Integration: handle-fetch-pr-diff
+(deftest ^{:stratum 2} handle-fetch-pr-diff-full-success-pipeline-test
   (testing "full pipeline: dispatch → handle → github → msg, all fields present"
     (with-redefs [process/shell (route-gh-command [0 multi-file-diff]
                                                    [0 detail-with-all-fields])]
@@ -183,7 +228,7 @@
         ;; AC4: no error on success
         (is (nil? (:error payload)))))))
 
-(deftest handle-fetch-pr-diff-string-number-coercion-test
+(deftest ^{:stratum 2} handle-fetch-pr-diff-string-number-coercion-test
   (testing "string PR number is coerced to long in pr-id"
     (with-redefs [process/shell (route-gh-command [0 "patch"] [0 empty-pr-json])]
       (let [[_ payload] (iface/handle-fetch-pr-diff
@@ -192,8 +237,7 @@
         (is (integer? (second (:pr-id payload))))))))
 
 ;; ---------------------------------------------------------------------------- Integration: partial failures
-
-(deftest handle-fetch-pr-diff-diff-fails-detail-ok-test
+(deftest ^{:stratum 2} handle-fetch-pr-diff-diff-fails-detail-ok-test
   (testing "diff failure + detail success → no error, detail preserved"
     (with-redefs [process/shell (route-gh-command [1 "not found"]
                                                    [0 detail-with-all-fields])]
@@ -204,7 +248,7 @@
         (is (map? (:detail payload)))
         (is (nil? (:error payload)))))))
 
-(deftest handle-fetch-pr-diff-detail-fails-diff-ok-test
+(deftest ^{:stratum 2} handle-fetch-pr-diff-detail-fails-diff-ok-test
   (testing "detail failure + diff success → no error, diff preserved"
     (with-redefs [process/shell (route-gh-command [0 multi-file-diff]
                                                    [128 "auth failed"])]
@@ -215,29 +259,8 @@
         (is (nil? (:detail payload)))
         (is (nil? (:error payload)))))))
 
-(deftest handle-fetch-pr-diff-both-fail-sets-error-test
-  (testing "both diff and detail fail → error message set"
-    (with-redefs [process/shell (fn [_opts & _] (mock-shell-failure 1 "nope"))]
-      (let [[_ payload] (iface/handle-fetch-pr-diff
-                         {:repo "r" :number 1})]
-        (is (nil? (:diff payload)))
-        (is (nil? (:detail payload)))
-        (is (string? (:error payload)))))))
-
-(deftest handle-fetch-pr-diff-exception-wraps-error-test
-  (testing "exception from github layer is caught and wrapped"
-    (with-redefs [github/fetch-pr-diff-and-detail
-                  (fn [_ _] (throw (java.net.SocketTimeoutException. "Read timed out")))]
-      (let [[msg-type payload] (iface/handle-fetch-pr-diff
-                                {:repo "r" :number 5})]
-        (is (= :msg/pr-diff-fetched msg-type))
-        (is (= ["r" 5] (:pr-id payload)))
-        (is (nil? (:diff payload)))
-        (is (str/includes? (:error payload) "Read timed out"))))))
-
 ;; ---------------------------------------------------------------------------- Integration: dispatch-effect routing
-
-(deftest dispatch-effect-routes-fetch-pr-diff-test
+(deftest ^{:stratum 2} dispatch-effect-routes-fetch-pr-diff-test
   (testing ":fetch-pr-diff effect type routes to handle-fetch-pr-diff"
     (with-redefs [process/shell (route-gh-command [0 "simple diff"]
                                                    [0 empty-pr-json])]
@@ -248,27 +271,3 @@
         (is (= ["org/lib" 77] (:pr-id payload)))
         (is (= "simple diff" (:diff payload)))
         (is (map? (:detail payload)))))))
-
-(deftest dispatch-effect-fetch-pr-diff-total-failure-test
-  (testing "dispatch-effect with total failure returns error in payload"
-    (with-redefs [process/shell (fn [_opts & _] (mock-shell-failure 127 "gh: command not found"))]
-      (let [[msg-type payload] (iface/dispatch-effect nil {:type :fetch-pr-diff
-                                                           :repo "r"
-                                                           :number 1})]
-        (is (= :msg/pr-diff-fetched msg-type))
-        (is (string? (:error payload)))))))
-
-;; ---------------------------------------------------------------------------- Edge cases: diff content
-
-(deftest diff-with-binary-file-markers-test
-  (testing "diff containing binary file markers is returned intact"
-    (let [diff "diff --git a/img.png b/img.png\nBinary files differ"]
-      (with-redefs [process/shell (fn [_opts & _] (mock-shell-success diff))]
-        (is (= diff (github/fetch-pr-diff "r" 1)))))))
-
-(deftest diff-with-unicode-content-test
-  (testing "diff with unicode characters is preserved"
-    (let [diff "diff --git a/i18n.clj b/i18n.clj\n+;; 日本語テスト — émojis: 🎉"]
-      (with-redefs [process/shell (fn [_opts & _] (mock-shell-success diff))]
-        (is (= diff (github/fetch-pr-diff "r" 1)))
-        (is (str/includes? (github/fetch-pr-diff "r" 1) "🎉"))))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.chat
   "Chat mode: model transforms for the conversational interface.
 
@@ -31,9 +30,9 @@
    [ai.miniforge.tui-views.transition :as transition]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Thread key derivation
 
-(defn chat-thread-key
+;; Thread key derivation
+(defn ^{:stratum 0} chat-thread-key
   "Derive a stable thread key from the current view context.
    Each PR or workflow gets its own conversation thread."
   [model]
@@ -43,16 +42,15 @@
     :pr-fleet  [:fleet]
     [:global]))
 
-(def ^:private empty-thread
+(def ^{:stratum 0} ^:private empty-thread
   {:messages [] :input-buf "" :context {} :pending? false :suggested-actions []})
 
 ;; Context builders
-
-(def chat-views
+(def ^{:stratum 0} chat-views
   "Views where chat mode is available."
   #{:pr-fleet :pr-detail})
 
-(defn pr-detail-context
+(defn ^{:stratum 0} pr-detail-context
   "Build chat context from a PR detail view."
   [model]
   (let [pr (get-in model [:detail :selected-pr])]
@@ -62,7 +60,7 @@
      :risk      (:pr/risk pr)
      :policy    (:pr/policy pr)}))
 
-(defn pr-fleet-context
+(defn ^{:stratum 0} pr-fleet-context
   "Build chat context from a PR fleet view."
   [model]
   (let [sel-ids (:selected-ids model #{})
@@ -76,7 +74,51 @@
      :active-filter (:active-filter model)
      :total-prs     (count (:pr-items model []))}))
 
-(defn build-context
+(defn ^{:stratum 0} escape
+  "Exit chat mode. Saves thread back to chat-threads."
+  [model]
+  (let [tk (get model :chat-active-key)]
+    (cond-> (assoc model :mode :normal :command-buf "")
+      tk (assoc-in [:chat-threads tk] (:chat model)))))
+
+;; Input handling
+(defn ^{:stratum 0} sync-command-buf
+  "Keep :command-buf in sync with chat input for the command bar overlay."
+  [model]
+  (assoc model :command-buf (str "chat> " (get-in model [:chat :input-buf] ""))))
+
+(defn ^{:stratum 0} execute-action
+  "Execute a suggested action by index (0-based).
+   Fires a :chat-execute-action side-effect."
+  [model idx]
+  (let [actions (get-in model [:chat :suggested-actions] [])
+        context (get-in model [:chat :context] {})]
+    (if-let [action (get actions idx)]
+      (-> model
+          (assoc :side-effect {:type :chat-execute-action
+                               :action action
+                               :context context})
+          (assoc :flash-message (msg/t :flash/executing-action {:label (:label action)})))
+      (transition/flash model (msg/t :flash/no-action-at-index)))))
+
+(defn ^{:stratum 0} scroll-up
+  "Scroll the chat panel up by one line."
+  [model]
+  (update-in model [:chat :scroll-offset] (fn [v] (max 0 (dec (or v 0))))))
+
+(defn ^{:stratum 0} scroll-down
+  "Scroll the chat panel down by one line."
+  [model]
+  (update-in model [:chat :scroll-offset] (fn [v] (inc (or v 0)))))
+
+(defn ^{:stratum 0} scroll-bottom
+  "Scroll the chat panel to the bottom (latest messages)."
+  [model]
+  (assoc-in model [:chat :scroll-offset] nil))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-context
   "Build chat context from the current view."
   [model]
   (case (:view model)
@@ -84,47 +126,14 @@
     :pr-fleet  (pr-fleet-context model)
     {:type :unknown :view (:view model)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Mode transitions
-
-(defn enter
-  "Enter chat mode. Loads or creates thread for current context."
-  [model]
-  (if (chat-views (:view model))
-    (let [tk      (chat-thread-key model)
-          thread  (get-in model [:chat-threads tk] empty-thread)
-          context (build-context model)]
-      (-> model
-          (assoc :mode :chat :command-buf "chat> " :chat-active-key tk)
-          (assoc :chat (-> thread
-                           (assoc :context context)
-                           (assoc :input-buf "")
-                           (assoc :pending? false)))))
-    (transition/flash model (msg/t :flash/chat-unavailable))))
-
-(defn escape
-  "Exit chat mode. Saves thread back to chat-threads."
-  [model]
-  (let [tk (get model :chat-active-key)]
-    (cond-> (assoc model :mode :normal :command-buf "")
-      tk (assoc-in [:chat-threads tk] (:chat model)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Input handling
-
-(defn sync-command-buf
-  "Keep :command-buf in sync with chat input for the command bar overlay."
-  [model]
-  (assoc model :command-buf (str "chat> " (get-in model [:chat :input-buf] ""))))
-
-(defn append
+(defn ^{:stratum 1} append
   "Append character to chat input buffer."
   [model ch]
   (-> model
       (update-in [:chat :input-buf] str ch)
       sync-command-buf))
 
-(defn backspace
+(defn ^{:stratum 1} backspace
   "Backspace in chat input buffer."
   [model]
   (let [buf (get-in model [:chat :input-buf] "")]
@@ -134,7 +143,7 @@
           sync-command-buf)
       model)))
 
-(defn send-message
+(defn ^{:stratum 1} send-message
   "Send the current chat input as a user message.
    Appends to messages, clears input, sets pending, fires side-effect."
   [model]
@@ -152,31 +161,20 @@
             sync-command-buf
             (assoc :side-effect (effect/chat-send context msg messages)))))))
 
-(defn execute-action
-  "Execute a suggested action by index (0-based).
-   Fires a :chat-execute-action side-effect."
-  [model idx]
-  (let [actions (get-in model [:chat :suggested-actions] [])
-        context (get-in model [:chat :context] {})]
-    (if-let [action (get actions idx)]
+;------------------------------------------------------------------------------ Layer 2
+
+;; Mode transitions
+(defn ^{:stratum 2} enter
+  "Enter chat mode. Loads or creates thread for current context."
+  [model]
+  (if (chat-views (:view model))
+    (let [tk      (chat-thread-key model)
+          thread  (get-in model [:chat-threads tk] empty-thread)
+          context (build-context model)]
       (-> model
-          (assoc :side-effect {:type :chat-execute-action
-                               :action action
-                               :context context})
-          (assoc :flash-message (msg/t :flash/executing-action {:label (:label action)})))
-      (transition/flash model (msg/t :flash/no-action-at-index)))))
-
-(defn scroll-up
-  "Scroll the chat panel up by one line."
-  [model]
-  (update-in model [:chat :scroll-offset] (fn [v] (max 0 (dec (or v 0))))))
-
-(defn scroll-down
-  "Scroll the chat panel down by one line."
-  [model]
-  (update-in model [:chat :scroll-offset] (fn [v] (inc (or v 0)))))
-
-(defn scroll-bottom
-  "Scroll the chat panel to the bottom (latest messages)."
-  [model]
-  (assoc-in model [:chat :scroll-offset] nil))
+          (assoc :mode :chat :command-buf "chat> " :chat-active-key tk)
+          (assoc :chat (-> thread
+                           (assoc :context context)
+                           (assoc :input-buf "")
+                           (assoc :pending? false)))))
+    (transition/flash model (msg/t :flash/chat-unavailable))))

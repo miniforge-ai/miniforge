@@ -15,13 +15,22 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.project.helpers
   "Pure formatting helpers, data extraction, readiness/risk derivation,
    recommendation logic, enrichment resolution, workflow-PR linkage,
    and temporal grouping.
 
-   Layer 0: Pure functions with no model dependency."
+   Layer 0: Pure functions with no model dependency (formatting, memoization,
+            temporal grouping, recommendation constructors).
+   Layer 1: CI/risk factor scoring helpers.
+   Layer 2: Readiness/risk state derivation and workflow-PR linkage.
+   Layer 3: derive-readiness / derive-risk (compose Layer 2 derivations) and
+            recommendation branch helpers.
+   Layer 4: normalize-readiness (merges enrichment with derive-readiness).
+   Layer 5: extract-pr-signals (merges normalized readiness + risk).
+   Layer 6: derive-recommendation (dispatches on extract-pr-signals).
+   Layer 7: resolve-enrichment (top-level entry point).
+   (Over the 3-layer budget; Wave 2 namespace-split candidate.)"
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.messages :as msg]
@@ -32,9 +41,9 @@
    [java.time.temporal ChronoUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Projection memoization (re-frame style subscription caching)
 
-(defn memoize-by
+;; Projection memoization (re-frame style subscription caching)
+(defn ^{:stratum 0} memoize-by
   "Memoize a projection function by extracting input signals from the model.
    extract-fn: (model -> inputs) — extracts the subset of model data that
    the projection depends on. If inputs are identical? to the cached inputs,
@@ -64,16 +73,14 @@
             (vreset! cache {:inputs inputs :result result})
             result))))))
 
-;------------------------------------------------------------------------------ Layer 0b
 ;; Formatting helpers
-
-(defn safe-format-time [ts]
+(defn ^{:stratum 0} safe-format-time [ts]
   (when ts
     (try
       (.format (SimpleDateFormat. "HH:mm:ss") ts)
       (catch Exception _ ""))))
 
-(defn status-char [status]
+(defn ^{:stratum 0} status-char [status]
   (case status
     :running   "●"
     :success   "✓"
@@ -84,7 +91,7 @@
     :archived  "⊘"
     "○"))
 
-(defn format-progress-bar [pct width]
+(defn ^{:stratum 0} format-progress-bar [pct width]
   (let [pct (or pct 0)
         bar-w (max 1 (- width 5))
         filled (int (/ (* pct bar-w) 100))]
@@ -92,7 +99,7 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
-(defn readiness-bar [score width]
+(defn ^{:stratum 0} readiness-bar [score width]
   (let [pct (int (* 100 (or score 0)))
         bar-w (max 1 (- width 5))
         filled (int (/ (* pct bar-w) 100))]
@@ -100,7 +107,7 @@
          (apply str (repeat (- bar-w filled) \u2591))
          (format " %3d%%" pct))))
 
-(defn readiness-blockers-summary
+(defn ^{:stratum 0} readiness-blockers-summary
   "Compact blocker summary for fleet table. Shows what's needed for merge."
   [readiness]
   (let [blockers (:readiness/blockers readiness [])
@@ -117,7 +124,7 @@
           (:conflicts types)    (conj (msg/t :readiness/blocker-conflicts))
           (:policy types)       (conj (msg/t :readiness/blocker-policy)))))))
 
-(defn risk-label [level]
+(defn ^{:stratum 0} risk-label [level]
   (case level
     :critical    (msg/t :risk/label-critical)
     :high        (msg/t :risk/label-high)
@@ -126,10 +133,8 @@
     :unevaluated (msg/t :risk/label-unevaluated)
     (msg/t :risk/label-unevaluated)))
 
-;------------------------------------------------------------------------------ Layer 0c
 ;; Readiness + risk derivation (pure, from provider signals)
-
-(defn readiness-state
+(defn ^{:stratum 0} readiness-state
   "Classify PR into [state score] from status and CI signals."
   [status ci-ok? ci-fail? behind?]
   (cond
@@ -169,7 +174,7 @@
     :else
     [:unknown 0.0]))
 
-(defn readiness-blockers
+(defn ^{:stratum 0} readiness-blockers
   "Compute blocker list from PR status and CI signals."
   [status ci-fail? behind?]
   (cond-> []
@@ -194,7 +199,7 @@
            :blocker/message (msg/t :readiness/blocker-msg-draft)
            :blocker/source "author"})))
 
-(def factor-weights
+(def ^{:stratum 0} factor-weights
   "Per-factor weights for the readiness score. Must sum to 1.0."
   {:deps-merged  0.25
    :ci-passed    0.25
@@ -202,7 +207,7 @@
    :gates-passed 0.15
    :behind-main  0.15})
 
-(def review-score-by-status
+(def ^{:stratum 0} review-score-by-status
   "PR status → review-score in [0.0, 1.0]."
   {:merged            1.0
    :merge-ready       1.0
@@ -213,81 +218,23 @@
    :draft             0.0
    :closed            0.0})
 
-(def ^:const default-factor-score
+(def ^{:stratum 0} ^:const default-factor-score
   "Score used for factors that aren't yet derived from real signals
    (e.g. :deps-merged, :gates-passed in naive mode without train context)."
   1.0)
 
-(def ^:const ci-passing-score 1.0)
-(def ^:const ci-failing-score 0.0)
-(def ^:const ci-pending-score 0.5)
+(def ^{:stratum 0} ^:const ci-passing-score 1.0)
 
-(defn- ci-status-score
-  "Map CI status booleans to a [0.0, 1.0] score."
-  [ci-ok? ci-fail?]
-  (cond
-    ci-ok?   ci-passing-score
-    ci-fail? ci-failing-score
-    :else    ci-pending-score))
+(def ^{:stratum 0} ^:const ci-failing-score 0.0)
 
-(defn- behind-status-score
-  "Map behind-main flag to a [0.0, 1.0] score."
-  [behind?]
-  (if behind? 0.0 default-factor-score))
+(def ^{:stratum 0} ^:const ci-pending-score 0.5)
 
-(defn- factor
-  "Build one {:factor :weight :score} entry from the weights table."
-  [factor-key score]
-  {:factor factor-key
-   :weight (get factor-weights factor-key)
-   :score  score})
-
-(defn- weighted-sum
+(defn- ^{:stratum 0} weighted-sum
   "Sum each factor's :weight × :score."
   [factors]
   (reduce + 0.0 (map (fn [{:keys [weight score]}] (* weight score)) factors)))
 
-(defn readiness-factors
-  "Compute weighted readiness factors and score.
-   Deps and gates default to 1.0 in naive derivation (no train context).
-   Returns {:weighted float :factors [...]
-            :ci-score float :review-score float :behind-score float}."
-  [status ci-ok? ci-fail? behind?]
-  (let [ci-score     (ci-status-score ci-ok? ci-fail?)
-        review-score (get review-score-by-status status 0.0)
-        behind-score (behind-status-score behind?)
-        factors      [(factor :deps-merged  default-factor-score)
-                      (factor :ci-passed    ci-score)
-                      (factor :approved     review-score)
-                      (factor :gates-passed default-factor-score)
-                      (factor :behind-main  behind-score)]]
-    {:weighted     (weighted-sum factors)
-     :ci-score     ci-score
-     :review-score review-score
-     :behind-score behind-score
-     :factors      factors}))
-
-(defn derive-readiness
-  "Derive N9 readiness state from provider signals.
-   Returns {:readiness/state kw :readiness/score float :readiness/ready? bool
-            :readiness/blockers [...]
-            :readiness/factors [{:factor kw :weight float :score float} ...]}"
-  [pr]
-  (let [status       (:pr/status pr)
-        ci           (:pr/ci-status pr)
-        ci-ok?       (= :passed ci)
-        ci-fail?     (= :failed ci)
-        behind?      (:pr/behind-main? pr false)
-        [state _]    (readiness-state status ci-ok? ci-fail? behind?)
-        blockers     (readiness-blockers status ci-fail? behind?)
-        {:keys [weighted factors]} (readiness-factors status ci-ok? ci-fail? behind?)]
-    {:readiness/state    state
-     :readiness/score    weighted
-     :readiness/ready?   (>= weighted 0.85)
-     :readiness/blockers blockers
-     :readiness/factors  factors}))
-
-(defn derive-risk
+(defn ^{:stratum 0} derive-risk
   "Derive mechanical risk assessment from provider signals and change size.
    Returns {:risk/level kw :risk/score float :risk/factors [{:factor kw :explanation str :value any} ...]}
    Uses max-of-factors scoring (not averaging) so a single high-risk signal
@@ -341,10 +288,8 @@
      :risk/score   score
      :risk/factors factors}))
 
-;------------------------------------------------------------------------------ Layer 0d
 ;; Temporal grouping
-
-(defn- to-zoned-datetime
+(defn- ^{:stratum 0} to-zoned-datetime
   "Parse a started-at value to ZonedDateTime. Returns nil on failure."
   [started]
   (try
@@ -354,12 +299,7 @@
         (.atZone (ZoneId/systemDefault)))
     (catch Exception _ nil)))
 
-(defn- to-local-date
-  "Convert a started-at value to LocalDate. Returns nil on failure."
-  [started]
-  (some-> started to-zoned-datetime .toLocalDate))
-
-(defn- days-ago-bucket
+(defn- ^{:stratum 0} days-ago-bucket
   "Map a days-ago integer to a temporal bucket keyword."
   [days-ago]
   (cond
@@ -369,15 +309,7 @@
     (<= days-ago 30)  :this-month
     :else             :older))
 
-(defn temporal-bucket
-  "Classify a workflow's started-at into a temporal group.
-   Accepts pre-computed `today` to avoid repeated LocalDate/now calls."
-  [wf ^LocalDate today]
-  (if-let [wf-date (some-> (:started-at wf) to-local-date)]
-    (days-ago-bucket (.between ChronoUnit/DAYS wf-date today))
-    :unknown))
-
-(defn- bucket-label
+(defn- ^{:stratum 0} bucket-label
   "User-facing label for a temporal bucket keyword."
   [bucket]
   (case bucket
@@ -388,10 +320,128 @@
     :older      (msg/t :readiness/bucket-older)
     (msg/t :readiness/bucket-unknown)))
 
-(def ^:private bucket-order
+(def ^{:stratum 0} ^:private bucket-order
   [:today :yesterday :this-week :this-month :older :unknown])
 
-(defn- format-started-time
+;; Recommendation constructors and signal extraction
+(defn ^{:stratum 0} readiness-indicator
+  "Readiness state -> status string with indicator character."
+  [state]
+  (case state
+    :merged            (msg/t :readiness/indicator-merged)
+    :closed            (msg/t :readiness/indicator-closed)
+    :merge-ready       (msg/t :readiness/indicator-merge-ready)
+    :ci-failing        (msg/t :readiness/indicator-ci-failing)
+    :needs-review      (msg/t :readiness/indicator-needs-review)
+    :changes-requested (msg/t :readiness/indicator-changes-requested)
+    :behind-main       (msg/t :readiness/indicator-behind-main)
+    :draft             (msg/t :readiness/indicator-draft)
+    :merge-conflicts   (msg/t :readiness/indicator-merge-conflicts)
+    :policy-failing    (msg/t :readiness/indicator-policy-failing)
+    :unknown           (msg/t :readiness/indicator-unknown)
+    (msg/t :readiness/indicator-unknown)))
+
+(defn ^{:stratum 0} recommend
+  "Build a recommendation map. Single constructor for all recommendation types."
+  [action label reason]
+  {:action action :label label :reason reason})
+
+(defn ^{:stratum 0} labels
+  "Action keyword -> user-facing label."
+  [action]
+  (case action
+    :remediate    (msg/t :action/remediate)
+    :review       (msg/t :action/review)
+    :evaluate     (msg/t :action/evaluate)
+    :wait         (msg/t :action/wait)
+    :do-not-merge (msg/t :action/do-not-merge)
+    :decompose    (msg/t :action/decompose)
+    :approve      (msg/t :action/approve)
+    :merge        (msg/t :action/merge)
+    nil))
+
+(defn ^{:stratum 0} policy-label
+  "Policy pass/fail/unknown -> display label."
+  [policy]
+  (case (:evaluation/passed? policy)
+    true  (msg/t :recommend/policy-pass)
+    false (msg/t :recommend/policy-fail)
+    (msg/t :recommend/policy-unknown)))
+
+;; Workflow-PR linkage helpers
+(defn ^{:stratum 0} find-workflow-by-id
+  "Find a workflow in the list by its UUID."
+  [workflows wf-id]
+  (some #(when (= (:id %) wf-id) %) workflows))
+
+(defn ^{:stratum 0} workflow-matches-branch?
+  "True when a workflow name partially matches a branch name (bidirectional)."
+  [wf branch]
+  (and (:name wf)
+       (or (str/includes? (str branch) (str (:name wf)))
+           (str/includes? (str (:name wf)) (str branch)))))
+
+(defn ^{:stratum 0} pr-state-label
+  "Map normalized PR status keyword to human-readable GitHub-level state."
+  [status]
+  (case status
+    :closed             (msg/t :recommend/pr-state-closed)
+    :draft              (msg/t :recommend/pr-state-draft)
+    :merged             (msg/t :recommend/pr-state-merged)
+    :open               (msg/t :recommend/pr-state-open)
+    :approved           (msg/t :recommend/pr-state-approved)
+    :reviewing          (msg/t :recommend/pr-state-reviewing)
+    :changes-requested  (msg/t :recommend/pr-state-changes-requested)
+    :merge-ready        (msg/t :recommend/pr-state-merge-ready)
+    (if (nil? status) "—" (msg/t :recommend/pr-state-open))))
+
+(defn ^{:stratum 0} wrap-text
+  "Word-wrap a string to fit within max-width characters.
+   Returns a vector of wrapped lines."
+  [text max-width]
+  (if (<= (count text) max-width)
+    [text]
+    (loop [remaining text
+           lines []]
+      (if (<= (count remaining) max-width)
+        (conj lines remaining)
+        ;; Find last space within max-width
+        (let [break-at (let [idx (str/last-index-of remaining " " max-width)]
+                         (if (and idx (pos? idx)) idx max-width))]
+          (recur (subs remaining (min (count remaining)
+                                      (if (= break-at max-width)
+                                        break-at
+                                        (inc break-at))))
+                 (conj lines (subs remaining 0 break-at))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} ci-status-score
+  "Map CI status booleans to a [0.0, 1.0] score."
+  [ci-ok? ci-fail?]
+  (cond
+    ci-ok?   ci-passing-score
+    ci-fail? ci-failing-score
+    :else    ci-pending-score))
+
+(defn- ^{:stratum 1} behind-status-score
+  "Map behind-main flag to a [0.0, 1.0] score."
+  [behind?]
+  (if behind? 0.0 default-factor-score))
+
+(defn- ^{:stratum 1} factor
+  "Build one {:factor :weight :score} entry from the weights table."
+  [factor-key score]
+  {:factor factor-key
+   :weight (get factor-weights factor-key)
+   :score  score})
+
+(defn- ^{:stratum 1} to-local-date
+  "Convert a started-at value to LocalDate. Returns nil on failure."
+  [started]
+  (some-> started to-zoned-datetime .toLocalDate))
+
+(defn- ^{:stratum 1} format-started-time
   "Format started-at for display. Shows HH:mm for today/yesterday, MM-dd HH:mm otherwise."
   [started bucket]
   (when-let [zdt (some-> started to-zoned-datetime)]
@@ -401,7 +451,128 @@
               (.getMonthValue zdt) (.getDayOfMonth zdt)
               (.getHour zdt) (.getMinute zdt)))))
 
-(defn group-workflows-with-headers
+(defn ^{:stratum 1} recommend-action
+  "Build recommendation for a known action keyword."
+  [action reason]
+  (recommend action (labels action) reason))
+
+(defn- ^{:stratum 1} normalize-risk
+  "Normalize risk enrichment into the map shape expected by the view layer."
+  [pr risk]
+  (cond
+    (map? risk)
+    risk
+
+    (keyword? risk)
+    {:risk/level risk
+     :risk/score nil
+     :risk/factors []}
+
+    :else
+    (derive-risk pr)))
+
+(defn ^{:stratum 1} find-linked-workflow
+  "Find the workflow linked to a PR. Tries direct ID lookup first,
+   then falls back to branch name matching."
+  [workflows wf-id branch]
+  (or (when wf-id (find-workflow-by-id workflows wf-id))
+      (when branch (some #(when (workflow-matches-branch? % branch) %) workflows))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} readiness-factors
+  "Compute weighted readiness factors and score.
+   Deps and gates default to 1.0 in naive derivation (no train context).
+   Returns {:weighted float :factors [...]
+            :ci-score float :review-score float :behind-score float}."
+  [status ci-ok? ci-fail? behind?]
+  (let [ci-score     (ci-status-score ci-ok? ci-fail?)
+        review-score (get review-score-by-status status 0.0)
+        behind-score (behind-status-score behind?)
+        factors      [(factor :deps-merged  default-factor-score)
+                      (factor :ci-passed    ci-score)
+                      (factor :approved     review-score)
+                      (factor :gates-passed default-factor-score)
+                      (factor :behind-main  behind-score)]]
+    {:weighted     (weighted-sum factors)
+     :ci-score     ci-score
+     :review-score review-score
+     :behind-score behind-score
+     :factors      factors}))
+
+(defn ^{:stratum 2} temporal-bucket
+  "Classify a workflow's started-at into a temporal group.
+   Accepts pre-computed `today` to avoid repeated LocalDate/now calls."
+  [wf ^LocalDate today]
+  (if-let [wf-date (some-> (:started-at wf) to-local-date)]
+    (days-ago-bucket (.between ChronoUnit/DAYS wf-date today))
+    :unknown))
+
+;; Recommendation branch helpers (called by derive-recommendation)
+(defn- ^{:stratum 2} policy-violation-recommendation
+  "Recommendation when policy violations are present."
+  [{:keys [auto-fixable?]}]
+  (if auto-fixable?
+    (recommend-action :remediate (msg/t :recommend/policy-auto-fixable))
+    (recommend-action :review (msg/t :recommend/policy-needs-review))))
+
+(defn- ^{:stratum 2} policy-failed-recommendation []
+  (recommend-action :do-not-merge (msg/t :recommend/policy-failed)))
+
+(defn- ^{:stratum 2} policy-unknown-ready-recommendation []
+  (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated)))
+
+(defn- ^{:stratum 2} hard-blocker-recommendation
+  "Recommendation for hard-blocker states (CI failing, changes requested, etc.)."
+  [state]
+  (case state
+    :ci-failing        (recommend-action :do-not-merge (msg/t :recommend/ci-failing))
+    :changes-requested (recommend-action :do-not-merge (msg/t :recommend/changes-requested))
+    :behind-main       (recommend-action :do-not-merge (msg/t :recommend/behind-main))
+    :draft             (recommend-action :do-not-merge (msg/t :recommend/draft))
+    nil))
+
+(defn- ^{:stratum 2} soft-blocker-recommendation
+  "Recommendation for soft-blocker states (review needed, large PR)."
+  [{:keys [large? state]}]
+  (cond
+    (and large? (#{:needs-review :open} state)) (recommend-action :decompose (msg/t :recommend/large-pr))
+    (= :needs-review state)                     (recommend-action :review (msg/t :recommend/awaiting-review))
+    :else                                       nil))
+
+(defn- ^{:stratum 2} ready-recommendation
+  "Recommendation when the PR is ready — gated by risk and policy."
+  [{:keys [risk-level policy-pass? policy-unknown?]}]
+  (cond
+    (= :unevaluated risk-level)                  (recommend-action :evaluate (msg/t :recommend/risk-not-assessed))
+    (#{:medium :high :critical} risk-level)      (recommend-action :approve (msg/t :recommend/ready-elevated-risk {:risk (name risk-level)}))
+    (and (= :low risk-level) (true? policy-pass?)) (recommend-action :merge (msg/t :recommend/all-gates-green))
+    policy-unknown?                              (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated))
+    :else                                        nil))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} derive-readiness
+  "Derive N9 readiness state from provider signals.
+   Returns {:readiness/state kw :readiness/score float :readiness/ready? bool
+            :readiness/blockers [...]
+            :readiness/factors [{:factor kw :weight float :score float} ...]}"
+  [pr]
+  (let [status       (:pr/status pr)
+        ci           (:pr/ci-status pr)
+        ci-ok?       (= :passed ci)
+        ci-fail?     (= :failed ci)
+        behind?      (:pr/behind-main? pr false)
+        [state _]    (readiness-state status ci-ok? ci-fail? behind?)
+        blockers     (readiness-blockers status ci-fail? behind?)
+        {:keys [weighted factors]} (readiness-factors status ci-ok? ci-fail? behind?)]
+    {:readiness/state    state
+     :readiness/score    weighted
+     :readiness/ready?   (>= weighted 0.85)
+     :readiness/blockers blockers
+     :readiness/factors  factors}))
+
+(defn ^{:stratum 3} group-workflows-with-headers
   "Group workflows into temporal buckets and interleave section header rows.
    Returns [flat-rows mapped-selected-idx].
    flat-rows: vector of maps, header rows marked with :_header? true.
@@ -449,51 +620,9 @@
                  (+ wf-counter (count wfs))
                  new-mapped))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Recommendation constructors and signal extraction
+;------------------------------------------------------------------------------ Layer 4
 
-(defn readiness-indicator
-  "Readiness state -> status string with indicator character."
-  [state]
-  (case state
-    :merged            (msg/t :readiness/indicator-merged)
-    :closed            (msg/t :readiness/indicator-closed)
-    :merge-ready       (msg/t :readiness/indicator-merge-ready)
-    :ci-failing        (msg/t :readiness/indicator-ci-failing)
-    :needs-review      (msg/t :readiness/indicator-needs-review)
-    :changes-requested (msg/t :readiness/indicator-changes-requested)
-    :behind-main       (msg/t :readiness/indicator-behind-main)
-    :draft             (msg/t :readiness/indicator-draft)
-    :merge-conflicts   (msg/t :readiness/indicator-merge-conflicts)
-    :policy-failing    (msg/t :readiness/indicator-policy-failing)
-    :unknown           (msg/t :readiness/indicator-unknown)
-    (msg/t :readiness/indicator-unknown)))
-
-(defn recommend
-  "Build a recommendation map. Single constructor for all recommendation types."
-  [action label reason]
-  {:action action :label label :reason reason})
-
-(defn labels
-  "Action keyword -> user-facing label."
-  [action]
-  (case action
-    :remediate    (msg/t :action/remediate)
-    :review       (msg/t :action/review)
-    :evaluate     (msg/t :action/evaluate)
-    :wait         (msg/t :action/wait)
-    :do-not-merge (msg/t :action/do-not-merge)
-    :decompose    (msg/t :action/decompose)
-    :approve      (msg/t :action/approve)
-    :merge        (msg/t :action/merge)
-    nil))
-
-(defn recommend-action
-  "Build recommendation for a known action keyword."
-  [action reason]
-  (recommend action (labels action) reason))
-
-(defn- normalize-readiness
+(defn- ^{:stratum 4} normalize-readiness
   "Normalize readiness enrichment into the map shape expected by the view layer."
   [pr readiness]
   (cond
@@ -509,22 +638,9 @@
     :else
     (derive-readiness pr)))
 
-(defn- normalize-risk
-  "Normalize risk enrichment into the map shape expected by the view layer."
-  [pr risk]
-  (cond
-    (map? risk)
-    risk
+;------------------------------------------------------------------------------ Layer 5
 
-    (keyword? risk)
-    {:risk/level risk
-     :risk/score nil
-     :risk/factors []}
-
-    :else
-    (derive-risk pr)))
-
-(defn extract-pr-signals
+(defn ^{:stratum 5} extract-pr-signals
   "Extract enriched signals from a PR for recommendation.
    Returns a flat map of booleans/keywords for predicate use.
    Merges derived state into enriched readiness (explain-readiness lacks :readiness/state)."
@@ -544,50 +660,9 @@
      :auto-fixable?   (boolean (some :auto-fixable? violations))
      :large?          (> changes 500)}))
 
-;; Layer 0 — recommendation branch helpers (called by derive-recommendation)
+;------------------------------------------------------------------------------ Layer 6
 
-(defn- policy-violation-recommendation
-  "Recommendation when policy violations are present."
-  [{:keys [auto-fixable?]}]
-  (if auto-fixable?
-    (recommend-action :remediate (msg/t :recommend/policy-auto-fixable))
-    (recommend-action :review (msg/t :recommend/policy-needs-review))))
-
-(defn- policy-failed-recommendation []
-  (recommend-action :do-not-merge (msg/t :recommend/policy-failed)))
-
-(defn- policy-unknown-ready-recommendation []
-  (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated)))
-
-(defn- hard-blocker-recommendation
-  "Recommendation for hard-blocker states (CI failing, changes requested, etc.)."
-  [state]
-  (case state
-    :ci-failing        (recommend-action :do-not-merge (msg/t :recommend/ci-failing))
-    :changes-requested (recommend-action :do-not-merge (msg/t :recommend/changes-requested))
-    :behind-main       (recommend-action :do-not-merge (msg/t :recommend/behind-main))
-    :draft             (recommend-action :do-not-merge (msg/t :recommend/draft))
-    nil))
-
-(defn- soft-blocker-recommendation
-  "Recommendation for soft-blocker states (review needed, large PR)."
-  [{:keys [large? state]}]
-  (cond
-    (and large? (#{:needs-review :open} state)) (recommend-action :decompose (msg/t :recommend/large-pr))
-    (= :needs-review state)                     (recommend-action :review (msg/t :recommend/awaiting-review))
-    :else                                       nil))
-
-(defn- ready-recommendation
-  "Recommendation when the PR is ready — gated by risk and policy."
-  [{:keys [risk-level policy-pass? policy-unknown?]}]
-  (cond
-    (= :unevaluated risk-level)                  (recommend-action :evaluate (msg/t :recommend/risk-not-assessed))
-    (#{:medium :high :critical} risk-level)      (recommend-action :approve (msg/t :recommend/ready-elevated-risk {:risk (name risk-level)}))
-    (and (= :low risk-level) (true? policy-pass?)) (recommend-action :merge (msg/t :recommend/all-gates-green))
-    policy-unknown?                              (recommend-action :evaluate (msg/t :recommend/policy-not-evaluated))
-    :else                                        nil))
-
-(defn derive-recommendation
+(defn ^{:stratum 6} derive-recommendation
   "Derive recommended next action from enriched PR data.
    Returns {:action kw :label str :reason str}.
 
@@ -619,10 +694,10 @@
         (when ready?                                       (ready-recommendation signals))
         (recommend-action :wait (msg/t :recommend/awaiting-signals)))))
 
-;------------------------------------------------------------------------------ Layer 1b
-;; Enrichment resolution
+;------------------------------------------------------------------------------ Layer 7
 
-(defn resolve-enrichment
+;; Enrichment resolution
+(defn ^{:stratum 7} resolve-enrichment
   "Resolve enriched readiness/risk/policy for a PR.
    Prefers pr-train/policy-pack data, falls back to naive derivation.
    Always ensures :readiness/state is set (explain-readiness doesn't provide it)."
@@ -631,69 +706,6 @@
    :risk      (normalize-risk pr (:pr/risk pr))
      :policy    (:pr/policy pr)
    :recommend (derive-recommendation pr)})
-
-(defn policy-label
-  "Policy pass/fail/unknown -> display label."
-  [policy]
-  (case (:evaluation/passed? policy)
-    true  (msg/t :recommend/policy-pass)
-    false (msg/t :recommend/policy-fail)
-    (msg/t :recommend/policy-unknown)))
-
-;------------------------------------------------------------------------------ Layer 1c
-;; Workflow-PR linkage helpers
-
-(defn find-workflow-by-id
-  "Find a workflow in the list by its UUID."
-  [workflows wf-id]
-  (some #(when (= (:id %) wf-id) %) workflows))
-
-(defn workflow-matches-branch?
-  "True when a workflow name partially matches a branch name (bidirectional)."
-  [wf branch]
-  (and (:name wf)
-       (or (str/includes? (str branch) (str (:name wf)))
-           (str/includes? (str (:name wf)) (str branch)))))
-
-(defn find-linked-workflow
-  "Find the workflow linked to a PR. Tries direct ID lookup first,
-   then falls back to branch name matching."
-  [workflows wf-id branch]
-  (or (when wf-id (find-workflow-by-id workflows wf-id))
-      (when branch (some #(when (workflow-matches-branch? % branch) %) workflows))))
-
-(defn pr-state-label
-  "Map normalized PR status keyword to human-readable GitHub-level state."
-  [status]
-  (case status
-    :closed             (msg/t :recommend/pr-state-closed)
-    :draft              (msg/t :recommend/pr-state-draft)
-    :merged             (msg/t :recommend/pr-state-merged)
-    :open               (msg/t :recommend/pr-state-open)
-    :approved           (msg/t :recommend/pr-state-approved)
-    :reviewing          (msg/t :recommend/pr-state-reviewing)
-    :changes-requested  (msg/t :recommend/pr-state-changes-requested)
-    :merge-ready        (msg/t :recommend/pr-state-merge-ready)
-    (if (nil? status) "—" (msg/t :recommend/pr-state-open))))
-
-(defn wrap-text
-  "Word-wrap a string to fit within max-width characters.
-   Returns a vector of wrapped lines."
-  [text max-width]
-  (if (<= (count text) max-width)
-    [text]
-    (loop [remaining text
-           lines []]
-      (if (<= (count remaining) max-width)
-        (conj lines remaining)
-        ;; Find last space within max-width
-        (let [break-at (let [idx (str/last-index-of remaining " " max-width)]
-                         (if (and idx (pos? idx)) idx max-width))]
-          (recur (subs remaining (min (count remaining)
-                                      (if (= break-at max-width)
-                                        break-at
-                                        (inc break-at))))
-                 (conj lines (subs remaining 0 break-at))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

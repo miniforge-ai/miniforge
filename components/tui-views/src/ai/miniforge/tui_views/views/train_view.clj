@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.train-view
   "Train view -- shows PRs ordered for merge in a release train.
 
@@ -27,22 +26,29 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Rendering helpers
 
-(defn format-pr-row [pr]
+;; Rendering helpers
+(defn ^{:stratum 0} format-pr-row [pr]
   {:title (get pr :pr/title (msg/t :pr/untitled))
    :readiness (msg/t :train/readiness-pct
                      {:pct (int (* 100 (get pr :pr/readiness 0)))})
    :order (str (get pr :pr/merge-order (msg/t :detail/value-none)))})
 
-(defn render-title-bar [train [cols rows]]
+(defn ^{:stratum 0} render-title-bar [train [cols rows]]
   (layout/text [cols rows]
     (msg/t :train/title
            {:name (get train :train/name (msg/t :train/name-fallback))
             :progress ""})
     {:fg palette/status-info :bold? true}))
 
-(defn render-table [prs selected [cols rows]]
+(defn ^{:stratum 0} render-footer [[cols rows]]
+  (layout/text [cols rows]
+    (msg/t :train/footer)
+    {:fg :default}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} render-table [prs selected [cols rows]]
   (if (empty? prs)
     (layout/text [cols rows] (msg/t :train/empty)
                  {:fg :default})
@@ -59,12 +65,9 @@
          :selected-row selected
          :offset offset}))))
 
-(defn render-footer [[cols rows]]
-  (layout/text [cols rows]
-    (msg/t :train/footer)
-    {:fg :default}))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render
+(defn ^{:stratum 2} render
   "Render the train view.
    model: full app model
    [cols rows]: available screen area"

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.project.supervisory
   "Supervisory projection builders — N5-delta §3-5.
 
@@ -30,9 +29,9 @@
    [ai.miniforge.tui-views.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; PR Governance state derivation — N5-delta §4
 
-(defn derive-governance-state
+;; PR Governance state derivation — N5-delta §4
+(defn ^{:stratum 0} derive-governance-state
   "Derive the governance state for a PR from its evaluations and waivers.
 
    States per N5-delta §4:
@@ -72,10 +71,8 @@
       :else
       :policy-failing)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Monitor zone projection builders
-
-(defn- duration-str
+(defn- ^{:stratum 0} duration-str
   "Format elapsed milliseconds as a compact human string (e.g. '3m', '1h2m')."
   [ms]
   (when (and ms (pos? ms))
@@ -88,7 +85,7 @@
         (>= m 1) (str m "m")
         :else    (str s "s")))))
 
-(defn- elapsed-ms
+(defn- ^{:stratum 0} elapsed-ms
   "Compute elapsed milliseconds from started-at to now. nil if no started-at."
   [started-at]
   (when started-at
@@ -97,7 +94,104 @@
          (inst-ms started-at)
          0))))
 
-(defn workflow-ticker
+(defn ^{:stratum 0} pr-train-strip
+  "Project PR train and fleet summary for the monitor zone.
+
+   Returns:
+   {:train-active?   bool
+    :train-merged    int    — merged PRs in active train
+    :train-total     int    — total PRs in active train
+    :fleet-open      int    — total open PRs across fleet
+    :fleet-ready     int    — PRs with readiness/ready? true
+    :fleet-monitored int    — PRs actively monitored by pr-monitor loop}"
+  [model]
+  (let [prs        (get model :pr-items [])
+        train      (some #(when (= (:active-train-id model) (:train/id %)) %)
+                         (get model :trains []))
+        progress   (get train :train/progress {})
+        monitored  (->> prs
+                        (filter #(get % :pr/monitor-active?))
+                        count)]
+    {:train-active?   (some? train)
+     :train-merged    (get progress :merged 0)
+     :train-total     (get progress :total 0)
+     :fleet-open      (count prs)
+     :fleet-ready     (count (filter #(get-in % [:pr/readiness :readiness/ready?]) prs))
+     :fleet-monitored monitored}))
+
+(def ^{:stratum 0} ^:private empty-governance-counts
+  {:not-evaluated 0 :policy-passing 0 :policy-failing 0 :waived 0 :escalated 0})
+
+;; Attention derivation — N5-delta §5
+(defn- ^{:stratum 0} workflow-failed-attention
+  "Derive attention items from failed workflows."
+  [workflows]
+  (for [wf workflows
+        :when (= :failed (:status wf))]
+    {:attention/id          (random-uuid)
+     :attention/severity    :critical
+     :attention/summary     (msg/t :attention/workflow-failed
+                                    {:name (or (:name wf) (str (:id wf)))})
+     :attention/source-type :workflow
+     :attention/source-id   (:id wf)
+     :attention/created-at  (:last-updated wf)}))
+
+(defn- ^{:stratum 0} budget-exhausted-attention
+  "Derive attention items from budget-exhausted PR monitor events."
+  [pr-items]
+  (for [pr pr-items
+        :when (:pr/monitor-budget-exhausted? pr)]
+    {:attention/id          (random-uuid)
+     :attention/severity    :critical
+     :attention/summary     (msg/t :attention/budget-exhausted
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
+     :attention/source-type :pr-monitor
+     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
+     :attention/created-at  nil}))
+
+(defn- ^{:stratum 0} budget-warning-attention
+  "Derive attention items from budget-warning PR monitor events."
+  [pr-items]
+  (for [pr pr-items
+        :when (:pr/monitor-budget-warning? pr)]
+    {:attention/id          (random-uuid)
+     :attention/severity    :warning
+     :attention/summary     (msg/t :attention/budget-warning
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
+     :attention/source-type :pr-monitor
+     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
+     :attention/created-at  nil}))
+
+(defn- ^{:stratum 0} escalated-attention
+  "Derive attention items from escalated PRs."
+  [pr-items]
+  (for [pr pr-items
+        :when (:pr/monitor-escalated? pr)]
+    {:attention/id          (random-uuid)
+     :attention/severity    :critical
+     :attention/summary     (msg/t :attention/escalated
+                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
+     :attention/source-type :pr-monitor
+     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
+     :attention/created-at  nil}))
+
+(defn- ^{:stratum 0} explicit-attention
+  "Return explicitly tracked attention items from model."
+  [model]
+  (get model :attention-items []))
+
+(defn- ^{:stratum 0} severity-order
+  "Sort order for severity — critical first."
+  [item]
+  (case (:attention/severity item)
+    :critical 0
+    :warning  1
+    :info     2
+    3))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} workflow-ticker
   "Project workflow runs for the monitor ticker zone.
 
    Returns a vector of rows sorted active-first, then by started-at descending.
@@ -123,35 +217,7 @@
                                     (or ""))})
               sorted)))))
 
-(defn pr-train-strip
-  "Project PR train and fleet summary for the monitor zone.
-
-   Returns:
-   {:train-active?   bool
-    :train-merged    int    — merged PRs in active train
-    :train-total     int    — total PRs in active train
-    :fleet-open      int    — total open PRs across fleet
-    :fleet-ready     int    — PRs with readiness/ready? true
-    :fleet-monitored int    — PRs actively monitored by pr-monitor loop}"
-  [model]
-  (let [prs        (get model :pr-items [])
-        train      (some #(when (= (:active-train-id model) (:train/id %)) %)
-                         (get model :trains []))
-        progress   (get train :train/progress {})
-        monitored  (->> prs
-                        (filter #(get % :pr/monitor-active?))
-                        count)]
-    {:train-active?   (some? train)
-     :train-merged    (get progress :merged 0)
-     :train-total     (get progress :total 0)
-     :fleet-open      (count prs)
-     :fleet-ready     (count (filter #(get-in % [:pr/readiness :readiness/ready?]) prs))
-     :fleet-monitored monitored}))
-
-(def ^:private empty-governance-counts
-  {:not-evaluated 0 :policy-passing 0 :policy-failing 0 :waived 0 :escalated 0})
-
-(defn- make-policy-health
+(defn- ^{:stratum 1} make-policy-health
   "Build a policy health summary. No-arg returns safe defaults."
   ([] (make-policy-health {}))
   ([{:keys [pass-rate total-evaluations passing-evaluations
@@ -163,7 +229,31 @@
     :governance-counts      (merge empty-governance-counts
                                    (or governance-counts {}))}))
 
-(defn policy-health
+(defn ^{:stratum 1} attention
+  "Derive the current attention items from model state (§5).
+
+   Sources:
+   - Failed workflows
+   - PR monitor budget exhausted/warning events
+   - PR monitor escalations
+   - Explicit :attention-items in model
+
+   Returns sorted vector (critical first) of attention item maps.
+   Always returns a vector."
+  [model]
+  (let [workflows  (get model :workflows [])
+        pr-items   (get model :pr-items [])
+        items      (concat
+                    (workflow-failed-attention workflows)
+                    (budget-exhausted-attention pr-items)
+                    (escalated-attention pr-items)
+                    (budget-warning-attention pr-items)
+                    (explicit-attention model))]
+    (vec (sort-by severity-order items))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} policy-health
   "Project policy health summary for the monitor zone.
 
    Returns:
@@ -191,97 +281,6 @@
                              :passing-evaluations    pass-evals
                              :violations-by-category viols-map
                              :governance-counts      (frequencies gov-states)})))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Attention derivation — N5-delta §5
-
-(defn- workflow-failed-attention
-  "Derive attention items from failed workflows."
-  [workflows]
-  (for [wf workflows
-        :when (= :failed (:status wf))]
-    {:attention/id          (random-uuid)
-     :attention/severity    :critical
-     :attention/summary     (msg/t :attention/workflow-failed
-                                    {:name (or (:name wf) (str (:id wf)))})
-     :attention/source-type :workflow
-     :attention/source-id   (:id wf)
-     :attention/created-at  (:last-updated wf)}))
-
-(defn- budget-exhausted-attention
-  "Derive attention items from budget-exhausted PR monitor events."
-  [pr-items]
-  (for [pr pr-items
-        :when (:pr/monitor-budget-exhausted? pr)]
-    {:attention/id          (random-uuid)
-     :attention/severity    :critical
-     :attention/summary     (msg/t :attention/budget-exhausted
-                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
-     :attention/source-type :pr-monitor
-     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
-     :attention/created-at  nil}))
-
-(defn- budget-warning-attention
-  "Derive attention items from budget-warning PR monitor events."
-  [pr-items]
-  (for [pr pr-items
-        :when (:pr/monitor-budget-warning? pr)]
-    {:attention/id          (random-uuid)
-     :attention/severity    :warning
-     :attention/summary     (msg/t :attention/budget-warning
-                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
-     :attention/source-type :pr-monitor
-     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
-     :attention/created-at  nil}))
-
-(defn- escalated-attention
-  "Derive attention items from escalated PRs."
-  [pr-items]
-  (for [pr pr-items
-        :when (:pr/monitor-escalated? pr)]
-    {:attention/id          (random-uuid)
-     :attention/severity    :critical
-     :attention/summary     (msg/t :attention/escalated
-                                    {:repo (:pr/repo pr) :number (:pr/number pr)})
-     :attention/source-type :pr-monitor
-     :attention/source-id   [(:pr/repo pr) (:pr/number pr)]
-     :attention/created-at  nil}))
-
-(defn- explicit-attention
-  "Return explicitly tracked attention items from model."
-  [model]
-  (get model :attention-items []))
-
-(defn- severity-order
-  "Sort order for severity — critical first."
-  [item]
-  (case (:attention/severity item)
-    :critical 0
-    :warning  1
-    :info     2
-    3))
-
-(defn attention
-  "Derive the current attention items from model state (§5).
-
-   Sources:
-   - Failed workflows
-   - PR monitor budget exhausted/warning events
-   - PR monitor escalations
-   - Explicit :attention-items in model
-
-   Returns sorted vector (critical first) of attention item maps.
-   Always returns a vector."
-  [model]
-  (let [workflows  (get model :workflows [])
-        pr-items   (get model :pr-items [])
-        items      (concat
-                    (workflow-failed-attention workflows)
-                    (budget-exhausted-attention pr-items)
-                    (escalated-attention pr-items)
-                    (budget-warning-attention pr-items)
-                    (explicit-attention model))]
-    (vec (sort-by severity-order items))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

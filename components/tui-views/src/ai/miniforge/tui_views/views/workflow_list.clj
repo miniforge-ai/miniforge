@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.workflow-list
   "Workflow list view -- N5 Section 3.2.1.
 
@@ -35,9 +34,9 @@
    [java.time.temporal ChronoUnit]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Temporal grouping
 
-(defn temporal-bucket
+;; Temporal grouping
+(defn ^{:stratum 0} temporal-bucket
   "Classify a workflow's started-at into a temporal group."
   [wf]
   (if-let [started (:started-at wf)]
@@ -56,7 +55,7 @@
         :else                              :older))
     :unknown))
 
-(defn bucket-labels
+(defn ^{:stratum 0} bucket-labels
   "Age-bucket keyword -> localized label. A fn (not a def-map) so the catalog
    lookups resolve at call time, keeping namespace load free of catalog I/O."
   []
@@ -67,28 +66,10 @@
    :older      (msg/t :readiness/bucket-older)
    :unknown    (msg/t :readiness/bucket-unknown)})
 
-(def bucket-order [:today :yesterday :this-week :this-month :older :unknown])
+(def ^{:stratum 0} bucket-order [:today :yesterday :this-week :this-month :older :unknown])
 
-(defn group-workflows
-  "Group workflows into temporal buckets, preserving order within each group.
-   Returns flat vector of {:type :header/:row, ...} entries for table rendering."
-  [workflows]
-  (let [grouped (group-by temporal-bucket workflows)
-        buckets (filter #(contains? grouped %) bucket-order)]
-    (into []
-          (mapcat (fn [bucket]
-                    (let [wfs (get grouped bucket)
-                          label (msg/t :wf-list/group-header
-                                       {:label (get (bucket-labels) bucket)
-                                        :count (count wfs)})]
-                      (cons {:type :header :label label :bucket bucket}
-                            (map (fn [wf] {:type :row :wf wf}) wfs)))))
-          buckets)))
-
-;------------------------------------------------------------------------------ Layer 0b
 ;; Rendering helpers
-
-(defn status-char [status]
+(defn ^{:stratum 0} status-char [status]
   (case status
     :running  "●"
     :success  "✓"
@@ -97,7 +78,7 @@
     :archived "⊘"
     "○"))
 
-(defn chain-prefix
+(defn ^{:stratum 0} chain-prefix
   "Build a chain progress prefix like '[plan-impl 2/4] ' when this workflow
    is the active chain step. Returns empty string otherwise."
   [wf active-chain]
@@ -107,24 +88,11 @@
       (str "[" (name chain-id) " "
            (inc (:step-index current-step)) "/" step-count "] "))))
 
-(defn format-workflow-row
-  "Transform workflow data into table row format.
-   active-chain is the :active-chain map from the model (or nil)."
-  [wf active-chain]
-  (let [prefix (or (chain-prefix wf active-chain) "")]
-    {:status-char (status-char (:status wf))
-     :name (str prefix (:name wf))
-     :phase (some-> (:phase wf) name)
-     :progress-str (str (:progress wf 0) "%")
-     :agent-msg (when-let [agent (first (vals (:agents wf)))]
-                  (when-let [msg (:message agent)]
-                    (subs msg 0 (min 16 (count msg)))))}))
-
-(defn render-title-bar [[cols rows]]
+(defn ^{:stratum 0} render-title-bar [[cols rows]]
   (layout/text [cols rows] (msg/t :wf-list/title)
                {:fg palette/status-info :bold? true}))
 
-(defn auto-scroll-offset
+(defn ^{:stratum 0} auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."
   [selected-idx visible-count]
   (let [sel (or selected-idx 0)]
@@ -132,21 +100,7 @@
       0
       (inc (- sel visible-count)))))
 
-(defn format-grouped-row
-  "Format a grouped entry (header or workflow row) for table rendering."
-  [entry active-chain _cols]
-  (if (= :header (:type entry))
-    ;; Section header — spans full width with dimmed color
-    {:status-char ""
-     :name (:label entry)
-     :name-fg palette/status-info
-     :phase ""
-     :progress-str ""
-     :agent-msg ""
-     :header? true}
-    (format-workflow-row (:wf entry) active-chain)))
-
-(defn grouped-selected-row
+(defn ^{:stratum 0} grouped-selected-row
   "Map a flat selected-idx (over non-header workflows) to the row index
    within the grouped list (which includes header rows)."
   [grouped-entries selected-idx]
@@ -166,8 +120,62 @@
           :else
           (recur (rest entries) (inc wf-idx) (inc row-idx)))))))
 
+(defn ^{:stratum 0} render-footer [flash-message [cols rows]]
+  (layout/text [cols rows]
+    (str (msg/t :wf-list/footer)
+         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
+    {:fg :default}))
 
-(defn render-table [workflows selected active-chain [cols rows]]
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} group-workflows
+  "Group workflows into temporal buckets, preserving order within each group.
+   Returns flat vector of {:type :header/:row, ...} entries for table rendering."
+  [workflows]
+  (let [grouped (group-by temporal-bucket workflows)
+        buckets (filter #(contains? grouped %) bucket-order)]
+    (into []
+          (mapcat (fn [bucket]
+                    (let [wfs (get grouped bucket)
+                          label (msg/t :wf-list/group-header
+                                       {:label (get (bucket-labels) bucket)
+                                        :count (count wfs)})]
+                      (cons {:type :header :label label :bucket bucket}
+                            (map (fn [wf] {:type :row :wf wf}) wfs)))))
+          buckets)))
+
+(defn ^{:stratum 1} format-workflow-row
+  "Transform workflow data into table row format.
+   active-chain is the :active-chain map from the model (or nil)."
+  [wf active-chain]
+  (let [prefix (or (chain-prefix wf active-chain) "")]
+    {:status-char (status-char (:status wf))
+     :name (str prefix (:name wf))
+     :phase (some-> (:phase wf) name)
+     :progress-str (str (:progress wf 0) "%")
+     :agent-msg (when-let [agent (first (vals (:agents wf)))]
+                  (when-let [msg (:message agent)]
+                    (subs msg 0 (min 16 (count msg)))))}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} format-grouped-row
+  "Format a grouped entry (header or workflow row) for table rendering."
+  [entry active-chain _cols]
+  (if (= :header (:type entry))
+    ;; Section header — spans full width with dimmed color
+    {:status-char ""
+     :name (:label entry)
+     :name-fg palette/status-info
+     :phase ""
+     :progress-str ""
+     :agent-msg ""
+     :header? true}
+    (format-workflow-row (:wf entry) active-chain)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} render-table [workflows selected active-chain [cols rows]]
   (if (empty? workflows)
     (layout/text [cols rows]
                  (msg/t :wf-list/empty)
@@ -186,13 +194,9 @@
          :selected-row mapped-selected
          :offset offset}))))
 
-(defn render-footer [flash-message [cols rows]]
-  (layout/text [cols rows]
-    (str (msg/t :wf-list/footer)
-         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
-    {:fg :default}))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn render
+(defn ^{:stratum 4} render
   "Render the workflow list view.
    model: full app model
    [cols rows]: available screen area"

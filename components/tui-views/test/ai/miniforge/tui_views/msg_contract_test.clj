@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.msg-contract-test
   "Contract tests for msg.clj — verifies structural invariants
    that all message constructors must satisfy.
@@ -26,14 +25,17 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.tui-views.msg :as msg]))
 
-;; ---------------------------------------------------------------------------- Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn msg-type [m] (first m))
-(defn msg-payload [m] (second m))
+;; ---------------------------------------------------------------------------- Helpers
+(defn ^{:stratum 0} msg-type [m] (first m))
+
+(defn ^{:stratum 0} msg-payload [m] (second m))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ---------------------------------------------------------------------------- pr-diff-fetched contract
-
-(deftest pr-diff-fetched-contract-test
+(deftest ^{:stratum 1} pr-diff-fetched-contract-test
   (testing "pr-diff-fetched always has :pr-id :diff :detail in payload"
     (doseq [[label args] [["all present" [["r" 1] "diff" {:title "T"} nil]]
                            ["all nil"     [["r" 1] nil nil nil]]
@@ -48,7 +50,7 @@
           (is (contains? p :diff))
           (is (contains? p :detail)))))))
 
-(deftest pr-diff-fetched-error-omission-test
+(deftest ^{:stratum 1} pr-diff-fetched-error-omission-test
   (testing ":error key is absent when error arg is nil"
     (let [p (msg-payload (msg/pr-diff-fetched ["r" 1] "d" {:t 1} nil))]
       (is (not (contains? p :error)))))
@@ -59,8 +61,7 @@
       (is (= "boom" (:error p))))))
 
 ;; ---------------------------------------------------------------------------- prs-synced arity contract
-
-(deftest prs-synced-arity-contract-test
+(deftest ^{:stratum 1} prs-synced-arity-contract-test
   (testing "1-arity always has :pr-items, never :error"
     (let [p (msg-payload (msg/prs-synced [{:id 1}]))]
       (is (contains? p :pr-items))
@@ -76,8 +77,7 @@
       (is (not (contains? p :error))))))
 
 ;; ---------------------------------------------------------------------------- prs-synced-with-cache contract
-
-(deftest prs-synced-with-cache-contract-test
+(deftest ^{:stratum 1} prs-synced-with-cache-contract-test
   (testing "always includes :pr-items and :cached-risk"
     (let [p (msg-payload (msg/prs-synced-with-cache [] {} nil))]
       (is (contains? p :pr-items))
@@ -88,8 +88,7 @@
     (is (= "e" (:error (msg-payload (msg/prs-synced-with-cache [] {} "e")))))))
 
 ;; ---------------------------------------------------------------------------- Message type namespace
-
-(deftest all-msg-types-use-msg-namespace-test
+(deftest ^{:stratum 1} all-msg-types-use-msg-namespace-test
   (testing "all message types use :msg/ namespace prefix"
     (let [messages [(msg/prs-synced [])
                     (msg/repos-discovered {})
@@ -134,8 +133,7 @@
             (str "Expected :msg/ namespace for " (msg-type m)))))))
 
 ;; ---------------------------------------------------------------------------- Chain messages contract
-
-(deftest chain-messages-always-include-chain-id-test
+(deftest ^{:stratum 1} chain-messages-always-include-chain-id-test
   (testing "all chain messages include :chain-id in payload"
     (let [chain-msgs [(msg/chain-started :c 3)
                       (msg/chain-step-started :c :s 0 :w)
@@ -148,8 +146,7 @@
             (str "Expected :chain-id = :c for " (msg-type m)))))))
 
 ;; ---------------------------------------------------------------------------- Workflow messages contract
-
-(deftest workflow-event-messages-always-include-workflow-id-test
+(deftest ^{:stratum 1} workflow-event-messages-always-include-workflow-id-test
   (testing "all workflow/agent/gate/tool messages include :workflow-id"
     (let [wf-msgs [(msg/workflow-added :wf "n" {})
                    (msg/phase-changed :wf :p)

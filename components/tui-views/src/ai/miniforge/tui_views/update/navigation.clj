@@ -15,13 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.navigation
   "Navigation helpers and view transitions.
 
    Pure functions for list navigation and view switching.
    Pane focus/selection logic lives in `update.pane`.
-   Layers 0-2."
+   Layers 0-4 (over the 3-layer budget; Wave 2 namespace-split candidate)."
   (:require
    [ai.miniforge.tui-views.effect :as effect]
    [ai.miniforge.tui-views.model :as model]
@@ -30,9 +29,9 @@
    [ai.miniforge.tui-views.update.pane :as pane]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Navigation helpers
 
-(defn list-count
+;; Navigation helpers
+(defn ^{:stratum 0} list-count
   "Count of items visible in the current list. Respects filtered-indices."
   [model]
   (let [raw-count (case (:view model)
@@ -46,7 +45,7 @@
       (count fi)
       raw-count)))
 
-(defn raw-workflow-index
+(defn ^{:stratum 0} raw-workflow-index
   "Map a cursor index to a raw workflow vector index via filtered-indices.
    Returns cursor index directly when no filter is active."
   [model idx]
@@ -54,50 +53,18 @@
     (nth (vec (sort fi)) idx nil)
     idx))
 
-(defn scrollable-view?
+(defn ^{:stratum 0} scrollable-view?
   "Views where j/k scroll content rather than moving a list cursor."
   [view]
   (= :workflow-detail view))
 
-(defn navigate-up [model]
-  (cond
-    (scrollable-view? (:view model))
-    (update model :scroll-offset #(max 0 (dec (or % 0))))
-
-    (pane/pane-detail-view? (:view model))
-    (pane/pane-navigate-up model)
-
-    :else
-    (update model :selected-idx #(max 0 (dec %)))))
-
-(defn navigate-down [model]
-  (cond
-    (scrollable-view? (:view model))
-    ;; scroll-offset upper bound is clamped at render time
-    (update model :scroll-offset #(inc (or % 0)))
-
-    (pane/pane-detail-view? (:view model))
-    (pane/pane-navigate-down model)
-
-    :else
-    (let [max-idx (max 0 (dec (list-count model)))]
-      (update model :selected-idx #(min max-idx (inc %))))))
-
-(defn navigate-top [model]
+(defn ^{:stratum 0} navigate-top [model]
   (if (pane/pane-detail-view? (:view model))
     (pane/pane-navigate-top model)
     (assoc model :selected-idx 0 :scroll-offset 0)))
 
-(defn navigate-bottom [model]
-  (if (pane/pane-detail-view? (:view model))
-    (pane/pane-navigate-bottom model)
-    (let [max-idx (max 0 (dec (list-count model)))]
-      (assoc model :selected-idx max-idx))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; View navigation
-
-(defn visible-prs
+(defn ^{:stratum 0} visible-prs
   "Return the visible PR list, respecting any active filter."
   [model]
   (let [prs (:pr-items model)]
@@ -105,7 +72,7 @@
       (into [] (keep-indexed #(when (contains? fi %1) %2)) prs)
       prs)))
 
-(defn empty-workflow-detail
+(defn ^{:stratum 0} empty-workflow-detail
   [workflow-id]
   {:workflow-id workflow-id
    :phases []
@@ -123,84 +90,7 @@
    :duration-ms nil
    :error nil})
 
-(defn workflow-row->detail
-  [wf]
-  (merge (empty-workflow-detail (:id wf))
-         {:current-phase (:phase wf)
-          :phases (if-let [phase (:phase wf)]
-                    [{:phase phase
-                      :status (case (:status wf)
-                                :failed :failed
-                                :success :success
-                                :completed :success
-                                :running)}]
-                    [])
-          :current-agent (when-let [[agent entry] (first (:agents wf))]
-                           (assoc entry :agent agent))
-          :evidence (when (seq (:gate-results wf))
-                      {:validation {:results (:gate-results wf)}})
-          :duration-ms (:duration-ms wf)
-          :error (:error wf)}))
-
-(defn workflow-detail-context
-  "Build detail context from the workflow row and any snapshot data already
-   stored on the row."
-  [wf]
-  (merge (workflow-row->detail wf)
-         (get wf :detail-snapshot {})
-         {:workflow-id (:id wf)}))
-
-(defn enter-workflow-detail [model]
-  (let [raw-idx (raw-workflow-index model (:selected-idx model))]
-    (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
-      (-> model
-          (assoc :view :workflow-detail)
-          (assoc :detail (workflow-detail-context wf))
-          (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
-                 :scroll-offset nil :search-matches [] :search-match-idx nil)
-          ;; Reload full detail from disk in background to fill in any
-          ;; events missed by the live subscription
-          (assoc :side-effect (effect/reload-workflow-detail (:id wf))))
-      model)))
-
-(defn enter-pr-detail [model]
-  (if-let [pr (get (visible-prs model) (:selected-idx model))]
-    (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
-          detail (-> model
-                     (assoc :view :pr-detail)
-                     (assoc-in [:detail :selected-pr] pr)
-                     (assoc-in [:detail :expanded-nodes] #{0})
-                     (pane/init-pane-state)
-                     (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
-          ;; Check if this PR already has a chat thread
-          tk      (chat/chat-thread-key detail)
-          thread  (get-in detail [:chat-threads tk])
-          fresh?  (or (nil? thread) (empty? (:messages thread)))
-          ;; Build side-effects: policy eval (if needed) + auto-analysis (if fresh)
-          effects (cond-> []
-                    (nil? (:pr/policy pr))
-                    (conj (effect/evaluate-policy pr-id pr))
-                    fresh?
-                    (conj (let [context (chat/pr-detail-context detail)
-                                auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
-                                user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
-                            (effect/chat-send context auto-msg [user-msg]))))]
-      (cond-> detail
-        ;; Set up chat state for auto-analysis
-        fresh?
-        (-> (assoc-in [:chat :messages]
-                      [{:role :user :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
-                        :timestamp (java.util.Date.)}])
-            (assoc-in [:chat :pending?] true)
-            (assoc-in [:chat :pending-since] (System/currentTimeMillis))
-            (assoc-in [:chat :context] (chat/pr-detail-context detail))
-            (assoc :chat-active-key tk))
-        ;; Fire side-effects
-        (seq effects)
-        (assoc :side-effects effects)))
-    model))
-
-(defn enter-train-detail [model]
+(defn ^{:stratum 0} enter-train-detail [model]
   (let [prs (get-in model [:detail :selected-train :train/prs])]
     (if-let [pr (get (vec prs) (:selected-idx model))]
       (-> model
@@ -211,14 +101,7 @@
           (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
       model)))
 
-(defn enter-detail [model]
-  (case (:view model)
-    :workflow-list (enter-workflow-detail model)
-    :pr-fleet      (enter-pr-detail model)
-    :train-view    (enter-train-detail model)
-    model))
-
-(defn go-back [model]
+(defn ^{:stratum 0} go-back [model]
   (let [clear {:selected-idx 0 :selected-ids #{} :visual-anchor nil
                :search-matches [] :search-match-idx nil :scroll-offset 0}]
     (case (:view model)
@@ -240,24 +123,22 @@
       ;; Top-level aggregate views: no-op (use Tab to cycle)
       model)))
 
-(defn switch-view [model view-key views]
+(defn ^{:stratum 0} switch-view [model view-key views]
   (if (some #{view-key} views)
     (assoc model :view view-key :selected-idx 0 :scroll-offset 0
            :selected-ids #{} :visual-anchor nil)
     model))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Action helpers
-
-(defn refresh [model]
+(defn ^{:stratum 0} refresh [model]
   (assoc model
          :flash-message "Refreshed"
          :last-updated (java.util.Date.)))
 
-(defn toggle-help [model]
+(defn ^{:stratum 0} toggle-help [model]
   (update model :help-visible? not))
 
-(defn toggle-expand [model]
+(defn ^{:stratum 0} toggle-expand [model]
   (let [idx (:selected-idx model)]
     (update-in model [:detail :expanded-nodes]
                (fn [nodes]
@@ -266,55 +147,23 @@
                      (disj nodes idx)
                      (conj nodes idx)))))))
 
-(defn cycle-pane
+(defn ^{:stratum 0} cycle-pane
   "Cycle Tab focus between panes in multi-pane views. Delegates to pane ns."
   [model]
   (pane/cycle-pane model))
 
 ;; Detail screen navigation — sibling items + sub-view cycling
-
-(def workflow-subviews
+(def ^{:stratum 0} workflow-subviews
   "Sub-views for a workflow item, cycled with Tab."
   [:workflow-detail :evidence :artifact-browser])
 
-(def workflow-subview-set
-  (set workflow-subviews))
-
-(defn in-detail-subview?
-  "True when the model is in a workflow detail sub-view context.
-   This means the current view is one of the workflow sub-views AND
-   a workflow-id is present in :detail (i.e. we drilled in from a list,
-   not navigated directly to a top-level aggregate)."
-  [model]
-  (and (contains? workflow-subview-set (:view model))
-       (some? (get-in model [:detail :workflow-id]))))
-
-(defn current-level-views
-  "Return views for the current abstraction level (max 10 keys per level).
-   - Top-level aggregate: model/top-level-views
-   - Workflow detail context: workflow sub-views
-   - Multi-pane detail views: model/detail-views
-   - Single-pane detail views (e.g. :train-view): top-level-views
-     so that number keys escape back to the aggregate level."
-  [model]
-  (cond
-    (in-detail-subview? model)
-    workflow-subviews
-
-    (and (some #{(:view model)} model/detail-views)
-         (> (pane/pane-count (:view model)) 1))
-    model/detail-views
-
-    :else
-    model/top-level-views))
-
-(defn find-workflow-idx
+(defn ^{:stratum 0} find-workflow-idx
   "Find the index of a workflow-id in the workflows vector."
   [workflows wf-id]
   (some (fn [[i wf]] (when (= (:id wf) wf-id) i))
         (map-indexed vector workflows)))
 
-(defn- switch-pr-detail
+(defn- ^{:stratum 0} switch-pr-detail
   "Switch the PR detail view to a different PR.
    Resets pane state, expanded nodes, and loads the correct chat thread.
    Triggers auto-analysis if the PR has no existing chat thread."
@@ -354,7 +203,248 @@
       (seq effects)
       (assoc :side-effects effects))))
 
-(defn navigate-prev-item
+(defn ^{:stratum 0} cycle-top-level-view
+  "Cycle Tab through top-level aggregate views.
+   pr-fleet → workflow-list → evidence → artifact-browser → dag-kanban → repo-manager → pr-fleet.
+   Clears detail context so Tab stays at the aggregate tier."
+  [model]
+  (let [current (:view model)
+        views model/top-level-views
+        idx (.indexOf views current)
+        next-view (if (>= idx 0)
+                    (get views (mod (inc idx) (count views)))
+                    (first views))]
+    (transition/switch-view model next-view)))
+
+(defn ^{:stratum 0} cycle-top-level-view-reverse
+  "Cycle Shift+Tab through top-level aggregate views in reverse.
+   pr-fleet ← repo-manager ← dag-kanban ← artifact-browser ← evidence ← workflow-list ← pr-fleet.
+   Clears detail context so Tab stays at the aggregate tier."
+  [model]
+  (let [current (:view model)
+        views model/top-level-views
+        n (count views)
+        idx (.indexOf views current)
+        prev-view (if (>= idx 0)
+                    (get views (mod (+ idx (dec n)) n))
+                    (last views))]
+    (transition/switch-view model prev-view)))
+
+(defn ^{:stratum 0} cycle-pane-reverse
+  "Cycle Shift+Tab focus between panes in reverse. Delegates to pane ns."
+  [model]
+  (pane/cycle-pane-reverse model))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} navigate-up [model]
+  (cond
+    (scrollable-view? (:view model))
+    (update model :scroll-offset #(max 0 (dec (or % 0))))
+
+    (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-up model)
+
+    :else
+    (update model :selected-idx #(max 0 (dec %)))))
+
+(defn ^{:stratum 1} navigate-down [model]
+  (cond
+    (scrollable-view? (:view model))
+    ;; scroll-offset upper bound is clamped at render time
+    (update model :scroll-offset #(inc (or % 0)))
+
+    (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-down model)
+
+    :else
+    (let [max-idx (max 0 (dec (list-count model)))]
+      (update model :selected-idx #(min max-idx (inc %))))))
+
+(defn ^{:stratum 1} navigate-bottom [model]
+  (if (pane/pane-detail-view? (:view model))
+    (pane/pane-navigate-bottom model)
+    (let [max-idx (max 0 (dec (list-count model)))]
+      (assoc model :selected-idx max-idx))))
+
+(defn ^{:stratum 1} workflow-row->detail
+  [wf]
+  (merge (empty-workflow-detail (:id wf))
+         {:current-phase (:phase wf)
+          :phases (if-let [phase (:phase wf)]
+                    [{:phase phase
+                      :status (case (:status wf)
+                                :failed :failed
+                                :success :success
+                                :completed :success
+                                :running)}]
+                    [])
+          :current-agent (when-let [[agent entry] (first (:agents wf))]
+                           (assoc entry :agent agent))
+          :evidence (when (seq (:gate-results wf))
+                      {:validation {:results (:gate-results wf)}})
+          :duration-ms (:duration-ms wf)
+          :error (:error wf)}))
+
+(defn ^{:stratum 1} enter-pr-detail [model]
+  (if-let [pr (get (visible-prs model) (:selected-idx model))]
+    (let [pr-id  [(:pr/repo pr) (:pr/number pr)]
+          detail (-> model
+                     (assoc :view :pr-detail)
+                     (assoc-in [:detail :selected-pr] pr)
+                     (assoc-in [:detail :expanded-nodes] #{0})
+                     (pane/init-pane-state)
+                     (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil))
+          ;; Check if this PR already has a chat thread
+          tk      (chat/chat-thread-key detail)
+          thread  (get-in detail [:chat-threads tk])
+          fresh?  (or (nil? thread) (empty? (:messages thread)))
+          ;; Build side-effects: policy eval (if needed) + auto-analysis (if fresh)
+          effects (cond-> []
+                    (nil? (:pr/policy pr))
+                    (conj (effect/evaluate-policy pr-id pr))
+                    fresh?
+                    (conj (let [context (chat/pr-detail-context detail)
+                                auto-msg "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                                user-msg {:role :user :content auto-msg :timestamp (java.util.Date.)}]
+                            (effect/chat-send context auto-msg [user-msg]))))]
+      (cond-> detail
+        ;; Set up chat state for auto-analysis
+        fresh?
+        (-> (assoc-in [:chat :messages]
+                      [{:role :user :content "Briefly analyze this PR: risk, readiness, and key concerns. Suggest 2-3 actions."
+                        :timestamp (java.util.Date.)}])
+            (assoc-in [:chat :pending?] true)
+            (assoc-in [:chat :pending-since] (System/currentTimeMillis))
+            (assoc-in [:chat :context] (chat/pr-detail-context detail))
+            (assoc :chat-active-key tk))
+        ;; Fire side-effects
+        (seq effects)
+        (assoc :side-effects effects)))
+    model))
+
+(def ^{:stratum 1} workflow-subview-set
+  (set workflow-subviews))
+
+;; Search match navigation
+(defn ^{:stratum 1} next-search-match
+  "Jump to the next search match. Wraps around.
+   In scrollable views (workflow-detail): updates scroll-offset.
+   In tree/table views (evidence): updates selected-idx.
+   No-op when no matches active."
+  [model]
+  (let [matches (:search-matches model)
+        idx (:search-match-idx model)]
+    (if (or (empty? matches) (nil? idx))
+      model
+      (let [next-idx (mod (inc idx) (count matches))
+            match (get matches next-idx)
+            line-idx (:line-idx match 0)]
+        (cond-> (assoc model :search-match-idx next-idx)
+          (scrollable-view? (:view model))
+          (assoc :scroll-offset line-idx)
+          (not (scrollable-view? (:view model)))
+          (assoc :selected-idx line-idx))))))
+
+(defn ^{:stratum 1} prev-search-match
+  "Jump to the previous search match. Wraps around."
+  [model]
+  (let [matches (:search-matches model)
+        idx (:search-match-idx model)]
+    (if (or (empty? matches) (nil? idx))
+      model
+      (let [prev-idx (mod (+ idx (dec (count matches))) (count matches))
+            match (get matches prev-idx)
+            line-idx (:line-idx match 0)]
+        (cond-> (assoc model :search-match-idx prev-idx)
+          (scrollable-view? (:view model))
+          (assoc :scroll-offset line-idx)
+          (not (scrollable-view? (:view model)))
+          (assoc :selected-idx line-idx))))))
+
+(defn ^{:stratum 1} cycle-detail-subview
+  "Cycle Tab through sub-views for the same item.
+   workflow-detail → evidence → artifact-browser → workflow-detail."
+  [model]
+  (let [current (:view model)
+        idx (.indexOf workflow-subviews current)
+        next-view (if (>= idx 0)
+                    (get workflow-subviews (mod (inc idx) (count workflow-subviews)))
+                    current)]
+    (-> model
+        (assoc :view next-view)
+        (assoc :selected-idx 0)
+        (assoc-in [:detail :expanded-nodes] #{}))))
+
+(defn ^{:stratum 1} cycle-detail-subview-reverse
+  "Cycle Shift+Tab through sub-views in reverse.
+   workflow-detail ← evidence ← artifact-browser ← workflow-detail."
+  [model]
+  (let [current (:view model)
+        n (count workflow-subviews)
+        idx (.indexOf workflow-subviews current)
+        prev-view (if (>= idx 0)
+                    (get workflow-subviews (mod (+ idx (dec n)) n))
+                    current)]
+    (-> model
+        (assoc :view prev-view)
+        (assoc :selected-idx 0)
+        (assoc-in [:detail :expanded-nodes] #{}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} workflow-detail-context
+  "Build detail context from the workflow row and any snapshot data already
+   stored on the row."
+  [wf]
+  (merge (workflow-row->detail wf)
+         (get wf :detail-snapshot {})
+         {:workflow-id (:id wf)}))
+
+(defn ^{:stratum 2} in-detail-subview?
+  "True when the model is in a workflow detail sub-view context.
+   This means the current view is one of the workflow sub-views AND
+   a workflow-id is present in :detail (i.e. we drilled in from a list,
+   not navigated directly to a top-level aggregate)."
+  [model]
+  (and (contains? workflow-subview-set (:view model))
+       (some? (get-in model [:detail :workflow-id]))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} enter-workflow-detail [model]
+  (let [raw-idx (raw-workflow-index model (:selected-idx model))]
+    (if-let [wf (when raw-idx (get (:workflows model) raw-idx))]
+      (-> model
+          (assoc :view :workflow-detail)
+          (assoc :detail (workflow-detail-context wf))
+          (assoc :selected-idx 0 :selected-ids #{} :visual-anchor nil
+                 :scroll-offset nil :search-matches [] :search-match-idx nil)
+          ;; Reload full detail from disk in background to fill in any
+          ;; events missed by the live subscription
+          (assoc :side-effect (effect/reload-workflow-detail (:id wf))))
+      model)))
+
+(defn ^{:stratum 3} current-level-views
+  "Return views for the current abstraction level (max 10 keys per level).
+   - Top-level aggregate: model/top-level-views
+   - Workflow detail context: workflow sub-views
+   - Multi-pane detail views: model/detail-views
+   - Single-pane detail views (e.g. :train-view): top-level-views
+     so that number keys escape back to the aggregate level."
+  [model]
+  (cond
+    (in-detail-subview? model)
+    workflow-subviews
+
+    (and (some #{(:view model)} model/detail-views)
+         (> (pane/pane-count (:view model)) 1))
+    model/detail-views
+
+    :else
+    model/top-level-views))
+
+(defn ^{:stratum 3} navigate-prev-item
   "Navigate to the previous item's detail view.
    In workflow detail/evidence/artifact-browser: show previous workflow.
    In pr-detail: show previous PR.
@@ -387,7 +477,7 @@
     ;; Non-detail views: no-op
     model))
 
-(defn navigate-next-item
+(defn ^{:stratum 3} navigate-next-item
   "Navigate to the next item's detail view.
    In workflow detail/evidence/artifact-browser: show next workflow.
    In pr-detail: show next PR.
@@ -420,100 +510,11 @@
     ;; Non-detail views: no-op
     model))
 
-;; Search match navigation
+;------------------------------------------------------------------------------ Layer 4
 
-(defn next-search-match
-  "Jump to the next search match. Wraps around.
-   In scrollable views (workflow-detail): updates scroll-offset.
-   In tree/table views (evidence): updates selected-idx.
-   No-op when no matches active."
-  [model]
-  (let [matches (:search-matches model)
-        idx (:search-match-idx model)]
-    (if (or (empty? matches) (nil? idx))
-      model
-      (let [next-idx (mod (inc idx) (count matches))
-            match (get matches next-idx)
-            line-idx (:line-idx match 0)]
-        (cond-> (assoc model :search-match-idx next-idx)
-          (scrollable-view? (:view model))
-          (assoc :scroll-offset line-idx)
-          (not (scrollable-view? (:view model)))
-          (assoc :selected-idx line-idx))))))
-
-(defn prev-search-match
-  "Jump to the previous search match. Wraps around."
-  [model]
-  (let [matches (:search-matches model)
-        idx (:search-match-idx model)]
-    (if (or (empty? matches) (nil? idx))
-      model
-      (let [prev-idx (mod (+ idx (dec (count matches))) (count matches))
-            match (get matches prev-idx)
-            line-idx (:line-idx match 0)]
-        (cond-> (assoc model :search-match-idx prev-idx)
-          (scrollable-view? (:view model))
-          (assoc :scroll-offset line-idx)
-          (not (scrollable-view? (:view model)))
-          (assoc :selected-idx line-idx))))))
-
-(defn cycle-detail-subview
-  "Cycle Tab through sub-views for the same item.
-   workflow-detail → evidence → artifact-browser → workflow-detail."
-  [model]
-  (let [current (:view model)
-        idx (.indexOf workflow-subviews current)
-        next-view (if (>= idx 0)
-                    (get workflow-subviews (mod (inc idx) (count workflow-subviews)))
-                    current)]
-    (-> model
-        (assoc :view next-view)
-        (assoc :selected-idx 0)
-        (assoc-in [:detail :expanded-nodes] #{}))))
-
-(defn cycle-detail-subview-reverse
-  "Cycle Shift+Tab through sub-views in reverse.
-   workflow-detail ← evidence ← artifact-browser ← workflow-detail."
-  [model]
-  (let [current (:view model)
-        n (count workflow-subviews)
-        idx (.indexOf workflow-subviews current)
-        prev-view (if (>= idx 0)
-                    (get workflow-subviews (mod (+ idx (dec n)) n))
-                    current)]
-    (-> model
-        (assoc :view prev-view)
-        (assoc :selected-idx 0)
-        (assoc-in [:detail :expanded-nodes] #{}))))
-
-(defn cycle-top-level-view
-  "Cycle Tab through top-level aggregate views.
-   pr-fleet → workflow-list → evidence → artifact-browser → dag-kanban → repo-manager → pr-fleet.
-   Clears detail context so Tab stays at the aggregate tier."
-  [model]
-  (let [current (:view model)
-        views model/top-level-views
-        idx (.indexOf views current)
-        next-view (if (>= idx 0)
-                    (get views (mod (inc idx) (count views)))
-                    (first views))]
-    (transition/switch-view model next-view)))
-
-(defn cycle-top-level-view-reverse
-  "Cycle Shift+Tab through top-level aggregate views in reverse.
-   pr-fleet ← repo-manager ← dag-kanban ← artifact-browser ← evidence ← workflow-list ← pr-fleet.
-   Clears detail context so Tab stays at the aggregate tier."
-  [model]
-  (let [current (:view model)
-        views model/top-level-views
-        n (count views)
-        idx (.indexOf views current)
-        prev-view (if (>= idx 0)
-                    (get views (mod (+ idx (dec n)) n))
-                    (last views))]
-    (transition/switch-view model prev-view)))
-
-(defn cycle-pane-reverse
-  "Cycle Shift+Tab focus between panes in reverse. Delegates to pane ns."
-  [model]
-  (pane/cycle-pane-reverse model))
+(defn ^{:stratum 4} enter-detail [model]
+  (case (:view model)
+    :workflow-list (enter-workflow-detail model)
+    :pr-fleet      (enter-pr-detail model)
+    :train-view    (enter-train-detail model)
+    model))

@@ -15,21 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.selection
   "Selection manipulation -- multi-select and visual mode.
 
    Pure functions for managing selected-ids set. Provides toggle,
    visual range selection, select-all, and clear operations.
-   Layer 2."
+   Layers 0-4 (over the 3-layer budget; Wave 2 namespace-split candidate)."
   (:require
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update.navigation :as nav]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Filtered index resolution
 
-(defn raw-index
+;; Filtered index resolution
+(defn ^{:stratum 0} raw-index
   "Map a cursor index to a raw list index, respecting filtered-indices.
    When a search filter is active, cursor index n refers to the nth visible
    item, not the nth item in the raw vector."
@@ -39,21 +38,52 @@
       (get sorted-fi idx))
     idx))
 
-;; ID resolution
+(defn ^{:stratum 0} pr-id
+  "Extract selectable ID [repo, number] from a PR map."
+  [pr]
+  (when pr [(:pr/repo pr) (:pr/number pr)]))
 
-(defn item-at
+;; Individual toggle
+(defn ^{:stratum 0} toggle-id
+  "Add id to set if absent, remove if present."
+  [ids id]
+  (let [ids (or ids #{})]
+    (if (contains? ids id) (disj ids id) (conj ids id))))
+
+(defn ^{:stratum 0} exit-visual-mode
+  "Clear visual anchor without clearing selections."
+  [model]
+  (assoc model :visual-anchor nil))
+
+(defn ^{:stratum 0} clear-selection
+  "Clear all selections and exit visual mode."
+  [model]
+  (assoc model :selected-ids #{} :visual-anchor nil))
+
+;; Query helpers
+(defn ^{:stratum 0} has-selection?
+  "True if any items are selected."
+  [model]
+  (boolean (seq (:selected-ids model))))
+
+(defn ^{:stratum 0} selection-count
+  "Number of currently selected items."
+  [model]
+  (count (:selected-ids model)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ID resolution
+(defn ^{:stratum 1} item-at
   "Get the item at cursor idx, resolving through filtered-indices.
    Returns nil if index is out of bounds."
   [model items idx]
   (when-let [raw-idx (raw-index model idx)]
     (get items raw-idx)))
 
-(defn pr-id
-  "Extract selectable ID [repo, number] from a PR map."
-  [pr]
-  (when pr [(:pr/repo pr) (:pr/number pr)]))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn item-id-at
+(defn ^{:stratum 2} item-id-at
   "Get the selectable ID for the item at the given index in the current view.
    Respects filtered-indices when active.
    Returns nil if index is out of bounds."
@@ -79,67 +109,14 @@
 
     nil))
 
-(defn current-item-id
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} current-item-id
   "Get ID of item at cursor position."
   [model]
   (item-id-at model (:selected-idx model)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Individual toggle
-
-(defn toggle-id
-  "Add id to set if absent, remove if present."
-  [ids id]
-  (let [ids (or ids #{})]
-    (if (contains? ids id) (disj ids id) (conj ids id))))
-
-(defn toggle-selection
-  "Toggle selection of item at cursor, then advance cursor down.
-   Standard TUI multi-select pattern (like mc/ranger)."
-  [model]
-  (if-let [id (current-item-id model)]
-    (-> model
-        (update :selected-ids toggle-id id)
-        (nav/navigate-down))
-    model))
-
-(defn select-down
-  "Select the item at cursor and move down. Shift+Arrow-Down behavior:
-   extends selection by one item downward (word-processor style)."
-  [model]
-  (if-let [id (current-item-id model)]
-    (-> model
-        (update :selected-ids (fnil conj #{}) id)
-        (nav/navigate-down))
-    model))
-
-(defn select-up
-  "Select the item at cursor and move up. Shift+Arrow-Up behavior:
-   extends selection by one item upward (word-processor style)."
-  [model]
-  (if-let [id (current-item-id model)]
-    (-> model
-        (update :selected-ids (fnil conj #{}) id)
-        (nav/navigate-up))
-    model))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Visual mode
-
-(defn enter-visual-mode
-  "Set visual anchor at current cursor position."
-  [model]
-  (let [id (current-item-id model)]
-    (-> model
-        (assoc :visual-anchor (:selected-idx model))
-        (assoc :selected-ids (if id #{id} #{})))))
-
-(defn exit-visual-mode
-  "Clear visual anchor without clearing selections."
-  [model]
-  (assoc model :visual-anchor nil))
-
-(defn update-visual-selection
+(defn ^{:stratum 3} update-visual-selection
   "Recompute selected-ids from visual anchor to current cursor.
    No-op when visual-anchor is nil -- safe to call after every j/k."
   [model]
@@ -150,30 +127,56 @@
       (assoc model :selected-ids ids))
     model))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Bulk operations
-
-(defn select-all
+(defn ^{:stratum 3} select-all
   "Select all items in current list."
   [model]
   (let [cnt (nav/list-count model)
         ids (set (keep #(item-id-at model %) (range cnt)))]
     (assoc model :selected-ids ids)))
 
-(defn clear-selection
-  "Clear all selections and exit visual mode."
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} toggle-selection
+  "Toggle selection of item at cursor, then advance cursor down.
+   Standard TUI multi-select pattern (like mc/ranger)."
   [model]
-  (assoc model :selected-ids #{} :visual-anchor nil))
+  (if-let [id (current-item-id model)]
+    (-> model
+        (update :selected-ids toggle-id id)
+        (nav/navigate-down))
+    model))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Query helpers
-
-(defn has-selection?
-  "True if any items are selected."
+(defn ^{:stratum 4} select-down
+  "Select the item at cursor and move down. Shift+Arrow-Down behavior:
+   extends selection by one item downward (word-processor style)."
   [model]
-  (boolean (seq (:selected-ids model))))
+  (if-let [id (current-item-id model)]
+    (-> model
+        (update :selected-ids (fnil conj #{}) id)
+        (nav/navigate-down))
+    model))
 
-(defn effective-ids
+(defn ^{:stratum 4} select-up
+  "Select the item at cursor and move up. Shift+Arrow-Up behavior:
+   extends selection by one item upward (word-processor style)."
+  [model]
+  (if-let [id (current-item-id model)]
+    (-> model
+        (update :selected-ids (fnil conj #{}) id)
+        (nav/navigate-up))
+    model))
+
+;; Visual mode
+(defn ^{:stratum 4} enter-visual-mode
+  "Set visual anchor at current cursor position."
+  [model]
+  (let [id (current-item-id model)]
+    (-> model
+        (assoc :visual-anchor (:selected-idx model))
+        (assoc :selected-ids (if id #{id} #{})))))
+
+(defn ^{:stratum 4} effective-ids
   "Return selected IDs for batch operation.
    If nothing selected, return the single cursor item ID wrapped in a set."
   [model]
@@ -182,8 +185,3 @@
     (if-let [id (current-item-id model)]
       #{id}
       #{})))
-
-(defn selection-count
-  "Number of currently selected items."
-  [model]
-  (count (:selected-ids model)))

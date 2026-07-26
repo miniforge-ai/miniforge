@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.prompts
   "Load and render LLM prompt templates from resources.
 
@@ -30,24 +29,26 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Template loading
 
-(def ^:private prompt-templates
+;; Template loading
+(def ^{:stratum 0} ^:private prompt-templates
   "Lazily loaded prompt templates from resources/config/tui/prompts.edn."
   (delay
     (if-let [resource (io/resource "config/tui/prompts.edn")]
       (edn/read-string (slurp resource))
       {})))
 
-(defn get-template
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-template
   "Look up a prompt template by key. Returns the raw template string or nil."
   [template-key]
   (get @prompt-templates template-key))
 
-;------------------------------------------------------------------------------ Layer 0a
-;; Template rendering
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render
+;; Template rendering
+(defn ^{:stratum 2} render
   "Render a prompt template with variable substitution.
    vars is a map of {\"variable-name\" \"value\"} or {:variable-name \"value\"}.
    Replaces all {{variable-name}} placeholders."

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.help
   "Help overlay -- shows keybinding reference.
 
@@ -28,9 +27,9 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Help content
 
-(defn help-sections
+;; Help content
+(defn ^{:stratum 0} help-sections
   "Keybinding help content organized by section."
   []
   [[(msg/t :help/section-navigation)
@@ -60,7 +59,9 @@
      ["?"      (msg/t :help/act-toggle-help)]
      ["q"      (msg/t :help/act-quit)]]]])
 
-(defn format-help-lines
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-help-lines
   "Build flat lines from help sections."
   []
   (into []
@@ -74,10 +75,10 @@
           [""])))
     (help-sections)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Overlay rendering
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render-overlay
+;; Overlay rendering
+(defn ^{:stratum 2} render-overlay
   "Render the help overlay centered on the screen.
    Returns a cell buffer to be blitted on top of the main view."
   [[cols rows]]
