@@ -15,29 +15,31 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.schema.logging
   "Logging schemas for miniforge structured EDN logging.
-   Layer 0: Base types and event taxonomy
-   Layer 1: Composite schemas (LogEntry, Scenario)"
+   Layer 0: Base event/level/category vocabularies
+   Layer 1: all-events (aggregates the Layer 0 event vocabularies)
+   Layer 2: logging-registry (the malli registry)
+   Layer 3: Composite schemas (LogContext, ScenarioContext, TraceContext,
+            PerfMetrics, LogEntry, Scenario)"
   (:require
    [malli.core :as m]
    [ai.miniforge.schema.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Base types and event taxonomy
 
-(def log-levels
+;; Base types and event taxonomy
+(def ^{:stratum 0} log-levels
   [:trace :debug :info :warn :error :fatal])
 
-(def log-categories
+(def ^{:stratum 0} log-categories
   [:agent :loop :policy :artifact :system])
 
-(def loop-types
+(def ^{:stratum 0} loop-types
   "Types of control loops in the system."
   [:inner :outer :meta])
 
-(def agent-events
+(def ^{:stratum 0} agent-events
   "Events emitted by agent operations."
   [:agent/task-started
    :agent/task-completed
@@ -46,7 +48,7 @@
    :agent/response-received
    :agent/memory-updated])
 
-(def loop-events
+(def ^{:stratum 0} loop-events
   "Events emitted by control loops."
   [:inner/iteration-started
    :inner/validation-passed
@@ -61,7 +63,7 @@
    :meta/improvement-proposed
    :meta/improvement-applied])
 
-(def policy-events
+(def ^{:stratum 0} policy-events
   "Events emitted by policy evaluation."
   [:policy/gate-evaluated
    :policy/budget-checked
@@ -70,14 +72,14 @@
    :policy/human-required
    :policy/human-approved])
 
-(def artifact-events
+(def ^{:stratum 0} artifact-events
   "Events emitted by artifact operations."
   [:artifact/created
    :artifact/versioned
    :artifact/linked
    :artifact/validation])
 
-(def system-events
+(def ^{:stratum 0} system-events
   "Events emitted by system operations."
   [:system/startup
    :system/shutdown
@@ -85,13 +87,17 @@
    :system/plugin-loaded
    :system/health-check])
 
-(def all-events
-  (vec (concat agent-events loop-events policy-events artifact-events system-events)))
-
-(def scenario-tags
+(def ^{:stratum 0} scenario-tags
   [:canary :shadow :regression :smoke :stress :chaos :golden-path :error-recovery :rollback])
 
-(def logging-registry
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} all-events
+  (vec (concat agent-events loop-events policy-events artifact-events system-events)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} logging-registry
   "Malli registry for logging schema types."
   (merge
    core/registry
@@ -102,10 +108,10 @@
     :log/loop-type (into [:enum] loop-types)
     :scenario/tag  (into [:enum] scenario-tags)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Composite schemas
+;------------------------------------------------------------------------------ Layer 3
 
-(def LogContext
+;; Composite schemas
+(def ^{:stratum 3} LogContext
   "Schema for log entry context fields."
   [:map {:registry logging-registry}
    [:ctx/workflow-id {:optional true} :workflow/id]
@@ -114,27 +120,27 @@
    [:ctx/phase {:optional true} :workflow/phase]
    [:ctx/loop {:optional true} :log/loop-type]])
 
-(def ScenarioContext
+(def ^{:stratum 3} ScenarioContext
   "Schema for scenario tracking in logs."
   [:map {:registry logging-registry}
    [:scenario/id {:optional true} :id/uuid]
    [:scenario/tags {:optional true} [:set :scenario/tag]]])
 
-(def TraceContext
+(def ^{:stratum 3} TraceContext
   "Schema for distributed tracing correlation."
   [:map {:registry logging-registry}
    [:trace/id {:optional true} :id/uuid]
    [:span/id {:optional true} :id/uuid]
    [:parent-span/id {:optional true} :id/uuid]])
 
-(def PerfMetrics
+(def ^{:stratum 3} PerfMetrics
   "Schema for performance metrics in log entries."
   [:map {:registry logging-registry}
    [:perf/duration-ms {:optional true} :common/non-neg-int]
    [:perf/tokens-used {:optional true} :common/non-neg-int]
    [:perf/cost-usd {:optional true} :common/pos-number]])
 
-(def LogEntry
+(def ^{:stratum 3} LogEntry
   "Schema for a structured log entry.
    Core data substrate for debugging, tracing, and meta loop signals."
   [:map {:registry logging-registry}
@@ -172,7 +178,7 @@
    [:perf/tokens-used {:optional true} :common/non-neg-int]
    [:perf/cost-usd {:optional true} :common/pos-number]])
 
-(def Scenario
+(def ^{:stratum 3} Scenario
   "Schema for a test scenario definition."
   [:map {:registry logging-registry}
    [:scenario/id :id/uuid]

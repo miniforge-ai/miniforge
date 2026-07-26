@@ -15,41 +15,40 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.schema.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def valid-agent
+;; Test fixtures
+(def ^{:stratum 0} valid-agent
   {:agent/id (random-uuid)
    :agent/role :implementer
    :agent/capabilities #{:code :test}
    :agent/config {:model "claude-sonnet-4"
                   :max-tokens 8000}})
 
-(def valid-task
+(def ^{:stratum 0} valid-task
   {:task/id (random-uuid)
    :task/type :implement
    :task/status :pending
    :task/constraints {:budget {:tokens 50000}}})
 
-(def valid-artifact
+(def ^{:stratum 0} valid-artifact
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/version "1.0.0"
    :artifact/content "(defn hello [] \"world\")"})
 
-(def valid-workflow
+(def ^{:stratum 0} valid-workflow
   {:workflow/id (random-uuid)
    :workflow/name "feature-auth"
    :workflow/status :running
    :workflow/phase :implement
    :workflow/priority 5})
 
-(def valid-log-entry
+(def ^{:stratum 0} valid-log-entry
   {:log/id (random-uuid)
    :log/timestamp (java.util.Date.)
    :log/level :info
@@ -58,17 +57,79 @@
    :ctx/workflow-id (random-uuid)
    :data {:agent-role :implementer}})
 
-(def valid-scenario
+(def ^{:stratum 0} valid-scenario
   {:scenario/id (random-uuid)
    :scenario/name "happy-path"
    :scenario/tags #{:golden-path}
    :scenario/created-at (java.util.Date.)
    :scenario/status :running})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Agent tests
+(deftest ^{:stratum 0} metrics-schema-test
+  (testing "valid metrics pass"
+    (is (schema/valid? schema/Metrics {:tokens 0 :duration-ms 0}))
+    (is (schema/valid? schema/Metrics {:tokens 1500 :duration-ms 3000 :cost-usd 0.02})))
+  (testing "explicit nil :tokens is rejected (the NPE class)"
+    (is (not (schema/valid? schema/Metrics {:tokens nil :duration-ms 0}))))
+  (testing "missing required key is rejected"
+    (is (not (schema/valid? schema/Metrics {:duration-ms 0})))
+    (is (not (schema/valid? schema/Metrics {:tokens 0}))))
+  (testing "negative tokens rejected"
+    (is (not (schema/valid? schema/Metrics {:tokens -1 :duration-ms 0})))))
 
-(deftest valid-agent?-test
+;; Enum access tests
+(deftest ^{:stratum 0} enum-values-test
+  (testing "agent-roles contains expected values"
+    (is (= 10 (count schema/agent-roles)))
+    (is (some #{:planner} schema/agent-roles))
+    (is (some #{:implementer} schema/agent-roles)))
+
+  (testing "task-types contains expected values"
+    (is (some #{:implement} schema/task-types))
+    (is (some #{:test} schema/task-types)))
+
+  (testing "artifact-types contains expected values"
+    (is (some #{:code} schema/artifact-types))
+    (is (some #{:spec} schema/artifact-types)))
+
+  (testing "log-levels contains expected values"
+    (is (= [:trace :debug :info :warn :error :fatal] schema/log-levels)))
+
+  (testing "all-events contains events from all categories"
+    (is (some #{:agent/task-started} schema/all-events))
+    (is (some #{:system/startup} schema/all-events))
+    (is (some #{:policy/gate-evaluated} schema/all-events))))
+
+;; Canonical severity
+(deftest ^{:stratum 0} severities-are-canonical-five-level
+  (testing "the shared severity enum is the 5-level scale, most to least severe"
+    (is (= [:critical :high :medium :low :info] schema/severities))
+    (is (= {:critical 0 :high 1 :medium 2 :low 3 :info 4} schema/severity-order))))
+
+(deftest ^{:stratum 0} severity-schema-rejects-legacy-values
+  (testing "Severity accepts canonical values and rejects legacy :major/:minor"
+    (is (schema/valid? schema/Severity :high))
+    (is (schema/valid? schema/Severity :info))
+    (is (not (schema/valid? schema/Severity :major)))
+    (is (not (schema/valid? schema/Severity :minor)))))
+
+(deftest ^{:stratum 0} normalize-severity-maps-legacy-to-canonical
+  (testing ":major->:high, :minor->:low, canonical/other unchanged"
+    (is (= :high (schema/normalize-severity :major)))
+    (is (= :low (schema/normalize-severity :minor)))
+    (is (= :critical (schema/normalize-severity :critical)))
+    (is (= :medium (schema/normalize-severity :medium)))))
+
+(deftest ^{:stratum 0} severity-comparison
+  (testing "compare-severity / more-severe order by rank"
+    (is (neg? (schema/compare-severity :critical :low)))
+    (is (pos? (schema/compare-severity :info :high)))
+    (is (zero? (schema/compare-severity :medium :medium)))
+    (is (= :critical (schema/more-severe :low :critical)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Agent tests
+(deftest ^{:stratum 1} valid-agent?-test
   (testing "valid agent returns true"
     (is (true? (schema/valid-agent? valid-agent))))
 
@@ -88,8 +149,7 @@
                   :agent/role :implementer})))))
 
 ;; Task tests
-
-(deftest valid-task?-test
+(deftest ^{:stratum 1} valid-task?-test
   (testing "valid task returns true"
     (is (true? (schema/valid-task? valid-task))))
 
@@ -112,8 +172,7 @@
                   :task/status :invalid})))))
 
 ;; Artifact tests
-
-(deftest valid-artifact?-test
+(deftest ^{:stratum 1} valid-artifact?-test
   (testing "valid artifact returns true"
     (is (true? (schema/valid-artifact? valid-artifact))))
 
@@ -130,8 +189,7 @@
                   :artifact/version "1.0.0"})))))
 
 ;; Workflow tests
-
-(deftest valid-workflow?-test
+(deftest ^{:stratum 1} valid-workflow?-test
   (testing "valid workflow returns true"
     (is (true? (schema/valid-workflow? valid-workflow))))
 
@@ -146,8 +204,7 @@
                   :workflow/status :invalid})))))
 
 ;; LogEntry tests
-
-(deftest valid-log-entry?-test
+(deftest ^{:stratum 1} valid-log-entry?-test
   (testing "valid log entry returns true"
     (is (true? (schema/valid-log-entry? valid-log-entry))))
 
@@ -168,8 +225,7 @@
                   :log/event :agent/task-started})))))
 
 ;; Scenario tests
-
-(deftest valid-scenario?-test
+(deftest ^{:stratum 1} valid-scenario?-test
   (testing "valid scenario returns true"
     (is (true? (schema/valid-scenario? valid-scenario))))
 
@@ -181,8 +237,7 @@
                   :scenario/status :invalid})))))
 
 ;; General validation tests
-
-(deftest explain-test
+(deftest ^{:stratum 1} explain-test
   (testing "valid data returns nil"
     (is (nil? (schema/explain schema/Agent valid-agent))))
 
@@ -193,7 +248,7 @@
       (is (contains? errors :agent/id))
       (is (contains? errors :agent/role)))))
 
-(deftest validate-test
+(deftest ^{:stratum 1} validate-test
   (testing "valid data returns the data"
     (is (= valid-agent (schema/validate schema/Agent valid-agent))))
 
@@ -202,73 +257,8 @@
                           #"Schema validation failed"
                           (schema/validate schema/Agent {:agent/id "bad"})))))
 
-(deftest metrics-schema-test
-  (testing "valid metrics pass"
-    (is (schema/valid? schema/Metrics {:tokens 0 :duration-ms 0}))
-    (is (schema/valid? schema/Metrics {:tokens 1500 :duration-ms 3000 :cost-usd 0.02})))
-  (testing "explicit nil :tokens is rejected (the NPE class)"
-    (is (not (schema/valid? schema/Metrics {:tokens nil :duration-ms 0}))))
-  (testing "missing required key is rejected"
-    (is (not (schema/valid? schema/Metrics {:duration-ms 0})))
-    (is (not (schema/valid? schema/Metrics {:tokens 0}))))
-  (testing "negative tokens rejected"
-    (is (not (schema/valid? schema/Metrics {:tokens -1 :duration-ms 0})))))
-
-;; Enum access tests
-
-(deftest enum-values-test
-  (testing "agent-roles contains expected values"
-    (is (= 10 (count schema/agent-roles)))
-    (is (some #{:planner} schema/agent-roles))
-    (is (some #{:implementer} schema/agent-roles)))
-
-  (testing "task-types contains expected values"
-    (is (some #{:implement} schema/task-types))
-    (is (some #{:test} schema/task-types)))
-
-  (testing "artifact-types contains expected values"
-    (is (some #{:code} schema/artifact-types))
-    (is (some #{:spec} schema/artifact-types)))
-
-  (testing "log-levels contains expected values"
-    (is (= [:trace :debug :info :warn :error :fatal] schema/log-levels)))
-
-  (testing "all-events contains events from all categories"
-    (is (some #{:agent/task-started} schema/all-events))
-    (is (some #{:system/startup} schema/all-events))
-    (is (some #{:policy/gate-evaluated} schema/all-events))))
-
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (test/run-tests 'ai.miniforge.schema.interface-test)
 
   :leave-this-here)
-
-;------------------------------------------------------------------------------ Layer 1
-;; Canonical severity
-
-(deftest severities-are-canonical-five-level
-  (testing "the shared severity enum is the 5-level scale, most to least severe"
-    (is (= [:critical :high :medium :low :info] schema/severities))
-    (is (= {:critical 0 :high 1 :medium 2 :low 3 :info 4} schema/severity-order))))
-
-(deftest severity-schema-rejects-legacy-values
-  (testing "Severity accepts canonical values and rejects legacy :major/:minor"
-    (is (schema/valid? schema/Severity :high))
-    (is (schema/valid? schema/Severity :info))
-    (is (not (schema/valid? schema/Severity :major)))
-    (is (not (schema/valid? schema/Severity :minor)))))
-
-(deftest normalize-severity-maps-legacy-to-canonical
-  (testing ":major->:high, :minor->:low, canonical/other unchanged"
-    (is (= :high (schema/normalize-severity :major)))
-    (is (= :low (schema/normalize-severity :minor)))
-    (is (= :critical (schema/normalize-severity :critical)))
-    (is (= :medium (schema/normalize-severity :medium)))))
-
-(deftest severity-comparison
-  (testing "compare-severity / more-severe order by rank"
-    (is (neg? (schema/compare-severity :critical :low)))
-    (is (pos? (schema/compare-severity :info :high)))
-    (is (zero? (schema/compare-severity :medium :medium)))
-    (is (= :critical (schema/more-severe :low :critical)))))

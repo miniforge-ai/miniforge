@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.schema.interface.validate-anomaly-failure-test
   "Failure-path coverage for `schema/validate-anomaly`: invalid values
    become canonical anomalies carrying useful diagnostic data."
@@ -23,34 +22,38 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.schema.interface :as schema]))
 
-(def invalid-agent
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} invalid-agent
   {:agent/id "not-a-uuid"
    :agent/role :invalid-role})
 
-(deftest validate-anomaly-returns-anomaly-on-failure
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} validate-anomaly-returns-anomaly-on-failure
   (testing "invalid value returns an anomaly map, not the value"
     (let [result (schema/validate-anomaly schema/Agent invalid-agent)]
       (is (anomaly/anomaly? result)))))
 
-(deftest validate-anomaly-uses-invalid-input-type
+(deftest ^{:stratum 1} validate-anomaly-uses-invalid-input-type
   (testing "anomaly type is :invalid-input — it's a validation failure"
     (let [result (schema/validate-anomaly schema/Agent invalid-agent)]
       (is (= :invalid-input (:anomaly/type result))))))
 
-(deftest validate-anomaly-message-is-human-readable
+(deftest ^{:stratum 1} validate-anomaly-message-is-human-readable
   (testing "anomaly carries a human-readable message"
     (let [result (schema/validate-anomaly schema/Agent invalid-agent)]
       (is (string? (:anomaly/message result)))
       (is (seq (:anomaly/message result))))))
 
-(deftest validate-anomaly-data-carries-errors
+(deftest ^{:stratum 1} validate-anomaly-data-carries-errors
   (testing "anomaly data includes humanized malli errors"
     (let [result (schema/validate-anomaly schema/Agent invalid-agent)
           errors (get-in result [:anomaly/data :errors])]
       (is (some? errors))
       (is (map? errors)))))
 
-(deftest validate-anomaly-data-carries-offending-value
+(deftest ^{:stratum 1} validate-anomaly-data-carries-offending-value
   (testing "anomaly data includes the offending value for diagnostics"
     (let [result (schema/validate-anomaly schema/Agent invalid-agent)]
       (is (= invalid-agent (get-in result [:anomaly/data :value]))))))

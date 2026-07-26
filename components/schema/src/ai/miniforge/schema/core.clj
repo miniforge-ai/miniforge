@@ -15,40 +15,43 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.schema.core
   "Core domain schemas for miniforge.
-   Layer 0: Base types and registries
-   Layer 1: Composite schemas (Agent, Task, Artifact, Workflow)"
+   Layer 0: Base enum vocabularies, severities, and normalize-severity
+   Layer 1: severity-order and the shared malli registry
+   Layer 2: compare-severity/Severity and standalone composite schemas
+            (Agent, TaskConstraints, TaskResult, Metrics, MetaAgentConfig, ...)
+   Layer 3: more-severe and top-level composites depending on Layer 2
+            (Task, Artifact, Workflow, MetaCoordinatorState)"
   (:require
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Base types and registries
 
-(def agent-roles
+;; Base types and registries
+(def ^{:stratum 0} agent-roles
   [:planner :architect :implementer :tester :reviewer :sre :security :release :historian :operator])
 
-(def meta-agent-roles
+(def ^{:stratum 0} meta-agent-roles
   "Meta-agent roles for workflow monitoring and control."
   [:progress-monitor :test-quality :conflict-detector :resource-manager :evidence-collector])
 
-(def task-types
+(def ^{:stratum 0} task-types
   [:plan :design :implement :test :review :deploy])
 
-(def task-statuses
+(def ^{:stratum 0} task-statuses
   [:pending :running :completed :failed :blocked])
 
-(def artifact-types
+(def ^{:stratum 0} artifact-types
   [:spec :plan :adr :code :test :review :manifest :image :telemetry :incident])
 
-(def workflow-phases
+(def ^{:stratum 0} workflow-phases
   [:plan :design :implement :verify :review :release :observe])
 
-(def workflow-statuses
+(def ^{:stratum 0} workflow-statuses
   [:pending :running :paused :completed :failed :cancelled])
 
-(def severities
+(def ^{:stratum 0} severities
   "Canonical severity levels, most to least severe. The single source of truth
    for how-bad-is-it across the codebase: rule severity (policy-pack), runtime
    violation/attention severity (supervisory, evidence-bundle), and any display
@@ -57,12 +60,7 @@
    `:high`/`:low` via `normalize-severity`."
   [:critical :high :medium :low :info])
 
-(def severity-order
-  "Rank per severity, 0 = most severe. Derived from `severities` so the order
-   table cannot drift from the enum."
-  (zipmap severities (range)))
-
-(defn normalize-severity
+(defn ^{:stratum 0} normalize-severity
   "Coerce a legacy severity keyword to the canonical enum: `:major` → `:high`,
    `:minor` → `:low`; every canonical value (and anything else) is returned
    unchanged. Lets a producer or reader tolerate a pre-migration value."
@@ -72,19 +70,14 @@
     :minor :low
     severity))
 
-(defn compare-severity
-  "Compare two severities. Negative when `a` is more severe than `b`, positive
-   when less, 0 when equal. Unknown severities sort last."
-  [a b]
-  (- (get severity-order a 99)
-     (get severity-order b 99)))
+;------------------------------------------------------------------------------ Layer 1
 
-(defn more-severe
-  "Return the more severe of two severities."
-  [a b]
-  (if (neg? (compare-severity a b)) a b))
+(def ^{:stratum 1} severity-order
+  "Rank per severity, 0 = most severe. Derived from `severities` so the order
+   table cannot drift from the enum."
+  (zipmap severities (range)))
 
-(def registry
+(def ^{:stratum 1} registry
   "Malli registry for base schema types."
   {;; Identifiers
    :id/uuid        uuid?
@@ -124,15 +117,22 @@
    :common/non-neg-int [:int {:min 0}]
    :common/pos-number [:double {:min 0.0}]})
 
-(def Severity
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} compare-severity
+  "Compare two severities. Negative when `a` is more severe than `b`, positive
+   when less, 0 when equal. Unknown severities sort last."
+  [a b]
+  (- (get severity-order a 99)
+     (get severity-order b 99)))
+
+(def ^{:stratum 2} Severity
   "Malli enum for a canonical severity level (see `severities`). Reuses the
    `:severity` registry entry so there is one constructed enum, not two copies."
   (:severity registry))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Composite schemas
-
-(def Agent
+(def ^{:stratum 2} Agent
   "Schema for an AI agent.
    Agents are pure functions: (context, task) -> (artifacts, decisions, signals)"
   [:map {:registry registry}
@@ -150,7 +150,7 @@
        [:tokens {:optional true} :common/non-neg-int]
        [:cost-usd {:optional true} :common/pos-number]]]]]])
 
-(def TaskConstraints
+(def ^{:stratum 2} TaskConstraints
   "Schema for task execution constraints."
   [:map {:registry registry}
    [:budget {:optional true}
@@ -162,7 +162,7 @@
    [:policies {:optional true} [:vector keyword?]]
    [:max-iterations {:optional true} :common/non-neg-int]])
 
-(def TaskResult
+(def ^{:stratum 2} TaskResult
   "Schema for task execution result."
   [:map {:registry registry}
    [:outcome [:enum :success :failure :escalated]]
@@ -175,7 +175,59 @@
      [:cost-usd {:optional true} :common/pos-number]
      [:iterations {:optional true} :common/non-neg-int]]]])
 
-(def Task
+(def ^{:stratum 2} ArtifactOrigin
+  "Schema for artifact provenance origin."
+  [:map {:registry registry}
+   [:intent-id {:optional true} :id/uuid]
+   [:agent-id {:optional true} :agent/id]
+   [:task-id {:optional true} :task/id]])
+
+(def ^{:stratum 2} WorkflowBudget
+  "Schema for workflow budget allocation."
+  [:map {:registry registry}
+   [:tokens {:optional true} :common/non-neg-int]
+   [:cost-usd {:optional true} :common/pos-number]
+   [:duration-ms {:optional true} :common/non-neg-int]])
+
+(def ^{:stratum 2} Metrics
+  "Schema for an agent/phase result's `:metrics` map. `:tokens` and
+   `:duration-ms` are REQUIRED and non-nil — they are consumed by cost and
+   accumulation arithmetic, so a missing or nil value is a boundary violation
+   (it throws a message-less NPE downstream). `:non-neg-int` already rejects a
+   present nil; making the keys required also rejects an absent one."
+  [:map {:registry registry}
+   [:tokens :common/non-neg-int]
+   [:duration-ms :common/non-neg-int]
+   [:cost-usd {:optional true} :common/pos-number]
+   [:iterations {:optional true} :common/non-neg-int]])
+
+(def ^{:stratum 2} MetaAgentConfig
+  "Schema for meta-agent configuration."
+  [:map {:registry registry}
+   [:id :meta-agent/id]
+   [:name :id/string]
+   [:can-halt? boolean?]
+   [:check-interval-ms :common/non-neg-int]
+   [:priority :meta-agent/priority]
+   [:enabled? boolean?]])
+
+(def ^{:stratum 2} MetaAgentHealthCheck
+  "Schema for meta-agent health check result."
+  [:map {:registry registry}
+   [:status :meta-agent/status]
+   [:agent/id :meta-agent/id]
+   [:message :id/string]
+   [:data {:optional true} [:map-of keyword? any?]]
+   [:checked-at :common/timestamp]])
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} more-severe
+  "Return the more severe of two severities."
+  [a b]
+  (if (neg? (compare-severity a b)) a b))
+
+(def ^{:stratum 3} Task
   "Schema for a unit of work assigned to an agent."
   [:map {:registry registry}
    [:task/id :task/id]
@@ -189,14 +241,7 @@
    [:task/constraints {:optional true} TaskConstraints]
    [:task/result {:optional true} TaskResult]])
 
-(def ArtifactOrigin
-  "Schema for artifact provenance origin."
-  [:map {:registry registry}
-   [:intent-id {:optional true} :id/uuid]
-   [:agent-id {:optional true} :agent/id]
-   [:task-id {:optional true} :task/id]])
-
-(def Artifact
+(def ^{:stratum 3} Artifact
   "Schema for a versioned work product with provenance."
   [:map {:registry registry}
    [:artifact/id :artifact/id]
@@ -209,26 +254,7 @@
    [:artifact/metadata {:optional true} [:map-of keyword? any?]]
    [:artifact/created-at {:optional true} :common/timestamp]])
 
-(def WorkflowBudget
-  "Schema for workflow budget allocation."
-  [:map {:registry registry}
-   [:tokens {:optional true} :common/non-neg-int]
-   [:cost-usd {:optional true} :common/pos-number]
-   [:duration-ms {:optional true} :common/non-neg-int]])
-
-(def Metrics
-  "Schema for an agent/phase result's `:metrics` map. `:tokens` and
-   `:duration-ms` are REQUIRED and non-nil — they are consumed by cost and
-   accumulation arithmetic, so a missing or nil value is a boundary violation
-   (it throws a message-less NPE downstream). `:non-neg-int` already rejects a
-   present nil; making the keys required also rejects an absent one."
-  [:map {:registry registry}
-   [:tokens :common/non-neg-int]
-   [:duration-ms :common/non-neg-int]
-   [:cost-usd {:optional true} :common/pos-number]
-   [:iterations {:optional true} :common/non-neg-int]])
-
-(def Workflow
+(def ^{:stratum 3} Workflow
   "Schema for an outer loop SDLC delivery instance."
   [:map {:registry registry}
    [:workflow/id :workflow/id]
@@ -252,26 +278,7 @@
       [:enabled? {:optional true} boolean?]
       [:config {:optional true} [:map-of keyword? any?]]]]]])
 
-(def MetaAgentConfig
-  "Schema for meta-agent configuration."
-  [:map {:registry registry}
-   [:id :meta-agent/id]
-   [:name :id/string]
-   [:can-halt? boolean?]
-   [:check-interval-ms :common/non-neg-int]
-   [:priority :meta-agent/priority]
-   [:enabled? boolean?]])
-
-(def MetaAgentHealthCheck
-  "Schema for meta-agent health check result."
-  [:map {:registry registry}
-   [:status :meta-agent/status]
-   [:agent/id :meta-agent/id]
-   [:message :id/string]
-   [:data {:optional true} [:map-of keyword? any?]]
-   [:checked-at :common/timestamp]])
-
-(def MetaCoordinatorState
+(def ^{:stratum 3} MetaCoordinatorState
   "Schema for meta-agent coordinator state."
   [:map {:registry registry}
    [:status :meta-agent/status]

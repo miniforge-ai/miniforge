@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.schema.interface.validate-throwing-compat-test
   "Backward-compat coverage for the deprecated throwing `schema/validate`.
 
@@ -26,27 +25,31 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.schema.interface :as schema]))
 
-(def valid-agent
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} valid-agent
   {:agent/id (random-uuid)
    :agent/role :implementer
    :agent/capabilities #{:code :test}
    :agent/config {:model "claude-sonnet-4"
                   :temperature 0.3}})
 
-(def invalid-agent
+(def ^{:stratum 0} invalid-agent
   {:agent/id "not-a-uuid"
    :agent/role :invalid-role})
 
-(deftest validate-still-returns-value-on-success
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} validate-still-returns-value-on-success
   (testing "deprecated throwing variant returns input unchanged on success"
     (is (= valid-agent (schema/validate schema/Agent valid-agent)))))
 
-(deftest validate-still-throws-ex-info-on-failure
+(deftest ^{:stratum 1} validate-still-throws-ex-info-on-failure
   (testing "deprecated throwing variant still throws ExceptionInfo on bad input"
     (is (thrown? clojure.lang.ExceptionInfo
                  (schema/validate schema/Agent invalid-agent)))))
 
-(deftest validate-thrown-ex-data-carries-errors
+(deftest ^{:stratum 1} validate-thrown-ex-data-carries-errors
   (testing "thrown ex-info carries :errors map for legacy callers"
     (try
       (schema/validate schema/Agent invalid-agent)
