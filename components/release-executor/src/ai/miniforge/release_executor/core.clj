@@ -104,13 +104,14 @@
   "True when `s`, even though it's otherwise made up of yaml-scalar's safe
    plain-scalar character set, would parse back as a YAML boolean/null/
    number rather than a string — the reserved words `true`/`false`/
-   `yes`/`no`/`null`/`~` (case-insensitive, since YAML 1.1 parsers treat
-   e.g. `True`/`YES` as booleans too) or anything that reads as a number.
-   Provenance values (workflow ids, spec paths, task ids, shas) must
-   always round-trip as strings, so these need forcing into the quoted
-   branch even though their characters alone look plain-scalar-safe."
+   `yes`/`no`/`on`/`off`/`null`/`~` (case-insensitive, since YAML 1.1
+   parsers treat e.g. `True`/`YES`/`Off` as booleans too) or anything that
+   reads as a number. Provenance values (workflow ids, spec paths, task
+   ids, shas) must always round-trip as strings, so these need forcing
+   into the quoted branch even though their characters alone look
+   plain-scalar-safe."
   [s]
-  (or (contains? #{"true" "false" "yes" "no" "null" "~"} (str/lower-case s))
+  (or (contains? #{"true" "false" "yes" "no" "on" "off" "null" "~"} (str/lower-case s))
       (boolean (re-matches #"[+-]?\d+(\.\d+)?([eE][+-]?\d+)?" s))))
 
 (defn- ^{:stratum 0} pr-doc-filename

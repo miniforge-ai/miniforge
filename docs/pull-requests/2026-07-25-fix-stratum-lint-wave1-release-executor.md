@@ -8,7 +8,7 @@ Started as a mechanical `stratum-lint --fix` pass over
 decorative `Layer N` headings with real ones derived from each file's
 actual same-file reference graph.
 
-It grew well beyond that: automated review on this PR found thirteen
+It grew well beyond that: automated review on this PR found fourteen
 genuine, pre-existing correctness issues along the way (a phantom-success
 on `rev-parse` failure in two independent `commit-changes!`
 implementations, a token-bearing URL interpolated unescaped into a shell
@@ -18,10 +18,11 @@ their contract on the error path, an unvalidated shell-injection surface
 in `stage-files!` (plus a fragile empty-paths edge case in the same
 function), an unescaped YAML-injection surface in
 `provenance-frontmatter` (plus a CRLF gap and a reserved-word/number
-ambiguity in that same fix's own first drafts), a plain-string-concat
+ambiguity — including an incomplete first cut of the reserved-word set
+itself — in that same fix's own first drafts), a plain-string-concat
 fetch call in `create-branch!`, and a docstring in two files that said
-the opposite of what the code does). All thirteen are fixed here — see
-"Thirteen real bugs found by automated review" below for the full list;
+the opposite of what the code does). All fourteen are fixed here — see
+"Fourteen real bugs found by automated review" below for the full list;
 each one was verified directly against the code before being fixed, not
 fixed on the reviewer's say-so.
 
@@ -103,9 +104,9 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Thirteen real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
+### Fourteen real bugs found by automated review, fixed in `sandbox.clj`, `git.clj`, and `core.clj`
 
-Automated review on this PR flagged thirteen genuine, pre-existing
+Automated review on this PR flagged fourteen genuine, pre-existing
 correctness issues across several rounds (unrelated to the stratum-lint
 mechanics above, but small enough to fold into this PR rather than open a
 second one). Verified each directly against the code before fixing:
@@ -260,7 +261,15 @@ second one). Verified each directly against the code before fixing:
     numeric, and force-quotes those even though their characters alone
     look plain-scalar-safe.
 
-Added 14 regression tests: 8 in `sandbox_test.clj`
+14. **`yaml-ambiguous-scalar?`'s reserved set (fix for #13) was itself
+    missing `"on"`/`"off"`** — the same YAML 1.1 boolean family as
+    `yes`/`no`, which the docstring already cited, but the set only had
+    `#{"true" "false" "yes" "no" "null" "~"}`. A provenance value of `"on"`
+    or `"off"` would still round-trip as a boolean, same bug class as #13
+    itself. Added both (and their case variants, via the existing
+    case-insensitive check) to the reserved set.
+
+Added 16 regression tests: 8 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`,
@@ -280,16 +289,17 @@ existing `with-redefs [process/shell ...]` pattern (used by
 `gh-token-injection-test`/`force-push-injects-token-test`) rather than the
 real-git-repo round-trip pattern, since simulating a `rev-parse` failure
 or a thrown exception right after/during a real git invocation isn't a
-reachable real-git state to construct directly; 4 in
+reachable real-git state to construct directly; 5 in
 `core_sandbox_test.clj` (`provenance-frontmatter-escapes-yaml-significant-characters`,
 `provenance-frontmatter-escapes-leading-dash-and-newline`,
 `provenance-frontmatter-escapes-crlf-and-lone-cr`,
-`provenance-frontmatter-force-quotes-yaml-reserved-words`). Each
-assertion targets behavior only the fixed code produces — verified by
-inspection (and, for the `yaml-scalar` leading-dash regex, by an actual
-test failure during development that caught the gap, and again for the
-`create-branch!` argv-vector conversion, which broke two existing tests'
-substring assertions until `cmd-str` was added) that all fourteen would
+`provenance-frontmatter-force-quotes-yaml-reserved-words`,
+`provenance-frontmatter-force-quotes-on-and-off`). Each assertion targets
+behavior only the fixed code produces — verified by inspection (and, for
+the `yaml-scalar` leading-dash regex, by an actual test failure during
+development that caught the gap, and again for the `create-branch!`
+argv-vector conversion, which broke two existing tests'
+substring assertions until `cmd-str` was added) that all sixteen would
 fail against the pre-fix code.
 
 ## Testing Plan
@@ -304,10 +314,10 @@ fail against the pre-fix code.
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the thirteen review-flagged issues (above) and added 14
+6. Fixed the fourteen review-flagged issues (above) and added 16
    regression tests. Ran all 9 test namespaces directly via `clojure
-   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 259
-   tests, 655 assertions, 0 failures, 0 errors.
+   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 260
+   tests, 658 assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
    the old decorative headings under-reported (none of these 5 reported
@@ -324,7 +334,7 @@ fail against the pre-fix code.
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the thirteen fixes above are mostly real
+comment/metadata/order-only; the fourteen fixes above are mostly real
 behavior changes (one is docstring-only) — a failure that used to be
 silently swallowed, misreported as success, dropped from the result
 shape, or run against the wrong executor context now surfaces/behaves
@@ -357,7 +367,7 @@ newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Thirteen review-flagged issues fixed: `sandbox.clj`'s
+- [x] Fourteen review-flagged issues fixed: `sandbox.clj`'s
       `commit-changes!` phantom success on `rev-parse` failure;
       `sandbox.clj`'s `push-with-https-fallback!` unescaped token URL +
       unchecked `set-url`/restore results + unthreaded `opts` (including
@@ -367,11 +377,12 @@ newly-surfaced `SL003` files above.
       `stage-files!` unvalidated shell-injection surface and fragile
       empty-paths edge case; `core.clj`'s `provenance-frontmatter`
       unescaped YAML injection surface, `\r`-handling gap, and
-      reserved-word/number ambiguity; `sandbox.clj`'s `create-branch!`
-      plain-string-concat fetch call; `reuse-existing-pr!`'s inverted
-      docstring in both `sandbox.clj` and `git.clj`. 14 regression tests
-      added.
-- [x] Component tests pass (259 tests, 655 assertions, 0 failures/errors)
+      reserved-word/number ambiguity (including an incomplete first cut
+      of the reserved-word set itself, missing `on`/`off`);
+      `sandbox.clj`'s `create-branch!` plain-string-concat fetch call;
+      `reuse-existing-pr!`'s inverted docstring in both `sandbox.clj` and
+      `git.clj`. 16 regression tests added.
+- [x] Component tests pass (260 tests, 658 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

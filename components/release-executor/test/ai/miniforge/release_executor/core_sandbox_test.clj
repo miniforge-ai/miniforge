@@ -169,6 +169,17 @@
       (is (clojure.string/includes? fm "commit: \"false\""))
       (is (= 2 (count (re-seq #"(?m)^---$" fm)))))))
 
+(deftest ^{:stratum 0} provenance-frontmatter-force-quotes-on-and-off
+  (testing "'on'/'off' (also YAML 1.1 booleans, same family as yes/no) round-trip as
+            quoted strings rather than unquoted booleans"
+    (let [fm (core/provenance-frontmatter
+              {:provenance {:workflow "on" :spec "Off"}
+               :commit-sha nil})]
+      (is (clojure.string/includes? fm "miniforge-workflow: \"on\""))
+      (is (clojure.string/includes? fm "spec: \"Off\"")
+          "case-insensitive: Off must be quoted too, not just the lowercase form")
+      (is (= 2 (count (re-seq #"(?m)^---$" fm)))))))
+
 (deftest ^{:stratum 0} with-provenance-prepends-and-is-idempotent
   (testing "prepends frontmatter to a plain body"
     (let [out (core/with-provenance "## Summary\nbody" {:provenance {:workflow "r1"} :commit-sha "c1"})]
