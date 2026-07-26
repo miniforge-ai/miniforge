@@ -282,7 +282,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 1: Interceptor enter tests
+;; Interceptor enter tests
 (deftest ^{:stratum 2} enter-verify-basic-test
   (testing "enter-verify sets up phase context and runs tests"
     (with-mocked-test-runner

@@ -125,7 +125,7 @@
   [entries-atom]
   (into #{} (keep :log/event) @entries-atom))
 
-;------------------------------------------------------------------------------ Layer N: Boundary-commit rehydration regression
+;------------------------------------------------------------------------------ Layer 0: Boundary-commit rehydration regression
 ;;
 ;; Stage-3 dogfood (2026-05-07): plan/implement/verify/review all green,
 ;; files committed on the task branch by the implement-phase boundary,
