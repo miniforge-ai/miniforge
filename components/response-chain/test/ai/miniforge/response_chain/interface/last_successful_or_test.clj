@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.last-successful-or-test
   "`last-successful-or` returns the most recent successful step's
    `:response`, falling back to a caller-supplied default when none has
@@ -25,11 +24,13 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest fallback-default-on-empty-chain
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} fallback-default-on-empty-chain
   (testing "no steps yet => default is returned"
     (is (= ::none (chain/last-successful-or (chain/create-chain :x) ::none)))))
 
-(deftest fallback-default-when-no-step-succeeded
+(deftest ^{:stratum 0} fallback-default-when-no-step-succeeded
   (testing "every step failed => default is returned"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :x)
@@ -37,7 +38,7 @@
                 (chain/append-step :b a nil))]
       (is (= ::fallback (chain/last-successful-or c ::fallback))))))
 
-(deftest returns-most-recent-successful-response
+(deftest ^{:stratum 0} returns-most-recent-successful-response
   (testing "with mixed failures, returns the most recent successful step's response"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :x)
@@ -46,7 +47,7 @@
                 (chain/append-step :c a nil))]
       (is (= 2 (chain/last-successful-or c ::none))))))
 
-(deftest returns-most-recent-success-after-recovery
+(deftest ^{:stratum 0} returns-most-recent-success-after-recovery
   (testing "if a later step succeeds, that is the most recent success"
     (let [a (anomaly/anomaly :fault "boom" {})
           c (-> (chain/create-chain :x)
@@ -55,7 +56,7 @@
                 (chain/append-step :c 3))]
       (is (= 3 (chain/last-successful-or c ::none))))))
 
-(deftest default-can-be-any-value
+(deftest ^{:stratum 0} default-can-be-any-value
   (testing "default may be nil, a map, or any value"
     (let [c (chain/create-chain :x)]
       (is (nil? (chain/last-successful-or c nil)))

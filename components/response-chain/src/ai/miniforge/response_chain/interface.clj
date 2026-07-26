@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface
   "Public API for the response-chain component.
 
@@ -52,22 +51,20 @@
    [ai.miniforge.response-chain.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def Chain
+;; Schema re-exports
+(def ^{:stratum 0} Chain
   "Malli schema for the canonical chain map. See
    `ai.miniforge.response-chain.contract/Chain`."
   contract/Chain)
 
-(def Step
+(def ^{:stratum 0} Step
   "Malli schema for a single chain step. See
    `ai.miniforge.response-chain.contract/Step`."
   contract/Step)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Construction
-
-(defn create-chain
+(defn ^{:stratum 0} create-chain
   "Start a new response-chain for the named `operation-key`.
 
    Returns a chain map with no steps and `:succeeded?` true (vacuous
@@ -75,10 +72,8 @@
   [operation-key]
   (core/create-chain operation-key))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Append
-
-(defn append-step
+(defn ^{:stratum 0} append-step
   "Append a step to `chain` for `operation-key`.
 
    - 3-arity `(append-step chain operation-key response)`
@@ -110,10 +105,8 @@
   ([chain operation-key anomaly response request]
    (core/append-step chain operation-key anomaly response request)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Predicate
-
-(defn succeeded?
+(defn ^{:stratum 0} succeeded?
   "True when `step-or-chain` is recorded as successful.
 
    - For a step: returns the step's `:succeeded?` flag.
@@ -122,34 +115,31 @@
   [step-or-chain]
   (core/succeeded? step-or-chain))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Accessors
-
-(defn steps
+(defn ^{:stratum 0} steps
   "Return the vector of step maps from `chain` in append order."
   [chain]
   (core/steps chain))
 
-(defn last-response
+(defn ^{:stratum 0} last-response
   "Return the `:response` of the most recently appended step, or nil
    when the chain has no steps."
   [chain]
   (core/last-response chain))
 
-(defn last-anomaly
+(defn ^{:stratum 0} last-anomaly
   "Return the `:anomaly` of the most recently appended step, or nil
    when the chain has no steps or the last step succeeded."
   [chain]
   (core/last-anomaly chain))
 
-(defn last-successful-or
+(defn ^{:stratum 0} last-successful-or
   "Return the `:response` of the most recently appended *successful*
    step, or `default` when no successful step has been appended."
   [chain default]
   (core/last-successful-or chain default))
 
 ;------------------------------------------------------------------------------ Rich Comment
-
 (comment
   (require '[ai.miniforge.anomaly.interface :as anomaly])
 
