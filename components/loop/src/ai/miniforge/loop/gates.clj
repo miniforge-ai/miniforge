@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.gates
   "Validation gate protocol and built-in gate implementations.
 
@@ -23,9 +22,17 @@
    - ai.miniforge.loop.interface.protocols.gate (Gate protocol)
 
    This namespace contains the built-in gate implementations.
-   Layer 0: Pure functions for gate results
-   Layer 1: Built-in gates (syntax, lint, test, policy)
-   Layer 2: Gate runner and composition"
+   Layer 0: protocol re-exports, result predicates/constructors
+     (passed?, failed?, pass-result, fail-result, make-error), and
+     applicable-gates — no same-file dependents among them
+   Layer 1: the SyntaxGate/LintGate/TestGate/PolicyGate/CustomGate
+     defrecords (call the Layer 0 result constructors) and run-gate
+     (calls make-error)
+   Layer 2: the gate constructor fns (syntax-gate, lint-gate, test-gate,
+     policy-gate, custom-gate — call the matching Layer 1 defrecord) and
+     run-gates (calls run-gate)
+   Layer 3: default-gates, minimal-gates, strict-gates (call the Layer 2
+     gate constructors)"
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.clock.interface :as clock]
@@ -34,29 +41,32 @@
    [ai.miniforge.logging.interface :as log]
    [clojure.string]))
 
-;; Re-export protocol for backward compatibility
-(def Gate p/Gate)
-(def check p/check)
-(def gate-id p/gate-id)
-(def gate-type p/gate-type)
-(def repair p/repair)
-
 ;------------------------------------------------------------------------------ Layer 0
-;; Gate result predicates
 
-(defn passed?
+;; Re-export protocol for backward compatibility
+(def ^{:stratum 0} Gate p/Gate)
+
+(def ^{:stratum 0} check p/check)
+
+(def ^{:stratum 0} gate-id p/gate-id)
+
+(def ^{:stratum 0} gate-type p/gate-type)
+
+(def ^{:stratum 0} repair p/repair)
+
+;; Gate result predicates
+(defn ^{:stratum 0} passed?
   "Check if a gate result or aggregate result indicates all gates passed."
   [result]
   (boolean (:passed? result)))
 
-(defn failed?
+(defn ^{:stratum 0} failed?
   "Check if a gate result or aggregate result indicates failure."
   [result]
   (not (:passed? result)))
 
 ;; Gate result constructors (pure functions)
-
-(defn pass-result
+(defn ^{:stratum 0} pass-result
   "Create a passing gate result."
   [gate-id gate-type & {:keys [warnings duration-ms]}]
   (cond-> {:gate/id gate-id
@@ -65,7 +75,7 @@
     warnings (assoc :gate/warnings warnings)
     duration-ms (assoc :gate/duration-ms duration-ms)))
 
-(defn fail-result
+(defn ^{:stratum 0} fail-result
   "Create a failing gate result.
    Includes :gate/anomaly — a canonical anomaly map preserving gate error
    richness.
@@ -96,7 +106,7 @@
     warnings (assoc :gate/warnings warnings)
     duration-ms (assoc :gate/duration-ms duration-ms)))
 
-(defn make-error
+(defn ^{:stratum 0} make-error
   "Create a gate error map."
   [code message & {:keys [file line column]}]
   (cond-> {:code code
@@ -105,10 +115,24 @@
                             line (assoc :line line)
                             column (assoc :column column)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Built-in gates
+(defn ^{:stratum 0} applicable-gates
+  "Filter gates to only those applicable to the given artifact type.
+   If a gate has no :applies-to config, it applies to all artifacts."
+  [gates artifact]
+  (let [artifact-type (:artifact/type artifact)]
+    (filter
+     (fn [gate]
+       (let [config (when (satisfies? clojure.lang.ILookup gate)
+                      (:config gate))
+             applies-to (when config (:applies-to config))]
+         (or (nil? applies-to)
+             (contains? applies-to artifact-type))))
+     gates)))
 
-(defrecord SyntaxGate [id config]
+;------------------------------------------------------------------------------ Layer 1
+
+;; Built-in gates
+(defrecord ^{:stratum 1} SyntaxGate [id config]
   p/Gate
   (check [_this artifact context]
     (let [start (clock/now-ms)
@@ -145,15 +169,7 @@
      :changes []
      :remaining-violations violations}))
 
-(defn syntax-gate
-  "Create a syntax validation gate.
-   Checks that code artifacts can be parsed without errors."
-  ([] (syntax-gate :syntax-check {}))
-  ([id] (syntax-gate id {}))
-  ([id config] (->SyntaxGate id config)))
-
-
-(defrecord LintGate [id config]
+(defrecord ^{:stratum 1} LintGate [id config]
   p/Gate
   (check [_this artifact context]
     (let [start (clock/now-ms)
@@ -209,16 +225,7 @@
        :changes changes
        :remaining-violations remaining})))
 
-(defn lint-gate
-  "Create a lint validation gate.
-   Options:
-   - :fail-on-warning? - If true, warnings cause failure (default false)"
-  ([] (lint-gate :lint-check {}))
-  ([id] (lint-gate id {}))
-  ([id config] (->LintGate id config)))
-
-
-(defrecord TestGate [id config]
+(defrecord ^{:stratum 1} TestGate [id config]
   p/Gate
   (check [_this artifact context]
     (let [start (clock/now-ms)
@@ -257,16 +264,7 @@
      :changes []
      :remaining-violations violations}))
 
-(defn test-gate
-  "Create a test validation gate.
-   Options:
-   - :test-fn - Function (fn [artifact context] -> {:passed? bool :errors [...]})"
-  ([] (test-gate :test-check {}))
-  ([id] (test-gate id {}))
-  ([id config] (->TestGate id config)))
-
-
-(defrecord PolicyGate [id config]
+(defrecord ^{:stratum 1} PolicyGate [id config]
   p/Gate
   (check [_this artifact context]
     (let [start (clock/now-ms)
@@ -337,17 +335,7 @@
        :changes changes
        :remaining-violations remaining})))
 
-(defn policy-gate
-  "Create a policy validation gate.
-   Options:
-   - :policies - Vector of policy keywords to check
-                 Supported: :no-secrets, :no-todos, :require-docstrings"
-  ([] (policy-gate :policy-check {}))
-  ([id] (policy-gate id {}))
-  ([id config] (->PolicyGate id config)))
-
-
-(defrecord CustomGate [id type-kw check-fn]
+(defrecord ^{:stratum 1} CustomGate [id type-kw check-fn]
   p/Gate
   (check [_this artifact context]
     (let [start (clock/now-ms)]
@@ -371,18 +359,8 @@
      :changes []
      :remaining-violations violations}))
 
-(defn custom-gate
-  "Create a custom validation gate.
-   Arguments:
-   - id - Unique gate identifier
-   - check-fn - Function (fn [artifact context] -> gate-result-map)"
-  ([id check-fn] (custom-gate id :custom check-fn))
-  ([id type-kw check-fn] (->CustomGate id type-kw check-fn)))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Gate runner
-
-(defn run-gate
+(defn ^{:stratum 1} run-gate
   "Run a single gate check, handling errors gracefully.
    Returns the gate result map."
   [gate artifact context]
@@ -393,7 +371,49 @@
                    [(make-error :gate-execution-error
                                 (messages/t :gate/execution-failed {:error (.getMessage e)}))]))))
 
-(defn run-gates
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} syntax-gate
+  "Create a syntax validation gate.
+   Checks that code artifacts can be parsed without errors."
+  ([] (syntax-gate :syntax-check {}))
+  ([id] (syntax-gate id {}))
+  ([id config] (->SyntaxGate id config)))
+
+(defn ^{:stratum 2} lint-gate
+  "Create a lint validation gate.
+   Options:
+   - :fail-on-warning? - If true, warnings cause failure (default false)"
+  ([] (lint-gate :lint-check {}))
+  ([id] (lint-gate id {}))
+  ([id config] (->LintGate id config)))
+
+(defn ^{:stratum 2} test-gate
+  "Create a test validation gate.
+   Options:
+   - :test-fn - Function (fn [artifact context] -> {:passed? bool :errors [...]})"
+  ([] (test-gate :test-check {}))
+  ([id] (test-gate id {}))
+  ([id config] (->TestGate id config)))
+
+(defn ^{:stratum 2} policy-gate
+  "Create a policy validation gate.
+   Options:
+   - :policies - Vector of policy keywords to check
+                 Supported: :no-secrets, :no-todos, :require-docstrings"
+  ([] (policy-gate :policy-check {}))
+  ([id] (policy-gate id {}))
+  ([id config] (->PolicyGate id config)))
+
+(defn ^{:stratum 2} custom-gate
+  "Create a custom validation gate.
+   Arguments:
+   - id - Unique gate identifier
+   - check-fn - Function (fn [artifact context] -> gate-result-map)"
+  ([id check-fn] (custom-gate id :custom check-fn))
+  ([id type-kw check-fn] (->CustomGate id type-kw check-fn)))
+
+(defn ^{:stratum 2} run-gates
   "Run multiple gates against an artifact.
    Options:
    - :fail-fast? - Stop on first failure (default false)
@@ -439,24 +459,10 @@
                 ;; Continue running remaining gates
                 (recur (rest remaining) new-results new-failed new-errors)))))))))
 
-(defn applicable-gates
-  "Filter gates to only those applicable to the given artifact type.
-   If a gate has no :applies-to config, it applies to all artifacts."
-  [gates artifact]
-  (let [artifact-type (:artifact/type artifact)]
-    (filter
-     (fn [gate]
-       (let [config (when (satisfies? clojure.lang.ILookup gate)
-                      (:config gate))
-             applies-to (when config (:applies-to config))]
-         (or (nil? applies-to)
-             (contains? applies-to artifact-type))))
-     gates)))
+;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Gate set constructors
-
-(defn default-gates
+(defn ^{:stratum 3} default-gates
   "Create a default set of gates for code artifacts.
    Options:
    - :lint-fail-on-warning? - Lint gate fails on warnings (default false)
@@ -468,12 +474,12 @@
    (lint-gate :lint-check {:fail-on-warning? lint-fail-on-warning?})
    (policy-gate :policy-check {:policies policies})])
 
-(defn minimal-gates
+(defn ^{:stratum 3} minimal-gates
   "Create a minimal set of gates (syntax only)."
   []
   [(syntax-gate)])
 
-(defn strict-gates
+(defn ^{:stratum 3} strict-gates
   "Create a strict set of gates for production code.
    Includes all policies and fails on warnings."
   []
