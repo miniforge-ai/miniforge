@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.listeners
   "Listener registry with capability enforcement for N8 OCI compliance.
 
@@ -34,32 +33,75 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def capability-levels
+;; Constants
+(def ^{:stratum 0} capability-levels
   "Valid listener capability levels, ordered by privilege."
   #{:observe :advise :control})
 
-(def capability-rank
+(def ^{:stratum 0} capability-rank
   "Numeric rank for capability comparison."
   {:observe 0 :advise 1 :control 2})
 
-(defn capability-sufficient?
-  "Check if actual capability meets or exceeds required capability."
-  [actual required]
-  (>= (get capability-rank actual 0)
-      (get capability-rank required 0)))
-
-(def privacy->min-capability
+(def ^{:stratum 0} privacy->min-capability
   "Map from event privacy level to minimum listener capability required.
    :public events -> any listener (:observe)
    :internal events -> :advise or higher
    :confidential events -> :control only"
   {:public       :observe
-   :internal     :observe
+   :internal     :advise
    :confidential :control})
 
-(defn event-requires-capability
+(defn ^{:stratum 0} matches-workflow?
+  "Check if event matches the workflow ID filter (nil/empty = match all)."
+  [wf-ids event]
+  (or (empty? wf-ids)
+      (contains? (set wf-ids) (:workflow/id event))))
+
+(defn ^{:stratum 0} matches-event-type?
+  "Check if event matches the event type filter (nil/empty = match all)."
+  [event-types event]
+  (or (empty? event-types)
+      (contains? (set event-types) (:event/type event))))
+
+(defn ^{:stratum 0} deregister-listener!
+  "Deregister a listener and remove its subscription.
+
+   Arguments:
+   - stream: Event stream atom
+   - listener-id: UUID returned from register-listener!
+   - reason: Optional reason string"
+  [stream listener-id & [reason]]
+  (let [listener (get-in @stream [:listeners listener-id])]
+    (when listener
+      ;; Unsubscribe from event stream
+      (core/unsubscribe! stream listener-id)
+      ;; Remove listener metadata
+      (swap! stream update :listeners dissoc listener-id)
+      ;; Emit listener/detached event
+      (core/publish! stream
+                     (core/listener-detached stream nil listener-id reason))
+      true)))
+
+(defn ^{:stratum 0} get-listener
+  "Get listener metadata by ID."
+  [stream listener-id]
+  (get-in @stream [:listeners listener-id]))
+
+(defn ^{:stratum 0} list-listeners
+  "List all registered listeners."
+  [stream]
+  (vals (get @stream :listeners {})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} capability-sufficient?
+  "Check if actual capability meets or exceeds required capability."
+  [actual required]
+  (>= (get capability-rank actual 0)
+      (get capability-rank required 0)))
+
+(defn ^{:stratum 1} event-requires-capability
   "Return the minimum capability level required to receive an event.
 
    Uses schema-defined privacy levels with fallback overrides for
@@ -68,22 +110,10 @@
   (let [privacy (schema/event-privacy event-type)]
     (get privacy->min-capability privacy :observe)))
 
-(defn matches-workflow?
-  "Check if event matches the workflow ID filter (nil/empty = match all)."
-  [wf-ids event]
-  (or (empty? wf-ids)
-      (contains? (set wf-ids) (:workflow/id event))))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn matches-event-type?
-  "Check if event matches the event type filter (nil/empty = match all)."
-  [event-types event]
-  (or (empty? event-types)
-      (contains? (set event-types) (:event/type event))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Listener registration
-
-(defn register-listener!
+(defn ^{:stratum 2} register-listener!
   "Register a listener with capability level.
 
    Arguments:
@@ -136,39 +166,8 @@
                      (core/listener-attached stream nil listener-id type capability))
       listener-id)))
 
-(defn deregister-listener!
-  "Deregister a listener and remove its subscription.
-
-   Arguments:
-   - stream: Event stream atom
-   - listener-id: UUID returned from register-listener!
-   - reason: Optional reason string"
-  [stream listener-id & [reason]]
-  (let [listener (get-in @stream [:listeners listener-id])]
-    (when listener
-      ;; Unsubscribe from event stream
-      (core/unsubscribe! stream listener-id)
-      ;; Remove listener metadata
-      (swap! stream update :listeners dissoc listener-id)
-      ;; Emit listener/detached event
-      (core/publish! stream
-                     (core/listener-detached stream nil listener-id reason))
-      true)))
-
-(defn get-listener
-  "Get listener metadata by ID."
-  [stream listener-id]
-  (get-in @stream [:listeners listener-id]))
-
-(defn list-listeners
-  "List all registered listeners."
-  [stream]
-  (vals (get @stream :listeners {})))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Advisory annotations
-
-(defn submit-annotation!
+(defn ^{:stratum 2} submit-annotation!
   "Submit an advisory annotation (requires :advise or :control capability).
 
    Arguments:
@@ -201,10 +200,8 @@
       (core/publish! stream event)
       event)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Control action submission (capability-gated)
-
-(defn submit-control-action!
+(defn ^{:stratum 2} submit-control-action!
   "Submit a control action via a listener (requires :control capability).
 
    Arguments:
