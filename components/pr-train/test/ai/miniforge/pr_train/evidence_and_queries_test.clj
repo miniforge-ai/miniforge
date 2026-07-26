@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.evidence-and-queries-test
   "Tests for evidence bundles, list, find, contains, and transitions."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.interface :as train]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Evidence tests
 ;; ============================================================================
-
-(deftest generate-evidence-bundle-test
+(deftest ^{:stratum 0} generate-evidence-bundle-test
   (testing "generate-evidence-bundle creates an evidence bundle"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -51,7 +51,7 @@
           (is (= 2 (:total-prs summary)))
           (is (= 1 (:human-approvals summary))))))))
 
-(deftest get-evidence-bundle-test
+(deftest ^{:stratum 0} get-evidence-bundle-test
   (testing "get-evidence-bundle retrieves stored bundle"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -65,8 +65,7 @@
 ;; ============================================================================
 ;; Utility function tests
 ;; ============================================================================
-
-(deftest list-trains-test
+(deftest ^{:stratum 0} list-trains-test
   (testing "list-trains returns all trains"
     (let [mgr (train/create-manager)]
       (train/create-train mgr "Train 1" (random-uuid) nil)
@@ -77,7 +76,7 @@
         (is (every? :train/id trains))
         (is (every? :train/name trains))))))
 
-(deftest find-trains-by-status-test
+(deftest ^{:stratum 0} find-trains-by-status-test
   (testing "find-trains-by-status filters by status"
     (let [mgr (train/create-manager)
           t1 (train/create-train mgr "Train 1" (random-uuid) nil)
@@ -89,7 +88,7 @@
       (is (= 1 (count (train/find-trains-by-status mgr :drafting))))
       (is (= 1 (count (train/find-trains-by-status mgr :abandoned)))))))
 
-(deftest train-contains-pr?-test
+(deftest ^{:stratum 0} train-contains-pr?-test
   (testing "train-contains-pr? checks PR membership"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -102,8 +101,7 @@
 ;; ============================================================================
 ;; State machine validation tests
 ;; ============================================================================
-
-(deftest valid-train-transition?-test
+(deftest ^{:stratum 0} valid-train-transition?-test
   (testing "valid-train-transition? validates transitions"
     (is (train/valid-train-transition? :drafting :open))
     (is (train/valid-train-transition? :open :reviewing))
@@ -111,7 +109,7 @@
     (is (not (train/valid-train-transition? :merged :drafting)))
     (is (not (train/valid-train-transition? :abandoned :open)))))
 
-(deftest valid-pr-transition?-test
+(deftest ^{:stratum 0} valid-pr-transition?-test
   (testing "valid-pr-transition? validates transitions"
     (is (train/valid-pr-transition? :draft :open))
     (is (train/valid-pr-transition? :reviewing :approved))

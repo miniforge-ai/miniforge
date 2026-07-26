@@ -15,17 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.risk-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-train.risk :as risk]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Risk level classification tests
 ;; ============================================================================
-
-(deftest score->level-test
+(deftest ^{:stratum 0} score->level-test
   (testing "critical threshold"
     (is (= :critical (risk/score->level 0.75)))
     (is (= :critical (risk/score->level 1.0))))
@@ -45,8 +45,7 @@
 ;; ============================================================================
 ;; Risk assessment tests
 ;; ============================================================================
-
-(deftest assess-risk-test
+(deftest ^{:stratum 0} assess-risk-test
   (testing "low-risk PR"
     (let [result (risk/assess-risk
                   {:train/prs []}
@@ -107,8 +106,7 @@
 ;; ============================================================================
 ;; Factor detail tests
 ;; ============================================================================
-
-(deftest change-size-factor-test
+(deftest ^{:stratum 0} change-size-factor-test
   (testing "small change is low risk"
     (let [result (risk/assess-risk {:train/prs []} {:pr/number 1 :pr/blocks []}
                                    {:change-size {:additions 10 :deletions 5}} {})
@@ -121,7 +119,7 @@
           factor (first (filter #(= :change-size (:factor %)) (:risk/factors result)))]
       (is (= 1.0 (:score factor))))))
 
-(deftest critical-files-factor-test
+(deftest ^{:stratum 0} critical-files-factor-test
   (testing "no critical files is zero risk"
     (let [result (risk/assess-risk {:train/prs []} {:pr/number 1 :pr/blocks []}
                                    {:changed-files ["src/core.clj"]} {})

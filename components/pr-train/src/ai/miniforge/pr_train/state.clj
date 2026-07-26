@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.state
   "State machine for PR trains and individual PRs.
    Manages valid transitions and state computations.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State machine definitions
 
-(def train-transitions
+;; State machine definitions
+(def ^{:stratum 0} train-transitions
   "Valid train status transitions.
    DRAFTING -> OPEN -> REVIEWING -> MERGING -> MERGED
                                           |
@@ -39,7 +38,7 @@
    :rolled-back #{}
    :abandoned   #{}})
 
-(def pr-transitions
+(def ^{:stratum 0} pr-transitions
   {:draft             #{:open :closed}
    :open              #{:reviewing :closed}
    :reviewing         #{:changes-requested :approved :closed}
@@ -48,40 +47,15 @@
    :merging           #{:merged :failed}
    :merged            #{}
    :closed            #{:open}  ; Can reopen
-   :failed            #{:open}}) ; Can retry
+   :failed            #{:open}})  ; Can retry
 
-;------------------------------------------------------------------------------ Layer 1
-;; Transition validation
-
-(defn valid-train-transition?
-  "Check if a train status transition is valid."
-  [from-status to-status]
-  (contains? (get train-transitions from-status #{}) to-status))
-
-(defn valid-pr-transition?
-  "Check if a PR status transition is valid."
-  [from-status to-status]
-  (contains? (get pr-transitions from-status #{}) to-status))
-
-(defn terminal-train-status?
-  "Check if a train status is terminal (no further transitions)."
-  [status]
-  (empty? (get train-transitions status #{})))
-
-(defn terminal-pr-status?
-  "Check if a PR status is terminal."
-  [status]
-  (empty? (get pr-transitions status #{})))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Train state creation and updates
-
-(defn update-timestamp
+(defn ^{:stratum 0} update-timestamp
   "Update the updated-at timestamp."
   [train]
   (assoc train :train/updated-at (java.util.Date.)))
 
-(defn create-train-state
+(defn ^{:stratum 0} create-train-state
   "Create initial train state.
 
    Arguments:
@@ -107,23 +81,8 @@
      :train/updated-at now
      :train/merged-at nil}))
 
-(defn transition-train-status
-  "Transition train to a new status if valid.
-
-   Returns updated train or nil if transition is invalid."
-  [train new-status]
-  (let [current-status (:train/status train)]
-    (when (valid-train-transition? current-status new-status)
-      (-> train
-          (assoc :train/status new-status)
-          (cond-> (= new-status :merged)
-            (assoc :train/merged-at (java.util.Date.)))
-          update-timestamp))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; PR state management within train
-
-(defn create-pr-state
+(defn ^{:stratum 0} create-pr-state
   "Create a new PR state for addition to a train.
 
    Arguments:
@@ -149,12 +108,62 @@
    :pr/gate-results nil
    :pr/intent nil})
 
-(defn find-pr
+(defn ^{:stratum 0} find-pr
   "Find a PR in the train by number."
   [train pr-number]
   (first (filter #(= pr-number (:pr/number %)) (:train/prs train))))
 
-(defn update-pr
+(defn ^{:stratum 0} gates-passed?
+  "Check if all gates have passed for a PR."
+  [pr]
+  (let [gate-results (:pr/gate-results pr)]
+    (or (nil? gate-results)
+        (empty? gate-results)
+        (every? :gate/passed? gate-results))))
+
+;; Progress computation
+(defn ^{:stratum 0} compute-progress
+  "Compute progress summary for a train.
+
+   Returns a Progress map with counts of PRs in each state."
+  [train]
+  (let [prs (:train/prs train)
+        total (count prs)]
+    (when (pos? total)
+      (let [merged (count (filter #(= :merged (:pr/status %)) prs))
+            approved (count (filter #(= :approved (:pr/status %)) prs))
+            failed (count (filter #(= :failed (:pr/status %)) prs))
+            pending (- total merged approved failed)]
+        {:total total
+         :merged merged
+         :approved approved
+         :pending pending
+         :failed failed}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Transition validation
+(defn ^{:stratum 1} valid-train-transition?
+  "Check if a train status transition is valid."
+  [from-status to-status]
+  (contains? (get train-transitions from-status #{}) to-status))
+
+(defn ^{:stratum 1} valid-pr-transition?
+  "Check if a PR status transition is valid."
+  [from-status to-status]
+  (contains? (get pr-transitions from-status #{}) to-status))
+
+(defn ^{:stratum 1} terminal-train-status?
+  "Check if a train status is terminal (no further transitions)."
+  [status]
+  (empty? (get train-transitions status #{})))
+
+(defn ^{:stratum 1} terminal-pr-status?
+  "Check if a PR status is terminal."
+  [status]
+  (empty? (get pr-transitions status #{})))
+
+(defn ^{:stratum 1} update-pr
   "Update a PR in the train by number.
 
    Arguments:
@@ -174,7 +183,54 @@
                       prs)))
       update-timestamp))
 
-(defn transition-pr-status
+;; Ready-to-merge computation
+(defn ^{:stratum 1} pr-merged?
+  "Check if a PR is merged."
+  [train pr-number]
+  (when-let [pr (find-pr train pr-number)]
+    (= :merged (:pr/status pr))))
+
+;; Rollback planning
+(defn ^{:stratum 1} compute-rollback-plan
+  "Compute a rollback plan for the train.
+
+   Arguments:
+   - train: The PRTrain
+   - trigger: What triggered the rollback
+   - action: What action to take
+
+   Returns updated train with rollback plan."
+  [train trigger action]
+  (let [merged-prs (->> (:train/prs train)
+                        (filter #(= :merged (:pr/status %)))
+                        (sort-by :pr/merge-order >)  ; Reverse order
+                        (mapv :pr/number))
+        checkpoint (when (seq merged-prs)
+                     (first (sort merged-prs)))]  ; First merged PR
+    (-> train
+        (assoc :train/rollback-plan
+               {:trigger trigger
+                :action action
+                :checkpoint checkpoint
+                :prs-to-revert merged-prs})
+        update-timestamp)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} transition-train-status
+  "Transition train to a new status if valid.
+
+   Returns updated train or nil if transition is invalid."
+  [train new-status]
+  (let [current-status (:train/status train)]
+    (when (valid-train-transition? current-status new-status)
+      (-> train
+          (assoc :train/status new-status)
+          (cond-> (= new-status :merged)
+            (assoc :train/merged-at (java.util.Date.)))
+          update-timestamp))))
+
+(defn ^{:stratum 2} transition-pr-status
   "Transition a PR to a new status if valid.
 
    Returns updated train or nil if transition is invalid."
@@ -184,29 +240,52 @@
       (when (valid-pr-transition? current-status new-status)
         (update-pr train pr-number #(assoc % :pr/status new-status))))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Ready-to-merge computation
-
-(defn pr-merged?
-  "Check if a PR is merged."
-  [train pr-number]
-  (when-let [pr (find-pr train pr-number)]
-    (= :merged (:pr/status pr))))
-
-(defn deps-merged?
+(defn ^{:stratum 2} deps-merged?
   "Check if all dependencies of a PR are merged."
   [train pr]
   (every? #(pr-merged? train %) (:pr/depends-on pr)))
 
-(defn gates-passed?
-  "Check if all gates have passed for a PR."
-  [pr]
-  (let [gate-results (:pr/gate-results pr)]
-    (or (nil? gate-results)
-        (empty? gate-results)
-        (every? :gate/passed? gate-results))))
+;; Auto-transition based on PR states
+(defn ^{:stratum 2} infer-train-status
+  "Infer what the train status should be based on PR states.
 
-(defn ready-to-merge?
+   Returns suggested new status or nil if no change needed."
+  [train]
+  (let [prs (:train/prs train)
+        current-status (:train/status train)]
+    (cond
+      ;; All PRs merged -> train is merged
+      (and (seq prs)
+           (every? #(= :merged (:pr/status %)) prs)
+           (not= :merged current-status))
+      :merged
+
+      ;; Any PR failed -> train failed
+      (and (some #(= :failed (:pr/status %)) prs)
+           (not= :failed current-status)
+           (not (terminal-train-status? current-status)))
+      :failed
+
+      ;; Any PR merging -> train is merging
+      (and (some #(= :merging (:pr/status %)) prs)
+           (= :reviewing current-status))
+      :merging
+
+      ;; Any PR reviewing/approved -> train is reviewing
+      (and (some #(#{:reviewing :approved} (:pr/status %)) prs)
+           (= :open current-status))
+      :reviewing
+
+      ;; Any PR open -> train is open
+      (and (some #(= :open (:pr/status %)) prs)
+           (= :drafting current-status))
+      :open
+
+      :else nil)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} ready-to-merge?
   "Check if a PR is ready to merge.
 
    A PR is ready when:
@@ -220,7 +299,18 @@
        (= :passed (:pr/ci-status pr))
        (gates-passed? pr)))
 
-(defn compute-ready-to-merge
+(defn ^{:stratum 3} auto-transition-train
+  "Automatically transition train status based on PR states.
+
+   Returns updated train or original if no transition needed."
+  [train]
+  (if-let [new-status (infer-train-status train)]
+    (or (transition-train-status train new-status) train)
+    train))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} compute-ready-to-merge
   "Compute list of PR numbers ready to merge.
 
    Returns vector of PR numbers sorted by merge order."
@@ -230,10 +320,8 @@
        (sort-by :pr/merge-order)
        (mapv :pr/number)))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Blocking PR computation
-
-(defn pr-blocking?
+(defn ^{:stratum 4} pr-blocking?
   "Check if a PR is blocking train progress.
 
    A PR is blocking when:
@@ -245,7 +333,9 @@
         not-ready? (not (ready-to-merge? train pr))]
     (and deps-ok? not-merged? not-ready?)))
 
-(defn compute-blocking-prs
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} compute-blocking-prs
   "Compute list of PR numbers that are blocking progress.
 
    Returns vector of PR numbers sorted by merge order."
@@ -256,30 +346,9 @@
        (mapv :pr/number)))
 
 ;------------------------------------------------------------------------------ Layer 6
-;; Progress computation
 
-(defn compute-progress
-  "Compute progress summary for a train.
-
-   Returns a Progress map with counts of PRs in each state."
-  [train]
-  (let [prs (:train/prs train)
-        total (count prs)]
-    (when (pos? total)
-      (let [merged (count (filter #(= :merged (:pr/status %)) prs))
-            approved (count (filter #(= :approved (:pr/status %)) prs))
-            failed (count (filter #(= :failed (:pr/status %)) prs))
-            pending (- total merged approved failed)]
-        {:total total
-         :merged merged
-         :approved approved
-         :pending pending
-         :failed failed}))))
-
-;------------------------------------------------------------------------------ Layer 7
 ;; Aggregate state recomputation
-
-(defn recompute-train-state
+(defn ^{:stratum 6} recompute-train-state
   "Recompute all derived state for a train.
 
    Updates:
@@ -295,10 +364,10 @@
       (assoc :train/progress (compute-progress train))
       update-timestamp))
 
-;------------------------------------------------------------------------------ Layer 8
-;; Dependency linking
+;------------------------------------------------------------------------------ Layer 7
 
-(defn link-pr-dependencies
+;; Dependency linking
+(defn ^{:stratum 7} link-pr-dependencies
   "Link PR dependencies based on merge order.
 
    PRs depend on all PRs with lower merge order.
@@ -326,10 +395,8 @@
         (assoc :train/prs linked-prs)
         recompute-train-state)))
 
-;------------------------------------------------------------------------------ Layer 8b
 ;; DAG-aware dependency linking
-
-(defn link-prs-from-dag
+(defn ^{:stratum 7} link-prs-from-dag
   "Link PR dependencies based on actual DAG topology rather than linear merge order.
 
    Arguments:
@@ -367,82 +434,6 @@
     (-> train
         (assoc :train/prs linked-prs)
         recompute-train-state)))
-
-;------------------------------------------------------------------------------ Layer 9
-;; Rollback planning
-
-(defn compute-rollback-plan
-  "Compute a rollback plan for the train.
-
-   Arguments:
-   - train: The PRTrain
-   - trigger: What triggered the rollback
-   - action: What action to take
-
-   Returns updated train with rollback plan."
-  [train trigger action]
-  (let [merged-prs (->> (:train/prs train)
-                        (filter #(= :merged (:pr/status %)))
-                        (sort-by :pr/merge-order >)  ; Reverse order
-                        (mapv :pr/number))
-        checkpoint (when (seq merged-prs)
-                     (first (sort merged-prs)))]  ; First merged PR
-    (-> train
-        (assoc :train/rollback-plan
-               {:trigger trigger
-                :action action
-                :checkpoint checkpoint
-                :prs-to-revert merged-prs})
-        update-timestamp)))
-
-;------------------------------------------------------------------------------ Layer 10
-;; Auto-transition based on PR states
-
-(defn infer-train-status
-  "Infer what the train status should be based on PR states.
-
-   Returns suggested new status or nil if no change needed."
-  [train]
-  (let [prs (:train/prs train)
-        current-status (:train/status train)]
-    (cond
-      ;; All PRs merged -> train is merged
-      (and (seq prs)
-           (every? #(= :merged (:pr/status %)) prs)
-           (not= :merged current-status))
-      :merged
-
-      ;; Any PR failed -> train failed
-      (and (some #(= :failed (:pr/status %)) prs)
-           (not= :failed current-status)
-           (not (terminal-train-status? current-status)))
-      :failed
-
-      ;; Any PR merging -> train is merging
-      (and (some #(= :merging (:pr/status %)) prs)
-           (= :reviewing current-status))
-      :merging
-
-      ;; Any PR reviewing/approved -> train is reviewing
-      (and (some #(#{:reviewing :approved} (:pr/status %)) prs)
-           (= :open current-status))
-      :reviewing
-
-      ;; Any PR open -> train is open
-      (and (some #(= :open (:pr/status %)) prs)
-           (= :drafting current-status))
-      :open
-
-      :else nil)))
-
-(defn auto-transition-train
-  "Automatically transition train status based on PR states.
-
-   Returns updated train or original if no transition needed."
-  [train]
-  (if-let [new-status (infer-train-status train)]
-    (or (transition-train-status train new-status) train)
-    train))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
