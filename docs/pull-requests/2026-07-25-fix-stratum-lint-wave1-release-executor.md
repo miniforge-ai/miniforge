@@ -86,12 +86,12 @@ warning (present before this fix too, just at a different line after
 reordering) — a dead `let` binding never referenced in its test body.
 Removed it so the component lints clean, per this PR's own bar.
 
-### Two real bugs found by automated review, fixed in `sandbox.clj`
+### Three real bugs found by automated review, fixed in `sandbox.clj` and `git.clj`
 
-Automated review on this PR flagged two genuine, pre-existing correctness
-issues in `sandbox.clj` (unrelated to the stratum-lint mechanics above,
-but small enough to fold into this PR rather than open a second one).
-Verified both directly against the code before fixing:
+Automated review on this PR flagged three genuine, pre-existing
+correctness issues (unrelated to the stratum-lint mechanics above, but
+small enough to fold into this PR rather than open a second one).
+Verified each directly against the code before fixing:
 
 1. **`commit-changes!` reported a phantom success on a `rev-parse`
    failure.** After a successful `git commit`, it ran `git rev-parse HEAD`
@@ -124,15 +124,27 @@ Verified both directly against the code before fixing:
    `git/with-https-token-fallback!`'s existing shape and reusing its
    `:push/https-fallback-*` message catalog entries.
 
-Added 3 regression tests in `sandbox_test.clj`
+3. **`git.clj`'s `commit-changes!` has the exact same `rev-parse`
+   phantom-success bug as `sandbox.clj`'s (#1 above) — a separate host-mode
+   implementation, not a shared function, so the same defect was
+   duplicated rather than inherited.** Same fix pattern: check
+   `(zero? (:exit sha-r))` before returning `shell-success`; on failure,
+   return `shell-failure` with `:commit-sha nil`.
+
+Added 4 regression tests: 3 in `sandbox_test.clj`
 (`commit-changes-rev-parse-failure-test`,
 `push-branch-https-setup-failure-test`,
 `push-branch-https-restore-failure-test`), following the existing
 tracking-exec mock pattern already used by
-`push-branch-ssh-fail-https-fallback-test` in the same file. Each
-assertion targets behavior only the fixed code produces — verified by
-inspection that all three would fail against the pre-fix code (the old
-`commit-changes!` always reports `:success? true`; the old
+`push-branch-ssh-fail-https-fallback-test` in the same file; 1 in
+`git_test.clj` (`commit-changes-rev-parse-failure-test`), following that
+file's existing `with-redefs [process/shell ...]` pattern (used by
+`gh-token-injection-test`/`force-push-injects-token-test`) rather than the
+real-git-repo round-trip pattern, since simulating a `rev-parse` failure
+right after a real successful commit isn't a reachable real-git state.
+Each assertion targets behavior only the fixed code produces — verified
+by inspection that all four would fail against the pre-fix code (both old
+`commit-changes!`s always report `:success? true`; the old
 `push-with-https-fallback!` always retries the push regardless of
 set-url's outcome and always returns the retry result regardless of
 restore's outcome).
@@ -149,10 +161,10 @@ restore's outcome).
 4. Re-ran `--fix` after the heading hand-fixes: zero diff (stable).
 5. `clj-kondo --lint components/release-executor`: 0 errors, 0 warnings,
    including `files.clj`.
-6. Fixed the two review-flagged `sandbox.clj` bugs (above) and added 3
-   regression tests. Ran all 9 test namespaces directly via `clojure
-   -A:dev:test -e "(require ...) (clojure.test/run-tests ...)"`: 248
-   tests, 622 assertions, 0 failures, 0 errors.
+6. Fixed the three review-flagged bugs (above) and added 4 regression
+   tests. Ran all 9 test namespaces directly via `clojure -A:dev:test -e
+   "(require ...) (clojure.test/run-tests ...)"`: 249 tests, 625
+   assertions, 0 failures, 0 errors.
 7. Re-ran plain `stratum-lint` after the fix: `SL001`/`SL002`/`SL004`
    clear. `SL003` newly surfaced on 5 files, all real over-budget files
    the old decorative headings under-reported (none of these 5 reported
@@ -169,12 +181,12 @@ restore's outcome).
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the two `sandbox.clj` fixes above are real
-behavior changes (a failure that used to be silently swallowed/misreported
-as success now surfaces correctly), scoped to the HTTPS-token-fallback
-push path and the post-commit sha lookup, both already covered by new
-tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn` is required at commit time
-for the 5 newly-surfaced `SL003` files above.
+comment/metadata/order-only; the three bug fixes above are real behavior
+changes (a failure that used to be silently swallowed/misreported as
+success now surfaces correctly), scoped to the HTTPS-token-fallback push
+path and the post-commit sha lookup in both the sandbox and host-mode
+backends, all covered by new tests. `MINIFORGE_STRATUM_BUDGET_MODE=warn`
+is required at commit time for the 5 newly-surfaced `SL003` files above.
 
 ## Related Issues/PRs
 
@@ -196,10 +208,12 @@ for the 5 newly-surfaced `SL003` files above.
       re-confirmed stable
 - [x] `clj-kondo` clean (0 errors, 0 warnings) across every changed file,
       including `files.clj`
-- [x] Two review-flagged `sandbox.clj` bugs fixed (phantom success on
-      `rev-parse` failure; unescaped token URL + unchecked `set-url`/
-      restore results), 3 regression tests added
-- [x] Component tests pass (248 tests, 622 assertions, 0 failures/errors)
+- [x] Three review-flagged bugs fixed: `sandbox.clj`'s `commit-changes!`
+      phantom success on `rev-parse` failure; `sandbox.clj`'s
+      `push-with-https-fallback!` unescaped token URL + unchecked
+      `set-url`/restore results; `git.clj`'s `commit-changes!` sibling
+      `rev-parse` bug. 4 regression tests added.
+- [x] Component tests pass (249 tests, 625 assertions, 0 failures/errors)
 - [x] Plain lint re-run post-fix: zero findings except 5 newly-surfaced
       `SL003` files, documented above, tracked as Wave 2
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

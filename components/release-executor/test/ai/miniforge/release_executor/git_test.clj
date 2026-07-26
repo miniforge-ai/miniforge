@@ -23,6 +23,7 @@
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]))
@@ -88,6 +89,18 @@
                                     {:exit 0 :out "" :err ""})]
         (git/force-push! "/tmp/wt" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
+
+(deftest ^{:stratum 0} commit-changes-rev-parse-failure-test
+  (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
+            phantom success with a missing sha"
+    (with-redefs [process/shell (fn [_opts & args]
+                                  (if (= ["git" "rev-parse" "HEAD"] (vec args))
+                                    {:exit 1 :out "" :err "fatal: bad revision 'HEAD'"}
+                                    {:exit 0 :out "1 file changed" :err ""}))]
+      (let [result (git/commit-changes! "/tmp/wt" "feat: add feature")]
+        (is (not (:success? result)))
+        (is (nil? (:commit-sha result)))
+        (is (str/includes? (:error result) "bad revision"))))))
 
 ;;-------------------------------------------- path traversal + base safety
 (deftest ^{:stratum 0} write-file-path-traversal-test

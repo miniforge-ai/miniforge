@@ -172,8 +172,14 @@
         (let [sha-r (process/shell
                      {:dir (str worktree-path) :out :string :err :string :continue true}
                      "git" "rev-parse" "HEAD")]
-          (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
-                                 :output (get commit-r :out "")}))
+          (if (zero? (:exit sha-r))
+            (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
+                                   :output (get commit-r :out "")})
+            ;; The commit itself succeeded, but resolving its sha didn't — do
+            ;; NOT report shell-success with an empty/missing :commit-sha,
+            ;; which would mislead callers that expect a real sha. Surface
+            ;; the rev-parse failure instead.
+            (result/shell-failure (get sha-r :err "") {:commit-sha nil})))
         (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
     (catch Exception e
       (result/shell-failure (.getMessage e) {:commit-sha nil}))))
