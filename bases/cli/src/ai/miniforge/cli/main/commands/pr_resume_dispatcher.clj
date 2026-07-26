@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-resume-dispatcher
   "N13 §2.7 Resume Signal Dispatcher CLI.
 
@@ -34,9 +33,10 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
-;; ── helpers ──────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- gh-pr-merge-state
+;; ── helpers ──────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} gh-pr-merge-state
   "Query GitHub for `pr-number`'s merge state in `worktree-path`'s
    repo. Returns `{:state :MERGED|:OPEN|:CLOSED :merge-sha string?
    :merged-at string?}` map on success or nil on gh failure.
@@ -56,24 +56,14 @@
            :merged-at (:mergedAt parsed)})))
     (catch Throwable _ nil)))
 
-(defn- parse-iso-inst
+(defn- ^{:stratum 0} parse-iso-inst
   "Parse an ISO-8601 string from gh into a java.util.Date, or nil."
   [s]
   (try
     (java.util.Date/from (java.time.Instant/parse s))
     (catch Throwable _ nil)))
 
-(defn- merged-pr-record
-  "Build the merged-PR record consumed by `dispatch-pr-merge!` from a
-   listener entry + the gh response."
-  [listener gh-response]
-  {:pr/url       (:pr/url listener)
-   :merge/sha    (:merge-sha gh-response)
-   :merged-at    (or (parse-iso-inst (:merged-at gh-response))
-                     (java.util.Date.))
-   :diff-summary nil}) ; v0 omits diff-summary; gh diff --stat is a follow-up
-
-(defn- group-active-listeners-by-pr
+(defn- ^{:stratum 0} group-active-listeners-by-pr
   "Pure: group `entries-for-agent`-style listener bundle into
    `{pr-url [listener ...]}` filtered to `:active`."
   [registry]
@@ -86,7 +76,7 @@
               acc)))
         {})))
 
-(defn- print-listener-failure!
+(defn- ^{:stratum 0} print-listener-failure!
   "Render one per-listener failure entry from the dispatch summary's
    `:failed` vector to a typed error line. Pulled out so the
    `doseq` body stays a single named call."
@@ -97,7 +87,19 @@
                 :code    (str (get-in failure [:error :code]))
                 :message (or (get-in failure [:error :message]) "")})))
 
-(defn- print-dispatch-result!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} merged-pr-record
+  "Build the merged-PR record consumed by `dispatch-pr-merge!` from a
+   listener entry + the gh response."
+  [listener gh-response]
+  {:pr/url       (:pr/url listener)
+   :merge/sha    (:merge-sha gh-response)
+   :merged-at    (or (parse-iso-inst (:merged-at gh-response))
+                     (java.util.Date.))
+   :diff-summary nil})  ; v0 omits diff-summary; gh diff --stat is a follow-up
+
+(defn- ^{:stratum 1} print-dispatch-result!
   "Render the operator-facing summary of one
    `dispatch-pr-merge!` call. Branches on `(dag/ok? r)` first
    because the dispatcher returns a DAG result (per its public
@@ -124,7 +126,9 @@
                     :total  (:listener-count summary)}))
       (run! print-listener-failure! (:failed summary)))))
 
-(defn- dispatch-merged-pr!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} dispatch-merged-pr!
   "For one PR with at least one `:active` listener: query gh, decide
    if merged, dispatch + mark on yes."
   [worktree-path pr-url listeners]
@@ -146,7 +150,9 @@
        (pr-lifecycle/dispatch-pr-merge!
         worktree-path pr-url (merged-pr-record (first listeners) gh))))))
 
-(defn- run-pass!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} run-pass!
   "One pass: read registry, group active listeners by PR, dispatch each."
   [worktree-path]
   (let [r (pr-lifecycle/read-listener-registry worktree-path)]
@@ -165,9 +171,10 @@
         (doseq [[pr-url listeners] groups]
           (dispatch-merged-pr! worktree-path pr-url listeners))))))
 
-;; ── command entry ────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 4
 
-(defn pr-resume-dispatcher-cmd
+;; ── command entry ────────────────────────────────────────────────────
+(defn ^{:stratum 4} pr-resume-dispatcher-cmd
   "CLI entry for `bb miniforge pr resume-dispatch`.
 
    v0: single-pass. The persistent loop is a v1 follow-up.

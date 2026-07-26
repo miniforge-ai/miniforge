@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-recommender-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.workflow-recommendation-config :as cfg]
    [ai.miniforge.cli.workflow-recommender :as recommender]))
 
-(deftest build-recommendation-prompt-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} build-recommendation-prompt-test
   (let [available-workflows [{:workflow/id :quick-fix
                               :workflow/task-types [:bugfix :docs]}
                              {:workflow/id :canonical-sdlc
@@ -61,7 +62,7 @@
             (is (.contains prompt (get-in prompt-config [:summary-labels :has-review])))
             (is (.contains prompt (get-in prompt-config [:summary-labels :has-testing])))))))))
 
-(deftest recommend-by-task-type-test
+(deftest ^{:stratum 0} recommend-by-task-type-test
   (let [available-workflows [{:workflow/id :quick-fix
                               :workflow/task-types [:bugfix :docs]}
                              {:workflow/id :canonical-sdlc

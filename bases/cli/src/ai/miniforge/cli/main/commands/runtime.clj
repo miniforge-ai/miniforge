@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.cli.main.commands.runtime
   "`mf runtime` subcommands — info / run.
 
@@ -23,14 +22,12 @@
    [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Config sourcing — MINIFORGE_RUNTIME handling lives in the shared
 ;; `runtime-env` leaf namespace so the workflow-runner sandbox applies the
 ;; same override these commands do.
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Render helpers
-
-(defn- format-probed-kind
+(defn- ^{:stratum 0} format-probed-kind
   "Render one entry from the auto-probe :probed list — '<kind> (<version>)'
    for available kinds, '<kind> — <reason>' for unavailable."
   [{:keys [kind available? runtime-version reason]}]
@@ -42,48 +39,15 @@
                 {:kind   (name kind)
                  :reason (or reason "")})))
 
-(defn- format-probed-list
-  [probed]
-  (when (seq probed)
-    (str/join ", " (map format-probed-kind probed))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; `mf runtime info`
-
-(defn- print-info-success
-  "Render a successful selection as human-readable lines plus the raw
-   descriptor as EDN at the end (so `mf runtime info` is grep-able and
-   programmable)."
-  [{:keys [descriptor kind selection runtime-version probed]}]
-  (println (messages/t :runtime/info-kind             {:kind (name kind)}))
-  (println (messages/t :runtime/info-executable       {:executable (dag/runtime-executable descriptor)}))
-  (println (messages/t :runtime/info-runtime-version  {:runtime-version (or runtime-version "?")}))
-  (println (messages/t :runtime/info-selection        {:selection (name selection)}))
-  (when (seq probed)
-    (println (messages/t :runtime/info-probed         {:probed (format-probed-list probed)})))
-  (println)
-  (pprint/pprint descriptor))
-
-(defn- print-info-error
+(defn- ^{:stratum 0} print-info-error
   [error]
   (display/print-error
    (messages/t :runtime/error-no-runtime
                {:code    (some-> (:code error) name)
                 :message (:message error)})))
 
-(defn runtime-info-cmd
-  "Resolve the runtime per N11-delta §3 and print the result. Used both
-   from `mf runtime info` and from the doctor."
-  [_m]
-  (let [result (dag/select-runtime (runtime-env/selection-config))]
-    (if (dag/ok? result)
-      (print-info-success (:data result))
-      (print-info-error (:error result)))))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; `mf runtime run -- <args>`
-
-(defn- forward-args
+(defn- ^{:stratum 0} forward-args
   "Pull the args list off the babashka.cli dispatch map and strip a
    leading `--` separator if present. Matches the convention used by
    `mf worktree run -- <cmd>`."
@@ -92,7 +56,31 @@
        (remove #{"--"})
        vec))
 
-(defn runtime-run-cmd
+;; Doctor integration
+(defn- ^{:stratum 0} format-runtime-line
+  "One-line summary for the doctor. Uses display/style for color."
+  [{:keys [kind selection runtime-version]}]
+  (str (display/style "✓" :foreground :green) " "
+       (messages/t :runtime/doctor-line
+                   {:kind            (name kind)
+                    :runtime-version (or runtime-version "?")
+                    :selection       (name selection)})))
+
+(defn- ^{:stratum 0} print-runtime-error-line
+  [error]
+  (println (display/style "✗" :foreground :red) " "
+           (messages/t :runtime/doctor-error-line
+                       {:code    (some-> (:code error) name)
+                        :message (:message error)})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} format-probed-list
+  [probed]
+  (when (seq probed)
+    (str/join ", " (map format-probed-kind probed))))
+
+(defn ^{:stratum 1} runtime-run-cmd
   "Resolve the runtime, then exec `<resolved-exe> <args>`. Args after
    `--` are forwarded verbatim. Exit code propagates.
 
@@ -113,26 +101,24 @@
         (when (and (number? exit) (not (zero? exit)))
           (System/exit exit))))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Doctor integration
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- format-runtime-line
-  "One-line summary for the doctor. Uses display/style for color."
-  [{:keys [kind selection runtime-version]}]
-  (str (display/style "✓" :foreground :green) " "
-       (messages/t :runtime/doctor-line
-                   {:kind            (name kind)
-                    :runtime-version (or runtime-version "?")
-                    :selection       (name selection)})))
+;; `mf runtime info`
+(defn- ^{:stratum 2} print-info-success
+  "Render a successful selection as human-readable lines plus the raw
+   descriptor as EDN at the end (so `mf runtime info` is grep-able and
+   programmable)."
+  [{:keys [descriptor kind selection runtime-version probed]}]
+  (println (messages/t :runtime/info-kind             {:kind (name kind)}))
+  (println (messages/t :runtime/info-executable       {:executable (dag/runtime-executable descriptor)}))
+  (println (messages/t :runtime/info-runtime-version  {:runtime-version (or runtime-version "?")}))
+  (println (messages/t :runtime/info-selection        {:selection (name selection)}))
+  (when (seq probed)
+    (println (messages/t :runtime/info-probed         {:probed (format-probed-list probed)})))
+  (println)
+  (pprint/pprint descriptor))
 
-(defn- print-runtime-error-line
-  [error]
-  (println (display/style "✗" :foreground :red) " "
-           (messages/t :runtime/doctor-error-line
-                       {:code    (some-> (:code error) name)
-                        :message (:message error)})))
-
-(defn print-doctor-runtime-section
+(defn ^{:stratum 2} print-doctor-runtime-section
   "Emit the runtime block of `mf doctor`. Picked up by main.clj's
    doctor-cmd."
   []
@@ -148,3 +134,14 @@
       (do (print-runtime-error-line (:error result))
           (println "  " (messages/t :runtime/doctor-override-hint
                                     {:env-var runtime-env/runtime-env-var}))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} runtime-info-cmd
+  "Resolve the runtime per N11-delta §3 and print the result. Used both
+   from `mf runtime info` and from the doctor."
+  [_m]
+  (let [result (dag/select-runtime (runtime-env/selection-config))]
+    (if (dag/ok? result)
+      (print-info-success (:data result))
+      (print-info-error (:error result)))))

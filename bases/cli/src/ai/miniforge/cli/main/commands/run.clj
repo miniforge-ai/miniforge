@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.run
   "Run command — execute workflows from spec files, plan files, or DAG files."
   (:require
@@ -32,32 +31,17 @@
    [slingshot.slingshot :refer [try+]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Error handling
 
-(defn- classify-error
+;; Error handling
+(defn- ^{:stratum 0} classify-error
   "Attempt runtime error classification. Returns classification or nil."
   [e]
   (try
     (agent-runtime/classify-error e (ex-data e))
     (catch Exception _ nil)))
 
-(defn- print-run-error-and-exit!
-  "Print error details and exit with code 1."
-  [e]
-  (let [classification (classify-error e)]
-    (if classification
-      (display/print-classified-error classification)
-      (do
-        (display/print-error (messages/t :run/failed {:error (ex-message e)}))
-        (when-let [data (ex-data e)]
-          (println (messages/t :run/error-details {:details (pr-str data)}))))))
-  (flush)
-  (System/exit 1))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Input type detection
-
-(defn detect-input-type
+(defn ^{:stratum 0} detect-input-type
   "Detect the type of a parsed input file.
    Returns :spec, :dag, :plan, or nil."
   [parsed]
@@ -67,20 +51,18 @@
     (:plan/id parsed)    :plan
     :else                nil))
 
-(defn read-edn-file
+(defn ^{:stratum 0} read-edn-file
   "Read an EDN file, returning the parsed data."
   [path]
   (edn/read-string (slurp (str path))))
 
-(defn markdown-spec?
+(defn ^{:stratum 0} markdown-spec?
   "True if path has a markdown extension."
   [path]
   (contains? #{"md" "markdown"} (fs/extension (str path))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Shared workflow execution path
-
-(defn- run-spec-workflow
+(defn- ^{:stratum 0} run-spec-workflow
   "Parse, validate, and execute a workflow spec from path.
    Used by both the markdown and EDN code paths.
    Returns the workflow result map, or nil on validation failure."
@@ -110,10 +92,25 @@
         (workflow-runner/run-workflow-from-spec!
          (assoc parsed-spec :spec/path spec-path) runner-opts)))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Run command
+;------------------------------------------------------------------------------ Layer 1
 
-(defn run-cmd
+(defn- ^{:stratum 1} print-run-error-and-exit!
+  "Print error details and exit with code 1."
+  [e]
+  (let [classification (classify-error e)]
+    (if classification
+      (display/print-classified-error classification)
+      (do
+        (display/print-error (messages/t :run/failed {:error (ex-message e)}))
+        (when-let [data (ex-data e)]
+          (println (messages/t :run/error-details {:details (pr-str data)}))))))
+  (flush)
+  (System/exit 1))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Run command
+(defn ^{:stratum 2} run-cmd
   "Execute a workflow from a spec, plan, or DAG file.
 
    Dispatch order:

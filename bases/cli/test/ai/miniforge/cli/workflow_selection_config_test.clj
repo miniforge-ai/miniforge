@@ -15,20 +15,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-selection-config-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.workflow-selection-config :as cfg]))
 
-(deftest configured-selection-profiles-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} configured-selection-profiles-test
   (testing "software-factory workflow selection profiles load from resources"
     (let [profiles (cfg/configured-selection-profiles)]
       (is (= :canonical-sdlc (:comprehensive profiles)))
       (is (= :quick-fix (:fast profiles)))
       (is (= :canonical-sdlc (:default profiles))))))
 
-(deftest resolve-selection-profile-test
+(deftest ^{:stratum 0} resolve-selection-profile-test
   (testing "configured profiles resolve to available workflows"
     (let [available-workflows [{:workflow/id :canonical-sdlc
                                 :workflow/phases [{:phase/id :explore}

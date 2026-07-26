@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.shared
   "Shared utilities for CLI command implementations.
 
@@ -27,45 +26,52 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants + helpers with no in-namespace dependencies.
 
-(def max-artifacts-display
+;; Constants + helpers with no in-namespace dependencies.
+(def ^{:stratum 0} max-artifacts-display
   "Maximum number of artifact files to display in a listing."
   50)
 
-(def bytes-per-kb
+(def ^{:stratum 0} bytes-per-kb
   "Bytes in a kilobyte."
   1024)
 
-(def bytes-per-mb
+(def ^{:stratum 0} bytes-per-mb
   "Bytes in a megabyte."
   1048576)
 
-(def max-prs-per-repo
+(def ^{:stratum 0} max-prs-per-repo
   "Maximum PRs to fetch per repository in fleet commands."
   20)
 
-(def pr-risk-lines-high
+(def ^{:stratum 0} pr-risk-lines-high
   "Line-change threshold above which a PR is considered high risk."
   500)
 
-(def pr-risk-lines-medium
+(def ^{:stratum 0} pr-risk-lines-medium
   "Line-change threshold above which a PR is considered medium risk."
   100)
 
-(def pr-risk-files-high
+(def ^{:stratum 0} pr-risk-files-high
   "Changed-files threshold above which a PR is considered high risk."
   20)
 
-(def pr-risk-files-medium
+(def ^{:stratum 0} pr-risk-files-medium
   "Changed-files threshold above which a PR is considered medium risk."
   5)
 
-(def optional-functions
+(def ^{:stratum 0} optional-functions
   "Explicitly composed optional CLI providers, keyed by their legacy symbol IDs."
   {})
 
-(defn register-optional-fn!
+(defn ^{:stratum 0} exit!
+  "Wrapper around System/exit that can be redef'd in tests."
+  [code]
+  (System/exit code))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} register-optional-fn!
   "Register an optional CLI provider function under `fn-sym`.
    Optional providers are composed by entry points that know the classpath
    includes the backing component."
@@ -77,22 +83,24 @@
   (alter-var-root #'optional-functions assoc fn-sym f)
   f)
 
-(defn optional-provider
+(defn ^{:stratum 1} optional-provider
   "Look up an explicitly composed optional provider by symbol.
    Returns the registered function, or nil when no provider is available.
    Does NOT call the function."
   [fn-sym]
   (get optional-functions fn-sym))
 
-(defn exit!
-  "Wrapper around System/exit that can be redef'd in tests."
-  [code]
-  (System/exit code))
+(defn ^{:stratum 1} usage-error!
+  "Print a usage error with the given message key and command string, then exit 1."
+  [message-key command-suffix]
+  (display/print-error
+   (messages/t message-key {:command (app-config/command-string command-suffix)}))
+  (exit! 1))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Composes Layer 0.
-
-(defn call-optional-provider
+(defn ^{:stratum 2} call-optional-provider
   "Look up optional provider `fn-sym` and immediately apply it to `args`.
    Returns nil when no provider is registered or the provider fails."
   [fn-sym & args]
@@ -103,10 +111,3 @@
         (.interrupt (Thread/currentThread))
         nil)
       (catch Exception _ nil))))
-
-(defn usage-error!
-  "Print a usage error with the given message key and command string, then exit 1."
-  [message-key command-suffix]
-  (display/print-error
-   (messages/t message-key {:command (app-config/command-string command-suffix)}))
-  (exit! 1))

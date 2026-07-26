@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-policy-respond
   "N13 §2.5 Comment Response Agent CLI — policy-eval (deterministic) path.
 
@@ -38,9 +37,10 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
-;; ── error rendering ──────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- error-message
+;; ── error rendering ──────────────────────────────────────────────────
+(defn- ^{:stratum 0} error-message
   "Translate the typed `:error` map on `ctx` into the operator-facing
    string. New `:kind`s should land here (and in the messages catalog)
    rather than re-stringifying at call sites."
@@ -51,13 +51,79 @@
     :checkout-failed (messages/t :pr/policy-respond-checkout-failed {:n (:n error)})
     :fetch-failed    (messages/t :pr/policy-respond-fetch-failed    {:n (:n error)})))
 
-(defn- commit-sha-text
+(defn- ^{:stratum 0} commit-sha-text
   "Return a commit SHA when it is a string; otherwise return the display sentinel."
   [data]
   (let [commit-sha (get data :commit-sha)]
     (if (string? commit-sha) commit-sha "—")))
 
-(defn- print-summary!
+(defn- ^{:stratum 0} print-failure!
+  [pr-number r]
+  (display/print-error
+   (messages/t :pr/policy-respond-failed
+               {:n pr-number
+                :code (str (get-in r [:error :code]))
+                :message (or (get-in r [:error :message]) "")})))
+
+;; ── infra helpers (worktree-scoped shell ops) ────────────────────────
+(defn- ^{:stratum 0} checkout-pr!
+  "Run `gh pr checkout <pr-number>` in `worktree-path`. Returns the
+   current branch on success, nil on failure."
+  [worktree-path pr-number]
+  (try
+    (let [r (process/shell {:dir (str worktree-path)
+                            :out :string :err :string :continue true}
+                           "gh" "pr" "checkout" (str pr-number))]
+      (when (zero? (:exit r))
+        (let [b (process/shell {:dir (str worktree-path)
+                                :out :string :err :string :continue true}
+                               "git" "branch" "--show-current")]
+          (when (zero? (:exit b))
+            (str/trim (:out b ""))))))
+    (catch Throwable _ nil)))
+
+(defn- ^{:stratum 0} fetch-comments
+  "Fetch the raw PR comments via the pr-lifecycle interface. Returns
+   the comments vector or nil on failure."
+  [worktree-path pr-number]
+  (let [r (pr-lifecycle/fetch-pr-comments worktree-path pr-number)]
+    (when (dag/ok? r)
+      (get-in r [:data :comments]))))
+
+;; ── pipeline steps ───────────────────────────────────────────────────
+;;
+;; Each step takes ctx, returns ctx. If ctx already carries `:error`
+;; the step is a no-op (early-bail) so downstream stages don't need
+;; per-step guards. Names match the operator's pipeline-style example.
+(defn- ^{:stratum 0} pr-policy-parse-url!
+  "Step 1: parse the operator-supplied URL, derive the PR number."
+  [{:keys [opts error] :as ctx}]
+  (if error
+    ctx
+    (let [url (:url opts)]
+      (cond
+        (or (nil? url) (str/blank? url))
+        (assoc ctx :error {:kind :usage})
+
+        :else
+        (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
+          (if-not number
+            (assoc ctx :error {:kind :bad-url})
+            (assoc ctx :url url :number number)))))))
+
+(defn- ^{:stratum 0} pr-policy-respond!
+  "Step 4: hand off to the deterministic responder. Its DAG-result
+   becomes `:result` on the ctx — the finalize step decides whether
+   to render summary or failure."
+  [{:keys [error cwd number comments] :as ctx}]
+  (if error
+    ctx
+    (assoc ctx :result
+           (pr-lifecycle/respond-to-policy-comments! cwd number comments))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} print-summary!
   [pr-number r]
   (let [d (:data r)
         applied   (count (:applied d))
@@ -78,63 +144,7 @@
                    {:cid (str (-> e :comment :comment/id))
                     :reason (str (:reason e))})))))
 
-(defn- print-failure!
-  [pr-number r]
-  (display/print-error
-   (messages/t :pr/policy-respond-failed
-               {:n pr-number
-                :code (str (get-in r [:error :code]))
-                :message (or (get-in r [:error :message]) "")})))
-
-;; ── infra helpers (worktree-scoped shell ops) ────────────────────────
-
-(defn- checkout-pr!
-  "Run `gh pr checkout <pr-number>` in `worktree-path`. Returns the
-   current branch on success, nil on failure."
-  [worktree-path pr-number]
-  (try
-    (let [r (process/shell {:dir (str worktree-path)
-                            :out :string :err :string :continue true}
-                           "gh" "pr" "checkout" (str pr-number))]
-      (when (zero? (:exit r))
-        (let [b (process/shell {:dir (str worktree-path)
-                                :out :string :err :string :continue true}
-                               "git" "branch" "--show-current")]
-          (when (zero? (:exit b))
-            (str/trim (:out b ""))))))
-    (catch Throwable _ nil)))
-
-(defn- fetch-comments
-  "Fetch the raw PR comments via the pr-lifecycle interface. Returns
-   the comments vector or nil on failure."
-  [worktree-path pr-number]
-  (let [r (pr-lifecycle/fetch-pr-comments worktree-path pr-number)]
-    (when (dag/ok? r)
-      (get-in r [:data :comments]))))
-
-;; ── pipeline steps ───────────────────────────────────────────────────
-;;
-;; Each step takes ctx, returns ctx. If ctx already carries `:error`
-;; the step is a no-op (early-bail) so downstream stages don't need
-;; per-step guards. Names match the operator's pipeline-style example.
-
-(defn- pr-policy-parse-url!
-  "Step 1: parse the operator-supplied URL, derive the PR number."
-  [{:keys [opts error] :as ctx}]
-  (if error
-    ctx
-    (let [url (:url opts)]
-      (cond
-        (or (nil? url) (str/blank? url))
-        (assoc ctx :error {:kind :usage})
-
-        :else
-        (let [{:keys [number]} (pr-lifecycle/parse-pr-url url)]
-          (if-not number
-            (assoc ctx :error {:kind :bad-url})
-            (assoc ctx :url url :number number)))))))
-
-(defn- pr-policy-checkout!
+(defn- ^{:stratum 1} pr-policy-checkout!
   "Step 2: switch the working tree to the PR branch via `gh pr checkout`."
   [{:keys [error number] :as ctx}]
   (if error
@@ -145,7 +155,7 @@
         (assoc ctx :cwd cwd :branch branch)
         (assoc ctx :error {:kind :checkout-failed :n number})))))
 
-(defn- pr-policy-fetch-comments!
+(defn- ^{:stratum 1} pr-policy-fetch-comments!
   "Step 3: pull every PR comment via pr-lifecycle."
   [{:keys [error cwd number branch] :as ctx}]
   (if error
@@ -156,17 +166,9 @@
         (assoc ctx :comments comments)
         (assoc ctx :error {:kind :fetch-failed :n number})))))
 
-(defn- pr-policy-respond!
-  "Step 4: hand off to the deterministic responder. Its DAG-result
-   becomes `:result` on the ctx — the finalize step decides whether
-   to render summary or failure."
-  [{:keys [error cwd number comments] :as ctx}]
-  (if error
-    ctx
-    (assoc ctx :result
-           (pr-lifecycle/respond-to-policy-comments! cwd number comments))))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- pr-policy-finalize!
+(defn- ^{:stratum 2} pr-policy-finalize!
   "Step 5: terminal render. Three exclusive branches in order:
    ctx-level error, responder-level error, success summary."
   [{:keys [error number result] :as ctx}]
@@ -176,9 +178,10 @@
     :else               (print-summary! number result))
   ctx)
 
-;; ── command entry ────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 3
 
-(defn pr-policy-respond-cmd
+;; ── command entry ────────────────────────────────────────────────────
+(defn ^{:stratum 3} pr-policy-respond-cmd
   "CLI entry for `bb miniforge pr policy-respond <pr-url>`.
 
    Pipeline: parse-url → checkout → fetch-comments → respond → finalize.

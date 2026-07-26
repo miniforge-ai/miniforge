@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.cli.main.commands.init
   "Init command — analyze a repository and write .miniforge/config.edn.
 
@@ -18,12 +17,13 @@
    [clojure.pprint :as pprint]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Pure data + helpers with no in-namespace dependencies.
+(def ^{:stratum 0} ^:private config-dir ".miniforge")
 
-(def ^:private config-dir ".miniforge")
-(def ^:private config-file "config.edn")
+(def ^{:stratum 0} ^:private config-file "config.edn")
 
-(defn- format-config
+(defn- ^{:stratum 0} format-config
   "Format a repo config map as pretty-printed EDN with a header comment."
   [config]
   (str ";; Miniforge repository configuration\n"
@@ -31,7 +31,7 @@
        ";; See: work/repo-config-profile.spec.edn\n\n"
        (with-out-str (pprint/pprint config))))
 
-(defn- build-config
+(defn- ^{:stratum 0} build-config
   "Build the .miniforge/config.edn map from analysis results."
   [analysis]
   (cond-> {:repo/technologies (:technologies analysis)
@@ -39,7 +39,7 @@
     (:git-host analysis)
     (assoc :repo/host (:git-host analysis))))
 
-(defn- print-analysis
+(defn- ^{:stratum 0} print-analysis
   "Print the analysis results to the user."
   [analysis]
   (display/print-info (messages/t :init/analysis-technologies
@@ -51,14 +51,14 @@
                                   {:value (pr-str (:packs analysis))})))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0 path constants.
 
-(def ^:private config-path (str config-dir "/" config-file))
+;; Composes Layer 0 path constants.
+(def ^{:stratum 1} ^:private config-path (str config-dir "/" config-file))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Composes Layer 1.
 
-(defn- write-config!
+;; Composes Layer 1.
+(defn- ^{:stratum 2} write-config!
   "Write the config file. Returns the path written."
   [repo-path config]
   (let [dir  (fs/path repo-path config-dir)
@@ -68,9 +68,9 @@
     (str path)))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Command entry point
 
-(defn init-cmd
+;; Command entry point
+(defn ^{:stratum 3} init-cmd
   "CLI entry point for the init command."
   [opts]
   (let [repo-path (get opts :repo (str (fs/cwd)))]

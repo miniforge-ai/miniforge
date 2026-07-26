@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.help.registry
   "Pure data registry of every workflow-runner CLI subcommand
    (`workflow run/list/execute/status/cancel` and `chain run/list`).
@@ -36,17 +35,33 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private help-flag-spec
+(def ^{:stratum 0} ^:private help-flag-spec
   "The `--help`/`-h` boolean flag added to every workflow-runner
    subcommand spec. Single definition keeps the alias consistent."
   {:coerce :boolean :alias :h})
 
-(defn with-help-flag
+(def ^{:stratum 0} workflow-subcommand-keys
+  "Display order for `mf workflow --help`."
+  [:workflow-run :workflow-list :workflow-execute :workflow-status
+   :workflow-inspect :workflow-cancel :workflow-gc-scratch])
+
+(def ^{:stratum 0} chain-subcommand-keys
+  "Display order for `mf chain --help`."
+  [:chain-run :chain-list])
+
+(defn- ^{:stratum 0} subcommand-leaf [entry]
+  (-> (:subcommand entry) (str/split #"\s+") last))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-help-flag
   "Return `spec` with the `--help`/`-h` boolean flag merged in. Idempotent."
   [spec]
   (assoc spec :help help-flag-spec))
 
-(def workflow-run-flag-spec
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} workflow-run-flag-spec
   (with-help-flag
     {:version       {:coerce :string  :alias :v :default "latest"}
      :input         {:alias :i}
@@ -55,43 +70,43 @@
      :quiet         {:coerce :boolean :alias :q}
      :dashboard-url {:coerce :string  :alias :d}}))
 
-(def workflow-list-flag-spec
+(def ^{:stratum 2} workflow-list-flag-spec
   (with-help-flag {}))
 
-(def workflow-execute-flag-spec
+(def ^{:stratum 2} workflow-execute-flag-spec
   (with-help-flag
     {:worktree       {:alias :w}
      :backend        {:coerce :keyword :alias :b}
      :execution-mode {:coerce :keyword :alias :m}
      :quiet          {:coerce :boolean :alias :q}}))
 
-(def workflow-status-flag-spec
+(def ^{:stratum 2} workflow-status-flag-spec
   (with-help-flag {}))
 
-(def workflow-inspect-flag-spec
+(def ^{:stratum 2} workflow-inspect-flag-spec
   (with-help-flag {}))
 
-(def workflow-cancel-flag-spec
+(def ^{:stratum 2} workflow-cancel-flag-spec
   (with-help-flag {}))
 
-(def workflow-gc-scratch-flag-spec
+(def ^{:stratum 2} workflow-gc-scratch-flag-spec
   (with-help-flag
     {:max-age-days {:coerce :int :alias :a :default 7}
      :repo-path    {:coerce :string :alias :r}}))
 
-(def chain-run-flag-spec
+(def ^{:stratum 2} chain-run-flag-spec
   (with-help-flag
     {:version    {:coerce :string :alias :v :default "latest"}
      :spec       {:alias :s}
      :input-json {}
      :quiet      {:coerce :boolean :alias :q}}))
 
-(def chain-list-flag-spec
+(def ^{:stratum 2} chain-list-flag-spec
   (with-help-flag {}))
 
-;------------------------------------------------------------------------------ Layer 1
+;------------------------------------------------------------------------------ Layer 3
 
-(def subcommands
+(def ^{:stratum 3} subcommands
   "Keyword-addressable registry of every workflow-runner subcommand.
    Each value is the input shape consumed by the help renderer."
   {:workflow-run     {:subcommand  "workflow run"
@@ -131,45 +146,35 @@
                       :spec        chain-list-flag-spec
                       :positional  []}})
 
-(def workflow-subcommand-keys
-  "Display order for `mf workflow --help`."
-  [:workflow-run :workflow-list :workflow-execute :workflow-status
-   :workflow-inspect :workflow-cancel :workflow-gc-scratch])
+;------------------------------------------------------------------------------ Layer 4
 
-(def chain-subcommand-keys
-  "Display order for `mf chain --help`."
-  [:chain-run :chain-list])
-
-(defn spec-for
+(defn ^{:stratum 4} spec-for
   "Look up the babashka.cli `:spec` for a subcommand by key."
   [subcommand-key]
   (:spec (get subcommands subcommand-key)))
 
-(defn entry-for
+(defn ^{:stratum 4} entry-for
   "Look up the full registry entry for `subcommand-key`. Returns nil
    when unknown — callers may treat that as a programming error."
   [subcommand-key]
   (get subcommands subcommand-key))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- subcommand-leaf [entry]
-  (-> (:subcommand entry) (str/split #"\s+") last))
-
-(defn- group-subcommand-rows [entry-keys]
+(defn- ^{:stratum 4} group-subcommand-rows [entry-keys]
   (map (fn [entry-key]
          (let [entry (get subcommands entry-key)]
            {:name        (subcommand-leaf entry)
             :summary-key (:summary-key entry)}))
        entry-keys))
 
-(def workflow-group-help
+;------------------------------------------------------------------------------ Layer 5
+
+(def ^{:stratum 5} workflow-group-help
   "Input shape for the `workflow` parent's `--help` listing."
   {:group       "workflow"
    :summary-key :workflow-runner.help/workflow-summary
    :subcommands (group-subcommand-rows workflow-subcommand-keys)})
 
-(def chain-group-help
+(def ^{:stratum 5} chain-group-help
   "Input shape for the `chain` parent's `--help` listing."
   {:group       "chain"
    :summary-key :workflow-runner.help/chain-summary

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.events
   "CLI `events show <workflow-id>` subcommand.
 
@@ -42,24 +41,24 @@
    [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:private default-gap-threshold-secs
+;; Constants
+(def ^{:stratum 0} ^:private default-gap-threshold-secs
   "Gap detection threshold in seconds used when --gap-threshold is absent."
   60)
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Pure helpers
 
-(defn- gap-threshold-ms
+;; Pure helpers
+(defn- ^{:stratum 1} gap-threshold-ms
   "Convert a seconds threshold to milliseconds, falling back to the default."
   [threshold-secs]
   (* (or threshold-secs default-gap-threshold-secs) 1000))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Core (testable) implementation
 
-(defn events-show
+;; Core (testable) implementation
+(defn ^{:stratum 2} events-show
   "Read and render the event log for `workflow-id` under `base-dir`.
 
    Arguments:
@@ -114,9 +113,9 @@
        :exit-code 1})))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; CLI command entry point
 
-(defn events-show-cmd
+;; CLI command entry point
+(defn ^{:stratum 3} events-show-cmd
   "CLI handler for `miniforge events show <workflow-id>`.
 
    Accepted opts (injected by babashka.cli dispatch):

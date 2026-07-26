@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-monitor-test
   "Unit tests for pr-monitor-cmd's worklist-resume and fresh-monitor paths.
 
@@ -40,14 +39,14 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fixtures
 
-(def ^:private cli-cfg
+;; Fixtures
+(def ^{:stratum 0} ^:private cli-cfg
   {:default-self-author "miniforge[bot]"
    :min-poll-interval-s 5
    :max-poll-interval-s 3600})
 
-(def ^:private open-pr-entry
+(def ^{:stratum 0} ^:private open-pr-entry
   {:pr/url                 "https://github.com/org/repo/pull/42"
    :pr/number              42
    :pr/repo                "org/repo"
@@ -55,31 +54,26 @@
    :pr/poll-interval       60
    :pr/abandon-after-hours 72})
 
-(def ^:private sample-worklist
-  {:worklist/repo-key   "abc123def456"
-   :worklist/prs        [open-pr-entry]
-   :worklist/updated-at (java.util.Date.)})
+(defn- ^{:stratum 0} exit-ex [code] (ex-info "exit!" {:code code}))
 
-(defn- exit-ex [code] (ex-info "exit!" {:code code}))
-
-(defn- capturing-msgs
+(defn- ^{:stratum 0} capturing-msgs
   "display/print-* stub that records every string."
   []
   (let [msgs (atom [])]
     {:msgs msgs :fn (fn [msg] (swap! msgs conj msg))}))
 
-(defn- fake-monitor
+(defn- ^{:stratum 0} fake-monitor
   "Atom that mimics a monitor state atom with a populated poll-interval."
   []
   (atom {:config {:poll-interval-ms 60000}}))
 
-(defn- noop-t
+(defn- ^{:stratum 0} noop-t
   "messages/t stub: returns a string embedding the key name so tests can
    check which key was used without loading the full message catalog."
   ([k]   (name k))
   ([k _] (name k)))
 
-(defn- run-cmd
+(defn- ^{:stratum 0} run-cmd
   "Call sut/pr-monitor-cmd, catching exit! exceptions. Returns the exit code
    when exit! was called, or nil for a normal return."
   [opts]
@@ -91,9 +85,14 @@
         (:code (ex-data e))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; (d) No remote URL → exit 1
 
-(deftest no-remote-url-exits-1-test
+(def ^{:stratum 1} ^:private sample-worklist
+  {:worklist/repo-key   "abc123def456"
+   :worklist/prs        [open-pr-entry]
+   :worklist/updated-at (java.util.Date.)})
+
+;; (d) No remote URL → exit 1
+(deftest ^{:stratum 1} no-remote-url-exits-1-test
   (testing "exits 1 when git remote get-url origin fails"
     (let [{errors :msgs err-fn :fn} (capturing-msgs)]
       (with-redefs [sut/remote-origin-url     (constantly nil)
@@ -104,10 +103,8 @@
         (is (= 1 (run-cmd {:repo "/some/repo"}))))
       (is (= 1 (count @errors))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; (c) No work-list on disk → exit 1
-
-(deftest no-worklist-exits-1-test
+(deftest ^{:stratum 1} no-worklist-exits-1-test
   (testing "exits 1 when load-worklist returns a failure result"
     (let [{errors :msgs err-fn :fn} (capturing-msgs)]
       (with-redefs [sut/remote-origin-url        (constantly "https://github.com/org/repo.git")
@@ -122,10 +119,34 @@
         (is (= 1 (run-cmd {:repo "/some/repo"}))))
       (is (= 1 (count @errors))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; (b) All PRs pruned → returns normally (exit 0 by default)
+(deftest ^{:stratum 1} fresh-author-path-skips-worklist-test
+  (testing "(g) --author starts a fresh monitor and never loads a work-list (Copilot #1209)"
+    (let [loaded?           (atom false)
+          monitor-opts-seen (atom nil)
+          loop-author       (atom nil)
+          mon               (fake-monitor)]
+      (with-redefs [pr-lifecycle/load-worklist        (fn [_]
+                                                        (reset! loaded? true)
+                                                        (schema/failure :worklist "should not be called"))
+                    pr-lifecycle/create-pr-monitor    (fn [opts] (reset! monitor-opts-seen opts) mon)
+                    pr-lifecycle/run-pr-monitor-loop  (fn [_monitor author]
+                                                        (reset! loop-author author)
+                                                        {:comments-received 0})
+                    pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
+                    app-config/pr-monitor-config      (constantly cli-cfg)
+                    display/print-info                (fn [_] nil)
+                    display/print-error               (fn [_] nil)
+                    messages/t                        noop-t]
+        (run-cmd {:author "alice" :repo "/some/repo"}))
+      (is (false? @loaded?) "fresh --author path must NOT load a work-list")
+      (is (= "alice" @loop-author) "monitors the supplied author")
+      (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
+      (is (= "alice" (:self-author @monitor-opts-seen))))))
 
-(deftest empty-worklist-after-prune-returns-normally-test
+;------------------------------------------------------------------------------ Layer 2
+
+;; (b) All PRs pruned → returns normally (exit 0 by default)
+(deftest ^{:stratum 2} empty-worklist-after-prune-returns-normally-test
   (testing "prints status and returns without calling exit! when all PRs are closed"
     (let [{infos :msgs info-fn :fn}  (capturing-msgs)
           pruned-wl                   (assoc sample-worklist :worklist/prs [])]
@@ -144,10 +165,8 @@
       (is (some #(.contains % "monitor-worklist-empty") @infos)
           "should print the empty-worklist key"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; (e) Prune returns anomaly → exit 1
-
-(deftest prune-anomaly-exits-1-test
+(deftest ^{:stratum 2} prune-anomaly-exits-1-test
   (testing "exits 1 when prune-closed-prs returns an anomaly"
     (let [{errors :msgs err-fn :fn} (capturing-msgs)
           gh-fail                    (anomaly/anomaly :fault "gh cli failed" {})]
@@ -165,10 +184,8 @@
         (is (= 1 (run-cmd {:repo "/some/repo"}))))
       (is (= 1 (count @errors))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; (f) Author unresolvable → exit 1
-
-(deftest nil-author-exits-1-test
+(deftest ^{:stratum 2} nil-author-exits-1-test
   (testing "exits 1 when neither gh api user nor default-self-author yields an author"
     (let [{errors :msgs err-fn :fn} (capturing-msgs)]
       (with-redefs [sut/remote-origin-url        (constantly "https://github.com/org/repo.git")
@@ -187,10 +204,8 @@
         (is (= 1 (run-cmd {:repo "/some/repo"}))))
       (is (= 1 (count @errors))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; (a) Open PRs in worklist → monitor created and loop runs
-
-(deftest resume-from-worklist-runs-monitor-test
+(deftest ^{:stratum 2} resume-from-worklist-runs-monitor-test
   (testing "creates monitor with worklist-derived poll-interval and runs loop"
     (let [monitor-opts-seen (atom nil)
           loop-ran          (atom false)
@@ -224,30 +239,6 @@
       (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
       (is (= (* 60 1000) (:poll-interval-ms @monitor-opts-seen))
           "poll-interval-ms should derive from the PR entry's :pr/poll-interval (60 s)"))))
-
-(deftest fresh-author-path-skips-worklist-test
-  (testing "(g) --author starts a fresh monitor and never loads a work-list (Copilot #1209)"
-    (let [loaded?           (atom false)
-          monitor-opts-seen (atom nil)
-          loop-author       (atom nil)
-          mon               (fake-monitor)]
-      (with-redefs [pr-lifecycle/load-worklist        (fn [_]
-                                                        (reset! loaded? true)
-                                                        (schema/failure :worklist "should not be called"))
-                    pr-lifecycle/create-pr-monitor    (fn [opts] (reset! monitor-opts-seen opts) mon)
-                    pr-lifecycle/run-pr-monitor-loop  (fn [_monitor author]
-                                                        (reset! loop-author author)
-                                                        {:comments-received 0})
-                    pr-lifecycle/stop-pr-monitor-loop (fn [_] nil)
-                    app-config/pr-monitor-config      (constantly cli-cfg)
-                    display/print-info                (fn [_] nil)
-                    display/print-error               (fn [_] nil)
-                    messages/t                        noop-t]
-        (run-cmd {:author "alice" :repo "/some/repo"}))
-      (is (false? @loaded?) "fresh --author path must NOT load a work-list")
-      (is (= "alice" @loop-author) "monitors the supplied author")
-      (is (= "/some/repo" (:worktree-path @monitor-opts-seen)))
-      (is (= "alice" (:self-author @monitor-opts-seen))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.cli.main.commands.pr-monitor-test)

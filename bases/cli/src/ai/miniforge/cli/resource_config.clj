@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.resource-config
   "Helpers for resource-backed CLI configuration and messages."
   (:require
@@ -23,9 +22,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Resource loading
 
-(defn resource-precedence
+;; Resource loading
+(defn ^{:stratum 0} resource-precedence
   "Sort classpath resources so base defaults load before component/project overrides."
   [resource]
   (let [path (str resource)]
@@ -35,11 +34,13 @@
       (str/includes? path "/projects/") 2
       :else 3)))
 
-(defn read-edn-resource
+(defn ^{:stratum 0} read-edn-resource
   [resource]
   (-> resource slurp edn/read-string))
 
-(defn merged-resource-config
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} merged-resource-config
   "Load and merge EDN resources from the classpath.
 
    `section-key` extracts the relevant sub-map from each resource when provided."
