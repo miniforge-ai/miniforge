@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.stream-recovery
   "Resume-on-kill logic: decide resume vs failover vs abort after a watchdog kill.
 
@@ -45,10 +44,10 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.self-healing.backend-health :as backend-health]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Backend-specific CLI metadata
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private backend-resume-flags
+;; Backend-specific CLI metadata
+(def ^{:stratum 0} ^:private backend-resume-flags
   "Map of backend keyword → CLI flag used to resume a prior session."
   {:anthropic   "--resume"
    :claude-code "--resume"
@@ -57,7 +56,7 @@
    :ollama      "--continue"
    :google      "--resume"})
 
-(def ^:private backend-binaries
+(def ^{:stratum 0} ^:private backend-binaries
   "Map of backend keyword → actual CLI binary name."
   {:anthropic   "claude"
    :claude-code "claude"
@@ -66,67 +65,8 @@
    :ollama      "ollama"
    :google      "gemini"})
 
-(defn resume-flag-for
-  "Return the backend-specific CLI resume flag.
-
-   Arguments:
-     backend - Keyword backend name
-
-   Returns: String CLI flag (defaults to \"--resume\")"
-  [backend]
-  (get backend-resume-flags (keyword backend) "--resume"))
-
-(defn- binary-for
-  "Return the CLI binary name for a backend.
-
-   Arguments:
-     backend - Keyword (or anything `clojure.lang.Named`) backend identifier.
-               Must be non-nil; nil/non-Named values return an anomaly rather
-               than producing a downstream NPE inside execute-resume!'s
-               ProcessBuilder.
-
-   Returns: String binary name (defaults to (name backend)) or anomaly map."
-  [backend]
-  (cond
-    (nil? backend)
-    (response/make-anomaly :anomalies/incorrect
-                           "binary-for: backend must not be nil"
-                           {:stream-recovery/backend backend})
-
-    (not (instance? clojure.lang.Named backend))
-    (response/make-anomaly :anomalies/incorrect
-                           "binary-for: backend must be a keyword or symbol"
-                           {:stream-recovery/backend backend
-                            :stream-recovery/type    (type backend)})
-
-    :else
-    (get backend-binaries (keyword backend) (name backend))))
-
-(defn build-resume-command
-  "Build the full CLI command vector to resume an agent session.
-
-   Arguments:
-     backend    - Keyword backend name (:anthropic, :openai, etc.)
-     session-id - String session identifier to resume
-     extra-args - Optional seq of additional CLI arguments
-
-   Returns: Vector of strings, e.g. [\"claude\" \"--resume\" \"<sid>\"],
-   or an anomaly map when backend input is invalid."
-  ([backend session-id]
-   (build-resume-command backend session-id []))
-  ([backend session-id extra-args]
-   (let [backend-key (if (string? backend) (keyword backend) backend)
-         binary      (binary-for backend-key)]
-     (if (response/anomaly-map? binary)
-       binary
-       (let [backend-kw (keyword backend-key)
-             flag       (resume-flag-for backend-kw)]
-         (into [binary flag (str session-id)] extra-args))))))
-
-;;------------------------------------------------------------------------------ Layer 1
 ;; Process management (isolated for testability)
-
-(defn- start-process!
+(defn- ^{:stratum 0} start-process!
   "Launch a subprocess from a command vector.
    Propagates java.io.IOException — caller is responsible for catching.
 
@@ -139,10 +79,8 @@
       (.inheritIO)
       (.start)))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Shared failover helper
-
-(defn- perform-failover
+(defn- ^{:stratum 0} perform-failover
   "Record the current backend as unhealthy, select a candidate from
    allowed-failover-backends via backend-health/select-best-backend,
    trigger a switch, and return the decision map.
@@ -172,10 +110,46 @@
         {:action :abort
          :reason "no healthy backends"}))))
 
-;;------------------------------------------------------------------------------ Layer 3
-;; Core decision function
+;------------------------------------------------------------------------------ Layer 1
 
-(defn evaluate-stall-recovery
+(defn ^{:stratum 1} resume-flag-for
+  "Return the backend-specific CLI resume flag.
+
+   Arguments:
+     backend - Keyword backend name
+
+   Returns: String CLI flag (defaults to \"--resume\")"
+  [backend]
+  (get backend-resume-flags (keyword backend) "--resume"))
+
+(defn- ^{:stratum 1} binary-for
+  "Return the CLI binary name for a backend.
+
+   Arguments:
+     backend - Keyword (or anything `clojure.lang.Named`) backend identifier.
+               Must be non-nil; nil/non-Named values return an anomaly rather
+               than producing a downstream NPE inside execute-resume!'s
+               ProcessBuilder.
+
+   Returns: String binary name (defaults to (name backend)) or anomaly map."
+  [backend]
+  (cond
+    (nil? backend)
+    (response/make-anomaly :anomalies/incorrect
+                           "binary-for: backend must not be nil"
+                           {:stream-recovery/backend backend})
+
+    (not (instance? clojure.lang.Named backend))
+    (response/make-anomaly :anomalies/incorrect
+                           "binary-for: backend must be a keyword or symbol"
+                           {:stream-recovery/backend backend
+                            :stream-recovery/type    (type backend)})
+
+    :else
+    (get backend-binaries (keyword backend) (name backend))))
+
+;; Core decision function
+(defn ^{:stratum 1} evaluate-stall-recovery
   "Decide whether to resume, failover, or abort after a watchdog kill.
 
    Side effects on :failover path:
@@ -303,10 +277,33 @@
            :reason   "degenerate hang-count and no resumable session"
            :anomaly? true}))))))
 
-;;------------------------------------------------------------------------------ Layer 4
-;; Public subprocess restart
+;------------------------------------------------------------------------------ Layer 2
 
-(defn execute-resume!
+(defn ^{:stratum 2} build-resume-command
+  "Build the full CLI command vector to resume an agent session.
+
+   Arguments:
+     backend    - Keyword backend name (:anthropic, :openai, etc.)
+     session-id - String session identifier to resume
+     extra-args - Optional seq of additional CLI arguments
+
+   Returns: Vector of strings, e.g. [\"claude\" \"--resume\" \"<sid>\"],
+   or an anomaly map when backend input is invalid."
+  ([backend session-id]
+   (build-resume-command backend session-id []))
+  ([backend session-id extra-args]
+   (let [backend-key (if (string? backend) (keyword backend) backend)
+         binary      (binary-for backend-key)]
+     (if (response/anomaly-map? binary)
+       binary
+       (let [backend-kw (keyword backend-key)
+             flag       (resume-flag-for backend-kw)]
+         (into [binary flag (str session-id)] extra-args))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Public subprocess restart
+(defn ^{:stratum 3} execute-resume!
   "Restart an agent subprocess using the backend-specific resume flag.
 
    Constructs a command of the form:
@@ -346,7 +343,6 @@
             :cmd              cmd}))))))
 
 ;;------------------------------------------------------------------------------ Rich comment
-
 (comment
   ;; First stall: resume (backend healthy)
   (let [hang (atom 1)]
@@ -373,4 +369,5 @@
 
   ;; Build command without launching a process
   (build-resume-command :anthropic "sess-xyz" ["--timeout" "120"]))
-  ;; => ["claude" "--resume" "sess-xyz" "--timeout" "120"]
+
+;; => ["claude" "--resume" "sess-xyz" "--timeout" "120"]

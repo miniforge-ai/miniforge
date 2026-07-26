@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.workaround-registry-test
   "Unit tests for workaround registry."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
@@ -23,35 +22,20 @@
             [ai.miniforge.config.interface :as config]
             [ai.miniforge.self-healing.workaround-registry :as registry]))
 
-;;------------------------------------------------------------------------------ Test fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def test-registry-path
+;;------------------------------------------------------------------------------ Test fixtures
+(def ^{:stratum 0} test-registry-path
   (str (config/miniforge-home) "/test_workarounds.edn"))
 
-(defn cleanup-test-registry
-  [f]
-  (with-redefs [registry/workaround-registry-path (constantly test-registry-path)]
-    (try
-      ;; Clean before test to ensure isolation
-      (when (.exists (io/file test-registry-path))
-        (.delete (io/file test-registry-path)))
-      (f)
-      (finally
-        (when (.exists (io/file test-registry-path))
-          (.delete (io/file test-registry-path)))))))
-
-(use-fixtures :each cleanup-test-registry)
-
-;;------------------------------------------------------------------------------ Layer 0 Tests
 ;; Basic load/save operations
-
-(deftest test-load-workarounds-empty
+(deftest ^{:stratum 0} test-load-workarounds-empty
   (testing "Load workarounds from non-existent file returns empty registry"
     (let [result (registry/load-workarounds)]
       (is (map? result))
       (is (= [] (:workarounds result))))))
 
-(deftest test-save-and-load-roundtrip
+(deftest ^{:stratum 0} test-save-and-load-roundtrip
   (testing "Save and load workarounds roundtrip"
     (let [data {:workarounds [{:id (java.util.UUID/randomUUID)
                                :error-pattern-id :test-pattern
@@ -66,10 +50,8 @@
         (is (= 1 (count (:workarounds loaded))))
         (is (= :test-pattern (-> loaded :workarounds first :error-pattern-id)))))))
 
-;;------------------------------------------------------------------------------ Layer 1 Tests
 ;; Add workaround
-
-(deftest test-add-workaround
+(deftest ^{:stratum 0} test-add-workaround
   (testing "Add workaround generates ID and timestamps"
     (let [workaround {:error-pattern-id :anthropic-rate-limit
                       :description "Retry with exponential backoff"
@@ -85,7 +67,7 @@
       (is (some? (:discovered-at result)))
       (is (nil? (:last-used result))))))
 
-(deftest test-add-workaround-with-id
+(deftest ^{:stratum 0} test-add-workaround-with-id
   (testing "Add workaround preserves provided ID"
     (let [id (java.util.UUID/randomUUID)
           workaround {:id id
@@ -96,10 +78,8 @@
           result (registry/add-workaround! workaround)]
       (is (= id (:id result))))))
 
-;;------------------------------------------------------------------------------ Layer 2 Tests
 ;; Update statistics
-
-(deftest test-update-workaround-stats-success
+(deftest ^{:stratum 0} test-update-workaround-stats-success
   (testing "Update workaround stats on success"
     (let [workaround (registry/add-workaround!
                       {:error-pattern-id :test-pattern
@@ -113,7 +93,7 @@
       (is (= 1.0 (:confidence updated)))
       (is (some? (:last-used updated))))))
 
-(deftest test-update-workaround-stats-failure
+(deftest ^{:stratum 0} test-update-workaround-stats-failure
   (testing "Update workaround stats on failure"
     (let [workaround (registry/add-workaround!
                       {:error-pattern-id :test-pattern
@@ -126,7 +106,7 @@
       (is (= 1 (:failure-count updated)))
       (is (= 0.0 (:confidence updated))))))
 
-(deftest test-update-workaround-stats-confidence
+(deftest ^{:stratum 0} test-update-workaround-stats-confidence
   (testing "Update workaround stats calculates confidence correctly"
     (let [workaround (registry/add-workaround!
                       {:error-pattern-id :test-pattern
@@ -144,15 +124,13 @@
         (is (= 1 (:failure-count updated)))
         (is (= 0.75 (:confidence updated)))))))
 
-(deftest test-update-workaround-stats-not-found
+(deftest ^{:stratum 0} test-update-workaround-stats-not-found
   (testing "Update workaround stats returns nil for non-existent ID"
     (let [result (registry/update-workaround-stats! (java.util.UUID/randomUUID) true)]
       (is (nil? result)))))
 
-;;------------------------------------------------------------------------------ Layer 3 Tests
 ;; Query operations
-
-(deftest test-get-workaround-by-pattern
+(deftest ^{:stratum 0} test-get-workaround-by-pattern
   (testing "Get workaround by pattern ID"
     (registry/add-workaround!
      {:error-pattern-id :pattern-1
@@ -169,12 +147,12 @@
       (is (= :pattern-1 (:error-pattern-id result)))
       (is (= "Test 1" (:description result))))))
 
-(deftest test-get-workaround-by-pattern-not-found
+(deftest ^{:stratum 0} test-get-workaround-by-pattern-not-found
   (testing "Get workaround by pattern returns nil for non-existent pattern"
     (let [result (registry/get-workaround-by-pattern :non-existent)]
       (is (nil? result)))))
 
-(deftest test-get-high-confidence-workarounds
+(deftest ^{:stratum 0} test-get-high-confidence-workarounds
   (testing "Get high-confidence workarounds filters by confidence >= 0.8"
     (let [wa1 (registry/add-workaround!
                {:error-pattern-id :high-conf
@@ -200,7 +178,7 @@
         (is (= 1 (count high-conf)))
         (is (= :high-conf (-> high-conf first :error-pattern-id)))))))
 
-(deftest test-get-all-workarounds
+(deftest ^{:stratum 0} test-get-all-workarounds
   (testing "Get all workarounds returns complete list"
     (registry/add-workaround!
      {:error-pattern-id :pattern-1
@@ -215,7 +193,7 @@
     (let [all (registry/get-all-workarounds)]
       (is (= 2 (count all))))))
 
-(deftest test-delete-workaround
+(deftest ^{:stratum 0} test-delete-workaround
   (testing "Delete workaround removes it from registry"
     (let [workaround (registry/add-workaround!
                       {:error-pattern-id :to-delete
@@ -227,7 +205,23 @@
       (is (true? deleted?))
       (is (nil? (registry/get-workaround-by-pattern :to-delete))))))
 
-(deftest test-delete-workaround-not-found
+(deftest ^{:stratum 0} test-delete-workaround-not-found
   (testing "Delete non-existent workaround returns nil"
     (let [result (registry/delete-workaround! (java.util.UUID/randomUUID))]
       (is (nil? result)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cleanup-test-registry
+  [f]
+  (with-redefs [registry/workaround-registry-path (constantly test-registry-path)]
+    (try
+      ;; Clean before test to ensure isolation
+      (when (.exists (io/file test-registry-path))
+        (.delete (io/file test-registry-path)))
+      (f)
+      (finally
+        (when (.exists (io/file test-registry-path))
+          (.delete (io/file test-registry-path)))))))
+
+(use-fixtures :each cleanup-test-registry)

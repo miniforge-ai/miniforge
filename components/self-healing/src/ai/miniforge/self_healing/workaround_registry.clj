@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.workaround-registry
   "Persistent registry of known vendor bug workarounds.
    Storage: ~/.miniforge/known_workarounds.edn"
@@ -23,10 +22,10 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; File paths and utilities
+;------------------------------------------------------------------------------ Layer 0
 
-(defn workaround-registry-path
+;; File paths and utilities
+(defn ^{:stratum 0} workaround-registry-path
   "Get path to workaround registry file.
 
    Returns: String path to ~/.miniforge/known_workarounds.edn"
@@ -35,7 +34,7 @@
         miniforge-dir (io/file home ".miniforge")]
     (.getPath (io/file miniforge-dir "known_workarounds.edn"))))
 
-(defn ensure-directory-exists
+(defn ^{:stratum 0} ensure-directory-exists
   "Ensure parent directory exists for a file path.
 
    Arguments:
@@ -47,7 +46,7 @@
     (when-not (.exists parent-dir)
       (.mkdirs parent-dir))))
 
-(defn safe-read-edn
+(defn ^{:stratum 0} safe-read-edn
   "Safely read EDN from file, returning default on error.
 
    Arguments:
@@ -62,7 +61,9 @@
     (catch Exception _
       default)))
 
-(defn atomic-write-edn
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} atomic-write-edn
   "Atomically write EDN to file using temp file + rename.
 
    Arguments:
@@ -76,10 +77,8 @@
     (spit temp-file (pr-str data))
     (.renameTo (io/file temp-file) (io/file file-path))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Workaround registry operations
-
-(defn load-workarounds
+(defn ^{:stratum 1} load-workarounds
   "Load workarounds from persistent storage.
 
    Returns: Map with :workarounds vector"
@@ -87,7 +86,9 @@
   (or (safe-read-edn (workaround-registry-path) nil)
       {:workarounds []}))
 
-(defn save-workarounds!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} save-workarounds!
   "Save workarounds to persistent storage.
 
    Arguments:
@@ -97,7 +98,37 @@
   [workarounds-data]
   (atomic-write-edn (workaround-registry-path) workarounds-data))
 
-(defn add-workaround!
+(defn ^{:stratum 2} get-workaround-by-pattern
+  "Get workaround matching an error pattern ID.
+
+   Arguments:
+     error-pattern-id - Keyword pattern ID
+
+   Returns: Workaround map or nil if not found"
+  [error-pattern-id]
+  (let [registry (load-workarounds)]
+    (first (filter #(= (:error-pattern-id %) error-pattern-id)
+                   (:workarounds registry)))))
+
+(defn ^{:stratum 2} get-high-confidence-workarounds
+  "Get all workarounds with confidence >= 0.8.
+
+   Returns: Vector of high-confidence workaround maps"
+  []
+  (let [registry (load-workarounds)]
+    (vec (filter #(>= (:confidence %) 0.8)
+                 (:workarounds registry)))))
+
+(defn ^{:stratum 2} get-all-workarounds
+  "Get all workarounds from registry.
+
+   Returns: Vector of all workaround maps"
+  []
+  (:workarounds (load-workarounds)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} add-workaround!
   "Add a new workaround to the registry.
 
    Arguments:
@@ -125,7 +156,7 @@
      (update registry :workarounds conj new-workaround))
     new-workaround))
 
-(defn update-workaround-stats!
+(defn ^{:stratum 3} update-workaround-stats!
   "Update success/failure statistics for a workaround.
 
    Arguments:
@@ -154,35 +185,7 @@
         (save-workarounds! (assoc registry :workarounds new-workarounds))
         updated))))
 
-(defn get-workaround-by-pattern
-  "Get workaround matching an error pattern ID.
-
-   Arguments:
-     error-pattern-id - Keyword pattern ID
-
-   Returns: Workaround map or nil if not found"
-  [error-pattern-id]
-  (let [registry (load-workarounds)]
-    (first (filter #(= (:error-pattern-id %) error-pattern-id)
-                   (:workarounds registry)))))
-
-(defn get-high-confidence-workarounds
-  "Get all workarounds with confidence >= 0.8.
-
-   Returns: Vector of high-confidence workaround maps"
-  []
-  (let [registry (load-workarounds)]
-    (vec (filter #(>= (:confidence %) 0.8)
-                 (:workarounds registry)))))
-
-(defn get-all-workarounds
-  "Get all workarounds from registry.
-
-   Returns: Vector of all workaround maps"
-  []
-  (:workarounds (load-workarounds)))
-
-(defn delete-workaround!
+(defn ^{:stratum 3} delete-workaround!
   "Delete a workaround from the registry.
 
    Arguments:

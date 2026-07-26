@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.backend-health
   "Backend health tracking and automatic failover.
    Storage: ~/.miniforge/backend_health.edn"
@@ -24,9 +23,9 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Tuning constants + file paths
+;------------------------------------------------------------------------------ Layer 0
 
+;; Tuning constants + file paths
 ;; Backend failover policy is operational config — the allow-list /
 ;; failover order and the health thresholds are operator policy, tuned
 ;; without a code release. Active values live in
@@ -34,41 +33,15 @@
 ;; below are the fallback when config is absent. `config` is public so the
 ;; sibling stream-recovery / integration namespaces resolve the same
 ;; defaults instead of re-hardcoding them.
-(def config
+(def ^{:stratum 0} config
   (cfg/load-config-resource "config/self-healing/backend-health.edn"
                             [:success-rate-threshold :switch-cooldown-ms
                              :failure-recency-window-ms
                              :health-decay-ms :default-backend
                              :fallback-order]))
 
-(def ^:private default-success-rate-threshold
-  "Minimum cumulative success rate (`:successful-calls / :total-calls`)
-   before a backend is considered degraded and a failover is triggered.
-   0.90 = at most 1 failure per 10 cumulative calls tolerated; below
-   that the backend is skipped in favor of a healthier one. Picked to
-   absorb transient single failures without flapping. (Note: the rate
-   is cumulative since last decay, not a sliding window — `maybe-decay-health`
-   resets the counters wholesale after 24h of stale data.)"
-  (:success-rate-threshold config))
-
-(def ^:private default-switch-cooldown-ms
-  "Minimum interval between automatic backend switches (30 min). After
-   a switch fires, the FROM backend is parked for this long even if its
-   success rate recovers — prevents two flaky backends from oscillating
-   between healthy and degraded."
-  (:switch-cooldown-ms config))
-
-(def ^:private default-failure-recency-window-ms
-  "Window during which a recent failure is considered fresh enough to
-   trigger a switch decision (5 min). The stored `:last-failure`
-   timestamp is compared against this window; older failures stay in
-   the cumulative counter for accounting but do not by themselves
-   cause a switch — stale failure data shouldn't trigger live failover."
-  (:failure-recency-window-ms config))
-
 ;; File paths and utilities
-
-(defn backend-health-path
+(defn ^{:stratum 0} backend-health-path
   "Get path to backend health tracking file.
 
    Returns: String path to ~/.miniforge/backend_health.edn"
@@ -77,7 +50,7 @@
         miniforge-dir (io/file home ".miniforge")]
     (.getPath (io/file miniforge-dir "backend_health.edn"))))
 
-(defn ensure-directory-exists
+(defn ^{:stratum 0} ensure-directory-exists
   "Ensure parent directory exists for a file path.
 
    Arguments:
@@ -89,7 +62,7 @@
     (when-not (.exists parent-dir)
       (.mkdirs parent-dir))))
 
-(defn safe-read-edn
+(defn ^{:stratum 0} safe-read-edn
   "Safely read EDN from file, returning default on error.
 
    Arguments:
@@ -104,7 +77,34 @@
     (catch Exception _
       default)))
 
-(defn atomic-write-edn
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private default-success-rate-threshold
+  "Minimum cumulative success rate (`:successful-calls / :total-calls`)
+   before a backend is considered degraded and a failover is triggered.
+   0.90 = at most 1 failure per 10 cumulative calls tolerated; below
+   that the backend is skipped in favor of a healthier one. Picked to
+   absorb transient single failures without flapping. (Note: the rate
+   is cumulative since last decay, not a sliding window — `maybe-decay-health`
+   resets the counters wholesale after 24h of stale data.)"
+  (:success-rate-threshold config))
+
+(def ^{:stratum 1} ^:private default-switch-cooldown-ms
+  "Minimum interval between automatic backend switches (30 min). After
+   a switch fires, the FROM backend is parked for this long even if its
+   success rate recovers — prevents two flaky backends from oscillating
+   between healthy and degraded."
+  (:switch-cooldown-ms config))
+
+(def ^{:stratum 1} ^:private default-failure-recency-window-ms
+  "Window during which a recent failure is considered fresh enough to
+   trigger a switch decision (5 min). The stored `:last-failure`
+   timestamp is compared against this window; older failures stay in
+   the cumulative counter for accounting but do not by themselves
+   cause a switch — stale failure data shouldn't trigger live failover."
+  (:failure-recency-window-ms config))
+
+(defn ^{:stratum 1} atomic-write-edn
   "Atomically write EDN to file using temp file + rename.
 
    Arguments:
@@ -118,10 +118,8 @@
     (spit temp-file (pr-str data))
     (.renameTo (io/file temp-file) (io/file file-path))))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Default health data structure
-
-(defn default-health-data
+(defn ^{:stratum 1} default-health-data
   "Create default health data structure.
 
    Returns: Map with default backends, cooldowns, and fallback order"
@@ -131,14 +129,14 @@
    :default-backend (:default-backend config)
    :fallback-order (:fallback-order config)})
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Backend health operations
-
-(def ^:private decay-threshold-ms
+(def ^{:stratum 1} ^:private decay-threshold-ms
   "Maximum age of health data before counters are reset (24 hours)."
   (:health-decay-ms config))
 
-(defn- maybe-decay-health
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} maybe-decay-health
   "Reset backend counters if all recorded last-failure timestamps are older than
    24 hours. Prevents accumulation of stale metrics over weeks of use.
 
@@ -169,17 +167,7 @@
       (assoc health-data :backends {})
       health-data)))
 
-(defn load-health
-  "Load backend health data from persistent storage.
-   Applies decay: if all backend metrics are older than 24 hours, resets counters.
-
-   Returns: Map with :backends, :switch-cooldowns, :default-backend, :fallback-order"
-  []
-  (let [raw (or (safe-read-edn (backend-health-path) nil)
-                (default-health-data))]
-    (maybe-decay-health raw)))
-
-(defn save-health!
+(defn ^{:stratum 2} save-health!
   "Save backend health data to persistent storage.
 
    Arguments:
@@ -189,7 +177,19 @@
   [health-data]
   (atomic-write-edn (backend-health-path) health-data))
 
-(defn reset-backend-health!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} load-health
+  "Load backend health data from persistent storage.
+   Applies decay: if all backend metrics are older than 24 hours, resets counters.
+
+   Returns: Map with :backends, :switch-cooldowns, :default-backend, :fallback-order"
+  []
+  (let [raw (or (safe-read-edn (backend-health-path) nil)
+                (default-health-data))]
+    (maybe-decay-health raw)))
+
+(defn ^{:stratum 3} reset-backend-health!
   "Reset all backend health data to defaults.
    Useful for clearing stale accumulated metrics.
 
@@ -199,7 +199,9 @@
     (save-health! defaults)
     defaults))
 
-(defn record-backend-call!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} record-backend-call!
   "Record a backend API call and its result.
 
    Arguments:
@@ -232,7 +234,7 @@
     (save-health! new-health)
     updated-stats))
 
-(defn get-backend-success-rate
+(defn ^{:stratum 4} get-backend-success-rate
   "Get current success rate for a backend.
 
    Arguments:
@@ -245,7 +247,7 @@
         stats (get-in health [:backends backend-key])]
     (:success-rate stats)))
 
-(defn- recent-failure?
+(defn- ^{:stratum 4} recent-failure?
   "Check if the last failure for a backend is within the recency window.
 
    Arguments:
@@ -265,25 +267,7 @@
              age-ms (.until failure-instant now java.time.temporal.ChronoUnit/MILLIS)]
          (< age-ms recency-ms))))))
 
-(defn should-switch-backend?
-  "Check if backend should be switched due to low success rate.
-   Only triggers if the last failure is recent (within 5 minutes),
-   preventing false positives from stale accumulated health data.
-
-   Arguments:
-     backend - Keyword backend name
-     threshold - Double threshold (default `default-success-rate-threshold`)
-
-   Returns: Boolean true if should switch"
-  ([backend]
-   (should-switch-backend? backend default-success-rate-threshold))
-  ([backend threshold]
-   (if-let [success-rate (get-backend-success-rate backend)]
-     (and (recent-failure? backend)
-          (< success-rate threshold))
-     false)))
-
-(defn in-cooldown?
+(defn ^{:stratum 4} in-cooldown?
   "Check if backend is in cooldown period after a switch.
 
    Arguments:
@@ -305,7 +289,53 @@
              cooldown-end (.plusMillis instant cooldown-ms)]
          (.isBefore now cooldown-end))))))
 
-(defn select-best-backend
+(defn ^{:stratum 4} trigger-backend-switch!
+  "Trigger a backend switch and record cooldown.
+
+   Arguments:
+     from-backend - Keyword current backend
+     to-backend - Keyword new backend
+     cooldown-ms - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
+
+   Returns: Map with :from, :to, :cooldown-until"
+  ([from-backend to-backend]
+   (trigger-backend-switch! from-backend to-backend default-switch-cooldown-ms))
+  ([from-backend to-backend cooldown-ms]
+   (let [health (load-health)
+         now (java.time.Instant/now)
+         from-key (keyword from-backend)
+         to-key (keyword to-backend)
+         cooldown-until-str (str now)
+         updated-health (-> health
+                           (assoc-in [:switch-cooldowns from-key] cooldown-until-str)
+                           (assoc :default-backend to-key))]
+     (save-health! updated-health)
+     {:from from-key
+      :to to-key
+      :cooldown-until now
+      :cooldown-ms cooldown-ms})))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} should-switch-backend?
+  "Check if backend should be switched due to low success rate.
+   Only triggers if the last failure is recent (within 5 minutes),
+   preventing false positives from stale accumulated health data.
+
+   Arguments:
+     backend - Keyword backend name
+     threshold - Double threshold (default `default-success-rate-threshold`)
+
+   Returns: Boolean true if should switch"
+  ([backend]
+   (should-switch-backend? backend default-success-rate-threshold))
+  ([backend threshold]
+   (if-let [success-rate (get-backend-success-rate backend)]
+     (and (recent-failure? backend)
+          (< success-rate threshold))
+     false)))
+
+(defn ^{:stratum 5} select-best-backend
   "Select the best available backend that is not unhealthy or in cooldown.
 
    Arguments:
@@ -349,36 +379,10 @@
                   true))) ;; No data = eligible
          candidates))))))
 
-(defn trigger-backend-switch!
-  "Trigger a backend switch and record cooldown.
+;------------------------------------------------------------------------------ Layer 6
 
-   Arguments:
-     from-backend - Keyword current backend
-     to-backend - Keyword new backend
-     cooldown-ms - Cooldown period in milliseconds (default `default-switch-cooldown-ms`)
-
-   Returns: Map with :from, :to, :cooldown-until"
-  ([from-backend to-backend]
-   (trigger-backend-switch! from-backend to-backend default-switch-cooldown-ms))
-  ([from-backend to-backend cooldown-ms]
-   (let [health (load-health)
-         now (java.time.Instant/now)
-         from-key (keyword from-backend)
-         to-key (keyword to-backend)
-         cooldown-until-str (str now)
-         updated-health (-> health
-                           (assoc-in [:switch-cooldowns from-key] cooldown-until-str)
-                           (assoc :default-backend to-key))]
-     (save-health! updated-health)
-     {:from from-key
-      :to to-key
-      :cooldown-until now
-      :cooldown-ms cooldown-ms})))
-
-;;------------------------------------------------------------------------------ Layer 3
 ;; High-level health check
-
-(defn check-and-switch-if-needed
+(defn ^{:stratum 6} check-and-switch-if-needed
   "Check current backend health and switch if necessary.
 
    Arguments:

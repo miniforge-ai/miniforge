@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.self-healing.integration
   "Integration helpers for self-healing in workflow execution.
 
@@ -24,10 +23,10 @@
    [ai.miniforge.self-healing.backend-health :as health]
    [ai.miniforge.self-healing.workaround-detector :as detector]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Configuration helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn get-self-healing-config
+;; Configuration helpers
+(defn ^{:stratum 0} get-self-healing-config
   "Extract self-healing configuration from context or use defaults.
 
    Arguments:
@@ -44,7 +43,7 @@
      :cooldown-ms (get config :backend-switch-cooldown-ms
                        (:switch-cooldown-ms health/config))}))
 
-(defn get-current-backend
+(defn ^{:stratum 0} get-current-backend
   "Get current backend from context or config.
 
    Arguments:
@@ -56,10 +55,54 @@
       (get-in context [:config :llm :backend])
       :anthropic))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Backend health tracking
+;; Event emission helpers
+(defn ^{:stratum 0} emit-workaround-event
+  "Emit workaround-applied event to event stream.
 
-(defn execute-with-health-tracking
+   Arguments:
+     context - Execution context map
+     workaround-result - Result from workaround application
+
+   Returns: Event map"
+  [context workaround-result]
+  (let [pattern (:pattern workaround-result)]
+    {:event/type :self-healing/workaround-applied
+     :event/id (java.util.UUID/randomUUID)
+     :event/timestamp (java.time.Instant/now)
+     :event/version "1.0.0"
+     :event/sequence-number (or (get-in context [:execution/sequence-number]) 0)
+     :workflow/id (or (:workflow/id context) (java.util.UUID/randomUUID))
+     :pattern-id (:id pattern)
+     :success? (:success? workaround-result)
+     :message (format "Applied workaround: %s" (:description pattern))}))
+
+(defn ^{:stratum 0} emit-backend-switch-event
+  "Emit backend-switched event to event stream.
+
+   Arguments:
+     context - Execution context map
+     switch-result - Result from backend switch
+
+   Returns: Event map"
+  [context switch-result]
+  {:event/type :self-healing/backend-switched
+   :event/id (java.util.UUID/randomUUID)
+   :event/timestamp (java.time.Instant/now)
+   :event/version "1.0.0"
+   :event/sequence-number (or (get-in context [:execution/sequence-number]) 0)
+   :workflow/id (or (:workflow/id context) (java.util.UUID/randomUUID))
+   :from (:from switch-result)
+   :to (:to switch-result)
+   :reason "Backend health below threshold"
+   :cooldown-until (:cooldown-until switch-result)
+   :message (str "Switched backend from " (name (:from switch-result))
+                " to " (name (:to switch-result))
+                " due to low success rate")})
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Backend health tracking
+(defn ^{:stratum 1} execute-with-health-tracking
   "Execute operation with backend health tracking.
 
    Automatically records success/failure and checks for backend switches.
@@ -127,7 +170,7 @@
                :workaround-applied? false
                :workaround-found? (:workaround-found? workaround-result)})))))))
 
-(defn check-backend-health-and-switch
+(defn ^{:stratum 1} check-backend-health-and-switch
   "Check backend health and switch if necessary.
 
    Should be called at phase boundaries or after failures.
@@ -149,56 +192,10 @@
         (when switch-result
           (assoc switch-result :switched? true))))))
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Event emission helpers
+;------------------------------------------------------------------------------ Layer 2
 
-(defn emit-workaround-event
-  "Emit workaround-applied event to event stream.
-
-   Arguments:
-     context - Execution context map
-     workaround-result - Result from workaround application
-
-   Returns: Event map"
-  [context workaround-result]
-  (let [pattern (:pattern workaround-result)]
-    {:event/type :self-healing/workaround-applied
-     :event/id (java.util.UUID/randomUUID)
-     :event/timestamp (java.time.Instant/now)
-     :event/version "1.0.0"
-     :event/sequence-number (or (get-in context [:execution/sequence-number]) 0)
-     :workflow/id (or (:workflow/id context) (java.util.UUID/randomUUID))
-     :pattern-id (:id pattern)
-     :success? (:success? workaround-result)
-     :message (format "Applied workaround: %s" (:description pattern))}))
-
-(defn emit-backend-switch-event
-  "Emit backend-switched event to event stream.
-
-   Arguments:
-     context - Execution context map
-     switch-result - Result from backend switch
-
-   Returns: Event map"
-  [context switch-result]
-  {:event/type :self-healing/backend-switched
-   :event/id (java.util.UUID/randomUUID)
-   :event/timestamp (java.time.Instant/now)
-   :event/version "1.0.0"
-   :event/sequence-number (or (get-in context [:execution/sequence-number]) 0)
-   :workflow/id (or (:workflow/id context) (java.util.UUID/randomUUID))
-   :from (:from switch-result)
-   :to (:to switch-result)
-   :reason "Backend health below threshold"
-   :cooldown-until (:cooldown-until switch-result)
-   :message (str "Switched backend from " (name (:from switch-result))
-                " to " (name (:to switch-result))
-                " due to low success rate")})
-
-;;------------------------------------------------------------------------------ Layer 3
 ;; High-level integration API
-
-(defn wrap-phase-execution
+(defn ^{:stratum 2} wrap-phase-execution
   "Wrap phase execution with self-healing capabilities.
 
    This is the main integration point for workflow execution.
