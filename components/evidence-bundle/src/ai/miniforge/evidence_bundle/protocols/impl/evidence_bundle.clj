@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle
   "Implementation functions for EvidenceBundle protocol.
    Pure functions organized in layers."
@@ -25,9 +24,9 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Evidence Collection Helpers
 
-(defn collect-phase-evidence
+;; Evidence Collection Helpers
+(defn ^{:stratum 0} collect-phase-evidence
   "Extract evidence from a phase execution.
    Returns phase evidence map per N6 spec."
   [phase-name phase-result]
@@ -43,29 +42,14 @@
      :phase/inner-loop-iterations (get phase-result :inner-loop-iterations 0)
      :phase/event-stream-range (get phase-result :event-stream-range {})}))
 
-(defn collect-all-phase-evidence
-  "Collect evidence from all executed phases.
-   Returns map of phase-name -> evidence."
-  [workflow-state]
-  (let [phases (:workflow/phases workflow-state {})]
-    (reduce-kv
-     (fn [acc phase-name phase-result]
-       (if-let [evidence (collect-phase-evidence phase-name phase-result)]
-         (assoc acc (keyword "evidence" (name phase-name)) evidence)
-         acc))
-     {}
-     phases)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Bundle Creation
-
-(defn extract-execution-evidence
+(defn ^{:stratum 0} extract-execution-evidence
   "Compatibility wrapper for execution evidence extraction.
    Delegates to the canonical collector implementation."
   [workflow-state]
   (collector/collect-execution-evidence workflow-state))
 
-(defn create-bundle-impl
+(defn ^{:stratum 0} create-bundle-impl
   "Create evidence bundle from workflow state.
    Merges N11 §9.1 execution evidence fields from :execution/output.
    Returns [bundle updated-bundles-atom-value]"
@@ -93,21 +77,19 @@
 
     [bundle new-bundles]))
 
-(defn get-bundle-impl
+(defn ^{:stratum 0} get-bundle-impl
   "Retrieve bundle by ID."
   [bundles bundle-id]
   (get @bundles bundle-id))
 
-(defn get-bundle-by-workflow-impl
+(defn ^{:stratum 0} get-bundle-by-workflow-impl
   "Retrieve bundle by workflow ID."
   [bundles workflow-id]
   (some #(when (= (:evidence-bundle/workflow-id %) workflow-id) %)
         (vals @bundles)))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Query Operations
-
-(defn matches-criteria?
+(defn ^{:stratum 0} matches-criteria?
   "Check if bundle matches query criteria."
   [bundle criteria]
   (every?
@@ -116,8 +98,8 @@
        :time-range
        (let [[start end] v
              created (:evidence-bundle/created-at bundle)]
-         (and (or (nil? start) (.isAfter created start))
-              (or (nil? end) (.isBefore created end))))
+         (and (or (nil? start) (and created (.isAfter created start)))
+              (or (nil? end) (and created (.isBefore created end)))))
 
        :intent-type
        (= v (get-in bundle [:evidence/intent :intent/type]))
@@ -128,15 +110,8 @@
        true))
    criteria))
 
-(defn query-bundles-impl
-  "Query bundles by criteria."
-  [bundles criteria]
-  (filter #(matches-criteria? % criteria) (vals @bundles)))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Validation
-
-(defn validate-bundle-impl
+(defn ^{:stratum 0} validate-bundle-impl
   "Validate bundle structure and integrity.
    Returns {:valid? bool :errors [...]}"
   [bundle]
@@ -173,10 +148,8 @@
     {:valid? (empty? @errors)
      :errors @errors}))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Export Operations
-
-(defn export-bundle-impl
+(defn ^{:stratum 0} export-bundle-impl
   "Export bundle to file.
    Returns true on success, false on error."
   [bundles logger bundle-id output-path]
@@ -192,3 +165,23 @@
                  {:data {:bundle-id bundle-id
                          :error (.getMessage e)}})
       false)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} collect-all-phase-evidence
+  "Collect evidence from all executed phases.
+   Returns map of phase-name -> evidence."
+  [workflow-state]
+  (let [phases (:workflow/phases workflow-state {})]
+    (reduce-kv
+     (fn [acc phase-name phase-result]
+       (if-let [evidence (collect-phase-evidence phase-name phase-result)]
+         (assoc acc (keyword "evidence" (name phase-name)) evidence)
+         acc))
+     {}
+     phases)))
+
+(defn ^{:stratum 1} query-bundles-impl
+  "Query bundles by criteria."
+  [bundles criteria]
+  (filter #(matches-criteria? % criteria) (vals @bundles)))
