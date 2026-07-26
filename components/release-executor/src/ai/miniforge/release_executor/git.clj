@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.git
   "Git operations for the release executor — host-mode backend.
 
@@ -31,27 +30,25 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; gh auth result helpers
 
-(defn gh-unavailable
+;; gh auth result helpers
+(defn ^{:stratum 0} gh-unavailable
   "Create result for gh CLI not available."
   [error-msg]
   {:available? false :authenticated? false :error error-msg})
 
-(defn gh-available-unauthenticated
+(defn ^{:stratum 0} gh-available-unauthenticated
   "Create result for gh CLI available but not authenticated."
   [error-msg]
   {:available? true :authenticated? false :error error-msg})
 
-(defn gh-authenticated
+(defn ^{:stratum 0} gh-authenticated
   "Create result for gh CLI available and authenticated."
   [user]
   {:available? true :authenticated? true :user user})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Safety + credential helpers (host-mode parity with sandbox.clj)
-
-(defn validate-safe-branch-name
+(defn ^{:stratum 0} validate-safe-branch-name
   "Return nil when `branch` is safe to pass as a git/gh argument, else a
    shell-failure result. Mirrors sandbox/validate-safe-branch-name: allows
    only [A-Za-z0-9._/-] (the set git permits) and rejects blank names or
@@ -74,7 +71,7 @@
 
       :else nil)))
 
-(defn- gh-shell-opts
+(defn- ^{:stratum 0} gh-shell-opts
   "process/shell option map for a gh call, injecting the caller's
    `github-token` as GH_TOKEN so host-mode uses the same credential the
    pipeline resolved — parity with sandbox's gh-exec-opts :env injection.
@@ -85,10 +82,8 @@
     worktree-path (assoc :dir (str worktree-path))
     github-token  (assoc :extra-env {"GH_TOKEN" github-token})))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Generic command runner
-
-(defn exec!
+(defn ^{:stratum 0} exec!
   "Run a git command in the worktree directory. `args` is an argv vector
    (e.g. [\"git\" \"rev-parse\" \"HEAD\"]) passed straight to the process — NOT
    through `sh -c` — so shell metacharacters in any argument are inert and
@@ -105,12 +100,10 @@
         (result/shell-failure (str/trim (get r :err ""))
                               {:output (str/trim (get r :out ""))})))
     (catch Exception e
-      (result/shell-failure (.getMessage e)))))
+      (result/shell-failure (.getMessage e) {:output ""}))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Git operations
-
-(defn stage-files!
+(defn ^{:stratum 0} stage-files!
   "Stage files in git worktree using git add."
   [worktree-path file-paths]
   (try
@@ -129,7 +122,111 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
-(defn check-gh-auth!
+(defn ^{:stratum 0} diff-stats
+  "Get line-level diff stats for staged changes.
+
+   Returns {:additions N :deletions N :files N} or nil on error."
+  [worktree-path]
+  (try
+    (let [r (process/shell
+             {:dir (str worktree-path) :out :string :err :string :continue true}
+             "git" "diff" "--cached" "--numstat")]
+      (when (zero? (:exit r))
+        (let [lines (str/split-lines (str/trim (get r :out "")))
+              parsed (keep (fn [line]
+                             (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
+                               {:additions (parse-long adds)
+                                :deletions (parse-long dels)}))
+                           lines)]
+          {:additions (reduce + 0 (map :additions parsed))
+           :deletions (reduce + 0 (map :deletions parsed))
+           :files (count parsed)})))
+    (catch Exception _ nil)))
+
+(defn ^{:stratum 0} count-test-defs
+  "Count deftest forms in staged changes.
+
+   Returns {:added N :removed N} or nil on error."
+  [worktree-path]
+  (try
+    (let [r (process/shell
+             {:dir (str worktree-path) :out :string :err :string :continue true}
+             "git" "diff" "--cached" "-U0")]
+      (when (zero? (:exit r))
+        (let [diff-text (get r :out "")
+              added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
+              removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
+          {:added added :removed removed})))
+    (catch Exception _ nil)))
+
+(defn ^{:stratum 0} commit-changes!
+  "Commit staged changes with the given message.
+
+   Returns {:success? bool :commit-sha string :error string}"
+  [worktree-path commit-message]
+  (try
+    (let [commit-r (process/shell
+                    {:dir (str worktree-path) :out :string :err :string :continue true}
+                    "git" "commit" "-m" commit-message)]
+      (if (zero? (:exit commit-r))
+        (let [sha-r (process/shell
+                     {:dir (str worktree-path) :out :string :err :string :continue true}
+                     "git" "rev-parse" "HEAD")]
+          (if (zero? (:exit sha-r))
+            (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
+                                   :output (get commit-r :out "")})
+            ;; The commit itself succeeded, but resolving its sha didn't — do
+            ;; NOT report shell-success with an empty/missing :commit-sha,
+            ;; which would mislead callers that expect a real sha. Surface
+            ;; the rev-parse failure instead.
+            (result/shell-failure (get sha-r :err "") {:commit-sha nil})))
+        (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
+    (catch Exception e
+      (result/shell-failure (.getMessage e) {:commit-sha nil}))))
+
+(defn- ^{:stratum 0} ssh->https-with-token
+  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth embedded,
+   or nil when conversion is not possible. Mirrors sandbox/ssh->https-with-token."
+  [remote-url token]
+  (when remote-url
+    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
+      (str "https://x-access-token:" token "@" host "/" path)
+      (when (str/starts-with? (str remote-url) "https://")
+        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
+
+(defn- ^{:stratum 0} inside-worktree?
+  "True when `file` resolves inside `worktree-path` after canonicalization
+   (collapses `..`, symlinks, and redundant separators). Kept self-contained
+   rather than reusing files/path-traversal-anomaly, which depends on this
+   namespace (a git→files require would cycle)."
+  [worktree-path ^java.io.File file]
+  (try
+    (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
+          target (.getCanonicalPath file)]
+      (or (= target root)
+          (str/starts-with? target (str root java.io.File/separator))))
+    ;; getCanonicalPath can throw on invalid paths / IO errors. The check
+    ;; runs before write-file!'s own try, so fail closed here (treat as
+    ;; escaping) — write-file! then returns a shell-failure, never throws.
+    (catch Exception _ false)))
+
+;; PR creation helpers (mirrors sandbox.clj equivalents)
+(defn- ^{:stratum 0} parse-pr-ref
+  "Parse a gh PR URL output into {:pr-url :pr-number}, or nil when the output
+   carries no /pull/<n> reference."
+  [output]
+  (let [url (str/trim (or output ""))]
+    (when-let [match (re-find #"/pull/(\d+)" url)]
+      {:pr-url url :pr-number (parse-long (second match))})))
+
+(defn- ^{:stratum 0} pr-already-exists?
+  "True when a gh error indicates a PR already exists for the current branch."
+  [error]
+  (boolean (some-> error str/lower-case (str/includes? "already exists"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} check-gh-auth!
   "Check if gh CLI is available and authenticated on the host. The optional
    `github-token` is injected as GH_TOKEN so the check reflects the
    credential the pipeline will use to open the PR (not just ambient host
@@ -157,7 +254,7 @@
     (catch Exception e
       (gh-unavailable (.getMessage e))))))
 
-(defn create-branch!
+(defn ^{:stratum 1} create-branch!
   "Create a new git branch for the release, branching from HEAD so that
    phase-boundary commits already on the task branch carry forward.
 
@@ -197,7 +294,7 @@
     (catch Exception e
       (result/shell-failure (.getMessage e) {:branch nil})))))
 
-(defn fetch-branch!
+(defn ^{:stratum 1} fetch-branch!
   "Fetch origin/<branch> into the local worktree.
 
    Used when a stacked-PR base is a parent task's branch: pulls it so later
@@ -216,7 +313,7 @@
      (catch Exception e
        (result/shell-failure (.getMessage e))))))
 
-(defn commits-ahead-of-base
+(defn ^{:stratum 1} commits-ahead-of-base
   "Count commits HEAD has added since branching from origin/<base>.
    Uses the three-dot merge-base form so concurrent movement of origin/<base>
    does not shrink the count to zero. Returns nil on git failure."
@@ -233,28 +330,7 @@
             (catch NumberFormatException _ nil))))
       (catch Exception _ nil))))
 
-(defn diff-stats
-  "Get line-level diff stats for staged changes.
-
-   Returns {:additions N :deletions N :files N} or nil on error."
-  [worktree-path]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "diff" "--cached" "--numstat")]
-      (when (zero? (:exit r))
-        (let [lines (str/split-lines (str/trim (get r :out "")))
-              parsed (keep (fn [line]
-                             (when-let [[_ adds dels] (re-matches #"(\d+)\t(\d+)\t.*" line)]
-                               {:additions (parse-long adds)
-                                :deletions (parse-long dels)}))
-                           lines)]
-          {:additions (reduce + 0 (map :additions parsed))
-           :deletions (reduce + 0 (map :deletions parsed))
-           :files (count parsed)})))
-    (catch Exception _ nil)))
-
-(defn diff-stats-range
+(defn ^{:stratum 1} diff-stats-range
   "Get diff stats for the changes this branch introduced since branching from
    origin/<base> — `git diff origin/<base>...HEAD --numstat` with the
    three-dot form (merge-base diff). Mirrors sandbox/diff-stats-range."
@@ -276,23 +352,7 @@
              :files (count parsed)})))
       (catch Exception _ nil))))
 
-(defn count-test-defs
-  "Count deftest forms in staged changes.
-
-   Returns {:added N :removed N} or nil on error."
-  [worktree-path]
-  (try
-    (let [r (process/shell
-             {:dir (str worktree-path) :out :string :err :string :continue true}
-             "git" "diff" "--cached" "-U0")]
-      (when (zero? (:exit r))
-        (let [diff-text (get r :out "")
-              added   (count (re-seq #"(?m)^\+.*\(deftest " diff-text))
-              removed (count (re-seq #"(?m)^-.*\(deftest " diff-text))]
-          {:added added :removed removed})))
-    (catch Exception _ nil)))
-
-(defn count-test-defs-range
+(defn ^{:stratum 1} count-test-defs-range
   "Count deftest forms added/removed in origin/<base>...HEAD (merge-base diff).
    Mirrors sandbox/count-test-defs-range."
   [worktree-path base-branch]
@@ -308,36 +368,7 @@
             {:added added :removed removed})))
       (catch Exception _ nil))))
 
-(defn commit-changes!
-  "Commit staged changes with the given message.
-
-   Returns {:success? bool :commit-sha string :error string}"
-  [worktree-path commit-message]
-  (try
-    (let [commit-r (process/shell
-                    {:dir (str worktree-path) :out :string :err :string :continue true}
-                    "git" "commit" "-m" commit-message)]
-      (if (zero? (:exit commit-r))
-        (let [sha-r (process/shell
-                     {:dir (str worktree-path) :out :string :err :string :continue true}
-                     "git" "rev-parse" "HEAD")]
-          (result/shell-success {:commit-sha (str/trim (get sha-r :out ""))
-                                 :output (get commit-r :out "")}))
-        (result/shell-failure (get commit-r :err "") {:commit-sha nil})))
-    (catch Exception e
-      (result/shell-failure (.getMessage e) {:commit-sha nil}))))
-
-(defn- ssh->https-with-token
-  "Convert an SSH or HTTPS git remote URL to HTTPS with token auth embedded,
-   or nil when conversion is not possible. Mirrors sandbox/ssh->https-with-token."
-  [remote-url token]
-  (when remote-url
-    (if-let [[_ host path] (re-matches #"git@([^:]+):(.+)" remote-url)]
-      (str "https://x-access-token:" token "@" host "/" path)
-      (when (str/starts-with? (str remote-url) "https://")
-        (str/replace remote-url #"https://" (str "https://x-access-token:" token "@"))))))
-
-(defn- raw-push!
+(defn- ^{:stratum 1} raw-push!
   "One `git push -u origin <branch>` with GH_TOKEN injected. Returns a
    shell-result."
   [worktree-path branch-name github-token]
@@ -351,7 +382,7 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
-(defn- with-https-token-fallback!
+(defn- ^{:stratum 1} with-https-token-fallback!
   "Run `push!` (a 0-arg thunk returning a shell-result). On failure with a
    token present, retry once over HTTPS+token auth: rewrite origin to an https
    URL embedding the token, re-run `push!`, then restore the original URL so
@@ -407,7 +438,7 @@
                      {:push-succeeded? pushed?}))))))
           result)))))
 
-(defn- raw-force-push!
+(defn- ^{:stratum 1} raw-force-push!
   "One `git push --force-with-lease` with GH_TOKEN injected. Returns a
    shell-result."
   [worktree-path github-token]
@@ -421,7 +452,65 @@
     (catch Exception e
       (result/shell-failure (.getMessage e)))))
 
-(defn push-branch!
+(defn ^{:stratum 1} write-file!
+  "Write content to a path inside the worktree, creating parent dirs.
+   Rejects a `rel-path` that escapes the worktree root (absolute path, `..`
+   segments, or symlinked parents) via a canonical-path check — parity with
+   the sandbox backend's guard. Returns {:success? bool :output string
+   :error string}."
+  [worktree-path rel-path content]
+  (let [file (java.io.File. (str worktree-path) (str rel-path))]
+    (if-not (inside-worktree? worktree-path file)
+      (result/shell-failure (str "Path traversal rejected: " rel-path
+                                 " escapes worktree root"))
+      (try
+        (let [parent (.getParentFile file)]
+          (when parent (.mkdirs parent))
+          (spit file content)
+          (result/shell-success {:output (str rel-path)}))
+        (catch Exception e
+          (result/shell-failure (.getMessage e)))))))
+
+(defn ^{:stratum 1} edit-pr-body!
+  "Update the body of an existing PR using gh CLI on the host. Injects
+   `github-token` as GH_TOKEN.
+   Returns {:success? bool :output string :error string}."
+  [worktree-path pr-number body github-token]
+  (try
+    (let [r (process/shell
+             (gh-shell-opts worktree-path github-token)
+             "gh" "pr" "edit" (str pr-number) "--body" (or body ""))]
+      (if (zero? (:exit r))
+        (result/shell-success {:output (get r :out "")})
+        (result/shell-failure (get r :err ""))))
+    (catch Exception e
+      (result/shell-failure (.getMessage e)))))
+
+(defn- ^{:stratum 1} reuse-existing-pr!
+  "Resolve the PR already open for the current branch via gh pr view, so a
+   release retry reuses it instead of opening a duplicate.
+   Falls back to a failure carrying the `gh pr view` resolution error (not
+   the original create error) when the PR cannot be resolved via gh pr
+   view — so retries are debuggable."
+  [worktree-path github-token]
+  (try
+    (let [r (process/shell
+             (gh-shell-opts worktree-path github-token)
+             "gh" "pr" "view" "--json" "url" "--jq" ".url")]
+      (if-let [pr (and (zero? (:exit r))
+                       (parse-pr-ref (get r :out "")))]
+        (result/shell-success pr)
+        (result/shell-failure (msg/t :pr/reuse-unresolved
+                                     {:error (or (not-empty (str/trim (get r :err "")))
+                                                 (not-empty (str/trim (get r :out "")))
+                                                 (msg/t :pr/reuse-no-url))})
+                              {:pr-url nil :pr-number nil})))
+    (catch Exception e
+      (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} push-branch!
   "Push the current branch to origin. Injects `github-token` as GH_TOKEN for
    gh's git credential helper. If the initial push fails and a token is
    present, retries over HTTPS with the token embedded in a temporary origin
@@ -442,7 +531,7 @@
      worktree-path github-token
      #(raw-push! worktree-path branch-name github-token)))))
 
-(defn force-push!
+(defn ^{:stratum 2} force-push!
   "Force-push the current branch with --force-with-lease, injecting
    `github-token` as GH_TOKEN so gh's git credential helper authenticates
    with the pipeline credential (the PR-doc amend path uses this). If the push
@@ -455,94 +544,7 @@
    worktree-path github-token
    #(raw-force-push! worktree-path github-token)))
 
-(defn- inside-worktree?
-  "True when `file` resolves inside `worktree-path` after canonicalization
-   (collapses `..`, symlinks, and redundant separators). Kept self-contained
-   rather than reusing files/path-traversal-anomaly, which depends on this
-   namespace (a git→files require would cycle)."
-  [worktree-path ^java.io.File file]
-  (try
-    (let [root   (.getCanonicalPath (java.io.File. (str worktree-path)))
-          target (.getCanonicalPath file)]
-      (or (= target root)
-          (str/starts-with? target (str root java.io.File/separator))))
-    ;; getCanonicalPath can throw on invalid paths / IO errors. The check
-    ;; runs before write-file!'s own try, so fail closed here (treat as
-    ;; escaping) — write-file! then returns a shell-failure, never throws.
-    (catch Exception _ false)))
-
-(defn write-file!
-  "Write content to a path inside the worktree, creating parent dirs.
-   Rejects a `rel-path` that escapes the worktree root (absolute path, `..`
-   segments, or symlinked parents) via a canonical-path check — parity with
-   the sandbox backend's guard. Returns {:success? bool :output string
-   :error string}."
-  [worktree-path rel-path content]
-  (let [file (java.io.File. (str worktree-path) (str rel-path))]
-    (if-not (inside-worktree? worktree-path file)
-      (result/shell-failure (str "Path traversal rejected: " rel-path
-                                 " escapes worktree root"))
-      (try
-        (let [parent (.getParentFile file)]
-          (when parent (.mkdirs parent))
-          (spit file content)
-          (result/shell-success {:output (str rel-path)}))
-        (catch Exception e
-          (result/shell-failure (.getMessage e)))))))
-
-(defn edit-pr-body!
-  "Update the body of an existing PR using gh CLI on the host. Injects
-   `github-token` as GH_TOKEN.
-   Returns {:success? bool :output string :error string}."
-  [worktree-path pr-number body github-token]
-  (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "gh" "pr" "edit" (str pr-number) "--body" (or body ""))]
-      (if (zero? (:exit r))
-        (result/shell-success {:output (get r :out "")})
-        (result/shell-failure (get r :err ""))))
-    (catch Exception e
-      (result/shell-failure (.getMessage e)))))
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; PR creation helpers (mirrors sandbox.clj equivalents)
-
-(defn- parse-pr-ref
-  "Parse a gh PR URL output into {:pr-url :pr-number}, or nil when the output
-   carries no /pull/<n> reference."
-  [output]
-  (let [url (str/trim (or output ""))]
-    (when-let [match (re-find #"/pull/(\d+)" url)]
-      {:pr-url url :pr-number (parse-long (second match))})))
-
-(defn- pr-already-exists?
-  "True when a gh error indicates a PR already exists for the current branch."
-  [error]
-  (boolean (some-> error str/lower-case (str/includes? "already exists"))))
-
-(defn- reuse-existing-pr!
-  "Resolve the PR already open for the current branch via gh pr view, so a
-   release retry reuses it instead of opening a duplicate.
-   Falls back to a failure carrying the original create error when the PR
-   cannot be resolved via gh pr view."
-  [worktree-path github-token]
-  (try
-    (let [r (process/shell
-             (gh-shell-opts worktree-path github-token)
-             "gh" "pr" "view" "--json" "url" "--jq" ".url")]
-      (if-let [pr (and (zero? (:exit r))
-                       (parse-pr-ref (get r :out "")))]
-        (result/shell-success pr)
-        (result/shell-failure (msg/t :pr/reuse-unresolved
-                                     {:error (or (not-empty (str/trim (get r :err "")))
-                                                 (not-empty (str/trim (get r :out "")))
-                                                 (msg/t :pr/reuse-no-url))})
-                              {:pr-url nil :pr-number nil})))
-    (catch Exception e
-      (result/shell-failure (.getMessage e) {:pr-url nil :pr-number nil}))))
-
-(defn create-pr!
+(defn ^{:stratum 2} create-pr!
   "Create a pull request using gh CLI on the host.
 
    Two robustness guarantees matching sandbox/create-pr!:

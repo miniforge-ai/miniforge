@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.interface
   "Public API for the release-executor component.
 
@@ -27,9 +26,9 @@
    [ai.miniforge.release-executor.git :as git]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Main execution function
 
-(def execute-release-phase
+;; Main execution function
+(def ^{:stratum 0} execute-release-phase
   "Execute the release phase.
 
    Arguments:
@@ -50,30 +49,28 @@
                             {:releaser my-releaser-agent})"
   core/execute-release-phase)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Git operations (for testing and advanced use)
-
-(def check-gh-auth!
+(def ^{:stratum 0} check-gh-auth!
   "Check if GitHub CLI is available and authenticated.
    Returns {:available? bool :authenticated? bool :error string}"
   git/check-gh-auth!)
 
-(def create-branch!
+(def ^{:stratum 0} create-branch!
   "Create a new git branch from main.
    Returns {:success? bool :branch string :base-branch string :error string}"
   git/create-branch!)
 
-(def commit-changes!
+(def ^{:stratum 0} commit-changes!
   "Commit staged changes.
    Returns {:success? bool :commit-sha string :error string}"
   git/commit-changes!)
 
-(def push-branch!
+(def ^{:stratum 0} push-branch!
   "Push branch to remote.
    Returns {:success? bool :error string}"
   git/push-branch!)
 
-(def create-pr!
+(def ^{:stratum 0} create-pr!
   "Create a PR using gh CLI.
    Returns {:success? bool :pr-number int :pr-url string :error string}"
   git/create-pr!)

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.git-test
   "Tests for the host-mode (no-executor) git/gh backend used when a local
    `bb dogfood` run has no DAG executor. Covers branch-name safety, the
@@ -24,31 +23,21 @@
   (:require
    [babashka.fs :as fs]
    [babashka.process :as process]
+   [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.release-executor.core :as core]
    [ai.miniforge.release-executor.git :as git]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;;------------------------------------------------------------------- helpers
-(defn- sh! [dir & args]
+(defn- ^{:stratum 0} sh! [dir & args]
   (apply process/shell
          {:dir (str dir) :out :string :err :string :continue true}
          args))
 
-(defn- init-repo!
-  "Initialise a throwaway git repo with one seed commit. No `origin` remote
-   is added, so origin-relative host-mode calls (create-branch!'s best-effort
-   fetch) degrade gracefully — which is itself part of what these tests cover."
-  [dir]
-  (sh! dir "git" "init" "-q")
-  (sh! dir "git" "config" "user.email" "test@example.com")
-  (sh! dir "git" "config" "user.name" "Test")
-  (sh! dir "git" "config" "commit.gpgsign" "false")
-  (spit (str (fs/path dir "README.md")) "seed\n")
-  (sh! dir "git" "add" ".")
-  (sh! dir "git" "commit" "-q" "-m" "seed"))
-
 ;;------------------------------------------------------ branch-name safety
-(deftest validate-safe-branch-name-test
+(deftest ^{:stratum 0} validate-safe-branch-name-test
   (testing "git-legal names are accepted (nil result)"
     (is (nil? (git/validate-safe-branch-name "main")))
     (is (nil? (git/validate-safe-branch-name "release/task-99c14ec5")))
@@ -59,44 +48,8 @@
         (is (and (map? r) (not (:success? r)))
             (str "expected failure for branch name: " (pr-str bad)))))))
 
-;;-------------------------------------------------- real-git round-trip
-(deftest stage-commit-diff-roundtrip-test
-  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-"})]
-    (try
-      (init-repo! dir)
-      (testing "exec! runs a command in the worktree"
-        (is (:success? (git/exec! dir ["git" "rev-parse" "--is-inside-work-tree"]))))
-      (testing "write-file! + stage-files! + commit-changes! round-trip"
-        (is (:success? (git/write-file! dir "src/a.clj" "(ns a)\n")))
-        (is (:success? (git/stage-files! dir :all)))
-        (let [c (git/commit-changes! dir "add a")]
-          (is (:success? c))
-          (is (re-matches #"[0-9a-f]{7,40}" (:commit-sha c)))))
-      (testing "diff-stats counts staged additions"
-        (is (:success? (git/write-file! dir "src/b.clj" "(ns b)\n(def x 1)\n")))
-        (is (:success? (git/stage-files! dir :all)))
-        (let [s (git/diff-stats dir)]
-          (is (= 1 (:files s)))
-          (is (pos? (:additions s)))))
-      (finally (fs/delete-tree dir)))))
-
-(deftest create-branch-test
-  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-branch-"})]
-    (try
-      (init-repo! dir)
-      (testing "create-branch! creates and checks out the branch"
-        (let [r (git/create-branch! dir "release/x")]
-          (is (:success? r))
-          (is (= "release/x" (:branch r)))
-          (is (= "release/x"
-                 (:output (git/exec! dir ["git" "rev-parse" "--abbrev-ref" "HEAD"]))))))
-      (testing "create-branch! rejects an option-injection name before any git call"
-        (let [r (git/create-branch! dir "-rf")]
-          (is (not (:success? r)))))
-      (finally (fs/delete-tree dir)))))
-
 ;;-------------------------------------------- GH_TOKEN injection (parity)
-(deftest gh-token-injection-test
+(deftest ^{:stratum 0} gh-token-injection-test
   (testing "create-pr! injects GH_TOKEN via :extra-env when a token is present"
     (let [seen (atom nil)]
       (with-redefs [process/shell (fn [opts & _]
@@ -128,7 +81,7 @@
       (let [auth (first (filter #(= "gh" (first (:args %))) @calls))]
         (is (= "tok-123" (get-in auth [:opts :extra-env "GH_TOKEN"])))))))
 
-(deftest force-push-injects-token-test
+(deftest ^{:stratum 0} force-push-injects-token-test
   (testing "force-push! passes GH_TOKEN via :extra-env"
     (let [seen (atom nil)]
       (with-redefs [process/shell (fn [opts & _]
@@ -137,8 +90,30 @@
         (git/force-push! "/tmp/wt" "push-tok"))
       (is (= "push-tok" (get-in @seen [:extra-env "GH_TOKEN"]))))))
 
+(deftest ^{:stratum 0} commit-changes-rev-parse-failure-test
+  (testing "commit-changes! surfaces a rev-parse failure instead of reporting a
+            phantom success with a missing sha"
+    (with-redefs [process/shell (fn [_opts & args]
+                                  (if (= ["git" "rev-parse" "HEAD"] (vec args))
+                                    {:exit 1 :out "" :err "fatal: bad revision 'HEAD'"}
+                                    {:exit 0 :out "1 file changed" :err ""}))]
+      (let [result (git/commit-changes! "/tmp/wt" "feat: add feature")]
+        (is (not (:success? result)))
+        (is (nil? (:commit-sha result)))
+        (is (str/includes? (:error result) "bad revision"))))))
+
+(deftest ^{:stratum 0} exec-bang-exception-includes-output-test
+  (testing "exec! includes :output even when process/shell throws"
+    (with-redefs [process/shell (fn [& _] (throw (Exception. "spawn failed")))]
+      (let [result (git/exec! "/tmp/wt" ["git" "status"])]
+        (is (not (:success? result)))
+        (is (contains? result :output)
+            "an exception path must still carry an :output key, matching the docstring's contract")
+        (is (= "" (:output result)))
+        (is (str/includes? (:error result) "spawn failed"))))))
+
 ;;-------------------------------------------- path traversal + base safety
-(deftest write-file-path-traversal-test
+(deftest ^{:stratum 0} write-file-path-traversal-test
   (let [dir (fs/create-temp-dir {:prefix "git-host-mode-wf-"})]
     (try
       (testing "write-file! writes a normal relative path"
@@ -150,18 +125,8 @@
           (is (not (fs/exists? (fs/path (fs/parent dir) "escape.md"))))))
       (finally (fs/delete-tree dir)))))
 
-(deftest range-fns-reject-unsafe-base-test
-  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-range-"})]
-    (try
-      (init-repo! dir)
-      (testing "range/ahead functions return nil for an unsafe base (no git call)"
-        (is (nil? (git/diff-stats-range dir "-x")))
-        (is (nil? (git/count-test-defs-range dir "--upload-pack=evil")))
-        (is (nil? (git/commits-ahead-of-base dir "a;rm -rf /"))))
-      (finally (fs/delete-tree dir)))))
-
 ;;-------------------------------------------- push SSH→HTTPS fallback
-(deftest push-branch-https-fallback-test
+(deftest ^{:stratum 0} push-branch-https-fallback-test
   (testing "push fails with a token → rewrite SSH origin to https-with-token, retry, restore"
     (let [calls   (atom [])
           push-n  (atom 0)]
@@ -187,7 +152,7 @@
           (is (= "git@github.com:o/r.git" (last (second set-urls)))
               "original ssh origin is restored"))))))
 
-(deftest push-branch-restore-failure-fails-loud-test
+(deftest ^{:stratum 0} push-branch-restore-failure-fails-loud-test
   (testing "restore of origin failing after the https fallback fails loud with a scrub hint"
     (let [push-n (atom 0) seturl-n (atom 0)]
       (with-redefs [process/shell
@@ -213,7 +178,7 @@
           (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
 
 ;;-------------------------------------------- force-push shares the fallback
-(deftest force-push-https-fallback-test
+(deftest ^{:stratum 0} force-push-https-fallback-test
   (testing "force-push over SSH fails with a token → rewrite to https-with-token, retry, restore"
     (let [calls  (atom [])
           push-n (atom 0)]
@@ -240,7 +205,7 @@
           (is (= "git@github.com:o/r.git" (last (second set-urls)))
               "original ssh origin is restored"))))))
 
-(deftest force-push-restore-failure-fails-loud-test
+(deftest ^{:stratum 0} force-push-restore-failure-fails-loud-test
   (testing "force-push restore failure after the https fallback fails loud with a scrub hint"
     (let [push-n (atom 0) seturl-n (atom 0)]
       (with-redefs [process/shell
@@ -265,7 +230,7 @@
           (is (re-find #"Scrub it" (:error r)) "surfaces the scrub command")
           (is (true? (:push-succeeded? r)) "records that the push itself succeeded"))))))
 
-(deftest force-push-push-and-restore-both-fail-test
+(deftest ^{:stratum 0} force-push-push-and-restore-both-fail-test
   (testing "https retry push AND restore both fail → error carries both, push-succeeded? false"
     (let [push-n (atom 0) seturl-n (atom 0)]
       (with-redefs [process/shell
@@ -292,7 +257,7 @@
           (is (re-find #"config locked" (:error r)) "includes the restore error")
           (is (re-find #"Scrub it" (:error r)) "still surfaces the scrub command"))))))
 
-(deftest force-push-https-setup-failure-test
+(deftest ^{:stratum 0} force-push-https-setup-failure-test
   (testing "repointing origin to the token URL fails → report it, skip the retry push, no restore"
     (let [push-n (atom 0) seturl-n (atom 0)]
       (with-redefs [process/shell
@@ -318,7 +283,7 @@
           (is (re-find #"config locked" (:error r)) "surfaces the set-url error"))))))
 
 ;;------------------------------------------- core host-mode dispatch
-(deftest step-validate-inputs-host-mode-test
+(deftest ^{:stratum 0} step-validate-inputs-host-mode-test
   (testing "no executor + no environment-id + worktree present → :host-mode? true"
     (let [r (core/step-validate-inputs {:worktree-path "/tmp/wt" :create-pr? true})]
       (is (:host-mode? r))
@@ -336,3 +301,66 @@
     (let [r (core/step-validate-inputs {:worktree-path "  " :create-pr? true})]
       (is (not (:host-mode? r)))
       (is (core/failed? r)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} init-repo!
+  "Initialise a throwaway git repo with one seed commit. No `origin` remote
+   is added, so origin-relative host-mode calls (create-branch!'s best-effort
+   fetch) degrade gracefully — which is itself part of what these tests cover."
+  [dir]
+  (sh! dir "git" "init" "-q")
+  (sh! dir "git" "config" "user.email" "test@example.com")
+  (sh! dir "git" "config" "user.name" "Test")
+  (sh! dir "git" "config" "commit.gpgsign" "false")
+  (spit (str (fs/path dir "README.md")) "seed\n")
+  (sh! dir "git" "add" ".")
+  (sh! dir "git" "commit" "-q" "-m" "seed"))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;;-------------------------------------------------- real-git round-trip
+(deftest ^{:stratum 2} stage-commit-diff-roundtrip-test
+  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-"})]
+    (try
+      (init-repo! dir)
+      (testing "exec! runs a command in the worktree"
+        (is (:success? (git/exec! dir ["git" "rev-parse" "--is-inside-work-tree"]))))
+      (testing "write-file! + stage-files! + commit-changes! round-trip"
+        (is (:success? (git/write-file! dir "src/a.clj" "(ns a)\n")))
+        (is (:success? (git/stage-files! dir :all)))
+        (let [c (git/commit-changes! dir "add a")]
+          (is (:success? c))
+          (is (re-matches #"[0-9a-f]{7,40}" (:commit-sha c)))))
+      (testing "diff-stats counts staged additions"
+        (is (:success? (git/write-file! dir "src/b.clj" "(ns b)\n(def x 1)\n")))
+        (is (:success? (git/stage-files! dir :all)))
+        (let [s (git/diff-stats dir)]
+          (is (= 1 (:files s)))
+          (is (pos? (:additions s)))))
+      (finally (fs/delete-tree dir)))))
+
+(deftest ^{:stratum 2} create-branch-test
+  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-branch-"})]
+    (try
+      (init-repo! dir)
+      (testing "create-branch! creates and checks out the branch"
+        (let [r (git/create-branch! dir "release/x")]
+          (is (:success? r))
+          (is (= "release/x" (:branch r)))
+          (is (= "release/x"
+                 (:output (git/exec! dir ["git" "rev-parse" "--abbrev-ref" "HEAD"]))))))
+      (testing "create-branch! rejects an option-injection name before any git call"
+        (let [r (git/create-branch! dir "-rf")]
+          (is (not (:success? r)))))
+      (finally (fs/delete-tree dir)))))
+
+(deftest ^{:stratum 2} range-fns-reject-unsafe-base-test
+  (let [dir (fs/create-temp-dir {:prefix "git-host-mode-range-"})]
+    (try
+      (init-repo! dir)
+      (testing "range/ahead functions return nil for an unsafe base (no git call)"
+        (is (nil? (git/diff-stats-range dir "-x")))
+        (is (nil? (git/count-test-defs-range dir "--upload-pack=evil")))
+        (is (nil? (git/commits-ahead-of-base dir "a;rm -rf /"))))
+      (finally (fs/delete-tree dir)))))
