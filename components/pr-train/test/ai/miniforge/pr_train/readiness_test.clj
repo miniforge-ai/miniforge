@@ -15,17 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.readiness-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.pr-train.readiness :as readiness]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Factor scoring tests
 ;; ============================================================================
-
-(deftest score-deps-factor-test
+(deftest ^{:stratum 0} score-deps-factor-test
   (testing "no dependencies scores 1.0"
     (let [train {:train/prs []}
           pr {:pr/depends-on []}]
@@ -49,7 +49,7 @@
           pr {:pr/depends-on [1 2]}]
       (is (= 0.5 (readiness/score-deps-factor train pr readiness/default-config))))))
 
-(deftest score-ci-factor-test
+(deftest ^{:stratum 0} score-ci-factor-test
   (testing "passed CI scores 1.0"
     (is (= 1.0 (readiness/score-ci-factor nil {:pr/ci-status :passed} readiness/default-config))))
 
@@ -59,7 +59,7 @@
   (testing "failed CI scores 0.0"
     (is (= 0.0 (readiness/score-ci-factor nil {:pr/ci-status :failed} readiness/default-config)))))
 
-(deftest score-approved-factor-test
+(deftest ^{:stratum 0} score-approved-factor-test
   (testing "approved PR scores 1.0"
     (is (= 1.0 (readiness/score-approved-factor nil {:pr/status :approved} readiness/default-config))))
 
@@ -69,7 +69,7 @@
   (testing "draft PR scores 0.0"
     (is (= 0.0 (readiness/score-approved-factor nil {:pr/status :draft} readiness/default-config)))))
 
-(deftest score-gates-factor-test
+(deftest ^{:stratum 0} score-gates-factor-test
   (testing "no gates scores 1.0"
     (is (= 1.0 (readiness/score-gates-factor nil {:pr/gate-results []} readiness/default-config))))
 
@@ -83,7 +83,7 @@
                  {:pr/gate-results [{:gate/passed? true} {:gate/passed? false}]}
                  readiness/default-config)))))
 
-(deftest score-behind-main-factor-test
+(deftest ^{:stratum 0} score-behind-main-factor-test
   (testing "not behind main scores 1.0"
     (is (= 1.0 (readiness/score-behind-main-factor nil {:pr/behind-main? false} readiness/default-config))))
 
@@ -96,8 +96,7 @@
 ;; ============================================================================
 ;; Weighted aggregation tests
 ;; ============================================================================
-
-(deftest compute-readiness-score-test
+(deftest ^{:stratum 0} compute-readiness-score-test
   (testing "perfect PR scores near 1.0"
     (let [train {:train/prs [{:pr/number 1 :pr/status :merged}]}
           pr {:pr/number 2
@@ -124,8 +123,7 @@
 ;; ============================================================================
 ;; Explainability tests
 ;; ============================================================================
-
-(deftest explain-readiness-test
+(deftest ^{:stratum 0} explain-readiness-test
   (testing "explain returns all factors"
     (let [train {:train/prs []}
           pr {:pr/depends-on [] :pr/ci-status :passed :pr/status :approved
@@ -154,8 +152,7 @@
 ;; ============================================================================
 ;; Threshold tests
 ;; ============================================================================
-
-(deftest threshold-test
+(deftest ^{:stratum 0} threshold-test
   (testing "ready? reflects threshold comparison"
     (let [train {:train/prs []}
           good-pr {:pr/depends-on [] :pr/ci-status :passed :pr/status :approved

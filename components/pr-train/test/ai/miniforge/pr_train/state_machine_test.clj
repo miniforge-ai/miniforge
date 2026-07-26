@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.state-machine-test
   "Tests for rollback, auto-transition, and recompute."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.state :as state]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Rollback planning tests
 ;; ============================================================================
-
-(deftest compute-rollback-plan-test
+(deftest ^{:stratum 0} compute-rollback-plan-test
   (testing "computes rollback plan with merged PRs"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :merged))
@@ -46,8 +46,7 @@
 ;; ============================================================================
 ;; Auto-transition tests
 ;; ============================================================================
-
-(deftest infer-train-status-test
+(deftest ^{:stratum 0} infer-train-status-test
   (testing "infers :merged when all PRs merged"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :merged))
@@ -82,7 +81,7 @@
                     (assoc :train/prs [pr]))]
       (is (nil? (state/infer-train-status train))))))
 
-(deftest auto-transition-train-test
+(deftest ^{:stratum 0} auto-transition-train-test
   (testing "auto-transitions train based on PR states"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :merged))
@@ -102,8 +101,7 @@
 ;; ============================================================================
 ;; Recompute train state tests
 ;; ============================================================================
-
-(deftest recompute-train-state-test
+(deftest ^{:stratum 0} recompute-train-state-test
   (testing "recomputes all derived state"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :approved)

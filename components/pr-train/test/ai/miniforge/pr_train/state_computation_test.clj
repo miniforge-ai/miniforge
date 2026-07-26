@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.state-computation-test
   "Tests for ready-to-merge, blocking, progress, and dependency computations."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.state :as state]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Ready-to-merge computation tests
 ;; ============================================================================
-
-(deftest deps-merged?-test
+(deftest ^{:stratum 0} deps-merged?-test
   (testing "PR with no deps is always deps-merged"
     (let [pr (state/create-pr-state "acme/a" 100 "url" "branch" "PR" 1)
           train (-> (state/create-train-state (random-uuid) "Test" (random-uuid))
@@ -50,7 +50,7 @@
                     (assoc :train/prs [pr1 pr2]))]
       (is (state/deps-merged? train pr2)))))
 
-(deftest gates-passed?-test
+(deftest ^{:stratum 0} gates-passed?-test
   (testing "PR with no gates passes"
     (let [pr (state/create-pr-state "acme/a" 100 "url" "branch" "PR" 1)]
       (is (state/gates-passed? pr))))
@@ -69,7 +69,7 @@
                          {:gate/id :lint :gate/type :lint :gate/passed? false}]))]
       (is (not (state/gates-passed? pr))))))
 
-(deftest ready-to-merge?-test
+(deftest ^{:stratum 0} ready-to-merge?-test
   (testing "PR is ready when all conditions met"
     (let [pr (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR" 1)
                  (assoc :pr/status :approved)
@@ -104,7 +104,7 @@
                     (assoc :train/prs [pr1 pr2]))]
       (is (not (state/ready-to-merge? train pr2))))))
 
-(deftest compute-ready-to-merge-test
+(deftest ^{:stratum 0} compute-ready-to-merge-test
   (testing "returns ready PRs in merge order"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :approved)
@@ -117,8 +117,7 @@
 ;; ============================================================================
 ;; Blocking PR computation tests
 ;; ============================================================================
-
-(deftest pr-blocking?-test
+(deftest ^{:stratum 0} pr-blocking?-test
   (testing "PR is blocking when deps merged but not ready"
     (let [pr (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR" 1)
                  (assoc :pr/status :open)
@@ -142,7 +141,7 @@
                     (assoc :train/prs [pr]))]
       (is (not (state/pr-blocking? train pr))))))
 
-(deftest compute-blocking-prs-test
+(deftest ^{:stratum 0} compute-blocking-prs-test
   (testing "returns blocking PRs"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :open))
@@ -157,8 +156,7 @@
 ;; ============================================================================
 ;; Progress computation tests
 ;; ============================================================================
-
-(deftest compute-progress-test
+(deftest ^{:stratum 0} compute-progress-test
   (testing "computes correct progress"
     (let [pr1 (-> (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
                   (assoc :pr/status :merged))
@@ -181,8 +179,7 @@
 ;; ============================================================================
 ;; Dependency linking tests
 ;; ============================================================================
-
-(deftest link-pr-dependencies-test
+(deftest ^{:stratum 0} link-pr-dependencies-test
   (testing "links PRs in linear chain"
     (let [pr1 (state/create-pr-state "acme/a" 100 "url" "branch" "PR 1" 1)
           pr2 (state/create-pr-state "acme/b" 200 "url" "branch" "PR 2" 2)

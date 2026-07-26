@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.train-control-test
   "Tests for pause, resume, abandon, and progress."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.interface :as train]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Train control tests
 ;; ============================================================================
-
-(deftest pause-resume-test
+(deftest ^{:stratum 0} pause-resume-test
   (testing "pause-train and resume-train work"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -39,7 +39,7 @@
         (is (not (:train/paused? resumed)))
         (is (nil? (:train/pause-reason resumed)))))))
 
-(deftest abandon-train-test
+(deftest ^{:stratum 0} abandon-train-test
   (testing "abandon-train marks train as abandoned"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)
@@ -50,8 +50,7 @@
 ;; ============================================================================
 ;; Progress tests
 ;; ============================================================================
-
-(deftest get-progress-test
+(deftest ^{:stratum 0} get-progress-test
   (testing "progress tracks PR states"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]

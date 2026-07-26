@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.event-stream-test
   "Tests for event-stream integration in PR train manager."
   (:require
@@ -23,7 +22,9 @@
    [ai.miniforge.pr-train.interface :as train]
    [ai.miniforge.event-stream.interface :as es]))
 
-(deftest complete-merge-emits-pr-merged-event
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} complete-merge-emits-pr-merged-event
   (testing "complete-merge publishes :pr/merged event to event-stream"
     ;; Real event-stream (no with-redefs — safe under pmap), sinkless:
     ;; the default file sink writes into the operator's REAL
@@ -71,7 +72,7 @@
             (is (uuid? (:event/id event)))
             (is (inst? (:event/timestamp event)))))))))
 
-(deftest add-pr-emits-pr-created-event
+(deftest ^{:stratum 0} add-pr-emits-pr-created-event
   (testing "add-pr announces the PR so an entity exists before merge"
     (let [stream (es/create-event-stream {:sinks []})
           captured (atom [])
@@ -90,7 +91,7 @@
           (is (= train-id (:train/id event)))
           (is (uuid? (:event/id event))))))))
 
-(deftest complete-merge-without-event-stream
+(deftest ^{:stratum 0} complete-merge-without-event-stream
   (testing "complete-merge works normally when no event-stream is configured"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "No Stream" (random-uuid) nil)]

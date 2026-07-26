@@ -15,25 +15,25 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.state-transitions-test
   "Tests for state transition validation."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.state :as state]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; State transition validation tests
 ;; ============================================================================
-
-(deftest train-transitions-test
+(deftest ^{:stratum 0} train-transitions-test
   (testing "train-transitions map is complete"
     (is (map? state/train-transitions))
     (is (contains? state/train-transitions :drafting))
     (is (contains? state/train-transitions :merged))
     (is (contains? state/train-transitions :abandoned))))
 
-(deftest valid-train-transition?-test
+(deftest ^{:stratum 0} valid-train-transition?-test
   (testing "valid forward transitions"
     (is (state/valid-train-transition? :drafting :open))
     (is (state/valid-train-transition? :drafting :abandoned))
@@ -50,7 +50,7 @@
     (is (not (state/valid-train-transition? :rolled-back :open)))
     (is (not (state/valid-train-transition? :drafting :merged)))))
 
-(deftest valid-pr-transition?-test
+(deftest ^{:stratum 0} valid-pr-transition?-test
   (testing "valid PR transitions"
     (is (state/valid-pr-transition? :draft :open))
     (is (state/valid-pr-transition? :draft :closed))
@@ -69,7 +69,7 @@
     (is (not (state/valid-pr-transition? :open :merged)))
     (is (not (state/valid-pr-transition? :reviewing :merged)))))
 
-(deftest terminal-status-tests
+(deftest ^{:stratum 0} terminal-status-tests
   (testing "terminal train statuses"
     (is (state/terminal-train-status? :merged))
     (is (state/terminal-train-status? :rolled-back))

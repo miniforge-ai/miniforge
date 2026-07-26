@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.schema
   "Malli schemas for PR Train component.
    Defines TrainPR, PRTrain, EvidenceBundle, and related types."
@@ -23,38 +22,38 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums and base types
 
-(def pr-statuses
+;; Enums and base types
+(def ^{:stratum 0} pr-statuses
   [:draft :open :reviewing :changes-requested
    :approved :merging :merged :closed :failed])
 
-(def train-statuses
+(def ^{:stratum 0} train-statuses
   [:drafting :open :reviewing :merging
    :merged :failed :rolled-back :abandoned])
 
-(def ci-statuses
+(def ^{:stratum 0} ci-statuses
   [:pending :running :passed :failed :skipped])
 
-(def rollback-triggers
+(def ^{:stratum 0} rollback-triggers
   [:ci-failure :gate-failure :manual :timeout])
 
-(def rollback-actions
+(def ^{:stratum 0} rollback-actions
   "Actions to take on rollback."
   [:revert-all :revert-to-checkpoint :pause])
 
-(def evidence-types
+(def ^{:stratum 0} evidence-types
   [:terraform-plan :atlantis-log :ci-log
    :gate-results :intent-validation :approval-record])
 
-(def intent-types
+(def ^{:stratum 0} intent-types
   "Types of semantic intent."
   [:create :import :modify :delete :migrate])
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Registry
 
-(def registry
+;; Registry
+(def ^{:stratum 1} registry
   "Malli registry for PR train types."
   {;; Identifiers
    :id/uuid uuid?
@@ -86,9 +85,9 @@
    :common/pos-number [:double {:min 0.0}]})
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Gate result schema
 
-(def GateResult
+;; Gate result schema
+(def ^{:stratum 2} GateResult
   [:map {:registry registry}
    [:gate/id keyword?]
    [:gate/type keyword?]
@@ -97,10 +96,8 @@
    [:gate/details {:optional true} [:map-of keyword? any?]]
    [:gate/timestamp {:optional true} :common/timestamp]])
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Task intent schema (for semantic validation)
-
-(def Invariant
+(def ^{:stratum 2} Invariant
   "Schema for an intent invariant."
   [:map {:registry registry}
    [:invariant/id keyword?]
@@ -110,17 +107,61 @@
      [:type [:enum :plan-output :diff-analysis :state-comparison]]
      [:condition any?]]]])
 
-(def TaskIntent
+;; Progress schema
+(def ^{:stratum 2} Progress
+  [:map {:registry registry}
+   [:total pos-int?]
+   [:merged :common/non-neg-int]
+   [:approved :common/non-neg-int]
+   [:pending :common/non-neg-int]
+   [:failed :common/non-neg-int]])
+
+;; Rollback plan schema
+(def ^{:stratum 2} RollbackPlan
+  [:map {:registry registry}
+   [:trigger (into [:enum] rollback-triggers)]
+   [:action (into [:enum] rollback-actions)]
+   [:checkpoint {:optional true} :pr/number]
+   [:prs-to-revert [:vector :pr/number]]])
+
+;; Evidence artifact schema
+(def ^{:stratum 2} EvidenceArtifact
+  "Schema for an individual evidence artifact."
+  [:map {:registry registry}
+   [:type :evidence/type]
+   [:content :id/string]
+   [:hash :id/string]
+   [:timestamp :common/timestamp]])
+
+(def ^{:stratum 2} EvidenceSummary
+  "Schema for evidence bundle summary."
+  [:map {:registry registry}
+   [:total-prs pos-int?]
+   [:gates-passed :common/non-neg-int]
+   [:gates-failed :common/non-neg-int]
+   [:human-approvals :common/non-neg-int]
+   [:semantic-violations :common/non-neg-int]])
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} TaskIntent
   [:map {:registry registry}
    [:intent/type (into [:enum] intent-types)]
    [:intent/invariants {:optional true} [:vector Invariant]]
    [:intent/forbidden-actions {:optional true} [:vector keyword?]]
    [:intent/required-evidence {:optional true} [:vector keyword?]]])
 
-;------------------------------------------------------------------------------ Layer 4
-;; TrainPR schema
+(def ^{:stratum 3} PREvidence
+  "Schema for evidence associated with a single PR."
+  [:map {:registry registry}
+   [:pr/repo :pr/repo]
+   [:pr/number :pr/number]
+   [:evidence/artifacts [:vector EvidenceArtifact]]])
 
-(def TrainPR
+;------------------------------------------------------------------------------ Layer 4
+
+;; TrainPR schema
+(def ^{:stratum 4} TrainPR
   [:map {:registry registry}
    [:pr/repo :pr/repo]
    [:pr/number :pr/number]
@@ -152,31 +193,19 @@
        [:additions :common/non-neg-int]
        [:deletions :common/non-neg-int]]]]]])
 
+(def ^{:stratum 4} EvidenceBundle
+  [:map {:registry registry}
+   [:evidence/id :evidence/id]
+   [:evidence/train-id :train/id]
+   [:evidence/created-at :common/timestamp]
+   [:evidence/prs [:vector PREvidence]]
+   [:evidence/summary EvidenceSummary]
+   [:evidence/miniforge-version :id/string]])
+
 ;------------------------------------------------------------------------------ Layer 5
-;; Progress schema
 
-(def Progress
-  [:map {:registry registry}
-   [:total pos-int?]
-   [:merged :common/non-neg-int]
-   [:approved :common/non-neg-int]
-   [:pending :common/non-neg-int]
-   [:failed :common/non-neg-int]])
-
-;------------------------------------------------------------------------------ Layer 6
-;; Rollback plan schema
-
-(def RollbackPlan
-  [:map {:registry registry}
-   [:trigger (into [:enum] rollback-triggers)]
-   [:action (into [:enum] rollback-actions)]
-   [:checkpoint {:optional true} :pr/number]
-   [:prs-to-revert [:vector :pr/number]]])
-
-;------------------------------------------------------------------------------ Layer 7
 ;; PRTrain schema
-
-(def PRTrain
+(def ^{:stratum 5} PRTrain
   [:map {:registry registry}
    [:train/id :train/id]
    [:train/name :train/name]
@@ -200,42 +229,6 @@
    [:train/created-at :common/timestamp]
    [:train/updated-at :common/timestamp]
    [:train/merged-at {:optional true} :common/timestamp]])
-
-;------------------------------------------------------------------------------ Layer 8
-;; Evidence artifact schema
-
-(def EvidenceArtifact
-  "Schema for an individual evidence artifact."
-  [:map {:registry registry}
-   [:type :evidence/type]
-   [:content :id/string]
-   [:hash :id/string]
-   [:timestamp :common/timestamp]])
-
-(def PREvidence
-  "Schema for evidence associated with a single PR."
-  [:map {:registry registry}
-   [:pr/repo :pr/repo]
-   [:pr/number :pr/number]
-   [:evidence/artifacts [:vector EvidenceArtifact]]])
-
-(def EvidenceSummary
-  "Schema for evidence bundle summary."
-  [:map {:registry registry}
-   [:total-prs pos-int?]
-   [:gates-passed :common/non-neg-int]
-   [:gates-failed :common/non-neg-int]
-   [:human-approvals :common/non-neg-int]
-   [:semantic-violations :common/non-neg-int]])
-
-(def EvidenceBundle
-  [:map {:registry registry}
-   [:evidence/id :evidence/id]
-   [:evidence/train-id :train/id]
-   [:evidence/created-at :common/timestamp]
-   [:evidence/prs [:vector PREvidence]]
-   [:evidence/summary EvidenceSummary]
-   [:evidence/miniforge-version :id/string]])
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
