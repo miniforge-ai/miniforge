@@ -139,7 +139,6 @@
         raw     (if (string? preview) preview (event-message event))]
     (truncate raw args-preview-length)))
 
-;; Public API
 (defn- ^{:stratum 1} index-tool-names
   "Build a `{tool-call-id → tool-name}` lookup map from the event stream.
 
@@ -300,6 +299,7 @@
 
 ;------------------------------------------------------------------------------ Layer 5
 
+;; Public API
 (defn ^{:stratum 5} render-timeline
   "Transform a seq of parsed event maps into a human-readable timeline string.
 

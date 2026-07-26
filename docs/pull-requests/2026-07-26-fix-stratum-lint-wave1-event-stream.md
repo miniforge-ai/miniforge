@@ -196,6 +196,23 @@ so the next `--fix` pass silently deleted it as a spurious extra
 (diff showed an unexpected file rewrite); fixed by rewording so
 "Layer 0" never appears alone on a line.
 
+### Review-round fix: a misplaced `;; Public API` banner (`timeline.clj`)
+
+GitHub Copilot's automated review on this PR flagged one real issue:
+the plain `;; Public API` grouping comment (not a `Layer N` heading —
+same class of pre-existing free-floating comment as
+`event_type_registry.clj`'s "Asymmetries at a glance" block above) sat
+directly above `index-tool-names`, a `defn-` (private). The file's
+only actual public function is `render-timeline` at the bottom
+(`defn`, real stratum 5) — every other function in the file is
+`defn-`. Verified directly against the PR's GitHub API data (not just
+the review summary) and cross-checked the same banner's correct usage
+elsewhere in the component (`digest.clj:108`, sitting directly above
+the actual public `digest-content`). Moved the banner from above
+`index-tool-names` to directly above `render-timeline`. Re-ran `--fix`
+on the file afterward — zero diff, confirms the new placement is
+stable. No behavior change; comment-position only.
+
 ## Testing Plan
 
 1. Confirmed the stratum-lint pin in `tasks/stratum.clj`
@@ -284,13 +301,20 @@ so the next `--fix` pass silently deleted it as a spurious extra
     over budget — purely because their old headings either didn't
     exist in a form the tool recognized (silently skipped, not a
     clean bill of health) or undercounted.
+11. GitHub Copilot review (post-push) flagged the `timeline.clj`
+    `;; Public API` misplacement above. Fixed, re-ran `--fix` (zero
+    diff, stable), re-ran `clj-kondo` on the file (0 errors, same 1
+    pre-existing `clojure.string` warning), and ran
+    `timeline_test.clj` directly (15 tests, 66 assertions, 0
+    failures/errors).
 
 ## Deployment Plan
 
 Merges to `main` like any other component change. Almost entirely
-comment/metadata/order-only; the one real fix
-(`event_type_registry.clj`'s comment placement) has zero behavior
-impact — no code, only comment position, changed. Pre-commit's
+comment/metadata/order-only; the two real fixes
+(`event_type_registry.clj`'s and `timeline.clj`'s comment placement)
+have zero behavior impact — no code, only comment position, changed.
+Pre-commit's
 `lint:stratum` autofixer keeps this component clean going forward.
 
 **SL003 deferral, not resolution, for all 12 remaining files.** Every
@@ -360,6 +384,19 @@ time for these 12 files until Wave 2 splits them.
   [stratum-lint#15](https://github.com/miniforge-ai/stratum-lint/pull/15)
   and PR #1526 (pin bump). Re-confirmed safe for this component in
   Motivation above; no action needed.
+- Pre-existing docstring/data mismatch noticed while verifying a
+  Copilot low-confidence (suppressed, not posted as an actionable
+  comment) note: `listeners.clj`'s `privacy->min-capability` docstring
+  says `:internal events -> :advise or higher`, but the map itself has
+  `:internal :observe` — the same minimum capability as `:public`,
+  meaning the `:internal` privacy tier currently adds no additional
+  access restriction over `:public`. Confirmed directly against the
+  code; pre-dates this PR (present since at least #854/#1158), not
+  introduced or touched by the stratum-lint fix. Not resolved here:
+  fixing the docstring would just paper over a possible real
+  authorization gap, and fixing the map would change runtime N8 OCI
+  access-control behavior — a decision that deserves its own
+  dedicated review, not a fold-in to a stratum-lint autofix PR.
 
 ## Checklist
 
@@ -390,4 +427,7 @@ time for these 12 files until Wave 2 splits them.
       `SL003` remains on 12 files, all documented above with real
       layer counts and explicit split-feasibility reasoning, tracked
       as Wave 2
+- [x] GitHub Copilot review comment (`timeline.clj`'s misplaced `;;
+      Public API` banner) verified directly against the PR's GitHub
+      API data and fixed; stability re-confirmed under `--fix`
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
