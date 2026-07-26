@@ -100,21 +100,21 @@
 ;; create-sinks-from-config
 (deftest ^{:stratum 0} create-sinks-from-config-test
   (testing "defaults to file sink when no config"
-    (let [sinks (sinks/create-sinks-from-config {})]
-      (is (= 1 (count sinks)))
-      (is (fn? (first sinks)))))
+    (let [created-sinks (sinks/create-sinks-from-config {})]
+      (is (= 1 (count created-sinks)))
+      (is (fn? (first created-sinks)))))
 
   (testing "creates sinks from :observability :event-sinks"
-    (let [sinks (sinks/create-sinks-from-config
-                 {:observability {:event-sinks [:stdout]}})]
-      (is (= 1 (count sinks)))
-      (is (fn? (first sinks)))))
+    (let [created-sinks (sinks/create-sinks-from-config
+                         {:observability {:event-sinks [:stdout]}})]
+      (is (= 1 (count created-sinks)))
+      (is (fn? (first created-sinks)))))
 
   (testing "multiple sinks from config"
-    (let [sinks (sinks/create-sinks-from-config
-                 {:observability {:event-sinks [:file :stdout]}})]
-      (is (= 2 (count sinks)))
-      (is (every? fn? sinks)))))
+    (let [created-sinks (sinks/create-sinks-from-config
+                         {:observability {:event-sinks [:file :stdout]}})]
+      (is (= 2 (count created-sinks)))
+      (is (every? fn? created-sinks)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

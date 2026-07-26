@@ -252,6 +252,19 @@ to match the verified real structure. Re-ran `--fix` (zero diff),
 `clj-kondo` (0 errors/warnings), and `approval_test.clj` (9 tests, 45
 assertions, 0 failures/errors) after the change.
 
+### Review-round fix: a local binding shadowing the `sinks` namespace alias
+
+GitHub Copilot's fourth review pass flagged `sinks_test.clj`'s
+`create-sinks-from-config-test`: all three `testing` blocks bound
+their result to a local named `sinks`, shadowing the file's own
+`[ai.miniforge.event-stream.sinks :as sinks]` require within each
+block. Verified directly — confirmed all three `(let [sinks ...] ...)`
+forms. Renamed the local to `created-sinks` in all three blocks and
+updated the `is` assertions referencing it. Purely mechanical, no
+functional change. Re-ran `--fix` (zero diff), `clj-kondo` (0
+errors/warnings), and `sinks_test.clj` directly (15 tests, 60
+assertions, 0 failures/errors) after the change.
+
 ## Testing Plan
 
 1. Confirmed the stratum-lint pin in `tasks/stratum.clj`
@@ -356,6 +369,11 @@ assertions, 0 failures/errors) after the change.
     Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
     warnings), and `approval_test.clj` directly (9 tests, 45
     assertions, 0 failures/errors).
+14. Fourth Copilot review pass (after the `approval.clj` push) flagged
+    `sinks_test.clj`'s `sinks`-local-shadows-`sinks`-alias issue above.
+    Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
+    warnings), and `sinks_test.clj` directly (15 tests, 60 assertions,
+    0 failures/errors).
 
 ## Deployment Plan
 
@@ -501,4 +519,7 @@ time for these 12 files until Wave 2 splits them.
 - [x] Third Copilot review pass comment (`approval.clj`'s stale
       namespace-docstring layer summary) verified directly against the
       file's actual `^{:stratum n}` tags and fixed
+- [x] Fourth Copilot review pass comment (`sinks_test.clj`'s
+      `sinks`-local-shadows-`sinks`-alias) verified directly and fixed
+      in all three affected `testing` blocks
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time
