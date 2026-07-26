@@ -11,20 +11,21 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.config
   "Validated load of the web-dashboard deployment/session defaults."
   (:require
    [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Fail-fast resource loading
+(def ^{:stratum 0} ^:private defaults-resource "config/web-dashboard/defaults.edn")
 
-(def ^:private defaults-resource "config/web-dashboard/defaults.edn")
-
-(def ^:private required-keys
+(def ^{:stratum 0} ^:private required-keys
   [:port :session-cookie-name :session-ttl-ms :stale-threshold-ms :max-recent-workflows])
 
-(def defaults
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} defaults
   "Web dashboard deployment and session defaults, validated at load."
   (config/load-config-resource defaults-resource required-keys))

@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.interface.protocols.repair-strategy
   "Public protocol for artifact repair strategies.
 
    This is an extensibility point - users can implement custom repair
    strategies by implementing this protocol.")
 
-(defprotocol RepairStrategy
+;------------------------------------------------------------------------------ Layer 0
+
+(defprotocol ^{:stratum 0} RepairStrategy
   "Protocol for artifact repair strategies.
    Strategies attempt to fix validation errors in artifacts."
   (can-repair? [this errors context]

@@ -15,12 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.core
   "Implementation of the repo-dag component.
-   Layer 0: Pure functions for DAG operations
-   Layer 1: Protocol definition
-   Layer 2: In-memory implementation"
+   Layer 0: Pure DAG primitives, protocol definition, and store helpers
+   Layer 1: Schema-validating siblings, traversal, and validation logic
+   Layer 2: Schema-aware constructors and anomaly-returning CRUD impls
+   Layer 3: In-memory manager implementation
+   Layer 4: Factory function"
   (:require
    [clojure.set :as set]
    [clojure.string :as str]
@@ -31,9 +32,9 @@
    [ai.miniforge.repo-dag.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure functions for DAG operations
 
-(defn validate-schema-anomaly
+;; Pure functions for DAG operations
+(defn ^{:stratum 0} validate-schema-anomaly
   "Validate a value against a schema. Return the value on success, or an
    `:invalid-input` anomaly map describing the validation failure.
 
@@ -52,14 +53,7 @@
                       :value value
                       :errors (me/humanize (m/explain schema-def value))})))
 
-(defn validate-schema
-  "Validate a value against a schema, returning the value or an anomaly map.
-
-   Kept as a stable alias for [[validate-schema-anomaly]]."
-  [schema-def value]
-  (validate-schema-anomaly schema-def value))
-
-(defn- build-repo-node
+(defn- ^{:stratum 0} build-repo-node
   "Internal: assemble the repo-node map (no validation). Shared by
    repo-node constructors so their behavior never drifts."
   [{:keys [repo/url repo/name repo/org repo/type repo/layer repo/default-branch repo/watch-config]
@@ -73,23 +67,7 @@
       org (assoc :repo/org org)
       watch-config (assoc :repo/watch-config watch-config))))
 
-(defn make-repo-node-anomaly
-  "Build a repo node from `repo-config`, returning the validated node or
-   an `:invalid-input` anomaly when schema validation rejects it (e.g.
-   missing `:repo/type`, malformed `:repo/url`, …).
-
-   Prefer this over [[make-repo-node]] in non-boundary code."
-  [repo-config]
-  (validate-schema-anomaly schema/RepoNode (build-repo-node repo-config)))
-
-(defn make-repo-node
-  "Create a repo node with layer inference if not specified.
-
-   Returns an anomaly map when schema validation fails."
-  [repo-config]
-  (validate-schema schema/RepoNode (build-repo-node repo-config)))
-
-(defn- build-repo-edge
+(defn- ^{:stratum 0} build-repo-edge
   "Internal: assemble the edge map (no validation). Shared by
    repo-edge constructors."
   [{:keys [edge/from edge/to edge/constraint edge/merge-ordering edge/validation]
@@ -100,38 +78,12 @@
            :edge/merge-ordering merge-ordering}
     validation (assoc :edge/validation validation)))
 
-(defn make-repo-edge-anomaly
-  "Build a repo edge from `edge-config`, returning the validated edge or
-   an `:invalid-input` anomaly when schema validation rejects it (unknown
-   `:edge/constraint`, unknown `:edge/merge-ordering`, missing endpoints, …).
-
-   Prefer this over [[make-repo-edge]] in non-boundary code."
-  [edge-config]
-  (validate-schema-anomaly schema/RepoEdge (build-repo-edge edge-config)))
-
-(defn make-repo-edge
-  "Create a repo edge with default merge ordering.
-
-   Returns an anomaly map when schema validation fails."
-  [edge-config]
-  (validate-schema schema/RepoEdge (build-repo-edge edge-config)))
-
-(defn make-dag
-  "Create a new empty DAG, or return an anomaly map if validation fails."
-  [id dag-name description]
-  (let [dag (cond-> {:dag/id id
-                     :dag/name dag-name
-                     :dag/repos []
-                     :dag/edges []}
-              description (assoc :dag/description description))]
-    (validate-schema schema/RepoDag dag)))
-
-(defn find-repo-by-name
+(defn ^{:stratum 0} find-repo-by-name
   "Find a repo node by name in the DAG."
   [dag repo-name]
   (some #(when (= repo-name (:repo/name %)) %) (:dag/repos dag)))
 
-(defn find-edge
+(defn ^{:stratum 0} find-edge
   "Find an edge by from/to pair."
   [dag from-repo to-repo]
   (some #(when (and (= from-repo (:edge/from %))
@@ -139,15 +91,14 @@
            %)
         (:dag/edges dag)))
 
-(defn repo-names
+(defn ^{:stratum 0} repo-names
   "Get set of all repo names in the DAG."
   [dag]
   (set (map :repo/name (:dag/repos dag))))
 
 ;------------------------------------------------------------------------------ Layer 0.5
 ;; Kahn's algorithm for topological sort
-
-(defn topo-sort
+(defn ^{:stratum 0} topo-sort
   "Perform topological sort using Kahn's algorithm.
    Returns {:success true :order [...]} or {:success false :error :cycle-detected :cycle-nodes #{...}}"
   [dag]
@@ -165,17 +116,9 @@
        :error       :cycle-detected
        :cycle-nodes (get-in result [:error :data :cycle-nodes])})))
 
-(defn find-cycle-nodes
-  "Find nodes involved in a cycle. Returns nil if no cycle."
-  [dag]
-  (let [result (topo-sort dag)]
-    (when-not (:success result)
-      (:cycle-nodes result))))
-
 ;------------------------------------------------------------------------------ Layer 0.6
 ;; Graph traversal functions
-
-(defn build-adjacency
+(defn ^{:stratum 0} build-adjacency
   "Build adjacency list from DAG edges."
   [dag]
   (reduce (fn [acc edge]
@@ -183,7 +126,7 @@
           {}
           (:dag/edges dag)))
 
-(defn build-reverse-adjacency
+(defn ^{:stratum 0} build-reverse-adjacency
   "Build reverse adjacency list (for finding upstream repos)."
   [dag]
   (reduce (fn [acc edge]
@@ -191,52 +134,7 @@
           {}
           (:dag/edges dag)))
 
-(defn downstream-repos
-  "Get all repos that depend on the given repo (transitive closure)."
-  [dag repo-name]
-  (let [adj (build-adjacency dag)]
-    (loop [to-visit #{repo-name}
-           visited #{}]
-      (if (empty? to-visit)
-        (disj visited repo-name) ; Don't include the starting repo
-        (let [current (first to-visit)
-              neighbors (get adj current #{})]
-          (recur (into (disj to-visit current)
-                       (set/difference neighbors visited))
-                 (conj visited current)))))))
-
-(defn upstream-repos-impl
-  "Get all repos that this repo depends on (transitive closure)."
-  [dag repo-name]
-  (let [rev-adj (build-reverse-adjacency dag)]
-    (loop [to-visit #{repo-name}
-           visited #{}]
-      (if (empty? to-visit)
-        (disj visited repo-name) ; Don't include the starting repo
-        (let [current (first to-visit)
-              neighbors (get rev-adj current #{})]
-          (recur (into (disj to-visit current)
-                       (set/difference neighbors visited))
-                 (conj visited current)))))))
-
-(defn compute-merge-order
-  "Given a set of repo names, compute valid merge order based on DAG topology.
-   Only considers repos in the pr-set."
-  [dag pr-set]
-  (let [pr-names (set pr-set)
-        ;; Filter edges to only those between repos in pr-set
-        relevant-edges (filterv (fn [edge]
-                                  (and (contains? pr-names (:edge/from edge))
-                                       (contains? pr-names (:edge/to edge))))
-                                (:dag/edges dag))
-        ;; Create sub-DAG
-        sub-dag (assoc dag
-                       :dag/repos (filterv #(contains? pr-names (:repo/name %))
-                                           (:dag/repos dag))
-                       :dag/edges relevant-edges)]
-    (topo-sort sub-dag)))
-
-(defn compute-layers
+(defn ^{:stratum 0} compute-layers
   "Group repos by their layer."
   [dag]
   (reduce (fn [acc repo]
@@ -246,181 +144,21 @@
           {}
           (:dag/repos dag)))
 
-;------------------------------------------------------------------------------ Layer 0.7
-;; Validation functions
-
-(defn validate-dag-impl
-  "Validate DAG structure. Returns {:valid? bool :errors [...]}"
-  [dag]
-  (let [repo-name-set (repo-names dag)
-        errors (atom [])]
-    ;; Check for duplicate repo names
-    (let [names (map :repo/name (:dag/repos dag))
-          freqs (frequencies names)
-          dups (filterv #(> (val %) 1) freqs)]
-      (doseq [[dup-name dup-count] dups]
-        (swap! errors conj {:type :duplicate-repo
-                            :message (str "Duplicate repo name: " dup-name " (appears " dup-count " times)")
-                            :data {:repo-name dup-name :count dup-count}})))
-
-    ;; Check for edges referencing missing repos
-    (doseq [edge (:dag/edges dag)]
-      (let [from-repo (:edge/from edge)
-            to-repo (:edge/to edge)]
-        (when-not (contains? repo-name-set from-repo)
-          (swap! errors conj {:type :missing-repo
-                              :message (str "Edge references missing repo: " from-repo)
-                              :data {:edge-from from-repo :edge-to to-repo}}))
-        (when-not (contains? repo-name-set to-repo)
-          (swap! errors conj {:type :missing-repo
-                              :message (str "Edge references missing repo: " to-repo)
-                              :data {:edge-from from-repo :edge-to to-repo}}))))
-
-    ;; Check for self-loops
-    (doseq [edge (:dag/edges dag)]
-      (let [from-repo (:edge/from edge)
-            to-repo (:edge/to edge)]
-        (when (= from-repo to-repo)
-          (swap! errors conj {:type :self-loop
-                              :message (str "Self-loop detected: " from-repo " -> " to-repo)
-                              :data {:repo from-repo}}))))
-
-    ;; Check for cycles
-    (let [result (topo-sort dag)]
-      (when-not (:success result)
-        (swap! errors conj {:type :cycle
-                            :message (str "Cycle detected involving repos: "
-                                          (str/join ", " (:cycle-nodes result)))
-                            :data {:cycle-nodes (:cycle-nodes result)}})))
-
-    {:valid? (empty? @errors)
-     :errors @errors}))
-
 ;------------------------------------------------------------------------------ Layer 0.8
 ;; Anomaly-returning shape helpers
 ;;
 ;; These are private store-shaped helpers; they consume the manager's
 ;; mutable atom directly so the protocol method bodies stay thin and
 ;; the anomaly-returning siblings have a single, shared implementation.
-
-(defn- dag-not-found-anomaly
+(defn- ^{:stratum 0} dag-not-found-anomaly
   "Construct the canonical `:not-found` anomaly for a missing DAG."
   [dag-id]
   (anomaly/anomaly :not-found
                    "DAG not found"
                    {:dag-id dag-id}))
 
-(defn- add-repo-impl
-  "Anomaly-returning add-repo. `store` is the manager's atom. Returns the
-   updated DAG on success, or an anomaly on missing DAG (`:not-found`),
-   schema-invalid `repo-config` (`:invalid-input`), or duplicate repo name
-   (`:conflict`)."
-  [store dag-id repo-config]
-  (if-let [dag (get @store dag-id)]
-    (let [node-or-anomaly (make-repo-node-anomaly repo-config)]
-      (if (anomaly/anomaly? node-or-anomaly)
-        node-or-anomaly
-        (let [rname (:repo/name node-or-anomaly)]
-          (if (find-repo-by-name dag rname)
-            (anomaly/anomaly :conflict
-                             "Repo already exists"
-                             {:dag-id dag-id :repo-name rname})
-            (let [updated (update dag :dag/repos conj node-or-anomaly)]
-              (swap! store assoc dag-id updated)
-              updated)))))
-    (dag-not-found-anomaly dag-id)))
-
-(defn- remove-repo-impl
-  "Anomaly-returning remove-repo. Returns the updated DAG on success, or a
-   `:not-found` anomaly if the DAG does not exist."
-  [store dag-id repo-name]
-  (if-let [dag (get @store dag-id)]
-    (let [updated-repos (filterv #(not= repo-name (:repo/name %)) (:dag/repos dag))
-          updated-edges (filterv #(and (not= repo-name (:edge/from %))
-                                       (not= repo-name (:edge/to %)))
-                                 (:dag/edges dag))
-          updated (assoc dag
-                         :dag/repos updated-repos
-                         :dag/edges updated-edges)]
-      (swap! store assoc dag-id updated)
-      updated)
-    (dag-not-found-anomaly dag-id)))
-
-(defn- add-edge-impl
-  "Anomaly-returning add-edge. Returns the updated DAG on success, or an
-   anomaly classifying the failure (:not-found, :invalid-input, or :conflict)."
-  [store dag-id from-repo to-repo constraint merge-ordering]
-  (if-let [dag (get @store dag-id)]
-    (let [repo-name-set (repo-names dag)]
-      (cond
-        (not (contains? repo-name-set from-repo))
-        (anomaly/anomaly :not-found
-                         "From repo not found in DAG"
-                         {:dag-id dag-id :repo-name from-repo})
-
-        (not (contains? repo-name-set to-repo))
-        (anomaly/anomaly :not-found
-                         "To repo not found in DAG"
-                         {:dag-id dag-id :repo-name to-repo})
-
-        (= from-repo to-repo)
-        (anomaly/anomaly :invalid-input
-                         "Self-loop not allowed"
-                         {:dag-id dag-id :repo-name from-repo})
-
-        (find-edge dag from-repo to-repo)
-        (anomaly/anomaly :conflict
-                         "Edge already exists"
-                         {:dag-id dag-id :from from-repo :to to-repo})
-
-        :else
-        (let [edge-or-anomaly (make-repo-edge-anomaly
-                               {:edge/from from-repo
-                                :edge/to to-repo
-                                :edge/constraint constraint
-                                :edge/merge-ordering merge-ordering})]
-          (if (anomaly/anomaly? edge-or-anomaly)
-            edge-or-anomaly
-            (let [updated (update dag :dag/edges conj edge-or-anomaly)
-                  result (topo-sort updated)]
-              (if (:success result)
-                (do
-                  (swap! store assoc dag-id updated)
-                  updated)
-                (anomaly/anomaly :conflict
-                                 "Adding edge would create cycle"
-                                 {:dag-id dag-id
-                                  :from from-repo
-                                  :to to-repo
-                                  :cycle-nodes (:cycle-nodes result)})))))))
-    (dag-not-found-anomaly dag-id)))
-
-(defn- remove-edge-impl
-  "Anomaly-returning remove-edge. Returns the updated DAG on success, or a
-   `:not-found` anomaly if the DAG does not exist."
-  [store dag-id from-repo to-repo]
-  (if-let [dag (get @store dag-id)]
-    (let [updated-edges (filterv #(not (and (= from-repo (:edge/from %))
-                                            (= to-repo (:edge/to %))))
-                                 (:dag/edges dag))
-          updated (assoc dag :dag/edges updated-edges)]
-      (swap! store assoc dag-id updated)
-      updated)
-    (dag-not-found-anomaly dag-id)))
-
-(defn- with-dag-or-anomaly
-  "Look up `dag-id` in `store`; on hit, apply `f` to the DAG and return its
-   result. On miss, return a `:not-found` anomaly. Shared helper for the
-   read-only protocol methods."
-  [store dag-id f]
-  (if-let [dag (get @store dag-id)]
-    (f dag)
-    (dag-not-found-anomaly dag-id)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Protocol definition
-
-(defprotocol RepoDagManager
+(defprotocol ^{:stratum 0} RepoDagManager
   "Protocol for managing repository dependency graphs."
 
   ;; CRUD operations
@@ -491,10 +229,280 @@
   (validate-dag-anomaly [this dag-id]
     "Explicit implementation name used by `validate-dag`."))
 
-;------------------------------------------------------------------------------ Layer 2
-;; In-memory implementation
+(defn ^{:stratum 0} get-all-dags
+  "Get all DAGs from the manager's store."
+  [manager]
+  (vals @(:store manager)))
 
-(defrecord InMemoryDagManager [store]
+(defn ^{:stratum 0} reset-manager!
+  "Reset the manager's store. Useful for testing."
+  [manager]
+  (reset! (:store manager) {}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} validate-schema
+  "Validate a value against a schema, returning the value or an anomaly map.
+
+   Kept as a stable alias for [[validate-schema-anomaly]]."
+  [schema-def value]
+  (validate-schema-anomaly schema-def value))
+
+(defn ^{:stratum 1} make-repo-node-anomaly
+  "Build a repo node from `repo-config`, returning the validated node or
+   an `:invalid-input` anomaly when schema validation rejects it (e.g.
+   missing `:repo/type`, malformed `:repo/url`, …).
+
+   Prefer this over [[make-repo-node]] in non-boundary code."
+  [repo-config]
+  (validate-schema-anomaly schema/RepoNode (build-repo-node repo-config)))
+
+(defn ^{:stratum 1} make-repo-edge-anomaly
+  "Build a repo edge from `edge-config`, returning the validated edge or
+   an `:invalid-input` anomaly when schema validation rejects it (unknown
+   `:edge/constraint`, unknown `:edge/merge-ordering`, missing endpoints, …).
+
+   Prefer this over [[make-repo-edge]] in non-boundary code."
+  [edge-config]
+  (validate-schema-anomaly schema/RepoEdge (build-repo-edge edge-config)))
+
+(defn ^{:stratum 1} find-cycle-nodes
+  "Find nodes involved in a cycle. Returns nil if no cycle."
+  [dag]
+  (let [result (topo-sort dag)]
+    (when-not (:success result)
+      (:cycle-nodes result))))
+
+(defn ^{:stratum 1} downstream-repos
+  "Get all repos that depend on the given repo (transitive closure)."
+  [dag repo-name]
+  (let [adj (build-adjacency dag)]
+    (loop [to-visit #{repo-name}
+           visited #{}]
+      (if (empty? to-visit)
+        (disj visited repo-name) ; Don't include the starting repo
+        (let [current (first to-visit)
+              neighbors (get adj current #{})]
+          (recur (into (disj to-visit current)
+                       (set/difference neighbors visited))
+                 (conj visited current)))))))
+
+(defn ^{:stratum 1} upstream-repos-impl
+  "Get all repos that this repo depends on (transitive closure)."
+  [dag repo-name]
+  (let [rev-adj (build-reverse-adjacency dag)]
+    (loop [to-visit #{repo-name}
+           visited #{}]
+      (if (empty? to-visit)
+        (disj visited repo-name) ; Don't include the starting repo
+        (let [current (first to-visit)
+              neighbors (get rev-adj current #{})]
+          (recur (into (disj to-visit current)
+                       (set/difference neighbors visited))
+                 (conj visited current)))))))
+
+(defn ^{:stratum 1} compute-merge-order
+  "Given a set of repo names, compute valid merge order based on DAG topology.
+   Only considers repos in the pr-set."
+  [dag pr-set]
+  (let [pr-names (set pr-set)
+        ;; Filter edges to only those between repos in pr-set
+        relevant-edges (filterv (fn [edge]
+                                  (and (contains? pr-names (:edge/from edge))
+                                       (contains? pr-names (:edge/to edge))))
+                                (:dag/edges dag))
+        ;; Create sub-DAG
+        sub-dag (assoc dag
+                       :dag/repos (filterv #(contains? pr-names (:repo/name %))
+                                           (:dag/repos dag))
+                       :dag/edges relevant-edges)]
+    (topo-sort sub-dag)))
+
+;; Validation functions
+(defn ^{:stratum 1} validate-dag-impl
+  "Validate DAG structure. Returns {:valid? bool :errors [...]}"
+  [dag]
+  (let [repo-name-set (repo-names dag)
+        errors (atom [])]
+    ;; Check for duplicate repo names
+    (let [names (map :repo/name (:dag/repos dag))
+          freqs (frequencies names)
+          dups (filterv #(> (val %) 1) freqs)]
+      (doseq [[dup-name dup-count] dups]
+        (swap! errors conj {:type :duplicate-repo
+                            :message (str "Duplicate repo name: " dup-name " (appears " dup-count " times)")
+                            :data {:repo-name dup-name :count dup-count}})))
+
+    ;; Check for edges referencing missing repos
+    (doseq [edge (:dag/edges dag)]
+      (let [from-repo (:edge/from edge)
+            to-repo (:edge/to edge)]
+        (when-not (contains? repo-name-set from-repo)
+          (swap! errors conj {:type :missing-repo
+                              :message (str "Edge references missing repo: " from-repo)
+                              :data {:edge-from from-repo :edge-to to-repo}}))
+        (when-not (contains? repo-name-set to-repo)
+          (swap! errors conj {:type :missing-repo
+                              :message (str "Edge references missing repo: " to-repo)
+                              :data {:edge-from from-repo :edge-to to-repo}}))))
+
+    ;; Check for self-loops
+    (doseq [edge (:dag/edges dag)]
+      (let [from-repo (:edge/from edge)
+            to-repo (:edge/to edge)]
+        (when (= from-repo to-repo)
+          (swap! errors conj {:type :self-loop
+                              :message (str "Self-loop detected: " from-repo " -> " to-repo)
+                              :data {:repo from-repo}}))))
+
+    ;; Check for cycles
+    (let [result (topo-sort dag)]
+      (when-not (:success result)
+        (swap! errors conj {:type :cycle
+                            :message (str "Cycle detected involving repos: "
+                                          (str/join ", " (:cycle-nodes result)))
+                            :data {:cycle-nodes (:cycle-nodes result)}})))
+
+    {:valid? (empty? @errors)
+     :errors @errors}))
+
+(defn- ^{:stratum 1} remove-repo-impl
+  "Anomaly-returning remove-repo. Returns the updated DAG on success, or a
+   `:not-found` anomaly if the DAG does not exist."
+  [store dag-id repo-name]
+  (if-let [dag (get @store dag-id)]
+    (let [updated-repos (filterv #(not= repo-name (:repo/name %)) (:dag/repos dag))
+          updated-edges (filterv #(and (not= repo-name (:edge/from %))
+                                       (not= repo-name (:edge/to %)))
+                                 (:dag/edges dag))
+          updated (assoc dag
+                         :dag/repos updated-repos
+                         :dag/edges updated-edges)]
+      (swap! store assoc dag-id updated)
+      updated)
+    (dag-not-found-anomaly dag-id)))
+
+(defn- ^{:stratum 1} remove-edge-impl
+  "Anomaly-returning remove-edge. Returns the updated DAG on success, or a
+   `:not-found` anomaly if the DAG does not exist."
+  [store dag-id from-repo to-repo]
+  (if-let [dag (get @store dag-id)]
+    (let [updated-edges (filterv #(not (and (= from-repo (:edge/from %))
+                                            (= to-repo (:edge/to %))))
+                                 (:dag/edges dag))
+          updated (assoc dag :dag/edges updated-edges)]
+      (swap! store assoc dag-id updated)
+      updated)
+    (dag-not-found-anomaly dag-id)))
+
+(defn- ^{:stratum 1} with-dag-or-anomaly
+  "Look up `dag-id` in `store`; on hit, apply `f` to the DAG and return its
+   result. On miss, return a `:not-found` anomaly. Shared helper for the
+   read-only protocol methods."
+  [store dag-id f]
+  (if-let [dag (get @store dag-id)]
+    (f dag)
+    (dag-not-found-anomaly dag-id)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} make-repo-node
+  "Create a repo node with layer inference if not specified.
+
+   Returns an anomaly map when schema validation fails."
+  [repo-config]
+  (validate-schema schema/RepoNode (build-repo-node repo-config)))
+
+(defn ^{:stratum 2} make-repo-edge
+  "Create a repo edge with default merge ordering.
+
+   Returns an anomaly map when schema validation fails."
+  [edge-config]
+  (validate-schema schema/RepoEdge (build-repo-edge edge-config)))
+
+(defn ^{:stratum 2} make-dag
+  "Create a new empty DAG, or return an anomaly map if validation fails."
+  [id dag-name description]
+  (let [dag (cond-> {:dag/id id
+                     :dag/name dag-name
+                     :dag/repos []
+                     :dag/edges []}
+              description (assoc :dag/description description))]
+    (validate-schema schema/RepoDag dag)))
+
+(defn- ^{:stratum 2} add-repo-impl
+  "Anomaly-returning add-repo. `store` is the manager's atom. Returns the
+   updated DAG on success, or an anomaly on missing DAG (`:not-found`),
+   schema-invalid `repo-config` (`:invalid-input`), or duplicate repo name
+   (`:conflict`)."
+  [store dag-id repo-config]
+  (if-let [dag (get @store dag-id)]
+    (let [node-or-anomaly (make-repo-node-anomaly repo-config)]
+      (if (anomaly/anomaly? node-or-anomaly)
+        node-or-anomaly
+        (let [rname (:repo/name node-or-anomaly)]
+          (if (find-repo-by-name dag rname)
+            (anomaly/anomaly :conflict
+                             "Repo already exists"
+                             {:dag-id dag-id :repo-name rname})
+            (let [updated (update dag :dag/repos conj node-or-anomaly)]
+              (swap! store assoc dag-id updated)
+              updated)))))
+    (dag-not-found-anomaly dag-id)))
+
+(defn- ^{:stratum 2} add-edge-impl
+  "Anomaly-returning add-edge. Returns the updated DAG on success, or an
+   anomaly classifying the failure (:not-found, :invalid-input, or :conflict)."
+  [store dag-id from-repo to-repo constraint merge-ordering]
+  (if-let [dag (get @store dag-id)]
+    (let [repo-name-set (repo-names dag)]
+      (cond
+        (not (contains? repo-name-set from-repo))
+        (anomaly/anomaly :not-found
+                         "From repo not found in DAG"
+                         {:dag-id dag-id :repo-name from-repo})
+
+        (not (contains? repo-name-set to-repo))
+        (anomaly/anomaly :not-found
+                         "To repo not found in DAG"
+                         {:dag-id dag-id :repo-name to-repo})
+
+        (= from-repo to-repo)
+        (anomaly/anomaly :invalid-input
+                         "Self-loop not allowed"
+                         {:dag-id dag-id :repo-name from-repo})
+
+        (find-edge dag from-repo to-repo)
+        (anomaly/anomaly :conflict
+                         "Edge already exists"
+                         {:dag-id dag-id :from from-repo :to to-repo})
+
+        :else
+        (let [edge-or-anomaly (make-repo-edge-anomaly
+                               {:edge/from from-repo
+                                :edge/to to-repo
+                                :edge/constraint constraint
+                                :edge/merge-ordering merge-ordering})]
+          (if (anomaly/anomaly? edge-or-anomaly)
+            edge-or-anomaly
+            (let [updated (update dag :dag/edges conj edge-or-anomaly)
+                  result (topo-sort updated)]
+              (if (:success result)
+                (do
+                  (swap! store assoc dag-id updated)
+                  updated)
+                (anomaly/anomaly :conflict
+                                 "Adding edge would create cycle"
+                                 {:dag-id dag-id
+                                  :from from-repo
+                                  :to to-repo
+                                  :cycle-nodes (:cycle-nodes result)})))))))
+    (dag-not-found-anomaly dag-id)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; In-memory implementation
+(defrecord ^{:stratum 3} InMemoryDagManager [store]
   RepoDagManager
 
   (create-dag [_this dag-name description]
@@ -560,23 +568,13 @@
   (validate-dag [this dag-id]
     (validate-dag-anomaly this dag-id)))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Factory functions
+;------------------------------------------------------------------------------ Layer 4
 
-(defn create-manager
+;; Factory functions
+(defn ^{:stratum 4} create-manager
   "Create a new in-memory DAG manager."
   []
   (->InMemoryDagManager (atom {})))
-
-(defn get-all-dags
-  "Get all DAGs from the manager's store."
-  [manager]
-  (vals @(:store manager)))
-
-(defn reset-manager!
-  "Reset the manager's store. Useful for testing."
-  [manager]
-  (reset! (:store manager) {}))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

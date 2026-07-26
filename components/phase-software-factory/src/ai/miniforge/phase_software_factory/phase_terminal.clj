@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.phase-terminal
   "Termination-reason derivation for phase-completed events.
 
@@ -25,7 +24,9 @@
 
    Layer 0 — pure function, no side effects, no external dependencies.")
 
-(defn derive-termination-reason
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} derive-termination-reason
   "Derive the :phase/termination-reason for a phase-completed event.
 
    Checks in priority order:

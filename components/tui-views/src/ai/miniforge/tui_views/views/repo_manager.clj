@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.repo-manager
   "Repo manager view -- add/remove repositories from the fleet.
 
@@ -28,25 +27,43 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Rendering helpers
 
-(defn source-label [model]
+;; Rendering helpers
+(defn ^{:stratum 0} source-label [model]
   (if (= :browse (:repo-manager-source model))
     (msg/t :repo/source-browse)
     (msg/t :repo/source-fleet-label)))
 
-(defn format-repo-row [repo selected-ids]
+(defn ^{:stratum 0} format-repo-row [repo selected-ids]
   (let [selected? (contains? (or selected-ids #{}) repo)]
     {:marker (if selected? "●" " ")
      :repo repo}))
 
-(defn view-number
+(defn ^{:stratum 0} view-number
   "1-based view number for the tab bar display."
   []
   (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)]
     (when (>= idx 0) (inc idx))))
 
-(defn render-title-bar [model [cols rows]]
+(defn ^{:stratum 0} auto-scroll-offset
+  "Compute scroll offset so selected-idx is always visible within visible-count rows."
+  [selected-idx visible-count]
+  (let [sel (or selected-idx 0)]
+    (if (<= (inc sel) visible-count)
+      0
+      (inc (- sel visible-count)))))
+
+(defn ^{:stratum 0} render-footer [model [cols rows]]
+  (let [source (if (= :browse (:repo-manager-source model)) :browse :fleet)]
+    (layout/text [cols rows]
+      (if (= :browse source)
+        (msg/t :repo/footer-browse)
+        (msg/t :repo/footer-fleet))
+      {:fg :default})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} render-title-bar [model [cols rows]]
   (let [items (model/repo-manager-items model)
         vnum (view-number)
         label (msg/t :repo/manager-bar {:index vnum
@@ -55,15 +72,7 @@
     (layout/text [cols rows] label
                  {:fg palette/status-info :bold? true})))
 
-(defn auto-scroll-offset
-  "Compute scroll offset so selected-idx is always visible within visible-count rows."
-  [selected-idx visible-count]
-  (let [sel (or selected-idx 0)]
-    (if (<= (inc sel) visible-count)
-      0
-      (inc (- sel visible-count)))))
-
-(defn render-table [items selected selected-ids [cols rows]]
+(defn ^{:stratum 1} render-table [items selected selected-ids [cols rows]]
   (if (empty? items)
     (layout/text [cols rows] (msg/t :repo/empty)
                  {:fg :default})
@@ -76,15 +85,9 @@
          :selected-row selected
          :offset offset}))))
 
-(defn render-footer [model [cols rows]]
-  (let [source (if (= :browse (:repo-manager-source model)) :browse :fleet)]
-    (layout/text [cols rows]
-      (if (= :browse source)
-        (msg/t :repo/footer-browse)
-        (msg/t :repo/footer-fleet))
-      {:fg :default})))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn render
+(defn ^{:stratum 2} render
   "Render the repo manager view.
    model: full app model
    [cols rows]: available screen area"

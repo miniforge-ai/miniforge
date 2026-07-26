@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.state.workflows-test
   (:require
    [clojure.java.io :as io]
@@ -24,18 +23,22 @@
    [ai.miniforge.web-dashboard.state.core :as core]
    [ai.miniforge.web-dashboard.state.workflows :as sut]))
 
-(defn temp-events-dir
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} temp-events-dir
   []
   (doto (io/file (System/getProperty "java.io.tmpdir")
                  (str "miniforge-workflow-events-" (random-uuid)))
     .mkdirs))
 
-(defn- parse-ts
+(defn- ^{:stratum 0} parse-ts
   "Parse an ISO-8601 instant string into a java.util.Date."
   [s]
   (java.util.Date/from (java.time.Instant/parse s)))
 
-(defn- wf-event
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} wf-event
   "Build a minimal workflow event map.
    Extra key/value pairs are merged in via the rest argument."
   [event-type wf-id timestamp & {:as extra}]
@@ -45,7 +48,9 @@
           :workflow/id     wf-id}
          extra))
 
-(deftest get-events-merges-live-and-historical-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} get-events-merges-live-and-historical-test
   (testing "queries include archived event-file history and dedupe live duplicates"
     (let [events-dir    (temp-events-dir)
           wf-id         (random-uuid)
@@ -75,7 +80,7 @@
           (is (= 1 (count phase-events)))
           (is (= [chunk] since-events)))))))
 
-(deftest get-workflows-exposes-stream-preview-and-metrics-test
+(deftest ^{:stratum 2} get-workflows-exposes-stream-preview-and-metrics-test
   (testing "live workflow summaries include recent streaming output and aggregated metrics"
     (let [stream     (es/create-event-stream {:sinks []})
           state      (core/create-state {:event-stream stream})
@@ -100,7 +105,7 @@
           (is (= 42 (get-in workflow [:metrics :tokens])))
           (is (= 3000 (get-in workflow [:metrics :duration-ms]))))))))
 
-(deftest get-workflows-projects-dependency-health-test
+(deftest ^{:stratum 2} get-workflows-projects-dependency-health-test
   (testing "workflow summaries expose active dependency issues with attribution"
     (let [stream     (es/create-event-stream {:sinks []})
           state      (core/create-state {:event-stream stream})

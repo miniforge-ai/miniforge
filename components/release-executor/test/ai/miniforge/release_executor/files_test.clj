@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.files-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -23,7 +22,9 @@
    [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest process-file-action-create-writes-inside-worktree
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} process-file-action-create-writes-inside-worktree
   (testing "valid create actions still write files and return success"
     (let [worktree (fs/create-temp-dir {:prefix "release-files-create-"})]
       (try
@@ -37,7 +38,7 @@
         (finally
           (fs/delete-tree worktree))))))
 
-(deftest process-file-action-create-rejects-path-traversal-as-data
+(deftest ^{:stratum 0} process-file-action-create-rejects-path-traversal-as-data
   (testing "escaped create paths return a failed result with anomaly data"
     (let [worktree (fs/create-temp-dir {:prefix "release-files-create-escape-"})]
       (try
@@ -56,7 +57,7 @@
         (finally
           (fs/delete-tree worktree))))))
 
-(deftest process-file-action-create-rejects-symlink-escape-as-data
+(deftest ^{:stratum 0} process-file-action-create-rejects-symlink-escape-as-data
   (testing "worktree-local symlinks cannot escape the canonical worktree root"
     (let [worktree (fs/create-temp-dir {:prefix "release-files-symlink-worktree-"})
           outside (fs/create-temp-dir {:prefix "release-files-symlink-outside-"})]
@@ -76,7 +77,7 @@
           (fs/delete-tree worktree)
           (fs/delete-tree outside))))))
 
-(deftest process-file-action-modify-rejects-path-traversal-as-data
+(deftest ^{:stratum 0} process-file-action-modify-rejects-path-traversal-as-data
   (testing "escaped modify paths return a failed result with anomaly data"
     (let [worktree (fs/create-temp-dir {:prefix "release-files-modify-escape-"})]
       (try
@@ -91,7 +92,7 @@
         (finally
           (fs/delete-tree worktree))))))
 
-(deftest process-file-action-delete-rejects-path-traversal-as-data
+(deftest ^{:stratum 0} process-file-action-delete-rejects-path-traversal-as-data
   (testing "escaped delete paths return a failed result with anomaly data"
     (let [worktree (fs/create-temp-dir {:prefix "release-files-delete-escape-"})]
       (try

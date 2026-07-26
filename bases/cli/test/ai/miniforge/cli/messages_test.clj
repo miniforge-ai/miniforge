@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.messages-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.messages :as messages]))
 
-(deftest message-catalog-renders-placeholders-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} message-catalog-renders-placeholders-test
   (let [english-catalog (messages/catalog "en")
         usage-template (:help/usage english-catalog)
         help-template (:main/run-help english-catalog)]
@@ -32,14 +33,14 @@
       (is (= (str/replace help-template "{command}" "miniforge help")
              (messages/t :main/run-help {:command "miniforge help"}))))))
 
-(deftest message-catalog-falls-back-to-english-test
+(deftest ^{:stratum 0} message-catalog-falls-back-to-english-test
   (testing "unknown locales fall back to the English catalog"
     (let [english-usage (messages/t :help/usage {:binary "moteur"})]
       (with-redefs [messages/active-locale (constantly :fr)]
         (is (= english-usage
                (messages/t :help/usage {:binary "moteur"})))))))
 
-(deftest etl-usage-messages-exist-test
+(deftest ^{:stratum 0} etl-usage-messages-exist-test
   (doseq [message-key [:etl/run-usage :etl/validate-usage :etl/registry-usage]]
     (is (= "Usage: miniforge etl command"
            (messages/t message-key {:command "miniforge etl command"})))))

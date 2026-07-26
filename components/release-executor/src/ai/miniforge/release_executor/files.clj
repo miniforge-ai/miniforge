@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.files
   "File operations for the release executor.
    Handles writing, deleting, and staging code artifact files."
@@ -27,9 +26,9 @@
    [babashka.fs :as fs]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File operation helpers
 
-(defn- existing-ancestor
+;; File operation helpers
+(defn- ^{:stratum 0} existing-ancestor
   "Return the nearest existing ancestor for `path` after lexical
    normalization. Used so validation can canonicalize symlinked parents
    even when the target file itself has not been created yet."
@@ -40,7 +39,34 @@
       (fs/exists? candidate) candidate
       :else (recur (fs/parent candidate)))))
 
-(defn- canonical-path
+(defn- ^{:stratum 0} path-validation-failure
+  [action path path-anomaly]
+  {:success? false
+   :action action
+   :path path
+   :error (:anomaly/message path-anomaly)
+   :anomaly path-anomaly})
+
+(defn ^{:stratum 0} ensure-parent-dir!
+  "Create parent directories for a file path if they don't exist."
+  [file-path]
+  (let [parent (fs/parent file-path)]
+    (when parent
+      (fs/create-dirs parent))
+    parent))
+
+(defn ^{:stratum 0} delete-file!
+  "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
+  [file-path]
+  (if (fs/exists? file-path)
+    (do
+      (fs/delete file-path)
+      true)
+    false))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} canonical-path
   "Return a normalized Path with symlinks resolved for every existing
    ancestor. Missing leaf segments are resolved under the canonicalized
    nearest ancestor."
@@ -53,7 +79,16 @@
         (.normalize (.resolve canonical-ancestor relative-tail)))
       absolute)))
 
-(defn path-traversal-anomaly
+(defn ^{:stratum 1} write-file!
+  "Write content to a file, creating parent directories as needed."
+  [file-path content]
+  (ensure-parent-dir! file-path)
+  (spit (str file-path) content)
+  file-path)
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} path-traversal-anomaly
   "Return nil when `file-path` stays inside `worktree-path`, or a
    canonical anomaly when the resolved path escapes the worktree root.
    Uses canonical Path comparison so '../', symlink components, and
@@ -68,46 +103,14 @@
                         :root       (str normalized-root)
                         :normalized (str normalized-path)}))))
 
-(defn- path-validation-failure
-  [action path path-anomaly]
-  {:success? false
-   :action action
-   :path path
-   :error (:anomaly/message path-anomaly)
-   :anomaly path-anomaly})
+;------------------------------------------------------------------------------ Layer 3
 
-(defn ensure-parent-dir!
-  "Create parent directories for a file path if they don't exist."
-  [file-path]
-  (let [parent (fs/parent file-path)]
-    (when parent
-      (fs/create-dirs parent))
-    parent))
-
-(defn write-file!
-  "Write content to a file, creating parent directories as needed."
-  [file-path content]
-  (ensure-parent-dir! file-path)
-  (spit (str file-path) content)
-  file-path)
-
-(defn delete-file!
-  "Delete a file if it exists. Returns true if deleted, false if file didn't exist."
-  [file-path]
-  (if (fs/exists? file-path)
-    (do
-      (fs/delete file-path)
-      true)
-    false))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; File action processing
-
-(defmulti process-file-action
+(defmulti ^{:stratum 3} process-file-action
   "Process a file action based on its :action keyword."
   (fn [_worktree-path file-spec _logger] (:action file-spec)))
 
-(defmethod process-file-action :create
+(defmethod ^{:stratum 3} process-file-action :create
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
@@ -124,7 +127,7 @@
                   {:message (.getMessage e) :data {:path path}}))
       {:success? false :action :create :path path :error (.getMessage e)})))
 
-(defmethod process-file-action :modify
+(defmethod ^{:stratum 3} process-file-action :modify
   [worktree-path {:keys [path content]} logger]
   (try
     (let [full-path (fs/path worktree-path path)]
@@ -141,7 +144,7 @@
                   {:message (.getMessage e) :data {:path path}}))
       {:success? false :action :modify :path path :error (.getMessage e)})))
 
-(defmethod process-file-action :delete
+(defmethod ^{:stratum 3} process-file-action :delete
   [worktree-path {:keys [path]} logger]
   (try
     (let [full-path (fs/path worktree-path path)
@@ -158,16 +161,16 @@
                   {:message (.getMessage e) :data {:path path}}))
       {:success? false :action :delete :path path :error (.getMessage e)})))
 
-(defmethod process-file-action :default
+(defmethod ^{:stratum 3} process-file-action :default
   [_worktree-path {:keys [path action]} logger]
   (when logger
     (log/warn logger :release-executor :unknown-action {:data {:path path :action action}}))
   {:success? false :action action :path path :error (str "Unknown action: " action)})
 
-;------------------------------------------------------------------------------ Layer 2
-;; Batch file operations
+;------------------------------------------------------------------------------ Layer 4
 
-(defn write-and-stage-files!
+;; Batch file operations
+(defn ^{:stratum 4} write-and-stage-files!
   "Write files to worktree and stage them. Returns result map."
   [worktree-path code-artifacts logger]
   (let [results (atom {:created 0 :modified 0 :deleted 0 :errors []})

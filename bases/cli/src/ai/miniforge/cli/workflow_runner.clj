@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -48,53 +47,22 @@
    [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Work spec kanban lifecycle
 
-(def ^:private work-dirs
+;; Work spec kanban lifecycle
+(def ^{:stratum 0} ^:private work-dirs
   "Kanban folder structure under work/."
   {:in-progress "work/in-progress"
    :done        "work/done"
    :failed      "work/failed"})
 
-(defn- work-spec?
+(defn- ^{:stratum 0} work-spec?
   "True when the spec provenance points to a file under work/."
   [provenance]
   (when-let [source (:source-file provenance)]
     (str/starts-with? (str source) "work/")))
 
-(defn- move-spec!
-  "Move a work spec file to the target kanban folder.
-   No-op if the spec isn't under work/ or the file doesn't exist."
-  [provenance target-key]
-  (when (work-spec? provenance)
-    (let [source (str (:source-file provenance))
-          target-dir (get work-dirs target-key)]
-      (when (and target-dir (fs/exists? source))
-        (fs/create-dirs target-dir)
-        (let [target (str target-dir "/" (fs/file-name source))]
-          (fs/move source target {:replace-existing true})
-          target)))))
-
-(defn move-spec-to-in-progress!
-  "Move a work spec to in-progress when execution starts.
-   Returns updated provenance with new source-file path,
-   or the original provenance if the move was a no-op."
-  [provenance]
-  (if-let [new-path (move-spec! provenance :in-progress)]
-    (assoc provenance :source-file new-path)
-    provenance))
-
-(defn move-spec-on-completion!
-  "Move a work spec to done or failed based on workflow result."
-  [provenance result]
-  (if (phase/succeeded? result)
-    (move-spec! provenance :done)
-    (move-spec! provenance :failed)))
-
-;------------------------------------------------------------------------------ Layer 0.5
 ;; Meta-loop context — process-scoped, accumulates metrics across workflows
-
-(defn- trigger-meta-loop-after-workflow!
+(defn- ^{:stratum 0} trigger-meta-loop-after-workflow!
   "Record workflow outcome and run a background meta-loop cycle.
    Failures are swallowed — the meta-loop must never crash the workflow runner."
   [workflow-id status failure-class]
@@ -105,19 +73,17 @@
         (agent/run-cycle-from-context! ctx))
       (catch Exception _e nil))))
 
-;------------------------------------------------------------------------------ Layer 0.6
 ;; Workflow interface resolution and pipeline helpers
-
-(defn resolve-workflow-interface []
+(defn ^{:stratum 0} resolve-workflow-interface []
   {:load-workflow workflow/load-workflow
    :run-pipeline  workflow/run-pipeline})
 
-(defn create-phase-callbacks [_quiet]
+(defn ^{:stratum 0} create-phase-callbacks [_quiet]
   ;; Phase progress is handled by the event-stream subscription
   ;; (display/start-progress!). Callbacks retained as extension point.
   {})
 
-(defn load-and-validate-workflow [load-workflow workflow-id version]
+(defn ^{:stratum 0} load-and-validate-workflow [load-workflow workflow-id version]
   (let [{:keys [workflow validation]} (load-workflow workflow-id version {})]
     (when-not workflow
       (response/throw-anomaly! :anomalies/not-found
@@ -129,7 +95,7 @@
                                {:workflow-id workflow-id :validation validation}))
     workflow))
 
-(defn create-artifact-store [quiet]
+(defn ^{:stratum 0} create-artifact-store [quiet]
   (try
     (artifact/create-transit-store)
     (catch Exception _e
@@ -137,7 +103,6 @@
         (println (display/colorize :yellow (messages/t :workflow-runner/artifact-store-warning))))
       nil)))
 
-;------------------------------------------------------------------------------ Layer 0.7
 ;; Deferred scratch-ref GC — thin delegation to workflow-runner.gc-hooks
 ;;
 ;; gc-hooks is a *pure* namespace (no external requires).  Its functions accept
@@ -145,29 +110,26 @@
 ;; partial + def) so that `with-redefs` on the gc-hooks vars is intercepted
 ;; correctly at call time — partial captures the function value at load time,
 ;; bypassing with-redefs in tests.
-
-(defn- enqueue-workflow-gc-best-effort!
+(defn- ^{:stratum 0} enqueue-workflow-gc-best-effort!
   "Append `workflow-id` to the scratch-ref GC queue.
    Never throws — GC housekeeping must not interfere with the workflow result."
   [workflow-id]
   (gc-hooks/enqueue-workflow-gc-best-effort! gc-queue/enqueue-workflow-gc! workflow-id))
 
-(defn- run-gc-pass-best-effort!
+(defn- ^{:stratum 0} run-gc-pass-best-effort!
   "Run the deferred scratch-ref GC pass piggybacked on workflow start.
    Never throws."
   []
   (gc-hooks/run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!))
 
-;------------------------------------------------------------------------------ Layer 0.8
 ;; Source-root and execution-context validation helpers
-
-(defn- valid-source-root?
+(defn- ^{:stratum 0} valid-source-root?
   [source-root]
   (and source-root
        (fs/exists? source-root)
        (fs/exists? (fs/path source-root ".git"))))
 
-(defn- normalize-path
+(defn- ^{:stratum 0} normalize-path
   [path]
   (when path
     (let [resolved (-> path
@@ -177,60 +139,13 @@
              (fs/canonicalize resolved)
              (.normalize resolved))))))
 
-(defn- source-dir-under-root?
-  [source-dir source-root]
-  (let [source-dir-path (some-> source-dir normalize-path fs/path)
-        source-root-path (some-> source-root normalize-path fs/path)]
-    (or (nil? source-dir-path)
-        (nil? source-root-path)
-        (.startsWith source-dir-path source-root-path))))
-
-(defn- assert-valid-source-root!
-  [context]
-  (let [source-root (:source-root context)]
-    (when-not (valid-source-root? source-root)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Invalid workflow source root: " source-root)
-                               {:source-root source-root
-                                :worktree-path (:worktree-path context)}))))
-
-(defn- assert-execution-worktree!
-  [context]
-  (let [expected (normalize-path (get-in context [:execution/opts :worktree-path]))
-        actual (normalize-path (:worktree-path context))]
-    (when (and expected actual (not= expected actual))
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Execution worktree mismatch: expected "
-                                    expected " but runtime is using " actual)
-                               {:expected-worktree expected
-                                :actual-worktree actual
-                                :source-root (:source-root context)}))))
-
-(defn- assert-source-dir-alignment!
-  [spec context]
-  (let [source-dir (:spec/source-dir spec)
-        source-root (:source-root context)]
-    (when-not (source-dir-under-root? source-dir source-root)
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Spec source directory is outside the workflow source root: "
-                                    source-dir)
-                               {:source-dir source-dir
-                                :source-root source-root
-                                :worktree-path (:worktree-path context)}))))
-
-(defn- assert-runtime-alignment!
-  [spec context]
-  (assert-valid-source-root! context)
-  (assert-execution-worktree! context)
-  (assert-source-dir-alignment! spec context))
-
-(defn- print-colored-lines!
+(defn- ^{:stratum 0} print-colored-lines!
   [quiet lines]
   (when-not quiet
     (doseq [[color line] lines]
       (println (display/colorize color line)))))
 
-(defn- runtime-provenance-lines
+(defn- ^{:stratum 0} runtime-provenance-lines
   [context]
   (concat
    [[:cyan (messages/t :workflow-runner/runtime-source
@@ -248,32 +163,13 @@
    (when (:git-dirty? context)
      [[:yellow (messages/t :workflow-runner/runtime-dirty-warning)]])))
 
-(defn- print-runtime-provenance!
-  [quiet context]
-  (print-colored-lines! quiet (runtime-provenance-lines context)))
-
-(def ^:private workflow-runner-config
+(def ^{:stratum 0} ^:private workflow-runner-config
   (delay
     (resource-config/merged-resource-config "config/cli/workflow-runner.edn"
                                             :workflow-runner
                                             {})))
 
-(defn- backend-preflight-config []
-  (:backend-preflight @workflow-runner-config))
-
-(defn- backend-preflight-prompt []
-  (:prompt (backend-preflight-config)))
-
-(defn- backend-preflight-timeout-ms []
-  (:timeout-ms (backend-preflight-config)))
-
-(defn- backend-version-timeout-ms []
-  (:version-timeout-ms (backend-preflight-config)))
-
-(defn- claude-preflight-args []
-  (:claude-args (backend-preflight-config)))
-
-(defn- executable-file?
+(defn- ^{:stratum 0} executable-file?
   [path]
   (let [file (some-> path fs/file)]
     (and file
@@ -281,50 +177,344 @@
          (not (fs/directory? file))
          (fs/executable? file))))
 
-(defn- direct-command-path?
+(defn- ^{:stratum 0} direct-command-path?
   [cmd]
   (boolean (re-find #"[\\/]" (or cmd ""))))
 
-(defn- normalize-command-path
+(defn- ^{:stratum 0} path-entries
+  []
+  (str/split (or (System/getenv "PATH") "") #":"))
+
+(defn- ^{:stratum 0} cli-process-env
+  []
+  (when (System/getenv "CLAUDECODE")
+    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
+
+(defn- ^{:stratum 0} stream-reader
+  [stream]
+  (future
+    (with-open [stream stream]
+      (slurp stream))))
+
+(defn- ^{:stratum 0} destroy-cli-process!
+  [^Process process]
+  (try
+    (.destroyForcibly process)
+    (.waitFor process 1000 java.util.concurrent.TimeUnit/MILLISECONDS)
+    (catch Exception _ nil)))
+
+(defn- ^{:stratum 0} await-stream
+  [stream-future]
+  (try
+    @stream-future
+    (catch Exception _ "")))
+
+(defn- ^{:stratum 0} success-response
+  [output]
+  (response/success output))
+
+(defn- ^{:stratum 0} failure-response
+  [category error-type message data]
+  (-> (response/failure message {:data (assoc data :type error-type)})
+      (assoc :anomaly (response/make-anomaly category message data))))
+
+(defn- ^{:stratum 0} response-output
+  [response]
+  (let [output (get response :output)]
+    (merge (select-keys response [:content :exit-code :version])
+           (if (map? output) output {}))))
+
+(defn- ^{:stratum 0} response-succeeded?
+  [response]
+  (or (true? (:success response))
+      (response/success? response)))
+
+(defn- ^{:stratum 0} with-backend-version
+  [stamp version]
+  (assoc stamp :cmd-version version))
+
+(defn- ^{:stratum 0} backend-provenance-lines
+  [{:keys [backend cmd-path cmd-version]}]
+  (concat
+   [[:cyan (messages/t :workflow-runner/backend-label
+                       {:backend (name backend)})]]
+   (when cmd-path
+     [[:cyan (messages/t :workflow-runner/backend-path {:path cmd-path})]])
+   (when cmd-version
+     [[:cyan (messages/t :workflow-runner/backend-version {:version cmd-version})]])))
+
+(defn- ^{:stratum 0} parse-preflight-payload
+  [content]
+  (try
+    (some-> content str/trim not-empty (json/parse-string true))
+    (catch Exception _ nil)))
+
+(defn- ^{:stratum 0} backend-stream-content
+  [stream-parser output]
+  (let [content (atom "")]
+    (doseq [line (str/split-lines (or output ""))]
+      (when-let [parsed (stream-parser line)]
+        (when-let [delta (:delta parsed)]
+          (swap! content str delta))))
+    (some-> @content str/trim not-empty)))
+
+(defn- ^{:stratum 0} backend-cli-missing!
+  [{:keys [backend cmd]}]
+  (response/throw-anomaly! :anomalies/incorrect
+                           (messages/t :workflow-runner/cli-not-on-path {:cmd cmd})
+                           {:backend backend
+                            :cmd cmd
+                            :path (System/getenv "PATH")}))
+
+(defn- ^{:stratum 0} backend-version-failed!
+  [{:keys [backend cmd cmd-path]} version-response]
+  (response/throw-anomaly! :anomalies/unavailable
+                           (messages/t :workflow-runner/backend-version-failed
+                                       {:backend (name backend)})
+                           {:backend backend
+                            :cmd cmd
+                            :cmd-path cmd-path
+                            :version-error (get-in version-response [:error :message])
+                            :version-error-data (get-in version-response [:error :data])}))
+
+(defn ^{:stratum 0} close-artifact-store [artifact-store]
+  (when artifact-store
+    (try
+      (artifact/close-store artifact-store)
+      (catch Exception _))))
+
+(defn ^{:stratum 0} select-workflow-type
+  "Select workflow type using LLM recommendation if not explicitly specified.
+   Checks :spec/workflow-type first, then :workflow/type as a fallback for
+   specs that use the shorter key."
+  [spec llm-client quiet]
+  (if-let [explicit-type (or (:spec/workflow-type spec)
+                             (:workflow/type spec))]
+    (do
+      (when-not quiet
+        (println (display/colorize :cyan (messages/t :workflow-runner/user-specified {:workflow-type (name explicit-type)}))))
+      explicit-type)
+    (let [recommendation (recommender/recommend-workflow-with-fallback spec llm-client)]
+      (when-not quiet
+        (println (display/colorize :cyan (messages/t :workflow-runner/auto-selected {:workflow-type (name (:workflow recommendation))})))
+        (println (messages/t :workflow-runner/auto-selected-reason {:reasoning (:reasoning recommendation)}))
+        (when (= :llm (:source recommendation))
+          (println (messages/t :workflow-runner/auto-selected-confidence {:confidence (format "%.0f%%" (* 100 (:confidence recommendation 0.0)))})))
+        (println (display/colorize :yellow (messages/t :workflow-runner/auto-selected-override))))
+      (:workflow recommendation))))
+
+(def ^{:stratum 0} ^:private workflow-aliases
+  "Map legacy/alternate workflow type keywords to their canonical counterparts.
+   Many work specs use :standard-sdlc but the only registered workflow is
+   :canonical-sdlc."
+  {:standard-sdlc :canonical-sdlc})
+
+(defn ^{:stratum 0} execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
+  (-> callbacks
+      (cond-> artifact-store (assoc :artifact-store artifact-store))
+      (cond-> event-stream (assoc :event-stream event-stream))
+      (->> (run-pipeline workflow input))))
+
+(defn- ^{:stratum 0} failure-message
+  "Build a meaningful failure message from a workflow result.
+   Falls back to execution status when no explicit errors exist."
+  [result]
+  (let [errors (:execution/errors result)
+        status (get result :execution/status :unknown)]
+    (if (seq errors)
+      (str (first errors))
+      (str "Workflow ended with status: " (name status)))))
+
+;; Execution orchestration
+(defn- ^{:stratum 0} publish-failure-event!
+  "Publish a workflow failure event, swallowing exceptions."
+  [event-stream workflow-id error-type message]
+  (try
+    (es/publish! event-stream
+                 (es/workflow-failed event-stream workflow-id
+                                     {:message message
+                                      :errors [{:type error-type :message message}]}))
+    (catch Exception _ nil)))
+
+(defn- ^{:stratum 0} best-effort-shutdown?
+  "Honor `MINIFORGE_BEST_EFFORT_SHUTDOWN` as the documented escape hatch
+   for local/dev loops that don't care about event durability. Default
+   off — normal headless mode treats drain failures as errors."
+  []
+  (let [v (System/getenv "MINIFORGE_BEST_EFFORT_SHUTDOWN")]
+    (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
+
+;; BD-2b sub-3a: per-workflow manifest lifecycle.
+;; manifest operations
+(def ^{:stratum 0} ^:dynamic *manifest-ops*
+  "Manifest operations used by the workflow lifecycle helpers."
+  {:init-active       es-manifest/init-active
+   :load-manifest     es-manifest/load-manifest
+   :mark-terminal     es-manifest/mark-terminal
+   :save-manifest!    es-manifest/save-manifest!
+   :start-heartbeat!  es-manifest/start-heartbeat!
+   :stop-heartbeat!   es-manifest/stop-heartbeat!
+   :archive-workflow! es-manifest/archive-workflow!})
+
+(defn ^{:stratum 0} format-workflow-listing [workflows]
+  (if (empty? workflows)
+    (println (messages/t :workflow-runner/no-workflows))
+    (do
+      (println (display/colorize :cyan (messages/t :workflow-runner/available-workflows)))
+      (println (display/colorize :cyan (apply str (repeat 60 "─"))))
+      (doseq [{:workflow/keys [id version description type]} workflows]
+        (println (str (display/colorize :bold (str "  " (name id)))
+                      " (v" version ")"
+                      "  " (display/colorize :yellow (messages/t :workflow-runner/workflow-type-label {:type (or type :unknown)}))
+                      (when description (str "\n    " description))))
+        (println))
+      (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
+
+;; Spec-driven execution
+(defn- ^{:stratum 0} governed-workflow-id
+  "A UUID workflow id for a governed run. The operator control channel
+   routes `:pause`/`:resume`/`:cancel` interventions by coercing the
+   target id to a UUID, so a run WITHOUT a UUID id is uncontrollable —
+   its interventions can't reach its live-runner registry or audit
+   trail. Use the spec's `:session-id` when it already is a UUID (or a
+   UUID string); otherwise mint one. A PRESENT-but-non-UUID session-id
+   is warned about (it was silently discarded); an absent one is the
+   normal case and mints quietly."
+  [session-id quiet]
+  (or (when (uuid? session-id) session-id)
+      (when (string? session-id) (parse-uuid session-id))
+      (let [fresh (random-uuid)]
+        (when (and (some? session-id) (not quiet))
+          (println (display/colorize
+                    :yellow
+                    (messages/t :workflow-runner/non-uuid-session-id
+                                {:session-id (pr-str session-id)
+                                 :workflow-id (str fresh)}))))
+        fresh)))
+
+;; ── Chain-driven execution ─────────────────────────────────────────────────
+(defn ^{:stratum 0} resolve-chain-input
+  "Resolve chain input from a spec file path or inline JSON."
+  [opts]
+  (let [spec-path (:spec opts)
+        inline-json (:input-json opts)]
+    (cond
+      inline-json (json/parse-string inline-json true)
+      spec-path (let [parsed (edn/read-string (slurp spec-path))
+                      enriched (context/decorate-spec-with-runtime-context parsed {})]
+                  (context/spec->workflow-input enriched))
+      :else {})))
+
+(defn ^{:stratum 0} print-chain-header
+  "Print chain execution banner."
+  [chain-id chain-def quiet]
+  (when-not quiet
+    (println)
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-header {:chain-id (name chain-id)})))
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-description {:description (:chain/description chain-def)})))
+    (println (display/colorize :cyan (messages/t :workflow-runner/chain-steps {:count (count (:chain/steps chain-def))})))
+    (println (display/colorize :cyan (apply str (repeat 60 "─"))))))
+
+(defn ^{:stratum 0} print-chain-result
+  "Print chain execution result summary."
+  [result quiet]
+  (when-not quiet
+    (let [steps (:chain/step-results result)
+          duration (:chain/duration-ms result)]
+      (println)
+      (println (display/colorize :cyan (apply str (repeat 60 "─"))))
+      (if (phase/succeeded? result)
+        (println (display/colorize :green (messages/t :workflow-runner/chain-completed {:count (count steps) :duration duration})))
+        (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
+          (println (display/colorize :red (messages/t :workflow-runner/chain-failed-at {:step (when failed-step (name failed-step))}))))))))
+
+(defn ^{:stratum 0} list-chains!
+  "List all available chain definitions."
+  []
+  (try
+    (let [chains (workflow/list-chains)]
+      (if (empty? chains)
+        (println (messages/t :workflow-runner/no-chains))
+        (do
+          (println (display/colorize :cyan (messages/t :workflow-runner/available-chains)))
+          (println (display/colorize :cyan (apply str (repeat 60 "─"))))
+          (doseq [{:keys [id version description steps]} chains]
+            (println (str (display/colorize :bold (str "  " (name id)))
+                          " (v" version ")"
+                          "  " (messages/t :workflow-runner/chain-steps-label {:steps steps})))
+            (when description
+              (println (str "    " description)))
+            (println))
+          (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
+    (catch Exception e
+      (println (display/colorize :red (messages/t :workflow-runner/list-chains-failed {:error (ex-message e)})))
+      (throw e))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} move-spec!
+  "Move a work spec file to the target kanban folder.
+   No-op if the spec isn't under work/ or the file doesn't exist."
+  [provenance target-key]
+  (when (work-spec? provenance)
+    (let [source (str (:source-file provenance))
+          target-dir (get work-dirs target-key)]
+      (when (and target-dir (fs/exists? source))
+        (fs/create-dirs target-dir)
+        (let [target (str target-dir "/" (fs/file-name source))]
+          (fs/move source target {:replace-existing true})
+          target)))))
+
+(defn- ^{:stratum 1} source-dir-under-root?
+  [source-dir source-root]
+  (let [source-dir-path (some-> source-dir normalize-path fs/path)
+        source-root-path (some-> source-root normalize-path fs/path)]
+    (or (nil? source-dir-path)
+        (nil? source-root-path)
+        (.startsWith source-dir-path source-root-path))))
+
+(defn- ^{:stratum 1} assert-valid-source-root!
+  [context]
+  (let [source-root (:source-root context)]
+    (when-not (valid-source-root? source-root)
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Invalid workflow source root: " source-root)
+                               {:source-root source-root
+                                :worktree-path (:worktree-path context)}))))
+
+(defn- ^{:stratum 1} assert-execution-worktree!
+  [context]
+  (let [expected (normalize-path (get-in context [:execution/opts :worktree-path]))
+        actual (normalize-path (:worktree-path context))]
+    (when (and expected actual (not= expected actual))
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Execution worktree mismatch: expected "
+                                    expected " but runtime is using " actual)
+                               {:expected-worktree expected
+                                :actual-worktree actual
+                                :source-root (:source-root context)}))))
+
+(defn- ^{:stratum 1} print-runtime-provenance!
+  [quiet context]
+  (print-colored-lines! quiet (runtime-provenance-lines context)))
+
+(defn- ^{:stratum 1} backend-preflight-config []
+  (:backend-preflight @workflow-runner-config))
+
+(defn- ^{:stratum 1} normalize-command-path
   [path]
   (when (executable-file? path)
     (str (-> path
              fs/path
              fs/absolutize))))
 
-(defn- portable-command-path
-  [cmd]
-  (some-> cmd
-          fs/which
-          normalize-command-path))
-
-(defn- path-entries
-  []
-  (str/split (or (System/getenv "PATH") "") #":"))
-
-(defn- matching-command-path
+(defn- ^{:stratum 1} matching-command-path
   [entry cmd]
   (let [candidate (fs/path entry cmd)]
     (when (executable-file? candidate)
       (str candidate))))
 
-(defn- resolve-cli-command-path
-  [cmd]
-  (cond
-    (str/blank? cmd) nil
-    (direct-command-path? cmd)
-    (normalize-command-path cmd)
-
-    :else
-    (or (portable-command-path cmd)
-        (some #(matching-command-path % cmd) (path-entries)))))
-
-(defn- cli-process-env
-  []
-  (when (System/getenv "CLAUDECODE")
-    (into {} (remove (fn [[k _]] (= k "CLAUDECODE"))) (System/getenv))))
-
-(defn- start-cli-process
+(defn- ^{:stratum 1} start-cli-process
   [cmd workdir]
   (let [builder (ProcessBuilder. ^java.util.List cmd)]
     (when-let [process-env (cli-process-env)]
@@ -336,26 +526,239 @@
       (.directory builder (java.io.File. workdir)))
     (.start builder)))
 
-(defn- stream-reader
-  [stream]
-  (future
-    (with-open [stream stream]
-      (slurp stream))))
+(defn- ^{:stratum 1} response-summary
+  [response]
+  (merge
+   (select-keys response [:success :error :anomaly :exit-code])
+   (select-keys (response-output response)
+                [:content :exit-code :version])))
 
-(defn- destroy-cli-process!
-  [^Process process]
-  (try
-    (.destroyForcibly process)
-    (.waitFor process 1000 java.util.concurrent.TimeUnit/MILLISECONDS)
-    (catch Exception _ nil)))
+(defn- ^{:stratum 1} print-backend-provenance!
+  [quiet {:keys [backend cmd-path cmd-version]}]
+  (print-colored-lines! quiet (backend-provenance-lines {:backend backend
+                                                         :cmd-path cmd-path
+                                                         :cmd-version cmd-version})))
 
-(defn- await-stream
-  [stream-future]
-  (try
-    @stream-future
-    (catch Exception _ "")))
+(defn- ^{:stratum 1} normalized-preflight-content
+  [content]
+  (loop [candidate (some-> content str/trim not-empty)]
+    (let [parsed (parse-preflight-payload candidate)
+          nested (or (some-> parsed :result str/trim not-empty)
+                     (some-> parsed :content str/trim not-empty))]
+      (cond
+        (and (:result parsed)
+             (not (and (= "result" (:type parsed))
+                       (= "success" (:subtype parsed))
+                       (not (:is_error parsed)))))
+        nil
 
-(defn- run-cli-command
+        (and nested (not= nested candidate))
+        (recur nested)
+
+        :else
+        candidate))))
+
+(defn- ^{:stratum 1} decoded-preflight-content
+  [backend-config output]
+  (if-let [stream-parser (:stream-parser backend-config)]
+    (backend-stream-content stream-parser output)
+    (some-> output str/trim not-empty)))
+
+(defn- ^{:stratum 1} ensure-cli-command-path!
+  [stamp]
+  (when-not (:cmd-path stamp)
+    (backend-cli-missing! stamp))
+  stamp)
+
+(defn ^{:stratum 1} resolve-workflow-alias
+  "Resolve a workflow type through the alias map. Returns the canonical type
+   if an alias exists, otherwise returns the type unchanged."
+  [workflow-type]
+  (get workflow-aliases workflow-type workflow-type))
+
+(defn ^{:stratum 1} publish-completion-event [event-stream workflow-id result]
+  (let [status (if (phase/succeeded? result) :success :failure)
+        duration-ms (get-in result [:execution/metrics :duration-ms])]
+    (es/publish! event-stream
+                 (if (= status :success)
+                   (es/workflow-completed event-stream workflow-id status duration-ms)
+                   (es/workflow-failed event-stream workflow-id
+                                       {:message (failure-message result)
+                                        :errors (or (seq (:execution/errors result))
+                                                    [{:type :unknown-failure
+                                                      :message (failure-message result)}])})))))
+
+;; lifecycle helpers
+;; Peers; none calls another. `run-workflow!` composes them at Layer 2.
+(defn ^{:stratum 1} start-workflow-manifest!
+  "Init the manifest at `manifest-dir` and start the heartbeat. Returns
+   `{:dir java.io.File :heartbeat ScheduledExecutorService :marked? atom}`
+   for the matching `finish-workflow-manifest!`. Returns nil when no
+   event stream is configured (dashboard-only run) — no on-disk
+   manifest to maintain in that case."
+  [workflow-id event-stream]
+  (when event-stream
+    (let [dir (es/workflow-dir workflow-id)]
+      ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
+      {:dir       dir
+       :heartbeat ((:start-heartbeat! *manifest-ops*) dir)
+       :marked?   (atom false)})))
+
+(defn ^{:stratum 1} mark-manifest-terminal!
+  "Stamp the manifest with a terminal `status` (`:completed |
+   :failed | :cancelled`). Idempotent via the `:marked?` atom — the
+   happy path marks `:completed` after drain, the finally block falls
+   back to `:cancelled` only if no prior mark fired.
+
+   Only flips `marked?` after a successful load + save. If the
+   manifest file is absent (e.g. it was deleted or never written by
+   sub-3b's archive flow), this is a no-op that leaves `marked?`
+   false so a subsequent attempt (e.g. the finally's :cancelled
+   fallback) can still try to write."
+  [{:keys [dir marked?]} status]
+  (when (and dir (not @marked?))
+    (when-let [m ((:load-manifest *manifest-ops*) dir)]
+      ((:save-manifest! *manifest-ops*) dir ((:mark-terminal *manifest-ops*) m status))
+      (reset! marked? true))))
+
+(defn ^{:stratum 1} finish-workflow-manifest!
+  "Stop the heartbeat. Caller is expected to have already called
+   `mark-manifest-terminal!` for the happy path; this is the
+   shutdown-time cleanup. Swallows exceptions so a manifest IO
+   failure during cleanup doesn't mask the workflow result.
+
+   `stop-heartbeat!` can raise `InterruptedException` via
+   `awaitTermination`. Swallowing it without restoring the interrupt
+   flag breaks cooperative cancellation — outer frames lose the
+   signal that they're being asked to shut down. We re-interrupt the
+   current thread in that case and still return nil so the cleanup
+   stays best-effort."
+  [{:keys [heartbeat]}]
+  (when heartbeat
+    (try
+      ((:stop-heartbeat! *manifest-ops*) heartbeat)
+      (catch InterruptedException _
+        (.interrupt (Thread/currentThread))
+        nil)
+      (catch Exception _ nil))))
+
+(defn ^{:stratum 1} archive-workflow-manifest!
+  "Run BD-2b sub-3b's atomic archive on `workflow-id`'s `live/`
+   directory. Called from the happy path after `mark-manifest-terminal!`
+   succeeds — at that point the manifest is at terminal status with
+   `archive_status = :live` and ready to transition to `:archived`.
+
+   Best-effort: archive failures (e.g. the manifest disappeared
+   between mark and archive, or the rename hit an IO error) are
+   logged to stderr but don't propagate. The boot-time
+   `archive/recover-all-incomplete!` pass picks up any half-finished
+   archives on next start. The finally's `:cancelled` fallback does
+   NOT archive — those workflows wait for the scheduled cleanup
+   pass (sub-3c) so a crashing pipeline can't get half-archived state
+   stuck on disk via the recovery flow."
+  [{:keys [dir marked?]} workflow-id]
+  (when (and dir @marked?)
+    (try
+      (let [result ((:archive-workflow! *manifest-ops*) workflow-id)]
+        (when (anomaly/anomaly? result)
+          (binding [*out* *err*]
+            (println (str "WARNING: archive of workflow " workflow-id
+                          " failed: " (:anomaly/message result)
+                          " (will be recovered by the cleanup pass)")))))
+      (catch Exception e
+        (binding [*out* *err*]
+          (println (str "WARNING: archive of workflow " workflow-id
+                        " failed: " (.getMessage e)
+                        " (will be recovered by the cleanup pass)")))))))
+
+(defn- ^{:stratum 1} event-stream-shutdown!
+  "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
+   `workflow-id`, then drain sinks. Returns the structured drain result
+   for inclusion in the run result map, or `nil` when no event stream
+   exists (dashboard-url runs).
+
+   On a non-OK drain in normal mode (best-effort off), throws an
+   ex-info carrying the drain result so the caller's catch path renders
+   the failure and the CLI exits non-zero. Best-effort mode logs the
+   degradation to stderr and returns the result without throwing."
+  [es workflow-id {:keys [quiet]}]
+  (when es
+    (es/quiesce! es {:workflow-id workflow-id :timeout-ms 5000})
+    (let [drain-result (es/drain! es {:timeout-ms 5000})]
+      (when-not (:ok? drain-result)
+        (let [best-effort? (best-effort-shutdown?)
+              msg (str "Event-stream drain incomplete on shutdown: "
+                       (name (:reason drain-result :unknown))
+                       (when-let [pending (:pending-count drain-result)]
+                         (str " (pending=" pending ")"))
+                       (when-let [failed (:failed-sinks drain-result)]
+                         (str " (failed-sinks=" (count failed) ")")))]
+          (binding [*out* *err*]
+            (println (cond-> msg
+                       (not quiet) (->> (display/colorize :yellow))
+                       best-effort? (str " [MINIFORGE_BEST_EFFORT_SHUTDOWN=1, continuing]"))))
+          (when-not best-effort?
+            (response/throw-anomaly! :anomalies/fault
+                                     msg
+                                     {:reason :event-stream-drain-failed
+                                      :drain-result drain-result}))))
+      drain-result)))
+
+(defn ^{:stratum 1} list-workflows-from-resources []
+  (let [list-workflows workflow/list-workflows]
+    (->> (list-workflows)
+         (sort-by (juxt :workflow/id :workflow/version))
+         format-workflow-listing)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} move-spec-to-in-progress!
+  "Move a work spec to in-progress when execution starts.
+   Returns updated provenance with new source-file path,
+   or the original provenance if the move was a no-op."
+  [provenance]
+  (if-let [new-path (move-spec! provenance :in-progress)]
+    (assoc provenance :source-file new-path)
+    provenance))
+
+(defn ^{:stratum 2} move-spec-on-completion!
+  "Move a work spec to done or failed based on workflow result."
+  [provenance result]
+  (if (phase/succeeded? result)
+    (move-spec! provenance :done)
+    (move-spec! provenance :failed)))
+
+(defn- ^{:stratum 2} assert-source-dir-alignment!
+  [spec context]
+  (let [source-dir (:spec/source-dir spec)
+        source-root (:source-root context)]
+    (when-not (source-dir-under-root? source-dir source-root)
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Spec source directory is outside the workflow source root: "
+                                    source-dir)
+                               {:source-dir source-dir
+                                :source-root source-root
+                                :worktree-path (:worktree-path context)}))))
+
+(defn- ^{:stratum 2} backend-preflight-prompt []
+  (:prompt (backend-preflight-config)))
+
+(defn- ^{:stratum 2} backend-preflight-timeout-ms []
+  (:timeout-ms (backend-preflight-config)))
+
+(defn- ^{:stratum 2} backend-version-timeout-ms []
+  (:version-timeout-ms (backend-preflight-config)))
+
+(defn- ^{:stratum 2} claude-preflight-args []
+  (:claude-args (backend-preflight-config)))
+
+(defn- ^{:stratum 2} portable-command-path
+  [cmd]
+  (some-> cmd
+          fs/which
+          normalize-command-path))
+
+(defn- ^{:stratum 2} run-cli-command
   [cmd timeout-ms & {:keys [workdir]}]
   (let [^Process process (start-cli-process cmd workdir)
         _ (.close (.getOutputStream process))
@@ -376,270 +779,11 @@
        :err (await-stream err-future)
        :exit (.exitValue process)})))
 
-(defn- success-response
-  [output]
-  (response/success output))
-
-(defn- failure-response
-  [category error-type message data]
-  (-> (response/failure message {:data (assoc data :type error-type)})
-      (assoc :anomaly (response/make-anomaly category message data))))
-
-(defn- response-output
-  [response]
-  (let [output (get response :output)]
-    (merge (select-keys response [:content :exit-code :version])
-           (if (map? output) output {}))))
-
-(defn- response-succeeded?
-  [response]
-  (or (true? (:success response))
-      (response/success? response)))
-
-(defn- response-summary
-  [response]
-  (merge
-   (select-keys response [:success :error :anomaly :exit-code])
-   (select-keys (response-output response)
-                [:content :exit-code :version])))
-
-(defn- read-cli-version
-  [cmd-path]
-  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
-    (cond
-      timeout-ms
-      (failure-response :anomalies/unavailable
-                        "backend_version_timeout"
-                        (messages/t :workflow-runner/backend-version-timeout
-                                    {:timeout-ms timeout-ms})
-                        {:cmd-path cmd-path
-                         :timeout-ms timeout-ms})
-
-      (zero? exit)
-      (if-let [version (or (some-> out str/trim not-empty)
-                           (some-> err str/trim not-empty))]
-        (success-response {:version version})
-        (failure-response :anomalies/unavailable
-                          "backend_version_empty_output"
-                          (messages/t :workflow-runner/backend-version-empty)
-                          {:cmd-path cmd-path
-                           :exit-code exit}))
-
-      :else
-      (failure-response :anomalies/unavailable
-                        "backend_version_cli_error"
-                        (or (some-> err str/trim not-empty)
-                            (some-> out str/trim not-empty)
-                            (messages/t :workflow-runner/backend-version-exit
-                                        {:exit-code exit}))
-                        {:cmd-path cmd-path
-                         :exit-code exit}))))
-
-(defn- backend-stamp
-  [llm-client]
-  (when-let [backend (llm/client-backend llm-client)]
-    (let [backend-config (get llm/backends backend)
-          cmd (:cmd backend-config)
-          cmd-path (when (:requires-cli? backend-config)
-                     (resolve-cli-command-path cmd))]
-      {:backend backend
-       :backend-config backend-config
-       :cmd cmd
-       :cmd-path cmd-path})))
-
-(defn- with-backend-version
-  [stamp version]
-  (assoc stamp :cmd-version version))
-
-(defn- backend-provenance-lines
-  [{:keys [backend cmd-path cmd-version]}]
-  (concat
-   [[:cyan (messages/t :workflow-runner/backend-label
-                       {:backend (name backend)})]]
-   (when cmd-path
-     [[:cyan (messages/t :workflow-runner/backend-path {:path cmd-path})]])
-   (when cmd-version
-     [[:cyan (messages/t :workflow-runner/backend-version {:version cmd-version})]])))
-
-(defn- print-backend-provenance!
-  [quiet {:keys [backend cmd-path cmd-version]}]
-  (print-colored-lines! quiet (backend-provenance-lines {:backend backend
-                                                         :cmd-path cmd-path
-                                                         :cmd-version cmd-version})))
-
-(defn- claude-preflight-command
-  [cmd-path]
-  (into [cmd-path "-p" (backend-preflight-prompt)]
-        (claude-preflight-args)))
-
-(defn- cli-required-backend-stamp
-  [llm-client]
-  (when-let [stamp (backend-stamp llm-client)]
-    (when (:requires-cli? (:backend-config stamp))
-      stamp)))
-
-(defn- parse-preflight-payload
-  [content]
-  (try
-    (some-> content str/trim not-empty (json/parse-string true))
-    (catch Exception _ nil)))
-
-(defn- normalized-preflight-content
-  [content]
-  (loop [candidate (some-> content str/trim not-empty)]
-    (let [parsed (parse-preflight-payload candidate)
-          nested (or (some-> parsed :result str/trim not-empty)
-                     (some-> parsed :content str/trim not-empty))]
-      (cond
-        (and (:result parsed)
-             (not (and (= "result" (:type parsed))
-                       (= "success" (:subtype parsed))
-                       (not (:is_error parsed)))))
-        nil
-
-        (and nested (not= nested candidate))
-        (recur nested)
-
-        :else
-        candidate))))
-
-(defn- preflight-success?
+(defn- ^{:stratum 2} preflight-success?
   [content]
   (= {:ok true} (parse-preflight-payload (normalized-preflight-content content))))
 
-(defn- backend-stream-content
-  [stream-parser output]
-  (let [content (atom "")]
-    (doseq [line (str/split-lines (or output ""))]
-      (when-let [parsed (stream-parser line)]
-        (when-let [delta (:delta parsed)]
-          (swap! content str delta))))
-    (some-> @content str/trim not-empty)))
-
-(defn- decoded-preflight-content
-  [backend-config output]
-  (if-let [stream-parser (:stream-parser backend-config)]
-    (backend-stream-content stream-parser output)
-    (some-> output str/trim not-empty)))
-
-(defn- generic-preflight-command
-  [llm-client]
-  (let [{:keys [backend model]} (:config llm-client)
-        {:keys [cmd args-fn]} (get llm/backends backend)
-        request (cond-> {:prompt (backend-preflight-prompt)}
-                  model (assoc :model model))]
-    (into [cmd] (args-fn request))))
-
-(defn- run-generic-backend-preflight
-  [llm-client cmd-path workdir]
-  (let [{:keys [backend]} (:config llm-client)
-        backend-config (get llm/backends backend)
-        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
-        {:keys [out err exit timeout-ms]} (run-cli-command full-cmd
-                                                           (backend-preflight-timeout-ms)
-                                                           :workdir workdir)
-        content (decoded-preflight-content backend-config out)]
-    (cond
-      timeout-ms
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_timeout"
-                        err
-                        {:cmd-path cmd-path
-                         :timeout-ms timeout-ms
-                         :exit-code exit})
-
-      (not (zero? exit))
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_cli_error"
-                        (or (some-> err str/trim not-empty)
-                            content
-                            (messages/t :workflow-runner/backend-preflight-exit
-                                        {:exit-code exit}))
-                        {:cmd-path cmd-path
-                         :stdout (some-> out str/trim not-empty)
-                         :stderr (some-> err str/trim not-empty)
-                         :exit-code exit})
-
-      (preflight-success? content)
-      (success-response {:content content
-                         :exit-code exit})
-
-      :else
-      (failure-response :anomalies/unavailable
-                        "backend_preflight_unexpected_output"
-                        (messages/t :workflow-runner/backend-preflight-failed
-                                    {:backend (name backend)})
-                        {:cmd-path cmd-path
-                         :stdout (some-> out str/trim not-empty)
-                         :stderr (some-> err str/trim not-empty)
-                         :content (normalized-preflight-content content)
-                         :exit-code exit}))))
-
-(defn- run-claude-backend-preflight
-  [cmd-path workdir]
-  (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
-                                                           (backend-preflight-timeout-ms)
-                                                           :workdir workdir)
-        trimmed (some-> out str/trim)
-        content (normalized-preflight-content trimmed)]
-    (cond
-      timeout-ms
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_timeout"
-                               err
-                               {:cmd-path cmd-path
-                                :timeout-ms timeout-ms
-                                :exit-code exit})
-             :exit-code exit)
-
-      (not (zero? exit))
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_cli_error"
-                               (or (some-> err str/trim not-empty)
-                                   trimmed
-                                   (messages/t :workflow-runner/backend-preflight-exit
-                                               {:exit-code exit}))
-                               {:cmd-path cmd-path
-                                :exit-code exit})
-             :exit-code exit)
-
-      (preflight-success? content)
-      (-> (success-response {:content content
-                             :exit-code exit})
-          (assoc :exit-code exit
-                 :content content))
-
-      :else
-      (assoc (failure-response :anomalies/unavailable
-                               "backend_preflight_unexpected_output"
-                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
-                               {:cmd-path cmd-path
-                                :stdout trimmed
-                                :content content
-                                :stderr (some-> err str/trim not-empty)
-                                :exit-code exit})
-             :exit-code exit))))
-
-(defn- backend-cli-missing!
-  [{:keys [backend cmd]}]
-  (response/throw-anomaly! :anomalies/incorrect
-                           (messages/t :workflow-runner/cli-not-on-path {:cmd cmd})
-                           {:backend backend
-                            :cmd cmd
-                            :path (System/getenv "PATH")}))
-
-(defn- backend-version-failed!
-  [{:keys [backend cmd cmd-path]} version-response]
-  (response/throw-anomaly! :anomalies/unavailable
-                           (messages/t :workflow-runner/backend-version-failed
-                                       {:backend (name backend)})
-                           {:backend backend
-                            :cmd cmd
-                            :cmd-path cmd-path
-                            :version-error (get-in version-response [:error :message])
-                            :version-error-data (get-in version-response [:error :data])}))
-
-(defn- backend-preflight-failed!
+(defn- ^{:stratum 2} backend-preflight-failed!
   [{:keys [backend cmd cmd-path cmd-version]} probe-response]
   (response/throw-anomaly! :anomalies/unavailable
                            (messages/t :workflow-runner/backend-preflight-failed
@@ -650,81 +794,7 @@
                             :cmd-version cmd-version
                             :probe-response (response-summary probe-response)}))
 
-(defn- run-backend-probe
-  [llm-client {:keys [backend cmd-path]} workdir]
-  (if (= backend :claude)
-    (run-claude-backend-preflight cmd-path workdir)
-    (run-generic-backend-preflight llm-client cmd-path workdir)))
-
-(defn- ensure-cli-command-path!
-  [stamp]
-  (when-not (:cmd-path stamp)
-    (backend-cli-missing! stamp))
-  stamp)
-
-(defn- versioned-backend-stamp
-  [stamp]
-  (let [version-response (read-cli-version (:cmd-path stamp))
-        version (get-in (response-output version-response) [:version])]
-    (when-not (response-succeeded? version-response)
-      (backend-version-failed! stamp version-response))
-    (with-backend-version stamp version)))
-
-(defn- verify-backend-probe!
-  [llm-client stamp workdir]
-  (let [probe-response (run-backend-probe llm-client stamp workdir)]
-    (when-not (response-succeeded? probe-response)
-      (backend-preflight-failed! stamp probe-response))
-    stamp))
-
-(defn- run-backend-preflight!
-  [quiet llm-client context]
-  (when-let [stamp (cli-required-backend-stamp llm-client)]
-    (let [stamp (-> stamp
-                    ensure-cli-command-path!
-                    versioned-backend-stamp)]
-      (print-backend-provenance! quiet stamp)
-      (verify-backend-probe! llm-client stamp (:worktree-path context)))))
-
-(defn close-artifact-store [artifact-store]
-  (when artifact-store
-    (try
-      (artifact/close-store artifact-store)
-      (catch Exception _))))
-
-(defn select-workflow-type
-  "Select workflow type using LLM recommendation if not explicitly specified.
-   Checks :spec/workflow-type first, then :workflow/type as a fallback for
-   specs that use the shorter key."
-  [spec llm-client quiet]
-  (if-let [explicit-type (or (:spec/workflow-type spec)
-                             (:workflow/type spec))]
-    (do
-      (when-not quiet
-        (println (display/colorize :cyan (messages/t :workflow-runner/user-specified {:workflow-type (name explicit-type)}))))
-      explicit-type)
-    (let [recommendation (recommender/recommend-workflow-with-fallback spec llm-client)]
-      (when-not quiet
-        (println (display/colorize :cyan (messages/t :workflow-runner/auto-selected {:workflow-type (name (:workflow recommendation))})))
-        (println (messages/t :workflow-runner/auto-selected-reason {:reasoning (:reasoning recommendation)}))
-        (when (= :llm (:source recommendation))
-          (println (messages/t :workflow-runner/auto-selected-confidence {:confidence (format "%.0f%%" (* 100 (:confidence recommendation 0.0)))})))
-        (println (display/colorize :yellow (messages/t :workflow-runner/auto-selected-override))))
-      (:workflow recommendation))))
-
-(def ^:private workflow-aliases
-  "Map legacy/alternate workflow type keywords to their canonical counterparts.
-   Many work specs use :standard-sdlc but the only registered workflow is
-   :canonical-sdlc."
-  {:standard-sdlc :canonical-sdlc})
-
-(defn resolve-workflow-alias
-  "Resolve a workflow type through the alias map. Returns the canonical type
-   if an alias exists, otherwise returns the type unchanged."
-  [workflow-type]
-  (get workflow-aliases workflow-type workflow-type))
-
-(defn load-or-create-workflow [load-workflow workflow-type workflow-version]
+(defn ^{:stratum 2} load-or-create-workflow [load-workflow workflow-type workflow-version]
   (let [workflow-type (resolve-workflow-alias workflow-type)]
     (try
       (load-and-validate-workflow load-workflow workflow-type workflow-version)
@@ -747,48 +817,7 @@
 
           (throw e))))))
 
-(defn execute-workflow-pipeline [run-pipeline workflow input callbacks artifact-store event-stream]
-  (-> callbacks
-      (cond-> artifact-store (assoc :artifact-store artifact-store))
-      (cond-> event-stream (assoc :event-stream event-stream))
-      (->> (run-pipeline workflow input))))
-
-(defn- failure-message
-  "Build a meaningful failure message from a workflow result.
-   Falls back to execution status when no explicit errors exist."
-  [result]
-  (let [errors (:execution/errors result)
-        status (get result :execution/status :unknown)]
-    (if (seq errors)
-      (str (first errors))
-      (str "Workflow ended with status: " (name status)))))
-
-(defn publish-completion-event [event-stream workflow-id result]
-  (let [status (if (phase/succeeded? result) :success :failure)
-        duration-ms (get-in result [:execution/metrics :duration-ms])]
-    (es/publish! event-stream
-                 (if (= status :success)
-                   (es/workflow-completed event-stream workflow-id status duration-ms)
-                   (es/workflow-failed event-stream workflow-id
-                                       {:message (failure-message result)
-                                        :errors (or (seq (:execution/errors result))
-                                                    [{:type :unknown-failure
-                                                      :message (failure-message result)}])})))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Execution orchestration
-
-(defn- publish-failure-event!
-  "Publish a workflow failure event, swallowing exceptions."
-  [event-stream workflow-id error-type message]
-  (try
-    (es/publish! event-stream
-                 (es/workflow-failed event-stream workflow-id
-                                     {:message message
-                                      :errors [{:type error-type :message message}]}))
-    (catch Exception _ nil)))
-
-(defn execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
+(defn ^{:stratum 2} execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
                                      event-stream workflow-id sandbox-cleanup opts]}]
   (let [completed? (atom false)]
     (try+
@@ -822,146 +851,7 @@
           (when-not (:quiet opts)
             (println (display/colorize :yellow (messages/t :workflow-runner/sandbox-released)))))))))
 
-(defn- best-effort-shutdown?
-  "Honor `MINIFORGE_BEST_EFFORT_SHUTDOWN` as the documented escape hatch
-   for local/dev loops that don't care about event durability. Default
-   off — normal headless mode treats drain failures as errors."
-  []
-  (let [v (System/getenv "MINIFORGE_BEST_EFFORT_SHUTDOWN")]
-    (boolean (and v (contains? #{"1" "true" "yes" "on"} (str/lower-case v))))))
-
-;; BD-2b sub-3a: per-workflow manifest lifecycle.
-
-;------------------------------------------------------------------------------ Layer 1 — manifest operations
-
-(def ^:dynamic *manifest-ops*
-  "Manifest operations used by the workflow lifecycle helpers."
-  {:init-active       es-manifest/init-active
-   :load-manifest     es-manifest/load-manifest
-   :mark-terminal     es-manifest/mark-terminal
-   :save-manifest!    es-manifest/save-manifest!
-   :start-heartbeat!  es-manifest/start-heartbeat!
-   :stop-heartbeat!   es-manifest/stop-heartbeat!
-   :archive-workflow! es-manifest/archive-workflow!})
-
-;------------------------------------------------------------------------------ Layer 2 — lifecycle helpers
-;; Peers; none calls another. `run-workflow!` composes them at Layer 3.
-
-(defn start-workflow-manifest!
-  "Init the manifest at `manifest-dir` and start the heartbeat. Returns
-   `{:dir java.io.File :heartbeat ScheduledExecutorService :marked? atom}`
-   for the matching `finish-workflow-manifest!`. Returns nil when no
-   event stream is configured (dashboard-only run) — no on-disk
-   manifest to maintain in that case."
-  [workflow-id event-stream]
-  (when event-stream
-    (let [dir (es/workflow-dir workflow-id)]
-      ((:save-manifest! *manifest-ops*) dir ((:init-active *manifest-ops*) workflow-id))
-      {:dir       dir
-       :heartbeat ((:start-heartbeat! *manifest-ops*) dir)
-       :marked?   (atom false)})))
-
-(defn mark-manifest-terminal!
-  "Stamp the manifest with a terminal `status` (`:completed |
-   :failed | :cancelled`). Idempotent via the `:marked?` atom — the
-   happy path marks `:completed` after drain, the finally block falls
-   back to `:cancelled` only if no prior mark fired.
-
-   Only flips `marked?` after a successful load + save. If the
-   manifest file is absent (e.g. it was deleted or never written by
-   sub-3b's archive flow), this is a no-op that leaves `marked?`
-   false so a subsequent attempt (e.g. the finally's :cancelled
-   fallback) can still try to write."
-  [{:keys [dir marked?]} status]
-  (when (and dir (not @marked?))
-    (when-let [m ((:load-manifest *manifest-ops*) dir)]
-      ((:save-manifest! *manifest-ops*) dir ((:mark-terminal *manifest-ops*) m status))
-      (reset! marked? true))))
-
-(defn finish-workflow-manifest!
-  "Stop the heartbeat. Caller is expected to have already called
-   `mark-manifest-terminal!` for the happy path; this is the
-   shutdown-time cleanup. Swallows exceptions so a manifest IO
-   failure during cleanup doesn't mask the workflow result.
-
-   `stop-heartbeat!` can raise `InterruptedException` via
-   `awaitTermination`. Swallowing it without restoring the interrupt
-   flag breaks cooperative cancellation — outer frames lose the
-   signal that they're being asked to shut down. We re-interrupt the
-   current thread in that case and still return nil so the cleanup
-   stays best-effort."
-  [{:keys [heartbeat]}]
-  (when heartbeat
-    (try
-      ((:stop-heartbeat! *manifest-ops*) heartbeat)
-      (catch InterruptedException _
-        (.interrupt (Thread/currentThread))
-        nil)
-      (catch Exception _ nil))))
-
-(defn archive-workflow-manifest!
-  "Run BD-2b sub-3b's atomic archive on `workflow-id`'s `live/`
-   directory. Called from the happy path after `mark-manifest-terminal!`
-   succeeds — at that point the manifest is at terminal status with
-   `archive_status = :live` and ready to transition to `:archived`.
-
-   Best-effort: archive failures (e.g. the manifest disappeared
-   between mark and archive, or the rename hit an IO error) are
-   logged to stderr but don't propagate. The boot-time
-   `archive/recover-all-incomplete!` pass picks up any half-finished
-   archives on next start. The finally's `:cancelled` fallback does
-   NOT archive — those workflows wait for the scheduled cleanup
-   pass (sub-3c) so a crashing pipeline can't get half-archived state
-   stuck on disk via the recovery flow."
-  [{:keys [dir marked?]} workflow-id]
-  (when (and dir @marked?)
-    (try
-      (let [result ((:archive-workflow! *manifest-ops*) workflow-id)]
-        (when (anomaly/anomaly? result)
-          (binding [*out* *err*]
-            (println (str "WARNING: archive of workflow " workflow-id
-                          " failed: " (:anomaly/message result)
-                          " (will be recovered by the cleanup pass)")))))
-      (catch Exception e
-        (binding [*out* *err*]
-          (println (str "WARNING: archive of workflow " workflow-id
-                        " failed: " (.getMessage e)
-                        " (will be recovered by the cleanup pass)")))))))
-
-(defn- event-stream-shutdown!
-  "Run the BD-2a shutdown sequence on `es`: quiesce publishers for
-   `workflow-id`, then drain sinks. Returns the structured drain result
-   for inclusion in the run result map, or `nil` when no event stream
-   exists (dashboard-url runs).
-
-   On a non-OK drain in normal mode (best-effort off), throws an
-   ex-info carrying the drain result so the caller's catch path renders
-   the failure and the CLI exits non-zero. Best-effort mode logs the
-   degradation to stderr and returns the result without throwing."
-  [es workflow-id {:keys [quiet]}]
-  (when es
-    (es/quiesce! es {:workflow-id workflow-id :timeout-ms 5000})
-    (let [drain-result (es/drain! es {:timeout-ms 5000})]
-      (when-not (:ok? drain-result)
-        (let [best-effort? (best-effort-shutdown?)
-              msg (str "Event-stream drain incomplete on shutdown: "
-                       (name (:reason drain-result :unknown))
-                       (when-let [pending (:pending-count drain-result)]
-                         (str " (pending=" pending ")"))
-                       (when-let [failed (:failed-sinks drain-result)]
-                         (str " (failed-sinks=" (count failed) ")")))]
-          (binding [*out* *err*]
-            (println (cond-> msg
-                       (not quiet) (->> (display/colorize :yellow))
-                       best-effort? (str " [MINIFORGE_BEST_EFFORT_SHUTDOWN=1, continuing]"))))
-          (when-not best-effort?
-            (response/throw-anomaly! :anomalies/fault
-                                     msg
-                                     {:reason :event-stream-drain-failed
-                                      :drain-result drain-result}))))
-      drain-result)))
-
-(defn run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
+(defn ^{:stratum 2} run-workflow! [workflow-id {:keys [version output quiet event-stream dashboard-url]
                                     :or {version "latest" output :pretty quiet false}
                                     :as opts}]
   ;; Piggyback deferred GC on each workflow start — deletes scratch refs
@@ -1038,58 +928,226 @@
                   {:pretty true})))
       (throw e))))
 
-(defn format-workflow-listing [workflows]
-  (if (empty? workflows)
-    (println (messages/t :workflow-runner/no-workflows))
-    (do
-      (println (display/colorize :cyan (messages/t :workflow-runner/available-workflows)))
-      (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-      (doseq [{:workflow/keys [id version description type]} workflows]
-        (println (str (display/colorize :bold (str "  " (name id)))
-                      " (v" version ")"
-                      "  " (display/colorize :yellow (messages/t :workflow-runner/workflow-type-label {:type (or type :unknown)}))
-                      (when description (str "\n    " description))))
-        (println))
-      (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
-
-(defn list-workflows-from-resources []
-  (let [list-workflows workflow/list-workflows]
-    (->> (list-workflows)
-         (sort-by (juxt :workflow/id :workflow/version))
-         format-workflow-listing)))
-
-(defn list-workflows! []
+(defn ^{:stratum 2} list-workflows! []
   (try
     (list-workflows-from-resources)
     (catch Exception e
       (println (display/colorize :red (messages/t :workflow-runner/list-failed {:error (ex-message e)})))
       (throw e))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Spec-driven execution
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- governed-workflow-id
-  "A UUID workflow id for a governed run. The operator control channel
-   routes `:pause`/`:resume`/`:cancel` interventions by coercing the
-   target id to a UUID, so a run WITHOUT a UUID id is uncontrollable —
-   its interventions can't reach its live-runner registry or audit
-   trail. Use the spec's `:session-id` when it already is a UUID (or a
-   UUID string); otherwise mint one. A PRESENT-but-non-UUID session-id
-   is warned about (it was silently discarded); an absent one is the
-   normal case and mints quietly."
-  [session-id quiet]
-  (or (when (uuid? session-id) session-id)
-      (when (string? session-id) (parse-uuid session-id))
-      (let [fresh (random-uuid)]
-        (when (and (some? session-id) (not quiet))
-          (println (display/colorize
-                    :yellow
-                    (messages/t :workflow-runner/non-uuid-session-id
-                                {:session-id (pr-str session-id)
-                                 :workflow-id (str fresh)}))))
-        fresh)))
+(defn- ^{:stratum 3} assert-runtime-alignment!
+  [spec context]
+  (assert-valid-source-root! context)
+  (assert-execution-worktree! context)
+  (assert-source-dir-alignment! spec context))
 
-(defn run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
+(defn- ^{:stratum 3} resolve-cli-command-path
+  [cmd]
+  (cond
+    (str/blank? cmd) nil
+    (direct-command-path? cmd)
+    (normalize-command-path cmd)
+
+    :else
+    (or (portable-command-path cmd)
+        (some #(matching-command-path % cmd) (path-entries)))))
+
+(defn- ^{:stratum 3} read-cli-version
+  [cmd-path]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command [cmd-path "--version"] (backend-version-timeout-ms))]
+    (cond
+      timeout-ms
+      (failure-response :anomalies/unavailable
+                        "backend_version_timeout"
+                        (messages/t :workflow-runner/backend-version-timeout
+                                    {:timeout-ms timeout-ms})
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms})
+
+      (zero? exit)
+      (if-let [version (or (some-> out str/trim not-empty)
+                           (some-> err str/trim not-empty))]
+        (success-response {:version version})
+        (failure-response :anomalies/unavailable
+                          "backend_version_empty_output"
+                          (messages/t :workflow-runner/backend-version-empty)
+                          {:cmd-path cmd-path
+                           :exit-code exit}))
+
+      :else
+      (failure-response :anomalies/unavailable
+                        "backend_version_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            (some-> out str/trim not-empty)
+                            (messages/t :workflow-runner/backend-version-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :exit-code exit}))))
+
+(defn- ^{:stratum 3} claude-preflight-command
+  [cmd-path]
+  (into [cmd-path "-p" (backend-preflight-prompt)]
+        (claude-preflight-args)))
+
+(defn- ^{:stratum 3} generic-preflight-command
+  [llm-client]
+  (let [{:keys [backend model]} (:config llm-client)
+        {:keys [cmd args-fn]} (get llm/backends backend)
+        request (cond-> {:prompt (backend-preflight-prompt)}
+                  model (assoc :model model))]
+    (into [cmd] (args-fn request))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} backend-stamp
+  [llm-client]
+  (when-let [backend (llm/client-backend llm-client)]
+    (let [backend-config (get llm/backends backend)
+          cmd (:cmd backend-config)
+          cmd-path (when (:requires-cli? backend-config)
+                     (resolve-cli-command-path cmd))]
+      {:backend backend
+       :backend-config backend-config
+       :cmd cmd
+       :cmd-path cmd-path})))
+
+(defn- ^{:stratum 4} run-generic-backend-preflight
+  [llm-client cmd-path workdir]
+  (let [{:keys [backend]} (:config llm-client)
+        backend-config (get llm/backends backend)
+        full-cmd (into [cmd-path] (rest (generic-preflight-command llm-client)))
+        {:keys [out err exit timeout-ms]} (run-cli-command full-cmd
+                                                           (backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        content (decoded-preflight-content backend-config out)]
+    (cond
+      timeout-ms
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_timeout"
+                        err
+                        {:cmd-path cmd-path
+                         :timeout-ms timeout-ms
+                         :exit-code exit})
+
+      (not (zero? exit))
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_cli_error"
+                        (or (some-> err str/trim not-empty)
+                            content
+                            (messages/t :workflow-runner/backend-preflight-exit
+                                        {:exit-code exit}))
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :exit-code exit})
+
+      (preflight-success? content)
+      (success-response {:content content
+                         :exit-code exit})
+
+      :else
+      (failure-response :anomalies/unavailable
+                        "backend_preflight_unexpected_output"
+                        (messages/t :workflow-runner/backend-preflight-failed
+                                    {:backend (name backend)})
+                        {:cmd-path cmd-path
+                         :stdout (some-> out str/trim not-empty)
+                         :stderr (some-> err str/trim not-empty)
+                         :content (normalized-preflight-content content)
+                         :exit-code exit}))))
+
+(defn- ^{:stratum 4} run-claude-backend-preflight
+  [cmd-path workdir]
+  (let [{:keys [out err exit timeout-ms]} (run-cli-command (claude-preflight-command cmd-path)
+                                                           (backend-preflight-timeout-ms)
+                                                           :workdir workdir)
+        trimmed (some-> out str/trim)
+        content (normalized-preflight-content trimmed)]
+    (cond
+      timeout-ms
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_timeout"
+                               err
+                               {:cmd-path cmd-path
+                                :timeout-ms timeout-ms
+                                :exit-code exit})
+             :exit-code exit)
+
+      (not (zero? exit))
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_cli_error"
+                               (or (some-> err str/trim not-empty)
+                                   trimmed
+                                   (messages/t :workflow-runner/backend-preflight-exit
+                                               {:exit-code exit}))
+                               {:cmd-path cmd-path
+                                :exit-code exit})
+             :exit-code exit)
+
+      (preflight-success? content)
+      (-> (success-response {:content content
+                             :exit-code exit})
+          (assoc :exit-code exit
+                 :content content))
+
+      :else
+      (assoc (failure-response :anomalies/unavailable
+                               "backend_preflight_unexpected_output"
+                               (messages/t :workflow-runner/claude-preflight-unexpected-output)
+                               {:cmd-path cmd-path
+                                :stdout trimmed
+                                :content content
+                                :stderr (some-> err str/trim not-empty)
+                                :exit-code exit})
+             :exit-code exit))))
+
+(defn- ^{:stratum 4} versioned-backend-stamp
+  [stamp]
+  (let [version-response (read-cli-version (:cmd-path stamp))
+        version (get-in (response-output version-response) [:version])]
+    (when-not (response-succeeded? version-response)
+      (backend-version-failed! stamp version-response))
+    (with-backend-version stamp version)))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} cli-required-backend-stamp
+  [llm-client]
+  (when-let [stamp (backend-stamp llm-client)]
+    (when (:requires-cli? (:backend-config stamp))
+      stamp)))
+
+(defn- ^{:stratum 5} run-backend-probe
+  [llm-client {:keys [backend cmd-path]} workdir]
+  (if (= backend :claude)
+    (run-claude-backend-preflight cmd-path workdir)
+    (run-generic-backend-preflight llm-client cmd-path workdir)))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} verify-backend-probe!
+  [llm-client stamp workdir]
+  (let [probe-response (run-backend-probe llm-client stamp workdir)]
+    (when-not (response-succeeded? probe-response)
+      (backend-preflight-failed! stamp probe-response))
+    stamp))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn- ^{:stratum 7} run-backend-preflight!
+  [quiet llm-client context]
+  (when-let [stamp (cli-required-backend-stamp llm-client)]
+    (let [stamp (-> stamp
+                    ensure-cli-command-path!
+                    versioned-backend-stamp)]
+      (print-backend-provenance! quiet stamp)
+      (verify-backend-probe! llm-client stamp (:worktree-path context)))))
+
+;------------------------------------------------------------------------------ Layer 8
+
+(defn ^{:stratum 8} run-workflow-from-spec! [spec {:keys [quiet] :or {quiet false} :as opts}]
   ;; Piggyback deferred GC on each spec-driven workflow start.
   (run-gc-pass-best-effort!)
   (try+
@@ -1187,85 +1245,7 @@
           (flush))
         (throw e)))))
 
-;------------------------------------------------------------------------------ Layer 2b
-;; Resume workflow from checkpointed DAG state
-
-(defn resume-workflow-from-spec!
-  "Resume a previously failed or paused workflow from checkpointed DAG state.
-
-   Arguments:
-   - workflow-id: UUID string of the workflow to resume
-   - spec: The original spec map (same spec file used for the initial run)
-   - opts: Same opts as run-workflow-from-spec!"
-  [workflow-id-str spec {:keys [quiet] :or {quiet false} :as opts}]
-  (let [resume-ctx (try
-                     (workflow-resume/resume-context workflow-id-str)
-                     (catch Exception e
-                       (when-not quiet
-                         (println (display/colorize :red
-                                   (messages/t :workflow-runner/resume-state-failed {:error (ex-message e)}))))
-                       nil))]
-    (when-not quiet
-      (println (display/colorize :cyan
-                (messages/t :workflow-runner/resuming {:workflow-id workflow-id-str})))
-      (println (display/colorize :cyan
-                (messages/t :workflow-runner/previously-completed {:count (count (:pre-completed-ids resume-ctx))})))
-      (when (seq (:pre-completed-artifacts resume-ctx))
-        (println (display/colorize :cyan
-                  (messages/t :workflow-runner/recovered-artifacts {:count (count (:pre-completed-artifacts resume-ctx))})))))
-    (if (and resume-ctx (seq (:pre-completed-ids resume-ctx)))
-      ;; Re-run with pre-completed task IDs injected
-      (let [execution-opts (-> (get opts :execution-opts {})
-                               (assoc :pre-completed-dag-tasks
-                                      (:pre-completed-ids resume-ctx))
-                               (assoc :pre-completed-artifacts
-                                      (:pre-completed-artifacts resume-ctx)))
-            opts-with-resume (assoc opts :execution-opts execution-opts)]
-        (run-workflow-from-spec! spec opts-with-resume))
-      (do
-        (when-not quiet
-          (println (display/colorize :yellow
-                    (messages/t :workflow-runner/no-completed-tasks))))
-        (run-workflow-from-spec! spec opts)))))
-
-;; ── Chain-driven execution ─────────────────────────────────────────────────
-
-(defn resolve-chain-input
-  "Resolve chain input from a spec file path or inline JSON."
-  [opts]
-  (let [spec-path (:spec opts)
-        inline-json (:input-json opts)]
-    (cond
-      inline-json (json/parse-string inline-json true)
-      spec-path (let [parsed (edn/read-string (slurp spec-path))
-                      enriched (context/decorate-spec-with-runtime-context parsed {})]
-                  (context/spec->workflow-input enriched))
-      :else {})))
-
-(defn print-chain-header
-  "Print chain execution banner."
-  [chain-id chain-def quiet]
-  (when-not quiet
-    (println)
-    (println (display/colorize :cyan (messages/t :workflow-runner/chain-header {:chain-id (name chain-id)})))
-    (println (display/colorize :cyan (messages/t :workflow-runner/chain-description {:description (:chain/description chain-def)})))
-    (println (display/colorize :cyan (messages/t :workflow-runner/chain-steps {:count (count (:chain/steps chain-def))})))
-    (println (display/colorize :cyan (apply str (repeat 60 "─"))))))
-
-(defn print-chain-result
-  "Print chain execution result summary."
-  [result quiet]
-  (when-not quiet
-    (let [steps (:chain/step-results result)
-          duration (:chain/duration-ms result)]
-      (println)
-      (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-      (if (phase/succeeded? result)
-        (println (display/colorize :green (messages/t :workflow-runner/chain-completed {:count (count steps) :duration duration})))
-        (let [failed-step (some #(when (phase/failed? %) (:step/id %)) steps)]
-          (println (display/colorize :red (messages/t :workflow-runner/chain-failed-at {:step (when failed-step (name failed-step))}))))))))
-
-(defn run-chain!
+(defn ^{:stratum 8} run-chain!
   "Execute a chain of workflows.
 
    Arguments:
@@ -1312,24 +1292,43 @@
           (println (display/colorize :red (messages/t :workflow-runner/chain-execution-failed {:error (ex-message e)}))))
         (throw e)))))
 
-(defn list-chains!
-  "List all available chain definitions."
-  []
-  (try
-    (let [chains (workflow/list-chains)]
-      (if (empty? chains)
-        (println (messages/t :workflow-runner/no-chains))
-        (do
-          (println (display/colorize :cyan (messages/t :workflow-runner/available-chains)))
-          (println (display/colorize :cyan (apply str (repeat 60 "─"))))
-          (doseq [{:keys [id version description steps]} chains]
-            (println (str (display/colorize :bold (str "  " (name id)))
-                          " (v" version ")"
-                          "  " (messages/t :workflow-runner/chain-steps-label {:steps steps})))
-            (when description
-              (println (str "    " description)))
-            (println))
-          (println (display/colorize :cyan (apply str (repeat 60 "─")))))))
-    (catch Exception e
-      (println (display/colorize :red (messages/t :workflow-runner/list-chains-failed {:error (ex-message e)})))
-      (throw e))))
+;------------------------------------------------------------------------------ Layer 9
+
+;; Resume workflow from checkpointed DAG state
+(defn ^{:stratum 9} resume-workflow-from-spec!
+  "Resume a previously failed or paused workflow from checkpointed DAG state.
+
+   Arguments:
+   - workflow-id: UUID string of the workflow to resume
+   - spec: The original spec map (same spec file used for the initial run)
+   - opts: Same opts as run-workflow-from-spec!"
+  [workflow-id-str spec {:keys [quiet] :or {quiet false} :as opts}]
+  (let [resume-ctx (try
+                     (workflow-resume/resume-context workflow-id-str)
+                     (catch Exception e
+                       (when-not quiet
+                         (println (display/colorize :red
+                                   (messages/t :workflow-runner/resume-state-failed {:error (ex-message e)}))))
+                       nil))]
+    (when-not quiet
+      (println (display/colorize :cyan
+                (messages/t :workflow-runner/resuming {:workflow-id workflow-id-str})))
+      (println (display/colorize :cyan
+                (messages/t :workflow-runner/previously-completed {:count (count (:pre-completed-ids resume-ctx))})))
+      (when (seq (:pre-completed-artifacts resume-ctx))
+        (println (display/colorize :cyan
+                  (messages/t :workflow-runner/recovered-artifacts {:count (count (:pre-completed-artifacts resume-ctx))})))))
+    (if (and resume-ctx (seq (:pre-completed-ids resume-ctx)))
+      ;; Re-run with pre-completed task IDs injected
+      (let [execution-opts (-> (get opts :execution-opts {})
+                               (assoc :pre-completed-dag-tasks
+                                      (:pre-completed-ids resume-ctx))
+                               (assoc :pre-completed-artifacts
+                                      (:pre-completed-artifacts resume-ctx)))
+            opts-with-resume (assoc opts :execution-opts execution-opts)]
+        (run-workflow-from-spec! spec opts-with-resume))
+      (do
+        (when-not quiet
+          (println (display/colorize :yellow
+                    (messages/t :workflow-runner/no-completed-tasks))))
+        (run-workflow-from-spec! spec opts)))))

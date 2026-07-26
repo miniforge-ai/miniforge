@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval.payload
   "N13 §2.5 Comment Response Agent — Layer 0: Foundations.
 
@@ -34,21 +33,25 @@
   (:require
    [ai.miniforge.compliance-scanner.interface :as scanner]))
 
-(def policy-eval-author
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} policy-eval-author
   "GitHub login the renderer posts under (per
    `compliance-scanner.comments/violation->comment`)."
   "miniforge-policy-evaluator[bot]")
 
-(defn policy-eval-comment?
-  "True when `comment` was posted by the N13 Standards Reviewer
-   (matched by author login). Comments from other bots / humans are
-   handled by the general LLM responder, not by this module."
-  [comment]
-  (= policy-eval-author (:comment/author comment)))
-
-(defn extract-policy-payload
+(defn ^{:stratum 0} extract-policy-payload
   "Return the embedded `:comment/payload` map from `comment`'s body,
    or nil. Delegates to `compliance-scanner.interface/extract-comment-payload`
    so the round-trip is the inverse of the renderer."
   [comment]
   (scanner/extract-comment-payload (:comment/body comment)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} policy-eval-comment?
+  "True when `comment` was posted by the N13 Standards Reviewer
+   (matched by author login). Comments from other bots / humans are
+   handled by the general LLM responder, not by this module."
+  [comment]
+  (= policy-eval-author (:comment/author comment)))

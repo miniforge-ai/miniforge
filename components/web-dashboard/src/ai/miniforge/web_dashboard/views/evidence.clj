@@ -11,20 +11,33 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.evidence
   "Evidence artifacts view for audit trails."
   (:require
    [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Evidence fragments
 
-(defn status-badge [status]
+;; Evidence fragments
+(defn ^{:stratum 0} status-badge [status]
   (let [label (if (keyword? status) (name status) (str status))]
     [:span.wf-badge {:class (str "badge-" label)} label]))
 
-(defn workflow-evidence-item [wf]
+(defn ^{:stratum 0} train-evidence-item [train]
+  [:div.evidence-item
+   [:div.evidence-info
+    [:h4 (:train-name train)]
+    [:span.evidence-meta
+     (str (msg/t :pr/count {:count (:pr-count train)})
+          (when (:has-evidence train) (str " | " (msg/t :evidence/evidence-available))))]]
+   (when (:has-evidence train)
+     [:button.btn.btn-sm.btn-ghost
+      {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
+      (msg/t :evidence/view-bundle)])])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} workflow-evidence-item [wf]
   [:div.evidence-item
    [:div.evidence-info
     [:h4 (:workflow-name wf)]
@@ -39,19 +52,9 @@
        (msg/t :evidence/view-bundle)]
       [:span.evidence-pending (msg/t :evidence/pending)])]])
 
-(defn train-evidence-item [train]
-  [:div.evidence-item
-   [:div.evidence-info
-    [:h4 (:train-name train)]
-    [:span.evidence-meta
-     (str (msg/t :pr/count {:count (:pr-count train)})
-          (when (:has-evidence train) (str " | " (msg/t :evidence/evidence-available))))]]
-   (when (:has-evidence train)
-     [:button.btn.btn-sm.btn-ghost
-      {:onclick (str "location.href='/api/evidence/" (:evidence-bundle-id train) "'")}
-      (msg/t :evidence/view-bundle)])])
+;------------------------------------------------------------------------------ Layer 2
 
-(defn evidence-list-fragment
+(defn ^{:stratum 2} evidence-list-fragment
   "Evidence list fragment for htmx updates.
    Accepts either a vector (legacy: train items only) or a map with :trains and :workflows."
   [state]
@@ -75,10 +78,10 @@
           (for [train trains]
             (train-evidence-item train))))])))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Evidence view
+;------------------------------------------------------------------------------ Layer 3
 
-(defn evidence-view
+;; Evidence view
+(defn ^{:stratum 3} evidence-view
   "Evidence artifacts view."
   [layout state]
   (layout (msg/t :layout/nav-evidence)

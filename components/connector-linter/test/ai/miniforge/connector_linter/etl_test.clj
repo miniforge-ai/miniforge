@@ -1,71 +1,25 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.connector-linter.etl-test
   "Tests for the data-driven ETL engine — field extraction, format parsing, mapping application."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.connector-linter.etl :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Access private functions
-(def extract-field (var-get #'sut/extract-field))
-(def map-severity (var-get #'sut/map-severity))
-(def matches-filter? (var-get #'sut/matches-filter?))
+(def ^{:stratum 0} extract-field (var-get #'sut/extract-field))
 
-;; ============================================================================
-;; Field extraction
-;; ============================================================================
+(def ^{:stratum 0} map-severity (var-get #'sut/map-severity))
 
-(deftest extract-field-keyword-test
-  (testing "extracts by keyword"
-    (is (= "foo.clj" (extract-field {:filename "foo.clj"} :filename)))))
-
-(deftest extract-field-vector-path-test
-  (testing "extracts by vector path"
-    (is (= 42 (extract-field {:pos {:line 42}} [:pos :line]))))
-
-  (testing "extracts through array index"
-    (is (= "bar.rs" (extract-field {:spans [{:file "bar.rs"}]} [:spans 0 :file]))))
-
-  (testing "returns nil for missing path"
-    (is (nil? (extract-field {:a 1} [:b :c])))))
-
-;; ============================================================================
-;; Severity mapping
-;; ============================================================================
-
-(deftest map-severity-test
-  (testing "maps string keys"
-    (is (= :critical (map-severity {"error" :critical} "error"))))
-
-  (testing "maps keyword values by name"
-    (is (= :high (map-severity {"warning" :high} :warning))))
-
-  (testing "defaults to :low for unknown"
-    (is (= :low (map-severity {"error" :critical} "unknown")))))
-
-;; ============================================================================
-;; Filter matching
-;; ============================================================================
-
-(deftest matches-filter-test
-  (testing "nil filter always matches"
-    (is (true? (matches-filter? nil {:anything true}))))
-
-  (testing "matches when path equals value"
-    (is (true? (matches-filter? {:path [:reason] :equals "compiler-message"}
-                                {:reason "compiler-message"}))))
-
-  (testing "rejects when path doesn't equal"
-    (is (false? (matches-filter? {:path [:reason] :equals "compiler-message"}
-                                 {:reason "build-script"})))))
+(def ^{:stratum 0} matches-filter? (var-get #'sut/matches-filter?))
 
 ;; ============================================================================
 ;; Mapping registry
 ;; ============================================================================
-
-(deftest mappings-load-test
+(deftest ^{:stratum 0} mappings-load-test
   (testing "mappings load from classpath"
     (is (map? @sut/mappings))
     (is (contains? @sut/mappings :clippy))
@@ -78,8 +32,7 @@
 ;; ============================================================================
 ;; Full mapping application — clj-kondo
 ;; ============================================================================
-
-(deftest apply-mapping-clj-kondo-test
+(deftest ^{:stratum 0} apply-mapping-clj-kondo-test
   (testing "parses EDN findings"
     (let [mapping (sut/get-mapping :clj-kondo)
           output  "{:findings [{:type :unresolved-symbol :filename \"src/core.clj\" :row 10 :col 5 :level :error :message \"Unresolved symbol: foo\"}]}"
@@ -92,8 +45,7 @@
 ;; ============================================================================
 ;; Full mapping application — ESLint (nested format)
 ;; ============================================================================
-
-(deftest apply-mapping-eslint-test
+(deftest ^{:stratum 0} apply-mapping-eslint-test
   (testing "parses nested JSON with parent file path"
     (let [mapping (sut/get-mapping :eslint)
           output  "[{\"filePath\":\"/src/app.js\",\"messages\":[{\"ruleId\":\"no-unused-vars\",\"severity\":2,\"message\":\"x is unused\",\"line\":5,\"column\":3}]}]"
@@ -105,8 +57,7 @@
 ;; ============================================================================
 ;; Full mapping application — Clippy (json-lines with filter)
 ;; ============================================================================
-
-(deftest apply-mapping-clippy-test
+(deftest ^{:stratum 0} apply-mapping-clippy-test
   (testing "filters for compiler-message and extracts nested fields"
     (let [mapping (sut/get-mapping :clippy)
           line1   "{\"reason\":\"compiler-artifact\"}"
@@ -120,8 +71,7 @@
 ;; ============================================================================
 ;; Full mapping application — ruff
 ;; ============================================================================
-
-(deftest apply-mapping-ruff-test
+(deftest ^{:stratum 0} apply-mapping-ruff-test
   (testing "parses flat JSON array"
     (let [mapping (sut/get-mapping :ruff)
           output  "[{\"code\":\"F401\",\"message\":\"unused import\",\"filename\":\"app.py\",\"location\":{\"row\":1,\"column\":1},\"type\":\"warning\"}]"
@@ -133,14 +83,60 @@
 ;; ============================================================================
 ;; Empty / error cases
 ;; ============================================================================
-
-(deftest apply-mapping-empty-test
+(deftest ^{:stratum 0} apply-mapping-empty-test
   (testing "empty output returns empty violations"
     (let [mapping (sut/get-mapping :eslint)]
       (is (= [] (sut/apply-mapping mapping "")))
       (is (= [] (sut/apply-mapping mapping "[]"))))))
 
-(deftest apply-mapping-malformed-test
+(deftest ^{:stratum 0} apply-mapping-malformed-test
   (testing "malformed output returns empty violations"
     (let [mapping (sut/get-mapping :eslint)]
       (is (= [] (sut/apply-mapping mapping "not json"))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; Field extraction
+;; ============================================================================
+(deftest ^{:stratum 1} extract-field-keyword-test
+  (testing "extracts by keyword"
+    (is (= "foo.clj" (extract-field {:filename "foo.clj"} :filename)))))
+
+(deftest ^{:stratum 1} extract-field-vector-path-test
+  (testing "extracts by vector path"
+    (is (= 42 (extract-field {:pos {:line 42}} [:pos :line]))))
+
+  (testing "extracts through array index"
+    (is (= "bar.rs" (extract-field {:spans [{:file "bar.rs"}]} [:spans 0 :file]))))
+
+  (testing "returns nil for missing path"
+    (is (nil? (extract-field {:a 1} [:b :c])))))
+
+;; ============================================================================
+;; Severity mapping
+;; ============================================================================
+(deftest ^{:stratum 1} map-severity-test
+  (testing "maps string keys"
+    (is (= :critical (map-severity {"error" :critical} "error"))))
+
+  (testing "maps keyword values by name"
+    (is (= :high (map-severity {"warning" :high} :warning))))
+
+  (testing "defaults to :low for unknown"
+    (is (= :low (map-severity {"error" :critical} "unknown")))))
+
+;; ============================================================================
+;; Filter matching
+;; ============================================================================
+(deftest ^{:stratum 1} matches-filter-test
+  (testing "nil filter always matches"
+    (is (true? (matches-filter? nil {:anything true}))))
+
+  (testing "matches when path equals value"
+    (is (true? (matches-filter? {:path [:reason] :equals "compiler-message"}
+                                {:reason "compiler-message"}))))
+
+  (testing "rejects when path doesn't equal"
+    (is (false? (matches-filter? {:path [:reason] :equals "compiler-message"}
+                                 {:reason "build-script"})))))

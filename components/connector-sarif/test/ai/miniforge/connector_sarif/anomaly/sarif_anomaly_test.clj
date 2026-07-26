@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-sarif.anomaly.sarif-anomaly-test
   "Coverage for sarif `format/parse-file` and `impl/do-connect`
    boundary escalation via `response/throw-anomaly!`.
@@ -28,7 +27,9 @@
             [ai.miniforge.response.interface :as response])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest parse-file-unsupported-format-throws-anomaly
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} parse-file-unsupported-format-throws-anomaly
   (testing "unrecognised format raises :anomalies/unsupported"
     (try
       (fmt/parse-file "/nope/no.weird" :weird nil)
@@ -39,7 +40,7 @@
         (is (= "/nope/no.weird" (:path (ex-data e))))
         (is (= :weird (:format (ex-data e))))))))
 
-(deftest do-connect-invalid-config-returns-anomaly
+(deftest ^{:stratum 0} do-connect-invalid-config-returns-anomaly
   (testing "invalid SARIF config returns :anomalies/incorrect"
     (let [result (impl/do-connect {})]
       (is (response/anomaly-map? result))

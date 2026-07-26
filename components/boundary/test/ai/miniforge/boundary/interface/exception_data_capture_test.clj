@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.exception-data-capture-test
   "Exception payload capture. The anomaly's `:anomaly/data` carries
    the canonical `CapturedException` shape — type, message, cause,
@@ -26,10 +25,14 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(defn- captured [chain]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} captured [chain]
   (-> chain chain/last-anomaly :anomaly/data))
 
-(deftest type-is-fully-qualified-class-name
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} type-is-fully-qualified-class-name
   (testing ":exception/type is the FQCN of the thrown exception"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -38,7 +41,7 @@
       (is (= "java.io.IOException"
              (:exception/type (captured c)))))))
 
-(deftest message-is-the-exception-message
+(deftest ^{:stratum 1} message-is-the-exception-message
   (testing ":exception/message is (.getMessage e)"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -47,7 +50,7 @@
       (is (= "down for maintenance"
              (:exception/message (captured c)))))))
 
-(deftest cause-is-captured-when-present
+(deftest ^{:stratum 1} cause-is-captured-when-present
   (testing ":exception/cause is the message of the immediate cause"
     (let [root  (IllegalStateException. "root")
           wrap  (RuntimeException. "wrap" root)
@@ -57,7 +60,7 @@
                                   (fn [] (throw wrap)))]
       (is (= "root" (:exception/cause (captured c)))))))
 
-(deftest cause-is-nil-when-absent
+(deftest ^{:stratum 1} cause-is-nil-when-absent
   (testing ":exception/cause is nil when the exception has no cause"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -65,7 +68,7 @@
                               (fn [] (throw (RuntimeException. "lonely"))))]
       (is (nil? (:exception/cause (captured c)))))))
 
-(deftest data-is-ex-data-for-exceptioninfo
+(deftest ^{:stratum 1} data-is-ex-data-for-exceptioninfo
   (testing ":exception/data carries the (ex-data e) map for ExceptionInfo"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -74,7 +77,7 @@
       (is (= {:user/id 7 :retry? true}
              (:exception/data (captured c)))))))
 
-(deftest data-is-nil-for-plain-exceptions
+(deftest ^{:stratum 1} data-is-nil-for-plain-exceptions
   (testing ":exception/data is nil when the throw is a plain Throwable"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -82,7 +85,7 @@
                               (fn [] (throw (RuntimeException. "no data"))))]
       (is (nil? (:exception/data (captured c)))))))
 
-(deftest captured-payload-validates-against-schema
+(deftest ^{:stratum 1} captured-payload-validates-against-schema
   (testing "the captured payload satisfies the CapturedException schema"
     (let [c (boundary/execute :db
                               (chain/create-chain :flow)

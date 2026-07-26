@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.policy-pack.ast-test
   "Tests for tree-sitter CLI wrapper — file extension, language detection, violations."
   (:require
@@ -9,7 +8,9 @@
    [ai.miniforge.policy-pack.ast :as sut]
    [ai.miniforge.policy-pack.detection :as detection]))
 
-(deftest file-extension-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} file-extension-test
   (testing "extracts extension from simple filename"
     (is (= "clj" (sut/file-extension "core.clj"))))
 
@@ -22,7 +23,7 @@
   (testing "returns nil for no extension"
     (is (nil? (sut/file-extension "Makefile")))))
 
-(deftest detect-language-test
+(deftest ^{:stratum 0} detect-language-test
   (testing "detects Clojure from .clj extension"
     (is (= "clojure" (sut/detect-language "core.clj" nil))))
 
@@ -35,7 +36,7 @@
   (testing "unknown extension returns text"
     (is (= "text" (sut/detect-language "file.xyz" nil)))))
 
-(deftest matches->violations-test
+(deftest ^{:stratum 0} matches->violations-test
   (testing "converts matches to violation-shaped maps"
     (let [matches [{:row 5 :col 0 :capture "fn" :text "eval" :pattern 0}
                    {:row 10 :col 2 :capture "fn" :text "eval" :pattern 0}]
@@ -48,11 +49,11 @@
   (testing "returns empty vector for no matches"
     (is (= [] (sut/matches->violations [] :test/rule "200" "Title" "file.clj")))))
 
-(deftest tree-sitter-available-test
+(deftest ^{:stratum 0} tree-sitter-available-test
   (testing "returns boolean"
     (is (boolean? (sut/tree-sitter-available?)))))
 
-(deftest run-query-returns-gracefully-without-hanging-test
+(deftest ^{:stratum 0} run-query-returns-gracefully-without-hanging-test
   ;; Regression guard for the pipe-buffer deadlock: run-query drained stdout
   ;; fully before stderr, so a tree-sitter process flooding stderr wedged the
   ;; JVM in an uninterruptible read with no timeout. It now drains both pipes
@@ -73,7 +74,7 @@
       (is (< elapsed (+ sut/tree-sitter-query-timeout-ms 10000))
           "returns within the timeout cap (+ slack) — never hangs"))))
 
-(deftest state-comparison-detection-test
+(deftest ^{:stratum 0} state-comparison-detection-test
   (testing "detects drift between desired and current state"
     (let [rule    {:rule/id :test/drift :rule/enforcement {:action :warn :message "Drift"}}
           context {:desired-state {:replicas 3 :image "v2"}
@@ -88,7 +89,7 @@
           result  (detection/detect-state-comparison rule {} context)]
       (is (nil? result)))))
 
-(deftest plan-resource-counts-test
+(deftest ^{:stratum 0} plan-resource-counts-test
   (testing "counts creates, updates, destroys from plan output"
     (let [plan "# aws_vpc.main will be created\n# aws_route.old will be destroyed\n# aws_subnet.main will be updated"]
       (is (= {:creates 1 :updates 1 :destroys 1}

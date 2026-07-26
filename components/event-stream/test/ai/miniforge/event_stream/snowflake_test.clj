@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.snowflake-test
   "Tests for the BD-2b Snowflake event-id generator."
   (:require
@@ -26,9 +25,10 @@
   (:import
    [java.util UUID]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- with-temp-workers-dir [f]
+;------------------------------------------------------------------------------ Helpers
+(defn- ^{:stratum 0} with-temp-workers-dir [f]
   (let [dir (java.nio.file.Files/createTempDirectory
              "snowflake-test-workers-"
              (into-array java.nio.file.attribute.FileAttribute []))]
@@ -38,7 +38,7 @@
         (doseq [file (reverse (file-seq (.toFile dir)))]
           (.delete ^java.io.File file))))))
 
-(defn- fixed-clock
+(defn- ^{:stratum 0} fixed-clock
   "Return a 0-arg fn that returns successive values from `times`. Once
    exhausted, repeats the last value (so the generator can spin without
    running off the end)."
@@ -58,35 +58,17 @@
 ;; first emission goes through the third (forward-time) branch. The
 ;; sentinel must be < any valid (ms, seq) pair the generator could
 ;; observe; -1 is the conventional Java/Clojure sentinel for unset.
-(def ^:private ^:const ^long unset-timestamp-sentinel -1)
-(def ^:private ^:const ^long unset-sequence-sentinel  -1)
+(def ^{:stratum 0} ^:private ^:const ^long unset-timestamp-sentinel -1)
+
+(def ^{:stratum 0} ^:private ^:const ^long unset-sequence-sentinel  -1)
 
 ;; Bypass the FileLock-based worker-id lease in unit tests by pinning a
 ;; deterministic worker id and providing a fake lease handle. `0` is
 ;; chosen for readability; any 0..max-workers-1 value works.
-(def ^:private ^:const ^long test-worker-id 0)
-
-(def ^:private fresh-test-state
-  "A fresh-but-quiesced generator state — what the production
-   `initial-state` factory would produce for the test worker-id, but
-   defined locally so tests don't reach into a private fn."
-  {:last-ts   unset-timestamp-sentinel
-   :last-seq  unset-sequence-sentinel
-   :worker-id test-worker-id})
-
-(def ^:private fake-test-lease
-  "Sentinel lease handle for tests that bypass the file-lock path."
-  {:worker-id test-worker-id})
-
-(defn- generator-with-fixed-clock [times]
-  {:state     (atom fresh-test-state)
-   :worker-id test-worker-id
-   :lease     fake-test-lease
-   :now-fn    (fixed-clock times)})
+(def ^{:stratum 0} ^:private ^:const ^long test-worker-id 0)
 
 ;------------------------------------------------------------------------------ Pure id-composition
-
-(deftest compose-id-packs-bits-correctly
+(deftest ^{:stratum 0} compose-id-packs-bits-correctly
   ;; Verify the bit layout: 41-bit ts << 22 | 10-bit worker << 12 | 12-bit seq.
   (let [id (sf/compose-id 0 0 0)]
     (is (zero? id)))
@@ -102,12 +84,12 @@
                    0xfff)
            id))))
 
-(deftest format-hex-produces-16-char-lowercase
+(deftest ^{:stratum 0} format-hex-produces-16-char-lowercase
   (is (= "0000000000000000" (sf/format-hex 0)))
   (is (= "0000000000000001" (sf/format-hex 1)))
-  (is (= "ffffffffffffffff" (sf/format-hex -1)))) ; all-ones long
+  (is (= "ffffffffffffffff" (sf/format-hex -1))))  ; all-ones long
 
-(deftest long->uuid-zeros-low-bits
+(deftest ^{:stratum 0} long->uuid-zeros-low-bits
   (let [u (sf/long->uuid 0x018f3a9c8e4b12d0)]
     (is (instance? UUID u))
     (is (= 0x018f3a9c8e4b12d0 (.getMostSignificantBits ^UUID u)))
@@ -116,13 +98,109 @@
   (is (= "00000000-0000-0000-0000-000000000000"
          (str (sf/long->uuid 0)))))
 
-(deftest uuid->hex-extracts-msb
+(deftest ^{:stratum 0} uuid->hex-extracts-msb
   (let [u (sf/long->uuid 0x018f3a9c8e4b12d0)]
     (is (= "018f3a9c8e4b12d0" (sf/uuid->hex u)))))
 
-;------------------------------------------------------------------------------ next-id! semantics
+(deftest ^{:stratum 0} create-generator-propagates-lease-anomaly
+  (let [lease-anomaly (response/make-anomaly
+                       :anomalies/busy
+                       "No worker slots"
+                       {:reason :workers-exhausted})
+        result (sf/create-generator {:lease lease-anomaly})]
+    (is (identical? lease-anomaly result))))
 
-(deftest next-id!-monotonic-within-same-ms
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private fresh-test-state
+  "A fresh-but-quiesced generator state — what the production
+   `initial-state` factory would produce for the test worker-id, but
+   defined locally so tests don't reach into a private fn."
+  {:last-ts   unset-timestamp-sentinel
+   :last-seq  unset-sequence-sentinel
+   :worker-id test-worker-id})
+
+(def ^{:stratum 1} ^:private fake-test-lease
+  "Sentinel lease handle for tests that bypass the file-lock path."
+  {:worker-id test-worker-id})
+
+;------------------------------------------------------------------------------ worker-id leasing
+(deftest ^{:stratum 1} acquire-worker-lease!-takes-id-zero-when-empty
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [lease (sf/acquire-worker-lease! dir)]
+        (try
+          (is (= 0 (:worker-id lease)))
+          (is (.exists (io/file dir "0.lease")))
+          (finally (sf/release-lease! lease)))))))
+
+(deftest ^{:stratum 1} acquire-worker-lease!-skips-locked-slot
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [first-lease (sf/acquire-worker-lease! dir)]
+        (try
+          (let [second-lease (sf/acquire-worker-lease! dir)]
+            (try
+              (is (= 0 (:worker-id first-lease)))
+              (is (= 1 (:worker-id second-lease))
+                  "a second concurrent acquire takes the next free slot")
+              (finally (sf/release-lease! second-lease))))
+          (finally (sf/release-lease! first-lease)))))))
+
+(deftest ^{:stratum 1} acquire-worker-lease!-reclaims-released-slot
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [lease-a (sf/acquire-worker-lease! dir)]
+        (sf/release-lease! lease-a))
+      (let [lease-b (sf/acquire-worker-lease! dir)]
+        (try
+          (is (= 0 (:worker-id lease-b))
+              "after release, slot 0 becomes acquirable again")
+          (finally (sf/release-lease! lease-b)))))))
+
+(deftest ^{:stratum 1} release-lease!-is-idempotent
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [lease (sf/acquire-worker-lease! dir)]
+        (sf/release-lease! lease)
+        (is (nil? (sf/release-lease! lease))
+            "second release is a no-op, not an error")))))
+
+(deftest ^{:stratum 1} acquire-worker-lease!-returns-anomaly-on-lease-io-failure
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [not-a-dir (io/file dir "occupied")]
+        (spit not-a-dir "not a directory")
+        (let [result (sf/acquire-worker-lease! not-a-dir)]
+          (is (response/anomaly-map? result))
+          (is (= :anomalies/unavailable (:anomaly/category result)))
+          (is (= :lease-io-failure (:reason result)))
+          (is (string? (:anomaly/ex-message result)))
+          (is (string? (:anomaly/ex-class result))))))))
+
+(deftest ^{:stratum 1} create-generator-acquires-worker-lease
+  (with-temp-workers-dir
+    (fn [dir]
+      (let [gen (sf/create-generator {:workers-dir dir})]
+        (try
+          (is (some? (:lease gen)))
+          (is (= 0 (:worker-id gen)))
+          (let [u (sf/next-id! gen)]
+            (is (instance? UUID u)))
+          (finally (sf/close! gen)))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} generator-with-fixed-clock [times]
+  {:state     (atom fresh-test-state)
+   :worker-id test-worker-id
+   :lease     fake-test-lease
+   :now-fn    (fixed-clock times)})
+
+;------------------------------------------------------------------------------ Layer 3
+
+;------------------------------------------------------------------------------ next-id! semantics
+(deftest ^{:stratum 3} next-id!-monotonic-within-same-ms
   (let [base-ts sf/miniforge-epoch-ms
         gen (generator-with-fixed-clock (repeat 10 base-ts))
         ids (vec (repeatedly 5 #(sf/next-id-long! gen)))]
@@ -132,7 +210,7 @@
       (is (= [0 1 2 3 4] seqs)
           "sequence increments deterministically inside the same millisecond"))))
 
-(deftest next-id!-resets-sequence-on-ms-advance
+(deftest ^{:stratum 3} next-id!-resets-sequence-on-ms-advance
   (let [base-ts sf/miniforge-epoch-ms
         ;; First call at base-ts, second call at base-ts + 1ms.
         gen (generator-with-fixed-clock [base-ts (inc base-ts)])
@@ -141,7 +219,7 @@
     (is (zero? (bit-and id1 sf/max-seq)) "first id at new ms has seq=0")
     (is (zero? (bit-and id2 sf/max-seq)) "second id at next ms also resets to seq=0")))
 
-(deftest next-id!-advances-ms-on-sequence-exhaustion
+(deftest ^{:stratum 3} next-id!-advances-ms-on-sequence-exhaustion
   ;; Force seq to 4095 manually, then call next-id! at the same ms.
   ;; The generator must spin — but with a fixed-clock that returns
   ;; the same ms, it would spin forever. We simulate the wall clock
@@ -161,7 +239,7 @@
       (is (zero? (bit-and id sf/max-seq))
           "sequence resets at the new ms"))))
 
-(deftest next-id!-returns-anomaly-on-pre-epoch-clock
+(deftest ^{:stratum 3} next-id!-returns-anomaly-on-pre-epoch-clock
   ;; If the wall clock is somehow before the miniforge epoch, the bit
   ;; layout would corrupt (negative ts shifts into worker bits). Return
   ;; an explicit anomaly rather than silently emit garbage.
@@ -171,7 +249,7 @@
     (is (= :anomalies/incorrect (:anomaly/category result)))
     (is (= :pre-epoch-clock (:reason result)))))
 
-(deftest next-id-wrappers-propagate-pre-epoch-anomaly
+(deftest ^{:stratum 3} next-id-wrappers-propagate-pre-epoch-anomaly
   (let [uuid-result (sf/next-id!
                      (generator-with-fixed-clock [(- sf/miniforge-epoch-ms 1)]))
         hex-result  (sf/next-id-hex!
@@ -181,7 +259,7 @@
     (is (= :pre-epoch-clock (:reason uuid-result)))
     (is (= :pre-epoch-clock (:reason hex-result)))))
 
-(deftest next-id!-stalls-on-clock-rollback
+(deftest ^{:stratum 3} next-id!-stalls-on-clock-rollback
   (let [base-ts (+ sf/miniforge-epoch-ms 1000)
         ;; Call 1: time goes BACKWARD by 100ms. Generator must stall.
         ;; Once enough retries land back at base-ts, it succeeds.
@@ -198,7 +276,7 @@
       (is (= expected-ts ts-component)
           "rollback resolves once wall clock surpasses last-ts"))))
 
-(deftest next-id!-returns-uuid-with-zero-low-bits
+(deftest ^{:stratum 3} next-id!-returns-uuid-with-zero-low-bits
   (let [base-ts sf/miniforge-epoch-ms
         gen (generator-with-fixed-clock (repeat 5 base-ts))
         u (sf/next-id! gen)]
@@ -206,14 +284,14 @@
     (is (zero? (.getLeastSignificantBits ^UUID u))
         "snowflake UUIDs always have zero low 64 bits — that's the discriminator")))
 
-(deftest next-id-hex!-is-16-lowercase-hex
+(deftest ^{:stratum 3} next-id-hex!-is-16-lowercase-hex
   (let [base-ts sf/miniforge-epoch-ms
         gen (generator-with-fixed-clock (repeat 5 base-ts))
         h (sf/next-id-hex! gen)]
     (is (= 16 (count h)))
     (is (re-matches #"[0-9a-f]{16}" h))))
 
-(deftest next-id-hex!-sorts-by-creation-order
+(deftest ^{:stratum 3} next-id-hex!-sorts-by-creation-order
   ;; Three ids generated 100ms apart should sort lex.
   (let [base-ts sf/miniforge-epoch-ms
         gen (generator-with-fixed-clock [base-ts
@@ -224,77 +302,3 @@
         c (sf/next-id-hex! gen)]
     (is (< (compare a b) 0))
     (is (< (compare b c) 0))))
-
-;------------------------------------------------------------------------------ worker-id leasing
-
-(deftest acquire-worker-lease!-takes-id-zero-when-empty
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [lease (sf/acquire-worker-lease! dir)]
-        (try
-          (is (= 0 (:worker-id lease)))
-          (is (.exists (io/file dir "0.lease")))
-          (finally (sf/release-lease! lease)))))))
-
-(deftest acquire-worker-lease!-skips-locked-slot
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [first-lease (sf/acquire-worker-lease! dir)]
-        (try
-          (let [second-lease (sf/acquire-worker-lease! dir)]
-            (try
-              (is (= 0 (:worker-id first-lease)))
-              (is (= 1 (:worker-id second-lease))
-                  "a second concurrent acquire takes the next free slot")
-              (finally (sf/release-lease! second-lease))))
-          (finally (sf/release-lease! first-lease)))))))
-
-(deftest acquire-worker-lease!-reclaims-released-slot
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [lease-a (sf/acquire-worker-lease! dir)]
-        (sf/release-lease! lease-a))
-      (let [lease-b (sf/acquire-worker-lease! dir)]
-        (try
-          (is (= 0 (:worker-id lease-b))
-              "after release, slot 0 becomes acquirable again")
-          (finally (sf/release-lease! lease-b)))))))
-
-(deftest release-lease!-is-idempotent
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [lease (sf/acquire-worker-lease! dir)]
-        (sf/release-lease! lease)
-        (is (nil? (sf/release-lease! lease))
-            "second release is a no-op, not an error")))))
-
-(deftest acquire-worker-lease!-returns-anomaly-on-lease-io-failure
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [not-a-dir (io/file dir "occupied")]
-        (spit not-a-dir "not a directory")
-        (let [result (sf/acquire-worker-lease! not-a-dir)]
-          (is (response/anomaly-map? result))
-          (is (= :anomalies/unavailable (:anomaly/category result)))
-          (is (= :lease-io-failure (:reason result)))
-          (is (string? (:anomaly/ex-message result)))
-          (is (string? (:anomaly/ex-class result))))))))
-
-(deftest create-generator-propagates-lease-anomaly
-  (let [lease-anomaly (response/make-anomaly
-                       :anomalies/busy
-                       "No worker slots"
-                       {:reason :workers-exhausted})
-        result (sf/create-generator {:lease lease-anomaly})]
-    (is (identical? lease-anomaly result))))
-
-(deftest create-generator-acquires-worker-lease
-  (with-temp-workers-dir
-    (fn [dir]
-      (let [gen (sf/create-generator {:workers-dir dir})]
-        (try
-          (is (some? (:lease gen)))
-          (is (= 0 (:worker-id gen)))
-          (let [u (sf/next-id! gen)]
-            (is (instance? UUID u)))
-          (finally (sf/close! gen)))))))

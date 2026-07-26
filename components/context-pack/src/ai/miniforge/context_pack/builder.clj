@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.context-pack.builder
   "Assemble context packs from repo-index data.
 
@@ -13,14 +12,14 @@
             [ai.miniforge.repo-index.interface :as repo-index]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- snippet-text
+;; Helpers
+(defn- ^{:stratum 0} snippet-text
   "Extract concatenated text from a search hit's snippets."
   [hit]
   (apply str (map :text (:snippets hit))))
 
-(defn- reduce-within-budget
+(defn- ^{:stratum 0} reduce-within-budget
   "Reduce items into a pack, stopping when budget is exhausted.
    item-fn takes (pack, item) and returns updated pack."
   [pack items item-fn]
@@ -32,10 +31,8 @@
     pack
     items))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack assembly steps
-
-(defn- add-repo-map
+(defn- ^{:stratum 0} add-repo-map
   "Add the repo map to the pack, consuming budget."
   [pack repo-index]
   (if (or (nil? repo-index) (budget/exhausted? pack))
@@ -46,19 +43,13 @@
           (assoc :repo-map rmap)
           (budget/add-source :repo-map nil rmap)))))
 
-(defn- try-add-file
+(defn- ^{:stratum 0} try-add-file
   "Try to add a single file to the pack within budget."
   [pack file]
   (budget/try-add-item pack :file (:path file) (:content file)
     #(update % :files conj file)))
 
-(defn- try-add-search-hit
-  "Try to add a single search hit to the pack within budget."
-  [pack hit]
-  (budget/try-add-item pack :search (:path hit) (snippet-text hit)
-    #(update % :search-results conj hit)))
-
-(defn- load-files
+(defn- ^{:stratum 0} load-files
   "Load and deduplicate files from the repo index."
   [repo-index files-in-scope]
   (let [max-f (config/max-files)
@@ -67,7 +58,7 @@
                                {:max-lines max-l})
          dedup/dedup-files)))
 
-(defn- load-search-results
+(defn- ^{:stratum 0} load-search-results
   "Load, deduplicate, and filter search results against already-included files."
   [search-index query included-files]
   (let [max-r (config/max-search-results)]
@@ -75,14 +66,34 @@
          dedup/dedup-search-results
          (dedup/remove-already-included included-files))))
 
-(defn- add-files
+(defn ^{:stratum 0} audit
+  "Create a budget audit snapshot for a context pack."
+  [pack]
+  (factory/->budget-audit
+    (:phase pack)
+    (:budget pack)
+    (:tokens-used pack)
+    (:exhausted? pack)
+    (count (:sources pack))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} try-add-search-hit
+  "Try to add a single search hit to the pack within budget."
+  [pack hit]
+  (budget/try-add-item pack :search (:path hit) (snippet-text hit)
+    #(update % :search-results conj hit)))
+
+(defn- ^{:stratum 1} add-files
   "Add file contents to the pack within budget."
   [pack repo-index files-in-scope]
   (if (or (not (seq files-in-scope)) (budget/exhausted? pack))
     pack
     (reduce-within-budget pack (load-files repo-index files-in-scope) try-add-file)))
 
-(defn- add-search-results
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} add-search-results
   "Add search results to the pack within budget."
   [pack search-index query]
   (if (or (nil? search-index) (nil? query) (budget/exhausted? pack))
@@ -90,10 +101,10 @@
     (let [filtered (load-search-results search-index query (:files pack))]
       (reduce-within-budget pack filtered try-add-search-hit))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public API
+;------------------------------------------------------------------------------ Layer 3
 
-(defn build-pack
+;; Public API
+(defn ^{:stratum 3} build-pack
   "Assemble a context pack for a given phase.
 
    Arguments:
@@ -115,19 +126,9 @@
         (add-files repo-index (:files-in-scope opts))
         (add-search-results (:search-index opts) (:search-query opts)))))
 
-(defn extend-pack
+(defn ^{:stratum 3} extend-pack
   "Extend an existing context pack with additional files or search results."
   [pack repo-index opts]
   (-> pack
       (add-files repo-index (:files-in-scope opts))
       (add-search-results (:search-index opts) (:search-query opts))))
-
-(defn audit
-  "Create a budget audit snapshot for a context pack."
-  [pack]
-  (factory/->budget-audit
-    (:phase pack)
-    (:budget pack)
-    (:tokens-used pack)
-    (:exhausted? pack)
-    (count (:sources pack))))

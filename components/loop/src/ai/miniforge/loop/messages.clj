@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.messages
   "Component-level message catalog for loop.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} t
   "Look up a loop message by key, with optional param substitution."
   (messages/create-translator "config/loop/messages/en-US.edn"
                               :loop/messages))

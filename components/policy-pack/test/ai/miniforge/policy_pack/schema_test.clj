@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.schema-test
   "Unit tests for policy-pack Malli schemas, validation helpers, and result helpers.
 
@@ -30,47 +29,47 @@
    [clojure.test :refer [deftest testing is are]]
    [ai.miniforge.policy-pack.schema :as sut]))
 
-;; ============================================================================
-;; Layer 0 — Enum definition tests
-;; ============================================================================
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest rule-severities-test
+;; ============================================================================
+;; Enum definition tests
+;; ============================================================================
+(deftest ^{:stratum 0} rule-severities-test
   (testing "rule-severities is the canonical five-keyword scale, descending"
     (is (= [:critical :high :medium :low :info] sut/rule-severities))
     (is (= 5 (count sut/rule-severities)))))
 
-(deftest enforcement-actions-test
+(deftest ^{:stratum 0} enforcement-actions-test
   (testing "enforcement-actions ordered from strictest to most lenient"
     (is (= [:hard-halt :require-approval :warn :audit] sut/enforcement-actions))
     (is (= 4 (count sut/enforcement-actions)))))
 
-(deftest detection-types-test
+(deftest ^{:stratum 0} detection-types-test
   (testing "detection-types has seven detection mechanisms"
     (is (= [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom :capability]
            sut/detection-types))
     (is (= 7 (count sut/detection-types)))))
 
-(deftest task-types-test
+(deftest ^{:stratum 0} task-types-test
   (testing "task-types has five task operations"
     (is (= [:create :import :modify :delete :migrate] sut/task-types))
     (is (= 5 (count sut/task-types)))))
 
-(deftest repo-types-test
+(deftest ^{:stratum 0} repo-types-test
   (testing "repo-types has five repository types"
     (is (= [:terraform-module :terraform-live :kubernetes :argocd :application]
            sut/repo-types))
     (is (= 5 (count sut/repo-types)))))
 
-(deftest approver-types-test
+(deftest ^{:stratum 0} approver-types-test
   (testing "approver-types has three approver kinds"
     (is (= [:human :senior-engineer :security] sut/approver-types))
     (is (= 3 (count sut/approver-types)))))
 
 ;; ============================================================================
-;; Layer 0 — Enum schema validation tests
+;; Enum schema validation tests
 ;; ============================================================================
-
-(deftest rule-severity-schema-test
+(deftest ^{:stratum 0} rule-severity-schema-test
   (testing "valid severity keywords pass"
     (doseq [sev [:critical :high :medium :low :info]]
       (is (sut/valid? sut/RuleSeverity sev)
@@ -80,7 +79,7 @@
     (are [v] (not (sut/valid? sut/RuleSeverity v))
       :warning :error :major :minor "critical" nil 42)))
 
-(deftest rule-enforcement-schema-test
+(deftest ^{:stratum 0} rule-enforcement-schema-test
   (testing "valid enforcement actions pass"
     (doseq [action [:hard-halt :require-approval :warn :audit]]
       (is (sut/valid? sut/RuleEnforcement action))))
@@ -89,7 +88,7 @@
     (are [v] (not (sut/valid? sut/RuleEnforcement v))
       :block :allow :skip "hard-halt" nil)))
 
-(deftest detection-type-schema-test
+(deftest ^{:stratum 0} detection-type-schema-test
   (testing "valid detection types pass"
     (doseq [dt [:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis :custom]]
       (is (sut/valid? sut/DetectionType dt))))
@@ -98,7 +97,7 @@
     (is (not (sut/valid? sut/DetectionType :regex)))
     (is (not (sut/valid? sut/DetectionType "custom")))))
 
-(deftest task-type-schema-test
+(deftest ^{:stratum 0} task-type-schema-test
   (testing "valid task types pass"
     (doseq [tt [:create :import :modify :delete :migrate]]
       (is (sut/valid? sut/TaskType tt))))
@@ -107,7 +106,7 @@
     (is (not (sut/valid? sut/TaskType :update)))
     (is (not (sut/valid? sut/TaskType :read)))))
 
-(deftest repo-type-schema-test
+(deftest ^{:stratum 0} repo-type-schema-test
   (testing "valid repo types pass"
     (doseq [rt [:terraform-module :terraform-live :kubernetes :argocd :application]]
       (is (sut/valid? sut/RepoType rt))))
@@ -116,7 +115,7 @@
     (is (not (sut/valid? sut/RepoType :github)))
     (is (not (sut/valid? sut/RepoType :docker)))))
 
-(deftest approver-type-schema-test
+(deftest ^{:stratum 0} approver-type-schema-test
   (testing "valid approver types pass"
     (doseq [at [:human :senior-engineer :security]]
       (is (sut/valid? sut/ApproverType at))))
@@ -125,7 +124,7 @@
     (is (not (sut/valid? sut/ApproverType :bot)))
     (is (not (sut/valid? sut/ApproverType :manager)))))
 
-(deftest trust-level-schema-test
+(deftest ^{:stratum 0} trust-level-schema-test
   (testing "valid trust levels pass"
     (doseq [tl [:tainted :untrusted :trusted]]
       (is (sut/valid? sut/TrustLevel tl))))
@@ -134,7 +133,7 @@
     (is (not (sut/valid? sut/TrustLevel :verified)))
     (is (not (sut/valid? sut/TrustLevel :unknown)))))
 
-(deftest authority-channel-schema-test
+(deftest ^{:stratum 0} authority-channel-schema-test
   (testing "valid authority channels pass"
     (is (sut/valid? sut/AuthorityChannel :authority/instruction))
     (is (sut/valid? sut/AuthorityChannel :authority/data)))
@@ -144,10 +143,9 @@
     (is (not (sut/valid? sut/AuthorityChannel :instruction)))))
 
 ;; ============================================================================
-;; Layer 1 — Component schema tests
+;; Component schema tests
 ;; ============================================================================
-
-(deftest rule-applicability-schema-test
+(deftest ^{:stratum 0} rule-applicability-schema-test
   (testing "empty map is valid (all fields optional)"
     (is (sut/valid? sut/RuleApplicability {})))
 
@@ -172,7 +170,7 @@
   (testing "phases must be a set of keywords"
     (is (sut/valid? sut/RuleApplicability {:phases #{:plan :review :implement}}))))
 
-(deftest rule-detection-schema-test
+(deftest ^{:stratum 0} rule-detection-schema-test
   (testing "minimal detection: type only"
     (is (sut/valid? sut/RuleDetection {:type :custom})))
 
@@ -207,7 +205,7 @@
     (is (not (sut/valid? sut/RuleDetection {:type :custom :context-lines 0})))
     (is (not (sut/valid? sut/RuleDetection {:type :custom :context-lines -1})))))
 
-(deftest rule-enforcement-config-schema-test
+(deftest ^{:stratum 0} rule-enforcement-config-schema-test
   (testing "minimal enforcement: action + message"
     (is (sut/valid? sut/RuleEnforcementConfig
                     {:action :hard-halt :message "Stop!"})))
@@ -230,7 +228,7 @@
   (testing "message is required"
     (is (not (sut/valid? sut/RuleEnforcementConfig {:action :audit})))))
 
-(deftest rule-example-schema-test
+(deftest ^{:stratum 0} rule-example-schema-test
   (testing "valid example with all fields"
     (is (sut/valid? sut/RuleExample
                     {:description "Test case"
@@ -252,10 +250,9 @@
     (is (not (sut/valid? sut/RuleExample {:description "x" :input "y"})))))
 
 ;; ============================================================================
-;; Layer 2 — Rule schema tests
+;; Rule schema tests
 ;; ============================================================================
-
-(def minimal-valid-rule
+(def ^{:stratum 0} minimal-valid-rule
   "A minimal rule map that satisfies all required fields."
   {:rule/id          :test/example
    :rule/title       "Example Rule"
@@ -266,11 +263,158 @@
    :rule/detection   {:type :custom}
    :rule/enforcement {:action :warn :message "Warning"}})
 
-(deftest rule-schema-valid-minimal-test
+;; ============================================================================
+;; PackManifest schema tests
+;; ============================================================================
+(def ^{:stratum 0} minimal-valid-pack
+  "A minimal PackManifest that satisfies all required fields."
+  {:pack/id          "test/pack"
+   :pack/name        "Test Pack"
+   :pack/version     "2026.03"
+   :pack/description "A test pack"
+   :pack/author      "tester"
+   :pack/categories  []
+   :pack/rules       []
+   :pack/created-at  (java.time.Instant/parse "2026-03-01T00:00:00Z")
+   :pack/updated-at  (java.time.Instant/parse "2026-03-01T00:00:00Z")})
+
+;; ============================================================================
+;; Validation helper tests
+;; ============================================================================
+(deftest ^{:stratum 0} valid?-test
+  (testing "returns true for valid data"
+    (is (true? (sut/valid? sut/RuleSeverity :critical))))
+
+  (testing "returns false for invalid data"
+    (is (false? (sut/valid? sut/RuleSeverity :nope)))))
+
+(deftest ^{:stratum 0} validate-test
+  (testing "returns {:valid? true :errors nil} for valid data"
+    (let [result (sut/validate sut/RuleSeverity :critical)]
+      (is (true? (:valid? result)))
+      (is (nil? (:errors result)))))
+
+  (testing "returns {:valid? false :errors ...} for invalid data"
+    (let [result (sut/validate sut/RuleSeverity :nope)]
+      (is (false? (:valid? result)))
+      (is (some? (:errors result))))))
+
+(deftest ^{:stratum 0} explain-test
+  (testing "returns nil for valid data"
+    (is (nil? (sut/explain sut/RuleSeverity :critical))))
+
+  (testing "returns humanized errors for invalid data"
+    (is (some? (sut/explain sut/RuleSeverity :nope))))
+
+  (testing "returns meaningful errors for wrong rule id type"
+    (let [errors (sut/explain sut/Rule {:rule/id "not-a-keyword"})]
+      (is (some? errors)))))
+
+;; ============================================================================
+;; Result helper tests
+;; ============================================================================
+(deftest ^{:stratum 0} succeeded?-test
+  (testing "returns true for success result"
+    (is (true? (sut/succeeded? {:success? true}))))
+
+  (testing "returns false for failure result"
+    (is (false? (sut/succeeded? {:success? false}))))
+
+  (testing "returns false for missing :success? key"
+    (is (false? (sut/succeeded? {}))))
+
+  (testing "returns false for nil"
+    (is (false? (sut/succeeded? nil)))))
+
+(deftest ^{:stratum 0} success-test
+  (testing "creates success result with key, value, and extras"
+    (let [result (sut/success :pack {:pack/id "test"} {:errors nil})]
+      (is (true? (:success? result)))
+      (is (= {:pack/id "test"} (:pack result)))
+      (is (nil? (:errors result)))))
+
+  (testing "extras are merged into result"
+    (let [result (sut/success :rule {:id 1} {:warnings ["w1"] :count 5})]
+      (is (true? (:success? result)))
+      (is (= {:id 1} (:rule result)))
+      (is (= ["w1"] (:warnings result)))
+      (is (= 5 (:count result))))))
+
+(deftest ^{:stratum 0} failure-test
+  (testing "creates failure result with error message"
+    (let [result (sut/failure :data "something broke")]
+      (is (false? (:success? result)))
+      (is (= "something broke" (:error result)))))
+
+  (testing "first arg (_key) is ignored"
+    (let [result (sut/failure :ignored "msg")]
+      (is (false? (:success? result)))
+      (is (nil? (:ignored result))))))
+
+(deftest ^{:stratum 0} failure-with-errors-test
+  (testing "creates failure result with error list"
+    (let [result (sut/failure-with-errors :pack ["err1" "err2"])]
+      (is (false? (:success? result)))
+      (is (= ["err1" "err2"] (:errors result)))))
+
+  (testing "first arg (_key) is ignored"
+    (let [result (sut/failure-with-errors :ignored ["e"])]
+      (is (false? (:success? result)))
+      (is (nil? (:ignored result))))))
+
+;; ============================================================================
+;; Rich Comment example validation — ensures documented examples stay correct
+;; ============================================================================
+(deftest ^{:stratum 0} rich-comment-rule-example-test
+  (testing "import-block-preservation rule from rich comment validates"
+    (is (sut/valid-rule?
+         {:rule/id          :310-import-block-preservation
+          :rule/title       "Preserve import blocks"
+          :rule/description "Never remove import blocks during IMPORT tasks"
+          :rule/severity    :critical
+          :rule/category    "310"
+          :rule/applies-to  {:task-types #{:import}
+                             :file-globs ["**/*.tf"]}
+          :rule/detection   {:type    :diff-analysis
+                             :pattern "^-\\s*import\\s*\\{"}
+          :rule/enforcement {:action  :hard-halt
+                             :message "Cannot remove import blocks"}}))))
+
+(deftest ^{:stratum 0} rich-comment-knowledge-rule-example-test
+  (testing "knowledge rule with always-inject and knowledge-content validates"
+    (is (sut/valid-rule?
+         {:rule/id               :std/stratified-design
+          :rule/title            "Stratified Design"
+          :rule/description      "Engineering standard (001): Stratified Design"
+          :rule/severity         :high
+          :rule/category         "001"
+          :rule/applies-to       {:phases #{:plan :implement :review :verify :release}}
+          :rule/detection        {:type :custom}
+          :rule/enforcement      {:action :warn :message "Standard: Stratified Design"}
+          :rule/agent-behavior   "Before writing code, output a stratified plan."
+          :rule/knowledge-content "# Stratified Design\n\nFull body text..."
+          :rule/always-inject?   true}))))
+
+(deftest ^{:stratum 0} rich-comment-pack-example-test
+  (testing "pack example from rich comment validates"
+    (is (sut/valid-pack?
+         {:pack/id          "test-pack"
+          :pack/name        "Test Pack"
+          :pack/version     "2026.01.22"
+          :pack/description "A test pack"
+          :pack/author      "test"
+          :pack/categories  []
+          :pack/rules       []
+          :pack/created-at  (java.time.Instant/now)
+          :pack/updated-at  (java.time.Instant/now)}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} rule-schema-valid-minimal-test
   (testing "minimal valid rule passes validation"
     (is (sut/valid-rule? minimal-valid-rule))))
 
-(deftest rule-schema-all-optional-fields-test
+(deftest ^{:stratum 1} rule-schema-all-optional-fields-test
   (testing "rule with all optional fields passes validation"
     (is (sut/valid-rule?
          (assoc minimal-valid-rule
@@ -282,7 +426,7 @@
                 :rule/author           "test-author"
                 :rule/references       ["https://example.com"])))))
 
-(deftest rule-schema-knowledge-content-semantics-test
+(deftest ^{:stratum 1} rule-schema-knowledge-content-semantics-test
   (testing ":rule/knowledge-content accepts full MDC body text"
     (is (sut/valid-rule?
          (assoc minimal-valid-rule
@@ -292,7 +436,7 @@
     (is (sut/valid-rule? minimal-valid-rule))
     (is (not (contains? minimal-valid-rule :rule/knowledge-content)))))
 
-(deftest rule-schema-always-inject-semantics-test
+(deftest ^{:stratum 1} rule-schema-always-inject-semantics-test
   (testing ":rule/always-inject? true marks rule for unconditional phase-gated injection"
     (is (sut/valid-rule? (assoc minimal-valid-rule :rule/always-inject? true))))
 
@@ -305,7 +449,7 @@
   (testing ":rule/always-inject? must be boolean when present"
     (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/always-inject? "true"))))))
 
-(deftest rule-schema-missing-required-fields-test
+(deftest ^{:stratum 1} rule-schema-missing-required-fields-test
   (testing "missing :rule/id fails"
     (is (not (sut/valid-rule? (dissoc minimal-valid-rule :rule/id)))))
 
@@ -330,7 +474,7 @@
   (testing "missing :rule/enforcement fails"
     (is (not (sut/valid-rule? (dissoc minimal-valid-rule :rule/enforcement))))))
 
-(deftest rule-schema-wrong-types-test
+(deftest ^{:stratum 1} rule-schema-wrong-types-test
   (testing ":rule/id must be keyword"
     (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/id "not-keyword")))))
 
@@ -340,27 +484,11 @@
   (testing ":rule/category must be string"
     (is (not (sut/valid-rule? (assoc minimal-valid-rule :rule/category :testing))))))
 
-;; ============================================================================
-;; Layer 2 — PackManifest schema tests
-;; ============================================================================
-
-(def minimal-valid-pack
-  "A minimal PackManifest that satisfies all required fields."
-  {:pack/id          "test/pack"
-   :pack/name        "Test Pack"
-   :pack/version     "2026.03"
-   :pack/description "A test pack"
-   :pack/author      "tester"
-   :pack/categories  []
-   :pack/rules       []
-   :pack/created-at  (java.time.Instant/parse "2026-03-01T00:00:00Z")
-   :pack/updated-at  (java.time.Instant/parse "2026-03-01T00:00:00Z")})
-
-(deftest pack-manifest-valid-minimal-test
+(deftest ^{:stratum 1} pack-manifest-valid-minimal-test
   (testing "minimal valid pack passes validation"
     (is (sut/valid-pack? minimal-valid-pack))))
 
-(deftest pack-manifest-with-trust-model-test
+(deftest ^{:stratum 1} pack-manifest-with-trust-model-test
   (testing "pack with trust-level and authority passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
@@ -375,7 +503,7 @@
     (is (sut/valid-pack?
          (assoc minimal-valid-pack :pack/trust-level :untrusted)))))
 
-(deftest pack-manifest-with-signing-test
+(deftest ^{:stratum 1} pack-manifest-with-signing-test
   (testing "pack with signing fields passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
@@ -383,7 +511,7 @@
                 :pack/signed-by "signer@example.com"
                 :pack/signed-at (java.time.Instant/now))))))
 
-(deftest pack-manifest-with-dependencies-test
+(deftest ^{:stratum 1} pack-manifest-with-dependencies-test
   (testing "pack with extends (dependencies) passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
@@ -395,19 +523,19 @@
               (assoc minimal-valid-pack
                      :pack/extends [{:version-constraint ">=2026.01"}]))))))
 
-(deftest pack-manifest-with-config-overrides-test
+(deftest ^{:stratum 1} pack-manifest-with-config-overrides-test
   (testing "pack with config-overrides passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
                 :pack/config-overrides {:governance {:max-iterations 5}})))))
 
-(deftest pack-manifest-with-rules-test
+(deftest ^{:stratum 1} pack-manifest-with-rules-test
   (testing "pack containing valid rules passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
                 :pack/rules [minimal-valid-rule])))))
 
-(deftest pack-manifest-with-categories-test
+(deftest ^{:stratum 1} pack-manifest-with-categories-test
   (testing "pack with valid categories passes"
     (is (sut/valid-pack?
          (assoc minimal-valid-pack
@@ -415,7 +543,7 @@
                                    :category/name  "Testing"
                                    :category/rules [:test/rule-a :test/rule-b]}])))))
 
-(deftest pack-manifest-missing-required-fields-test
+(deftest ^{:stratum 1} pack-manifest-missing-required-fields-test
   (testing "missing :pack/id fails"
     (is (not (sut/valid-pack? (dissoc minimal-valid-pack :pack/id)))))
 
@@ -440,8 +568,7 @@
 ;; ============================================================================
 ;; Standards pack as separate file from builtin pack
 ;; ============================================================================
-
-(deftest standards-pack-is-separate-from-builtin-test
+(deftest ^{:stratum 1} standards-pack-is-separate-from-builtin-test
   (testing "standards pack has distinct ID from builtin (both loaded from classpath)"
     ;; The standards pack uses 'miniforge/standards' while builtin uses a
     ;; different ID. Both are loaded independently from classpath EDN resources.
@@ -456,40 +583,7 @@
       (is (sut/valid-pack? builtin-pack))
       (is (not= (:pack/id standards-pack) (:pack/id builtin-pack))))))
 
-;; ============================================================================
-;; Validation helper tests
-;; ============================================================================
-
-(deftest valid?-test
-  (testing "returns true for valid data"
-    (is (true? (sut/valid? sut/RuleSeverity :critical))))
-
-  (testing "returns false for invalid data"
-    (is (false? (sut/valid? sut/RuleSeverity :nope)))))
-
-(deftest validate-test
-  (testing "returns {:valid? true :errors nil} for valid data"
-    (let [result (sut/validate sut/RuleSeverity :critical)]
-      (is (true? (:valid? result)))
-      (is (nil? (:errors result)))))
-
-  (testing "returns {:valid? false :errors ...} for invalid data"
-    (let [result (sut/validate sut/RuleSeverity :nope)]
-      (is (false? (:valid? result)))
-      (is (some? (:errors result))))))
-
-(deftest explain-test
-  (testing "returns nil for valid data"
-    (is (nil? (sut/explain sut/RuleSeverity :critical))))
-
-  (testing "returns humanized errors for invalid data"
-    (is (some? (sut/explain sut/RuleSeverity :nope))))
-
-  (testing "returns meaningful errors for wrong rule id type"
-    (let [errors (sut/explain sut/Rule {:rule/id "not-a-keyword"})]
-      (is (some? errors)))))
-
-(deftest validate-rule-test
+(deftest ^{:stratum 1} validate-rule-test
   (testing "valid rule returns {:valid? true}"
     (let [result (sut/validate-rule minimal-valid-rule)]
       (is (true? (:valid? result)))
@@ -500,7 +594,7 @@
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
 
-(deftest validate-pack-test
+(deftest ^{:stratum 1} validate-pack-test
   (testing "valid pack returns {:valid? true}"
     (let [result (sut/validate-pack minimal-valid-pack)]
       (is (true? (:valid? result)))
@@ -510,106 +604,6 @@
     (let [result (sut/validate-pack {})]
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
-
-;; ============================================================================
-;; Result helper tests
-;; ============================================================================
-
-(deftest succeeded?-test
-  (testing "returns true for success result"
-    (is (true? (sut/succeeded? {:success? true}))))
-
-  (testing "returns false for failure result"
-    (is (false? (sut/succeeded? {:success? false}))))
-
-  (testing "returns false for missing :success? key"
-    (is (false? (sut/succeeded? {}))))
-
-  (testing "returns false for nil"
-    (is (false? (sut/succeeded? nil)))))
-
-(deftest success-test
-  (testing "creates success result with key, value, and extras"
-    (let [result (sut/success :pack {:pack/id "test"} {:errors nil})]
-      (is (true? (:success? result)))
-      (is (= {:pack/id "test"} (:pack result)))
-      (is (nil? (:errors result)))))
-
-  (testing "extras are merged into result"
-    (let [result (sut/success :rule {:id 1} {:warnings ["w1"] :count 5})]
-      (is (true? (:success? result)))
-      (is (= {:id 1} (:rule result)))
-      (is (= ["w1"] (:warnings result)))
-      (is (= 5 (:count result))))))
-
-(deftest failure-test
-  (testing "creates failure result with error message"
-    (let [result (sut/failure :data "something broke")]
-      (is (false? (:success? result)))
-      (is (= "something broke" (:error result)))))
-
-  (testing "first arg (_key) is ignored"
-    (let [result (sut/failure :ignored "msg")]
-      (is (false? (:success? result)))
-      (is (nil? (:ignored result))))))
-
-(deftest failure-with-errors-test
-  (testing "creates failure result with error list"
-    (let [result (sut/failure-with-errors :pack ["err1" "err2"])]
-      (is (false? (:success? result)))
-      (is (= ["err1" "err2"] (:errors result)))))
-
-  (testing "first arg (_key) is ignored"
-    (let [result (sut/failure-with-errors :ignored ["e"])]
-      (is (false? (:success? result)))
-      (is (nil? (:ignored result))))))
-
-;; ============================================================================
-;; Rich Comment example validation — ensures documented examples stay correct
-;; ============================================================================
-
-(deftest rich-comment-rule-example-test
-  (testing "import-block-preservation rule from rich comment validates"
-    (is (sut/valid-rule?
-         {:rule/id          :310-import-block-preservation
-          :rule/title       "Preserve import blocks"
-          :rule/description "Never remove import blocks during IMPORT tasks"
-          :rule/severity    :critical
-          :rule/category    "310"
-          :rule/applies-to  {:task-types #{:import}
-                             :file-globs ["**/*.tf"]}
-          :rule/detection   {:type    :diff-analysis
-                             :pattern "^-\\s*import\\s*\\{"}
-          :rule/enforcement {:action  :hard-halt
-                             :message "Cannot remove import blocks"}}))))
-
-(deftest rich-comment-knowledge-rule-example-test
-  (testing "knowledge rule with always-inject and knowledge-content validates"
-    (is (sut/valid-rule?
-         {:rule/id               :std/stratified-design
-          :rule/title            "Stratified Design"
-          :rule/description      "Engineering standard (001): Stratified Design"
-          :rule/severity         :high
-          :rule/category         "001"
-          :rule/applies-to       {:phases #{:plan :implement :review :verify :release}}
-          :rule/detection        {:type :custom}
-          :rule/enforcement      {:action :warn :message "Standard: Stratified Design"}
-          :rule/agent-behavior   "Before writing code, output a stratified plan."
-          :rule/knowledge-content "# Stratified Design\n\nFull body text..."
-          :rule/always-inject?   true}))))
-
-(deftest rich-comment-pack-example-test
-  (testing "pack example from rich comment validates"
-    (is (sut/valid-pack?
-         {:pack/id          "test-pack"
-          :pack/name        "Test Pack"
-          :pack/version     "2026.01.22"
-          :pack/description "A test pack"
-          :pack/author      "test"
-          :pack/categories  []
-          :pack/rules       []
-          :pack/created-at  (java.time.Instant/now)
-          :pack/updated-at  (java.time.Instant/now)}))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.policy-pack.schema-test)

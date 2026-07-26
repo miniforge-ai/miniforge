@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.auth
   "Dashboard-local authentication and session management."
   (:require
@@ -23,22 +22,15 @@
    [ai.miniforge.web-dashboard.views.auth :as auth-views]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Pure helpers
+(def ^{:stratum 0} ^:private defaults dashboard-config/defaults)
 
-(def ^:private defaults dashboard-config/defaults)
-
-(def default-cookie-name (:session-cookie-name defaults))
-(def default-session-ttl-ms (:session-ttl-ms defaults))
-
-(defn- utf8-bytes
+(defn- ^{:stratum 0} utf8-bytes
   [value]
   (.getBytes (str (or value "")) "UTF-8"))
 
-(defn- constant-time=
-  [left right]
-  (java.security.MessageDigest/isEqual (utf8-bytes left) (utf8-bytes right)))
-
-(defn- env-auth-config
+(defn- ^{:stratum 0} env-auth-config
   []
   (let [username (System/getenv "MINIFORGE_WEB_USERNAME")
         password (System/getenv "MINIFORGE_WEB_PASSWORD")]
@@ -47,7 +39,7 @@
                 :password password
                 :role :operator}]})))
 
-(defn- normalize-user-entry
+(defn- ^{:stratum 0} normalize-user-entry
   [[username config]]
   (let [entry (if (map? config) config {:password config})
         uname (get entry :username username)]
@@ -57,7 +49,82 @@
               :display-name (get entry :display-name uname)
               :role (get entry :role :operator)}])))
 
-(defn- normalize-users
+(defn ^{:stratum 0} parse-cookie-header
+  "Parse a Cookie header into a string-keyed map."
+  [cookie-header]
+  (if (str/blank? cookie-header)
+    {}
+    (reduce (fn [acc cookie-part]
+              (let [[raw-name raw-value] (str/split cookie-part #"=" 2)
+                    name (some-> raw-name str/trim)
+                    value (some-> raw-value str/trim)]
+                (if (seq name)
+                  (assoc acc name (or value ""))
+                  acc)))
+            {}
+            (str/split cookie-header #";"))))
+
+(defn- ^{:stratum 0} safe-return-to
+  [value]
+  (let [path (or value "/")]
+    (if (and (string? path)
+             (str/starts-with? path "/")
+             (not (str/starts-with? path "//")))
+      path
+      "/")))
+
+(defn- ^{:stratum 0} redirect-response
+  [location & [headers]]
+  {:status 302
+   :headers (merge {"Location" location} headers)
+   :body ""})
+
+(defn- ^{:stratum 0} session-cookie-value
+  [{:keys [cookie-name session-ttl-ms]} token]
+  (str cookie-name "=" token
+       "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" (quot session-ttl-ms 1000)))
+
+(defn- ^{:stratum 0} clear-cookie-value
+  [{:keys [cookie-name]}]
+  (str cookie-name "=deleted; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"))
+
+(defn ^{:stratum 0} enabled?
+  "True when dashboard login is configured."
+  [auth-state]
+  (boolean (:enabled? auth-state)))
+
+(defn ^{:stratum 0} public-request?
+  "Requests that must stay available without a browser session."
+  [{:keys [uri request-method]}]
+  (or (= uri "/health")
+      (and (= uri "/login") (#{:get :post} request-method))
+      (and (= uri "/logout") (= :post request-method))
+      (= uri "/ws/events")
+      (and (= uri "/api/events/ingest") (= :post request-method))
+      (and (= uri "/api/control-plane/agents/register") (= :post request-method))
+      (and (.startsWith uri "/api/control-plane/agents/")
+           (.endsWith uri "/heartbeat")
+           (= :post request-method))
+      (.startsWith uri "/css/")
+      (.startsWith uri "/js/")
+      (.startsWith uri "/img/")))
+
+(def ^{:stratum 0} ^:private mutating-methods
+  "HTTP methods that change server state. The dashboard's every write
+   route answers one of these; read-only views use GET/HEAD."
+  #{:post :put :patch :delete})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} default-cookie-name (:session-cookie-name defaults))
+
+(def ^{:stratum 1} default-session-ttl-ms (:session-ttl-ms defaults))
+
+(defn- ^{:stratum 1} constant-time=
+  [left right]
+  (java.security.MessageDigest/isEqual (utf8-bytes left) (utf8-bytes right)))
+
+(defn- ^{:stratum 1} normalize-users
   [auth-config]
   (let [users (:users auth-config)]
     (cond
@@ -87,31 +154,7 @@
       :else
       {})))
 
-(defn parse-cookie-header
-  "Parse a Cookie header into a string-keyed map."
-  [cookie-header]
-  (if (str/blank? cookie-header)
-    {}
-    (reduce (fn [acc cookie-part]
-              (let [[raw-name raw-value] (str/split cookie-part #"=" 2)
-                    name (some-> raw-name str/trim)
-                    value (some-> raw-value str/trim)]
-                (if (seq name)
-                  (assoc acc name (or value ""))
-                  acc)))
-            {}
-            (str/split cookie-header #";"))))
-
-(defn- safe-return-to
-  [value]
-  (let [path (or value "/")]
-    (if (and (string? path)
-             (str/starts-with? path "/")
-             (not (str/starts-with? path "//")))
-      path
-      "/")))
-
-(defn- login-page-response
+(defn- ^{:stratum 1} login-page-response
   [{:keys [error username return-to status]}]
   (assoc (responses/html-response
           (auth-views/login-view {:error error
@@ -119,25 +162,65 @@
                                   :return-to (safe-return-to return-to)}))
          :status (or status 200)))
 
-(defn- redirect-response
-  [location & [headers]]
-  {:status 302
-   :headers (merge {"Location" location} headers)
-   :body ""})
+(defn ^{:stratum 1} mutating-request?
+  "True for state-changing requests that must carry an authenticated
+   operator session regardless of the global browse-auth toggle
+   (issue #1460). A request mutates when it uses a non-idempotent HTTP
+   method and is not one of the intentionally public machine/login
+   endpoints (event ingest, agent register/heartbeat, login/logout).
+   Read-only GET/HEAD views are never mutating, so browsing a no-auth
+   dashboard stays open; only the controls need identity."
+  [{:keys [request-method] :as req}]
+  (and (contains? mutating-methods request-method)
+       (not (public-request? req))))
 
-(defn- session-cookie-value
-  [{:keys [cookie-name session-ttl-ms]} token]
-  (str cookie-name "=" token
-       "; Path=/; HttpOnly; SameSite=Lax; Max-Age=" (quot session-ttl-ms 1000)))
+(defn ^{:stratum 1} current-session
+  "Return the current valid session map from the request cookie."
+  [auth-state req]
+  (when (enabled? auth-state)
+    (let [token (get (parse-cookie-header (get-in req [:headers "cookie"]))
+                     (:cookie-name auth-state))
+          session (get @(:sessions auth-state) token)
+          now (System/currentTimeMillis)]
+      (when session
+        (if (< (- now (:last-seen-at session)) (:session-ttl-ms auth-state))
+          (let [updated (assoc session :last-seen-at now)]
+            (swap! (:sessions auth-state) assoc token updated)
+            updated)
+          (do
+            (swap! (:sessions auth-state) dissoc token)
+            nil))))))
 
-(defn- clear-cookie-value
-  [{:keys [cookie-name]}]
-  (str cookie-name "=deleted; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"))
+(defn ^{:stratum 1} clear-session!
+  "Delete any session referenced by the request cookie."
+  [auth-state req]
+  (when (enabled? auth-state)
+    (when-let [token (get (parse-cookie-header (get-in req [:headers "cookie"]))
+                          (:cookie-name auth-state))]
+      (swap! (:sessions auth-state) dissoc token))))
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 1} unauthorized-response
+  "Return an auth challenge response for the current request."
+  [_auth-state req]
+  (let [return-to (safe-return-to
+                   (str (:uri req)
+                        (when-let [qs (:query-string req)]
+                          (when (seq qs) (str "?" qs)))))]
+    (if (and (= :get (:request-method req))
+             (not (.startsWith (:uri req) "/api/"))
+             (not= (:uri req) "/ws"))
+      (redirect-response (str "/login?return-to="
+                              (java.net.URLEncoder/encode return-to "UTF-8")))
+      {:status 401
+       :headers {"Content-Type" "application/json"
+                 "HX-Redirect" (str "/login?return-to="
+                                    (java.net.URLEncoder/encode return-to "UTF-8"))}
+       :body (json/generate-string {:error "authentication-required"})})))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; State and session lifecycle
-
-(defn build-auth-state
+(defn ^{:stratum 2} build-auth-state
   "Normalize dashboard auth config.
 
    Supported inputs:
@@ -155,45 +238,7 @@
      :users users
      :sessions (atom {})}))
 
-(defn enabled?
-  "True when dashboard login is configured."
-  [auth-state]
-  (boolean (:enabled? auth-state)))
-
-(defn public-request?
-  "Requests that must stay available without a browser session."
-  [{:keys [uri request-method]}]
-  (or (= uri "/health")
-      (and (= uri "/login") (#{:get :post} request-method))
-      (and (= uri "/logout") (= :post request-method))
-      (= uri "/ws/events")
-      (and (= uri "/api/events/ingest") (= :post request-method))
-      (and (= uri "/api/control-plane/agents/register") (= :post request-method))
-      (and (.startsWith uri "/api/control-plane/agents/")
-           (.endsWith uri "/heartbeat")
-           (= :post request-method))
-      (.startsWith uri "/css/")
-      (.startsWith uri "/js/")
-      (.startsWith uri "/img/")))
-
-(defn current-session
-  "Return the current valid session map from the request cookie."
-  [auth-state req]
-  (when (enabled? auth-state)
-    (let [token (get (parse-cookie-header (get-in req [:headers "cookie"]))
-                     (:cookie-name auth-state))
-          session (get @(:sessions auth-state) token)
-          now (System/currentTimeMillis)]
-      (when session
-        (if (< (- now (:last-seen-at session)) (:session-ttl-ms auth-state))
-          (let [updated (assoc session :last-seen-at now)]
-            (swap! (:sessions auth-state) assoc token updated)
-            updated)
-          (do
-            (swap! (:sessions auth-state) dissoc token)
-            nil))))))
-
-(defn authenticate!
+(defn ^{:stratum 2} authenticate!
   "Authenticate credentials and create a session when valid."
   [auth-state username password]
   (when (enabled? auth-state)
@@ -210,18 +255,8 @@
           (swap! (:sessions auth-state) assoc token session)
           session)))))
 
-(defn clear-session!
-  "Delete any session referenced by the request cookie."
-  [auth-state req]
-  (when (enabled? auth-state)
-    (when-let [token (get (parse-cookie-header (get-in req [:headers "cookie"]))
-                          (:cookie-name auth-state))]
-      (swap! (:sessions auth-state) dissoc token))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Request handling
-
-(defn handle-login-page
+(defn ^{:stratum 2} handle-login-page
   "Serve the login page or redirect an already authenticated user."
   [auth-state req]
   (if-not (enabled? auth-state)
@@ -232,7 +267,36 @@
                                             "return-to"
                                             "/")}))))
 
-(defn handle-login-submit
+(defn ^{:stratum 2} handle-logout
+  "Clear the current session and redirect to the login page."
+  [auth-state req]
+  (clear-session! auth-state req)
+  (redirect-response "/login"
+                     {"Set-Cookie" (clear-cookie-value auth-state)}))
+
+(defn ^{:stratum 2} control-unauthorized-response
+  "Auth challenge for a state-mutating request that arrived without a
+   session (issue #1460). When browse-auth is enabled this is the same
+   challenge browsing gets — a redirect / HX-Redirect to the login page,
+   so an operator can sign in. When browse-auth is disabled there is no
+   login page to send anyone to, so return a plain JSON 401 that names
+   the remedy: configure operator credentials. Read-only views stay
+   open in both modes; only mutations reach here."
+  [auth-state req]
+  (if (enabled? auth-state)
+    (unauthorized-response auth-state req)
+    {:status 401
+     :headers {"Content-Type" "application/json"}
+     :body (json/generate-string
+            {:error "authentication-required"
+             :message (str "Control actions require an authenticated operator "
+                           "session. Set MINIFORGE_WEB_USERNAME and "
+                           "MINIFORGE_WEB_PASSWORD (or configure a :users list) "
+                           "to enable operator login.")})}))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} handle-login-submit
   "Process login form submission."
   [auth-state req]
   (let [params (filters/query-string->params (slurp (:body req)))
@@ -248,28 +312,3 @@
                               :error "Invalid username or password."
                               :username username
                               :return-to return-to})))))
-
-(defn handle-logout
-  "Clear the current session and redirect to the login page."
-  [auth-state req]
-  (clear-session! auth-state req)
-  (redirect-response "/login"
-                     {"Set-Cookie" (clear-cookie-value auth-state)}))
-
-(defn unauthorized-response
-  "Return an auth challenge response for the current request."
-  [_auth-state req]
-  (let [return-to (safe-return-to
-                   (str (:uri req)
-                        (when-let [qs (:query-string req)]
-                          (when (seq qs) (str "?" qs)))))]
-    (if (and (= :get (:request-method req))
-             (not (.startsWith (:uri req) "/api/"))
-             (not= (:uri req) "/ws"))
-      (redirect-response (str "/login?return-to="
-                              (java.net.URLEncoder/encode return-to "UTF-8")))
-      {:status 401
-       :headers {"Content-Type" "application/json"
-                 "HX-Redirect" (str "/login?return-to="
-                                    (java.net.URLEncoder/encode return-to "UTF-8"))}
-       :body (json/generate-string {:error "authentication-required"})})))

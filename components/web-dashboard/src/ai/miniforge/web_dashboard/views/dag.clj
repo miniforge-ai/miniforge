@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.dag
   "DAG kanban board views for workflow task visualization."
   (:require
@@ -19,85 +18,27 @@
    [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Filter modal (shared across panes)
 
-(defn js-escape
+;; Filter modal (shared across panes)
+(defn ^{:stratum 0} js-escape
   [s]
   (-> (str s)
       (str/replace "\\" "\\\\")
       (str/replace "'" "\\\\'")))
 
-(defn option-raw-value
+(defn ^{:stratum 0} option-raw-value
   [value]
   (if (keyword? value)
     (str value)
     (str value)))
 
-(defn option-display-value
+(defn ^{:stratum 0} option-display-value
   [value]
   (if (keyword? value)
     (name value)
     (str value)))
 
-(defn enum-option
-  [filter-id scope value count cloud?]
-  (let [raw-value (option-raw-value value)
-        display-value (option-display-value value)]
-  [:label {:class (str "filter-option" (when cloud? " filter-option-cloud"))
-           :key (str filter-id "-" value)}
-   [:input {:type "checkbox"
-            :class "filter-checkbox"
-            :name (str "filter-" (name filter-id))
-            :value raw-value
-            :data-filter-id (name filter-id)
-            :data-scope scope
-            :onchange (str "window.miniforge.filters.toggleFilter('"
-                         (name filter-id) "', '" (js-escape raw-value) "', '" scope "', this.checked);")}]
-   [:span (str display-value (when count (str " (" count ")")))]]))
-
-(defn cloud-option
-  [filter-id scope value count]
-  (let [raw-value (option-raw-value value)
-        display-value (option-display-value value)]
-    [:button.filter-option-cloud-btn
-     {:type "button"
-      :key (str filter-id "-" value)
-      :data-filter-id (name filter-id)
-      :data-filter-value raw-value
-      :data-scope scope
-      :onclick "window.miniforge.filters.toggleCloudFilter(this);"}
-     [:span.filter-option-cloud-label display-value]
-     (when count
-       [:span.filter-option-cloud-count count])]))
-
-(defn dynamic-enum-options
-  [filter-id scope filter-label facet-counts cloud?]
-  (if (seq facet-counts)
-    (for [[value count] facet-counts]
-      (if cloud?
-        (cloud-option filter-id scope value count)
-        (enum-option filter-id scope value count cloud?)))
-    (list
-     [:div.filter-option-empty
-      [:span (msg/t :dag/filter-no-values)]
-      [:input.filter-text-input
-       {:type "text"
-        :class "filter-text-input"
-        :placeholder (msg/t :dag/filter-set-placeholder {:label filter-label})
-        :data-filter-id (name filter-id)
-        :data-scope scope
-        :onchange (str "window.miniforge.filters.setTextFilter('"
-                     (name filter-id) "', '" scope "', this.value, ':=');")}]])))
-
-(defn static-enum-options
-  [filter-id scope values facet-counts cloud?]
-  (for [value values]
-    (let [option-value (if (keyword? value) (name value) (str value))]
-      (if cloud?
-        (cloud-option filter-id scope value (get facet-counts value))
-        (enum-option filter-id scope option-value (get facet-counts value) cloud?)))))
-
-(defn bool-filter-options
+(defn ^{:stratum 0} bool-filter-options
   [filter-id scope]
   [:div.filter-option
    [:label
@@ -110,7 +51,7 @@
                           (name filter-id) "', true, '" scope "', this.checked);")}]
     [:span (msg/t :value/yes)]]])
 
-(defn text-filter-input
+(defn ^{:stratum 0} text-filter-input
   [filter-id filter-label scope filter-spec]
   (let [text-op (if (= :multi-path (get-in filter-spec [:filter/value :kind]))
                   ":text-search"
@@ -124,80 +65,8 @@
       :onchange (str "window.miniforge.filters.setTextFilter('"
                    (name filter-id) "', '" scope "', this.value, '" text-op "');")}]))
 
-(defn filter-options-fragment
-  [filter-spec scope facet-counts cloud?]
-  (let [filter-id (:filter/id filter-spec)
-        filter-label (:filter/label filter-spec)
-        filter-type (:filter/type filter-spec)]
-    (case filter-type
-      :enum
-      (if (= :dynamic (:filter/values filter-spec))
-        (dynamic-enum-options filter-id scope filter-label facet-counts cloud?)
-        (static-enum-options filter-id scope (:filter/values filter-spec) facet-counts cloud?))
-
-      :bool
-      (bool-filter-options filter-id scope)
-
-      :text
-      (text-filter-input filter-id filter-label scope filter-spec)
-
-      [:span (msg/t :dag/filter-unsupported-type {:type (name filter-type)})])))
-
-(defn filter-section-fragment
-  [filter-spec facets scope]
-  (let [filter-id (:filter/id filter-spec)
-        filter-label (:filter/label filter-spec)
-        filter-type (:filter/type filter-spec)
-        facet-counts (get facets filter-id)
-        cloud? (and (= scope "global") (= filter-type :enum))
-        section-class (str "filter-section"
-                           (when (= scope "global") " filter-section-global-compact")
-                           (when (= scope "local") " filter-section-local-compact"))]
-    [:div {:class section-class
-           :key (str filter-id)}
-     [:h4.filter-section-title filter-label]
-     [:div {:class (str "filter-options" (when cloud? " filter-options-cloud"))}
-      (filter-options-fragment filter-spec scope facet-counts cloud?)]]))
-
-(defn filter-modal-body-fragment
-  [filters facets scope]
-  (if (empty? filters)
-    [:p.empty-message (if (= scope "global")
-                        (msg/t :dag/filter-no-global-fields)
-                        (msg/t :dag/filter-no-pane-filters))]
-    (for [filter-spec filters]
-      (filter-section-fragment filter-spec facets scope))))
-
-(defn filter-modal-fragment
-  "Filter selection modal content with faceted counts."
-  [{:keys [filters facets scope _pane] :or {filters [] facets {} scope "local"}}]
-  [:div.filter-modal
-   [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
-   [:div.filter-modal-content
-    [:div.filter-modal-header
-     [:h3
-      (if (= scope "global")
-        (msg/t :dag/modal-global-title)
-        (msg/t :dag/modal-title))]
-     [:div.scope-badge {:class (if (= scope "global") "scope-badge-global" "scope-badge-local")}
-      (if (= scope "global")
-        (msg/t :dag/scope-all-panes)
-        (msg/t :dag/scope-this-pane))]
-     [:button.filter-modal-close
-      {:onclick "this.parentElement.parentElement.parentElement.remove()"
-       :title (msg/t :action/close)}
-      "×"]]
-    [:div.filter-modal-body
-     (filter-modal-body-fragment filters facets scope)]
-    [:div.filter-modal-footer
-     [:button.btn.btn-sm.btn-ghost
-      {:onclick "this.parentElement.parentElement.parentElement.remove()"}
-      (msg/t :action/done)]]]])
-
-;------------------------------------------------------------------------------ Layer 1
 ;; DAG kanban view
-
-(defn dag-kanban-view
+(defn ^{:stratum 0} dag-kanban-view
   "Task status kanban board for workflow visualization."
   [layout state]
   (layout (msg/t :layout/nav-task-status)
@@ -244,3 +113,143 @@
                      [:div.card-title (:title task)]
                      [:div.card-footer
                       [:a.card-link {:href (str "/train/" (:train-id task))} (msg/t :dag/view-train)]]]))]])]]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} enum-option
+  [filter-id scope value count cloud?]
+  (let [raw-value (option-raw-value value)
+        display-value (option-display-value value)]
+  [:label {:class (str "filter-option" (when cloud? " filter-option-cloud"))
+           :key (str filter-id "-" value)}
+   [:input {:type "checkbox"
+            :class "filter-checkbox"
+            :name (str "filter-" (name filter-id))
+            :value raw-value
+            :data-filter-id (name filter-id)
+            :data-scope scope
+            :onchange (str "window.miniforge.filters.toggleFilter('"
+                         (name filter-id) "', '" (js-escape raw-value) "', '" scope "', this.checked);")}]
+   [:span (str display-value (when count (str " (" count ")")))]]))
+
+(defn ^{:stratum 1} cloud-option
+  [filter-id scope value count]
+  (let [raw-value (option-raw-value value)
+        display-value (option-display-value value)]
+    [:button.filter-option-cloud-btn
+     {:type "button"
+      :key (str filter-id "-" value)
+      :data-filter-id (name filter-id)
+      :data-filter-value raw-value
+      :data-scope scope
+      :onclick "window.miniforge.filters.toggleCloudFilter(this);"}
+     [:span.filter-option-cloud-label display-value]
+     (when count
+       [:span.filter-option-cloud-count count])]))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} dynamic-enum-options
+  [filter-id scope filter-label facet-counts cloud?]
+  (if (seq facet-counts)
+    (for [[value count] facet-counts]
+      (if cloud?
+        (cloud-option filter-id scope value count)
+        (enum-option filter-id scope value count cloud?)))
+    (list
+     [:div.filter-option-empty
+      [:span (msg/t :dag/filter-no-values)]
+      [:input.filter-text-input
+       {:type "text"
+        :class "filter-text-input"
+        :placeholder (msg/t :dag/filter-set-placeholder {:label filter-label})
+        :data-filter-id (name filter-id)
+        :data-scope scope
+        :onchange (str "window.miniforge.filters.setTextFilter('"
+                     (name filter-id) "', '" scope "', this.value, ':=');")}]])))
+
+(defn ^{:stratum 2} static-enum-options
+  [filter-id scope values facet-counts cloud?]
+  (for [value values]
+    (let [option-value (if (keyword? value) (name value) (str value))]
+      (if cloud?
+        (cloud-option filter-id scope value (get facet-counts value))
+        (enum-option filter-id scope option-value (get facet-counts value) cloud?)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} filter-options-fragment
+  [filter-spec scope facet-counts cloud?]
+  (let [filter-id (:filter/id filter-spec)
+        filter-label (:filter/label filter-spec)
+        filter-type (:filter/type filter-spec)]
+    (case filter-type
+      :enum
+      (if (= :dynamic (:filter/values filter-spec))
+        (dynamic-enum-options filter-id scope filter-label facet-counts cloud?)
+        (static-enum-options filter-id scope (:filter/values filter-spec) facet-counts cloud?))
+
+      :bool
+      (bool-filter-options filter-id scope)
+
+      :text
+      (text-filter-input filter-id filter-label scope filter-spec)
+
+      [:span (msg/t :dag/filter-unsupported-type {:type (name filter-type)})])))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} filter-section-fragment
+  [filter-spec facets scope]
+  (let [filter-id (:filter/id filter-spec)
+        filter-label (:filter/label filter-spec)
+        filter-type (:filter/type filter-spec)
+        facet-counts (get facets filter-id)
+        cloud? (and (= scope "global") (= filter-type :enum))
+        section-class (str "filter-section"
+                           (when (= scope "global") " filter-section-global-compact")
+                           (when (= scope "local") " filter-section-local-compact"))]
+    [:div {:class section-class
+           :key (str filter-id)}
+     [:h4.filter-section-title filter-label]
+     [:div {:class (str "filter-options" (when cloud? " filter-options-cloud"))}
+      (filter-options-fragment filter-spec scope facet-counts cloud?)]]))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} filter-modal-body-fragment
+  [filters facets scope]
+  (if (empty? filters)
+    [:p.empty-message (if (= scope "global")
+                        (msg/t :dag/filter-no-global-fields)
+                        (msg/t :dag/filter-no-pane-filters))]
+    (for [filter-spec filters]
+      (filter-section-fragment filter-spec facets scope))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} filter-modal-fragment
+  "Filter selection modal content with faceted counts."
+  [{:keys [filters facets scope _pane] :or {filters [] facets {} scope "local"}}]
+  [:div.filter-modal
+   [:div.filter-modal-overlay {:onclick "this.parentElement.remove()"}]
+   [:div.filter-modal-content
+    [:div.filter-modal-header
+     [:h3
+      (if (= scope "global")
+        (msg/t :dag/modal-global-title)
+        (msg/t :dag/modal-title))]
+     [:div.scope-badge {:class (if (= scope "global") "scope-badge-global" "scope-badge-local")}
+      (if (= scope "global")
+        (msg/t :dag/scope-all-panes)
+        (msg/t :dag/scope-this-pane))]
+     [:button.filter-modal-close
+      {:onclick "this.parentElement.parentElement.parentElement.remove()"
+       :title (msg/t :action/close)}
+      "×"]]
+    [:div.filter-modal-body
+     (filter-modal-body-fragment filters facets scope)]
+    [:div.filter-modal-footer
+     [:button.btn.btn-sm.btn-ghost
+      {:onclick "this.parentElement.parentElement.parentElement.remove()"}
+      (msg/t :action/done)]]]])

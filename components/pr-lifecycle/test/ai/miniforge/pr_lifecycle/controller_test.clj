@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.controller-test
   "Unit tests for the PR lifecycle controller state machine.
 
@@ -36,40 +35,41 @@
    [ai.miniforge.release-executor.interface :as release]
    [ai.miniforge.schema.interface :as schema]))
 
-;------------------------------------------------------------------------------ Test Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def test-task
+;------------------------------------------------------------------------------ Test Data
+(def ^{:stratum 0} test-task
   {:task/id "task-abc"
    :task/title "Implement feature X"
    :task/description "Add the feature"
    :task/acceptance-criteria ["Tests pass" "No lint errors"]
    :task/constraints ["No breaking changes"]})
 
-(defn- max-fix-iterations-exceeded-pattern
+(defn- ^{:stratum 0} max-fix-iterations-exceeded-pattern
   []
   (re-pattern
    (java.util.regex.Pattern/quote
     (messages/t :controller/max-fix-iterations-exceeded))))
 
-(defn- release-success
+(defn- ^{:stratum 0} release-success
   [data]
   (merge {:success? true} data))
 
-(defn- release-failure
+(defn- ^{:stratum 0} release-failure
   [error]
   {:success? false
    :error error})
 
-(defn- fix-success
+(defn- ^{:stratum 0} fix-success
   [data]
   (merge {:success? true} data))
 
-(defn- fix-failure
+(defn- ^{:stratum 0} fix-failure
   [reason]
   {:success? false
    :reason reason})
 
-(defn- pr-info
+(defn- ^{:stratum 0} pr-info
   "Factory for the `pr-lifecycle` PR-info map stored on `(:pr @controller)`.
    Defaults exercise the fix-loop's expected shape (id/branch/head-sha);
    pass overrides to vary individual fields per test."
@@ -79,23 +79,24 @@
           :pr/head-sha "abc"}
          overrides))
 
-(defn make-event-collector
+(defn ^{:stratum 0} make-event-collector
   "Create a minimal event bus that collects published events."
   []
   (let [events (atom [])]
     {:publish! (fn [event] (swap! events conj event) nil)
      :events events}))
 
-(defn transition-error-data
+(defn ^{:stratum 0} transition-error-data
   "Return anomaly data for an invalid controller status transition."
   [controller target-status]
   (let [result (controller/update-status! controller target-status)]
     (when (anomaly/anomaly? result)
       (:anomaly/data result))))
 
-;------------------------------------------------------------------------------ Controller Creation
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest create-controller-initial-state-test
+;------------------------------------------------------------------------------ Controller Creation
+(deftest ^{:stratum 1} create-controller-initial-state-test
   (testing "Controller initializes with :pending status"
     (let [ctrl (controller/create-controller
                  "dag-1" "run-1" "task-1" test-task
@@ -108,7 +109,7 @@
       (is (inst? (:created-at @ctrl)))
       (is (inst? (:updated-at @ctrl))))))
 
-(deftest create-controller-ids-test
+(deftest ^{:stratum 1} create-controller-ids-test
   (testing "Controller stores DAG/run/task IDs"
     (let [ctrl (controller/create-controller
                  "dag-1" "run-1" "task-1" test-task
@@ -118,14 +119,14 @@
       (is (= "task-1" (:task/id @ctrl)))
       (is (uuid? (:controller/id @ctrl))))))
 
-(deftest create-controller-stores-task-test
+(deftest ^{:stratum 1} create-controller-stores-task-test
   (testing "Controller stores the task definition"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
       (is (= test-task (:task @ctrl))))))
 
-(deftest create-controller-default-config-test
+(deftest ^{:stratum 1} create-controller-default-config-test
   (testing "Controller uses default configuration values"
     (let [defaults (controller-config/controller-defaults)
           ctrl (controller/create-controller
@@ -144,7 +145,7 @@
       (is (= (:branch-name-prefix defaults)
              (get-in @ctrl [:config :branch-name-prefix]))))))
 
-(deftest create-controller-custom-config-test
+(deftest ^{:stratum 1} create-controller-custom-config-test
   (testing "Controller accepts custom configuration"
     (let [custom-policy {:method :rebase :require-ci-green? false}
           ctrl (controller/create-controller
@@ -164,7 +165,7 @@
       (is (= (:branch-name-prefix (controller-config/controller-defaults))
              (get-in @ctrl [:config :branch-name-prefix]))))))
 
-(deftest create-controller-nil-options-preserve-defaults-test
+(deftest ^{:stratum 1} create-controller-nil-options-preserve-defaults-test
   (testing "Nil options do not overwrite configured defaults"
     (let [defaults (controller-config/controller-defaults)
           ctrl (controller/create-controller
@@ -180,7 +181,7 @@
       (is (= (:auto-resolve-comments defaults)
              (get-in @ctrl [:config :auto-resolve-comments]))))))
 
-(deftest create-controller-with-dependencies-test
+(deftest ^{:stratum 1} create-controller-with-dependencies-test
   (testing "Controller stores event-bus, logger, generate-fn"
     (let [bus (make-event-collector)
           gen-fn (fn [& _] nil)
@@ -193,15 +194,14 @@
       (is (= gen-fn (:generate-fn @ctrl))))))
 
 ;------------------------------------------------------------------------------ Config Validation
-
-(deftest create-controller-nil-worktree-path-test
+(deftest ^{:stratum 1} create-controller-nil-worktree-path-test
   (testing "Controller accepts nil worktree-path (stored as nil in config)"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task)]
       (is (nil? (get-in @ctrl [:config :worktree-path])))
       (is (= :pending (:status @ctrl))))))
 
-(deftest create-controller-merge-policy-validation-test
+(deftest ^{:stratum 1} create-controller-merge-policy-validation-test
   (testing "Custom merge policy is stored verbatim without defaults merging"
     (let [partial-policy {:method :rebase}
           ctrl (controller/create-controller
@@ -212,7 +212,7 @@
       (is (nil? (get-in @ctrl [:config :merge-policy :require-ci-green?]))
           "Partial policy should not be merged with defaults"))))
 
-(deftest create-controller-zero-max-iterations-test
+(deftest ^{:stratum 1} create-controller-zero-max-iterations-test
   (testing "Controller allows zero max-fix-iterations"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -220,7 +220,7 @@
                  :max-fix-iterations 0)]
       (is (= 0 (get-in @ctrl [:config :max-fix-iterations]))))))
 
-(deftest create-controller-config-keys-complete-test
+(deftest ^{:stratum 1} create-controller-config-keys-complete-test
   (testing "Config map contains exactly the expected keys"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -231,15 +231,14 @@
              (set (keys (:config @ctrl))))))))
 
 ;------------------------------------------------------------------------------ State Machine Transitions via update-status!
-
-(deftest update-status-returns-new-status-test
+(deftest ^{:stratum 1} update-status-returns-new-status-test
   (testing "update-status! returns the new status value"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
       (is (= :creating-pr (controller/update-status! ctrl :creating-pr))))))
 
-(deftest update-status-updates-timestamp-test
+(deftest ^{:stratum 1} update-status-updates-timestamp-test
   (testing "update-status! updates the :updated-at timestamp"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -254,7 +253,7 @@
           (is (not= before-ts after-ts))
           (is (.after ^java.util.Date after-ts ^java.util.Date before-ts)))))))
 
-(deftest state-machine-full-happy-path-test
+(deftest ^{:stratum 1} state-machine-full-happy-path-test
   (testing "State transitions through the full happy path: pending -> creating-pr -> monitoring-ci -> monitoring-review -> ready-to-merge -> merging -> merged"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -277,7 +276,7 @@
       (controller/update-status! ctrl :merged)
       (is (= :merged (:status @ctrl))))))
 
-(deftest state-machine-ci-failure-fix-loop-test
+(deftest ^{:stratum 1} state-machine-ci-failure-fix-loop-test
   (testing "State transitions through CI failure/fix loop: pending -> creating-pr -> monitoring-ci -> fixing -> monitoring-ci -> monitoring-review -> merged"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -309,7 +308,7 @@
       (controller/update-status! ctrl :merged)
       (is (= :merged (:status @ctrl))))))
 
-(deftest state-machine-review-changes-requested-loop-test
+(deftest ^{:stratum 1} state-machine-review-changes-requested-loop-test
   (testing "State transitions through review changes requested loop"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -335,7 +334,7 @@
       (controller/update-status! ctrl :merged)
       (is (= :merged (:status @ctrl))))))
 
-(deftest state-machine-failure-terminal-test
+(deftest ^{:stratum 1} state-machine-failure-terminal-test
   (testing ":failed is a terminal state - controller records failure"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -345,8 +344,7 @@
       (is (= :failed (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ Invalid / Unexpected State Transitions
-
-(deftest invalid-status-value-rejected-test
+(deftest ^{:stratum 1} invalid-status-value-rejected-test
   (testing "Controller rejects unknown statuses and preserves the current state"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -355,7 +353,7 @@
       (is (= :invalid-target-status (:error error-data)))
       (is (= :pending (:status @ctrl))))))
 
-(deftest backward-transition-rejected-test
+(deftest ^{:stratum 1} backward-transition-rejected-test
   (testing "Controller rejects backward transitions that are outside the FSM"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -367,7 +365,7 @@
       (is (= #{:monitoring-ci :monitoring-review :fixing :failed}
              (:valid-targets error-data))))))
 
-(deftest transition-from-terminal-state-rejected-test
+(deftest ^{:stratum 1} transition-from-terminal-state-rejected-test
   (testing "Transitioning away from :merged is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -381,7 +379,7 @@
         (is (= :terminal-state (:error error-data)))
         (is (= :merged (:status @ctrl)))))))
 
-(deftest transition-from-failed-state-rejected-test
+(deftest ^{:stratum 1} transition-from-failed-state-rejected-test
   (testing "Transitioning away from :failed is rejected"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -391,7 +389,7 @@
         (is (= :terminal-state (:error error-data)))
         (is (= :failed (:status @ctrl)))))))
 
-(deftest idempotent-transition-remains-valid-test
+(deftest ^{:stratum 1} idempotent-transition-remains-valid-test
   (testing "Controller allows same-state transitions for idempotent status updates"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -401,8 +399,7 @@
       (is (= :monitoring-ci (:status @ctrl))))))
 
 ;------------------------------------------------------------------------------ add-history! Function
-
-(deftest add-history-appends-event-test
+(deftest ^{:stratum 1} add-history-appends-event-test
   (testing "add-history! appends an event with type, data, and timestamp"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -414,14 +411,14 @@
         (is (= {:pr-id 42} (:data event)))
         (is (inst? (:timestamp event)))))))
 
-(deftest add-history-returns-nil-test
+(deftest ^{:stratum 1} add-history-returns-nil-test
   (testing "add-history! returns nil"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
                  :worktree-path "/tmp")]
       (is (nil? (controller/add-history! ctrl :test-event {}))))))
 
-(deftest add-history-preserves-order-test
+(deftest ^{:stratum 1} add-history-preserves-order-test
   (testing "add-history! preserves chronological order"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -433,8 +430,7 @@
              (mapv :type (:history @ctrl)))))))
 
 ;------------------------------------------------------------------------------ Fix Iteration Enforcement
-
-(deftest handle-ci-failure-max-iterations-test
+(deftest ^{:stratum 1} handle-ci-failure-max-iterations-test
   (testing "handle-ci-failure! returns anomaly when max iterations exceeded"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -448,7 +444,7 @@
         (is (re-find (max-fix-iterations-exceeded-pattern)
                      (:anomaly/message result)))))))
 
-(deftest handle-review-feedback-max-iterations-test
+(deftest ^{:stratum 1} handle-review-feedback-max-iterations-test
   (testing "handle-review-feedback! returns anomaly when max iterations exceeded"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -461,7 +457,7 @@
         (is (re-find (max-fix-iterations-exceeded-pattern)
                      (:anomaly/message result)))))))
 
-(deftest handle-ci-failure-increments-iteration-before-max-test
+(deftest ^{:stratum 1} handle-ci-failure-increments-iteration-before-max-test
   (testing "handle-ci-failure! transitions to :fixing and increments counter"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -484,7 +480,7 @@
       (is (= :fixing (:status @ctrl)))
       (is (= 1 (:fix-iterations @ctrl))))))
 
-(deftest handle-ci-failure-sets-failed-on-max-test
+(deftest ^{:stratum 1} handle-ci-failure-sets-failed-on-max-test
   (testing "handle-ci-failure! sets :failed status when at max"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -494,7 +490,7 @@
       (controller/handle-ci-failure! ctrl "logs")
       (is (= :failed (:status @ctrl))))))
 
-(deftest handle-ci-failure-records-history-on-max-exceeded-test
+(deftest ^{:stratum 1} handle-ci-failure-records-history-on-max-exceeded-test
   (testing "handle-ci-failure! records :max-fix-iterations-exceeded in history"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -504,7 +500,7 @@
       (controller/handle-ci-failure! ctrl "logs")
       (is (some #(= :max-fix-iterations-exceeded (:type %)) (:history @ctrl))))))
 
-(deftest handle-ci-failure-zero-max-iterations-test
+(deftest ^{:stratum 1} handle-ci-failure-zero-max-iterations-test
   (testing "handle-ci-failure! immediately returns anomaly when max-fix-iterations is 0"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -516,7 +512,7 @@
       (is (re-find (max-fix-iterations-exceeded-pattern)
                    (:anomaly/message result))))))
 
-(deftest handle-ci-failure-records-normalized-result-status-test
+(deftest ^{:stratum 1} handle-ci-failure-records-normalized-result-status-test
   (testing "handle-ci-failure! records normalized result status in history"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -532,7 +528,7 @@
         (is (= {:result-status :succeeded}
                (:data (last (:history @ctrl)))))))))
 
-(deftest handle-review-feedback-records-normalized-result-status-test
+(deftest ^{:stratum 1} handle-review-feedback-records-normalized-result-status-test
   (testing "handle-review-feedback! records normalized result status in history"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -549,8 +545,7 @@
                (:data (last (:history @ctrl)))))))))
 
 ;------------------------------------------------------------------------------ State Manipulation (via atom)
-
-(deftest controller-status-transitions-test
+(deftest ^{:stratum 1} controller-status-transitions-test
   (testing "Status can be manually transitioned for testing"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -572,7 +567,7 @@
       (swap! ctrl assoc :status :merged)
       (is (= :merged (:status @ctrl))))))
 
-(deftest controller-pr-info-storage-test
+(deftest ^{:stratum 1} controller-pr-info-storage-test
   (testing "PR info can be stored and retrieved"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -585,7 +580,7 @@
       (is (= 42 (get-in @ctrl [:pr :pr/id])))
       (is (= "feat/bar" (get-in @ctrl [:pr :pr/branch]))))))
 
-(deftest controller-history-accumulation-test
+(deftest ^{:stratum 1} controller-history-accumulation-test
   (testing "History events accumulate correctly"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -600,7 +595,7 @@
       (is (= [:pr-created :ci-passed :merged]
              (mapv :type (:history @ctrl)))))))
 
-(deftest controller-fix-iteration-counter-test
+(deftest ^{:stratum 1} controller-fix-iteration-counter-test
   (testing "Fix iteration counter increments correctly"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -612,7 +607,7 @@
       (swap! ctrl update :fix-iterations inc)
       (is (= 3 (:fix-iterations @ctrl))))))
 
-(deftest controller-monitors-nil-initially-test
+(deftest ^{:stratum 1} controller-monitors-nil-initially-test
   (testing "CI and review monitors are nil initially"
     (let [ctrl (controller/create-controller
                  "dag" "run" "task" test-task
@@ -621,8 +616,7 @@
       (is (nil? (:review-monitor @ctrl))))))
 
 ;------------------------------------------------------------------------------ Extracted PR creation steps
-
-(defn make-controller
+(defn ^{:stratum 1} make-controller
   "Create a test controller with minimal config."
   ([] (make-controller {}))
   ([overrides]
@@ -633,9 +627,10 @@
        (swap! ctrl merge overrides))
      ctrl)))
 
-;; fail-controller!
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest fail-controller-sets-status-and-returns-err
+;; fail-controller!
+(deftest ^{:stratum 2} fail-controller-sets-status-and-returns-err
   (testing "fail-controller! sets :failed status and returns a DAG error"
     (let [ctrl (make-controller)]
       (is (= :pending (:status @ctrl)))
@@ -645,8 +640,7 @@
         (is (= :some-error (get-in result [:error :code])))))))
 
 ;; create-and-checkout-branch!
-
-(deftest create-and-checkout-branch-success
+(deftest ^{:stratum 2} create-and-checkout-branch-success
   (testing "Returns branch result on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
@@ -655,7 +649,7 @@
           (is (schema/succeeded? result))
           (is (= "main" (:base-branch result))))))))
 
-(deftest create-and-checkout-branch-failure
+(deftest ^{:stratum 2} create-and-checkout-branch-failure
   (testing "Returns DAG error on failure and adds history"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
@@ -665,7 +659,7 @@
           (is (= :failed (:status @ctrl)))
           (is (some #(= :pr-creation-failed (:type %)) (:history @ctrl))))))))
 
-(deftest run-lifecycle-pr-creation-failure-reports-current-status
+(deftest ^{:stratum 2} run-lifecycle-pr-creation-failure-reports-current-status
   (testing "PR creation anomaly result reports the controller's actual status"
     (let [ctrl (make-controller)]
       (with-redefs [release/create-branch! (fn [_path _name]
@@ -676,8 +670,7 @@
           (is (= "PR creation failed" (:error result))))))))
 
 ;; apply-code-to-files!
-
-(deftest apply-code-to-files-success
+(deftest ^{:stratum 2} apply-code-to-files-success
   (testing "Returns apply result on success"
     (let [ctrl (make-controller)]
       (with-redefs [fix/apply-fix-to-worktree (fn [_path _artifact _logger]
@@ -685,7 +678,7 @@
         (let [result (controller/apply-code-to-files! ctrl "/tmp" {:code/files []} nil)]
           (is (= {:applied true} result)))))))
 
-(deftest apply-code-to-files-failure
+(deftest ^{:stratum 2} apply-code-to-files-failure
   (testing "Returns DAG error when fix/apply returns error"
     (let [ctrl (make-controller)]
       (with-redefs [fix/apply-fix-to-worktree (fn [_path _artifact _logger]
@@ -695,8 +688,7 @@
           (is (= :failed (:status @ctrl))))))))
 
 ;; commit-changes!
-
-(deftest commit-changes-success
+(deftest ^{:stratum 2} commit-changes-success
   (testing "Returns commit result on success"
     (let [ctrl (make-controller)
           task-id "task-00000001"]
@@ -706,7 +698,7 @@
           (is (schema/succeeded? result))
           (is (= "abc123" (:commit-sha result))))))))
 
-(deftest commit-changes-failure
+(deftest ^{:stratum 2} commit-changes-failure
   (testing "Returns DAG error on commit failure"
     (let [ctrl (make-controller)]
       (with-redefs [release/commit-changes! (fn [_path _msg]
@@ -715,7 +707,7 @@
           (is (dag/err? result))
           (is (= :failed (:status @ctrl))))))))
 
-(deftest commit-changes-uses-task-title-in-message
+(deftest ^{:stratum 2} commit-changes-uses-task-title-in-message
   (testing "Commit message includes task title"
     (let [ctrl (make-controller)
           captured-msg (atom nil)]
@@ -726,8 +718,7 @@
         (is (.contains @captured-msg "Implement feature X"))))))
 
 ;; push-and-create-pr!
-
-(deftest push-and-create-pr-success
+(deftest ^{:stratum 2} push-and-create-pr-success
   (testing "Returns PR info map on success"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
@@ -745,7 +736,7 @@
           (is (= "feat/x" (:pr/branch result)))
           (is (= "abc123" (:pr/head-sha result))))))))
 
-(deftest push-and-create-pr-push-failure
+(deftest ^{:stratum 2} push-and-create-pr-push-failure
   (testing "Returns DAG error when push fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
@@ -755,7 +746,7 @@
           (is (dag/err? result))
           (is (= :failed (:status @ctrl))))))))
 
-(deftest push-and-create-pr-pr-creation-failure
+(deftest ^{:stratum 2} push-and-create-pr-pr-creation-failure
   (testing "Returns DAG error when PR creation fails"
     (let [ctrl (make-controller)]
       (with-redefs [release/push-branch! (fn [_path _branch]
@@ -766,7 +757,7 @@
                                                       test-task "t-1" {:commit-sha "x"})]
           (is (dag/err? result)))))))
 
-(deftest push-and-create-pr-includes-acceptance-criteria
+(deftest ^{:stratum 2} push-and-create-pr-includes-acceptance-criteria
   (testing "PR body includes acceptance criteria from task"
     (let [ctrl (make-controller)
           captured-opts (atom nil)]
@@ -780,8 +771,7 @@
         (is (.contains (:body @captured-opts) "No lint errors"))))))
 
 ;; finalize-pr-creation!
-
-(deftest finalize-pr-creation-records-pr-and-returns-ok
+(deftest ^{:stratum 2} finalize-pr-creation-records-pr-and-returns-ok
   (testing "Stores PR on controller, adds history, returns dag/ok"
     (let [ctrl (make-controller)
           pr     (pr-info :pr/id 42 :pr/url "url")
@@ -790,7 +780,7 @@
       (is (= 42 (get-in @ctrl [:pr :pr/id])))
       (is (some #(= :pr-created (:type %)) (:history @ctrl))))))
 
-(deftest finalize-pr-creation-publishes-event
+(deftest ^{:stratum 2} finalize-pr-creation-publishes-event
   (testing "Publishes pr-opened event when event-bus is present"
     (let [ctrl (make-controller)
           published (atom [])

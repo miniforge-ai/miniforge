@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.stream
   "Event-stream lifecycle and query API."
   (:require
    [ai.miniforge.event-stream.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event stream lifecycle and queries
 
-(def create-event-stream
+;; Event stream lifecycle and queries
+(def ^{:stratum 0} create-event-stream
   "Create an event stream. Returns an atom holding the stream state
    (events vector, subscribers, filters, sinks, sequence numbers,
    quiesce fence, in-flight counter, optional snowflake generator).
@@ -33,7 +32,7 @@
    generator for lexically-sortable ids)."
   core/create-event-stream)
 
-(def create-envelope
+(def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
    sequence number. Returns a map carrying :event/type, :event/id (a
    uuid? — snowflake-encoded when the stream has a generator, else
@@ -43,7 +42,7 @@
    :agent/id, :agent/instance-id)."
   core/create-envelope)
 
-(def publish!
+(def ^{:stratum 0} publish!
   "Publish an event to the stream: fan out to sinks, append to the
    in-memory log, fan out to matching subscribers, log. Returns the
    published event map. If the event's workflow has been quiesced
@@ -52,29 +51,29 @@
    running sinks or subscribers."
   core/publish!)
 
-(def subscribe!
+(def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching
    events are delivered. Returns the subscriber-id passed in."
   core/subscribe!)
 
-(def unsubscribe!
+(def ^{:stratum 0} unsubscribe!
   "Remove a subscriber (and its filter) by id. Returns nil."
   core/unsubscribe!)
 
-(def get-events
+(def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
    :limit."
   core/get-events)
 
-(def get-latest-status
+(def ^{:stratum 0} get-latest-status
   "Return the most recent :agent/status event map for a workflow (and
    optionally a specific agent-id), or nil when none exist."
   core/get-latest-status)
 
 ;; BD-2a: shutdown ordering primitives.
-(def quiesce!
+(def ^{:stratum 0} quiesce!
   "Fence future publishes for a workflow (when :workflow-id is given)
    and wait for in-flight publishes to settle. After return, publish!
    for that workflow returns a rejection map. Without :workflow-id, adds
@@ -84,7 +83,7 @@
    5000)."
   core/quiesce!)
 
-(def drain!
+(def ^{:stratum 0} drain!
   "Wait for every event published before this call to reach all sinks,
    including each sink's optional drain hook. Returns a map: {:ok? true
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or

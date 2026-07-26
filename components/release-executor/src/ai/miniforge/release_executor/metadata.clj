@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.metadata
   "Release metadata generation for the release executor.
    Handles invoking the releaser agent and generating fallback metadata."
@@ -25,17 +24,17 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; String utilities
 
-(defn- default-task-description
+;; String utilities
+(defn- ^{:stratum 0} default-task-description
   []
   (msg/t :default/task-description))
 
-(defn- file-label
+(defn- ^{:stratum 0} file-label
   [file-count]
   (msg/t (if (= 1 file-count) :pr/file-singular :pr/file-plural)))
 
-(defn slugify
+(defn ^{:stratum 0} slugify
   "Convert a string to a URL-safe slug.
    Handles basic ASCII transliteration and normalizes spacing."
   [s]
@@ -58,7 +57,7 @@
                  (str/replace #"^-|-$" ""))]
     (subs slug 0 (min 40 (count slug)))))
 
-(defn- first-sentence
+(defn- ^{:stratum 0} first-sentence
   "Extract the first sentence or line from text, capped at max-len chars."
   [text max-len]
   (let [clean (-> (or text "")
@@ -77,10 +76,8 @@
           (str (subs truncated 0 last-space) "...")
           (str truncated "..."))))))
 
-;------------------------------------------------------------------------------ Layer 0b
 ;; Workflow data extraction
-
-(defn extract-review-artifacts
+(defn ^{:stratum 0} extract-review-artifacts
   "Extract review artifacts from workflow artifacts list.
    Returns a seq of review content maps."
   [workflow-artifacts]
@@ -92,7 +89,7 @@
                   (:content artifact))))
        (remove nil?)))
 
-(defn extract-test-artifacts
+(defn ^{:stratum 0} extract-test-artifacts
   "Extract test artifacts from workflow artifacts list.
    Returns a seq of test content maps."
   [workflow-artifacts]
@@ -104,17 +101,15 @@
                   (:content artifact))))
        (remove nil?)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; PR body formatting
-
-(defn- format-file-list
+(defn- ^{:stratum 0} format-file-list
   "Format code artifact files as a markdown list."
   [code-artifacts]
   (let [files (mapcat :code/files code-artifacts)]
     (when (seq files)
       (str/join "\n" (map #(str "- `" (:path %) "` (" (name (get % :action :create)) ")") files)))))
 
-(defn- format-gate-results
+(defn- ^{:stratum 0} format-gate-results
   "Format gate results from review artifacts as markdown for the test plan.
    Returns a string of gate result lines, or nil if no gate data."
   [review-artifacts]
@@ -143,7 +138,7 @@
               (str header "\n" gate-lines)
               header)))))))
 
-(defn- warning-location
+(defn- ^{:stratum 0} warning-location
   "Markdown `file:line` prefix for a structured review warning, or empty when
    absent."
   [{:keys [file line]}]
@@ -151,7 +146,9 @@
     (str "`" file (when line (str ":" line)) "` — ")
     ""))
 
-(defn- known-issue-text
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} known-issue-text
   "Markdown text for one known issue. A structured warning is a map with
    :file/:line/:description; legacy reviewer warnings (and gate-produced
    warnings) arrive as plain description strings — render those verbatim so
@@ -161,44 +158,7 @@
     (str (warning-location w) (get w :description ""))
     (str w)))
 
-(defn format-known-issues
-  "Render unresolved non-blocking review issues (severities :warning and :nit)
-   as a markdown known-issues list, or nil when there are none. Each item may
-   be a structured issue map ({:file :line :description}) or a legacy
-   description string; both render without collapsing to an empty bullet.
-   Public so both the PR-body renderer and the docs-file renderer present
-   issues identically."
-  [warnings]
-  (when (seq warnings)
-    (str (msg/t :pr/known-issues-header {:count (count warnings)})
-         (str/join "\n"
-                   (map (fn [w]
-                          (msg/t :pr/known-issue-item {:item (known-issue-text w)}))
-                        warnings)))))
-
-(defn- format-review-summary
-  "Extract and format the review summary from review artifacts.
-   Returns a formatted string or nil when there is neither a summary nor
-   any unresolved warnings to record."
-  [review-artifacts]
-  (let [reviews (filter #(or (contains? % :review/summary)
-                             (seq (:review/warnings %)))
-                        review-artifacts)]
-    (when (seq reviews)
-      (let [latest-review (last reviews)
-            summary (:review/summary latest-review)
-            decision (:review/decision latest-review)
-            decision-str (when decision
-                           (str (msg/t :pr/decision {:decision (name decision)}) "\n\n"))
-            summary-str (when (and summary (not (str/blank? summary))) summary)
-            known-issues (format-known-issues (:review/warnings latest-review))
-            body (str decision-str
-                      summary-str
-                      (when (and summary-str known-issues) "\n\n")
-                      known-issues)]
-        (when-not (str/blank? body) body)))))
-
-(defn- render-pr-body
+(defn- ^{:stratum 1} render-pr-body
   "Render a structured PR body from available data.
 
    Arguments:
@@ -222,10 +182,8 @@
        (msg/t :pr/footer {:file-count file-count
                           :file-label (file-label file-count)})))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Releaser agent integration
-
-(defn invoke-releaser
+(defn ^{:stratum 1} invoke-releaser
   "Invoke the releaser agent to generate release metadata.
    Falls back to nil if agent fails (caller should use fallback).
 
@@ -267,7 +225,50 @@
           nil))
       nil)))
 
-(defn fallback-release-metadata
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} format-known-issues
+  "Render unresolved non-blocking review issues (severities :warning and :nit)
+   as a markdown known-issues list, or nil when there are none. Each item may
+   be a structured issue map ({:file :line :description}) or a legacy
+   description string; both render without collapsing to an empty bullet.
+   Public so both the PR-body renderer and the docs-file renderer present
+   issues identically."
+  [warnings]
+  (when (seq warnings)
+    (str (msg/t :pr/known-issues-header {:count (count warnings)})
+         (str/join "\n"
+                   (map (fn [w]
+                          (msg/t :pr/known-issue-item {:item (known-issue-text w)}))
+                        warnings)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} format-review-summary
+  "Extract and format the review summary from review artifacts.
+   Returns a formatted string or nil when there is neither a summary nor
+   any unresolved warnings to record."
+  [review-artifacts]
+  (let [reviews (filter #(or (contains? % :review/summary)
+                             (seq (:review/warnings %)))
+                        review-artifacts)]
+    (when (seq reviews)
+      (let [latest-review (last reviews)
+            summary (:review/summary latest-review)
+            decision (:review/decision latest-review)
+            decision-str (when decision
+                           (str (msg/t :pr/decision {:decision (name decision)}) "\n\n"))
+            summary-str (when (and summary (not (str/blank? summary))) summary)
+            known-issues (format-known-issues (:review/warnings latest-review))
+            body (str decision-str
+                      summary-str
+                      (when (and summary-str known-issues) "\n\n")
+                      known-issues)]
+        (when-not (str/blank? body) body)))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} fallback-release-metadata
   "Generate deterministic release metadata from the task description and artifacts.
    Used when no releaser agent is configured or LLM backend is unavailable.
 
@@ -300,7 +301,9 @@
       :release/pr-body body
       :release/pr-description summary})))
 
-(defn generate-release-metadata
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} generate-release-metadata
   "Generate release metadata using releaser agent, falling back to deterministic
    metadata from the task description when no agent or LLM is available.
 

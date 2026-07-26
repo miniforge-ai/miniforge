@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.protocols.records.llm-client
   "Record that implements LLMClient protocol.
 
@@ -25,7 +24,9 @@
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]
    [ai.miniforge.response.interface :as response]))
 
-(defrecord CLIClient [config logger exec-fn stream-exec-fn]
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} CLIClient [config logger exec-fn stream-exec-fn]
   p/LLMClient
   (complete* [this request]
     (impl/complete-impl this request))
@@ -37,9 +38,9 @@
     (impl/get-config-impl this)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Factory functions
 
-(defn create-client
+;; Factory functions
+(defn ^{:stratum 1} create-client
   "Create a new LLM client.
 
    Options:

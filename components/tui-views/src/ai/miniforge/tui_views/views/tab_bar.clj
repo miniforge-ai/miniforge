@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.tab-bar
   "Tab bar renderer for top-level views.
 
@@ -29,7 +28,9 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.palette :as palette]))
 
-(defn render
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} render
   "Render the tab bar header.
    model: app model (uses :view for active tab)
    context: optional context string (e.g. workflow count, PR summary)

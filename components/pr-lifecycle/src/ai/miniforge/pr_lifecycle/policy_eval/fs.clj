@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval.fs
   "N13 §2.5 Comment Response Agent — Layer 2: File I/O.
 
@@ -34,9 +33,10 @@
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
-;; ── path safety ──────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- safe-worktree-path
+;; ── path safety ──────────────────────────────────────────────────────
+(defn- ^{:stratum 0} safe-worktree-path
   "Resolve `relative-path` under `worktree-root`. Returns the
    canonical absolute path string when the target stays inside the
    worktree root, or returns nil when `relative-path` escapes
@@ -76,8 +76,7 @@
     (catch SecurityException _ nil)))
 
 ;; ── content read/write (trailing-newline preserving) ─────────────────
-
-(defn- read-content
+(defn- ^{:stratum 0} read-content
   "Slurp `path` and return `{:lines <vec> :trailing-newline? <bool>}`.
    Preserves trailing-newline info so round-trips don't drop the final `\\n`
    or silently normalize CRLF."
@@ -87,12 +86,23 @@
         lines    (vec (str/split-lines content))]
     {:lines lines :trailing-newline? trailing}))
 
-(defn- write-content!
+(defn- ^{:stratum 0} write-content!
   "Join `lines` with `\\n`, append trailing `\\n` when `trailing-newline?`
    is true, and write to `path`."
   [path lines trailing-newline?]
   (spit path (cond-> (str/join "\n" lines)
                trailing-newline? (str "\n"))))
+
+(defn- ^{:stratum 0} guard-file-exists
+  "Step 2: require the resolved file to actually exist."
+  [{:keys [abs relative-path] :as ctx}]
+  (if (fs/exists? abs)
+    (dag/ok ctx)
+    (dag/err :policy-eval/file-not-found
+             (str "file " abs " not present in worktree")
+             {:path relative-path})))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ── pipeline guards ──────────────────────────────────────────────────
 ;;
@@ -100,8 +110,7 @@
 ;; `(dag/ok new-ctx)` enriching the context, or `(dag/err ...)` with the
 ;; typed failure code for this step. The public entry chains them via
 ;; `dag/when-let-ok` — see the railway-binding rule (dewey 211).
-
-(defn- guard-path
+(defn- ^{:stratum 1} guard-path
   "Step 1: resolve `relative-path` under `worktree-path`. Bails out
    with `:policy-eval/path-traversal` on absolute paths, ..-segments,
    or canonicalization escapes."
@@ -112,16 +121,7 @@
              (str "relative-path escapes worktree root: " relative-path)
              {:path relative-path :worktree-path (str worktree-path)})))
 
-(defn- guard-file-exists
-  "Step 2: require the resolved file to actually exist."
-  [{:keys [abs relative-path] :as ctx}]
-  (if (fs/exists? abs)
-    (dag/ok ctx)
-    (dag/err :policy-eval/file-not-found
-             (str "file " abs " not present in worktree")
-             {:path relative-path})))
-
-(defn- guard-line-in-range
+(defn- ^{:stratum 1} guard-line-in-range
   "Step 3: read the file content, verify `line-number` is within
    bounds, and enrich the ctx with the file's lines + the current
    line content for the writer step."
@@ -140,7 +140,7 @@
                      :line              line-number
                      :before            (nth lines idx))))))
 
-(defn- write-or-skip!
+(defn- ^{:stratum 1} write-or-skip!
   "Step 4: idempotency guard + write. When `before == replacement`,
    skip the write and return `:already-applied` so the caller can
    exclude the no-op from the commit path. Otherwise rewrite the
@@ -159,9 +159,10 @@
                :before before
                :after  replacement}))))
 
-;; ── public entry ─────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 2
 
-(defn apply-single-line-replacement!
+;; ── public entry ─────────────────────────────────────────────────────
+(defn ^{:stratum 2} apply-single-line-replacement!
   "Replace line `line-number` (1-indexed, matching GitHub comment
    line semantics) in `worktree-path/relative-path` with
    `replacement`. Returns DAG result with `{:path :line :before :after}`
@@ -187,7 +188,9 @@
                (str "failed to apply fix to " relative-path ": " (.getMessage e))
                {:path relative-path :line line-number}))))
 
-(defn materialize-fix!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} materialize-fix!
   "Apply one planned `:to-apply` entry's suggested-fix to disk.
    Returns the DAG result from `apply-single-line-replacement!`
    decorated with the originating comment-id for traceability."

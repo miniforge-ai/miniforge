@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.parse-json-test
   "Coverage for `core/parse-json` (anomaly-returning) and its boundary
    escalation through `parse-spec-file`."
@@ -24,15 +23,15 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Anomaly-returning happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest parse-json-valid-content
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+(deftest ^{:stratum 0} parse-json-valid-content
   (testing "valid JSON parses to keywordized map"
     (is (= {:title "T"} (core/parse-json "{\"title\": \"T\"}")))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure path
-
-(deftest parse-json-malformed-returns-anomaly
+(deftest ^{:stratum 0} parse-json-malformed-returns-anomaly
   (testing "malformed JSON yields :invalid-input anomaly"
     (let [result (core/parse-json "{not json}")]
       (is (anomaly/anomaly? result))
@@ -40,8 +39,7 @@
       (is (= "Failed to parse JSON file" (:anomaly/message result))))))
 
 ;------------------------------------------------------------------------------ Boundary escalation
-
-(deftest parse-spec-file-escalates-malformed-json
+(deftest ^{:stratum 0} parse-spec-file-escalates-malformed-json
   (testing "malformed JSON surfaces as ex-info from parse-spec-file"
     (let [tmp (fs/create-temp-file {:suffix ".json"})]
       (try

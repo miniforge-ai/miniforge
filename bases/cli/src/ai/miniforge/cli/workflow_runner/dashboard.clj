@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.dashboard
   "Dashboard auto-discovery and status display.
 
@@ -35,9 +34,9 @@
    [ai.miniforge.cli.workflow-runner.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Auto-discovery
 
-(defn pid-alive?
+;; Auto-discovery
+(defn ^{:stratum 0} pid-alive?
   "Check if a process with the given PID is still running."
   [pid]
   (try
@@ -45,7 +44,9 @@
       (.isPresent (java.lang.ProcessHandle/of (long pid))))
     (catch Exception _ false)))
 
-(defn discover-dashboard-url
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} discover-dashboard-url
   "Auto-discover running dashboard from the app-configured dashboard port file.
    Returns dashboard URL string or nil. Verifies the dashboard PID is alive
    and cleans up stale discovery files from crashed processes."
@@ -62,10 +63,10 @@
             (do (.delete discovery-file) nil)))))
     (catch Exception _ nil)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Status display
+;------------------------------------------------------------------------------ Layer 2
 
-(defn print-dashboard-status!
+;; Status display
+(defn ^{:stratum 2} print-dashboard-status!
   "Print dashboard URL (if discovered) and events directory path."
   [quiet]
   (when-not quiet

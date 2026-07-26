@@ -10,30 +10,31 @@
    producers to annotate entities with ad-hoc metadata without
    breaking validation.
 
-   Layer 0: Enums and registry extensions
-   Layer 1: Composite schemas"
+   Layer 0: Enums for supervisory entities
+   Layer 1: supervisory-registry (registry extensions)
+   Layer 2: Composite schemas (WorkflowRun, PolicyEvaluation, PolicyViolation,
+            AttentionItem, Waiver, EvidenceBundle)"
   (:require
    [ai.miniforge.schema.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums for supervisory entities
 
-(def eval-results
+;; Enums for supervisory entities
+(def ^{:stratum 0} eval-results
   [:pass :fail :warn :skip])
 
-(def violation-categories
+(def ^{:stratum 0} violation-categories
   [:style :security :testing :documentation :architecture :process :budget])
 
-(def violation-severities
+(def ^{:stratum 0} violation-severities
   [:info :low :medium :high :critical])
 
-(def attention-source-types
+(def ^{:stratum 0} attention-source-types
   [:workflow :policy :agent :system :human])
 
-;------------------------------------------------------------------------------ Layer 0a
-;; Registry extensions for supervisory types
+;------------------------------------------------------------------------------ Layer 1
 
-(def supervisory-registry
+(def ^{:stratum 1} supervisory-registry
   "Malli registry extending core registry with supervisory types."
   (merge
    core/registry
@@ -57,10 +58,10 @@
     ;; Evidence types
     :evidence/id       :id/uuid}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Composite schemas — all open maps (no {:closed true})
+;------------------------------------------------------------------------------ Layer 2
 
-(def WorkflowRun
+;; Composite schemas — all open maps (no {:closed true})
+(def ^{:stratum 2} WorkflowRun
   "Schema for a supervisory workflow run.
    Tracks the lifecycle of a single workflow execution.
    Open map — extra keys pass through."
@@ -71,7 +72,7 @@
    [:workflow/phase :workflow/phase]
    [:workflow/started-at :common/timestamp]])
 
-(def PolicyEvaluation
+(def ^{:stratum 2} PolicyEvaluation
   "Schema for a policy evaluation result.
    Records the outcome of evaluating policies against a PR.
    Open map — extra keys pass through."
@@ -82,7 +83,7 @@
    [:eval/rules-applied [:vector keyword?]]
    [:eval/evaluated-at :common/timestamp]])
 
-(def PolicyViolation
+(def ^{:stratum 2} PolicyViolation
   "Schema for a policy violation.
    Identifies a specific rule violation within an evaluation.
    Open map — extra keys pass through."
@@ -93,7 +94,7 @@
    [:violation/category :violation/category]
    [:violation/severity :violation/severity]])
 
-(def AttentionItem
+(def ^{:stratum 2} AttentionItem
   "Schema for an attention item requiring human review.
    Surfaces items needing oversight from any source in the system.
    Open map — extra keys pass through."
@@ -104,7 +105,7 @@
    [:attention/source-type :attention/source-type]
    [:attention/source-id [:string {:min 1}]]])
 
-(def Waiver
+(def ^{:stratum 2} Waiver
   "Schema for a policy waiver.
    Records a human decision to waive a policy violation.
    Open map — extra keys pass through."
@@ -115,7 +116,7 @@
    [:waiver/reason [:string {:min 1}]]
    [:waiver/created-at :common/timestamp]])
 
-(def EvidenceBundle
+(def ^{:stratum 2} EvidenceBundle
   "Schema for an evidence bundle.
    Collects evidence entries produced during a workflow.
    Open map — extra keys pass through."

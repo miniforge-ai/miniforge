@@ -1,7 +1,6 @@
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;;
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.control-plane.orchestrator-supplemental-test
   "Supplemental tests for the orchestrator.
    Covers property-based tests, concurrency edge cases,
@@ -14,30 +13,14 @@
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
-(def ^:private default-wait-timeout-ms 2000)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- wait-until-count
-  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
-   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
-  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
-  ([items-atom n timeout-ms]
-   (let [done (promise)
-         k    (gensym "wait-count-")]
-     (when (>= (count @items-atom) n)
-       (deliver done :immediate))
-     (add-watch items-atom k
-                (fn [_ _ _ new-val]
-                  (when (>= (count new-val) n)
-                    (deliver done :reached))))
-     (let [result (deref done timeout-ms ::timeout)]
-       (remove-watch items-atom k)
-       (not= result ::timeout)))))
+(def ^{:stratum 0} ^:private default-wait-timeout-ms 2000)
 
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
 ;; ---------------------------------------------------------------------------
-
-(defn make-mock-adapter
+(defn ^{:stratum 0} make-mock-adapter
   "Create a mock adapter implementing ControlPlaneAdapter."
   [overrides]
   (let [id (get overrides :adapter-id :test-adapter)]
@@ -60,14 +43,14 @@
           (f agent-record command)
           {:success? true})))))
 
-(defn base-opts
+(defn ^{:stratum 0} base-opts
   [& [overrides]]
   (merge {:adapters []
           :discovery-interval-ms 50
           :poll-interval-ms 50}
          overrides))
 
-(defn register-running-agent!
+(defn ^{:stratum 0} register-running-agent!
   "Helper: register an agent and transition to :running."
   [reg agent-info]
   (let [rec (registry/register-agent! reg agent-info)]
@@ -75,10 +58,47 @@
     (registry/get-agent reg (:agent/id rec))))
 
 ;; ---------------------------------------------------------------------------
+;; create-orchestrator: interval values
+;; ---------------------------------------------------------------------------
+(deftest ^{:stratum 0} create-orchestrator-custom-intervals-test
+  (testing "custom interval values are stored correctly"
+    (let [orch (sut/create-orchestrator
+                {:discovery-interval-ms 60000
+                 :poll-interval-ms 5000})]
+      (is (= 60000 (:discovery-interval-ms orch)))
+      (is (= 5000 (:poll-interval-ms orch))))))
+
+(deftest ^{:stratum 0} create-orchestrator-zero-intervals-test
+  (testing "zero intervals are accepted (caller's responsibility)"
+    (let [orch (sut/create-orchestrator
+                {:discovery-interval-ms 0
+                 :poll-interval-ms 0})]
+      (is (= 0 (:discovery-interval-ms orch)))
+      (is (= 0 (:poll-interval-ms orch))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} wait-until-count
+  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
+   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
+  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
+  ([items-atom n timeout-ms]
+   (let [done (promise)
+         k    (gensym "wait-count-")]
+     (when (>= (count @items-atom) n)
+       (deliver done :immediate))
+     (add-watch items-atom k
+                (fn [_ _ _ new-val]
+                  (when (>= (count new-val) n)
+                    (deliver done :reached))))
+     (let [result (deref done timeout-ms ::timeout)]
+       (remove-watch items-atom k)
+       (not= result ::timeout)))))
+
+;; ---------------------------------------------------------------------------
 ;; Discovery: adapter returns nil instead of empty seq
 ;; ---------------------------------------------------------------------------
-
-(deftest run-discovery-pass-adapter-returns-nil-test
+(deftest ^{:stratum 1} run-discovery-pass-adapter-returns-nil-test
   (testing "discovery pass handles adapter returning nil (not empty seq)"
     (let [reg (registry/create-registry)
           adapter (make-mock-adapter
@@ -92,8 +112,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Discovery: duplicate external-ids across adapters
 ;; ---------------------------------------------------------------------------
-
-(deftest run-discovery-pass-duplicate-ext-id-across-adapters-test
+(deftest ^{:stratum 1} run-discovery-pass-duplicate-ext-id-across-adapters-test
   (testing "same external-id from two adapters only registers once"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -120,8 +139,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll: adapter returns status-update without :agent/status key
 ;; ---------------------------------------------------------------------------
-
-(deftest run-poll-pass-status-update-missing-status-key-test
+(deftest ^{:stratum 1} run-poll-pass-status-update-missing-status-key-test
   (testing "poll pass handles status update map without :agent/status"
     (let [reg (registry/create-registry)
           _ (registry/register-agent! reg
@@ -139,37 +157,9 @@
           "should not throw when status key is missing"))))
 
 ;; ---------------------------------------------------------------------------
-;; Poll: status changes emit correct old/new values
-;; ---------------------------------------------------------------------------
-
-(deftest run-poll-pass-status-change-event-values-test
-  (testing "poll emits state-changed with correct old and new status values"
-    (let [reg (registry/create-registry)
-          es (stream/create-event-stream {:sinks []})
-          published (atom [])
-          _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          _agent-rec (registry/register-agent! reg
-                      {:agent/external-id "ext-change"
-                       :agent/name "Change Agent"
-                       :agent/vendor :test-adapter})
-          ;; Agent starts as :unknown (default), poll returns :running
-          adapter (make-mock-adapter
-                   {:poll-agent-status
-                    (fn [_] {:status :running})})
-          orch (sut/create-orchestrator
-                (base-opts {:registry reg
-                            :adapters [adapter]
-                            :event-stream es}))]
-      (#'sut/run-poll-pass orch)
-      ;; Verify at least one event was published with state change
-      (is (wait-until-count published 1)
-          "should emit event for status change"))))
-
-;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: adapter throws during delivery
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-adapter-throws-test
+(deftest ^{:stratum 1} resolve-and-deliver-adapter-throws-test
   (testing "resolve-and-deliver! handles adapter throwing during delivery"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -196,8 +186,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: already-resolved decision
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-already-resolved-test
+(deftest ^{:stratum 1} resolve-and-deliver-already-resolved-test
   (testing "resolve-and-deliver! on already-resolved decision returns nil"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -226,8 +215,7 @@
 ;; ---------------------------------------------------------------------------
 ;; submit-decision-from-agent!: no opts provided (varargs edge case)
 ;; ---------------------------------------------------------------------------
-
-(deftest submit-decision-no-opts-test
+(deftest ^{:stratum 1} submit-decision-no-opts-test
   (testing "submit-decision-from-agent! works with only required args (no opts)"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -244,36 +232,9 @@
       (is (= "Simple question" (:decision/summary decision))))))
 
 ;; ---------------------------------------------------------------------------
-;; submit-decision-from-agent!: with event stream, event has correct fields
-;; ---------------------------------------------------------------------------
-
-(deftest submit-decision-event-fields-test
-  (testing "decision-created event contains agent-id and summary"
-    (let [reg (registry/create-registry)
-          dm (dq/create-decision-manager)
-          es (stream/create-event-stream {:sinks []})
-          published (atom [])
-          _ (stream/subscribe! es :test-sub #(swap! published conj %))
-          agent-rec (register-running-agent! reg
-                     {:agent/external-id "ext-evfield"
-                      :agent/name "EvField Agent"
-                      :agent/vendor :test-adapter})
-          orch (sut/create-orchestrator
-                (base-opts {:registry reg
-                            :decision-manager dm
-                            :event-stream es}))
-          decision (sut/submit-decision-from-agent!
-                    orch (:agent/id agent-rec) "Event field test")]
-      (is (wait-until-count published 1)
-          "should have published decision-created event")
-      ;; Verify the returned decision is well-formed
-      (is (= (:agent/id agent-rec) (:decision/agent-id decision))))))
-
-;; ---------------------------------------------------------------------------
 ;; Concurrent discovery passes don't duplicate registrations
 ;; ---------------------------------------------------------------------------
-
-(deftest concurrent-discovery-no-duplicates-test
+(deftest ^{:stratum 1} concurrent-discovery-no-duplicates-test
   (testing "concurrent discovery passes don't create duplicate agent registrations"
     (let [reg (registry/create-registry)
           call-count (atom 0)
@@ -301,8 +262,7 @@
 ;; ---------------------------------------------------------------------------
 ;; start!/stop! with active discovery finding agents
 ;; ---------------------------------------------------------------------------
-
-(deftest start-stop-rapid-cycling-test
+(deftest ^{:stratum 1} start-stop-rapid-cycling-test
   (testing "rapid start/stop cycling doesn't leave orphaned threads"
     (let [adapter (make-mock-adapter {})
           orch (sut/create-orchestrator
@@ -321,8 +281,7 @@
 ;; ---------------------------------------------------------------------------
 ;; start! sets up watchdog correctly
 ;; ---------------------------------------------------------------------------
-
-(deftest start-watchdog-uses-poll-interval-test
+(deftest ^{:stratum 1} start-watchdog-uses-poll-interval-test
   (testing "start! creates watchdog that uses poll-interval-ms"
     (let [orch (sut/create-orchestrator
                 (base-opts {:poll-interval-ms 100}))
@@ -336,8 +295,7 @@
 ;; ---------------------------------------------------------------------------
 ;; stop! cancels all futures
 ;; ---------------------------------------------------------------------------
-
-(deftest stop-cancels-futures-test
+(deftest ^{:stratum 1} stop-cancels-futures-test
   (testing "stop! cancels futures and clears them"
     (let [adapter (make-mock-adapter {})
           orch (sut/create-orchestrator
@@ -360,8 +318,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver! transitions agent back to running
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-agent-transitions-blocked-to-running-test
+(deftest ^{:stratum 1} resolve-and-deliver-agent-transitions-blocked-to-running-test
   (testing "agent goes :running -> :blocked (submit) -> :running (resolve)"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -388,8 +345,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver! with comment=nil
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-nil-comment-test
+(deftest ^{:stratum 1} resolve-and-deliver-nil-comment-test
   (testing "resolve-and-deliver! with explicit nil comment"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -414,8 +370,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Discovery: agent-info with extra metadata fields
 ;; ---------------------------------------------------------------------------
-
-(deftest run-discovery-pass-agent-with-capabilities-and-metadata-test
+(deftest ^{:stratum 1} run-discovery-pass-agent-with-capabilities-and-metadata-test
   (testing "discovery pass handles agents with rich metadata"
     (let [reg (registry/create-registry)
           discovered (atom [])
@@ -439,8 +394,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: adapter returns status for already-transitioning agent
 ;; ---------------------------------------------------------------------------
-
-(deftest run-poll-pass-polls-blocked-agents-test
+(deftest ^{:stratum 1} run-poll-pass-polls-blocked-agents-test
   (testing "poll pass does poll agents with :blocked status (not terminal)"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -460,7 +414,7 @@
       (is (= 1 @poll-count)
           "should poll :blocked agents since they are not terminal"))))
 
-(deftest run-poll-pass-polls-idle-agents-test
+(deftest ^{:stratum 1} run-poll-pass-polls-idle-agents-test
   (testing "poll pass polls agents with :idle status"
     (let [reg (registry/create-registry)
           poll-count (atom 0)
@@ -483,8 +437,7 @@
 ;; ---------------------------------------------------------------------------
 ;; submit-decision-from-agent!: returns decision with correct agent-id
 ;; ---------------------------------------------------------------------------
-
-(deftest submit-decision-decision-stored-in-manager-test
+(deftest ^{:stratum 1} submit-decision-decision-stored-in-manager-test
   (testing "submitted decision is retrievable from the decision manager"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -504,8 +457,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: decision resolved data matches
 ;; ---------------------------------------------------------------------------
-
-(deftest resolve-and-deliver-passes-resolved-decision-to-adapter-test
+(deftest ^{:stratum 1} resolve-and-deliver-passes-resolved-decision-to-adapter-test
   (testing "adapter receives the resolved decision with resolution"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -532,30 +484,9 @@
       (is (= "Ship it" (:decision/comment @delivered-data))))))
 
 ;; ---------------------------------------------------------------------------
-;; create-orchestrator: interval values
-;; ---------------------------------------------------------------------------
-
-(deftest create-orchestrator-custom-intervals-test
-  (testing "custom interval values are stored correctly"
-    (let [orch (sut/create-orchestrator
-                {:discovery-interval-ms 60000
-                 :poll-interval-ms 5000})]
-      (is (= 60000 (:discovery-interval-ms orch)))
-      (is (= 5000 (:poll-interval-ms orch))))))
-
-(deftest create-orchestrator-zero-intervals-test
-  (testing "zero intervals are accepted (caller's responsibility)"
-    (let [orch (sut/create-orchestrator
-                {:discovery-interval-ms 0
-                 :poll-interval-ms 0})]
-      (is (= 0 (:discovery-interval-ms orch)))
-      (is (= 0 (:poll-interval-ms orch))))))
-
-;; ---------------------------------------------------------------------------
 ;; Integration: multiple agents, mixed statuses
 ;; ---------------------------------------------------------------------------
-
-(deftest poll-pass-mixed-statuses-test
+(deftest ^{:stratum 1} poll-pass-mixed-statuses-test
   (testing "poll correctly handles mix of terminal and non-terminal agents"
     (let [reg (registry/create-registry)
           poll-log (atom [])
@@ -595,8 +526,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Integration: decision lifecycle with multiple agents
 ;; ---------------------------------------------------------------------------
-
-(deftest multiple-agents-independent-decisions-test
+(deftest ^{:stratum 1} multiple-agents-independent-decisions-test
   (testing "decisions for different agents are independent"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -629,3 +559,56 @@
       ;; Resolve d2
       (sut/resolve-and-deliver! orch (:decision/id d2) "no")
       (is (= :running (:agent/status (registry/get-agent reg (:agent/id a2))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ---------------------------------------------------------------------------
+;; Poll: status changes emit correct old/new values
+;; ---------------------------------------------------------------------------
+(deftest ^{:stratum 2} run-poll-pass-status-change-event-values-test
+  (testing "poll emits state-changed with correct old and new status values"
+    (let [reg (registry/create-registry)
+          es (stream/create-event-stream {:sinks []})
+          published (atom [])
+          _ (stream/subscribe! es :test-sub #(swap! published conj %))
+          _agent-rec (registry/register-agent! reg
+                      {:agent/external-id "ext-change"
+                       :agent/name "Change Agent"
+                       :agent/vendor :test-adapter})
+          ;; Agent starts as :unknown (default), poll returns :running
+          adapter (make-mock-adapter
+                   {:poll-agent-status
+                    (fn [_] {:status :running})})
+          orch (sut/create-orchestrator
+                (base-opts {:registry reg
+                            :adapters [adapter]
+                            :event-stream es}))]
+      (#'sut/run-poll-pass orch)
+      ;; Verify at least one event was published with state change
+      (is (wait-until-count published 1)
+          "should emit event for status change"))))
+
+;; ---------------------------------------------------------------------------
+;; submit-decision-from-agent!: with event stream, event has correct fields
+;; ---------------------------------------------------------------------------
+(deftest ^{:stratum 2} submit-decision-event-fields-test
+  (testing "decision-created event contains agent-id and summary"
+    (let [reg (registry/create-registry)
+          dm (dq/create-decision-manager)
+          es (stream/create-event-stream {:sinks []})
+          published (atom [])
+          _ (stream/subscribe! es :test-sub #(swap! published conj %))
+          agent-rec (register-running-agent! reg
+                     {:agent/external-id "ext-evfield"
+                      :agent/name "EvField Agent"
+                      :agent/vendor :test-adapter})
+          orch (sut/create-orchestrator
+                (base-opts {:registry reg
+                            :decision-manager dm
+                            :event-stream es}))
+          decision (sut/submit-decision-from-agent!
+                    orch (:agent/id agent-rec) "Event field test")]
+      (is (wait-until-count published 1)
+          "should have published decision-created event")
+      ;; Verify the returned decision is well-formed
+      (is (= (:agent/id agent-rec) (:decision/agent-id decision))))))

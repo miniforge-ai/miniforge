@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.mapping-test
   "Unit tests for mapping artifacts — schemas, loading, resolution, and projection.
 
@@ -28,13 +27,41 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.mapping :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Test fixtures
 ;; ============================================================================
+(def ^{:stratum 0} now (java.time.Instant/now))
 
-(def now (java.time.Instant/now))
+(def ^{:stratum 0} test-mapping
+  {:mapping/id      :test-to-vanta/core
+   :mapping/version "1.0.0"
+   :mapping/source  {:mapping/system-kind :pack
+                     :mapping/system-id   :test/core
+                     :mapping/system-version "1.0.0"}
+   :mapping/target  {:mapping/system-kind :framework
+                     :mapping/system-id   :vanta/soc2}
+   :mapping/entries [{:source/rule    :test/copyright
+                      :target/control "CC6.2"
+                      :mapping/type   :exact}
+                     {:source/category :operations
+                      :target/control  "CC7.1"
+                      :mapping/type    :broad
+                      :mapping/notes   "Broad category coverage"}
+                     {:source/rule    :test/nonexistent
+                      :target/control "CC8.1"
+                      :mapping/type   :partial}
+                     {:target/control "CC9.1"
+                      :mapping/type   :none
+                      :mapping/notes  "No mapping exists"}]
+   :mapping/authorship {:publisher   :test
+                        :confidence  :high
+                        :validated-at "2026-04-01"}})
 
-(def test-pack
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} test-pack
   {:pack/id          "test-pack"
    :pack/name        "Test Pack"
    :pack/version     "1.0.0"
@@ -60,36 +87,10 @@
    :pack/created-at  now
    :pack/updated-at  now})
 
-(def test-mapping
-  {:mapping/id      :test-to-vanta/core
-   :mapping/version "1.0.0"
-   :mapping/source  {:mapping/system-kind :pack
-                     :mapping/system-id   :test/core
-                     :mapping/system-version "1.0.0"}
-   :mapping/target  {:mapping/system-kind :framework
-                     :mapping/system-id   :vanta/soc2}
-   :mapping/entries [{:source/rule    :test/copyright
-                      :target/control "CC6.2"
-                      :mapping/type   :exact}
-                     {:source/category :operations
-                      :target/control  "CC7.1"
-                      :mapping/type    :broad
-                      :mapping/notes   "Broad category coverage"}
-                     {:source/rule    :test/nonexistent
-                      :target/control "CC8.1"
-                      :mapping/type   :partial}
-                     {:target/control "CC9.1"
-                      :mapping/type   :none
-                      :mapping/notes  "No mapping exists"}]
-   :mapping/authorship {:publisher   :test
-                        :confidence  :high
-                        :validated-at "2026-04-01"}})
-
 ;; ============================================================================
 ;; Schema validation tests
 ;; ============================================================================
-
-(deftest valid-mapping-test
+(deftest ^{:stratum 1} valid-mapping-test
   (testing "well-formed mapping passes validation"
     (is (true? (sut/valid-mapping? test-mapping))))
 
@@ -108,7 +109,7 @@
                         [{:source/rule :test/foo
                           :mapping/type :invalid}]))))))
 
-(deftest mapping-entry-types-test
+(deftest ^{:stratum 1} mapping-entry-types-test
   (testing "all four mapping types are valid"
     (doseq [mt [:exact :broad :partial :none]]
       (is (true? (sut/valid-mapping?
@@ -117,7 +118,7 @@
                            :target/control "CC1.1"
                            :mapping/type mt}])))))))
 
-(deftest mapping-authorship-test
+(deftest ^{:stratum 1} mapping-authorship-test
   (testing "mapping without authorship is valid"
     (is (true? (sut/valid-mapping? (dissoc test-mapping :mapping/authorship)))))
 
@@ -126,11 +127,12 @@
       (is (true? (sut/valid-mapping?
                   (assoc-in test-mapping [:mapping/authorship :confidence] c)))))))
 
+;------------------------------------------------------------------------------ Layer 2
+
 ;; ============================================================================
 ;; Resolution tests
 ;; ============================================================================
-
-(deftest resolve-mapping-test
+(deftest ^{:stratum 2} resolve-mapping-test
   (testing "matched rule entry has :matched? true"
     (let [resolved (sut/resolve-mapping test-mapping test-pack)
           entry    (first (filter #(= :test/copyright (:source/rule %)) resolved))]
@@ -155,8 +157,7 @@
 ;; ============================================================================
 ;; Report projection tests
 ;; ============================================================================
-
-(deftest project-report-test
+(deftest ^{:stratum 2} project-report-test
   (testing "summary counts matched and unmatched entries"
     (let [report (sut/project-report test-mapping test-pack)]
       (is (= 1 (get-in report [:summary :exact])))

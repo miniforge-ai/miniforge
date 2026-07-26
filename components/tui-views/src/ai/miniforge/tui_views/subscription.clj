@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.subscription
   "Event stream -> TUI message bridge.
 
@@ -27,37 +26,88 @@
    [ai.miniforge.tui-views.msg :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event -> TUI message translation
 
-(defn workflow-id
+;; Event -> TUI message translation
+(defn ^{:stratum 0} workflow-id
   [event]
   (or (:workflow/id event) (:workflow-id event)))
 
-(defn workflow-phase
+(defn ^{:stratum 0} workflow-phase
   [event]
   (or (:workflow/phase event) (:phase event)))
 
-(defn agent-id
+(defn ^{:stratum 0} agent-id
   [event]
   (or (:agent/id event) (:agent event)))
 
-(defn status-type
+(defn ^{:stratum 0} status-type
   [event]
   (or (:status/type event) (:status-type event)))
 
-(defn chunk-delta
+(defn ^{:stratum 0} chunk-delta
   [event]
   (or (:chunk/delta event) (:delta event)))
 
-(defn chunk-done?
+(defn ^{:stratum 0} chunk-done?
   [event]
   (boolean (or (:chunk/done? event) (:done? event))))
 
-(defn gate-id
+(defn ^{:stratum 0} gate-id
   [event]
   (or (:gate/id event) (:gate event)))
 
-(defn translate-event
+;; Throttled subscription
+(defn ^{:stratum 0} create-chunk-aggregator
+  "Create a throttled aggregator for agent/chunk events.
+   Accumulates deltas and flushes at configurable intervals."
+  [dispatch-fn flush-interval-ms]
+  (let [buffer (atom {})  ; {workflow-id {:delta str :agent kw}}
+        running? (atom true)
+        flush-fn (fn []
+                   (let [buf @buffer]
+                     (reset! buffer {})
+                     (doseq [[wf-id {:keys [delta agent]}] buf]
+                       (when (seq delta)
+                         (dispatch-fn (msg/agent-output wf-id agent delta false))))))
+        thread (Thread. (fn []
+                          (try
+                            (while @running?
+                              (Thread/sleep flush-interval-ms)
+                              (flush-fn))
+                            (catch InterruptedException _))))]
+    (.setDaemon thread true)
+    (.setName thread "tui-chunk-aggregator")
+    (.start thread)
+    {:buffer buffer
+     :running? running?
+     :thread thread
+     :stop! (fn []
+              (reset! running? false)
+              (.interrupt thread))}))
+
+(defn ^{:stratum 0} buffer-chunk!
+  "Buffer an agent chunk for throttled delivery."
+  [aggregator workflow-id agent-id delta]
+  (swap! (:buffer aggregator)
+         update workflow-id
+         (fn [existing]
+           {:delta (str (:delta existing) (or delta ""))
+            :agent agent-id})))
+
+;; Public subscription API
+(defn ^{:stratum 0} compute-staleness
+  "Pure staleness check: compare last-event timestamp against threshold.
+   Returns [status last-event-date] suitable for dispatch."
+  [last-event-ms-atom stale-after-ms]
+  (let [now     (System/currentTimeMillis)
+        last-ms (or @last-event-ms-atom now)
+        elapsed (- now last-ms)
+        status  (if (>= elapsed stale-after-ms) :stale :connected)]
+    [status (java.util.Date. last-ms)]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} translate-event
   "Translate a single event-stream event to a TUI message vector.
    Returns nil for events that should be ignored."
   [event]
@@ -196,60 +246,7 @@
     ;; Unknown event types are ignored
     nil))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Throttled subscription
-
-(defn create-chunk-aggregator
-  "Create a throttled aggregator for agent/chunk events.
-   Accumulates deltas and flushes at configurable intervals."
-  [dispatch-fn flush-interval-ms]
-  (let [buffer (atom {})  ; {workflow-id {:delta str :agent kw}}
-        running? (atom true)
-        flush-fn (fn []
-                   (let [buf @buffer]
-                     (reset! buffer {})
-                     (doseq [[wf-id {:keys [delta agent]}] buf]
-                       (when (seq delta)
-                         (dispatch-fn (msg/agent-output wf-id agent delta false))))))
-        thread (Thread. (fn []
-                          (try
-                            (while @running?
-                              (Thread/sleep flush-interval-ms)
-                              (flush-fn))
-                            (catch InterruptedException _))))]
-    (.setDaemon thread true)
-    (.setName thread "tui-chunk-aggregator")
-    (.start thread)
-    {:buffer buffer
-     :running? running?
-     :thread thread
-     :stop! (fn []
-              (reset! running? false)
-              (.interrupt thread))}))
-
-(defn buffer-chunk!
-  "Buffer an agent chunk for throttled delivery."
-  [aggregator workflow-id agent-id delta]
-  (swap! (:buffer aggregator)
-         update workflow-id
-         (fn [existing]
-           {:delta (str (:delta existing) (or delta ""))
-            :agent agent-id})))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Public subscription API
-
-(defn compute-staleness
-  "Pure staleness check: compare last-event timestamp against threshold.
-   Returns [status last-event-date] suitable for dispatch."
-  [last-event-ms-atom stale-after-ms]
-  (let [now     (System/currentTimeMillis)
-        last-ms (or @last-event-ms-atom now)
-        elapsed (- now last-ms)
-        status  (if (>= elapsed stale-after-ms) :stale :connected)]
-    [status (java.util.Date. last-ms)]))
-
-(defn create-staleness-checker
+(defn ^{:stratum 1} create-staleness-checker
   "Create a scheduled checker that periodically evaluates whether the event
    stream has gone quiet and dispatches :msg/subscription-status-changed.
 
@@ -270,7 +267,9 @@
     {:scheduler scheduler
      :stop!     (fn [] (.shutdownNow scheduler))}))
 
-(defn subscribe-to-stream!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} subscribe-to-stream!
   "Subscribe to an event stream, translating events into TUI messages.
 
    Arguments:

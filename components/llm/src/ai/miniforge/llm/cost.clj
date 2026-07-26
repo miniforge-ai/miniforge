@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.cost
   "Fallback USD cost estimation from token usage when the upstream
    CLI doesn't surface `total_cost_usd` in its streaming result.
@@ -34,21 +33,31 @@
    [clojure.edn :as edn]
    [clojure.java.io :as io]))
 
-;; Constants
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private cost-table-resource-path
+;; Constants
+(def ^{:stratum 0} ^:private cost-table-resource-path
   "Classpath path to the EDN pricing table. Single source of truth
    so callers can't drift on which file is canonical."
   "llm/cost-table.edn")
 
-(def ^:private tokens-per-million
+(def ^{:stratum 0} ^:private tokens-per-million
   "Per-1M-token denominator for the EDN pricing table. Defined as
    a named constant so the unit-of-pricing is readable inline at
    estimate-cost rather than appearing as a bare 1000000 in the
    arithmetic."
   1000000)
 
-(def ^:private cost-table
+(defn- ^{:stratum 0} usage-token-count
+  "Return a numeric usage token count, treating missing or malformed values
+   as zero so cost estimation remains numeric for upstream payloads."
+  [usage token-key]
+  (let [tokens (get usage token-key)]
+    (if (number? tokens) tokens 0)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private cost-table
   "Delay-loaded pricing table. Loaded once at namespace init via
    the resource path; defaults to an empty pricing map when the
    resource is missing so callers see $0.00 rather than throwing.
@@ -63,16 +72,10 @@
           {})
       (catch Exception _ {}))))
 
-(defn- usage-token-count
-  "Return a numeric usage token count, treating missing or malformed values
-   as zero so cost estimation remains numeric for upstream payloads."
-  [usage token-key]
-  (let [tokens (get usage token-key)]
-    (if (number? tokens) tokens 0)))
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Public API
-
-(defn pricing-for-model
+(defn ^{:stratum 2} pricing-for-model
   "Return `{:input-per-1m N :output-per-1m N}` for the given
    model-id string, or nil when the model isn't in the table.
    Callers fold the nil to a zero-cost estimate rather than
@@ -81,7 +84,9 @@
   (when (string? model-id)
     (get @cost-table model-id)))
 
-(defn estimate-cost
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} estimate-cost
   "Compute USD cost from a token-usage map and model-id.
 
    Inputs:

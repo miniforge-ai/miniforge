@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.builtin-detectors
   "Built-in :custom detectors, registered at namespace load. These exist so a
    rule's policy parameters stay DATA — read from the rule's
@@ -26,14 +25,34 @@
    [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Approved EC2 instance types
 
-(def ^:private default-approved-instance-families
+;; Approved EC2 instance types
+(def ^{:stratum 0} ^:private default-approved-instance-families
   "Fallback approved EC2 instance-type families, used only when a rule supplies
    no :approved-families in its :detector-config."
   ["t3" "t4g" "m5" "m6i" "c5" "c6i" "r5" "r6i"])
 
-(defn- approved-families
+(defn- ^{:stratum 0} instance-type-literals
+  "String literals assigned to instance_type in Terraform content, e.g.
+   `instance_type = \"t3.micro\"` -> \"t3.micro\". The capture is `*`, not `+`, so
+   an empty literal (`instance_type = \"\"`) is captured (and later flagged as a
+   non-family) rather than ignored. Variable references (`instance_type = var.x`)
+   carry no literal and are not evaluated here — the same limitation the prior
+   regex had."
+  [content]
+  (map second (re-seq #"instance_type\s*=\s*\"([^\"]*)\"" (str content))))
+
+(defn- ^{:stratum 0} approved?
+  "True when `literal` has a `family.size` shape whose family is approved. A
+   dotless/placeholder literal (\"t3\", \"\") has no family and is never approved
+   — matching the prior regex, which required a `family.` prefix."
+  [approved-set literal]
+  (boolean (when-let [[_ fam] (re-matches #"([^.]+)\..+" literal)]
+             (contains? approved-set fam))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} approved-families
   "The approved-family set for this rule. A configured `:approved-families` must
    be a sequential collection of strings; anything else is a misconfigured pack
    and throws (surfaced as a :custom-error by `run-resolved-custom`) rather than
@@ -45,25 +64,9 @@
                       {:approved-families configured})))
     (set (or configured default-approved-instance-families))))
 
-(defn- instance-type-literals
-  "String literals assigned to instance_type in Terraform content, e.g.
-   `instance_type = \"t3.micro\"` -> \"t3.micro\". The capture is `*`, not `+`, so
-   an empty literal (`instance_type = \"\"`) is captured (and later flagged as a
-   non-family) rather than ignored. Variable references (`instance_type = var.x`)
-   carry no literal and are not evaluated here — the same limitation the prior
-   regex had."
-  [content]
-  (map second (re-seq #"instance_type\s*=\s*\"([^\"]*)\"" (str content))))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- approved?
-  "True when `literal` has a `family.size` shape whose family is approved. A
-   dotless/placeholder literal (\"t3\", \"\") has no family and is never approved
-   — matching the prior regex, which required a `family.` prefix."
-  [approved-set literal]
-  (boolean (when-let [[_ fam] (re-matches #"([^.]+)\..+" literal)]
-             (contains? approved-set fam))))
-
-(defn check-approved-instance-types
+(defn ^{:stratum 2} check-approved-instance-types
   "Flag EC2 `instance_type` literals whose family is not approved. The approved
    families come from the rule's `:detector-config :approved-families` (data),
    falling back to `default-approved-instance-families`."
@@ -75,10 +78,10 @@
       {:matches  (vec offenders)
        :message  (get-in context [:policy-pack/rule :rule/enforcement :message])})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Registration (load-time side effect — see ns docstring)
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- register!
+;; Registration (load-time side effect — see ns docstring)
+(defn- ^{:stratum 3} register!
   []
   (detection/register-custom-fn!
    'ai.miniforge.policy-pack.builtin-detectors/check-approved-instance-types

@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.lifecycle-test
   "Tests for manager, train create, add/remove/link PR."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.interface :as train]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Manager creation tests
 ;; ============================================================================
-
-(deftest create-manager-test
+(deftest ^{:stratum 0} create-manager-test
   (testing "create-manager returns a manager"
     (let [mgr (train/create-manager)]
       (is (some? mgr))
@@ -35,8 +35,7 @@
 ;; ============================================================================
 ;; Train lifecycle tests
 ;; ============================================================================
-
-(deftest create-train-test
+(deftest ^{:stratum 0} create-train-test
   (testing "create-train returns a train-id"
     (let [mgr (train/create-manager)
           dag-id (random-uuid)
@@ -52,7 +51,7 @@
           (is (= :drafting (:train/status t)))
           (is (empty? (:train/prs t))))))))
 
-(deftest add-pr-test
+(deftest ^{:stratum 0} add-pr-test
   (testing "add-pr adds a PR to the train"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)
@@ -80,7 +79,7 @@
             orders (map :pr/merge-order (:train/prs t))]
         (is (= [1 2 3] orders))))))
 
-(deftest remove-pr-test
+(deftest ^{:stratum 0} remove-pr-test
   (testing "remove-pr removes a PR and reorders"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -94,7 +93,7 @@
         (is (= [1 3] remaining))
         (is (= [1 2] orders))))))
 
-(deftest link-prs-test
+(deftest ^{:stratum 0} link-prs-test
   (testing "link-prs computes dependencies"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]

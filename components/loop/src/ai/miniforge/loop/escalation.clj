@@ -15,23 +15,29 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.escalation
   "Human escalation for retry budget exhaustion.
    Prompts user for hints when agent is stuck.
-   
-   Layer 0: Pure functions for prompt formatting
-   Layer 1: User interaction functions
-   Layer 2: Escalation integration with inner loop"
+
+   Layer 0: format-error-entry, read-user-input, and the
+     checkpoint/episode helpers (create-escalation-checkpoint,
+     result->response, escalated-result, abort-escalation) — no
+     same-file dependents among them
+   Layer 1: format-error-context (calls format-error-entry), prompt-user
+     (calls read-user-input), handle-escalation (calls the Layer 0
+     checkpoint/episode helpers)
+   Layer 2: format-escalation-prompt (calls format-error-context)
+   Layer 3: escalate-to-user (calls prompt-user and
+     format-escalation-prompt)"
   (:require
    [clojure.string :as str]
    [ai.miniforge.decision.interface :as decision]
    [ai.miniforge.loop.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Prompt formatting (pure functions)
 
-(defn format-error-entry
+;; Prompt formatting (pure functions)
+(defn ^{:stratum 0} format-error-entry
   "Format a single error entry for display.
    Reads :anomaly/message and the anomaly classification when available,
    falls back to :message and :code for legacy shapes.
@@ -53,7 +59,47 @@
     (str (messages/t :escalation/error-line-prefix {:n (inc idx)}) msg
          (when code (messages/t :escalation/error-code-tag {:code code})))))
 
-(defn format-error-context
+;; User interaction
+(defn ^{:stratum 0} read-user-input
+  "Read a line of input from user. Can be mocked in tests."
+  []
+  (read-line))
+
+;; Inner loop integration
+(defn ^{:stratum 0} create-escalation-checkpoint
+  "Create a canonical checkpoint for an inner-loop escalation."
+  [loop-state & [opts]]
+  (decision/create-loop-escalation-checkpoint loop-state (or opts {})))
+
+(defn- ^{:stratum 0} result->response
+  [result]
+  (case (:action result)
+    :continue (decision/decision-response :input (:hints result))
+    :abort {:type :reject
+            :value :abort
+            :rationale (:reason result)
+            :authority-role (if (:reason result) :system :human)}
+    {:type :defer
+     :authority-role :human}))
+
+(defn- ^{:stratum 0} escalated-result
+  [result checkpoint episode]
+  (assoc result
+         :escalated true
+         :decision/checkpoint checkpoint
+         :decision/episode episode))
+
+(defn- ^{:stratum 0} abort-escalation
+  [reason checkpoint episode]
+  {:escalated true
+   :action :abort
+   :reason reason
+   :decision/checkpoint checkpoint
+   :decision/episode episode})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-error-context
   "Format error context for user display.
    
    Arguments:
@@ -77,40 +123,7 @@
                 (when (> (count (str content)) 200) (messages/t :escalation/truncation-ellipsis))))
          (str "  " (messages/t :escalation/no-content)))))
 
-(defn format-escalation-prompt
-  "Format the escalation prompt for user.
-   
-   Arguments:
-   - loop-state - Current inner loop state
-   
-   Returns formatted prompt string."
-  [loop-state]
-  (let [errors (:loop/errors loop-state)
-        iteration (:loop/iteration loop-state)
-        artifact (:loop/artifact loop-state)
-        reason (get-in loop-state [:loop/termination :reason])]
-    (str "\n"
-         (messages/t :escalation/banner-separator) "\n"
-         (messages/t :escalation/banner-title) "\n"
-         (messages/t :escalation/banner-separator) "\n\n"
-         (format-error-context errors iteration artifact)
-         "\n\n"
-         (messages/t :escalation/termination-reason {:reason (name reason)}) "\n"
-         "\n" (messages/t :escalation/options-header) "\n"
-         (messages/t :escalation/option-hints) "\n"
-         (messages/t :escalation/option-abort) "\n"
-         "\n"
-         (messages/t :escalation/input-prompt))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; User interaction
-
-(defn read-user-input
-  "Read a line of input from user. Can be mocked in tests."
-  []
-  (read-line))
-
-(defn prompt-user
+(defn ^{:stratum 1} prompt-user
   "Prompt user for input via stdin.
    
    Arguments:
@@ -130,67 +143,7 @@
       {:type :hints
        :content input})))
 
-(defn escalate-to-user
-  "Escalate to user for guidance.
-   
-   Arguments:
-   - loop-state - Current inner loop state
-   - & opts - Keyword options:
-     :prompt-fn - Custom prompt function (default: prompt-user)
-   
-   Returns:
-   {:action :continue :hints string} or
-   {:action :abort}"
-  [loop-state & {:keys [prompt-fn]}]
-  (let [actual-prompt-fn (or prompt-fn prompt-user)
-        prompt-text (format-escalation-prompt loop-state)
-        user-response (actual-prompt-fn prompt-text)]
-    (case (:type user-response)
-      :abort
-      {:action :abort}
-      
-      :hints
-      {:action :continue
-       :hints (:content user-response)}
-      
-      ;; Default to abort if unknown response
-      {:action :abort})))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Inner loop integration
-
-(defn create-escalation-checkpoint
-  "Create a canonical checkpoint for an inner-loop escalation."
-  [loop-state & [opts]]
-  (decision/create-loop-escalation-checkpoint loop-state (or opts {})))
-
-(defn- result->response
-  [result]
-  (case (:action result)
-    :continue (decision/decision-response :input (:hints result))
-    :abort {:type :reject
-            :value :abort
-            :rationale (:reason result)
-            :authority-role (if (:reason result) :system :human)}
-    {:type :defer
-     :authority-role :human}))
-
-(defn- escalated-result
-  [result checkpoint episode]
-  (assoc result
-         :escalated true
-         :decision/checkpoint checkpoint
-         :decision/episode episode))
-
-(defn- abort-escalation
-  [reason checkpoint episode]
-  {:escalated true
-   :action :abort
-   :reason reason
-   :decision/checkpoint checkpoint
-   :decision/episode episode})
-
-(defn handle-escalation
+(defn ^{:stratum 1} handle-escalation
   "Handle escalation in inner loop.
    Called when loop reaches :escalated state.
    
@@ -222,6 +175,61 @@
         (abort-escalation no-fn-msg
                           resolved-checkpoint
                           updated-episode)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} format-escalation-prompt
+  "Format the escalation prompt for user.
+   
+   Arguments:
+   - loop-state - Current inner loop state
+   
+   Returns formatted prompt string."
+  [loop-state]
+  (let [errors (:loop/errors loop-state)
+        iteration (:loop/iteration loop-state)
+        artifact (:loop/artifact loop-state)
+        reason (get-in loop-state [:loop/termination :reason])]
+    (str "\n"
+         (messages/t :escalation/banner-separator) "\n"
+         (messages/t :escalation/banner-title) "\n"
+         (messages/t :escalation/banner-separator) "\n\n"
+         (format-error-context errors iteration artifact)
+         "\n\n"
+         (messages/t :escalation/termination-reason {:reason (name reason)}) "\n"
+         "\n" (messages/t :escalation/options-header) "\n"
+         (messages/t :escalation/option-hints) "\n"
+         (messages/t :escalation/option-abort) "\n"
+         "\n"
+         (messages/t :escalation/input-prompt))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} escalate-to-user
+  "Escalate to user for guidance.
+   
+   Arguments:
+   - loop-state - Current inner loop state
+   - & opts - Keyword options:
+     :prompt-fn - Custom prompt function (default: prompt-user)
+   
+   Returns:
+   {:action :continue :hints string} or
+   {:action :abort}"
+  [loop-state & {:keys [prompt-fn]}]
+  (let [actual-prompt-fn (or prompt-fn prompt-user)
+        prompt-text (format-escalation-prompt loop-state)
+        user-response (actual-prompt-fn prompt-text)]
+    (case (:type user-response)
+      :abort
+      {:action :abort}
+      
+      :hints
+      {:action :continue
+       :hints (:content user-response)}
+      
+      ;; Default to abort if unknown response
+      {:action :abort})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

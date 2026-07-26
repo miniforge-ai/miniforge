@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.review-scheduler-test
   "Tests for the review-scheduler — marker detection, predicate,
    partition. Excludes the bracketing `with-pr-worktree` (covered
@@ -28,56 +27,37 @@
             [ai.miniforge.pr-lifecycle.github :as github]
             [ai.miniforge.pr-lifecycle.review-scheduler :as sched]))
 
-;; ── helpers ──────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- capture-shell
+;; ── helpers ──────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} capture-shell
   [calls-atom result]
   (fn [opts & args]
     (swap! calls-atom conj {:opts opts :args (vec args)})
     result))
 
-(def ^:private sha-a "a000000000000000000000000000000000000001")
-(def ^:private sha-b "b000000000000000000000000000000000000002")
-(def ^:private sha-c "c000000000000000000000000000000000000003")
+(def ^{:stratum 0} ^:private sha-a "a000000000000000000000000000000000000001")
 
-(defn- review [sha author body]
+(def ^{:stratum 0} ^:private sha-b "b000000000000000000000000000000000000002")
+
+(def ^{:stratum 0} ^:private sha-c "c000000000000000000000000000000000000003")
+
+(defn- ^{:stratum 0} review [sha author body]
   {:id (rand-int 100000)
    :commit_id sha
    :user {:login author}
    :body body})
 
-(def ^:private mixed-reviews-json
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private mixed-reviews-json
   (json/generate-string
    [(review sha-a "miniforge-bot" (str "policy-review: 3 violations\n\n" github/review-marker))
     (review sha-b "human-reviewer" "looks good, ship it")
     (review sha-a "human-reviewer" "+1")
     (review sha-c "miniforge-bot" (str "policy-review: 0 violations\n\n" github/review-marker))]))
 
-;; ── existing-review-shas ─────────────────────────────────────────────
-
-(deftest existing-review-shas-filters-by-marker
-  (testing "only reviews carrying review-marker contribute SHAs"
-    (let [stub (capture-shell (atom [])
-                              {:exit 0 :out mixed-reviews-json :err ""})]
-      (with-redefs [process/shell stub]
-        (let [r (sched/existing-review-shas "/some/repo" 42)]
-          (is (dag/ok? r))
-          (is (= #{sha-a sha-c} (:data r))
-              "SHAs are union of all marker-bearing reviews; non-marker reviews ignored")))))
-  (testing "no reviews → empty set, still ok"
-    (let [stub (capture-shell (atom []) {:exit 0 :out "[]" :err ""})]
-      (with-redefs [process/shell stub]
-        (let [r (sched/existing-review-shas "/some/repo" 42)]
-          (is (dag/ok? r))
-          (is (= #{} (:data r)))))))
-  (testing "blank stdout → empty set, still ok (gh paginate edge)"
-    (let [stub (capture-shell (atom []) {:exit 0 :out "" :err ""})]
-      (with-redefs [process/shell stub]
-        (let [r (sched/existing-review-shas "/some/repo" 42)]
-          (is (dag/ok? r))
-          (is (= #{} (:data r))))))))
-
-(deftest existing-review-shas-handles-paginate-concat
+(deftest ^{:stratum 1} existing-review-shas-handles-paginate-concat
   (testing "gh --paginate emits multiple JSON arrays back-to-back; we concat them"
     (let [page1 [(review sha-a "x" (str "p1\n" github/review-marker))]
           page2 [(review sha-b "y" "no marker")
@@ -89,7 +69,7 @@
           (is (dag/ok? r))
           (is (= #{sha-a sha-c} (:data r))))))))
 
-(deftest existing-review-shas-shells-correct-endpoint
+(deftest ^{:stratum 1} existing-review-shas-shells-correct-endpoint
   (testing "shells out to `gh api repos/{owner}/{repo}/pulls/<n>/reviews --paginate` in worktree dir"
     (let [calls (atom [])
           stub  (capture-shell calls {:exit 0 :out "[]" :err ""})]
@@ -102,7 +82,7 @@
                (:args call)))
         (is (= "/some/repo" (str (get-in call [:opts :dir]))))))))
 
-(deftest existing-review-shas-gh-failure-bubbles-up
+(deftest ^{:stratum 1} existing-review-shas-gh-failure-bubbles-up
   (testing "non-zero gh exit → typed :gh-command-failed"
     (let [stub (capture-shell (atom [])
                               {:exit 1 :out "" :err "HTTP 401"})]
@@ -112,8 +92,7 @@
           (is (= :gh-command-failed (get-in r [:error :code]))))))))
 
 ;; ── predicates ───────────────────────────────────────────────────────
-
-(deftest pr-needs-review-honors-existing-shas
+(deftest ^{:stratum 1} pr-needs-review-honors-existing-shas
   (testing "true when pr/sha not in existing-shas"
     (is (true? (sched/pr-needs-review? {:pr/sha sha-a} #{sha-b sha-c})))
     (is (true? (sched/pr-needs-review? {:pr/sha sha-a} #{}))
@@ -129,8 +108,7 @@
     (is (false? (sched/pr-needs-review? {:pr/sha 42} #{})))))
 
 ;; ── with-pr-worktree cleanup invariants ──────────────────────────────
-
-(deftest with-pr-worktree-cleans-up-on-add-failure
+(deftest ^{:stratum 1} with-pr-worktree-cleans-up-on-add-failure
   (testing "when add-pr-worktree! fails, remove-pr-worktree! is still invoked"
     (let [calls (atom [])]
       (with-redefs [sched/fetch-pr-head!
@@ -155,7 +133,7 @@
           (is (not (some #{:unreached} (map identity []))) ; sanity placeholder
               ":unreached marker would only show up if f ran"))))))
 
-(deftest with-pr-worktree-runs-f-then-cleanup-on-success
+(deftest ^{:stratum 1} with-pr-worktree-runs-f-then-cleanup-on-success
   (testing "happy path: fetch ok, add ok, f runs, cleanup runs in finally"
     (let [calls (atom [])]
       (with-redefs [sched/fetch-pr-head!
@@ -186,7 +164,7 @@
                 "f received a worktree-path that includes the SHA")
             (is (= sha-a (last f-call)))))))))
 
-(deftest with-pr-worktree-cleans-up-on-f-exception
+(deftest ^{:stratum 1} with-pr-worktree-cleans-up-on-f-exception
   (testing "f exception still triggers cleanup, then rethrows"
     (let [calls (atom [])]
       (with-redefs [sched/fetch-pr-head! (fn [_ _] (dag/ok {:output ""}))
@@ -203,7 +181,7 @@
         (is (= [:add :remove] @calls)
             "remove ran in the finally even though f threw")))))
 
-(deftest with-pr-worktree-skips-on-fetch-failure
+(deftest ^{:stratum 1} with-pr-worktree-skips-on-fetch-failure
   (testing "fetch failure short-circuits — no add, no remove (nothing was created)"
     (let [calls (atom [])]
       (with-redefs [sched/fetch-pr-head!
@@ -219,7 +197,7 @@
           (is (= [:fetch] @calls)
               "fetch tried; add+remove not invoked (nothing was created)"))))))
 
-(deftest partition-needs-review-splits-prs
+(deftest ^{:stratum 1} partition-needs-review-splits-prs
   (testing "splits into :needs-review / :already-reviewed by PR-keyed map"
     (let [prs [{:pr/number 1 :pr/sha sha-a}
                {:pr/number 2 :pr/sha sha-b}
@@ -234,3 +212,28 @@
       (is (= #{2 3} (set (map :pr/number needs-review))))
       (is (= 1 (count already-reviewed)))
       (is (= [1] (mapv :pr/number already-reviewed))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ── existing-review-shas ─────────────────────────────────────────────
+(deftest ^{:stratum 2} existing-review-shas-filters-by-marker
+  (testing "only reviews carrying review-marker contribute SHAs"
+    (let [stub (capture-shell (atom [])
+                              {:exit 0 :out mixed-reviews-json :err ""})]
+      (with-redefs [process/shell stub]
+        (let [r (sched/existing-review-shas "/some/repo" 42)]
+          (is (dag/ok? r))
+          (is (= #{sha-a sha-c} (:data r))
+              "SHAs are union of all marker-bearing reviews; non-marker reviews ignored")))))
+  (testing "no reviews → empty set, still ok"
+    (let [stub (capture-shell (atom []) {:exit 0 :out "[]" :err ""})]
+      (with-redefs [process/shell stub]
+        (let [r (sched/existing-review-shas "/some/repo" 42)]
+          (is (dag/ok? r))
+          (is (= #{} (:data r)))))))
+  (testing "blank stdout → empty set, still ok (gh paginate edge)"
+    (let [stub (capture-shell (atom []) {:exit 0 :out "" :err ""})]
+      (with-redefs [process/shell stub]
+        (let [r (sched/existing-review-shas "/some/repo" 42)]
+          (is (dag/ok? r))
+          (is (= #{} (:data r))))))))

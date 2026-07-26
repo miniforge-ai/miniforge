@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.rules.pack-dependency-graph-test
   "Tests for pack dependency graph validation: no issues, circular, and missing deps."
   (:require
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ Test Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def valid-pack-a
+;------------------------------------------------------------------------------ Test Fixtures
+(def ^{:stratum 0} valid-pack-a
   "Simple pack with no dependencies."
   {:pack/id "pack-a"
    :pack/version "2026.01.25"
@@ -36,7 +36,7 @@
    :pack/created-at (java.time.Instant/now)
    :pack/updated-at (java.time.Instant/now)})
 
-(def valid-pack-b
+(def ^{:stratum 0} valid-pack-b
   "Pack that depends on pack-a."
   {:pack/id "pack-b"
    :pack/version "2026.01.25"
@@ -49,7 +49,7 @@
    :pack/created-at (java.time.Instant/now)
    :pack/updated-at (java.time.Instant/now)})
 
-(def valid-pack-c
+(def ^{:stratum 0} valid-pack-c
   "Pack that depends on pack-b (transitive to pack-a)."
   {:pack/id "pack-c"
    :pack/version "2026.01.25"
@@ -62,26 +62,8 @@
    :pack/created-at (java.time.Instant/now)
    :pack/updated-at (java.time.Instant/now)})
 
-;------------------------------------------------------------------------------ Tests: No Issues
-
-(deftest test-no-dependencies
-  (testing "Pack with no dependencies passes validation"
-    (let [result (sut/validate-pack-dependencies [valid-pack-a])]
-      (is (:valid? result))
-      (is (empty? (:violations result)))
-      (is (empty? (:warnings result))))))
-
-(deftest test-valid-linear-dependencies
-  (testing "Valid linear dependency chain passes validation"
-    (let [result (sut/validate-pack-dependencies
-                  [valid-pack-a valid-pack-b valid-pack-c])]
-      (is (:valid? result))
-      (is (empty? (:violations result)))
-      (is (empty? (:warnings result))))))
-
 ;------------------------------------------------------------------------------ Tests: Circular Dependencies
-
-(deftest test-circular-dependency-simple
+(deftest ^{:stratum 0} test-circular-dependency-simple
   (testing "Simple circular dependency (A -> B -> A) is detected"
     (let [pack-a {:pack/id "pack-a"
                   :pack/version "2026.01.25"
@@ -109,7 +91,7 @@
       (is (seq (:violations result)))
       (is (some #(= :circular-dependency (:type %)) (:violations result))))))
 
-(deftest test-circular-dependency-complex
+(deftest ^{:stratum 0} test-circular-dependency-complex
   (testing "Complex circular dependency (A -> B -> C -> A) is detected"
     (let [pack-a {:pack/id "pack-a"
                   :pack/version "2026.01.25"
@@ -152,8 +134,7 @@
         (is (>= (count (:cycle circular-violation)) 3))))))
 
 ;------------------------------------------------------------------------------ Tests: Missing Dependencies
-
-(deftest test-missing-dependency
+(deftest ^{:stratum 0} test-missing-dependency
   (testing "Missing dependency is detected"
     (let [pack-with-missing {:pack/id "pack-x"
                              :pack/version "2026.01.25"
@@ -175,7 +156,7 @@
         (is (= "pack-x" (:pack-id missing-violation)))
         (is (= "nonexistent-pack" (:missing-dep missing-violation)))))))
 
-(deftest test-multiple-missing-dependencies
+(deftest ^{:stratum 0} test-multiple-missing-dependencies
   (testing "Multiple missing dependencies are all detected"
     (let [pack {:pack/id "pack-x"
                 :pack/version "2026.01.25"
@@ -196,3 +177,21 @@
       (is (not (:valid? result)))
       (is (= 3 (count missing-violations)))
       (is (every? #(= "pack-x" (:pack-id %)) missing-violations)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Tests: No Issues
+(deftest ^{:stratum 1} test-no-dependencies
+  (testing "Pack with no dependencies passes validation"
+    (let [result (sut/validate-pack-dependencies [valid-pack-a])]
+      (is (:valid? result))
+      (is (empty? (:violations result)))
+      (is (empty? (:warnings result))))))
+
+(deftest ^{:stratum 1} test-valid-linear-dependencies
+  (testing "Valid linear dependency chain passes validation"
+    (let [result (sut/validate-pack-dependencies
+                  [valid-pack-a valid-pack-b valid-pack-c])]
+      (is (:valid? result))
+      (is (empty? (:violations result)))
+      (is (empty? (:warnings result))))))

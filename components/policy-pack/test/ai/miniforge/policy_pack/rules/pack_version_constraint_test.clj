@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.rules.pack-version-constraint-test
   "Tests for version constraints and version parsing (N4 S2.4.2)."
   (:require
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ Tests: Version Conflicts
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest test-version-constraint-satisfied
+;------------------------------------------------------------------------------ Tests: Version Conflicts
+(deftest ^{:stratum 0} test-version-constraint-satisfied
   (testing "Version constraint is satisfied"
     (let [pack-dep {:pack/id "shared-dep"
                     :pack/version "2026.01.25"
@@ -51,7 +51,7 @@
       (is (:valid? result))
       (is (empty? (:violations result))))))
 
-(deftest test-version-constraint-conflict
+(deftest ^{:stratum 0} test-version-constraint-conflict
   (testing "Version constraint conflict is detected"
     (let [pack-dep {:pack/id "shared-dep"
                     :pack/version "2026.01.25"
@@ -94,7 +94,7 @@
         (is (= "shared-dep" (:dependency version-violation)))
         (is (= "2026.01.25" (:actual-version version-violation)))))))
 
-(deftest test-wildcard-version-constraint
+(deftest ^{:stratum 0} test-wildcard-version-constraint
   (testing "Wildcard version constraint is satisfied"
     (let [pack-dep {:pack/id "dep"
                     :pack/version "2026.01.25"
@@ -122,8 +122,7 @@
       (is (empty? (:violations result))))))
 
 ;------------------------------------------------------------------------------ Tests: Version Parsing
-
-(deftest test-version-parsing
+(deftest ^{:stratum 0} test-version-parsing
   (testing "Version parsing handles DateVer format"
     (let [parse-version #'sut/parse-version]
       (is (= {:year 2026 :month 1 :day 25 :patch 0}
@@ -132,7 +131,7 @@
              (parse-version "2026.01.25.2")))
       (is (nil? (parse-version "invalid"))))))
 
-(deftest test-version-comparison
+(deftest ^{:stratum 0} test-version-comparison
   (testing "Version comparison works correctly"
     (let [compare-versions #'sut/compare-versions]
       (is (neg? (compare-versions "2026.01.24" "2026.01.25")))
@@ -140,7 +139,7 @@
       (is (zero? (compare-versions "2026.01.25" "2026.01.25")))
       (is (neg? (compare-versions "2026.01.25.1" "2026.01.25.2"))))))
 
-(deftest test-version-constraints
+(deftest ^{:stratum 0} test-version-constraints
   (testing "Version constraint satisfaction"
     (let [satisfies-constraint? #'sut/satisfies-constraint?]
       (is (satisfies-constraint? "2026.01.25" "2026.01.25"))

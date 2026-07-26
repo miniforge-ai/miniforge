@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.core
   "Implementation of the boundary primitive.
 
@@ -34,9 +33,9 @@
    [ai.miniforge.response-chain.interface :as chain]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Category → anomaly-type mapping
 
-(def category->anomaly-type
+;; Category → anomaly-type mapping
+(def ^{:stratum 0} category->anomaly-type
   "Data-driven mapping from boundary category to canonical anomaly
    type. Public read-only table — exposed through the interface so
    callers and reviewers can audit the wiring without reading code.
@@ -51,16 +50,8 @@
    :unavailable :unavailable
    :unknown     :fault})
 
-;; Compile-time invariant: every standard category resolves to an
-;; anomaly type. Catches drift if either set is edited in isolation.
-(assert (= contract/exception-categories
-           (set (keys category->anomaly-type)))
-        "boundary/category->anomaly-type must cover every exception-category")
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Programmer-error guard
-
-(defn- assert-known-category!
+(defn- ^{:stratum 0} assert-known-category!
   "Throw `IllegalArgumentException` when `category` is not in the
    standard vocabulary. This is the one place boundary throws — the
    exception means the call site is wrong, not that runtime data went
@@ -72,10 +63,8 @@
                  ". Must be one of "
                  (pr-str contract/exception-categories))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Exception → captured payload
-
-(defn- cause-message
+(defn- ^{:stratum 0} cause-message
   "Return the message of the immediate cause of `e`, or nil when there
    is no cause. Boundary code may pass the cause as nil (no
    `Throwable.getCause` link), so we explicitly nil-coalesce."
@@ -83,13 +72,13 @@
   (when-let [cause (.getCause e)]
     (.getMessage ^Throwable cause)))
 
-(defn- exception-class-name
+(defn- ^{:stratum 0} exception-class-name
   "Return the fully-qualified class name of `e`. Always a string —
    every JVM Throwable has a class."
   [^Throwable e]
   (.getName (class e)))
 
-(defn- safe-ex-data
+(defn- ^{:stratum 0} safe-ex-data
   "Return `(ex-data e)` when `e` is an `ExceptionInfo`, else nil.
    `ex-data` returns nil for non-`IExceptionInfo`, but callers may
    subclass; this stays defensive."
@@ -98,7 +87,19 @@
     (ex-data e)
     (catch Throwable _ nil)))
 
-(defn- capture-exception
+;; Safe invocation
+(defn- ^{:stratum 0} safe-apply
+  "Apply `f` to `args`, returning either {:ok value} on success or
+   {:throw e} on any thrown `Throwable`. Never propagates."
+  [f args]
+  (try
+    {:ok (apply f args)}
+    (catch Throwable e
+      {:throw e})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} capture-exception
   "Build the `CapturedException` payload for the supplied exception
    and category. Pure — never throws."
   [^Throwable e category]
@@ -108,10 +109,8 @@
    :exception/data     (safe-ex-data e)
    :boundary/category  category})
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Exception → anomaly
-
-(defn- category->type
+(defn- ^{:stratum 1} category->type
   "Resolve `category` to its anomaly type. Falls back to `:fault` for
    unknown categories so the function stays non-throwing in the
    recovery path; the public entry point's `assert-known-category!`
@@ -119,7 +118,9 @@
   [category]
   (get category->anomaly-type category :fault))
 
-(defn- exception->anomaly
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} exception->anomaly
   "Convert exception `e` (under `category`) into a canonical anomaly.
    The anomaly's `:anomaly/data` carries the captured payload."
   [^Throwable e category]
@@ -128,22 +129,10 @@
                     (exception-class-name e))]
     (anomaly/anomaly an-type message (capture-exception e category))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Safe invocation
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- safe-apply
-  "Apply `f` to `args`, returning either {:ok value} on success or
-   {:throw e} on any thrown `Throwable`. Never propagates."
-  [f args]
-  (try
-    {:ok (apply f args)}
-    (catch Throwable e
-      {:throw e})))
-
-;------------------------------------------------------------------------------ Layer 5
 ;; Public entry point
-
-(defn execute-with-exception-handling
+(defn ^{:stratum 3} execute-with-exception-handling
   "Canonical exception → anomaly wrapper.
 
    Calls `(apply f args)`. On success appends a successful step under
@@ -165,3 +154,9 @@
                          (exception->anomaly e category)
                          nil)
       (chain/append-step chain operation-key (:ok result)))))
+
+;; Compile-time invariant: every standard category resolves to an
+;; anomaly type. Catches drift if either set is edited in isolation.
+(assert (= contract/exception-categories
+           (set (keys category->anomaly-type)))
+        "boundary/category->anomaly-type must cover every exception-category")

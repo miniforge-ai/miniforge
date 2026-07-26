@@ -15,25 +15,53 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.timeline-test
   (:require
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.timeline :as sut]))
 
-;------------------------------------------------------------------------------ helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- epoch->date
+;------------------------------------------------------------------------------ helpers
+(defn- ^{:stratum 0} epoch->date
   "Coerce epoch-ms long to a java.util.Date."
   [ms]
   (java.util.Date. (long ms)))
 
-(def ^:private base-ms
+(def ^{:stratum 0} ^:private base-ms
   "A fixed epoch-ms (2025-01-01T00:00:00Z) for deterministic timestamps."
   1735689600000)
 
-(defn- mk-event
+;------------------------------------------------------------------------------ tests
+(deftest ^{:stratum 0} empty-events-returns-empty-string
+  (testing "empty / nil input yields empty string — consistent return type so callers don't have to nil-check"
+    (is (= "" (sut/render-timeline [])))
+    (is (= "" (sut/render-timeline nil)))
+    (is (= "" (sut/render-timeline [] {})))))
+
+(deftest ^{:stratum 0} events-without-timestamps-handled-gracefully
+  (testing "events with nil timestamp render with ?? placeholders but do not throw"
+    (let [event  {:event/type     :agent/tool-call-started
+                  :workflow/phase :implement
+                  :tool/name      "Read"}
+          result (sut/render-timeline [event])]
+      (is (string? result))
+      (is (str/includes? result "??:??:??"))))
+
+  (testing "gap detection is skipped when timestamps are absent"
+    (let [events [{:event/type     :agent/tool-call-started
+                   :tool/name      "Read"}
+                  {:event/type     :agent/tool-call-started
+                   :tool/name      "Write"}]
+          result (sut/render-timeline events)
+          lines  (str/split-lines result)]
+      ;; No gap line expected — timestamps are nil so gap cannot be computed
+      (is (= 2 (count lines))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} mk-event
   "Build a minimal event map with optional extra keys merged in."
   [event-type ts-offset-ms & {:as extra}]
   (merge {:event/type      event-type
@@ -41,15 +69,9 @@
           :workflow/phase  :implement}
          extra))
 
-;------------------------------------------------------------------------------ tests
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest empty-events-returns-empty-string
-  (testing "empty / nil input yields empty string — consistent return type so callers don't have to nil-check"
-    (is (= "" (sut/render-timeline [])))
-    (is (= "" (sut/render-timeline nil)))
-    (is (= "" (sut/render-timeline [] {})))))
-
-(deftest tool-call-started-renders-correctly
+(deftest ^{:stratum 2} tool-call-started-renders-correctly
   (testing "agent/tool-call-started shows tool name and args digest preview"
     (let [event  (mk-event :agent/tool-call-started 0
                             :tool/name "Write"
@@ -60,7 +82,7 @@
       (is (str/includes? result "Writing src/foo.clj"))
       (is (str/includes? result "implement")))))
 
-(deftest tool-call-completed-uses-tool-success-flag-not-error-presence
+(deftest ^{:stratum 2} tool-call-completed-uses-tool-success-flag-not-error-presence
   (testing "tool/call-completed shows success status from :tool/success? per ToolCallCompleted schema"
     ;; ToolCallCompleted in schema.clj does NOT carry :tool/name; the
     ;; name is correlated via :tool/call-id back to the started event
@@ -96,7 +118,7 @@
       (is (str/includes? result "Read")
           "tool name still resolves via correlation in the error path"))))
 
-(deftest tool-call-completed-falls-back-to-call-id-when-no-started-event
+(deftest ^{:stratum 2} tool-call-completed-falls-back-to-call-id-when-no-started-event
   (testing "if the started event is missing, the completed event renders with :tool/call-id as the tool label"
     ;; Defensive: prevents <unknown> from showing up when there's a
     ;; correlatable id but no preceding started event (e.g. truncated
@@ -109,7 +131,7 @@
           "call-id substitutes for tool name when correlation is impossible")
       (is (not (str/includes? result "<unknown>"))))))
 
-(deftest tool-call-pair-renders-both-lines
+(deftest ^{:stratum 2} tool-call-pair-renders-both-lines
   (testing "started + completed pair produces two lines, name correlated via :tool/call-id"
     (let [events [(mk-event :agent/tool-call-started 0
                             :tool/name "Bash"
@@ -127,7 +149,7 @@
           "completed line carries the same tool name as started, via correlation")
       (is (str/includes? (second lines) "success")))))
 
-(deftest gap-detection-inserts-stall-line
+(deftest ^{:stratum 2} gap-detection-inserts-stall-line
   (testing "gap above threshold inserts a gap line between events"
     ;; Put events 90 seconds apart (above default 60s threshold)
     (let [events [(mk-event :agent/tool-call-started 0
@@ -160,7 +182,7 @@
       (is (= 3 (count lines)))
       (is (str/includes? (second lines) "event-stream gap (stalled)")))))
 
-(deftest terminal-event-renders-terminated-marker
+(deftest ^{:stratum 2} terminal-event-renders-terminated-marker
   (testing "workflow/completed renders TERMINATED marker"
     (let [event  (mk-event :workflow/completed 5000
                             :message "all phases passed")
@@ -175,7 +197,7 @@
       (is (str/includes? result "TERMINATED"))
       (is (str/includes? result "phase implement failed")))))
 
-(deftest phase-lifecycle-events-render
+(deftest ^{:stratum 2} phase-lifecycle-events-render
   (testing "workflow/phase-started renders phase started label"
     (let [event  (mk-event :workflow/phase-started 0
                             :workflow/phase :plan
@@ -190,7 +212,7 @@
           result (sut/render-timeline [event])]
       (is (str/includes? result "phase completed")))))
 
-(deftest stream-stall-event-renders
+(deftest ^{:stratum 2} stream-stall-event-renders
   (testing "agent/stream-stalled renders stall marker"
     (let [event  (mk-event :agent/stream-stalled 3000
                             :message "no output for 120s")
@@ -198,7 +220,7 @@
       (is (str/includes? result "[stall]"))
       (is (str/includes? result "no output for 120s")))))
 
-(deftest generic-event-renders-fallback
+(deftest ^{:stratum 2} generic-event-renders-fallback
   (testing "unknown event type renders event-type + message"
     (let [event  (mk-event :some/unknown-event 1000
                             :message "something happened")
@@ -206,7 +228,7 @@
       (is (str/includes? result ":some/unknown-event"))
       (is (str/includes? result "something happened")))))
 
-(deftest non-string-event-messages-render-as-empty-test
+(deftest ^{:stratum 2} non-string-event-messages-render-as-empty-test
   (testing "message-bearing renderers tolerate a missing message key"
     (doseq [event-type [:workflow/phase-started
                         :workflow/completed
@@ -241,26 +263,7 @@
       (is (str/includes? result ":failed"))
       (is (not (str/includes? result ":not-a-string"))))))
 
-(deftest events-without-timestamps-handled-gracefully
-  (testing "events with nil timestamp render with ?? placeholders but do not throw"
-    (let [event  {:event/type     :agent/tool-call-started
-                  :workflow/phase :implement
-                  :tool/name      "Read"}
-          result (sut/render-timeline [event])]
-      (is (string? result))
-      (is (str/includes? result "??:??:??"))))
-
-  (testing "gap detection is skipped when timestamps are absent"
-    (let [events [{:event/type     :agent/tool-call-started
-                   :tool/name      "Read"}
-                  {:event/type     :agent/tool-call-started
-                   :tool/name      "Write"}]
-          result (sut/render-timeline events)
-          lines  (str/split-lines result)]
-      ;; No gap line expected — timestamps are nil so gap cannot be computed
-      (is (= 2 (count lines))))))
-
-(deftest args-summary-truncated-at-60-chars
+(deftest ^{:stratum 2} args-summary-truncated-at-60-chars
   (testing "args preview longer than 60 chars is truncated"
     (let [long-preview (apply str (repeat 80 "x"))
           event        (mk-event :agent/tool-call-started 0
@@ -272,7 +275,7 @@
       ;; Must contain truncation indicator
       (is (str/includes? result "…")))))
 
-(deftest message-fallback-when-no-args-digest
+(deftest ^{:stratum 2} message-fallback-when-no-args-digest
   (testing "falls back to :message when :tool/args-digest is absent"
     (let [event  (mk-event :agent/tool-call-started 0
                             :tool/name "Bash"
@@ -280,7 +283,7 @@
           result (sut/render-timeline [event])]
       (is (str/includes? result "running tests")))))
 
-(deftest render-timeline-returns-string
+(deftest ^{:stratum 2} render-timeline-returns-string
   (testing "render-timeline with multiple events returns a single string"
     (let [events [(mk-event :workflow/phase-started 0 :workflow/phase :plan)
                   (mk-event :agent/tool-call-started 1000

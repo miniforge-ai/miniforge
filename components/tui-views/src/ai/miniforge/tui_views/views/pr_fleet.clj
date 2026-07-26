@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.pr-fleet
   "PR Fleet view -- shows all tracked pull requests across repositories.
 
@@ -28,9 +27,9 @@
    [ai.miniforge.tui-views.update.navigation :as nav]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Rendering helpers
 
-(defn risk-indicator [risk]
+;; Rendering helpers
+(defn ^{:stratum 0} risk-indicator [risk]
   (case risk
     :low         (msg/t :risk/low)
     :medium      (msg/t :risk/medium)
@@ -38,7 +37,7 @@
     :unevaluated (msg/t :risk/unevaluated)
     (msg/t :risk/none)))
 
-(defn readiness-bar [readiness cols]
+(defn ^{:stratum 0} readiness-bar [readiness cols]
   (let [pct (int (* (or readiness 0) 100))
         bar-width (max 1 (- cols 5))
         filled (int (* bar-width (or readiness 0)))]
@@ -46,17 +45,11 @@
          (apply str (repeat (- bar-width filled) "░"))
          (msg/t :fleet/readiness-pct {:pct pct}))))
 
-(defn format-pr-row [pr cols]
-  {:title (get pr :pr/title (msg/t :pr/untitled))
-   :repo  (get pr :pr/repo "")
-   :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
-   :risk (risk-indicator (:pr/risk pr))})
-
-(defn render-title-bar [[cols rows]]
+(defn ^{:stratum 0} render-title-bar [[cols rows]]
   (layout/text [cols rows] (msg/t :fleet/title)
                {:fg palette/status-info :bold? true}))
 
-(defn auto-scroll-offset
+(defn ^{:stratum 0} auto-scroll-offset
   "Compute scroll offset so selected-idx is always visible within visible-count rows."
   [selected-idx visible-count]
   (let [sel (or selected-idx 0)]
@@ -64,7 +57,23 @@
       0
       (inc (- sel visible-count)))))
 
-(defn render-table [pr-items selected [cols rows]]
+(defn ^{:stratum 0} render-footer [flash-message [cols rows]]
+  (layout/text [cols rows]
+    (str (msg/t :fleet/footer)
+         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
+    {:fg :default}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-pr-row [pr cols]
+  {:title (get pr :pr/title (msg/t :pr/untitled))
+   :repo  (get pr :pr/repo "")
+   :readiness (readiness-bar (:pr/readiness pr) (min 15 (max 8 (quot cols 6))))
+   :risk (risk-indicator (:pr/risk pr))})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} render-table [pr-items selected [cols rows]]
   (if (empty? pr-items)
     (layout/text [cols rows] (msg/t :fleet/empty)
                  {:fg :default})
@@ -80,13 +89,9 @@
          :selected-row selected
          :offset offset}))))
 
-(defn render-footer [flash-message [cols rows]]
-  (layout/text [cols rows]
-    (str (msg/t :fleet/footer)
-         (when flash-message (str (msg/t :fleet/flash-prefix) flash-message)))
-    {:fg :default}))
+;------------------------------------------------------------------------------ Layer 3
 
-(defn render
+(defn ^{:stratum 3} render
   "Render the PR fleet view.
    model: full app model
    [cols rows]: available screen area"

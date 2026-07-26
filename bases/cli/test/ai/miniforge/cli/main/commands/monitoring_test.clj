@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.monitoring-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -25,11 +24,53 @@
    [ai.miniforge.cli.main.commands.monitoring :as sut]
    [ai.miniforge.cli.main.display :as display]))
 
-(defn- exit-ex
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} exit-ex
   [code]
   (ex-info "exit" {:code code}))
 
-(deftest web-cmd-unavailable-uses-message-catalog-test
+(deftest ^{:stratum 0} web-cmd-uses-injected-launcher-test
+  (testing "Web startup uses the launcher composed by cli.main"
+    (let [started (atom nil)
+          exit-code (atom nil)]
+      (binding [sut/*web-available?* true
+                sut/*start-web-dashboard!* (fn [opts]
+                                             (reset! started opts)
+                                             (throw (ex-info "stop" {})))]
+        (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
+                      messages/t (fn
+                                   ([k] (name k))
+                                   ([k params] (str (name k) params)))
+                      display/print-info (fn [& _] nil)
+                      display/print-error (fn [& _] nil)
+                      sut/exit! (fn [code] (reset! exit-code code))]
+          (sut/web-cmd {}))
+        (is (= {:port 9191} @started))
+        (is (= 1 @exit-code))))))
+
+(deftest ^{:stratum 0} tui-cmd-uses-injected-launcher-test
+  (testing "TUI startup uses the launcher composed by cli.main"
+    (let [started (atom nil)
+          shut-down? (atom false)
+          exit-code (atom nil)]
+      (binding [sut/*tui-available?* true
+                sut/*start-standalone-tui!* (fn [opts]
+                                              (reset! started opts))]
+        (with-redefs [messages/t (fn
+                                   ([k] (name k))
+                                   ([k params] (str (name k) params)))
+                      display/print-info (fn [& _] nil)
+                      clojure.core/shutdown-agents (fn [] (reset! shut-down? true))
+                      sut/exit! (fn [code] (reset! exit-code code))]
+          (sut/tui-cmd {:events-dir "/tmp/events"}))
+        (is (= {:events-dir "/tmp/events"} @started))
+        (is @shut-down?)
+        (is (= 0 @exit-code))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} web-cmd-unavailable-uses-message-catalog-test
   (testing "Web dashboard is unavailable when the composed launcher is missing"
     (binding [sut/*web-available?* false
               sut/*start-web-dashboard!* nil]
@@ -51,26 +92,7 @@
           (is (.contains output "WEB-NOT-AVAILABLE"))
           (is (.contains output "WEB-REQUIRES-JVM")))))))
 
-(deftest web-cmd-uses-injected-launcher-test
-  (testing "Web startup uses the launcher composed by cli.main"
-    (let [started (atom nil)
-          exit-code (atom nil)]
-      (binding [sut/*web-available?* true
-                sut/*start-web-dashboard!* (fn [opts]
-                                             (reset! started opts)
-                                             (throw (ex-info "stop" {})))]
-        (with-redefs [config/load-config (constantly {:dashboard {:port 9191}})
-                      messages/t (fn
-                                   ([k] (name k))
-                                   ([k params] (str (name k) params)))
-                      display/print-info (fn [& _] nil)
-                      display/print-error (fn [& _] nil)
-                      sut/exit! (fn [code] (reset! exit-code code))]
-          (sut/web-cmd {}))
-        (is (= {:port 9191} @started))
-        (is (= 1 @exit-code))))))
-
-(deftest tui-cmd-unavailable-uses-message-catalog-test
+(deftest ^{:stratum 1} tui-cmd-unavailable-uses-message-catalog-test
   (testing "TUI unavailable output reads user-facing copy from the message catalog"
     (binding [sut/*tui-available?* false]
       (with-redefs [messages/t (fn
@@ -99,7 +121,7 @@
           (is (.contains output "TUI-INSTALL"))
           (is (.contains output "TUI-USE-WEB")))))))
 
-(deftest tui-cmd-missing-launcher-uses-unavailable-path-test
+(deftest ^{:stratum 1} tui-cmd-missing-launcher-uses-unavailable-path-test
   (testing "TUI is unavailable when the composed launcher is missing"
     (binding [sut/*tui-available?* true
               sut/*start-standalone-tui!* nil]
@@ -126,22 +148,3 @@
                            (is (= 1 (:code (ex-data e)))))))]
           (is (.contains output "TUI-NOT-AVAILABLE"))
           (is (.contains output "TUI-REQUIRES-JVM")))))))
-
-(deftest tui-cmd-uses-injected-launcher-test
-  (testing "TUI startup uses the launcher composed by cli.main"
-    (let [started (atom nil)
-          shut-down? (atom false)
-          exit-code (atom nil)]
-      (binding [sut/*tui-available?* true
-                sut/*start-standalone-tui!* (fn [opts]
-                                              (reset! started opts))]
-        (with-redefs [messages/t (fn
-                                   ([k] (name k))
-                                   ([k params] (str (name k) params)))
-                      display/print-info (fn [& _] nil)
-                      clojure.core/shutdown-agents (fn [] (reset! shut-down? true))
-                      sut/exit! (fn [code] (reset! exit-code code))]
-          (sut/tui-cmd {:events-dir "/tmp/events"}))
-        (is (= {:events-dir "/tmp/events"} @started))
-        (is @shut-down?)
-        (is (= 0 @exit-code))))))

@@ -22,35 +22,51 @@
    to skip tasks that completed in a prior run. Emits :dag/task-completed
    events to the event stream so completed work survives crashes.
 
-   Each DAG task receives a full sub-workflow pipeline (explore → plan → implement
-   → verify → ...) rather than just an implementer agent. The sub-workflow is
-   derived from the parent workflow config, with the plan phase skipped (the plan
-   already exists) and DAG execution disabled (to prevent infinite recursion).
+   Plan analysis/conversion (`dag-plan`), sub-workflow construction
+   (`dag-sub-workflow`) and execution (`dag-task-execution`), v2
+   multi-parent git-merge orchestration (`dag-merge` and its own
+   internal split), and terminal-result/rate-limit accounting
+   (`dag-finalize`, `dag-rate-limit`) all live in sibling namespaces —
+   split out 2026-07-25, miniforge#1317, rule 210: this file was 1810
+   lines with a non-monotonic layer stack. This namespace keeps the
+   batch-scheduling engine itself (ready-task selection, parallel
+   execution, checkpointing) and the plan-level entry points
+   (`execute-plan-as-dag`, `maybe-parallelize-plan`), and re-exports the
+   handful of relocated vars that existing callers/tests reference
+   through this namespace so the public interface is unchanged.
 
-   v2 multi-parent: tasks with `>1` declared dependencies trigger the
-   orchestrator's `merge-parent-branches!`, which performs a deterministic
-   git merge of the parents' persisted branches and hands the resulting
-   ref to the sub-workflow. See specs/informative/I-DAG-MULTI-PARENT-MERGE.md.
-   Stage 1B (this code path) handles the no-conflict happy path; conflict
-   surfaces as a typed anomaly, which Stage 2 will replace with the
-   resolution sub-workflow."
+   CAVEAT (stratum-lint SL003): this file still measures 4 distinct
+   layers (max 3) after the split above. It's irreducible without
+   breaking an existing test contract: `execute-single-task` must be a
+   var literally named `dag-orchestrator/execute-single-task` (several
+   tests `with-redefs` it directly), and `execute-dag-loop` /
+   `execute-plan-as-dag` / `maybe-parallelize-plan` must each remain
+   directly callable as `dag-orchestrator/<name>` (functional tests,
+   plus configurable.clj/execution.clj/interface/pipeline.clj callers)
+   — a linear must-colocate chain of 4 functions is 4 layers by
+   construction, and moving any one of them to a sibling namespace
+   creates a circular require (the sibling would need this namespace
+   for `execute-single-task`; this namespace would need the sibling to
+   re-export the moved function). Run with
+   `MINIFORGE_STRATUM_BUDGET_MODE=warn` for this file until the wave
+   program reaches `workflow` and either accepts this floor or revisits
+   the with-redefs contract."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
-   [ai.miniforge.event-stream.interface :as events]
    [ai.miniforge.logging.interface :as log]
-   [ai.miniforge.phase.interface :as phase]
-   [ai.miniforge.response.interface :as response]
+   [ai.miniforge.workflow.dag-finalize :as dag-finalize]
+   [ai.miniforge.workflow.dag-merge :as dag-merge]
+   [ai.miniforge.workflow.dag-plan :as dag-plan]
+   [ai.miniforge.workflow.dag-rate-limit :as dag-rate-limit]
    [ai.miniforge.workflow.dag-resilience :as resilience]
-   [ai.miniforge.workflow.merge-resolution :as merge-resolution]
-   [ai.miniforge.workflow.messages :as messages]
-   [babashka.fs :as fs]
-   [clojure.java.shell :as shell]
-   [clojure.set :as set]
-   [clojure.string :as str]))
+   [ai.miniforge.workflow.dag-sub-workflow :as dag-sub-workflow]
+   [ai.miniforge.workflow.dag-task-execution :as dag-task-execution]
+   [clojure.set :as set]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
+<<<<<<< HEAD
 ;--- Layer 0: Result Constructors
 (def ^{:stratum 0} zero-metrics
   "Canonical zeroed metrics for DAG / inner-workflow results. Used as
@@ -618,6 +634,43 @@
              {:task-id task-id :metrics (:metrics wf-result)})))
 
 ;--- Layer 2: Synchronous DAG Execution
+=======
+;--- Layer 0: Compatibility Re-exports
+;; Moved to dag-plan / dag-sub-workflow / dag-task-execution / dag-merge;
+;; re-exported here so existing `:require [... :as dag-orch]` call sites
+;; (production and test) keep resolving without modification.
+(def ^{:stratum 0} zero-metrics dag-plan/zero-metrics)
+
+(def ^{:stratum 0} parallelizable-plan? dag-plan/parallelizable-plan?)
+
+(def ^{:stratum 0} estimate-parallel-speedup dag-plan/estimate-parallel-speedup)
+
+(def ^{:stratum 0} plan->dag-tasks dag-plan/plan->dag-tasks)
+
+(def ^{:stratum 0} wire-stratum-deps dag-plan/wire-stratum-deps)
+
+(def ^{:stratum 0} task-sub-workflow dag-sub-workflow/task-sub-workflow)
+
+(def ^{:stratum 0} task-sub-input dag-sub-workflow/task-sub-input)
+
+(def ^{:stratum 0} task-sub-opts dag-sub-workflow/task-sub-opts)
+
+(def ^{:stratum 0} run-mini-workflow dag-task-execution/run-mini-workflow)
+
+(def ^{:stratum 0} extract-sub-workflow-error dag-task-execution/extract-sub-workflow-error)
+
+(def ^{:stratum 0} extract-pr-info-from-result dag-task-execution/extract-pr-info-from-result)
+
+(def ^{:stratum 0} execute-single-task dag-task-execution/execute-single-task)
+
+(def ^{:stratum 0} merge-parent-branches! dag-merge/merge-parent-branches!)
+
+(def ^{:stratum 0} aggregate-results dag-finalize/aggregate-results)
+
+(def ^{:stratum 0} propagate-failures dag-finalize/propagate-failures)
+
+;--- Layer 0: Synchronous DAG Execution
+>>>>>>> origin/main
 (defn ^{:stratum 0} compute-ready-tasks [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
@@ -681,6 +734,7 @@
         err-results (->> results (filter #(not (dag/ok? (second %)))) (map first))]
     {:completed ok-results :failed err-results}))
 
+<<<<<<< HEAD
 (defn- ^{:stratum 0} result-metrics
   "Extract per-task `:metrics` from a dag/ok OR dag/err result.
    `dag/ok` puts the data payload under `:data`; `dag/err` puts the
@@ -717,6 +771,8 @@
           :completed-tasks completed-count
           :message message}})
 
+=======
+>>>>>>> origin/main
 (defn ^{:stratum 0} emit-completed-checkpoints!
   "Emit task-completed events for checkpointing."
   [completed-task-ids results event-stream workflow-id]
@@ -733,6 +789,7 @@
   (doseq [tid failed-task-ids]
     (resilience/emit-dag-task-failed! event-stream workflow-id tid (get results tid))))
 
+<<<<<<< HEAD
 (defn ^{:stratum 0} find-unreached-tasks
   "Identify tasks that are neither completed nor failed — stuck due to unmet deps."
   [tasks-map completed-ids all-failed]
@@ -743,6 +800,8 @@
                :unmet-deps (vec (remove completed-ids
                                         (get-in tasks-map [tid :task/deps] #{})))}))))
 
+=======
+>>>>>>> origin/main
 (defn- ^{:stratum 0} register-batch-branches!
   "Register every successfully-completed task's persisted branch in the
    per-workflow branch registry. Runs once per batch, AFTER all futures
@@ -762,6 +821,10 @@
                  {:branch    branch
                   :pr-branch (get-in result [:data :pr-info :branch])}))))))
 
+<<<<<<< HEAD
+=======
+;--- Layer 0: Workflow Integration
+>>>>>>> origin/main
 (defn ^{:stratum 0} warn-potential-monolith
   "Log a warning when a plan may be under-decomposed — single task but
    multiple components or many files."
@@ -799,6 +862,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+<<<<<<< HEAD
 (defn ^{:stratum 1} build-deps-map
   "Normalizes ids and dep ids the same way `plan->dag-tasks` does — a plan
    whose tasks mix string/UUID id representations must resolve identically
@@ -1109,6 +1173,8 @@
                 (checkpoint-log-data reset-at wait-ms completed-count
                                      "Rate limit too far out. Resume manually when ready.")))))
 
+=======
+>>>>>>> origin/main
 (defn ^{:stratum 1} emit-batch-events!
   "Emit checkpointing + diagnostic events for a completed batch.
    Successful results get :dag/task-completed; failed results get
@@ -1125,6 +1191,7 @@
     (emit-failed-checkpoints! failed-task-ids results event-stream workflow-id)
     nil))
 
+<<<<<<< HEAD
 (defn ^{:stratum 1} log-unreached-tasks! [logger tasks-map completed-ids all-failed]
   (let [unreached (find-unreached-tasks tasks-map completed-ids all-failed)]
     (when (seq unreached)
@@ -1732,6 +1799,9 @@
         result))))
 
 (defn ^{:stratum 10} execute-dag-loop [tasks-map context logger]
+=======
+(defn ^{:stratum 1} execute-dag-loop [tasks-map context logger]
+>>>>>>> origin/main
   (let [{:keys [on-task-start on-task-complete]} context
         max-parallel (get context :max-parallel 4)
         event-stream (or (:event-stream context)
@@ -1756,17 +1826,17 @@
            sub-workflow-ids []
            current-backend (get context :current-backend)
            iteration 0]
-      (let [all-failed (propagate-failures tasks-map failed-ids)
+      (let [all-failed (dag-finalize/propagate-failures tasks-map failed-ids)
             ready-tasks (compute-ready-tasks tasks-map completed-ids all-failed)]
         (cond
           ;; No more work — finalize
           (empty? ready-tasks)
-          (finalize-dag tasks-map completed-ids all-failed all-results
-                        sub-workflow-ids iteration logger)
+          (dag-finalize/finalize-dag tasks-map completed-ids all-failed all-results
+                                     sub-workflow-ids iteration logger)
 
           ;; Safety valve
           (> iteration 100)
-          (dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
+          (dag-plan/dag-execution-error (count completed-ids) (count all-failed) "Max iterations exceeded")
 
           ;; Execute next batch
           :else
@@ -1795,7 +1865,7 @@
             (emit-failed-checkpoints! other-failed-ids results event-stream workflow-id)
 
             (if (seq rate-limited-ids)
-              (let [decision (handle-rate-limit-in-batch
+              (let [decision (dag-rate-limit/handle-rate-limit-in-batch
                               context rate-limited-ids new-completed new-failed
                               all-results results event-stream workflow-id logger)]
                 (if (= :continue (:action decision))
@@ -1813,12 +1883,29 @@
                      current-backend
                      (inc iteration)))))))))
 
+<<<<<<< HEAD
 ;------------------------------------------------------------------------------ Layer 11
 
 (defn ^{:stratum 11} execute-plan-as-dag [plan context]
+=======
+(defn- ^{:stratum 1} log-multi-parent-detected!
+  "Emit an informational log (NOT an anomaly) when the plan has
+   multi-parent tasks. v2 runs them via the merge path; the log
+   surfaces plan shape on the dashboard so operators can see fan-in
+   patterns without the orchestrator rejecting work."
+  [logger plan task-defs]
+  (when-let [non-forest (dag/validate-dag-forest (task-defs->forest-shape task-defs))]
+    (log/info logger :dag-orchestrator :dag/multi-parent-detected
+              {:data {:plan-id (:plan/id plan)
+                      :multi-parent-tasks (:multi-parent-tasks non-forest)}})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-plan-as-dag [plan context]
+>>>>>>> origin/main
   (let [logger (or (:logger context) (log/create-logger {:min-level :info}))
         _ (warn-potential-monolith plan logger)
-        task-defs (plan->dag-tasks plan (assoc context :logger logger))
+        task-defs (dag-plan/plan->dag-tasks plan (assoc context :logger logger))
         _ (log-multi-parent-detected! logger plan task-defs)
         tasks-map (->> task-defs (map (fn [t] [(:task/id t) t])) (into {}))
         pre-completed (get context :pre-completed-ids #{})
@@ -1830,11 +1917,18 @@
                       :pre-completed (count pre-completed)}})
     (execute-dag-loop tasks-map ctx logger)))
 
+<<<<<<< HEAD
 ;------------------------------------------------------------------------------ Layer 12
 
 ;--- Layer 3: Workflow Integration
 (defn ^{:stratum 12} maybe-parallelize-plan [plan context]
   (let [estimate (estimate-parallel-speedup plan)]
+=======
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} maybe-parallelize-plan [plan context]
+  (let [estimate (dag-plan/estimate-parallel-speedup plan)]
+>>>>>>> origin/main
     (when (:parallelizable? estimate)
       (let [logger (or (:logger context) (log/create-logger {:min-level :info}))]
         (log/info logger :dag-orchestrator :plan/parallelizing

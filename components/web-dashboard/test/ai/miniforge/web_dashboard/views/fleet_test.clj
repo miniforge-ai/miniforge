@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.fleet-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [clojure.string :as str]
    [ai.miniforge.web-dashboard.views.fleet :as sut]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; sync-status-fragment tests
 ;; ============================================================================
-
-(deftest sync-status-fragment-nil-test
+(deftest ^{:stratum 0} sync-status-fragment-nil-test
   (testing "Nil last-sync renders 'no sync' message"
     (let [result (sut/sync-status-fragment nil)]
       (is (vector? result))
@@ -35,7 +35,7 @@
       (is (some #(and (string? %) (str/includes? % "No sync"))
                (flatten (tree-seq coll? seq result)))))))
 
-(deftest sync-status-fragment-success-test
+(deftest ^{:stratum 0} sync-status-fragment-success-test
   (testing "Success sync renders success badge and counts"
     (let [result (sut/sync-status-fragment {:status :success
                                             :timestamp (java.util.Date.)
@@ -47,7 +47,7 @@
       (is (some #(and (string? %) (str/includes? % "success"))
                (flatten (tree-seq coll? seq result)))))))
 
-(deftest sync-status-fragment-with-failures-test
+(deftest ^{:stratum 0} sync-status-fragment-with-failures-test
   (testing "Failures render with error details and action hints"
     (let [result (sut/sync-status-fragment {:status :partial
                                             :timestamp (java.util.Date.)
@@ -65,7 +65,7 @@
         ;; Should contain action hint
         (is (some #(and (string? %) (str/includes? % "gh auth login")) flat))))))
 
-(deftest sync-status-fragment-failed-test
+(deftest ^{:stratum 0} sync-status-fragment-failed-test
   (testing "Failed sync renders error variant"
     (let [result (sut/sync-status-fragment {:status :failed
                                             :synced 0
@@ -81,8 +81,7 @@
 ;; readiness-state-variant + error-category-label + readiness-state-label
 ;; full mapping coverage (edge cases live in fleet_view_gaps_test.clj)
 ;; ============================================================================
-
-(deftest readiness-state-variant-mapping-test
+(deftest ^{:stratum 0} readiness-state-variant-mapping-test
   (testing "Maps readiness states to badge variants"
     (is (= :success (sut/readiness-state-variant :merge-ready)))
     (is (= :error   (sut/readiness-state-variant :ci-failing)))
@@ -92,7 +91,7 @@
     (is (= :neutral (sut/readiness-state-variant :dep-blocked)))
     (is (= :info    (sut/readiness-state-variant :needs-review)))))
 
-(deftest error-category-label-mapping-test
+(deftest ^{:stratum 0} error-category-label-mapping-test
   (testing "Maps error categories to human-readable labels"
     (is (= "Auth"       (sut/error-category-label :auth)))
     (is (= "Access"     (sut/error-category-label :access)))
@@ -101,7 +100,7 @@
     (is (= "Parse"      (sut/error-category-label :parse)))
     (is (= "Network"    (sut/error-category-label :network)))))
 
-(deftest readiness-state-label-mapping-test
+(deftest ^{:stratum 0} readiness-state-label-mapping-test
   (testing "Maps readiness states to human-readable labels"
     (is (= "Ready"             (sut/readiness-state-label :merge-ready)))
     (is (= "CI Failing"        (sut/readiness-state-label :ci-failing)))
@@ -114,14 +113,13 @@
 ;; ============================================================================
 ;; train-list-fragment tests
 ;; ============================================================================
-
-(deftest train-list-fragment-empty-test
+(deftest ^{:stratum 0} train-list-fragment-empty-test
   (testing "Empty trains renders empty state with emoji and actions"
     (let [html-str (str (sut/train-list-fragment []))]
       (is (str/includes? html-str "No PR Trains Yet"))
       (is (str/includes? html-str "🚂")))))
 
-(deftest train-list-fragment-with-trains-test
+(deftest ^{:stratum 0} train-list-fragment-with-trains-test
   (testing "Trains render table with name, status, counts"
     (let [train-id (random-uuid)
           trains [{:train/id train-id
@@ -141,15 +139,14 @@
 ;; ============================================================================
 ;; train-detail-view tests
 ;; ============================================================================
-
-(deftest train-detail-view-error-test
+(deftest ^{:stratum 0} train-detail-view-error-test
   (testing "Error train renders error message"
     (let [layout (fn [title body] [:html [:head [:title title]] [:body body]])
           result (sut/train-detail-view layout {:error "Train not found"})]
       (is (some #(and (string? %) (str/includes? % "Train not found"))
                (flatten (tree-seq coll? seq result)))))))
 
-(deftest train-detail-view-renders-prs-test
+(deftest ^{:stratum 0} train-detail-view-renders-prs-test
   (testing "Train detail renders PR cards with readiness info"
     (let [layout (fn [title body] [:html [:head [:title title]] [:body body]])
           train {:train/id (random-uuid)
@@ -176,8 +173,7 @@
 ;; ============================================================================
 ;; format-sync-time tests
 ;; ============================================================================
-
-(deftest format-sync-time-test
+(deftest ^{:stratum 0} format-sync-time-test
   (testing "Formats a Date into string"
     (let [result (sut/format-sync-time (java.util.Date.))]
       (is (string? result))
@@ -188,8 +184,7 @@
 ;; ============================================================================
 ;; fleet-action-onclick tests
 ;; ============================================================================
-
-(deftest fleet-action-onclick-test
+(deftest ^{:stratum 0} fleet-action-onclick-test
   (testing "Returns correct onclick handlers"
     (is (str/includes? (sut/fleet-action-onclick :add-repo) "addRepo"))
     (is (str/includes? (sut/fleet-action-onclick :discover-repos) "discoverRepos"))

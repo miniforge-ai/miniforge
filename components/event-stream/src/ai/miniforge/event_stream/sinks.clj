@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.sinks
   "Configurable event sinks for different deployment scenarios.
 
@@ -53,48 +52,48 @@
    [java.time Instant ZonedDateTime ZoneOffset]
    [java.time.format DateTimeFormatter]))
 
-;;------------------------------------------------------------------------------ Defaults
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private default-event-ttl-ms
+;;------------------------------------------------------------------------------ Defaults
+(def ^{:stratum 0} ^:private default-event-ttl-ms
   "How long a persisted event file is kept before cleanup prunes it —
    7 days. Long enough to debug a failed run days later; short enough that
    the on-disk event log doesn't grow unbounded on a busy fleet."
   (* 7 24 60 60 1000))
 
-(def ^:private default-fleet-sink-batch-size
+(def ^{:stratum 0} ^:private default-fleet-sink-batch-size
   "Events buffered before the fleet HTTP sink flushes a batch. 10 keeps
    request overhead low without holding events long enough to lose many on a
    crash between flushes."
   10)
 
-(def ^:private default-fleet-sink-flush-interval-ms
+(def ^{:stratum 0} ^:private default-fleet-sink-flush-interval-ms
   "Maximum time the fleet HTTP sink holds a partial batch before flushing it
    regardless of size — bounds delivery latency for low event rates. 5s."
   5000)
 
-(def ^:private default-fleet-sink-timeout-ms
+(def ^{:stratum 0} ^:private default-fleet-sink-timeout-ms
   "HTTP request timeout for a fleet-sink batch POST. 10s — generous for a
    batched upload over a slow link, short enough that a hung endpoint doesn't
    stall the flush loop indefinitely."
   10000)
 
 ;;------------------------------------------------------------------------------ Internal helpers
-
-(defn default-events-dir
+(defn ^{:stratum 0} default-events-dir
   "Return the default events directory (~/.miniforge/events). Public
    so the BD-2b sub-3b archive module and the cleanup pass (sub-3c)
    can resolve the same root the file sink writes under."
   ^java.io.File []
   (io/file (config/miniforge-home) "events"))
 
-(defn- now-sortable-str
+(defn- ^{:stratum 0} now-sortable-str
   "Return a sortable UTC timestamp string for use as a file-name prefix.
    Format: yyyyMMdd'T'HHmmss'Z', e.g. 20260411T100000Z."
   []
   (.format (DateTimeFormatter/ofPattern "yyyyMMdd'T'HHmmssSSS'Z'")
            (ZonedDateTime/now ZoneOffset/UTC)))
 
-(def ^:private instant-write-handler
+(def ^{:stratum 0} ^:private instant-write-handler
   "Transit write handler for java.time.Instant — writes the instant's
    RFC-3339 string under tag `t`, surfacing as a `~t...` tag-string in
    verbose Transit JSON (same shape Transit gives java.util.Date in
@@ -103,26 +102,7 @@
    (constantly "t")
    (fn [^Instant v] (str v))))
 
-(defn event->transit-json
-  "Serialize `event` to a Transit-JSON string using the verbose writer.
-   Verbose mode disables transit's cache codes (repeated keywords stay
-   literal, never `^0` references) and renders instants as RFC-3339
-   `~t...` tag-strings instead of compact `~m` millisecond strings, so
-   the Rust parser can decode them without millisecond arithmetic.
-   UUIDs render as `~u...` tag-strings. Custom handler for
-   java.time.Instant (not supported by Transit defaults).
-
-   Public: this is the canonical wire encoding for every event the file
-   sink persists. Contract tooling (supervisory golden fixtures) calls it
-   directly so vendored fixtures share the exact byte path with production."
-  [event]
-  (let [out (ByteArrayOutputStream.)
-        writer (transit/writer out :json-verbose
-                               {:handlers {Instant instant-write-handler}})]
-    (transit/write writer event)
-    (.toString out "UTF-8")))
-
-(defn- snowflake-uuid?
+(defn- ^{:stratum 0} snowflake-uuid?
   "True when `id` is a UUID whose low 64 bits are zero — the shape that
    `snowflake/long->uuid` produces. Random UUIDs collide on this with
    probability ~1 in 2^64, which is negligible."
@@ -130,41 +110,12 @@
   (and (uuid? id)
        (zero? (.getLeastSignificantBits ^java.util.UUID id))))
 
-(defn- event-filename
-  "Pick a filename for `event`.
-
-   New (BD-2b): when `:event/id` is a snowflake UUID,
-     `{event-id-hex16}__{workflow-seq-dec12}.transit.json`
-   sorts lex-by-creation across all workflows on this host.
-
-   Legacy: `{timestamp}-{uuid}.json` for streams without a snowflake
-   generator. Sort-by-creation still works via the timestamp prefix."
-  [event]
-  (let [id (:event/id event)
-        seq-num (long (or (:event/sequence-number event) 0))]
-    (if (snowflake-uuid? id)
-      (str (snowflake/uuid->hex id)
-           "__"
-           (format "%012d" seq-num)
-           ".transit.json")
-      (str (now-sortable-str) "-" (or id (random-uuid)) ".json"))))
-
-(defn- new-event-file-path
-  "Return a java.io.File for `event` inside `parent-dir`. Creates the
-   directory if needed. The filename is derived from the event itself
-   (BD-2b filename grammar — see `event-filename`)."
-  [parent-dir event]
-  (let [dir (io/file parent-dir)]
-    (.mkdirs dir)
-    (io/file dir (event-filename event))))
-
-(defn- ensure-parent-dir!
+(defn- ^{:stratum 0} ensure-parent-dir!
   [file-path]
   (some-> file-path .getParentFile .mkdirs))
 
-;;------------------------------------------------------------------------------ Layer 0: File Sink paths
-
-(defn- workflow-id-segment
+;; File Sink paths
+(defn- ^{:stratum 0} workflow-id-segment
   "Normalize a workflow-id into a path segment safe for the OS
    filesystem. Keywords become their plain name (`:canonical-sdlc` →
    `canonical-sdlc`) — `(str ...)` would otherwise include the colon
@@ -177,161 +128,8 @@
     (name workflow-id)
     (str workflow-id)))
 
-(defn live-dir
-  "Return the `{base-dir}/live/` directory that holds in-flight
-   workflows. Public so the archive module and cleanup pass can scan
-   it on boot for recovery / cleanup."
-  (^java.io.File [] (live-dir (default-events-dir)))
-  (^java.io.File [base-dir] (io/file base-dir (layout/live-subdir))))
-
-(defn archived-dir
-  "Return the `{base-dir}/archived/` directory that holds workflows
-   whose archive completed via BD-2b sub-3b's atomic move."
-  (^java.io.File [] (archived-dir (default-events-dir)))
-  (^java.io.File [base-dir] (io/file base-dir (layout/archived-subdir))))
-
-(defn live-workflow-dir
-  "Return `{base-dir}/live/{workflow-id}/`. Canonical path for an
-   in-flight workflow's event files + manifest."
-  (^java.io.File [workflow-id]
-   (live-workflow-dir (default-events-dir) workflow-id))
-  (^java.io.File [base-dir workflow-id]
-   (io/file (live-dir base-dir) (workflow-id-segment workflow-id))))
-
-(defn archived-workflow-dir
-  "Return `{base-dir}/archived/{workflow-id}/`. The destination of
-   the BD-2b sub-3b atomic archive operation."
-  (^java.io.File [workflow-id]
-   (archived-workflow-dir (default-events-dir) workflow-id))
-  (^java.io.File [base-dir workflow-id]
-   (io/file (archived-dir base-dir) (workflow-id-segment workflow-id))))
-
-(defn workflow-dir
-  "Return the per-workflow directory for an in-flight workflow. As of
-   BD-2b sub-3b this is an alias for `live-workflow-dir` —
-   `{base-dir}/live/{workflow-id}/`. The file sink for event files
-   and the manifest module (sub-2) both reference the same path so
-   archival's `mv live → archived` rename moves them together."
-  (^java.io.File [workflow-id]
-   (live-workflow-dir workflow-id))
-  (^java.io.File [base-dir workflow-id]
-   (live-workflow-dir base-dir workflow-id)))
-
-(defn event-file-path
-  "Return a java.io.File for a new event file in the per-workflow subdirectory.
-   Creates the subdirectory if needed. Filename derives from `event`'s
-   `:event/id` and `:event/sequence-number` (BD-2b filename grammar).
-
-   File layout (BD-2b sub-3b):
-     {base-dir}/live/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
-                                  (or legacy {timestamp}-{uuid}.json for
-                                   non-snowflake streams).
-   The archive operation moves the whole `live/{wid}/` directory to
-   `archived/{wid}/` on terminal status.
-
-   Arguments:
-     base-dir    - Base directory (default: ~/.miniforge/events)
-     workflow-id - UUID or string workflow identifier
-     event       - The event whose envelope provides the filename fields"
-  ([workflow-id event]
-   (event-file-path (default-events-dir) workflow-id event))
-  ([base-dir workflow-id event]
-   (new-event-file-path (live-workflow-dir base-dir workflow-id) event)))
-
-(defn operator-dir
-  "Return the cross-workflow operator events directory under `base-dir`.
-   Writer side is [[operator-event-file-path]]; the operator-event
-   consumer (Phase D D-2) lists this directory on the read side."
-  (^java.io.File []
-   (operator-dir (default-events-dir)))
-  (^java.io.File [base-dir]
-   (io/file base-dir (layout/operator-subdir))))
-
-(defn operator-event-file-path
-  "Return a java.io.File for a new event file in the operator subdirectory.
-   Used by meta-loop, reliability, and degradation events (no :workflow/id).
-
-   File layout: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
-                (or legacy {timestamp}-{uuid}.json for non-snowflake streams).
-
-   Arguments:
-     base-dir - Base directory (default: ~/.miniforge/events)
-     event    - The event whose envelope provides the filename fields"
-  ([event]
-   (operator-event-file-path (default-events-dir) event))
-  ([base-dir event]
-   (new-event-file-path (io/file base-dir (layout/operator-subdir)) event)))
-
-(defn cleanup-stale-events!
-  "Delete event files older than TTL from the events directory.
-   Walks all subdirectories (per-workflow and operator).
-
-   Arguments:
-     opts - Map with optional:
-       :events-dir - Directory to clean (default: ~/.miniforge/events)
-       :base-dir   - Alias for :events-dir
-       :ttl-ms     - Max age in milliseconds (default: 7 days)
-
-   Returns: Number of files deleted"
-  [& [opts]]
-  (let [ttl-ms (get opts :ttl-ms default-event-ttl-ms)
-        events-dir (or (:events-dir opts) (:base-dir opts) (default-events-dir))
-        cutoff (- (System/currentTimeMillis) ttl-ms)]
-    (if (.isDirectory events-dir)
-      (let [stale-files (->> (file-seq events-dir)
-                             (filter #(and (.isFile %)
-                                           (str/ends-with? (.getName %) ".json")
-                                           (< (.lastModified %) cutoff))))]
-        (doseq [f stale-files] (.delete f))
-        (count stale-files))
-      0)))
-
-(defn file-sink
-  "Create a file sink that writes each event as a Transit-JSON file.
-
-   File layout:
-     per-workflow:   {base-dir}/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
-     cross-workflow: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
-
-   The leading hex sorts by creation order when the event's :event/id is a
-   snowflake-encoded UUID (BD-2b). For events whose :event/id is a random
-   UUID (e.g. streams without a snowflake generator), the filename falls
-   back to the legacy {timestamp}-{uuid}.json shape so sort-by-creation
-   still works via the timestamp prefix.
-
-   Each event gets its own file (no append).
-
-   Performs lazy cleanup of stale event files (older than 7 days) on creation.
-
-   Arguments:
-     opts - Map with optional:
-       :base-dir - Base directory (default: ~/.miniforge/events)
-       :ttl-ms   - Max event file age in ms (default: 7 days)
-
-   Returns: Sink function (fn [event] -> nil)"
-  [& [opts]]
-  ;; Non-blocking cleanup on sink creation
-  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
-  (fn [event]
-    (try
-      (let [base-dir (or (:base-dir opts) (default-events-dir))
-            file-path (if-let [workflow-id (:workflow/id event)]
-                        (event-file-path base-dir workflow-id event)
-                        (operator-event-file-path base-dir event))]
-        (ensure-parent-dir! file-path)
-        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
-        ;; files are a cross-language contract surface — platform default
-        ;; encoding must never decide the on-disk bytes.
-        (spit file-path (event->transit-json event) :encoding "UTF-8"))
-      (catch Exception e
-        ;; Log to stderr so failures are visible without breaking the event stream
-        (binding [*out* *err*]
-          (println (str "WARNING: Event sink write failed: " (ex-message e))))
-        nil))))
-
-;;------------------------------------------------------------------------------ Layer 1: Stream Sinks
-
-(defn stdout-sink
+;; Stream Sinks
+(defn ^{:stratum 0} stdout-sink
   "Create a stdout sink that prints events to standard output.
 
    Useful for containers where stdout is collected by log aggregators.
@@ -359,7 +157,7 @@
           (binding [*out* *err*]
             (println (str "WARNING: Event sink write failed: " (ex-message e)))))))))
 
-(defn stderr-sink
+(defn ^{:stratum 0} stderr-sink
   "Create a stderr sink that prints events to standard error.
 
    Useful for error/warning events that should go to stderr stream.
@@ -386,9 +184,111 @@
             (binding [*out* *err*]
               (println (str "WARNING: Event sink write failed: " (ex-message e))))))))))
 
-;;------------------------------------------------------------------------------ Layer 2: Fleet Sink
+;; Multi-Sink
+(defn ^{:stratum 0} multi-sink
+  "Create a multi-sink that writes to multiple sinks simultaneously.
 
-(defn fleet-sink
+   Arguments:
+     sinks - Vector of sink functions
+
+   Returns: Combined sink function (fn [event] -> nil)"
+  [sinks]
+  (fn [event]
+    (doseq [sink sinks]
+      (try
+        (sink event)
+        (catch Exception _e
+          ;; Continue with other sinks even if one fails
+          nil)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} event->transit-json
+  "Serialize `event` to a Transit-JSON string using the verbose writer.
+   Verbose mode disables transit's cache codes (repeated keywords stay
+   literal, never `^0` references) and renders instants as RFC-3339
+   `~t...` tag-strings instead of compact `~m` millisecond strings, so
+   the Rust parser can decode them without millisecond arithmetic.
+   UUIDs render as `~u...` tag-strings. Custom handler for
+   java.time.Instant (not supported by Transit defaults).
+
+   Public: this is the canonical wire encoding for every event the file
+   sink persists. Contract tooling (supervisory golden fixtures) calls it
+   directly so vendored fixtures share the exact byte path with production."
+  [event]
+  (let [out (ByteArrayOutputStream.)
+        writer (transit/writer out :json-verbose
+                               {:handlers {Instant instant-write-handler}})]
+    (transit/write writer event)
+    (.toString out "UTF-8")))
+
+(defn- ^{:stratum 1} event-filename
+  "Pick a filename for `event`.
+
+   New (BD-2b): when `:event/id` is a snowflake UUID,
+     `{event-id-hex16}__{workflow-seq-dec12}.transit.json`
+   sorts lex-by-creation across all workflows on this host.
+
+   Legacy: `{timestamp}-{uuid}.json` for streams without a snowflake
+   generator. Sort-by-creation still works via the timestamp prefix."
+  [event]
+  (let [id (:event/id event)
+        seq-num (long (or (:event/sequence-number event) 0))]
+    (if (snowflake-uuid? id)
+      (str (snowflake/uuid->hex id)
+           "__"
+           (format "%012d" seq-num)
+           ".transit.json")
+      (str (now-sortable-str) "-" (or id (random-uuid)) ".json"))))
+
+(defn ^{:stratum 1} live-dir
+  "Return the `{base-dir}/live/` directory that holds in-flight
+   workflows. Public so the archive module and cleanup pass can scan
+   it on boot for recovery / cleanup."
+  (^java.io.File [] (live-dir (default-events-dir)))
+  (^java.io.File [base-dir] (io/file base-dir (layout/live-subdir))))
+
+(defn ^{:stratum 1} archived-dir
+  "Return the `{base-dir}/archived/` directory that holds workflows
+   whose archive completed via BD-2b sub-3b's atomic move."
+  (^java.io.File [] (archived-dir (default-events-dir)))
+  (^java.io.File [base-dir] (io/file base-dir (layout/archived-subdir))))
+
+(defn ^{:stratum 1} operator-dir
+  "Return the cross-workflow operator events directory under `base-dir`.
+   Writer side is [[operator-event-file-path]]; the operator-event
+   consumer (Phase D D-2) lists this directory on the read side."
+  (^java.io.File []
+   (operator-dir (default-events-dir)))
+  (^java.io.File [base-dir]
+   (io/file base-dir (layout/operator-subdir))))
+
+(defn ^{:stratum 1} cleanup-stale-events!
+  "Delete event files older than TTL from the events directory.
+   Walks all subdirectories (per-workflow and operator).
+
+   Arguments:
+     opts - Map with optional:
+       :events-dir - Directory to clean (default: ~/.miniforge/events)
+       :base-dir   - Alias for :events-dir
+       :ttl-ms     - Max age in milliseconds (default: 7 days)
+
+   Returns: Number of files deleted"
+  [& [opts]]
+  (let [ttl-ms (get opts :ttl-ms default-event-ttl-ms)
+        events-dir (or (:events-dir opts) (:base-dir opts) (default-events-dir))
+        cutoff (- (System/currentTimeMillis) ttl-ms)]
+    (if (.isDirectory events-dir)
+      (let [stale-files (->> (file-seq events-dir)
+                             (filter #(and (.isFile %)
+                                           (str/ends-with? (.getName %) ".json")
+                                           (< (.lastModified %) cutoff))))]
+        (doseq [f stale-files] (.delete f))
+        (count stale-files))
+      0)))
+
+;; Fleet Sink
+(defn ^{:stratum 1} fleet-sink
   "Create a fleet sink that sends events to fleet command via HTTP.
 
    Arguments:
@@ -465,27 +365,131 @@
           (when (or batch-full? time-exceeded?)
             (flush-batch!)))))))
 
-;;------------------------------------------------------------------------------ Layer 3: Multi-Sink
+;------------------------------------------------------------------------------ Layer 2
 
-(defn multi-sink
-  "Create a multi-sink that writes to multiple sinks simultaneously.
+(defn- ^{:stratum 2} new-event-file-path
+  "Return a java.io.File for `event` inside `parent-dir`. Creates the
+   directory if needed. The filename is derived from the event itself
+   (BD-2b filename grammar — see `event-filename`)."
+  [parent-dir event]
+  (let [dir (io/file parent-dir)]
+    (.mkdirs dir)
+    (io/file dir (event-filename event))))
+
+(defn ^{:stratum 2} live-workflow-dir
+  "Return `{base-dir}/live/{workflow-id}/`. Canonical path for an
+   in-flight workflow's event files + manifest."
+  (^java.io.File [workflow-id]
+   (live-workflow-dir (default-events-dir) workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (io/file (live-dir base-dir) (workflow-id-segment workflow-id))))
+
+(defn ^{:stratum 2} archived-workflow-dir
+  "Return `{base-dir}/archived/{workflow-id}/`. The destination of
+   the BD-2b sub-3b atomic archive operation."
+  (^java.io.File [workflow-id]
+   (archived-workflow-dir (default-events-dir) workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (io/file (archived-dir base-dir) (workflow-id-segment workflow-id))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} workflow-dir
+  "Return the per-workflow directory for an in-flight workflow. As of
+   BD-2b sub-3b this is an alias for `live-workflow-dir` —
+   `{base-dir}/live/{workflow-id}/`. The file sink for event files
+   and the manifest module (sub-2) both reference the same path so
+   archival's `mv live → archived` rename moves them together."
+  (^java.io.File [workflow-id]
+   (live-workflow-dir workflow-id))
+  (^java.io.File [base-dir workflow-id]
+   (live-workflow-dir base-dir workflow-id)))
+
+(defn ^{:stratum 3} event-file-path
+  "Return a java.io.File for a new event file in the per-workflow subdirectory.
+   Creates the subdirectory if needed. Filename derives from `event`'s
+   `:event/id` and `:event/sequence-number` (BD-2b filename grammar).
+
+   File layout (BD-2b sub-3b):
+     {base-dir}/live/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
+                                  (or legacy {timestamp}-{uuid}.json for
+                                   non-snowflake streams).
+   The archive operation moves the whole `live/{wid}/` directory to
+   `archived/{wid}/` on terminal status.
 
    Arguments:
-     sinks - Vector of sink functions
+     base-dir    - Base directory (default: ~/.miniforge/events)
+     workflow-id - UUID or string workflow identifier
+     event       - The event whose envelope provides the filename fields"
+  ([workflow-id event]
+   (event-file-path (default-events-dir) workflow-id event))
+  ([base-dir workflow-id event]
+   (new-event-file-path (live-workflow-dir base-dir workflow-id) event)))
 
-   Returns: Combined sink function (fn [event] -> nil)"
-  [sinks]
+(defn ^{:stratum 3} operator-event-file-path
+  "Return a java.io.File for a new event file in the operator subdirectory.
+   Used by meta-loop, reliability, and degradation events (no :workflow/id).
+
+   File layout: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
+                (or legacy {timestamp}-{uuid}.json for non-snowflake streams).
+
+   Arguments:
+     base-dir - Base directory (default: ~/.miniforge/events)
+     event    - The event whose envelope provides the filename fields"
+  ([event]
+   (operator-event-file-path (default-events-dir) event))
+  ([base-dir event]
+   (new-event-file-path (io/file base-dir (layout/operator-subdir)) event)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} file-sink
+  "Create a file sink that writes each event as a Transit-JSON file.
+
+   File layout:
+     per-workflow:   {base-dir}/{workflow-id}/{event-id-hex16}__{seq:012d}.transit.json
+     cross-workflow: {base-dir}/operator/{event-id-hex16}__{seq:012d}.transit.json
+
+   The leading hex sorts by creation order when the event's :event/id is a
+   snowflake-encoded UUID (BD-2b). For events whose :event/id is a random
+   UUID (e.g. streams without a snowflake generator), the filename falls
+   back to the legacy {timestamp}-{uuid}.json shape so sort-by-creation
+   still works via the timestamp prefix.
+
+   Each event gets its own file (no append).
+
+   Performs lazy cleanup of stale event files (older than 7 days) on creation.
+
+   Arguments:
+     opts - Map with optional:
+       :base-dir - Base directory (default: ~/.miniforge/events)
+       :ttl-ms   - Max event file age in ms (default: 7 days)
+
+   Returns: Sink function (fn [event] -> nil)"
+  [& [opts]]
+  ;; Non-blocking cleanup on sink creation
+  (future (try (cleanup-stale-events! opts) (catch Exception _ nil)))
   (fn [event]
-    (doseq [sink sinks]
-      (try
-        (sink event)
-        (catch Exception _e
-          ;; Continue with other sinks even if one fails
-          nil)))))
+    (try
+      (let [base-dir (or (:base-dir opts) (default-events-dir))
+            file-path (if-let [workflow-id (:workflow/id event)]
+                        (event-file-path base-dir workflow-id event)
+                        (operator-event-file-path base-dir event))]
+        (ensure-parent-dir! file-path)
+        ;; Explicit UTF-8: payload strings can carry non-ASCII and these
+        ;; files are a cross-language contract surface — platform default
+        ;; encoding must never decide the on-disk bytes.
+        (spit file-path (event->transit-json event) :encoding "UTF-8"))
+      (catch Exception e
+        ;; Log to stderr so failures are visible without breaking the event stream
+        (binding [*out* *err*]
+          (println (str "WARNING: Event sink write failed: " (ex-message e))))
+        nil))))
 
-;;------------------------------------------------------------------------------ Layer 4: Sink Factory
+;------------------------------------------------------------------------------ Layer 5
 
-(defn create-sink
+;; Sink Factory
+(defn ^{:stratum 5} create-sink
   "Create a sink from configuration.
 
    Arguments:
@@ -528,7 +532,9 @@
                              {:config sink-config
                               :config/error :invalid-config})))
 
-(defn create-sinks-from-config
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} create-sinks-from-config
   "Create sinks from user configuration.
 
    Arguments:

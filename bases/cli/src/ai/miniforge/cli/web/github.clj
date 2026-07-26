@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web.github
   "GitHub CLI operations."
   (:require
@@ -24,25 +23,29 @@
    [cheshire.core :as json]
    [ai.miniforge.cli.web.risk :as risk]))
 
-(defn sh-success? [result]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} sh-success? [result]
   (zero? (:exit result)))
 
-(defn sh-error-msg [result default]
+(defn ^{:stratum 0} sh-error-msg [result default]
   (str/trim (or (:err result) (:out result) default)))
 
-(defn check-auth []
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} check-auth []
   (let [result (process/sh "gh" "auth" "status")]
     {:available (sh-success? result)
      :message (if (sh-success? result) "Authenticated" "Not authenticated")}))
 
-(defn check-claude-cli []
+(defn ^{:stratum 1} check-claude-cli []
   (sh-success? (process/sh "which" "claude")))
 
-(defn check-repo [repo]
+(defn ^{:stratum 1} check-repo [repo]
   {:accessible (sh-success? (process/sh "gh" "repo" "view" repo "--json" "name"))
    :repo repo})
 
-(defn fetch-prs [repo]
+(defn ^{:stratum 1} fetch-prs [repo]
   (let [result (process/sh "gh" "pr" "list" "--repo" repo
                            "--json" "number,title,state,author,url,additions,deletions,changedFiles,createdAt,labels"
                            "--limit" "50")]
@@ -52,24 +55,17 @@
              (mapv #(assoc % :repo repo :analysis (risk/analyze-pr %))))
         (catch Exception _ [])))))
 
-(defn fetch-all-prs [repos]
-  (->> repos
-       (keep (fn [repo]
-               (when-let [prs (fetch-prs repo)]
-                 {:repo repo :prs prs})))
-       vec))
-
-(defn fetch-pr-diff [repo number]
+(defn ^{:stratum 1} fetch-pr-diff [repo number]
   (let [result (process/sh "gh" "pr" "diff" (str number) "--repo" repo)]
     (when (sh-success? result) (:out result))))
 
-(defn fetch-pr-body [repo number]
+(defn ^{:stratum 1} fetch-pr-body [repo number]
   (let [result (process/sh "gh" "pr" "view" (str number) "--repo" repo "--json" "body,title,labels")]
     (when (sh-success? result)
       (try (json/parse-string (:out result) true)
            (catch Exception _ nil)))))
 
-(defn fetch-workflow-runs [repo]
+(defn ^{:stratum 1} fetch-workflow-runs [repo]
   (let [result (process/sh "gh" "run" "list" "--repo" repo
                            "--json" "workflowName,status,conclusion,createdAt,databaseId"
                            "--limit" "10")]
@@ -78,7 +74,7 @@
            (catch Exception _ []))
       [])))
 
-(defn approve-pr! [repo number]
+(defn ^{:stratum 1} approve-pr! [repo number]
   (let [result (process/sh "gh" "pr" "review" (str number) "--repo" repo "--approve")]
     {:success (sh-success? result)
      :message (if (sh-success? result)
@@ -86,7 +82,7 @@
                 (str "❌ Failed to approve PR #" number ": "
                      (sh-error-msg result "Unknown error. Check gh CLI authentication.")))}))
 
-(defn request-changes! [repo number reason]
+(defn ^{:stratum 1} request-changes! [repo number reason]
   (let [result (process/sh "gh" "pr" "review" (str number)
                            "--repo" repo "--request-changes" "--body" reason)]
     {:success (sh-success? result)
@@ -95,7 +91,16 @@
                 (str "❌ Failed to request changes: "
                      (sh-error-msg result "Unknown error. Check gh CLI authentication.")))}))
 
-(defn generate-pr-summary [repo number]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} fetch-all-prs [repos]
+  (->> repos
+       (keep (fn [repo]
+               (when-let [prs (fetch-prs repo)]
+                 {:repo repo :prs prs})))
+       vec))
+
+(defn ^{:stratum 2} generate-pr-summary [repo number]
   (if-not (check-claude-cli)
     {:success false
      :summary "Claude CLI not available. Install from https://claude.ai/download"}
@@ -113,7 +118,7 @@
             {:success true :summary (str/trim (:out result))}
             {:success false :summary (str "Claude CLI error: " (sh-error-msg result "Unknown"))}))))))
 
-(defn chat-about-pr [repo number question diff-context]
+(defn ^{:stratum 2} chat-about-pr [repo number question diff-context]
   (if-not (check-claude-cli)
     {:success false :response "❌ Claude CLI not available."}
     (let [prompt (str "You are reviewing PR #" number " in " repo ".\n\n"

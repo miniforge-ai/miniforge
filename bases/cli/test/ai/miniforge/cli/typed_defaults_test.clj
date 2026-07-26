@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.typed-defaults-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.main.commands.pr-policy-respond :as pr-policy]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
-(deftest commit-sha-text-is-always-a-string-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} commit-sha-text-is-always-a-string-test
   (testing "valid commit SHAs are preserved"
     (is (= "abc123" (#'pr-policy/commit-sha-text {:commit-sha "abc123"}))))
   (testing "absent and malformed commit SHAs use the display sentinel"
@@ -33,7 +34,7 @@
                   {:commit-sha 42}]]
       (is (= "—" (#'pr-policy/commit-sha-text data))))))
 
-(deftest response-output-is-always-a-map-test
+(deftest ^{:stratum 0} response-output-is-always-a-map-test
   (testing "valid response output is merged into top-level projection fields"
     (is (= {:content "outer" :exit-code 0 :detail :ok}
            (#'workflow-runner/response-output

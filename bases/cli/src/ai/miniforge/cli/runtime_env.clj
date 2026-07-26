@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.runtime-env
   "MINIFORGE_RUNTIME environment sourcing for container-runtime selection.
 
@@ -26,18 +25,24 @@
   (:require
    [clojure.string :as str]))
 
-(def runtime-env-var
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} runtime-env-var
   "MINIFORGE_RUNTIME environment variable — overrides file config per
    N11-delta §2.1."
   "MINIFORGE_RUNTIME")
 
-(defn env-runtime-kind
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} env-runtime-kind
   "Read MINIFORGE_RUNTIME from the environment and coerce to a keyword.
    Returns nil when unset or blank."
   []
   (some-> (System/getenv runtime-env-var) str/trim not-empty keyword))
 
-(defn selection-config
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} selection-config
   "Build the config map passed to the runtime selector: `base` (or {} when
    called with no args) with the env override applied on top. The env is
    read once — the predicate and the assoc must see the same value."

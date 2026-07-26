@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.context
   "Workflow input resolution and runtime context creation."
   (:require
@@ -32,9 +31,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Input resolution
 
-(defn read-input-file [path]
+;; Input resolution
+(defn ^{:stratum 0} read-input-file [path]
   (when path
     (let [file (fs/file path)]
       (when-not (fs/exists? file)
@@ -50,7 +49,7 @@
                                   (str "Unsupported file format: " ext " (use .edn or .json)")
                                   {:path path :extension ext}))))))
 
-(defn parse-inline-json [s]
+(defn ^{:stratum 0} parse-inline-json [s]
   (when s
     (try
       (json/parse-string s true)
@@ -59,63 +58,24 @@
                                 (str "Failed to parse input JSON: " (ex-message e))
                                 {:input s})))))
 
-(defn resolve-input [{:keys [input input-json]}]
-  (cond
-    input-json (parse-inline-json input-json)
-    input (read-input-file input)
-    :else {}))
-
-(defn- resolve-git-field
+(defn- ^{:stratum 0} resolve-git-field
   [dir & args]
   (let [{:keys [exit out]} (apply shell/sh (concat ["git"] args [:dir dir]))]
     (when (zero? exit)
       (some-> out str/trim not-empty))))
 
-(defn- resolve-git-bool
-  [dir & args]
-  (boolean (apply resolve-git-field dir args)))
-
-(defn get-git-info
-  ([] (get-git-info nil))
-  ([start-path]
-   (try
-     (when-let [root (worktree/worktree-root start-path)]
-       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
-             commit (resolve-git-field root "rev-parse" "--short" "HEAD")]
-         (when (and branch commit)
-           {:git-branch branch
-            :git-commit commit})))
-     (catch Exception _ nil))))
-
-(defn get-git-state
-  ([] (get-git-state nil))
-  ([start-path]
-   (try
-     (when-let [root (worktree/worktree-root start-path)]
-       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
-             commit (resolve-git-field root "rev-parse" "--short" "HEAD")
-             upstream (resolve-git-field root "rev-parse" "--abbrev-ref" "--symbolic-full-name" "@{upstream}")
-             dirty? (resolve-git-bool root "status" "--porcelain")]
-         (when (and branch commit)
-           {:git-branch branch
-            :git-commit commit
-            :git-upstream upstream
-            :git-dirty? dirty?
-            :git-detached? (= "HEAD" branch)})))
-     (catch Exception _ nil))))
-
-(defn- execution-worktree-path
+(defn- ^{:stratum 0} execution-worktree-path
   [execution-opts]
   (get execution-opts :worktree-path))
 
-(defn- source-root-path
+(defn- ^{:stratum 0} source-root-path
   [source-dir]
   (or (worktree/worktree-root source-dir)
       source-dir
       (worktree/worktree-root)
       (System/getProperty "user.dir")))
 
-(defn get-files-in-scope
+(defn ^{:stratum 0} get-files-in-scope
   "Resolve scope paths to actual file paths.
 
    Handles both individual files and directories. Directories are expanded
@@ -137,7 +97,7 @@
                    (catch Exception _ [path]))))
        vec))
 
-(defn spec->workflow-input [enriched-spec]
+(defn ^{:stratum 0} spec->workflow-input [enriched-spec]
   (merge (:spec/raw-data enriched-spec)
          {:title (:spec/title enriched-spec)
           :description (:spec/description enriched-spec)
@@ -157,10 +117,67 @@
           ;; PR → spec mapping).
           :spec/path (:spec/path enriched-spec)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Context decoration
+(defn ^{:stratum 0} create-llm-client
+  ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
+  ([workflow spec quiet backend-override]
+   (try
+     (let [cfg (config/load-config)
+           llm-backend (config/get-llm-backend
+                        cfg
+                            (or backend-override
+                                (get-in workflow [:workflow/config :llm-backend])
+                                (:spec/llm-backend spec)))]
+       (llm/create-client {:backend llm-backend}))
+     (catch Exception e
+       (when-not quiet
+         (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
+       nil))))
 
-(defn decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resolve-input [{:keys [input input-json]}]
+  (cond
+    input-json (parse-inline-json input-json)
+    input (read-input-file input)
+    :else {}))
+
+(defn- ^{:stratum 1} resolve-git-bool
+  [dir & args]
+  (boolean (apply resolve-git-field dir args)))
+
+(defn ^{:stratum 1} get-git-info
+  ([] (get-git-info nil))
+  ([start-path]
+   (try
+     (when-let [root (worktree/worktree-root start-path)]
+       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
+             commit (resolve-git-field root "rev-parse" "--short" "HEAD")]
+         (when (and branch commit)
+           {:git-branch branch
+            :git-commit commit})))
+     (catch Exception _ nil))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-git-state
+  ([] (get-git-state nil))
+  ([start-path]
+   (try
+     (when-let [root (worktree/worktree-root start-path)]
+       (let [branch (resolve-git-field root "rev-parse" "--abbrev-ref" "HEAD")
+             commit (resolve-git-field root "rev-parse" "--short" "HEAD")
+             upstream (resolve-git-field root "rev-parse" "--abbrev-ref" "--symbolic-full-name" "@{upstream}")
+             dirty? (resolve-git-bool root "status" "--porcelain")]
+         (when (and branch commit)
+           {:git-branch branch
+            :git-commit commit
+            :git-upstream upstream
+            :git-dirty? dirty?
+            :git-detached? (= "HEAD" branch)})))
+     (catch Exception _ nil))))
+
+;; Context decoration
+(defn ^{:stratum 2} decorate-spec-with-runtime-context [spec {:keys [iteration parent-task-id] :or {iteration 1}}]
   (let [cwd (or (worktree/worktree-root) (str (fs/cwd)))
         git-info (get-git-info cwd)
         files-in-scope (get-files-in-scope (:spec/intent spec))]
@@ -177,26 +194,10 @@
                     :iteration iteration}
              parent-task-id (assoc :parent-task-id parent-task-id)))))
 
-(defn create-llm-client
-  ([workflow spec quiet] (create-llm-client workflow spec quiet nil))
-  ([workflow spec quiet backend-override]
-   (try
-     (let [cfg (config/load-config)
-           llm-backend (config/get-llm-backend
-                        cfg
-                            (or backend-override
-                                (get-in workflow [:workflow/config :llm-backend])
-                                (:spec/llm-backend spec)))]
-       (llm/create-client {:backend llm-backend}))
-     (catch Exception e
-       (when-not quiet
-         (println (display/colorize :yellow (str "Warning: Could not create LLM client (" (ex-message e) "), agents will use fallback mode"))))
-       nil))))
+;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Workflow context assembly
-
-(defn create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
+(defn ^{:stratum 3} create-workflow-context [{:keys [callbacks artifact-store event-stream workflow-id
                                        workflow-type workflow-version llm-client quiet
                                        spec-title control-state skip-lifecycle-events
                                        execution-opts source-dir

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.merge
   "Merge policy enforcement and PR merging.
 
@@ -33,9 +32,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Anomaly detection (dual shape during W2 convergence)
 
-(defn- any-anomaly?
+;; Anomaly detection (dual shape during W2 convergence)
+(defn- ^{:stratum 0} any-anomaly?
   "True when `x` is either a canonical anomaly (`:anomaly/type`) or a
    legacy response anomaly (`:anomaly/category`).
 
@@ -51,16 +50,14 @@
   (or (anomaly/anomaly? x)
       (response/anomaly-map? x)))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Merge policies
-
-(def merge-methods
+(def ^{:stratum 0} merge-methods
   "Supported merge methods."
   #{:merge    ; Create merge commit
     :squash   ; Squash and merge
-    :rebase}) ; Rebase and merge
+    :rebase})  ; Rebase and merge
 
-(def default-merge-policy
+(def ^{:stratum 0} default-merge-policy
   "Default merge policy."
   {:method :squash
    :require-ci-green? true
@@ -77,10 +74,8 @@
    ;; injects workflow.merge-resolution/resolve-conflict! there).
    :auto-resolve-conflicts? true})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; GitHub CLI helpers
-
-(defn run-gh-command
+(defn ^{:stratum 0} run-gh-command
   "Run a gh CLI command and return result."
   [args worktree-path]
   (try
@@ -98,10 +93,29 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Merge readiness checks
+(defn ^{:stratum 0} check-unresolved-threads
+  "Check if PR has unresolved comment threads."
+  [_worktree-path _pr-number]
+  ;; gh doesn't have a direct way to check this
+  ;; Would need GitHub API for accurate count
+  (dag/ok {:has-unresolved? false
+           :note "Thread resolution check requires GitHub API"}))
 
-(defn check-ci-status
+;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
+(defn- ^{:stratum 0} parse-gh-json
+  "Parse `gh --json` output as JSON via Cheshire. Returns the parsed
+   map (keywordized keys) on success or nil if the body isn't valid
+   JSON. Cheshire matches what github.clj / pr_poller.clj already
+   use; the prior regex-based parse here was brittle to formatting
+   and escaping changes in gh's output."
+  [body]
+  (try (json/parse-string body true)
+       (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Merge readiness checks
+(defn ^{:stratum 1} check-ci-status
   "Check if CI is green for a PR."
   [worktree-path pr-number]
   (let [result (run-gh-command
@@ -112,7 +126,7 @@
       (dag/ok {:ci-green? false
                :error (:error result)}))))
 
-(defn check-review-status
+(defn ^{:stratum 1} check-review-status
   "Check if PR has required approvals."
   [worktree-path pr-number _required-approvals]
   (let [result (run-gh-command
@@ -125,7 +139,7 @@
                  :raw output}))
       result)))
 
-(defn check-branch-status
+(defn ^{:stratum 1} check-branch-status
   "Check if PR branch is up-to-date with base."
   [worktree-path pr-number]
   (let [result (run-gh-command
@@ -140,60 +154,8 @@
                  :raw output}))
       result)))
 
-(defn check-unresolved-threads
-  "Check if PR has unresolved comment threads."
-  [_worktree-path _pr-number]
-  ;; gh doesn't have a direct way to check this
-  ;; Would need GitHub API for accurate count
-  (dag/ok {:has-unresolved? false
-           :note "Thread resolution check requires GitHub API"}))
-
-(defn evaluate-merge-readiness
-  "Evaluate if a PR is ready to merge according to policy.
-
-   Arguments:
-   - worktree-path: Path to git worktree
-   - pr-number: PR number
-   - policy: Merge policy map
-
-   Returns {:ready? bool :checks {...} :blocking [...]}."
-  [worktree-path pr-number policy]
-  (let [ci-check (when (:require-ci-green? policy)
-                   (check-ci-status worktree-path pr-number))
-        review-check (when (:require-approvals? policy)
-                       (check-review-status worktree-path pr-number
-                                            (:required-approvals policy)))
-        branch-check (when (:require-branch-up-to-date? policy)
-                       (check-branch-status worktree-path pr-number))
-        thread-check (when (:require-no-unresolved-threads? policy)
-                       (check-unresolved-threads worktree-path pr-number))
-
-        checks {:ci ci-check
-                :review review-check
-                :branch branch-check
-                :threads thread-check}
-
-        blocking (cond-> []
-                   (and ci-check (not (:ci-green? (:data ci-check))))
-                   (conj :ci-not-green)
-
-                   (and review-check (not (:approved? (:data review-check))))
-                   (conj :not-approved)
-
-                   (and branch-check (not (:up-to-date? (:data branch-check))))
-                   (conj :branch-not-up-to-date)
-
-                   (and thread-check (:has-unresolved? (:data thread-check)))
-                   (conj :unresolved-threads))]
-
-    {:ready? (empty? blocking)
-     :checks checks
-     :blocking blocking}))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Merge execution
-
-(defn merge-pr!
+(defn ^{:stratum 1} merge-pr!
   "Merge a PR using gh CLI.
 
    Arguments:
@@ -219,7 +181,7 @@
                :output (:output (:data result))})
       result)))
 
-(defn enable-auto-merge!
+(defn ^{:stratum 1} enable-auto-merge!
   "Enable auto-merge for a PR (merges when all checks pass).
 
    Arguments:
@@ -241,7 +203,7 @@
       (dag/ok {:auto-merge-enabled? true})
       result)))
 
-(defn disable-auto-merge!
+(defn ^{:stratum 1} disable-auto-merge!
   "Disable auto-merge for a PR."
   [worktree-path pr-number]
   (let [result (run-gh-command
@@ -251,7 +213,7 @@
       (dag/ok {:auto-merge-disabled? true})
       result)))
 
-(defn rebase-pr!
+(defn ^{:stratum 1} rebase-pr!
   "Rebase a PR onto the latest base branch.
 
    Arguments:
@@ -285,20 +247,7 @@
               (dag/err :push-failed (:error push-result))))
           (dag/err :rebase-failed (:error rebase-result)))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Conflict-resolution dispatch (Stage 3d, spec §6.4)
-
-(defn- parse-gh-json
-  "Parse `gh --json` output as JSON via Cheshire. Returns the parsed
-   map (keywordized keys) on success or nil if the body isn't valid
-   JSON. Cheshire matches what github.clj / pr_poller.clj already
-   use; the prior regex-based parse here was brittle to formatting
-   and escaping changes in gh's output."
-  [body]
-  (try (json/parse-string body true)
-       (catch Exception _ nil)))
-
-(defn- pr-info-from-gh
+(defn- ^{:stratum 1} pr-info-from-gh
   "Fetch the fields conflict-resolution/resolve-pr-conflicts! needs
    from `gh pr view`: PR number, branch (headRefName), base
    (baseRefName), head SHA (headRefOid), base SHA (baseRefOid).
@@ -340,7 +289,7 @@
                                (not head-sha)    (conj :headRefOid)
                                (not base-sha)    (conj :baseRefOid))}))))))
 
-(defn- normalize-resolution-outcome
+(defn- ^{:stratum 1} normalize-resolution-outcome
   "conflict-resolution/resolve-pr-conflicts! can return:
    - dag/ok on success;
    - dag/err on infrastructure failure; or
@@ -365,7 +314,72 @@
              {:anomaly outcome})
     outcome))
 
-(defn- attempt-conflict-resolution!
+;; Merge orchestration
+(defn ^{:stratum 1} fetch-pr-labels!
+  "Fetch the label names attached to a PR via `gh pr view --json labels`.
+
+   Returns a `#{}` of label-name strings (GitHub-native, literal,
+   no case-folding). Returns `#{}` on any failure — label fetch is
+   best-effort and never blocks the merge-event publish path. The
+   first downstream consumer is the M2 pr-label-actions watcher."
+  [worktree-path pr-number]
+  (try
+    (let [result (run-gh-command
+                  ["gh" "pr" "view" (str pr-number) "--json" "labels"]
+                  worktree-path)]
+      (if (dag/ok? result)
+        (let [body (json/parse-string (:output (:data result)) true)]
+          (->> (:labels body)
+               (keep :name)
+               set))
+        #{}))
+    (catch Exception _ #{})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} evaluate-merge-readiness
+  "Evaluate if a PR is ready to merge according to policy.
+
+   Arguments:
+   - worktree-path: Path to git worktree
+   - pr-number: PR number
+   - policy: Merge policy map
+
+   Returns {:ready? bool :checks {...} :blocking [...]}."
+  [worktree-path pr-number policy]
+  (let [ci-check (when (:require-ci-green? policy)
+                   (check-ci-status worktree-path pr-number))
+        review-check (when (:require-approvals? policy)
+                       (check-review-status worktree-path pr-number
+                                            (:required-approvals policy)))
+        branch-check (when (:require-branch-up-to-date? policy)
+                       (check-branch-status worktree-path pr-number))
+        thread-check (when (:require-no-unresolved-threads? policy)
+                       (check-unresolved-threads worktree-path pr-number))
+
+        checks {:ci ci-check
+                :review review-check
+                :branch branch-check
+                :threads thread-check}
+
+        blocking (cond-> []
+                   (and ci-check (not (:ci-green? (:data ci-check))))
+                   (conj :ci-not-green)
+
+                   (and review-check (not (:approved? (:data review-check))))
+                   (conj :not-approved)
+
+                   (and branch-check (not (:up-to-date? (:data branch-check))))
+                   (conj :branch-not-up-to-date)
+
+                   (and thread-check (:has-unresolved? (:data thread-check)))
+                   (conj :unresolved-threads))]
+
+    {:ready? (empty? blocking)
+     :checks checks
+     :blocking blocking}))
+
+(defn- ^{:stratum 2} attempt-conflict-resolution!
   "Spec §6.4 dispatch: when `branch-check` raw output classifies as
    :conflicting AND policy enables auto-resolve AND context carries
    `:resolve-fn`, run conflict-resolution/resolve-pr-conflicts! and
@@ -392,30 +406,9 @@
              :resolve-fn    resolve-fn
              :context       context})))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Merge orchestration
+;------------------------------------------------------------------------------ Layer 3
 
-(defn fetch-pr-labels!
-  "Fetch the label names attached to a PR via `gh pr view --json labels`.
-
-   Returns a `#{}` of label-name strings (GitHub-native, literal,
-   no case-folding). Returns `#{}` on any failure — label fetch is
-   best-effort and never blocks the merge-event publish path. The
-   first downstream consumer is the M2 pr-label-actions watcher."
-  [worktree-path pr-number]
-  (try
-    (let [result (run-gh-command
-                  ["gh" "pr" "view" (str pr-number) "--json" "labels"]
-                  worktree-path)]
-      (if (dag/ok? result)
-        (let [body (json/parse-string (:output (:data result)) true)]
-          (->> (:labels body)
-               (keep :name)
-               set))
-        #{}))
-    (catch Exception _ #{})))
-
-(defn attempt-merge
+(defn ^{:stratum 3} attempt-merge
   "Attempt to merge a PR, handling common failure cases.
 
    Arguments:

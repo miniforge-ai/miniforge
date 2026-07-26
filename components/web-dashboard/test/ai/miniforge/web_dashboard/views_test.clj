@@ -15,18 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views-test
   (:require
    [ai.miniforge.web-dashboard.views :as sut]
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
-(defn- render-str
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} render-str
   [form]
   (str form))
 
-(deftest title->pane-maps-known-titles
+(deftest ^{:stratum 0} title->pane-maps-known-titles
   (testing "known dashboard titles map to stable pane ids"
     (is (= :dashboard (sut/title->pane "Dashboard")))
     (is (= :fleet (sut/title->pane "PR Fleet")))
@@ -34,10 +35,12 @@
     (is (= :evidence (sut/title->pane "Evidence")))
     (is (= :workflows (sut/title->pane "Workflows")))))
 
-(deftest title->pane-defaults-unknown-to-task-status
+(deftest ^{:stratum 0} title->pane-defaults-unknown-to-task-status
   (is (= :task-status (sut/title->pane "Unknown"))))
 
-(deftest layout-renders-page-shell
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} layout-renders-page-shell
   (let [result (render-str (sut/layout "Dashboard" [:div "Inner body"]))]
     (testing "layout includes title and current pane marker"
       (is (str/includes? result "<title>Miniforge | Dashboard</title>"))
@@ -53,12 +56,12 @@
     (testing "layout renders supplied body content"
       (is (str/includes? result "Inner body")))))
 
-(deftest layout-marks-active-nav-item
+(deftest ^{:stratum 1} layout-marks-active-nav-item
   (let [result (render-str (sut/layout "PR Fleet" [:div "Fleet body"]))]
     (is (str/includes? result "class=\"nav-item active\" href=\"/fleet\""))
     (is (not (str/includes? result "href=\"/\" class=\"active\"")))))
 
-(deftest layout-renders-shared-script-paths
+(deftest ^{:stratum 1} layout-renders-shared-script-paths
   (let [result (render-str (sut/layout "Dashboard" [:div "Body"]))]
     (is (str/includes? result "/js/app.js"))
     (is (str/includes? result "/js/filters/runtime.js"))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.happy-path-test
   "Happy path. When the wrapped function returns normally, boundary
    appends a successful step under the supplied operation key, the
@@ -26,7 +25,9 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest successful-call-appends-successful-step
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} successful-call-appends-successful-step
   (testing "execute on a returning function appends a step with succeeded? true"
     (let [c0 (chain/create-chain :flow)
           c1 (boundary/execute :db c0 :db/find-user
@@ -37,13 +38,13 @@
       (is (nil?  (:anomaly step)))
       (is (= :db/find-user (:operation step))))))
 
-(deftest successful-call-keeps-chain-succeeded
+(deftest ^{:stratum 0} successful-call-keeps-chain-succeeded
   (testing "chain remains successful after a successful execute"
     (let [c0 (chain/create-chain :flow)
           c  (boundary/execute :db c0 :db/find-user (constantly :ok))]
       (is (chain/succeeded? c)))))
 
-(deftest response-is-the-functions-return-value
+(deftest ^{:stratum 0} response-is-the-functions-return-value
   (testing "step :response equals the value the wrapped function returned"
     (let [c (boundary/execute :io
                               (chain/create-chain :flow)
@@ -52,7 +53,7 @@
                               "/tmp/x")]
       (is (= {:path "/tmp/x" :bytes 12} (chain/last-response c))))))
 
-(deftest variadic-args-are-applied-in-order
+(deftest ^{:stratum 0} variadic-args-are-applied-in-order
   (testing "extra args after f are forwarded to (apply f args) in order"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -61,7 +62,7 @@
                               1 2 3 4)]
       (is (= 10 (chain/last-response c))))))
 
-(deftest zero-arg-function-is-supported
+(deftest ^{:stratum 0} zero-arg-function-is-supported
   (testing "execute supports zero-arg wrapped functions"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -70,7 +71,7 @@
       (is (chain/succeeded? c))
       (is (= 42 (chain/last-response c))))))
 
-(deftest execute-and-long-form-are-equivalent-on-success
+(deftest ^{:stratum 0} execute-and-long-form-are-equivalent-on-success
   (testing "execute is a true alias for execute-with-exception-handling"
     (let [c0 (chain/create-chain :flow)
           a  (boundary/execute :db c0 :op (constantly :ok))

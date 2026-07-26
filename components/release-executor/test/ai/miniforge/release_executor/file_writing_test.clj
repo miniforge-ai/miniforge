@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.file-writing-test
   "Integration test for release executor file writing.
 
@@ -29,9 +28,10 @@
    [ai.miniforge.release-executor.files :as files]
    [babashka.fs :as fs]))
 
-;------------------------------------------------------------------------------ Mock Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def mock-code-artifact
+;------------------------------------------------------------------------------ Mock Data
+(def ^{:stratum 0} mock-code-artifact
   {:code/id (random-uuid)
    :code/files [{:path "src/feature.clj"
                  :content "(ns feature)\n(defn new-feature [] :implemented)"
@@ -44,7 +44,7 @@
                  :action :modify}]
    :code/language "clojure"})
 
-(def mock-code-artifact-with-delete
+(def ^{:stratum 0} mock-code-artifact-with-delete
   {:code/id (random-uuid)
    :code/files [{:path "src/old_feature.clj"
                  :action :delete}
@@ -52,16 +52,8 @@
                  :content "(ns new-feature)\n(defn better [] :ok)"
                  :action :create}]})
 
-(def mock-workflow-state
-  {:workflow/id (random-uuid)
-   :workflow/phase :release
-   :workflow/spec {:spec/description "Add new feature"}
-   :workflow/artifacts [{:artifact/type :code
-                         :artifact/content mock-code-artifact}]})
-
 ;------------------------------------------------------------------------------ Test Helpers
-
-(defn create-temp-dir
+(defn ^{:stratum 0} create-temp-dir
   "Create a temporary directory for testing."
   []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
@@ -69,7 +61,7 @@
     (.mkdirs temp-dir)
     (.getPath temp-dir)))
 
-(defn cleanup-temp-dir
+(defn ^{:stratum 0} cleanup-temp-dir
   "Delete a temporary directory and its contents."
   [dir-path]
   (when dir-path
@@ -81,7 +73,7 @@
         (doseq [subdir (reverse (file-seq dir))]
           (.delete subdir))))))
 
-(defn count-files
+(defn ^{:stratum 0} count-files
   "Count files in a directory recursively."
   [dir-path]
   (let [dir (io/file dir-path)]
@@ -91,19 +83,19 @@
            count)
       0)))
 
-(defn file-exists?
+(defn ^{:stratum 0} file-exists?
   "Check if a file exists in the directory."
   [dir-path relative-path]
   (.exists (io/file dir-path relative-path)))
 
-(defn read-file-content
+(defn ^{:stratum 0} read-file-content
   "Read content of a file."
   [dir-path relative-path]
   (let [file (io/file dir-path relative-path)]
     (when (.exists file)
       (slurp file))))
 
-(defn mock-git-operations
+(defn ^{:stratum 0} mock-git-operations
   "Mock git operations for testing."
   []
   {:add-file (fn [_path _file] {:success? true})
@@ -112,8 +104,7 @@
    :push (fn [] {:success? true})})
 
 ;------------------------------------------------------------------------------ Tests
-
-(defn write-file!
+(defn ^{:stratum 0} write-file!
   "Simple file writer for testing."
   [base-dir file-spec]
   (try
@@ -130,7 +121,16 @@
     (catch Exception e
       {:success? false :error (ex-message e)})))
 
-(defn write-files!
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} mock-workflow-state
+  {:workflow/id (random-uuid)
+   :workflow/phase :release
+   :workflow/spec {:spec/description "Add new feature"}
+   :workflow/artifacts [{:artifact/type :code
+                         :artifact/content mock-code-artifact}]})
+
+(defn ^{:stratum 1} write-files!
   "Write multiple files."
   [base-dir file-specs]
   (try
@@ -142,7 +142,7 @@
     (catch Exception e
       {:success? false :error (ex-message e)})))
 
-(deftest write-single-file-test
+(deftest ^{:stratum 1} write-single-file-test
   (testing "Writing a single file to disk"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -161,26 +161,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest write-multiple-files-test
-  (testing "Writing multiple files from artifact"
-    (let [temp-dir (create-temp-dir)]
-      (try
-        (let [result (write-files! temp-dir (:code/files mock-code-artifact))]
-
-          (is (true? (:success? result))
-              "All files should write successfully")
-          (is (= 3 (:files-written result))
-              "Should report 3 files written")
-          (is (file-exists? temp-dir "src/feature.clj")
-              "Source file should exist")
-          (is (file-exists? temp-dir "test/feature_test.clj")
-              "Test file should exist")
-          (is (file-exists? temp-dir "README.md")
-              "README should exist"))
-        (finally
-          (cleanup-temp-dir temp-dir))))))
-
-(deftest file-write-creates-directories-test
+(deftest ^{:stratum 1} file-write-creates-directories-test
   (testing "File write creates parent directories automatically"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -198,7 +179,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest modify-existing-file-test
+(deftest ^{:stratum 1} modify-existing-file-test
   (testing "Modifying an existing file"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -219,7 +200,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest delete-file-test
+(deftest ^{:stratum 1} delete-file-test
   (testing "Deleting a file"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -241,51 +222,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest mixed-operations-test
-  (testing "Mix of create, modify, and delete operations"
-    (let [temp-dir (create-temp-dir)]
-      (try
-        ;; Set up existing file to modify (create parent dir first)
-        (.mkdirs (io/file temp-dir "src"))
-        (spit (io/file temp-dir "src/old.clj") "(ns old)")
-
-        (let [files [{:path "src/new.clj"
-                      :content "(ns new)"
-                      :action :create}
-                     {:path "src/old.clj"
-                      :content "(ns old-modified)"
-                      :action :modify}
-                     {:path "src/deleted.clj"
-                      :action :delete}]
-              result (write-files! temp-dir files)]
-
-          (is (true? (:success? result))
-              "All operations should succeed")
-          (is (>= (:files-written result) 1)
-              "Should report files written")
-          (is (file-exists? temp-dir "src/new.clj")
-              "New file should exist")
-          (is (file-exists? temp-dir "src/old.clj")
-              "Modified file should still exist")
-          (is (= "(ns old-modified)"
-                 (read-file-content temp-dir "src/old.clj"))
-              "Modified content should be updated"))
-        (finally
-          (cleanup-temp-dir temp-dir))))))
-
-(deftest write-with-zero-files-test
-  (testing "Handling artifact with zero files"
-    (let [temp-dir (create-temp-dir)]
-      (try
-        (let [result (write-files! temp-dir [])]
-
-          (is (or (false? (:success? result))
-                  (zero? (:files-written result)))
-              "Should report zero files written or failure"))
-        (finally
-          (cleanup-temp-dir temp-dir))))))
-
-(deftest invalid-path-handling-test
+(deftest ^{:stratum 1} invalid-path-handling-test
   (testing "path-traversal-anomaly returns an anomaly for path traversal (../)"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -325,7 +262,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest metadata-generation-test
+(deftest ^{:stratum 1} metadata-generation-test
   (testing "Generate commit message from artifact"
     (let [artifact mock-code-artifact
           ;; Simple commit message generation for testing
@@ -338,7 +275,90 @@
       (is (re-find #"feature" (str/lower-case metadata-result))
           "Should mention the feature"))))
 
-(deftest pr-metadata-generation-test
+(deftest ^{:stratum 1} preserve-file-permissions-test
+  ;; TODO: write-file! does not handle :executable flag — tracked for future fix
+  (testing "File is written successfully (executable bit not yet implemented)"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        (let [file-spec {:path "script.sh"
+                         :content "#!/bin/bash\necho 'test'"
+                         :action :create
+                         :executable true}
+              result (write-file! temp-dir file-spec)]
+
+          (is (true? (:success? result))
+              "File write should succeed")
+          (is (file-exists? temp-dir "script.sh")
+              "Script file should exist on disk"))
+        (finally
+          (cleanup-temp-dir temp-dir))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} write-multiple-files-test
+  (testing "Writing multiple files from artifact"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        (let [result (write-files! temp-dir (:code/files mock-code-artifact))]
+
+          (is (true? (:success? result))
+              "All files should write successfully")
+          (is (= 3 (:files-written result))
+              "Should report 3 files written")
+          (is (file-exists? temp-dir "src/feature.clj")
+              "Source file should exist")
+          (is (file-exists? temp-dir "test/feature_test.clj")
+              "Test file should exist")
+          (is (file-exists? temp-dir "README.md")
+              "README should exist"))
+        (finally
+          (cleanup-temp-dir temp-dir))))))
+
+(deftest ^{:stratum 2} mixed-operations-test
+  (testing "Mix of create, modify, and delete operations"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        ;; Set up existing file to modify (create parent dir first)
+        (.mkdirs (io/file temp-dir "src"))
+        (spit (io/file temp-dir "src/old.clj") "(ns old)")
+
+        (let [files [{:path "src/new.clj"
+                      :content "(ns new)"
+                      :action :create}
+                     {:path "src/old.clj"
+                      :content "(ns old-modified)"
+                      :action :modify}
+                     {:path "src/deleted.clj"
+                      :action :delete}]
+              result (write-files! temp-dir files)]
+
+          (is (true? (:success? result))
+              "All operations should succeed")
+          (is (>= (:files-written result) 1)
+              "Should report files written")
+          (is (file-exists? temp-dir "src/new.clj")
+              "New file should exist")
+          (is (file-exists? temp-dir "src/old.clj")
+              "Modified file should still exist")
+          (is (= "(ns old-modified)"
+                 (read-file-content temp-dir "src/old.clj"))
+              "Modified content should be updated"))
+        (finally
+          (cleanup-temp-dir temp-dir))))))
+
+(deftest ^{:stratum 2} write-with-zero-files-test
+  (testing "Handling artifact with zero files"
+    (let [temp-dir (create-temp-dir)]
+      (try
+        (let [result (write-files! temp-dir [])]
+
+          (is (or (false? (:success? result))
+                  (zero? (:files-written result)))
+              "Should report zero files written or failure"))
+        (finally
+          (cleanup-temp-dir temp-dir))))))
+
+(deftest ^{:stratum 2} pr-metadata-generation-test
   (testing "Generate PR title and description"
     (let [workflow-state mock-workflow-state
           ;; Simple PR metadata generation for testing
@@ -354,7 +374,7 @@
       (is (re-find #"feature" (str/lower-case (:description pr-metadata)))
           "Description should mention the work"))))
 
-(deftest rollback-on-partial-failure-test
+(deftest ^{:stratum 2} rollback-on-partial-failure-test
   ;; TODO: write-files! does not implement rollback — partial writes persist
   (testing "Partial failure reports correct count"
     (let [temp-dir (create-temp-dir)]
@@ -373,7 +393,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest file-staging-for-git-test
+(deftest ^{:stratum 2} file-staging-for-git-test
   (testing "Files are prepared for git staging"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -391,25 +411,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest preserve-file-permissions-test
-  ;; TODO: write-file! does not handle :executable flag — tracked for future fix
-  (testing "File is written successfully (executable bit not yet implemented)"
-    (let [temp-dir (create-temp-dir)]
-      (try
-        (let [file-spec {:path "script.sh"
-                         :content "#!/bin/bash\necho 'test'"
-                         :action :create
-                         :executable true}
-              result (write-file! temp-dir file-spec)]
-
-          (is (true? (:success? result))
-              "File write should succeed")
-          (is (file-exists? temp-dir "script.sh")
-              "Script file should exist on disk"))
-        (finally
-          (cleanup-temp-dir temp-dir))))))
-
-(deftest concurrent-file-writes-test
+(deftest ^{:stratum 2} concurrent-file-writes-test
   (testing "Multiple artifacts can be written concurrently"
     (let [temp-dir (create-temp-dir)]
       (try
@@ -432,7 +434,7 @@
         (finally
           (cleanup-temp-dir temp-dir))))))
 
-(deftest zero-files-written-detection-test
+(deftest ^{:stratum 2} zero-files-written-detection-test
   (testing "Detect when zero files are written despite success"
     (let [temp-dir (create-temp-dir)]
       (try

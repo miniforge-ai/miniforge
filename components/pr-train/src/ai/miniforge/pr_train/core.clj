@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.core
   "Core implementation of PR Train management.
    Provides PRTrainManager protocol and in-memory implementation."
@@ -24,9 +23,9 @@
    [ai.miniforge.pr-train.state :as state]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol definition
 
-(defprotocol PRTrainManager
+;; Protocol definition
+(defprotocol ^{:stratum 0} PRTrainManager
   "Protocol for managing PR trains.
 
    PR trains are coordinated sets of related PRs that must merge
@@ -133,10 +132,57 @@
     "Retrieve evidence bundle by ID.
      Returns bundle or nil if not found."))
 
-;------------------------------------------------------------------------------ Layer 1
-;; In-memory implementation
+;; ── Utility functions for working with trains ───────────────────────────────
+(defn ^{:stratum 0} list-trains
+  "List all trains in a manager.
 
-(defrecord InMemoryPRTrainManager [trains evidence-bundles event-stream]
+   Returns full train maps."
+  [manager]
+  (->> @(:trains manager)
+       vals
+       (sort-by :train/created-at)
+       vec))
+
+(defn ^{:stratum 0} find-trains-by-status
+  "Find trains with a given status.
+
+   Returns vector of train-ids."
+  [manager status]
+  (->> @(:trains manager)
+       (filter (fn [[_id train]] (= status (:train/status train))))
+       (map first)
+       vec))
+
+(defn ^{:stratum 0} find-trains-by-dag
+  "Find trains using a specific DAG.
+
+   Returns vector of train-ids."
+  [manager dag-id]
+  (->> @(:trains manager)
+       (filter (fn [[_id train]] (= dag-id (:train/dag-id train))))
+       (map first)
+       vec))
+
+(defn ^{:stratum 0} train-contains-pr?
+  "Check if a train contains a specific PR."
+  [manager train-id repo pr-number]
+  (when-let [train (get-train manager train-id)]
+    (some #(and (= repo (:pr/repo %))
+                (= pr-number (:pr/number %)))
+          (:train/prs train))))
+
+(defn ^{:stratum 0} get-pr-from-train
+  "Get a PR from a train.
+
+   Returns TrainPR or nil if not found."
+  [manager train-id pr-number]
+  (when-let [train (get-train manager train-id)]
+    (state/find-pr train pr-number)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; In-memory implementation
+(defrecord ^{:stratum 1} InMemoryPRTrainManager [trains evidence-bundles event-stream]
   PRTrainManager
 
   ;; Lifecycle
@@ -398,9 +444,9 @@
     (get @evidence-bundles bundle-id)))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Factory function
 
-(defn create-manager
+;; Factory function
+(defn ^{:stratum 2} create-manager
   "Create a new in-memory PR train manager.
    Options:
    - :event-stream - Optional event stream for publishing merge events
@@ -408,54 +454,6 @@
   ([] (create-manager nil))
   ([opts]
    (->InMemoryPRTrainManager (atom {}) (atom {}) (:event-stream opts))))
-
-;; ── Utility functions for working with trains ───────────────────────────────
-
-(defn list-trains
-  "List all trains in a manager.
-
-   Returns full train maps."
-  [manager]
-  (->> @(:trains manager)
-       vals
-       (sort-by :train/created-at)
-       vec))
-
-(defn find-trains-by-status
-  "Find trains with a given status.
-
-   Returns vector of train-ids."
-  [manager status]
-  (->> @(:trains manager)
-       (filter (fn [[_id train]] (= status (:train/status train))))
-       (map first)
-       vec))
-
-(defn find-trains-by-dag
-  "Find trains using a specific DAG.
-
-   Returns vector of train-ids."
-  [manager dag-id]
-  (->> @(:trains manager)
-       (filter (fn [[_id train]] (= dag-id (:train/dag-id train))))
-       (map first)
-       vec))
-
-(defn train-contains-pr?
-  "Check if a train contains a specific PR."
-  [manager train-id repo pr-number]
-  (when-let [train (get-train manager train-id)]
-    (some #(and (= repo (:pr/repo %))
-                (= pr-number (:pr/number %)))
-          (:train/prs train))))
-
-(defn get-pr-from-train
-  "Get a PR from a train.
-
-   Returns TrainPR or nil if not found."
-  [manager train-id pr-number]
-  (when-let [train (get-train manager train-id)]
-    (state/find-pr train pr-number)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

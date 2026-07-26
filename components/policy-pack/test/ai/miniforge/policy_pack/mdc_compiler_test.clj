@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.mdc-compiler-test
   "Unit tests for the MDC-to-rule compiler.
 
@@ -34,14 +33,15 @@
    [clojure.string :as str]
    [ai.miniforge.policy-pack.mdc-compiler :as sut]))
 
-(def requiring-resolve-pattern
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} requiring-resolve-pattern
   (str "\\(" "requiring-resolve" "\\s"))
 
 ;; ============================================================================
-;; Layer 0 — split-frontmatter tests
+;; split-frontmatter tests
 ;; ============================================================================
-
-(deftest split-frontmatter-test
+(deftest ^{:stratum 0} split-frontmatter-test
   (testing "splits frontmatter and body at --- delimiters"
     (let [result (sut/split-frontmatter "---\nkey: value\n---\nBody text")]
       (is (= "key: value" (:frontmatter result)))
@@ -70,10 +70,9 @@
       (is (= "" (:frontmatter result))))))
 
 ;; ============================================================================
-;; Layer 0 — parse-mdc tests
+;; parse-mdc tests
 ;; ============================================================================
-
-(deftest parse-mdc-test
+(deftest ^{:stratum 0} parse-mdc-test
   (testing "parses complete MDC file with frontmatter and body"
     (let [content "---\ndewey: \"001\"\ndescription: Stratified Design\nalwaysApply: true\n---\n\n# Body here"
           result (sut/parse-mdc content)]
@@ -116,59 +115,14 @@
       (is (= "Just body" (:body result))))))
 
 ;; ============================================================================
-;; Layer 1 — Dewey → phases mapping tests
+;; Dewey → phases mapping tests
 ;; ============================================================================
-
-(def all-phases #{:plan :implement :review :verify :release})
-
-(deftest dewey->phases-test
-  (testing "foundations (0-99) → all phases"
-    (is (= all-phases (sut/dewey->phases "001")))
-    (is (= all-phases (sut/dewey->phases "000")))
-    (is (= all-phases (sut/dewey->phases "099"))))
-
-  (testing "tools (100-199) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
-
-  (testing "languages (200-299) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "210"))))
-
-  (testing "frameworks (300-399) → plan + implement + review"
-    (is (= #{:plan :implement :review} (sut/dewey->phases "300"))))
-
-  (testing "testing (400-499) → implement + verify"
-    (is (= #{:implement :verify} (sut/dewey->phases "400"))))
-
-  (testing "operations (500-599) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "500"))))
-
-  (testing "documentation (600-699) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "600"))))
-
-  (testing "workflows (700-799) → all phases"
-    (is (= all-phases (sut/dewey->phases "715"))))
-
-  (testing "project (800-899) → implement + review"
-    (is (= #{:implement :review} (sut/dewey->phases "800"))))
-
-  (testing "meta (900-999) → empty set (never injected)"
-    (is (= #{} (sut/dewey->phases "900")))
-    (is (= #{} (sut/dewey->phases "999"))))
-
-  (testing "boundary values: end of one range, start of next"
-    (is (= all-phases (sut/dewey->phases "99")))
-    (is (= #{:implement :review} (sut/dewey->phases "100"))))
-
-  (testing "unparseable dewey falls back to default phases"
-    (is (= #{:implement :review} (sut/dewey->phases "xyz")))
-    (is (= #{:implement :review} (sut/dewey->phases "")))
-    (is (= #{:implement :review} (sut/dewey->phases nil)))))
+(def ^{:stratum 0} all-phases #{:plan :implement :review :verify :release})
 
 ;; ============================================================================
-;; Layer 1 — Dewey → category tests
+;; Dewey → category tests
 ;; ============================================================================
-
-(deftest dewey->category-id-test
+(deftest ^{:stratum 0} dewey->category-id-test
   (testing "maps dewey codes to category IDs"
     (are [dewey expected]
          (= expected (sut/dewey->category-id dewey))
@@ -187,7 +141,7 @@
     (is (= "other" (sut/dewey->category-id "xyz")))
     (is (= "other" (sut/dewey->category-id "")))))
 
-(deftest dewey->category-label-test
+(deftest ^{:stratum 0} dewey->category-label-test
   (testing "maps dewey codes to human labels"
     (is (= "Foundations & Core Principles" (sut/dewey->category-label "001")))
     (is (= "Languages" (sut/dewey->category-label "210")))
@@ -197,10 +151,9 @@
     (is (= "Other" (sut/dewey->category-label "xyz")))))
 
 ;; ============================================================================
-;; Layer 1 — Slug → rule ID tests
+;; Slug → rule ID tests
 ;; ============================================================================
-
-(deftest slug->rule-id-test
+(deftest ^{:stratum 0} slug->rule-id-test
   (testing "converts .mdc filename to :std/ namespaced keyword"
     (are [filename expected]
          (= expected (sut/slug->rule-id filename))
@@ -214,10 +167,9 @@
     (is (= :std/stratified-design (sut/slug->rule-id "stratified-design.mdc")))))
 
 ;; ============================================================================
-;; Layer 1 — Agent behavior extraction tests
+;; Agent behavior extraction tests
 ;; ============================================================================
-
-(deftest extract-agent-behavior-test
+(deftest ^{:stratum 0} extract-agent-behavior-test
   (testing "priority 1: extracts ## Agent behavior section"
     (let [body "# Title\n\nIntro.\n\n## Agent behavior\n\n- Do this first.\n- Then do that.\n\n## Next section"]
       (is (= "- Do this first.\n- Then do that."
@@ -295,63 +247,7 @@
       (is (str/includes? result "long numbered step")
           "the surviving prefix must contain whole sentences"))))
 
-;; ============================================================================
-;; Layer 2 — mdc->rule compilation tests
-;; ============================================================================
-
-(deftest mdc->rule-success-test
-  (testing "compiles a standard MDC file into a valid rule"
-    (let [content (str "---\ndewey: \"001\"\n"
-                       "description: Stratified Design\n"
-                       "alwaysApply: true\n"
-                       "---\n\n"
-                       "# Stratified Design (ALWAYS)\n\n"
-                       "Use a DAG.\n\n"
-                       "## Agent behavior\n\n"
-                       "- Output a stratified plan before writing code.")
-          result (sut/mdc->rule "stratified-design.mdc" content)]
-      (is (true? (:success? result)))
-      (let [rule (:rule result)]
-        (is (= :std/stratified-design (:rule/id rule)))
-        (is (= "Stratified Design" (:rule/title rule)))
-        (is (= "Engineering standard (001): Stratified Design" (:rule/description rule)))
-        (is (= :high (:rule/severity rule)))
-        (is (= "001" (:rule/category rule)))
-        (is (true? (:rule/always-inject? rule)))
-        (is (= all-phases (get-in rule [:rule/applies-to :phases])))
-        (is (= {:type :custom} (:rule/detection rule)))
-        (is (= {:action :warn :message "Standard: Stratified Design"}
-               (:rule/enforcement rule)))
-        (is (some? (:rule/agent-behavior rule)))
-        (is (some? (:rule/knowledge-content rule)))))))
-
-(deftest mdc->rule-enforcement-action-override-test
-  (testing "frontmatter enforcement.action :hard-halt makes the rule BLOCKING
-            (content-scan detector + :high severity), so a gate can block on it"
-    (let [content (str "---\ndewey: \"212\"\n"
-                       "description: No requiring-resolve\n"
-                       "globs: [\"**/*.clj\"]\n"
-                       "detection.pattern: \"" requiring-resolve-pattern "\"\n"
-                       "enforcement.action: hard-halt\n"
-                       "enforcement.message: Use a direct require\n"
-                       "---\n\n# No requiring-resolve\n\nbody")
-          rule (:rule (sut/mdc->rule "clojure-no-requiring-resolve.mdc" content))]
-      (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
-      (is (= "Use a direct require" (get-in rule [:rule/enforcement :message])))
-      (is (= :high (:rule/severity rule)) "a blocking rule is at least :high")
-      (is (= :content-scan (get-in rule [:rule/detection :type])))
-      (is (= requiring-resolve-pattern (get-in rule [:rule/detection :pattern])))))
-  (testing "an unrecognized action falls back to the alwaysApply default, not garbage"
-    (let [content (str "---\ndewey: \"001\"\ndescription: X\nalwaysApply: true\n"
-                       "enforcement.action: bogus-action\n---\n\n# X\n\nbody")
-          rule (:rule (sut/mdc->rule "x.mdc" content))]
-      (is (= :warn (get-in rule [:rule/enforcement :action])))))
-  (testing "no enforcement override → existing default (advisory rule audits)"
-    (let [content "---\ndewey: \"001\"\ndescription: X\n---\n\n# X\n\nbody"
-          rule (:rule (sut/mdc->rule "x.mdc" content))]
-      (is (= :audit (get-in rule [:rule/enforcement :action]))))))
-
-(deftest mdc->rule-field-mapping-completeness-test
+(deftest ^{:stratum 0} mdc->rule-field-mapping-completeness-test
   (testing "all four frontmatter fields are mapped: dewey, description, alwaysApply, globs"
     (let [content (str "---\ndewey: \"210\"\n"
                        "description: Clojure Style\n"
@@ -370,7 +266,7 @@
       ;; globs → :rule/applies-to :file-globs
       (is (= ["*.clj" "*.cljc"] (get-in rule [:rule/applies-to :file-globs]))))))
 
-(deftest mdc->rule-knowledge-content-semantics-test
+(deftest ^{:stratum 0} mdc->rule-knowledge-content-semantics-test
   (testing ":rule/knowledge-content contains full MDC body text (distinct from agent-behavior)"
     (let [content "---\ndewey: \"001\"\n---\n\n# Full Title\n\nParagraph one.\n\n## Agent behavior\n\n- Be concise."
           rule (:rule (sut/mdc->rule "test.mdc" content))]
@@ -391,7 +287,7 @@
           rule (:rule (sut/mdc->rule "blank.mdc" content))]
       (is (not (contains? rule :rule/knowledge-content))))))
 
-(deftest mdc->rule-always-inject-semantics-test
+(deftest ^{:stratum 0} mdc->rule-always-inject-semantics-test
   (testing ":rule/always-inject? true when alwaysApply: true"
     (let [content "---\nalwaysApply: true\n---\nBody"
           rule (:rule (sut/mdc->rule "test.mdc" content))]
@@ -407,28 +303,21 @@
           rule (:rule (sut/mdc->rule "test.mdc" content))]
       (is (not (contains? rule :rule/always-inject?))))))
 
-(deftest mdc->rule-missing-description-fallback-test
+(deftest ^{:stratum 0} mdc->rule-missing-description-fallback-test
   (testing "missing description → title derived from filename slug"
     (let [content "---\ndewey: \"001\"\n---\nBody"
           rule (:rule (sut/mdc->rule "code-quality.mdc" content))]
       (is (= "Code Quality" (:rule/title rule)))
       (is (= "Engineering standard (001): Code Quality" (:rule/description rule))))))
 
-(deftest mdc->rule-missing-dewey-fallback-test
-  (testing "missing dewey → defaults to '000' (foundations phases)"
-    (let [content "---\ndescription: No Dewey\n---\nBody"
-          rule (:rule (sut/mdc->rule "no-dewey.mdc" content))]
-      (is (= "000" (:rule/category rule)))
-      (is (= all-phases (get-in rule [:rule/applies-to :phases]))))))
-
-(deftest mdc->rule-meta-dewey-empty-phases-test
+(deftest ^{:stratum 0} mdc->rule-meta-dewey-empty-phases-test
   (testing "dewey 900 (meta) → empty phases, never auto-injected"
     (let [content "---\ndewey: \"900\"\ndescription: Rule Format\nglobs: [\".cursor/rules/**/*.mdc\"]\n---\n\nTemplate."
           rule (:rule (sut/mdc->rule "rule-format.mdc" content))]
       (is (= #{} (get-in rule [:rule/applies-to :phases])))
       (is (= [".cursor/rules/**/*.mdc"] (get-in rule [:rule/applies-to :file-globs]))))))
 
-(deftest mdc->rule-globs-normalization-test
+(deftest ^{:stratum 0} mdc->rule-globs-normalization-test
   (testing "string glob wrapped in vector"
     (let [content "---\nglobs: \"*.clj\"\n---\nBody"
           rule (:rule (sut/mdc->rule "test.mdc" content))]
@@ -444,7 +333,7 @@
           rule (:rule (sut/mdc->rule "test.mdc" content))]
       (is (not (contains? (:rule/applies-to rule) :file-globs))))))
 
-(deftest mdc->rule-error-handling-test
+(deftest ^{:stratum 0} mdc->rule-error-handling-test
   (testing "returns failure result on exception"
     ;; Force an error by passing something that will cause parse issues
     ;; (the function catches all exceptions)
@@ -454,7 +343,7 @@
       ;; Actually, (str nil) => "" which won't throw. Let's verify it still works.
       (is (boolean? (:success? result))))))
 
-(deftest mdc->rule-constant-fields-test
+(deftest ^{:stratum 0} mdc->rule-constant-fields-test
   (testing "non-alwaysApply severity is :low"
     (let [rule (:rule (sut/mdc->rule "x.mdc" "---\ndewey: \"001\"\n---\nBody"))]
       (is (= :low (:rule/severity rule)))))
@@ -468,17 +357,16 @@
       (is (= :audit (get-in rule [:rule/enforcement :action]))))))
 
 ;; ============================================================================
-;; Layer 2 — compile-standards-pack tests
+;; compile-standards-pack tests
 ;; ============================================================================
-
-(deftest compile-standards-pack-missing-directory-test
+(deftest ^{:stratum 0} compile-standards-pack-missing-directory-test
   (testing "returns failure when directory does not exist"
     (let [result (sut/compile-standards-pack "/nonexistent/path/to/standards")]
       (is (false? (:success? result)))
       (is (seq (:errors result)))
       (is (str/includes? (first (:errors result)) "not found")))))
 
-(deftest compile-standards-pack-empty-directory-test
+(deftest ^{:stratum 0} compile-standards-pack-empty-directory-test
   (testing "returns success with zero rules for empty directory"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -492,7 +380,7 @@
         (finally
           (.delete tmp-dir))))))
 
-(deftest compile-standards-pack-single-file-test
+(deftest ^{:stratum 0} compile-standards-pack-single-file-test
   (testing "compiles a single .mdc file into a pack"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -517,7 +405,7 @@
           (.delete mdc-file)
           (.delete tmp-dir))))))
 
-(deftest compile-standards-pack-duplicate-slugs-test
+(deftest ^{:stratum 0} compile-standards-pack-duplicate-slugs-test
   (testing "returns failure when duplicate filename slugs detected"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -541,7 +429,7 @@
           (.delete sub-b)
           (.delete tmp-dir))))))
 
-(deftest compile-standards-pack-metadata-test
+(deftest ^{:stratum 0} compile-standards-pack-metadata-test
   (testing "pack metadata matches expected standards pack structure"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -567,7 +455,7 @@
           (.delete mdc-file)
           (.delete tmp-dir))))))
 
-(deftest compile-standards-pack-categories-grouping-test
+(deftest ^{:stratum 0} compile-standards-pack-categories-grouping-test
   (testing "rules are grouped into categories by dewey range"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -592,7 +480,7 @@
           (.delete f3)
           (.delete tmp-dir))))))
 
-(deftest compile-standards-pack-always-inject-meta-warning-test
+(deftest ^{:stratum 0} compile-standards-pack-always-inject-meta-warning-test
   (testing "warns when always-inject rule has empty phases (dewey 900)"
     (let [tmp-dir (java.io.File/createTempFile "mdc-test" "")
           _ (.delete tmp-dir)
@@ -610,8 +498,7 @@
 ;; ============================================================================
 ;; Integration: compiled rules pass schema validation
 ;; ============================================================================
-
-(deftest compiled-rule-passes-schema-test
+(deftest ^{:stratum 0} compiled-rule-passes-schema-test
   (testing "mdc->rule output validates against Rule schema"
     (let [content (str "---\ndewey: \"001\"\n"
                        "description: Full Example\n"
@@ -630,6 +517,113 @@
               (str "Compiled rule should pass schema validation: "
                    ((resolve 'ai.miniforge.policy-pack.schema/explain)
                     @(resolve 'ai.miniforge.policy-pack.schema/Rule) rule))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} dewey->phases-test
+  (testing "foundations (0-99) → all phases"
+    (is (= all-phases (sut/dewey->phases "001")))
+    (is (= all-phases (sut/dewey->phases "000")))
+    (is (= all-phases (sut/dewey->phases "099"))))
+
+  (testing "tools (100-199) → implement + review"
+    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+
+  (testing "languages (200-299) → implement + review"
+    (is (= #{:implement :review} (sut/dewey->phases "210"))))
+
+  (testing "frameworks (300-399) → plan + implement + review"
+    (is (= #{:plan :implement :review} (sut/dewey->phases "300"))))
+
+  (testing "testing (400-499) → implement + verify"
+    (is (= #{:implement :verify} (sut/dewey->phases "400"))))
+
+  (testing "operations (500-599) → implement + review"
+    (is (= #{:implement :review} (sut/dewey->phases "500"))))
+
+  (testing "documentation (600-699) → implement + review"
+    (is (= #{:implement :review} (sut/dewey->phases "600"))))
+
+  (testing "workflows (700-799) → all phases"
+    (is (= all-phases (sut/dewey->phases "715"))))
+
+  (testing "project (800-899) → implement + review"
+    (is (= #{:implement :review} (sut/dewey->phases "800"))))
+
+  (testing "meta (900-999) → empty set (never injected)"
+    (is (= #{} (sut/dewey->phases "900")))
+    (is (= #{} (sut/dewey->phases "999"))))
+
+  (testing "boundary values: end of one range, start of next"
+    (is (= all-phases (sut/dewey->phases "99")))
+    (is (= #{:implement :review} (sut/dewey->phases "100"))))
+
+  (testing "unparseable dewey falls back to default phases"
+    (is (= #{:implement :review} (sut/dewey->phases "xyz")))
+    (is (= #{:implement :review} (sut/dewey->phases "")))
+    (is (= #{:implement :review} (sut/dewey->phases nil)))))
+
+;; ============================================================================
+;; mdc->rule compilation tests
+;; ============================================================================
+(deftest ^{:stratum 1} mdc->rule-success-test
+  (testing "compiles a standard MDC file into a valid rule"
+    (let [content (str "---\ndewey: \"001\"\n"
+                       "description: Stratified Design\n"
+                       "alwaysApply: true\n"
+                       "---\n\n"
+                       "# Stratified Design (ALWAYS)\n\n"
+                       "Use a DAG.\n\n"
+                       "## Agent behavior\n\n"
+                       "- Output a stratified plan before writing code.")
+          result (sut/mdc->rule "stratified-design.mdc" content)]
+      (is (true? (:success? result)))
+      (let [rule (:rule result)]
+        (is (= :std/stratified-design (:rule/id rule)))
+        (is (= "Stratified Design" (:rule/title rule)))
+        (is (= "Engineering standard (001): Stratified Design" (:rule/description rule)))
+        (is (= :high (:rule/severity rule)))
+        (is (= "001" (:rule/category rule)))
+        (is (true? (:rule/always-inject? rule)))
+        (is (= all-phases (get-in rule [:rule/applies-to :phases])))
+        (is (= {:type :custom} (:rule/detection rule)))
+        (is (= {:action :warn :message "Standard: Stratified Design"}
+               (:rule/enforcement rule)))
+        (is (some? (:rule/agent-behavior rule)))
+        (is (some? (:rule/knowledge-content rule)))))))
+
+(deftest ^{:stratum 1} mdc->rule-enforcement-action-override-test
+  (testing "frontmatter enforcement.action :hard-halt makes the rule BLOCKING
+            (content-scan detector + :high severity), so a gate can block on it"
+    (let [content (str "---\ndewey: \"212\"\n"
+                       "description: No requiring-resolve\n"
+                       "globs: [\"**/*.clj\"]\n"
+                       "detection.pattern: \"" requiring-resolve-pattern "\"\n"
+                       "enforcement.action: hard-halt\n"
+                       "enforcement.message: Use a direct require\n"
+                       "---\n\n# No requiring-resolve\n\nbody")
+          rule (:rule (sut/mdc->rule "clojure-no-requiring-resolve.mdc" content))]
+      (is (= :hard-halt (get-in rule [:rule/enforcement :action])))
+      (is (= "Use a direct require" (get-in rule [:rule/enforcement :message])))
+      (is (= :high (:rule/severity rule)) "a blocking rule is at least :high")
+      (is (= :content-scan (get-in rule [:rule/detection :type])))
+      (is (= requiring-resolve-pattern (get-in rule [:rule/detection :pattern])))))
+  (testing "an unrecognized action falls back to the alwaysApply default, not garbage"
+    (let [content (str "---\ndewey: \"001\"\ndescription: X\nalwaysApply: true\n"
+                       "enforcement.action: bogus-action\n---\n\n# X\n\nbody")
+          rule (:rule (sut/mdc->rule "x.mdc" content))]
+      (is (= :warn (get-in rule [:rule/enforcement :action])))))
+  (testing "no enforcement override → existing default (advisory rule audits)"
+    (let [content "---\ndewey: \"001\"\ndescription: X\n---\n\n# X\n\nbody"
+          rule (:rule (sut/mdc->rule "x.mdc" content))]
+      (is (= :audit (get-in rule [:rule/enforcement :action]))))))
+
+(deftest ^{:stratum 1} mdc->rule-missing-dewey-fallback-test
+  (testing "missing dewey → defaults to '000' (foundations phases)"
+    (let [content "---\ndescription: No Dewey\n---\nBody"
+          rule (:rule (sut/mdc->rule "no-dewey.mdc" content))]
+      (is (= "000" (:rule/category rule)))
+      (is (= all-phases (get-in rule [:rule/applies-to :phases]))))))
 
 (comment
   (clojure.test/run-tests 'ai.miniforge.policy-pack.mdc-compiler-test)

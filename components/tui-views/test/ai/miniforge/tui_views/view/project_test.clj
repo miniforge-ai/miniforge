@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.project-test
   "Unit tests for extracted helper functions in project.clj."
   (:require
@@ -27,66 +26,67 @@
    [java.time LocalDate ZoneId]
    [java.util Date]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; readiness-state
 ;; ============================================================================
-
-(deftest readiness-state-merge-ready
+(deftest ^{:stratum 0} readiness-state-merge-ready
   (testing "Approved + CI passed + not behind → merge-ready"
     (is (= [:merge-ready 1.0]
            (sut/readiness-state :approved true false false)))))
 
-(deftest readiness-state-behind-main
+(deftest ^{:stratum 0} readiness-state-behind-main
   (testing "Approved + CI passed + behind → behind-main"
     (is (= [:behind-main 0.85]
            (sut/readiness-state :approved true false true)))))
 
-(deftest readiness-state-ci-failing-approved
+(deftest ^{:stratum 0} readiness-state-ci-failing-approved
   (testing "Approved + CI failed → ci-failing"
     (is (= [:ci-failing 0.5]
            (sut/readiness-state :approved false true false)))))
 
-(deftest readiness-state-approved-pending-ci
+(deftest ^{:stratum 0} readiness-state-approved-pending-ci
   (testing "Approved + CI not passed and not failed → needs-review"
     (is (= [:needs-review 0.7]
            (sut/readiness-state :approved false false false)))))
 
-(deftest readiness-state-changes-requested
+(deftest ^{:stratum 0} readiness-state-changes-requested
   (testing "Changes requested → changes-requested"
     (is (= [:changes-requested 0.25]
            (sut/readiness-state :changes-requested false false false)))))
 
-(deftest readiness-state-reviewing
+(deftest ^{:stratum 0} readiness-state-reviewing
   (testing "Reviewing → needs-review"
     (is (= [:needs-review 0.5]
            (sut/readiness-state :reviewing false false false)))))
 
-(deftest readiness-state-open-ci-fail
+(deftest ^{:stratum 0} readiness-state-open-ci-fail
   (testing "Open + CI failed → ci-failing"
     (is (= [:ci-failing 0.25]
            (sut/readiness-state :open false true false)))))
 
-(deftest readiness-state-open
+(deftest ^{:stratum 0} readiness-state-open
   (testing "Open + no CI failure → needs-review"
     (is (= [:needs-review 0.4]
            (sut/readiness-state :open false false false)))))
 
-(deftest readiness-state-draft
+(deftest ^{:stratum 0} readiness-state-draft
   (testing "Draft → draft"
     (is (= [:draft 0.1]
            (sut/readiness-state :draft false false false)))))
 
-(deftest readiness-state-merged
+(deftest ^{:stratum 0} readiness-state-merged
   (testing "Merged → merged with score 1.0"
     (is (= [:merged 1.0]
            (sut/readiness-state :merged false false false)))))
 
-(deftest readiness-state-closed
+(deftest ^{:stratum 0} readiness-state-closed
   (testing "Closed → closed with score 0.0"
     (is (= [:closed 0.0]
            (sut/readiness-state :closed false false false)))))
 
-(deftest readiness-state-unknown
+(deftest ^{:stratum 0} readiness-state-unknown
   (testing "Unknown status → unknown"
     (is (= [:unknown 0.0]
            (sut/readiness-state :something-else false false false)))))
@@ -94,43 +94,42 @@
 ;; ============================================================================
 ;; readiness-blockers
 ;; ============================================================================
-
-(deftest readiness-blockers-ci-fail
+(deftest ^{:stratum 0} readiness-blockers-ci-fail
   (testing "CI failure adds a CI blocker"
     (let [blockers (sut/readiness-blockers :approved true false)]
       (is (= 1 (count blockers)))
       (is (= :ci (-> blockers first :blocker/type))))))
 
-(deftest readiness-blockers-behind
+(deftest ^{:stratum 0} readiness-blockers-behind
   (testing "Behind main adds a behind-main blocker"
     (let [blockers (sut/readiness-blockers :approved false true)]
       (is (some #(= :behind-main (:blocker/type %)) blockers)))))
 
-(deftest readiness-blockers-review-needed
+(deftest ^{:stratum 0} readiness-blockers-review-needed
   (testing "Open/reviewing statuses add review blocker"
     (doseq [status [:open :reviewing]]
       (let [blockers (sut/readiness-blockers status false false)]
         (is (some #(= :review (:blocker/type %)) blockers)
             (str status " should produce review blocker"))))))
 
-(deftest readiness-blockers-changes-requested
+(deftest ^{:stratum 0} readiness-blockers-changes-requested
   (testing "Changes requested adds review blocker"
     (let [blockers (sut/readiness-blockers :changes-requested false false)]
       (is (some #(= :review (:blocker/type %)) blockers))
       (is (some #(= "Reviewer requested changes" (:blocker/message %)) blockers)))))
 
-(deftest readiness-blockers-draft
+(deftest ^{:stratum 0} readiness-blockers-draft
   (testing "Draft adds review blocker with author source"
     (let [blockers (sut/readiness-blockers :draft false false)]
       (is (some #(and (= :review (:blocker/type %))
                       (= "author" (:blocker/source %)))
                 blockers)))))
 
-(deftest readiness-blockers-approved-no-issues
+(deftest ^{:stratum 0} readiness-blockers-approved-no-issues
   (testing "Approved with no CI fail and not behind → empty blockers"
     (is (empty? (sut/readiness-blockers :approved false false)))))
 
-(deftest readiness-blockers-multiple
+(deftest ^{:stratum 0} readiness-blockers-multiple
   (testing "Multiple conditions produce multiple blockers"
     (let [blockers (sut/readiness-blockers :open true true)]
       (is (>= (count blockers) 3)))))
@@ -138,8 +137,7 @@
 ;; ============================================================================
 ;; readiness-factors
 ;; ============================================================================
-
-(deftest readiness-factors-all-green
+(deftest ^{:stratum 0} readiness-factors-all-green
   (testing "All green → weighted score near 1.0"
     (let [result (sut/readiness-factors :approved true false false)]
       (is (>= (:weighted result) 0.85))
@@ -148,22 +146,22 @@
       (is (= 1.0 (:behind-score result)))
       (is (= 5 (count (:factors result)))))))
 
-(deftest readiness-factors-ci-failed
+(deftest ^{:stratum 0} readiness-factors-ci-failed
   (testing "CI failed → ci-score 0.0"
     (let [result (sut/readiness-factors :approved false true false)]
       (is (= 0.0 (:ci-score result))))))
 
-(deftest readiness-factors-draft
+(deftest ^{:stratum 0} readiness-factors-draft
   (testing "Draft → review-score 0.0"
     (let [result (sut/readiness-factors :draft false false false)]
       (is (= 0.0 (:review-score result))))))
 
-(deftest readiness-factors-behind
+(deftest ^{:stratum 0} readiness-factors-behind
   (testing "Behind main → behind-score 0.0"
     (let [result (sut/readiness-factors :approved true false true)]
       (is (= 0.0 (:behind-score result))))))
 
-(deftest readiness-factors-weights-sum-to-one
+(deftest ^{:stratum 0} readiness-factors-weights-sum-to-one
   (testing "Factor weights sum to 1.0"
     (let [result (sut/readiness-factors :approved true false false)
           total (reduce + 0.0 (map :weight (:factors result)))]
@@ -172,20 +170,19 @@
 ;; ============================================================================
 ;; ci-section-nodes
 ;; ============================================================================
-
-(deftest ci-section-nodes-passed
+(deftest ^{:stratum 0} ci-section-nodes-passed
   (testing "Passed CI produces green header"
     (let [nodes (sut/ci-section-nodes :passed [])]
       (is (= 1 (count nodes)))
       (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "passed")))))
 
-(deftest ci-section-nodes-failed
+(deftest ^{:stratum 0} ci-section-nodes-failed
   (testing "Failed CI produces red header"
     (let [nodes (sut/ci-section-nodes :failed [])]
       (is (= sut/status-fail (:fg (first nodes)))))))
 
-(deftest ci-section-nodes-with-checks
+(deftest ^{:stratum 0} ci-section-nodes-with-checks
   (testing "Individual checks are appended as child nodes"
     (let [checks [{:name "lint" :conclusion :success}
                   {:name "test" :conclusion :failure}]
@@ -196,15 +193,14 @@
 ;; ============================================================================
 ;; behind-main-node
 ;; ============================================================================
-
-(deftest behind-main-node-behind
+(deftest ^{:stratum 0} behind-main-node-behind
   (testing "Behind → red node with merge state"
     (let [node (sut/behind-main-node true "DIRTY")]
       (is (.contains (:label node) "yes"))
       (is (.contains (:label node) "DIRTY"))
       (is (= sut/status-fail (:fg node))))))
 
-(deftest behind-main-node-not-behind
+(deftest ^{:stratum 0} behind-main-node-not-behind
   (testing "Not behind → green node"
     (let [node (sut/behind-main-node false nil)]
       (is (.contains (:label node) "no"))
@@ -213,32 +209,31 @@
 ;; ============================================================================
 ;; review-node
 ;; ============================================================================
-
-(deftest review-node-approved
+(deftest ^{:stratum 0} review-node-approved
   (testing "Approved → green node"
     (let [node (sut/review-node :approved)]
       (is (.contains (:label node) "approved"))
       (is (= sut/status-pass (:fg node))))))
 
-(deftest review-node-changes-requested
+(deftest ^{:stratum 0} review-node-changes-requested
   (testing "Changes requested → red node"
     (let [node (sut/review-node :changes-requested)]
       (is (.contains (:label node) "changes requested"))
       (is (= sut/status-fail (:fg node))))))
 
-(deftest review-node-reviewing
+(deftest ^{:stratum 0} review-node-reviewing
   (testing "Reviewing → yellow node"
     (let [node (sut/review-node :reviewing)]
       (is (.contains (:label node) "review required"))
       (is (= sut/status-warning (:fg node))))))
 
-(deftest review-node-draft
+(deftest ^{:stratum 0} review-node-draft
   (testing "Draft → no color"
     (let [node (sut/review-node :draft)]
       (is (.contains (:label node) "draft"))
       (is (nil? (:fg node))))))
 
-(deftest review-node-default
+(deftest ^{:stratum 0} review-node-default
   (testing "Unknown status → pending with yellow"
     (let [node (sut/review-node :unknown)]
       (is (.contains (:label node) "pending"))
@@ -247,14 +242,13 @@
 ;; ============================================================================
 ;; gates-section-nodes
 ;; ============================================================================
-
-(deftest gates-section-nodes-empty
+(deftest ^{:stratum 0} gates-section-nodes-empty
   (testing "No gates → single 'none' node"
     (let [nodes (sut/gates-section-nodes [])]
       (is (= 1 (count nodes)))
       (is (.contains (:label (first nodes)) "none")))))
 
-(deftest gates-section-nodes-all-passed
+(deftest ^{:stratum 0} gates-section-nodes-all-passed
   (testing "All gates passed → green header + child nodes"
     (let [gates [{:gate/id :lint :gate/passed? true}
                  {:gate/id :test :gate/passed? true}]
@@ -263,7 +257,7 @@
       (is (= sut/status-pass (:fg (first nodes))))
       (is (.contains (:label (first nodes)) "2/2 passed")))))
 
-(deftest gates-section-nodes-some-failed
+(deftest ^{:stratum 0} gates-section-nodes-some-failed
   (testing "Some gates failed → yellow header + mixed children"
     (let [gates [{:gate/id :lint :gate/passed? true}
                  {:gate/id :test :gate/passed? false}]
@@ -277,12 +271,11 @@
 ;; ============================================================================
 ;; packs-applied-nodes
 ;; ============================================================================
-
-(deftest packs-applied-nodes-empty
+(deftest ^{:stratum 0} packs-applied-nodes-empty
   (testing "Empty packs → nil"
     (is (nil? (sut/packs-applied-nodes [])))))
 
-(deftest packs-applied-nodes-present
+(deftest ^{:stratum 0} packs-applied-nodes-present
   (testing "Non-empty packs → header + child per pack"
     (let [nodes (sut/packs-applied-nodes ["pack-a" "pack-b"])]
       (is (= 3 (count nodes)))
@@ -291,16 +284,15 @@
 ;; ============================================================================
 ;; severity-summary-nodes
 ;; ============================================================================
-
-(deftest severity-summary-nodes-nil
+(deftest ^{:stratum 0} severity-summary-nodes-nil
   (testing "Nil summary → nil"
     (is (nil? (sut/severity-summary-nodes nil)))))
 
-(deftest severity-summary-nodes-all-zero
+(deftest ^{:stratum 0} severity-summary-nodes-all-zero
   (testing "All-zero summary → nil"
     (is (nil? (sut/severity-summary-nodes {:critical 0 :high 0 :medium 0 :low 0 :info 0})))))
 
-(deftest severity-summary-nodes-mixed
+(deftest ^{:stratum 0} severity-summary-nodes-mixed
   (testing "Mixed counts → summary string"
     (let [nodes (sut/severity-summary-nodes {:critical 1 :high 0 :medium 3 :low 0 :info 2})]
       (is (= 1 (count nodes)))
@@ -313,12 +305,11 @@
 ;; ============================================================================
 ;; violation-nodes
 ;; ============================================================================
-
-(deftest violation-nodes-empty
+(deftest ^{:stratum 0} violation-nodes-empty
   (testing "Empty violations → nil"
     (is (nil? (sut/violation-nodes [])))))
 
-(deftest violation-nodes-present
+(deftest ^{:stratum 0} violation-nodes-present
   (testing "Non-empty violations → header + colored child nodes"
     (let [violations [{:severity :critical :message "Bad thing" :auto-fixable? false}
                       {:severity :low :message "Small thing" :auto-fixable? true}]
@@ -331,15 +322,14 @@
 ;; ============================================================================
 ;; intent-nodes
 ;; ============================================================================
-
-(deftest intent-nodes-with-description
+(deftest ^{:stratum 0} intent-nodes-with-description
   (testing "Evidence with intent → description label"
     (let [nodes (sut/intent-nodes {:intent {:description "Fix bug"}})]
       (is (= 2 (count nodes)))
       (is (= "Intent" (:label (first nodes))))
       (is (= "Fix bug" (:label (second nodes)))))))
 
-(deftest intent-nodes-without-description
+(deftest ^{:stratum 0} intent-nodes-without-description
   (testing "No intent → fallback label"
     (let [nodes (sut/intent-nodes {})]
       (is (= "No intent data available" (:label (second nodes)))))))
@@ -347,14 +337,13 @@
 ;; ============================================================================
 ;; phase-nodes
 ;; ============================================================================
-
-(deftest phase-nodes-empty
+(deftest ^{:stratum 0} phase-nodes-empty
   (testing "Empty phases → just header"
     (let [nodes (sut/phase-nodes [])]
       (is (= 1 (count nodes)))
       (is (= "Phases" (:label (first nodes)))))))
 
-(deftest phase-nodes-with-phases
+(deftest ^{:stratum 0} phase-nodes-with-phases
   (testing "Phases render with status icons"
     (let [nodes (sut/phase-nodes [{:phase :plan :status :success}
                                   {:phase :implement :status :running}
@@ -367,14 +356,13 @@
 ;; ============================================================================
 ;; validation-nodes
 ;; ============================================================================
-
-(deftest validation-nodes-passed
+(deftest ^{:stratum 0} validation-nodes-passed
   (testing "Passed validation → success label"
     (let [nodes (sut/validation-nodes {:validation {:passed? true}})]
       (is (= 2 (count nodes)))
       (is (.contains (:label (second nodes)) "All gates passed")))))
 
-(deftest validation-nodes-failed
+(deftest ^{:stratum 0} validation-nodes-failed
   (testing "Failed validation → error count"
     (let [nodes (sut/validation-nodes {:validation {:passed? false :errors [:e1 :e2]}})]
       (is (.contains (:label (second nodes)) "2 error(s)")))))
@@ -382,13 +370,12 @@
 ;; ============================================================================
 ;; policy-evidence-nodes
 ;; ============================================================================
-
-(deftest policy-evidence-nodes-compliant
+(deftest ^{:stratum 0} policy-evidence-nodes-compliant
   (testing "Compliant policy → success label"
     (let [nodes (sut/policy-evidence-nodes {:policy {:compliant? true}})]
       (is (.contains (:label (second nodes)) "Policy compliant")))))
 
-(deftest policy-evidence-nodes-non-compliant
+(deftest ^{:stratum 0} policy-evidence-nodes-non-compliant
   (testing "Non-compliant policy → violations label"
     (let [nodes (sut/policy-evidence-nodes {:policy {:compliant? false}})]
       (is (.contains (:label (second nodes)) "violations detected")))))
@@ -396,8 +383,7 @@
 ;; ============================================================================
 ;; derive-recommendation — regression: readiness state resolution
 ;; ============================================================================
-
-(deftest recommend-not-wait-when-enriched
+(deftest ^{:stratum 0} recommend-not-wait-when-enriched
   (testing "PR with pr-train enrichment (no :readiness/state) produces actionable recommendation, not :wait"
     ;; Regression: explain-readiness returns {:readiness/score :readiness/ready? :readiness/factors}
     ;; but NOT :readiness/state. extract-pr-signals must derive the state from PR status/CI.
@@ -411,7 +397,7 @@
           "Should not be :wait — :open + ci:passed should derive :needs-review state")
       (is (= :review (:action rec))))))
 
-(deftest recommend-merge-when-all-green
+(deftest ^{:stratum 0} recommend-merge-when-all-green
   (testing "Approved PR with passing CI, low risk, policy pass → merge"
     (let [pr {:pr/status :approved :pr/ci-status :passed
               :pr/additions 50 :pr/deletions 10
@@ -422,14 +408,14 @@
           rec (sut/derive-recommendation pr)]
       (is (= :merge (:action rec))))))
 
-(deftest recommend-do-not-merge-ci-failing
+(deftest ^{:stratum 0} recommend-do-not-merge-ci-failing
   (testing "Open PR with failing CI → do-not-merge"
     (let [pr {:pr/status :open :pr/ci-status :failed
               :pr/additions 100 :pr/deletions 50}
           rec (sut/derive-recommendation pr)]
       (is (= :do-not-merge (:action rec))))))
 
-(deftest recommend-evaluate-when-ready-no-policy
+(deftest ^{:stratum 0} recommend-evaluate-when-ready-no-policy
   (testing "Ready PR without policy evaluation → evaluate"
     (let [pr {:pr/status :approved :pr/ci-status :passed
               :pr/additions 50 :pr/deletions 10
@@ -439,7 +425,7 @@
           rec (sut/derive-recommendation pr)]
       (is (= :evaluate (:action rec))))))
 
-(deftest recommend-decompose-large-pr
+(deftest ^{:stratum 0} recommend-decompose-large-pr
   (testing "Large open PR with policy evaluated → decompose"
     (let [pr {:pr/status :open :pr/ci-status :passed
               :pr/additions 400 :pr/deletions 200
@@ -447,7 +433,7 @@
           rec (sut/derive-recommendation pr)]
       (is (= :decompose (:action rec))))))
 
-(deftest recommend-approve-elevated-risk
+(deftest ^{:stratum 0} recommend-approve-elevated-risk
   (testing "Ready PR with medium risk → approve (human sign-off)"
     (let [pr {:pr/status :approved :pr/ci-status :passed
               :pr/additions 50 :pr/deletions 10
@@ -459,7 +445,7 @@
           rec (sut/derive-recommendation pr)]
       (is (= :approve (:action rec))))))
 
-(deftest extract-pr-signals-uses-pr-additions
+(deftest ^{:stratum 0} extract-pr-signals-uses-pr-additions
   (testing "extract-pr-signals reads :pr/additions not [:change-size :additions]"
     (let [signals (sut/extract-pr-signals {:pr/status :open :pr/ci-status :passed
                                            :pr/additions 400 :pr/deletions 200})]
@@ -468,23 +454,22 @@
 ;; ============================================================================
 ;; readiness-state — :merge-ready status (GitLab PRs)
 ;; ============================================================================
-
-(deftest readiness-state-merge-ready-ci-passed
+(deftest ^{:stratum 0} readiness-state-merge-ready-ci-passed
   (testing "merge-ready + CI passed + not behind → merge-ready"
     (is (= [:merge-ready 1.0]
            (sut/readiness-state :merge-ready true false false)))))
 
-(deftest readiness-state-merge-ready-behind
+(deftest ^{:stratum 0} readiness-state-merge-ready-behind
   (testing "merge-ready + CI passed + behind → behind-main"
     (is (= [:behind-main 0.85]
            (sut/readiness-state :merge-ready true false true)))))
 
-(deftest readiness-state-merge-ready-ci-failing
+(deftest ^{:stratum 0} readiness-state-merge-ready-ci-failing
   (testing "merge-ready + CI failing → ci-failing (regression: was :unknown)"
     (is (= [:ci-failing 0.5]
            (sut/readiness-state :merge-ready false true false)))))
 
-(deftest readiness-state-merge-ready-ci-pending
+(deftest ^{:stratum 0} readiness-state-merge-ready-ci-pending
   (testing "merge-ready + CI pending → needs-review (regression: was :unknown)"
     (is (= [:needs-review 0.7]
            (sut/readiness-state :merge-ready false false false)))))
@@ -492,30 +477,29 @@
 ;; ============================================================================
 ;; readiness-blockers-summary
 ;; ============================================================================
-
-(deftest blockers-summary-ready
+(deftest ^{:stratum 0} blockers-summary-ready
   (testing "No blockers → ready"
     (is (= "ready"
            (sut/readiness-blockers-summary {:readiness/blockers []})))))
 
-(deftest blockers-summary-nil-blockers
+(deftest ^{:stratum 0} blockers-summary-nil-blockers
   (testing "Nil blockers → ready"
     (is (= "ready"
            (sut/readiness-blockers-summary {})))))
 
-(deftest blockers-summary-review
+(deftest ^{:stratum 0} blockers-summary-review
   (testing "Review blocker → review"
     (is (= "review"
            (sut/readiness-blockers-summary
              {:readiness/blockers [{:blocker/type :review :blocker/message "Needs review"}]})))))
 
-(deftest blockers-summary-ci
+(deftest ^{:stratum 0} blockers-summary-ci
   (testing "CI blocker → CI"
     (is (= "CI"
            (sut/readiness-blockers-summary
              {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}]})))))
 
-(deftest blockers-summary-multiple
+(deftest ^{:stratum 0} blockers-summary-multiple
   (testing "Multiple blockers joined with comma"
     (let [summary (sut/readiness-blockers-summary
                     {:readiness/blockers [{:blocker/type :ci :blocker/message "CI failing"}
@@ -525,7 +509,7 @@
       (is (.contains summary "review"))
       (is (.contains summary "rebase")))))
 
-(deftest blockers-summary-draft
+(deftest ^{:stratum 0} blockers-summary-draft
   (testing "Draft blocker → draft"
     (is (= "draft"
            (sut/readiness-blockers-summary
@@ -534,32 +518,31 @@
 ;; ============================================================================
 ;; derive-risk — scoring changes
 ;; ============================================================================
-
-(deftest derive-risk-ci-fail-is-high
+(deftest ^{:stratum 0} derive-risk-ci-fail-is-high
   (testing "CI failing → high risk"
     (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :failed
                                  :pr/additions 100 :pr/deletions 50})]
       (is (= :high (:risk/level risk))))))
 
-(deftest derive-risk-ci-fail-plus-changes-requested-is-critical
+(deftest ^{:stratum 0} derive-risk-ci-fail-plus-changes-requested-is-critical
   (testing "CI failing + changes requested → critical"
     (let [risk (sut/derive-risk {:pr/status :changes-requested :pr/ci-status :failed
                                  :pr/additions 100 :pr/deletions 50})]
       (is (= :critical (:risk/level risk))))))
 
-(deftest derive-risk-large-pr-is-medium
+(deftest ^{:stratum 0} derive-risk-large-pr-is-medium
   (testing ">500 LOC → medium risk"
     (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
                                  :pr/additions 400 :pr/deletions 200})]
       (is (= :medium (:risk/level risk))))))
 
-(deftest derive-risk-small-pr-is-low
+(deftest ^{:stratum 0} derive-risk-small-pr-is-low
   (testing "<200 LOC → low risk"
     (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
                                  :pr/additions 50 :pr/deletions 20})]
       (is (= :low (:risk/level risk))))))
 
-(deftest derive-risk-uses-max-not-average
+(deftest ^{:stratum 0} derive-risk-uses-max-not-average
   (testing "Max-of-factors scoring: one high signal isn't diluted"
     (let [risk (sut/derive-risk {:pr/status :open :pr/ci-status :passed
                                  :pr/additions 600 :pr/deletions 100
@@ -572,8 +555,7 @@
 ;; ============================================================================
 ;; project-pr-row — size column color coding
 ;; ============================================================================
-
-(defn- pr-row-with-size
+(defn- ^{:stratum 0} pr-row-with-size
   "Helper: build a minimal PR with given additions/deletions and call project-pr-row."
   [adds dels]
   (sut/project-pr-row {:pr/repo "test/repo" :pr/number 1 :pr/title "t"
@@ -581,57 +563,30 @@
                         :pr/additions adds :pr/deletions dels}
                       {}))
 
-(deftest size-color-red-over-1000
-  (testing "Total > red threshold (1000) → status-fail color"
-    (let [row (pr-row-with-size 800 300)]
-      (is (= [220 50 40] (:ready-fg row))))))
-
-(deftest size-color-yellow-over-500
-  (testing "Total > yellow threshold (500) but ≤ red → status-warning color"
-    (let [row (pr-row-with-size 400 200)]
-      (is (= [200 160 0] (:ready-fg row))))))
-
-(deftest size-color-neutral-over-200
-  (testing "Total > green threshold (200) but ≤ yellow → no color (nil)"
-    (let [row (pr-row-with-size 150 100)]
-      (is (nil? (:ready-fg row))))))
-
-(deftest size-color-green-under-200
-  (testing "Total ≤ green threshold (200) → status-pass color"
-    (let [row (pr-row-with-size 50 20)]
-      (is (= [0 180 80] (:ready-fg row))))))
-
-(deftest size-color-zero-shows-dash
-  (testing "Zero additions and deletions → dash display, green color"
-    (let [row (pr-row-with-size 0 0)]
-      (is (= "—" (:ready row)))
-      (is (= [0 180 80] (:ready-fg row))))))
-
 ;; ============================================================================
 ;; clean-agent-content
 ;; ============================================================================
-
-(deftest clean-agent-content-unescapes-newlines
+(deftest ^{:stratum 0} clean-agent-content-unescapes-newlines
   (testing "literal \\n becomes real newline, splitting into multiple lines"
     (let [lines (trees/clean-agent-content "line one\\nline two\\nline three")]
       (is (= ["line one" "line two" "line three"] (vec lines))))))
 
-(deftest clean-agent-content-filters-sse-events
+(deftest ^{:stratum 0} clean-agent-content-filters-sse-events
   (testing "JSON SSE event lines are removed"
     (let [content "Review complete\n{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":100}}\nDone"
           lines (trees/clean-agent-content content)]
       (is (= ["Review complete" "Done"] (vec lines))))))
 
-(deftest clean-agent-content-strips-markdown-links
+(deftest ^{:stratum 0} clean-agent-content-strips-markdown-links
   (testing "markdown [text](url) links become plain text"
     (let [lines (trees/clean-agent-content "See [foo.clj](/path/to/foo.clj#L42) for details")]
       (is (= ["See foo.clj for details"] (vec lines))))))
 
-(deftest clean-agent-content-nil-safe
+(deftest ^{:stratum 0} clean-agent-content-nil-safe
   (testing "nil content returns a sequence with one empty string"
     (is (= [""] (vec (trees/clean-agent-content nil))))))
 
-(deftest clean-agent-content-combined
+(deftest ^{:stratum 0} clean-agent-content-combined
   (testing "unescapes, filters SSE, and strips links together"
     (let [content "Issue 1: missing test\\n{\"type\":\"turn.completed\"}\nSee [foo.clj](/foo.clj) for context"
           lines (trees/clean-agent-content content)]
@@ -642,8 +597,7 @@
 ;; (Bug: some-> threaded wf-date as receiver of .between, but LocalDate has no
 ;;  2-arg between method. Correct call: ChronoUnit/DAYS.between(start, end).)
 ;; ============================================================================
-
-(defn- date-days-ago
+(defn- ^{:stratum 0} date-days-ago
   "Return a java.util.Date for N days before today (midnight local time)."
   [n]
   (-> (LocalDate/now)
@@ -652,47 +606,75 @@
       .toInstant
       Date/from))
 
-(deftest temporal-bucket-today
+(deftest ^{:stratum 0} temporal-bucket-nil-started-at
+  (testing "nil started-at → :unknown (no exception)"
+    (is (= :unknown
+           (helpers/temporal-bucket {:started-at nil} (LocalDate/now))))))
+
+(deftest ^{:stratum 0} temporal-bucket-missing-started-at
+  (testing "missing started-at key → :unknown (no exception)"
+    (is (= :unknown
+           (helpers/temporal-bucket {} (LocalDate/now))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} size-color-red-over-1000
+  (testing "Total > red threshold (1000) → status-fail color"
+    (let [row (pr-row-with-size 800 300)]
+      (is (= [220 50 40] (:ready-fg row))))))
+
+(deftest ^{:stratum 1} size-color-yellow-over-500
+  (testing "Total > yellow threshold (500) but ≤ red → status-warning color"
+    (let [row (pr-row-with-size 400 200)]
+      (is (= [200 160 0] (:ready-fg row))))))
+
+(deftest ^{:stratum 1} size-color-neutral-over-200
+  (testing "Total > green threshold (200) but ≤ yellow → no color (nil)"
+    (let [row (pr-row-with-size 150 100)]
+      (is (nil? (:ready-fg row))))))
+
+(deftest ^{:stratum 1} size-color-green-under-200
+  (testing "Total ≤ green threshold (200) → status-pass color"
+    (let [row (pr-row-with-size 50 20)]
+      (is (= [0 180 80] (:ready-fg row))))))
+
+(deftest ^{:stratum 1} size-color-zero-shows-dash
+  (testing "Zero additions and deletions → dash display, green color"
+    (let [row (pr-row-with-size 0 0)]
+      (is (= "—" (:ready row)))
+      (is (= [0 180 80] (:ready-fg row))))))
+
+(deftest ^{:stratum 1} temporal-bucket-today
   (testing "workflow started today → :today"
     (is (= :today
            (helpers/temporal-bucket {:started-at (date-days-ago 0)}
                                     (LocalDate/now))))))
 
-(deftest temporal-bucket-yesterday
+(deftest ^{:stratum 1} temporal-bucket-yesterday
   (testing "workflow started 1 day ago → :yesterday"
     (is (= :yesterday
            (helpers/temporal-bucket {:started-at (date-days-ago 1)}
                                     (LocalDate/now))))))
 
-(deftest temporal-bucket-this-week
+(deftest ^{:stratum 1} temporal-bucket-this-week
   (testing "workflow started 3 days ago → :this-week"
     (is (= :this-week
            (helpers/temporal-bucket {:started-at (date-days-ago 3)}
                                     (LocalDate/now))))))
 
-(deftest temporal-bucket-this-month
+(deftest ^{:stratum 1} temporal-bucket-this-month
   (testing "workflow started 15 days ago → :this-month"
     (is (= :this-month
            (helpers/temporal-bucket {:started-at (date-days-ago 15)}
                                     (LocalDate/now))))))
 
-(deftest temporal-bucket-older
+(deftest ^{:stratum 1} temporal-bucket-older
   (testing "workflow started 60 days ago → :older"
     (is (= :older
            (helpers/temporal-bucket {:started-at (date-days-ago 60)}
                                     (LocalDate/now))))))
 
-(deftest temporal-bucket-nil-started-at
-  (testing "nil started-at → :unknown (no exception)"
-    (is (= :unknown
-           (helpers/temporal-bucket {:started-at nil} (LocalDate/now))))))
-
-(deftest temporal-bucket-missing-started-at
-  (testing "missing started-at key → :unknown (no exception)"
-    (is (= :unknown
-           (helpers/temporal-bucket {} (LocalDate/now))))))
-
-(deftest group-workflows-with-headers-dated
+(deftest ^{:stratum 1} group-workflows-with-headers-dated
   (testing "dated workflows produce bucket headers without throwing"
     (let [wfs [{:id "wf1" :name "Today wf"  :status :running :started-at (date-days-ago 0)}
                {:id "wf2" :name "Old wf"    :status :success :started-at (date-days-ago 40)}]

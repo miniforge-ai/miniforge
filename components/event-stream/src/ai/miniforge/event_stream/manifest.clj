@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.manifest
   "Per-workflow manifest: lifecycle state, archive state, snapshot
    watermark, owner lease (BD-2b sub-2 of the RFC at
@@ -55,6 +54,8 @@
    [java.time Instant]
    [java.util.concurrent Executors ScheduledExecutorService TimeUnit]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; STRATIFIED-DESIGN LAYERING
 ;;
 ;; Layers are a strict DAG: each layer is a vocabulary for the next
@@ -63,26 +64,35 @@
 ;; stratum; if you find yourself wanting one function in a layer to
 ;; call another, the called one belongs in a lower layer.
 ;;
-;; Quick map:
+;; Quick map (7 real layers per the same-file reference graph — over
+;; the 3-layer budget; SL003 deferred to a Wave 2 namespace split,
+;; see the stratum-lint Wave 1 PR doc for this component):
 ;;
-;;   Layer 0  defaults, data shapes, atomic Java-interop helpers
-;;            (snowflake-event-id-re, legal-archive-transitions,
-;;             manifest-path, iso-now, pid-string, hostname-string,
-;;             default-heartbeat-error-log!, stop-heartbeat!)
-;;   Layer 1  single-concern primitives built on Layer 0
-;;            (valid?, explain, legal-archive-transition?,
-;;             fresh-owner, renew-lease, lease-fresh?, owner-pid-alive?)
+;;   Layer 0  defaults, data shapes, atomic Java-interop helpers,
+;;            lease-freshness check
+;;            (defaults, snowflake-event-id-re,
+;;             legal-archive-transitions, iso-now, pid-string,
+;;             hostname-string, default-heartbeat-error-log!,
+;;             stop-heartbeat!, lease-fresh?)
+;;   Layer 1  single-concern primitives + config re-exports, built
+;;            on the Layer 0 vocabulary above
+;;            (schema-version, manifest-filename, workflow-statuses,
+;;             archive-statuses, snapshot-statuses,
+;;             default-lease-ttl-seconds, heartbeat-period-seconds,
+;;             legal-archive-transition?, renew-lease,
+;;             owner-pid-alive?, mark-terminal)
 ;;   Layer 2  compose Layer 1 primitives
-;;            (transition-archive, init-active, mark-terminal,
-;;             load-manifest, save-manifest!)
+;;            (Manifest schema, manifest-path, fresh-owner,
+;;             transition-archive)
 ;;   Layer 3  manifest-bound IO that composes Layer 2 read + write
+;;            (valid?, explain, init-active, load-manifest)
+;;   Layer 4  atomic manifest write
+;;            (save-manifest!)
+;;   Layer 5  lease renewal, composing read + write
 ;;            (renew-lease!)
-;;   Layer 4  scheduled / orchestration
+;;   Layer 6  scheduled orchestration
 ;;            (start-heartbeat!)
-
-;------------------------------------------------------------------------------ Layer 0 — atomic helpers, defaults, data
-
-(def defaults
+(def ^{:stratum 0} defaults
   "Manifest defaults loaded from
    `resources/config/event-stream/manifest-defaults.edn` at namespace
    load. Keys: `:schema-version`, `:manifest-filename`,
@@ -92,20 +102,132 @@
       slurp
       edn/read-string))
 
-(def schema-version       (:schema-version defaults))
-(def manifest-filename    (:manifest-filename defaults))
-(def workflow-statuses    (:workflow-statuses defaults))
-(def archive-statuses     (:archive-statuses defaults))
-(def snapshot-statuses    (:snapshot-statuses defaults))
-(def default-lease-ttl-seconds (:default-lease-ttl-seconds defaults))
-(def heartbeat-period-seconds  (:heartbeat-period-seconds defaults))
-
-(def ^:private snowflake-event-id-re
+(def ^{:stratum 0} ^:private snowflake-event-id-re
   "16-char lowercase hex per the BD-2b sub-1 Snowflake filename
    grammar. The cross-repo JSON Schema validates the same shape."
   #"^[0-9a-f]{16}$")
 
-(def Manifest
+(def ^{:stratum 0} ^:private legal-archive-transitions
+  "Forward-only edges. Backwards moves (e.g. archived → live) are
+   never legal — once events have been moved they don't come back."
+  {:live       #{:archiving}
+   :archiving  #{:archived :live}        ; rollback to :live on aborted archive
+   :archived   #{:tombstoned}
+   :tombstoned #{}})
+
+(defn- ^{:stratum 0} iso-now
+  "ISO-8601 instant for `lease_renewed_at` / `created_at` etc."
+  ^String []
+  (str (Instant/now)))
+
+(defn- ^{:stratum 0} pid-string
+  "Process id as a string. Built from the JMX runtime bean name —
+   `pid@host` on hotspot — so we don't need Java-9-only APIs."
+  ^String []
+  (let [name (.getName (ManagementFactory/getRuntimeMXBean))]
+    (first (str/split name #"@"))))
+
+(defn- ^{:stratum 0} hostname-string
+  "Best-effort canonical hostname. Falls back to `\"unknown-host\"` if
+   DNS / lookup fails — the field is informational, not load-bearing."
+  ^String []
+  (try (.getCanonicalHostName (InetAddress/getLocalHost))
+       (catch Exception _ "unknown-host")))
+
+(defn- ^{:stratum 0} default-heartbeat-error-log!
+  "Last-resort logging when no `:on-error` callback is supplied. Writes
+   a single-line warning to stderr so persistent IO failures during
+   the heartbeat are observable in the operator's terminal / CI logs
+   rather than silently disappearing. Accepts either a Throwable or an
+   anomaly map returned by `renew-lease!`. The workflow runner is the
+   normal caller and should prefer to wire its own logger via
+   `:on-error`."
+  [failure workflow-dir]
+  (binding [*out* *err*]
+    (println (str "WARNING: manifest heartbeat renew failed for "
+                  (.getAbsolutePath ^File (io/file workflow-dir))
+                  ": " (if (anomaly/anomaly? failure)
+                         (:anomaly/message failure)
+                         (.getMessage ^Throwable failure))))))
+
+(defn ^{:stratum 0} stop-heartbeat!
+  "Shut a heartbeat executor down. Waits up to `:timeout-ms` (default
+   1000) for the in-flight renew to finish, then forces. Independent
+   of `start-heartbeat!` — placed in Layer 0 because it has no other
+   calls into this namespace."
+  ([^ScheduledExecutorService ex] (stop-heartbeat! ex {}))
+  ([^ScheduledExecutorService ex {:keys [timeout-ms] :or {timeout-ms 1000}}]
+   (when ex
+     (.shutdown ex)
+     (when-not (.awaitTermination ex (long timeout-ms) TimeUnit/MILLISECONDS)
+       (.shutdownNow ex))
+     nil)))
+
+(defn ^{:stratum 0} lease-fresh?
+  "True if `manifest`'s lease was renewed within `ttl_seconds` of `now`.
+   Pure — caller passes `now` as an `Instant` for testability."
+  ([manifest] (lease-fresh? manifest (Instant/now)))
+  ([manifest ^Instant now]
+   (let [renewed (Instant/parse ^String (get-in manifest [:owner :lease_renewed_at]))
+         ttl-s   (long (get-in manifest [:owner :lease_ttl_seconds]))
+         age-s   (- (.getEpochSecond now) (.getEpochSecond renewed))]
+     (<= age-s ttl-s))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} schema-version       (:schema-version defaults))
+
+(def ^{:stratum 1} manifest-filename    (:manifest-filename defaults))
+
+(def ^{:stratum 1} workflow-statuses    (:workflow-statuses defaults))
+
+(def ^{:stratum 1} archive-statuses     (:archive-statuses defaults))
+
+(def ^{:stratum 1} snapshot-statuses    (:snapshot-statuses defaults))
+
+(def ^{:stratum 1} default-lease-ttl-seconds (:default-lease-ttl-seconds defaults))
+
+(def ^{:stratum 1} heartbeat-period-seconds  (:heartbeat-period-seconds defaults))
+
+(defn ^{:stratum 1} legal-archive-transition?
+  "True iff the manifest may move from `from` to `to`."
+  [from to]
+  (contains? (get legal-archive-transitions from #{}) to))
+
+(defn ^{:stratum 1} renew-lease
+  "Pure: update `manifest`'s `:owner.lease_renewed_at` to now. Does
+   not change pid/host/ttl — those are stamped at acquisition and
+   only re-stamped when the workflow is re-claimed."
+  [manifest]
+  (assoc-in manifest [:owner :lease_renewed_at] (iso-now)))
+
+(defn ^{:stratum 1} owner-pid-alive?
+  "True if the manifest's `:owner.pid` corresponds to a running
+   process on this host. Use `ProcessHandle/of` (Java 9+). Returns
+   false when host doesn't match — cross-host pid checks are out of
+   scope (single-machine non-goal per the RFC)."
+  [manifest]
+  (let [owner-host (get-in manifest [:owner :host])]
+    (and (= owner-host (hostname-string))
+         (try
+           (let [pid (Long/parseLong (get-in manifest [:owner :pid]))]
+             (.isPresent (java.lang.ProcessHandle/of pid)))
+           (catch Exception _ false)))))
+
+(defn ^{:stratum 1} mark-terminal
+  "Pure: set `status` to a terminal value (`:completed | :failed |
+   :cancelled`) and stamp `completed_at`. Does NOT change
+   archive_status — that's a separate state machine driven by sub-3."
+  [manifest status]
+  (assert (contains? #{:completed :failed :cancelled} status)
+          (str "mark-terminal expects a terminal status, got " status))
+  (assoc manifest
+         :status       status
+         :completed_at (iso-now)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} Manifest
   "Open Malli schema for the per-workflow manifest map. Open: future
    keys (e.g. additional snapshot-status detail) pass through without
    a schema bump per the RFC's forward-compatibility rule. Constraints
@@ -134,87 +256,14 @@
      [:lease_renewed_at :string]
      [:lease_ttl_seconds [:int {:min 1}]]]]])
 
-(def ^:private legal-archive-transitions
-  "Forward-only edges. Backwards moves (e.g. archived → live) are
-   never legal — once events have been moved they don't come back."
-  {:live       #{:archiving}
-   :archiving  #{:archived :live}        ; rollback to :live on aborted archive
-   :archived   #{:tombstoned}
-   :tombstoned #{}})
-
-(defn- iso-now
-  "ISO-8601 instant for `lease_renewed_at` / `created_at` etc."
-  ^String []
-  (str (Instant/now)))
-
-(defn- pid-string
-  "Process id as a string. Built from the JMX runtime bean name —
-   `pid@host` on hotspot — so we don't need Java-9-only APIs."
-  ^String []
-  (let [name (.getName (ManagementFactory/getRuntimeMXBean))]
-    (first (str/split name #"@"))))
-
-(defn- hostname-string
-  "Best-effort canonical hostname. Falls back to `\"unknown-host\"` if
-   DNS / lookup fails — the field is informational, not load-bearing."
-  ^String []
-  (try (.getCanonicalHostName (InetAddress/getLocalHost))
-       (catch Exception _ "unknown-host")))
-
-(defn manifest-path
+(defn ^{:stratum 2} manifest-path
   "Return the manifest.json path under `workflow-dir`. The caller
    chooses live/{wid} vs archived/{wid} — manifest is the same shape
    in both."
   ^File [workflow-dir]
   (io/file workflow-dir manifest-filename))
 
-(defn- default-heartbeat-error-log!
-  "Last-resort logging when no `:on-error` callback is supplied. Writes
-   a single-line warning to stderr so persistent IO failures during
-   the heartbeat are observable in the operator's terminal / CI logs
-   rather than silently disappearing. Accepts either a Throwable or an
-   anomaly map returned by `renew-lease!`. The workflow runner is the
-   normal caller and should prefer to wire its own logger via
-   `:on-error`."
-  [failure workflow-dir]
-  (binding [*out* *err*]
-    (println (str "WARNING: manifest heartbeat renew failed for "
-                  (.getAbsolutePath ^File (io/file workflow-dir))
-                  ": " (if (anomaly/anomaly? failure)
-                         (:anomaly/message failure)
-                         (.getMessage ^Throwable failure))))))
-
-(defn stop-heartbeat!
-  "Shut a heartbeat executor down. Waits up to `:timeout-ms` (default
-   1000) for the in-flight renew to finish, then forces. Independent
-   of `start-heartbeat!` — placed in Layer 0 because it has no other
-   calls into this namespace."
-  ([^ScheduledExecutorService ex] (stop-heartbeat! ex {}))
-  ([^ScheduledExecutorService ex {:keys [timeout-ms] :or {timeout-ms 1000}}]
-   (when ex
-     (.shutdown ex)
-     (when-not (.awaitTermination ex (long timeout-ms) TimeUnit/MILLISECONDS)
-       (.shutdownNow ex))
-     nil)))
-
-;------------------------------------------------------------------------------ Layer 1 — single-concern primitives over Layer 0
-
-(defn valid?
-  "True if `m` matches the manifest schema."
-  [m]
-  (m/validate Manifest m))
-
-(defn explain
-  "Return a malli explanation when `m` does not match. nil when valid."
-  [m]
-  (m/explain Manifest m))
-
-(defn legal-archive-transition?
-  "True iff the manifest may move from `from` to `to`."
-  [from to]
-  (contains? (get legal-archive-transitions from #{}) to))
-
-(defn fresh-owner
+(defn ^{:stratum 2} fresh-owner
   "Build an owner map with the calling process's pid + host, marking
    the lease as renewed right now."
   ([] (fresh-owner default-lease-ttl-seconds))
@@ -224,39 +273,7 @@
     :lease_renewed_at  (iso-now)
     :lease_ttl_seconds ttl-seconds}))
 
-(defn renew-lease
-  "Pure: update `manifest`'s `:owner.lease_renewed_at` to now. Does
-   not change pid/host/ttl — those are stamped at acquisition and
-   only re-stamped when the workflow is re-claimed."
-  [manifest]
-  (assoc-in manifest [:owner :lease_renewed_at] (iso-now)))
-
-(defn lease-fresh?
-  "True if `manifest`'s lease was renewed within `ttl_seconds` of `now`.
-   Pure — caller passes `now` as an `Instant` for testability."
-  ([manifest] (lease-fresh? manifest (Instant/now)))
-  ([manifest ^Instant now]
-   (let [renewed (Instant/parse ^String (get-in manifest [:owner :lease_renewed_at]))
-         ttl-s   (long (get-in manifest [:owner :lease_ttl_seconds]))
-         age-s   (- (.getEpochSecond now) (.getEpochSecond renewed))]
-     (<= age-s ttl-s))))
-
-(defn owner-pid-alive?
-  "True if the manifest's `:owner.pid` corresponds to a running
-   process on this host. Use `ProcessHandle/of` (Java 9+). Returns
-   false when host doesn't match — cross-host pid checks are out of
-   scope (single-machine non-goal per the RFC)."
-  [manifest]
-  (let [owner-host (get-in manifest [:owner :host])]
-    (and (= owner-host (hostname-string))
-         (try
-           (let [pid (Long/parseLong (get-in manifest [:owner :pid]))]
-             (.isPresent (java.lang.ProcessHandle/of pid)))
-           (catch Exception _ false)))))
-
-;------------------------------------------------------------------------------ Layer 2 — compose Layer 1
-
-(defn transition-archive
+(defn ^{:stratum 2} transition-archive
   "Pure: move the manifest's `archive_status` from its current value
    to `to`, returning the updated manifest. Returns a canonical
    `:conflict` anomaly on illegal moves so callers can't silently
@@ -272,7 +289,19 @@
                         :to     to
                         :workflow-id (:workflow_id manifest)}))))
 
-(defn init-active
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} valid?
+  "True if `m` matches the manifest schema."
+  [m]
+  (m/validate Manifest m))
+
+(defn ^{:stratum 3} explain
+  "Return a malli explanation when `m` does not match. nil when valid."
+  [m]
+  (m/explain Manifest m))
+
+(defn ^{:stratum 3} init-active
   "Build a fresh `:active` / `:live` manifest for a new workflow.
    Owner is the calling process. Snapshot watermark starts at
    sequence 0 with no event id — sub-3 / BD-2c update it as
@@ -293,18 +322,7 @@
    :raw_events_retained_until nil
    :owner                    (fresh-owner ttl-seconds)})
 
-(defn mark-terminal
-  "Pure: set `status` to a terminal value (`:completed | :failed |
-   :cancelled`) and stamp `completed_at`. Does NOT change
-   archive_status — that's a separate state machine driven by sub-3."
-  [manifest status]
-  (assert (contains? #{:completed :failed :cancelled} status)
-          (str "mark-terminal expects a terminal status, got " status))
-  (assoc manifest
-         :status       status
-         :completed_at (iso-now)))
-
-(defn load-manifest
+(defn ^{:stratum 3} load-manifest
   "Read and parse a manifest from disk. Returns the parsed map (with
    keyword keys) or nil when the file is absent. Throws if present
    but unparseable — a corrupted manifest is a real bug, not a
@@ -322,7 +340,9 @@
           (string? (:archive_status raw))  (update :archive_status keyword)
           (string? (:snapshot_status raw)) (update :snapshot_status keyword))))))
 
-(defn save-manifest!
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} save-manifest!
   "Atomically write `manifest` to `workflow-dir/manifest.json`.
 
    Writes to `manifest.json.tmp` first, fsyncs, then `Files/move`s
@@ -368,9 +388,9 @@
                                StandardCopyOption/REPLACE_EXISTING]))
       final)))
 
-;------------------------------------------------------------------------------ Layer 3 — manifest-bound IO composing Layer 2 read + write
+;------------------------------------------------------------------------------ Layer 5
 
-(defn renew-lease!
+(defn ^{:stratum 5} renew-lease!
   "Re-stamp the lease and write the manifest atomically. Returns the
    updated manifest, an anomaly from `save-manifest!`, or nil when the
    manifest is absent. Idempotent — a missing manifest is a no-op so
@@ -382,9 +402,9 @@
       (anomaly/let-ok [_saved (save-manifest! workflow-dir renewed)]
         renewed))))
 
-;------------------------------------------------------------------------------ Layer 4 — scheduled orchestration
+;------------------------------------------------------------------------------ Layer 6
 
-(defn start-heartbeat!
+(defn ^{:stratum 6} start-heartbeat!
   "Start a single-threaded scheduled executor that renews the
    manifest's lease every `:period-seconds` (default
    `heartbeat-period-seconds`). Returns the executor handle for

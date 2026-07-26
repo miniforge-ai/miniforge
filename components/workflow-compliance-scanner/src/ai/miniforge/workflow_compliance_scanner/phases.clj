@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow-compliance-scanner.phases
   "Phase interceptors for the compliance scan and execute workflows.
 
@@ -35,9 +34,9 @@
    [ai.miniforge.phase.interface              :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- resolve-repo-path
+;; Helpers
+(defn- ^{:stratum 0} resolve-repo-path
   "Resolve the repository path from context.
    Prefers explicit [:execution/input :repo-path] when provided (cross-repo scan),
    then :execution/worktree-path (isolation), then '.'."
@@ -46,65 +45,41 @@
       (get ctx :execution/worktree-path)
       "."))
 
-(defn- resolve-standards-path
+(defn- ^{:stratum 0} resolve-standards-path
   "Resolve the standards path from context.
    Prefers [:execution/input :standards-path], then '.standards'."
   [ctx]
   (or (get-in ctx [:execution/input :standards-path])
       ".standards"))
 
-(defn- resolve-rules
+(defn- ^{:stratum 0} resolve-rules
   "Resolve which rules to apply from context input.
    Defaults to :always-apply."
   [ctx]
   (get-in ctx [:execution/input :rules] :always-apply))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Default configs
-
-(def default-scan-config
+(def ^{:stratum 0} default-scan-config
   {:agent nil
    :gates []
    :budget {:tokens 5000 :iterations 1 :time-seconds 300}})
 
-(def default-classify-config
+(def ^{:stratum 0} default-classify-config
   {:agent nil
    :gates []
    :budget {:tokens 1000 :iterations 1 :time-seconds 60}})
 
-(def default-plan-config
+(def ^{:stratum 0} default-plan-config
   {:agent nil
    :gates []
    :budget {:tokens 5000 :iterations 1 :time-seconds 120}})
 
-(def default-execute-config
+(def ^{:stratum 0} default-execute-config
   {:agent nil
    :gates []
    :budget {:tokens 5000 :iterations 1 :time-seconds 1800}})
 
-;; Register defaults on load
-(phase/register-phase-defaults! :compliance-scan     default-scan-config)
-(phase/register-phase-defaults! :compliance-classify default-classify-config)
-(phase/register-phase-defaults! :compliance-plan     default-plan-config)
-(phase/register-phase-defaults! :compliance-execute  default-execute-config)
-
-;------------------------------------------------------------------------------ Layer 1
-;; :compliance-scan interceptor
-
-(defn enter-compliance-scan
-  "Execute compliance scan phase.
-
-   Calls compliance-scanner/scan and stores ScanResult in context."
-  [ctx]
-  (let [start-time     (System/currentTimeMillis)
-        repo-path      (resolve-repo-path ctx)
-        standards-path (resolve-standards-path ctx)
-        rules          (resolve-rules ctx)
-        scan-result    (compliance-scanner/scan repo-path standards-path {:rules rules})]
-    (phase/enter-context ctx :compliance-scan nil [] default-scan-config start-time
-                                {:status :success :output scan-result})))
-
-(defn leave-compliance-scan
+(defn ^{:stratum 0} leave-compliance-scan
   "Post-processing for compliance scan phase.
 
    Records violation count in metrics."
@@ -125,28 +100,14 @@
         (update-in [:execution :phases-completed] (fnil conj []) :compliance-scan)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn error-compliance-scan
+(defn ^{:stratum 0} error-compliance-scan
   "Handle compliance scan phase errors."
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase/exception-error ex))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; :compliance-classify interceptor
-
-(defn enter-compliance-classify
-  "Execute compliance classify phase.
-
-   Reads violations from scan phase results, classifies them, stores output."
-  [ctx]
-  (let [start-time  (System/currentTimeMillis)
-        violations  (get-in ctx [:execution/phase-results :compliance-scan :result :output :violations] [])
-        classified  (compliance-scanner/classify violations)]
-    (phase/enter-context ctx :compliance-classify nil [] default-classify-config start-time
-                                {:status :success :output {:classified-violations classified}})))
-
-(defn leave-compliance-classify
+(defn ^{:stratum 0} leave-compliance-classify
   "Post-processing for compliance classify phase.
 
    Records auto-fixable and needs-review counts in metrics."
@@ -169,35 +130,14 @@
         (update-in [:execution :phases-completed] (fnil conj []) :compliance-classify)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn error-compliance-classify
+(defn ^{:stratum 0} error-compliance-classify
   "Handle compliance classify phase errors."
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase/exception-error ex))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; :compliance-plan interceptor
-
-(defn enter-compliance-plan
-  "Execute compliance plan phase.
-
-   Reads classified violations, generates plan, writes work spec and delta
-   report to disk, stores plan output in context."
-  [ctx]
-  (let [start-time     (System/currentTimeMillis)
-        repo-path      (resolve-repo-path ctx)
-        standards-path (resolve-standards-path ctx)
-        classified     (get-in ctx [:execution/phase-results :compliance-classify :result :output :classified-violations] [])
-        the-plan       (compliance-scanner/plan classified repo-path)]
-    (compliance-scanner/write-work-spec! (:work-spec the-plan) repo-path)
-    (compliance-scanner/write-delta-report! repo-path standards-path classified the-plan)
-    (phase/enter-context ctx :compliance-plan nil [] default-plan-config start-time
-                                {:status :success
-                                 :output {:plan       the-plan
-                                          :task-count (count (:dag-tasks the-plan))}})))
-
-(defn leave-compliance-plan
+(defn ^{:stratum 0} leave-compliance-plan
   "Post-processing for compliance plan phase.
 
    Records task count in metrics."
@@ -217,29 +157,14 @@
         (update-in [:execution :phases-completed] (fnil conj []) :compliance-plan)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn error-compliance-plan
+(defn ^{:stratum 0} error-compliance-plan
   "Handle compliance plan phase errors."
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase/exception-error ex))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; :compliance-execute interceptor
-
-(defn enter-compliance-execute
-  "Execute compliance execute phase.
-   Reads the plan from phase results, applies auto-fixable violations to files
-   in the worktree, commits per rule, and opens one GitHub PR per rule."
-  [ctx]
-  (let [start-time (System/currentTimeMillis)
-        repo-path  (resolve-repo-path ctx)
-        plan       (get-in ctx [:execution/phase-results :compliance-plan :result :output :plan])
-        result     (compliance-scanner/execute! plan repo-path)]
-    (phase/enter-context ctx :compliance-execute nil [] default-execute-config start-time
-                                {:status :success :output result})))
-
-(defn leave-compliance-execute
+(defn ^{:stratum 0} leave-compliance-execute
   "Post-processing for compliance execute phase.
    Records PR count and violations-fixed in metrics."
   [ctx]
@@ -263,17 +188,77 @@
         (update-in [:execution :phases-completed] (fnil conj []) :compliance-execute)
         (update-in [:execution/metrics :duration-ms] (fnil + 0) duration-ms))))
 
-(defn error-compliance-execute
+(defn ^{:stratum 0} error-compliance-execute
   "Handle compliance execute phase errors."
   [ctx ex]
   (-> ctx
       (assoc-in [:phase :status] :failed)
       (assoc-in [:phase :error] (phase/exception-error ex))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registry methods
+;------------------------------------------------------------------------------ Layer 1
 
-(defmethod phase/get-phase-interceptor-method :compliance-scan
+;; :compliance-scan interceptor
+(defn ^{:stratum 1} enter-compliance-scan
+  "Execute compliance scan phase.
+
+   Calls compliance-scanner/scan and stores ScanResult in context."
+  [ctx]
+  (let [start-time     (System/currentTimeMillis)
+        repo-path      (resolve-repo-path ctx)
+        standards-path (resolve-standards-path ctx)
+        rules          (resolve-rules ctx)
+        scan-result    (compliance-scanner/scan repo-path standards-path {:rules rules})]
+    (phase/enter-context ctx :compliance-scan nil [] default-scan-config start-time
+                                {:status :success :output scan-result})))
+
+;; :compliance-classify interceptor
+(defn ^{:stratum 1} enter-compliance-classify
+  "Execute compliance classify phase.
+
+   Reads violations from scan phase results, classifies them, stores output."
+  [ctx]
+  (let [start-time  (System/currentTimeMillis)
+        violations  (get-in ctx [:execution/phase-results :compliance-scan :result :output :violations] [])
+        classified  (compliance-scanner/classify violations)]
+    (phase/enter-context ctx :compliance-classify nil [] default-classify-config start-time
+                                {:status :success :output {:classified-violations classified}})))
+
+;; :compliance-plan interceptor
+(defn ^{:stratum 1} enter-compliance-plan
+  "Execute compliance plan phase.
+
+   Reads classified violations, generates plan, writes work spec and delta
+   report to disk, stores plan output in context."
+  [ctx]
+  (let [start-time     (System/currentTimeMillis)
+        repo-path      (resolve-repo-path ctx)
+        standards-path (resolve-standards-path ctx)
+        classified     (get-in ctx [:execution/phase-results :compliance-classify :result :output :classified-violations] [])
+        the-plan       (compliance-scanner/plan classified repo-path)]
+    (compliance-scanner/write-work-spec! (:work-spec the-plan) repo-path)
+    (compliance-scanner/write-delta-report! repo-path standards-path classified the-plan)
+    (phase/enter-context ctx :compliance-plan nil [] default-plan-config start-time
+                                {:status :success
+                                 :output {:plan       the-plan
+                                          :task-count (count (:dag-tasks the-plan))}})))
+
+;; :compliance-execute interceptor
+(defn ^{:stratum 1} enter-compliance-execute
+  "Execute compliance execute phase.
+   Reads the plan from phase results, applies auto-fixable violations to files
+   in the worktree, commits per rule, and opens one GitHub PR per rule."
+  [ctx]
+  (let [start-time (System/currentTimeMillis)
+        repo-path  (resolve-repo-path ctx)
+        plan       (get-in ctx [:execution/phase-results :compliance-plan :result :output :plan])
+        result     (compliance-scanner/execute! plan repo-path)]
+    (phase/enter-context ctx :compliance-execute nil [] default-execute-config start-time
+                                {:status :success :output result})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Registry methods
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :compliance-scan
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-scan
@@ -282,7 +267,7 @@
      :leave  leave-compliance-scan
      :error  error-compliance-scan}))
 
-(defmethod phase/get-phase-interceptor-method :compliance-classify
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :compliance-classify
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-classify
@@ -291,7 +276,7 @@
      :leave  leave-compliance-classify
      :error  error-compliance-classify}))
 
-(defmethod phase/get-phase-interceptor-method :compliance-plan
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :compliance-plan
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-plan
@@ -300,7 +285,7 @@
      :leave  leave-compliance-plan
      :error  error-compliance-plan}))
 
-(defmethod phase/get-phase-interceptor-method :compliance-execute
+(defmethod ^{:stratum 2} phase/get-phase-interceptor-method :compliance-execute
   [config]
   (let [merged (phase/merge-with-defaults config)]
     {:name   ::compliance-execute
@@ -308,6 +293,15 @@
      :enter  (fn [ctx] (enter-compliance-execute (assoc ctx :phase-config merged)))
      :leave  leave-compliance-execute
      :error  error-compliance-execute}))
+
+;; Register defaults on load
+(phase/register-phase-defaults! :compliance-scan     default-scan-config)
+
+(phase/register-phase-defaults! :compliance-classify default-classify-config)
+
+(phase/register-phase-defaults! :compliance-plan     default-plan-config)
+
+(phase/register-phase-defaults! :compliance-execute  default-execute-config)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

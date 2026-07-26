@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.interface
   "Public API for the Observer component.
 
@@ -53,9 +52,9 @@
    [ai.miniforge.observer.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Observer creation
 
-(def create-observer
+;; Observer creation
+(def ^{:stratum 0} create-observer
   "Create a new Observer instance.
 
    The Observer collects workflow metrics and generates performance reports.
@@ -70,10 +69,8 @@
      (def obs (create-observer))"
   core/create-observer)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Metrics collection
-
-(defn collect-workflow-metrics
+(defn ^{:stratum 0} collect-workflow-metrics
   "Collect metrics from a completed workflow.
 
    Arguments:
@@ -88,7 +85,7 @@
   [observer workflow-id workflow-state]
   (proto/collect-workflow-metrics observer workflow-id workflow-state))
 
-(defn collect-phase-metrics
+(defn ^{:stratum 0} collect-phase-metrics
   "Collect metrics from a completed phase.
 
    Arguments:
@@ -104,10 +101,8 @@
   [observer workflow-id phase-name phase-result]
   (proto/collect-phase-metrics observer workflow-id phase-name phase-result))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Query and retrieval
-
-(defn get-workflow-metrics
+(defn ^{:stratum 0} get-workflow-metrics
   "Get collected metrics for a specific workflow.
 
    Arguments:
@@ -125,7 +120,7 @@
   [observer workflow-id]
   (proto/get-workflow-metrics observer workflow-id))
 
-(defn get-all-metrics
+(defn ^{:stratum 0} get-all-metrics
   "Get all collected metrics with optional filtering.
 
    Arguments:
@@ -142,10 +137,8 @@
   [observer opts]
   (proto/get-all-metrics observer opts))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Analysis
-
-(defn analyze-metrics
+(defn ^{:stratum 0} analyze-metrics
   "Analyze collected metrics and generate statistics.
 
    Arguments:
@@ -174,10 +167,8 @@
   [observer analysis-type opts]
   (proto/analyze-metrics observer analysis-type opts))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Report generation
-
-(defn generate-report
+(defn ^{:stratum 0} generate-report
   "Generate a performance report from collected metrics.
 
    Arguments:
@@ -191,10 +182,11 @@
    - :recommendations - Recommendations for improvements
 
    Options:
-   - :format - Output format (:edn, :markdown, :json) - default :markdown
+   - :format - :edn or :markdown; any other value falls through to :edn.
+     Default :markdown for :summary/:recommendations, :edn for :detailed.
    - :limit - Number of workflows to analyze (default: 100 for summary, 50 for detailed)
 
-   Returns: Report string (markdown/json) or data structure (edn)
+   Returns: Report string (:markdown) or data structure (:edn)
 
    Example:
      (generate-report obs :summary {:format :markdown})
@@ -205,7 +197,7 @@
   [observer report-type opts]
   (proto/generate-report observer report-type opts))
 
-(defn create-telemetry-artifact
+(defn ^{:stratum 0} create-telemetry-artifact
   "Create a telemetry artifact from collected metrics.
 
    Arguments:
@@ -227,10 +219,8 @@
   [observer artifact-store]
   (proto/create-telemetry-artifact observer artifact-store))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Data structure constructors (re-export from protocol)
-
-(def workflow-metrics
+(def ^{:stratum 0} workflow-metrics
   "Create a workflow metrics record.
 
    Required fields:
@@ -252,7 +242,7 @@
         :timestamp (java.util.Date.)})"
   proto/workflow-metrics)
 
-(def phase-metrics
+(def ^{:stratum 0} phase-metrics
   "Create a phase metrics record.
 
    Required fields:
@@ -272,7 +262,7 @@
         :success? true})"
   proto/phase-metrics)
 
-(def analysis-result
+(def ^{:stratum 0} analysis-result
   "Create an analysis result record.
 
    Required fields:
@@ -291,26 +281,26 @@
         :summary \"Analyzed 100 workflows...\"})"
   proto/analysis-result)
 
-(def create-alert-state
+(def ^{:stratum 0} create-alert-state
   "Create alert evaluator state: outstanding tool calls and known tool outcomes."
   alerts/create-alert-state)
 
-(def evaluate-rules
+(def ^{:stratum 0} evaluate-rules
   "Evaluate alert rule maps against an event; returns fired alert maps."
   alerts/evaluate-rules)
 
-(def alert-fired
+(def ^{:stratum 0} alert-fired
   "Build an :observer/alert-fired event from workflow id and fired alert map."
   alerts/alert-fired)
 
-(def start-alert-subscriber!
+(def ^{:stratum 0} start-alert-subscriber!
   "Subscribe to workflow heartbeat/tool events and publish fired alert events."
   alert-subscriber/start-alert-subscriber!)
 
-(def stop-alert-subscriber!
+(def ^{:stratum 0} stop-alert-subscriber!
   "Stop a handle returned by start-alert-subscriber!; nil/no-op safe."
   alert-subscriber/stop-alert-subscriber!)
 
-(def rules-from-config
+(def ^{:stratum 0} rules-from-config
   "Return alert rule maps from [:observability :alerts] config."
   alert-subscriber/rules-from-config)

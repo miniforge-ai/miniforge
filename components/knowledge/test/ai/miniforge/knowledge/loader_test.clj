@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.loader-test
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.knowledge.loader :as sut]))
 
-(deftest initialize-knowledge-store-default-rules-dir-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} initialize-knowledge-store-default-rules-dir-test
   (testing "defaults rules loading to .cursor/rules"
     (let [captured-rules-dir (atom nil)]
       (with-redefs [sut/load-rules (fn [_store rules-dir]
@@ -32,7 +33,7 @@
         (is (= 0 (:total (sut/initialize-knowledge-store! ::store {}))))
         (is (= ".cursor/rules" @captured-rules-dir))))))
 
-(deftest initialize-knowledge-store-explicit-rules-dir-test
+(deftest ^{:stratum 0} initialize-knowledge-store-explicit-rules-dir-test
   (testing "respects an explicit rules-dir override"
     (let [captured-rules-dir (atom nil)]
       (with-redefs [sut/load-rules (fn [_store rules-dir]

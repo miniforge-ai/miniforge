@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.context-pack.budget
   "Token budget enforcement for context packs.
 
@@ -10,24 +9,34 @@
             [ai.miniforge.context-pack.factory :as factory]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Token estimation
 
-(defn estimate-tokens
+;; Token estimation
+(defn ^{:stratum 0} estimate-tokens
   "Estimate token count for a string (~4 chars per token)."
   [s]
   (if (string? s)
     (int (Math/ceil (/ (count s) 4)))
     0))
 
-(defn would-exceed?
+(defn ^{:stratum 0} would-exceed?
   "Check if adding tokens would exceed the pack's budget."
   [pack additional-tokens]
   (> (+ (:tokens-used pack) additional-tokens) (:budget pack)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Budget tracking
+(defn ^{:stratum 0} tokens-remaining
+  "Get remaining token budget for a pack."
+  [pack]
+  (max 0 (- (:budget pack) (:tokens-used pack))))
 
-(defn add-source
+(defn ^{:stratum 0} exhausted?
+  "Check if a pack's budget is exhausted."
+  [pack]
+  (:exhausted? pack))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Budget tracking
+(defn ^{:stratum 1} add-source
   "Add a source to the pack, tracking its token cost.
    Returns updated pack, or pack with :exhausted? true if over budget."
   [pack kind path content]
@@ -44,7 +53,9 @@
             (and over-budget? (= policy :warn))
             (assoc :exhausted? true))))))
 
-(defn try-add-item
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} try-add-item
   "Try to add an item to the pack within budget.
    Returns updated pack if it fits, or pack with :exhausted? true if not."
   [pack kind path content update-fn]
@@ -54,13 +65,3 @@
       (-> pack
           update-fn
           (add-source kind path content)))))
-
-(defn tokens-remaining
-  "Get remaining token budget for a pack."
-  [pack]
-  (max 0 (- (:budget pack) (:tokens-used pack))))
-
-(defn exhausted?
-  "Check if a pack's budget is exhausted."
-  [pack]
-  (:exhausted? pack))

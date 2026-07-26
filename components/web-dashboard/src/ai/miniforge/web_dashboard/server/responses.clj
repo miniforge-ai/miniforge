@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.responses
   "HTTP response helpers and static file serving."
   (:require
@@ -20,9 +19,9 @@
    [hiccup2.core :refer [html]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Content types
 
-(def content-types
+;; Content types
+(def ^{:stratum 0} content-types
   "MIME types for static files."
   {".html" "text/html"
    ".css"  "text/css"
@@ -35,7 +34,32 @@
    ".gif"  "image/gif"
    ".ico"  "image/x-icon"})
 
-(defn get-content-type
+(defn ^{:stratum 0} html-response
+  "Render hiccup to HTML and return as HTTP response."
+  [hiccup-data]
+  {:status 200
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body (if (string? hiccup-data)
+           hiccup-data
+           (str (html hiccup-data)))})
+
+(defn ^{:stratum 0} json-response
+  "Return JSON response."
+  [data]
+  {:status 200
+   :headers {"Content-Type" "application/json"}
+   :body (json/generate-string data)})
+
+(defn ^{:stratum 0} not-found-response
+  "Return 404 response."
+  []
+  {:status 404
+   :headers {"Content-Type" "text/plain"}
+   :body "Not Found"})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-content-type
   "Get content type from file extension."
   [path]
   (or (some (fn [[ext type]]
@@ -43,10 +67,10 @@
             content-types)
       "application/octet-stream"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Response constructors
+;------------------------------------------------------------------------------ Layer 2
 
-(defn serve-static-file
+;; Response constructors
+(defn ^{:stratum 2} serve-static-file
   "Serve a static file from resources/public."
   [path]
   (if-let [resource (io/resource (str "public" path))]
@@ -56,26 +80,3 @@
     {:status 404
      :headers {"Content-Type" "text/plain"}
      :body "Not Found"}))
-
-(defn html-response
-  "Render hiccup to HTML and return as HTTP response."
-  [hiccup-data]
-  {:status 200
-   :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body (if (string? hiccup-data)
-           hiccup-data
-           (str (html hiccup-data)))})
-
-(defn json-response
-  "Return JSON response."
-  [data]
-  {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body (json/generate-string data)})
-
-(defn not-found-response
-  "Return 404 response."
-  []
-  {:status 404
-   :headers {"Content-Type" "text/plain"}
-   :body "Not Found"})

@@ -15,20 +15,22 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.schema
   "Malli schemas for the knowledge component (Zettelkasten).
-   Layer 0: Link schemas
-   Layer 1: Source/provenance schemas
-   Layer 2: Zettel schemas
-   Layer 3: Query schemas"
+   Layer 0: enum schemas + the query/result schemas built only from
+     enums and primitives (LinkType, SourceType, ZettelType, ShareScope,
+     Classification, TrustLevel, PolicyQuery, PolicyResult)
+   Layer 1: compound schemas referencing Layer 0 enums (Link, Source,
+     ZettelSummary, KnowledgeQuery, AgentManifest, LearningCapture)
+   Layer 2: Zettel — references Link + Source + ShareScope +
+     Classification + TrustLevel, all from Layers 0-1"
   (:require
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Link schemas
 
-(def LinkType
+;; Link schemas
+(def ^{:stratum 0} LinkType
   "Types of connections between zettels."
   [:enum
    :supports      ; Evidence or argument supporting the target
@@ -39,42 +41,20 @@
    :questions     ; Raises a question about the target
    :answers       ; Responds to a question
    :supersedes    ; Replaces/updates the target
-   :related])     ; General association
+   :related])  ; General association
 
-(def Link
-  "A connection between zettels with explicit rationale."
-  [:map
-   [:link/target-id uuid?]
-   [:link/type LinkType]
-   [:link/rationale [:string {:min 10}]]  ; Must explain WHY
-   [:link/strength {:optional true} [:double {:min 0.0 :max 1.0}]]
-   [:link/bidirectional? {:optional true} boolean?]])
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Source/provenance schemas
-
-(def SourceType
+(def ^{:stratum 0} SourceType
   "How this knowledge was created."
   [:enum
    :manual        ; Human-authored
    :inner-loop    ; Generated during repair cycle
    :meta-loop     ; Observed pattern across executions
    :import        ; Imported from external source
-   :migration])   ; Migrated from existing rules
+   :migration])  ; Migrated from existing rules
 
-(def Source
-  "Provenance information for a zettel."
-  [:map
-   [:source/type SourceType]
-   [:source/agent {:optional true} keyword?]     ; Which agent role
-   [:source/task-id {:optional true} uuid?]      ; Task that generated this
-   [:source/context {:optional true} string?]    ; Additional context
-   [:source/confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Zettel schemas
-
-(def ZettelType
+(def ^{:stratum 0} ZettelType
   "Categories of knowledge units."
   [:enum
    :rule         ; Constraint/convention (from .mdc files)
@@ -83,22 +63,21 @@
    :example      ; Concrete code/pattern
    :hub          ; Structure note organizing others
    :question     ; Open question to resolve
-   :decision])   ; ADR-style decision record
+   :decision])  ; ADR-style decision record
 
 ;; ----------------------------------------------------------------------------
 ;; Fleet-share fields (Decision 6 + 8 + 13 of the miniforge-fleet Phase E
 ;; planning doc). All optional — local Zettelkasten use does not require any
 ;; of them; they're populated when the zettel becomes a candidate for
 ;; cross-instance share via miniforge-fleet's event log.
-
-(def ShareScope
+(def ^{:stratum 0} ShareScope
   "Audience scope a zettel is intended for when shared via Fleet.
    Decision 14 — every event carries an audience scope, even on
    single-org deployments (multi-tenant retrofit otherwise becomes
    unbounded work)."
   [:enum :org :team :repo :workflow])
 
-(def Classification
+(def ^{:stratum 0} Classification
   "Privacy classification from Decision 8.
      :public-org  — distributable across the org-wide fleet.
      :internal    — org-only, not pushed beyond org boundaries.
@@ -108,7 +87,7 @@
                     (`:fleet/shareable true` is a hard reject upstream)."
   [:enum :public-org :internal :restricted :secret])
 
-(def TrustLevel
+(def ^{:stratum 0} TrustLevel
   "Trust attached to a specific zettel revision (Decision 6 + 8 of
    miniforge-fleet's Phase E plan; closes the gap filed at
    miniforge-ai/miniforge#836).
@@ -129,9 +108,108 @@
    than the looser `:zettel/type :rule` proxy."
   [:enum :untrusted :trusted])
 
-;; ----------------------------------------------------------------------------
+;; Query schemas
+(def ^{:stratum 0} PolicyQuery
+  "Input schema for policy-pack rule lookup.
+   All fields are optional; omitting all returns every loaded :rule zettel.
+   Multiple criteria are ANDed.
 
-(def Zettel
+   :query        Case-insensitive substring matched against rule title + body.
+   :tags         Vector of keywords; a rule matches if it carries at least one.
+   :dewey-prefix Prefix string matched at the start of the rule's Dewey code
+                 (e.g. \"21\" matches \"210\" and \"211\"; \"210\" matches
+                 \"210\" but not \"211\")."
+  [:map
+   [:query        {:optional true} [:string {:min 1}]]
+   [:tags         {:optional true} [:vector keyword?]]
+   [:dewey-prefix {:optional true} [:string {:min 1}]]])
+
+(def ^{:stratum 0} PolicyResult
+  "Compact rule result returned by lookup-policy-rules.
+   Contains only the title and full markdown content of the matched rule."
+  [:map
+   [:rule/title   string?]
+   [:rule/content string?]])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} Link
+  "A connection between zettels with explicit rationale."
+  [:map
+   [:link/target-id uuid?]
+   [:link/type LinkType]
+   [:link/rationale [:string {:min 10}]]  ; Must explain WHY
+   [:link/strength {:optional true} [:double {:min 0.0 :max 1.0}]]
+   [:link/bidirectional? {:optional true} boolean?]])
+
+(def ^{:stratum 1} Source
+  "Provenance information for a zettel."
+  [:map
+   [:source/type SourceType]
+   [:source/agent {:optional true} keyword?]     ; Which agent role
+   [:source/task-id {:optional true} uuid?]      ; Task that generated this
+   [:source/context {:optional true} string?]    ; Additional context
+   [:source/confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
+
+(def ^{:stratum 1} ZettelSummary
+  "Lightweight zettel reference for listings."
+  [:map
+   [:zettel/id uuid?]
+   [:zettel/uid string?]
+   [:zettel/title string?]
+   [:zettel/type ZettelType]
+   [:zettel/dewey {:optional true} string?]
+   [:zettel/tags {:optional true} [:vector keyword?]]])
+
+(def ^{:stratum 1} KnowledgeQuery
+  "Query specification for retrieving relevant knowledge."
+  [:map
+   [:agent-role {:optional true} keyword?]
+   [:task-type {:optional true} keyword?]
+   [:tags {:optional true} [:vector keyword?]]
+   [:dewey-range {:optional true} [:tuple string? string?]]  ; ["200" "299"]
+   [:dewey-prefixes {:optional true} [:vector string?]]      ; ["210" "220"]
+   [:include-types {:optional true} [:vector ZettelType]]
+   [:exclude-types {:optional true} [:vector ZettelType]]
+   [:min-strength {:optional true} [:double {:min 0.0 :max 1.0}]]
+   [:related-to {:optional true} [:or uuid? string?]]
+   [:traverse-links? {:optional true} boolean?]
+   [:max-hops {:optional true} [:int {:min 1 :max 5}]]
+   [:limit {:optional true} [:int {:min 1}]]
+   [:text-search {:optional true} string?]])
+
+(def ^{:stratum 1} AgentManifest
+  "Knowledge injection configuration for an agent role."
+  [:map
+   [:agent-role keyword?]
+   [:dewey-prefixes {:optional true} [:vector string?]]
+   [:tags {:optional true} [:vector keyword?]]
+   [:types {:optional true} [:vector ZettelType]]
+   [:hubs {:optional true} [:vector string?]]        ; Hub UIDs to include
+   [:always-include {:optional true} [:vector string?]]  ; UIDs always injected
+   [:max-zettels {:optional true} [:int {:min 1}]]])
+
+(def ^{:stratum 1} LearningCapture
+  "Input for capturing new learning from agent execution."
+  [:map
+   [:type SourceType]
+   [:agent {:optional true} keyword?]
+   [:task-id {:optional true} uuid?]
+   [:title [:string {:min 1}]]
+   [:content [:string {:min 1}]]
+   [:tags {:optional true} [:vector keyword?]]
+   [:dewey {:optional true} string?]
+   [:links {:optional true} [:vector
+                             [:map
+                              [:target [:or uuid? string?]]  ; ID or UID
+                              [:type LinkType]
+                              [:rationale string?]]]]
+   [:confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ----------------------------------------------------------------------------
+(def ^{:stratum 2} Zettel
   "An atomic unit of knowledge.
 
    Decision 6 of miniforge-fleet's Phase E planning doc requires every
@@ -185,86 +263,6 @@
    ;; produced the zettel; Fleet's E.4 quarantine gate + E.9 migration
    ;; registry both key off this.
    [:fleet/oss-version {:optional true} [:string {:min 1}]]])
-
-(def ZettelSummary
-  "Lightweight zettel reference for listings."
-  [:map
-   [:zettel/id uuid?]
-   [:zettel/uid string?]
-   [:zettel/title string?]
-   [:zettel/type ZettelType]
-   [:zettel/dewey {:optional true} string?]
-   [:zettel/tags {:optional true} [:vector keyword?]]])
-
-;------------------------------------------------------------------------------ Layer 3
-;; Query schemas
-
-(def PolicyQuery
-  "Input schema for policy-pack rule lookup.
-   All fields are optional; omitting all returns every loaded :rule zettel.
-   Multiple criteria are ANDed.
-
-   :query        Case-insensitive substring matched against rule title + body.
-   :tags         Vector of keywords; a rule matches if it carries at least one.
-   :dewey-prefix Prefix string matched at the start of the rule's Dewey code
-                 (e.g. \"21\" matches \"210\" and \"211\"; \"210\" matches
-                 \"210\" but not \"211\")."
-  [:map
-   [:query        {:optional true} [:string {:min 1}]]
-   [:tags         {:optional true} [:vector keyword?]]
-   [:dewey-prefix {:optional true} [:string {:min 1}]]])
-
-(def PolicyResult
-  "Compact rule result returned by lookup-policy-rules.
-   Contains only the title and full markdown content of the matched rule."
-  [:map
-   [:rule/title   string?]
-   [:rule/content string?]])
-
-(def KnowledgeQuery
-  "Query specification for retrieving relevant knowledge."
-  [:map
-   [:agent-role {:optional true} keyword?]
-   [:task-type {:optional true} keyword?]
-   [:tags {:optional true} [:vector keyword?]]
-   [:dewey-range {:optional true} [:tuple string? string?]]  ; ["200" "299"]
-   [:dewey-prefixes {:optional true} [:vector string?]]      ; ["210" "220"]
-   [:include-types {:optional true} [:vector ZettelType]]
-   [:exclude-types {:optional true} [:vector ZettelType]]
-   [:min-strength {:optional true} [:double {:min 0.0 :max 1.0}]]
-   [:related-to {:optional true} [:or uuid? string?]]
-   [:traverse-links? {:optional true} boolean?]
-   [:max-hops {:optional true} [:int {:min 1 :max 5}]]
-   [:limit {:optional true} [:int {:min 1}]]
-   [:text-search {:optional true} string?]])
-
-(def AgentManifest
-  "Knowledge injection configuration for an agent role."
-  [:map
-   [:agent-role keyword?]
-   [:dewey-prefixes {:optional true} [:vector string?]]
-   [:tags {:optional true} [:vector keyword?]]
-   [:types {:optional true} [:vector ZettelType]]
-   [:hubs {:optional true} [:vector string?]]        ; Hub UIDs to include
-   [:always-include {:optional true} [:vector string?]]  ; UIDs always injected
-   [:max-zettels {:optional true} [:int {:min 1}]]])
-
-(def LearningCapture
-  "Input for capturing new learning from agent execution."
-  [:map
-   [:type SourceType]
-   [:agent {:optional true} keyword?]
-   [:task-id {:optional true} uuid?]
-   [:title [:string {:min 1}]]
-   [:content [:string {:min 1}]]
-   [:tags {:optional true} [:vector keyword?]]
-   [:dewey {:optional true} string?]
-   [:links {:optional true} [:vector
-                             [:map
-                              [:target [:or uuid? string?]]  ; ID or UID
-                              [:type LinkType]
-                              [:rationale string?]]]]
-   [:confidence {:optional true} [:double {:min 0.0 :max 1.0}]]])
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

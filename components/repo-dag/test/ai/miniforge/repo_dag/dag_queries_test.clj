@@ -15,26 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.dag-queries-test
-  "Tests for affected repos, upstream repos, and merge order (Layers 5-6)."
+  "Tests for affected repos, upstream repos, and merge order."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
             [ai.miniforge.repo-dag.interface :as dag]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *manager* nil)
 
-(def ^:dynamic *manager* nil)
-
-(defn manager-fixture [f]
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
+;------------------------------------------------------------------------------ Layer 1
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Affected repos and upstream repos tests
-
-(deftest affected-repos-test
+(deftest ^{:stratum 1} affected-repos-test
   (testing "returns direct downstream repos"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -68,7 +66,7 @@
           affected (dag/affected-repos *manager* (:dag/id d) "b")]
       (is (= #{} affected)))))
 
-(deftest upstream-repos-test
+(deftest ^{:stratum 1} upstream-repos-test
   (testing "returns direct upstream repos"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -102,10 +100,8 @@
           upstream (dag/upstream-repos *manager* (:dag/id d) "a")]
       (is (= #{} upstream)))))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Merge order tests
-
-(deftest merge-order-test
+(deftest ^{:stratum 1} merge-order-test
   (testing "computes merge order for subset of repos"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo *manager* (:dag/id d)
@@ -135,3 +131,5 @@
       (is (:success result))
       (is (= 2 (count (:order result))))
       (is (= #{"a" "b"} (set (:order result)))))))
+
+(use-fixtures :each manager-fixture)

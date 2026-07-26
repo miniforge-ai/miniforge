@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.filters-new
   "Filter system interface - data-driven hybrid filtering.
 
@@ -30,21 +29,29 @@
    [ai.miniforge.web-dashboard.filter-eval :as eval]
    [ai.miniforge.web-dashboard.filter-facets :as facets]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;;------------------------------------------------------------------------------
 ;; Public API
-
 ;; Spec management
-(def get-filter-specs specs/get-filter-specs)
-(def reload-filter-specs! specs/reload-filter-specs!)
-(def add-custom-filter-spec! specs/add-custom-filter-spec!)
-(def get-applicable-filters specs/get-applicable-filters)
-(def get-filter-spec-by-id specs/get-filter-spec-by-id)
+(def ^{:stratum 0} get-filter-specs specs/get-filter-specs)
+
+(def ^{:stratum 0} reload-filter-specs! specs/reload-filter-specs!)
+
+(def ^{:stratum 0} add-custom-filter-spec! specs/add-custom-filter-spec!)
+
+(def ^{:stratum 0} get-applicable-filters specs/get-applicable-filters)
+
+(def ^{:stratum 0} get-filter-spec-by-id specs/get-filter-spec-by-id)
 
 ;; Filter evaluation
-(def eval-filter-ast eval/eval-filter-ast)
-(def apply-filters eval/apply-filters)
-(def merge-filter-state eval/merge-filter-state)
+(def ^{:stratum 0} eval-filter-ast eval/eval-filter-ast)
+
+(def ^{:stratum 0} apply-filters eval/apply-filters)
+
+(def ^{:stratum 0} merge-filter-state eval/merge-filter-state)
 
 ;; Facet computation
-(def compute-facets facets/compute-facets)
-(def compute-all-facets facets/compute-all-facets)
+(def ^{:stratum 0} compute-facets facets/compute-facets)
+
+(def ^{:stratum 0} compute-all-facets facets/compute-all-facets)

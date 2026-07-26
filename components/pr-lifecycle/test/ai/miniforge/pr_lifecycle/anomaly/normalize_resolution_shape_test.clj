@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.anomaly.normalize-resolution-shape-test
   "Locks the dual-shape anomaly detection in
    `merge/normalize-resolution-outcome` for the W2 anomaly
@@ -40,12 +39,12 @@
    [ai.miniforge.pr-lifecycle.merge :as merge]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fixtures + factories
 
-(def ^:private unresolvable-message
+;; Fixtures + factories
+(def ^{:stratum 0} ^:private unresolvable-message
   "Merge conflict could not be auto-resolved")
 
-(def ^:private conflicting-readiness
+(def ^{:stratum 0} ^:private conflicting-readiness
   "Readiness map shaped like evaluate-merge-readiness output where the
    branch check failed via CONFLICTING (DIRTY mergeStateStatus) — the
    shape that triggers `attempt-conflict-resolution!`'s dispatch into
@@ -55,32 +54,14 @@
                                :raw "{\"mergeable\":\"CONFLICTING\",\"mergeStateStatus\":\"DIRTY\"}"})}
    :blocking [:branch-not-up-to-date]})
 
-(def ^:private gh-pr-info-output
+(def ^{:stratum 0} ^:private gh-pr-info-output
   (str "{\"number\":123,"
        "\"headRefName\":\"feat/x\","
        "\"baseRefName\":\"main\","
        "\"headRefOid\":\"abc1234\","
        "\"baseRefOid\":\"def5678\"}"))
 
-(defn- legacy-unresolvable-anomaly
-  "Legacy-shape (`:anomaly/category`) terminal anomaly — what
-   workflow.merge-resolution returns today, pre W2 batch 4."
-  []
-  {:anomaly/category  :anomalies/dag-multi-parent-unresolvable
-   :anomaly/message   unresolvable-message
-   :resolution/reason :budget-exhausted})
-
-(defn- canonical-unresolvable-anomaly
-  "Canonical-shape (`:anomaly/type` + `:anomaly/subtype`) terminal
-   anomaly — what workflow.merge-resolution returns after W2 batch 4
-   flips the workflow brick."
-  []
-  (anomaly/sub-anomaly :conflict
-                       :anomalies/dag-multi-parent-unresolvable
-                       unresolvable-message
-                       {:resolution/reason :budget-exhausted}))
-
-(defn- merge-context
+(defn- ^{:stratum 0} merge-context
   "Context map for `merge/attempt-merge` with an injected no-op
    resolve-fn (the real one is stubbed via with-redefs of
    `conflict-resolution/resolve-pr-conflicts!`)."
@@ -91,7 +72,27 @@
    :pr-id      123
    :resolve-fn (fn [_] (dag/ok {}))})
 
-(defn- attempt-merge-with-resolution
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} legacy-unresolvable-anomaly
+  "Legacy-shape (`:anomaly/category`) terminal anomaly — what
+   workflow.merge-resolution returns today, pre W2 batch 4."
+  []
+  {:anomaly/category  :anomalies/dag-multi-parent-unresolvable
+   :anomaly/message   unresolvable-message
+   :resolution/reason :budget-exhausted})
+
+(defn- ^{:stratum 1} canonical-unresolvable-anomaly
+  "Canonical-shape (`:anomaly/type` + `:anomaly/subtype`) terminal
+   anomaly — what workflow.merge-resolution returns after W2 batch 4
+   flips the workflow brick."
+  []
+  (anomaly/sub-anomaly :conflict
+                       :anomalies/dag-multi-parent-unresolvable
+                       unresolvable-message
+                       {:resolution/reason :budget-exhausted}))
+
+(defn- ^{:stratum 1} attempt-merge-with-resolution
   "Run `merge/attempt-merge` with `resolve-pr-conflicts!` stubbed to
    return the supplied terminal anomaly. Returns the attempt-merge
    result for the caller to assert on."
@@ -106,10 +107,10 @@
                          merge/default-merge-policy
                          (merge-context))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Dual-shape detection
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest legacy-shape-anomaly-normalizes-to-conflict-unresolvable
+;; Dual-shape detection
+(deftest ^{:stratum 2} legacy-shape-anomaly-normalizes-to-conflict-unresolvable
   (testing "legacy `:anomaly/category` terminal anomaly normalizes
             to a dag/err with :conflict-unresolvable code"
     (let [terminal (legacy-unresolvable-anomaly)
@@ -119,7 +120,7 @@
       (is (= terminal (get-in result [:error :data :anomaly]))
           "original anomaly preserved for diagnostic surfacing"))))
 
-(deftest canonical-shape-anomaly-normalizes-to-conflict-unresolvable
+(deftest ^{:stratum 2} canonical-shape-anomaly-normalizes-to-conflict-unresolvable
   (testing "canonical `:anomaly/type` terminal anomaly (post W2
             batch 4 workflow flip) also normalizes to a dag/err with
             :conflict-unresolvable code"
@@ -132,7 +133,7 @@
       (is (= unresolvable-message (:message (:error result)))
           ":anomaly/message carries through to the dag/err message"))))
 
-(deftest canonical-and-legacy-shapes-both-detected-by-any-anomaly
+(deftest ^{:stratum 2} canonical-and-legacy-shapes-both-detected-by-any-anomaly
   (testing "both shapes that `any-anomaly?` must recognise yield the
             same downstream :conflict-unresolvable normalization. This
             locks the dual-shape contract: if a future change drops

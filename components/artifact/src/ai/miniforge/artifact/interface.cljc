@@ -15,18 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.interface
   "Public API for the artifact component."
   (:require
    #?@(:bb []
-       :clj [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
+       :default [[ai.miniforge.artifact.datalevin-store :as datalevin-store]])
    [ai.miniforge.artifact.core :as core]
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.records.transit-store :as transit-store]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Re-export protocol for public API
-(def ArtifactStore
+(def ^{:stratum 0} ArtifactStore
   "Protocol contract for pluggable artifact stores (extensibility point).
 
    Re-exported from ai.miniforge.artifact.interface.protocols.artifact-store.
@@ -39,35 +40,15 @@
    currently document argument contracts or failure modes)."
   p/ArtifactStore)
 
-#?(:bb
-   (defn- create-datalevin-store
-     [opts]
-     (throw (ex-info "Datalevin artifact store is JVM-only; use create-transit-store under Babashka"
-                     {:store :datalevin
-                      :runtime :bb
-                      :opts opts})))
+(defn- ^{:stratum 0} create-datalevin-store
+  [opts]
+  #?(:bb (throw (ex-info "Datalevin artifact store is JVM-only; use create-transit-store under Babashka"
+                        {:store :datalevin
+                         :runtime :bb
+                         :opts opts}))
+     :default (datalevin-store/create-datalevin-store opts)))
 
-   :clj
-   (defn- create-datalevin-store
-     [opts]
-     (datalevin-store/create-datalevin-store opts)))
-
-(defn create-store
-  "Create a Datalevin-based artifact store (JVM only).
-   For Babashka compatibility, use create-transit-store instead.
-
-   Options:
-   - :dir      - Directory for storage (nil for in-memory)
-   - :logger   - Optional logger
-   - :schema   - Optional custom Datalevin schema
-
-   Examples:
-     (create-store)                          ; in-memory
-     (create-store {:dir \"data/artifacts\"})  ; persistent"
-  ([] (create-store {}))
-  ([opts] (create-datalevin-store opts)))
-
-(defn create-transit-store
+(defn ^{:stratum 0} create-transit-store
   "Create a Transit-based artifact store (Babashka compatible).
 
    Options:
@@ -90,25 +71,48 @@
   ([] (transit-store/create-transit-store))
   ([opts] (transit-store/create-transit-store opts)))
 
-(defn close-store [store] (p/close store))
-(defn save! [store artifact] (p/save store artifact))
-(defn load-artifact [store id] (p/load-artifact store id))
-(defn query [store criteria] (p/query store criteria))
-(defn link! [store parent-id child-id] (p/link store parent-id child-id))
+(defn ^{:stratum 0} close-store [store] (p/close store))
 
-(defn build-artifact [opts] (core/build-artifact opts))
-(defn add-parent [artifact parent-id] (core/add-parent artifact parent-id))
-(defn add-child [artifact child-id] (core/add-child artifact child-id))
+(defn ^{:stratum 0} save! [store artifact] (p/save store artifact))
 
-(defn get-provenance [store artifact-id]
+(defn ^{:stratum 0} load-artifact [store id] (p/load-artifact store id))
+
+(defn ^{:stratum 0} query [store criteria] (p/query store criteria))
+
+(defn ^{:stratum 0} link! [store parent-id child-id] (p/link store parent-id child-id))
+
+(defn ^{:stratum 0} build-artifact [opts] (core/build-artifact opts))
+
+(defn ^{:stratum 0} add-parent [artifact parent-id] (core/add-parent artifact parent-id))
+
+(defn ^{:stratum 0} add-child [artifact child-id] (core/add-child artifact child-id))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-store
+  "Create a Datalevin-based artifact store (JVM only).
+   For Babashka compatibility, use create-transit-store instead.
+
+   Options:
+   - :dir      - Directory for storage (nil for in-memory)
+   - :logger   - Optional logger
+   - :schema   - Optional custom Datalevin schema
+
+   Examples:
+     (create-store)                          ; in-memory
+     (create-store {:dir \"data/artifacts\"})  ; persistent"
+  ([] (create-store {}))
+  ([opts] (create-datalevin-store opts)))
+
+(defn ^{:stratum 1} get-provenance [store artifact-id]
   (when-let [artifact (load-artifact store artifact-id)]
     {:ancestors (:artifact/parents artifact [])
      :descendants (:artifact/children artifact [])}))
 
-(defn query-by-type [store artifact-type]
+(defn ^{:stratum 1} query-by-type [store artifact-type]
   (query store {:artifact/type artifact-type}))
 
-(defn query-by-origin [store origin-criteria]
+(defn ^{:stratum 1} query-by-origin [store origin-criteria]
   (let [all-artifacts (query store {})
         {task-id :task-id agent-id :agent-id} origin-criteria]
     (filter (fn [art]

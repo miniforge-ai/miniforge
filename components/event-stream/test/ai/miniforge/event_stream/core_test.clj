@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.core-test
   "Direct unit tests for event-stream core — chain events, error handling,
    OCI events, control-plane events, and sink integration."
@@ -26,14 +25,15 @@
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.event-stream.core :as core]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn no-op-stream
+;------------------------------------------------------------------------------ Helpers
+(defn ^{:stratum 0} no-op-stream
   "Create an event stream with no sinks for isolated testing."
   []
   (core/create-event-stream {:sinks []}))
 
-(defn collect-stream
+(defn ^{:stratum 0} collect-stream
   "Create an event stream with a collecting sink for verifying sink calls."
   []
   (let [collected (atom [])
@@ -41,10 +41,74 @@
         stream (core/create-event-stream {:sinks [sink]})]
     {:stream stream :collected collected}))
 
-;------------------------------------------------------------------------------ Layer 0
-;; create-envelope
+(deftest ^{:stratum 0} create-envelope-propagates-snowflake-anomaly
+  (let [generator {:state     (atom {:last-ts -1
+                                     :last-seq -1
+                                     :worker-id 0})
+                   :worker-id 0
+                   :lease     {:worker-id 0}
+                   :now-fn    (constantly 0)}
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator})
+        result (core/create-envelope stream :test/event (random-uuid) "hello")]
+    (is (response/anomaly-map? result))
+    (is (= :anomalies/incorrect (:anomaly/category result)))
+    (is (= :pre-epoch-clock (:reason result)))))
 
-(deftest create-envelope-test
+(deftest ^{:stratum 0} create-envelope-propagates-anomaly-generator
+  (let [generator-anomaly (response/make-anomaly
+                           :anomalies/busy
+                           "No worker slots"
+                           {:reason :workers-exhausted})
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator-anomaly})
+        result (core/create-envelope stream :test/event (random-uuid) "hello")]
+    (is (identical? generator-anomaly result))))
+
+(deftest ^{:stratum 0} create-envelope-does-not-consume-sequence-on-id-anomaly
+  (let [wf-id (random-uuid)
+        generator {:state     (atom {:last-ts -1
+                                     :last-seq -1
+                                     :worker-id 0})
+                   :worker-id 0
+                   :lease     {:worker-id 0}
+                   :now-fn    (constantly 0)}
+        stream (core/create-event-stream {:sinks []
+                                          :snowflake-generator generator})
+        result (core/create-envelope stream :test/event wf-id "bad")]
+    (is (response/anomaly-map? result))
+    (swap! stream dissoc :snowflake-generator)
+    (is (= 0 (:event/sequence-number
+              (core/create-envelope stream :test/event wf-id "good"))))))
+
+(deftest ^{:stratum 0} publish-sink-error-handling-test
+  (testing "publish! continues when a sink throws"
+    (let [good-received (atom [])
+          bad-sink (fn [_] (throw (Exception. "sink boom")))
+          good-sink (fn [e] (swap! good-received conj e))
+          stream (core/create-event-stream {:sinks [bad-sink good-sink]})
+          event (core/create-envelope stream :test/err (random-uuid) "error test")]
+      (core/publish! stream event)
+      ;; Event still stored in memory and good sink received it
+      (is (= 1 (count (:events @stream))))
+      (is (= 1 (count @good-received))))))
+
+;; Dependency health event constructors
+(defn- ^{:stratum 0} dependency-health-entity
+  [overrides]
+  (merge {:dependency/id :anthropic
+          :dependency/source :external-provider
+          :dependency/kind :provider
+          :dependency/status :degraded
+          :dependency/failure-count 1
+          :dependency/window-size 5
+          :dependency/incident-counts {:degraded 1}}
+         overrides))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; create-envelope
+(deftest ^{:stratum 1} create-envelope-test
   (testing "produces well-formed event map"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -84,10 +148,8 @@
       (is (nil? (:workflow/id env)))
       (is (= 0 (:event/sequence-number env))))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; knowledge failure constructors
-
-(deftest knowledge-promotion-failed-accepts-failure-data-test
+(deftest ^{:stratum 1} knowledge-promotion-failed-accepts-failure-data-test
   (testing "promotion failure event can be built from error data without ex-info"
     (let [stream (no-op-stream)
           event (core/knowledge-promotion-failed stream
@@ -98,7 +160,7 @@
       (is (= "Knowledge promotion failed: promotion blocked"
              (:message event))))))
 
-(deftest knowledge-failure-constructors-preserve-throwable-messages-test
+(deftest ^{:stratum 1} knowledge-failure-constructors-preserve-throwable-messages-test
   (testing "existing Throwable callers keep the same message behavior"
     (let [stream (no-op-stream)
           err (ex-info "synthesis failed" {:cause :test})
@@ -106,50 +168,8 @@
       (is (= :knowledge/synthesis-failed (:event/type event)))
       (is (= "synthesis failed" (:knowledge/error event))))))
 
-(deftest create-envelope-propagates-snowflake-anomaly
-  (let [generator {:state     (atom {:last-ts -1
-                                     :last-seq -1
-                                     :worker-id 0})
-                   :worker-id 0
-                   :lease     {:worker-id 0}
-                   :now-fn    (constantly 0)}
-        stream (core/create-event-stream {:sinks []
-                                          :snowflake-generator generator})
-        result (core/create-envelope stream :test/event (random-uuid) "hello")]
-    (is (response/anomaly-map? result))
-    (is (= :anomalies/incorrect (:anomaly/category result)))
-    (is (= :pre-epoch-clock (:reason result)))))
-
-(deftest create-envelope-propagates-anomaly-generator
-  (let [generator-anomaly (response/make-anomaly
-                           :anomalies/busy
-                           "No worker slots"
-                           {:reason :workers-exhausted})
-        stream (core/create-event-stream {:sinks []
-                                          :snowflake-generator generator-anomaly})
-        result (core/create-envelope stream :test/event (random-uuid) "hello")]
-    (is (identical? generator-anomaly result))))
-
-(deftest create-envelope-does-not-consume-sequence-on-id-anomaly
-  (let [wf-id (random-uuid)
-        generator {:state     (atom {:last-ts -1
-                                     :last-seq -1
-                                     :worker-id 0})
-                   :worker-id 0
-                   :lease     {:worker-id 0}
-                   :now-fn    (constantly 0)}
-        stream (core/create-event-stream {:sinks []
-                                          :snowflake-generator generator})
-        result (core/create-envelope stream :test/event wf-id "bad")]
-    (is (response/anomaly-map? result))
-    (swap! stream dissoc :snowflake-generator)
-    (is (= 0 (:event/sequence-number
-              (core/create-envelope stream :test/event wf-id "good"))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; publish! sink integration
-
-(deftest publish-calls-sinks-test
+(deftest ^{:stratum 1} publish-calls-sinks-test
   (testing "publish! calls all configured sinks"
     (let [{:keys [stream collected]} (collect-stream)
           event (core/create-envelope stream :test/sink (random-uuid) "sink test")]
@@ -157,7 +177,7 @@
       (is (= 1 (count @collected)))
       (is (= :test/sink (:event/type (first @collected)))))))
 
-(deftest publish-returns-anomaly-without-delivery
+(deftest ^{:stratum 1} publish-returns-anomaly-without-delivery
   (let [{:keys [stream collected]} (collect-stream)
         anomaly (response/make-anomaly
                  :anomalies/incorrect
@@ -168,19 +188,7 @@
     (is (empty? @collected))
     (is (empty? (:events @stream)))))
 
-(deftest publish-sink-error-handling-test
-  (testing "publish! continues when a sink throws"
-    (let [good-received (atom [])
-          bad-sink (fn [_] (throw (Exception. "sink boom")))
-          good-sink (fn [e] (swap! good-received conj e))
-          stream (core/create-event-stream {:sinks [bad-sink good-sink]})
-          event (core/create-envelope stream :test/err (random-uuid) "error test")]
-      (core/publish! stream event)
-      ;; Event still stored in memory and good sink received it
-      (is (= 1 (count (:events @stream))))
-      (is (= 1 (count @good-received))))))
-
-(deftest publish-subscriber-error-handling-test
+(deftest ^{:stratum 1} publish-subscriber-error-handling-test
   (testing "publish! continues when a subscriber callback throws"
     (let [stream (no-op-stream)
           received (atom [])]
@@ -191,10 +199,8 @@
         ;; Good subscriber still received the event
         (is (= 1 (count @received)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; subscribe! and unsubscribe!
-
-(deftest subscribe-with-filter-test
+(deftest ^{:stratum 1} subscribe-with-filter-test
   (testing "subscriber with filter only receives matching events"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -207,7 +213,7 @@
       (is (= 1 (count @received)))
       (is (= :special (:event/type (first @received)))))))
 
-(deftest unsubscribe-test
+(deftest ^{:stratum 1} unsubscribe-test
   (testing "unsubscribed callback no longer receives events"
     (let [stream (no-op-stream)
           received (atom [])]
@@ -217,10 +223,8 @@
       (core/publish! stream (core/create-envelope stream :b (random-uuid) "after"))
       (is (= 1 (count @received))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Query API
-
-(deftest get-events-combined-filters-test
+(deftest ^{:stratum 1} get-events-combined-filters-test
   (testing "workflow-id + event-type filters compose"
     (let [stream (no-op-stream)
           wf-1 (random-uuid)
@@ -233,7 +237,7 @@
         (is (= 1 (count results)))
         (is (= wf-1 (:workflow/id (first results))))))))
 
-(deftest get-latest-status-nil-agent-test
+(deftest ^{:stratum 1} get-latest-status-nil-agent-test
   (testing "get-latest-status with nil agent-id returns latest status across agents"
     (let [stream (no-op-stream)
           wf-id (random-uuid)]
@@ -242,10 +246,8 @@
       (let [latest (core/get-latest-status stream wf-id)]
         (is (= :generating (:status/type latest)))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Chain event constructors
-
-(deftest workflow-started-routing-trigger-event-id-test
+(deftest ^{:stratum 1} workflow-started-routing-trigger-event-id-test
   (testing "2-arg and 3-arg call shapes preserved (backward compat)"
     (let [stream (no-op-stream)
           wf-id  (random-uuid)
@@ -277,7 +279,7 @@
           (str "nil opts value must not pollute the envelope — N5-delta-4 §4.3 "
                "leaves the field optional/absent on operator-initiated workflows")))))
 
-(deftest chain-envelope-test
+(deftest ^{:stratum 1} chain-envelope-test
   (testing "chain-envelope uses nil workflow-id and event-type as message"
     (let [stream (no-op-stream)
           env (core/chain-envelope stream :chain/started)]
@@ -285,7 +287,7 @@
       (is (nil? (:workflow/id env)))
       (is (= "started" (:message env))))))
 
-(deftest chain-started-test
+(deftest ^{:stratum 1} chain-started-test
   (testing "chain-started includes chain-id and step-count"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
@@ -294,7 +296,7 @@
       (is (= chain-id (:chain/id event)))
       (is (= 5 (:chain/step-count event))))))
 
-(deftest chain-step-started-test
+(deftest ^{:stratum 1} chain-step-started-test
   (testing "chain-step-started includes step metadata"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
@@ -307,14 +309,14 @@
       (is (= 0 (:step/index event)))
       (is (= wf-id (:step/workflow-id event))))))
 
-(deftest chain-step-completed-test
+(deftest ^{:stratum 1} chain-step-completed-test
   (testing "chain-step-completed captures step index"
     (let [stream (no-op-stream)
           event (core/chain-step-completed stream (random-uuid) :implement 1)]
       (is (= :chain/step-completed (:event/type event)))
       (is (= 1 (:step/index event))))))
 
-(deftest chain-step-failed-test
+(deftest ^{:stratum 1} chain-step-failed-test
   (testing "chain-step-failed captures error"
     (let [stream (no-op-stream)
           error {:message "compilation failed"}
@@ -322,7 +324,7 @@
       (is (= :chain/step-failed (:event/type event)))
       (is (= error (:chain/error event))))))
 
-(deftest chain-completed-test
+(deftest ^{:stratum 1} chain-completed-test
   (testing "chain-completed captures duration and step count"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
@@ -332,7 +334,7 @@
       (is (= 12000 (:chain/duration-ms event)))
       (is (= 3 (:chain/step-count event))))))
 
-(deftest chain-failed-test
+(deftest ^{:stratum 1} chain-failed-test
   (testing "chain-failed captures failed step and error"
     (let [stream (no-op-stream)
           chain-id (random-uuid)
@@ -342,10 +344,8 @@
       (is (= :review (:chain/failed-step event)))
       (is (= {:message "timeout"} (:chain/error event))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; OCI container events
-
-(deftest container-started-test
+(deftest ^{:stratum 1} container-started-test
   (testing "container-started creates event with container-id"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -361,7 +361,7 @@
       (is (= "sha256:abc" (:oci/image-digest event)))
       (is (= :verified (:oci/trust-level event))))))
 
-(deftest container-completed-test
+(deftest ^{:stratum 1} container-completed-test
   (testing "container-completed captures exit code"
     (let [stream (no-op-stream)
           event (core/container-completed stream (random-uuid) "ctr-789" 0 5000)]
@@ -375,10 +375,8 @@
       (is (= 1 (:oci/exit-code event)))
       (is (nil? (:oci/duration-ms event))))))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Tool supervision events
-
-(deftest tool-use-evaluated-test
+(deftest ^{:stratum 1} tool-use-evaluated-test
   (testing "basic tool evaluation event"
     (let [stream (no-op-stream)
           event (core/tool-use-evaluated stream (random-uuid) "file-write" :allow)]
@@ -398,10 +396,8 @@
       (is (= 0.95 (:supervision/confidence event)))
       (is (= :implement (:workflow/phase event))))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Control plane events
-
-(deftest cp-agent-registered-test
+(deftest ^{:stratum 1} cp-agent-registered-test
   (testing "creates registration event"
     (let [stream (no-op-stream)
           event (core/cp-agent-registered stream (random-uuid) "agent-1" :anthropic)]
@@ -429,7 +425,7 @@
       (is (= [:native] (:cp/tags event)))
       (is (= 15000 (:cp/heartbeat-interval-ms event))))))
 
-(deftest cp-agent-heartbeat-test
+(deftest ^{:stratum 1} cp-agent-heartbeat-test
   (testing "creates heartbeat event"
     (let [stream (no-op-stream)
           event (core/cp-agent-heartbeat stream (random-uuid) "agent-1" :active)]
@@ -445,7 +441,7 @@
       (is (= "Reviewing PR" (:cp/task event)))
       (is (= {:tokens 42} (:cp/metrics event))))))
 
-(deftest cp-agent-state-changed-test
+(deftest ^{:stratum 1} cp-agent-state-changed-test
   (testing "creates state-change event with from/to"
     (let [stream (no-op-stream)
           event (core/cp-agent-state-changed stream (random-uuid) "agent-1" :idle :active)]
@@ -453,7 +449,7 @@
       (is (= :idle (:cp/from-status event)))
       (is (= :active (:cp/to-status event))))))
 
-(deftest cp-decision-created-test
+(deftest ^{:stratum 1} cp-decision-created-test
   (testing "creates decision event"
     (let [stream (no-op-stream)
           decision-id (random-uuid)
@@ -480,7 +476,7 @@
       (is (= ["blue" "green"] (:cp/options event)))
       (is (= deadline (:cp/deadline event))))))
 
-(deftest cp-decision-resolved-test
+(deftest ^{:stratum 1} cp-decision-resolved-test
   (testing "creates resolved event"
     (let [stream (no-op-stream)
           decision-id (random-uuid)
@@ -497,7 +493,7 @@
                                            "Matches rollout plan")]
       (is (= "Matches rollout plan" (:cp/comment event))))))
 
-(deftest intervention-requested-test
+(deftest ^{:stratum 1} intervention-requested-test
   (testing "creates supervisory intervention requested event"
     (let [stream (no-op-stream)
           workflow-id (random-uuid)
@@ -518,7 +514,7 @@
       (is (= (messages/t :supervisory/intervention-requested {:type "pause"})
              (:message event))))))
 
-(deftest intervention-state-changed-test
+(deftest ^{:stratum 1} intervention-state-changed-test
   (testing "creates supervisory intervention lifecycle event"
     (let [stream (no-op-stream)
           intervention-id (random-uuid)
@@ -540,10 +536,8 @@
                           :state "applied"})
              (:message event))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Workflow failed edge cases
-
-(deftest workflow-failed-with-exception-test
+(deftest ^{:stratum 1} workflow-failed-with-exception-test
   (testing "workflow-failed from Throwable extracts message and type"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -553,7 +547,7 @@
       (is (string? (:workflow/failure-reason event)))
       (is (map? (:workflow/error-details event))))))
 
-(deftest workflow-failed-with-plain-map-test
+(deftest ^{:stratum 1} workflow-failed-with-plain-map-test
   (testing "workflow-failed from plain error map"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -561,10 +555,8 @@
       (is (= :workflow/failed (:event/type event)))
       (is (= "API error" (:workflow/failure-reason event))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Phase completed transition request
-
-(deftest phase-completed-transition-request-test
+(deftest ^{:stratum 1} phase-completed-transition-request-test
   (testing "phase-completed preserves transition requests and legacy redirect projection"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -577,7 +569,7 @@
              (get-in event [:phase/transition-request :transition/target])))
       (is (= :implement (:phase/redirect-to event))))))
 
-(deftest phase-completed-with-error-test
+(deftest ^{:stratum 1} phase-completed-with-error-test
   (testing "phase-completed captures error details"
     (let [stream (no-op-stream)
           wf-id (random-uuid)
@@ -588,21 +580,7 @@
       (is (= :failure (:phase/outcome event)))
       (is (= {:message "compile error" :line 42} (:phase/error event))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Dependency health event constructors
-
-(defn- dependency-health-entity
-  [overrides]
-  (merge {:dependency/id :anthropic
-          :dependency/source :external-provider
-          :dependency/kind :provider
-          :dependency/status :degraded
-          :dependency/failure-count 1
-          :dependency/window-size 5
-          :dependency/incident-counts {:degraded 1}}
-         overrides))
-
-(deftest dependency-health-updated-test
+(deftest ^{:stratum 1} dependency-health-updated-test
   (testing "dependency-health-updated carries dependency projection and prior status"
     (let [stream (no-op-stream)
           dependency (dependency-health-entity {})
@@ -616,7 +594,7 @@
                           :status "degraded"})
              (:message event))))))
 
-(deftest dependency-recovered-test
+(deftest ^{:stratum 1} dependency-recovered-test
   (testing "dependency-recovered carries healthy projection and prior status"
     (let [stream (no-op-stream)
           dependency (dependency-health-entity {:dependency/status :healthy
@@ -631,10 +609,8 @@
                           :status "healthy"})
              (:message event))))))
 
-;------------------------------------------------------------------------------ Layer 9
 ;; Routing trigger events (N5-delta-4 §4.2)
-
-(deftest pr-monitor-review-comments-arrived-test
+(deftest ^{:stratum 1} pr-monitor-review-comments-arrived-test
   (testing "without :comments/agent-session-id (shorter overload)"
     (let [stream (no-op-stream)
           event  (core/pr-monitor-review-comments-arrived
@@ -652,7 +628,7 @@
                        stream "miniforge-ai/miniforge" 999 3 session-id)]
       (is (= session-id (:comments/agent-session-id event))))))
 
-(deftest pr-monitor-ci-failed-test
+(deftest ^{:stratum 1} pr-monitor-ci-failed-test
   (testing "carries pr/repo, pr/number, ci/check-name, ci/conclusion"
     (let [stream (no-op-stream)
           event  (core/pr-monitor-ci-failed stream "miniforge-ai/miniforge"
@@ -663,7 +639,7 @@
       (is (= "tests" (:ci/check-name event)))
       (is (= :failure (:ci/conclusion event))))))
 
-(deftest standards-review-posted-test
+(deftest ^{:stratum 1} standards-review-posted-test
   (testing "without :affected/workflow-run-id (shorter overload)"
     (let [stream (no-op-stream)
           event  (core/standards-review-posted

@@ -15,17 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.control-plane.orchestrator
   "Orchestrator loop for the control plane.
 
    Coordinates adapters, the agent registry, decision queue,
    and heartbeat watchdog into a unified runtime. Periodically
-   runs adapter discovery and status polling.
-
-   Layer 0: Orchestrator creation
-   Layer 1: Discovery and polling loop
-   Layer 2: Full lifecycle management"
+   runs adapter discovery and status polling."
   (:require
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
@@ -35,22 +30,38 @@
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Orchestrator state
 
-(def ^:const default-discovery-interval-ms
+;; Orchestrator state
+(def ^{:stratum 0} ^:const default-discovery-interval-ms
   "How often to run adapter discovery."
   30000)
 
-(def ^:const default-poll-interval-ms
+(def ^{:stratum 0} ^:const default-poll-interval-ms
   "How often to poll agent status."
   10000)
 
-(defn- publish-event!
+(defn- ^{:stratum 0} publish-event!
   [event-stream event]
   (when (and event-stream event)
     (stream/publish! event-stream event)))
 
-(defn create-orchestrator
+(defn ^{:stratum 0} stop!
+  "Stop the orchestrator and all background loops.
+
+   Arguments:
+   - orchestrator - Running orchestrator."
+  [orchestrator]
+  (reset! (:running orchestrator) false)
+  (doseq [f @(:futures orchestrator)]
+    (future-cancel f))
+  (when-let [wd (:watchdog orchestrator)]
+    (heartbeat/stop-watchdog wd))
+  (reset! (:futures orchestrator) [])
+  orchestrator)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-orchestrator
   "Create a control plane orchestrator.
 
    Arguments:
@@ -82,10 +93,8 @@
    :running (atom false)
    :futures (atom [])})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Discovery and polling
-
-(defn- run-discovery-pass
+(defn- ^{:stratum 1} run-discovery-pass
   "Run one discovery pass across all adapters.
    Registers any newly discovered agents."
   [{:keys [registry adapters on-agent-discovered event-stream workflow-id]}]
@@ -115,7 +124,7 @@
                                                             registered)}))))))))
       (catch Exception _e nil))))
 
-(defn- run-poll-pass
+(defn- ^{:stratum 1} run-poll-pass
   "Run one status poll pass for all non-terminal agents."
   [{:keys [registry adapters event-stream workflow-id]}]
   (let [agents (registry/list-agents registry)
@@ -163,61 +172,7 @@
                                      new-status)))))
               (catch Exception _e nil))))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Full lifecycle
-
-(defn start!
-  "Start the orchestrator discovery and polling loops.
-
-   Arguments:
-   - orchestrator - Orchestrator map from create-orchestrator
-
-   Returns: Updated orchestrator with running futures."
-  [orchestrator]
-  (let [{:keys [running futures discovery-interval-ms poll-interval-ms
-                registry on-agent-unreachable]} orchestrator]
-    (reset! running true)
-
-    ;; Discovery loop
-    (swap! futures conj
-           (future
-             (while @running
-               (try
-                 (run-discovery-pass orchestrator)
-                 (catch Exception _e nil))
-               (Thread/sleep discovery-interval-ms))))
-
-    ;; Poll loop
-    (swap! futures conj
-           (future
-             (while @running
-               (try
-                 (run-poll-pass orchestrator)
-                 (catch Exception _e nil))
-               (Thread/sleep poll-interval-ms))))
-
-    ;; Heartbeat watchdog
-    (let [wd (heartbeat/start-watchdog registry
-               {:check-interval-ms poll-interval-ms
-                :on-unreachable on-agent-unreachable})]
-      (swap! futures conj (:future wd))
-      (assoc orchestrator :watchdog wd))))
-
-(defn stop!
-  "Stop the orchestrator and all background loops.
-
-   Arguments:
-   - orchestrator - Running orchestrator."
-  [orchestrator]
-  (reset! (:running orchestrator) false)
-  (doseq [f @(:futures orchestrator)]
-    (future-cancel f))
-  (when-let [wd (:watchdog orchestrator)]
-    (heartbeat/stop-watchdog wd))
-  (reset! (:futures orchestrator) [])
-  orchestrator)
-
-(defn submit-decision-from-agent!
+(defn ^{:stratum 1} submit-decision-from-agent!
   "Submit a decision from an agent to the queue.
    Transitions the agent to :blocked.
 
@@ -253,7 +208,7 @@
                         :deadline (:decision/deadline decision)})))
     decision))
 
-(defn resolve-and-deliver!
+(defn ^{:stratum 1} resolve-and-deliver!
   "Resolve a decision and deliver the result back to the agent.
 
    Arguments:
@@ -290,6 +245,46 @@
                            comment)))
         {:resolved resolved
          :delivered? (get delivery :delivered? false)}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Full lifecycle
+(defn ^{:stratum 2} start!
+  "Start the orchestrator discovery and polling loops.
+
+   Arguments:
+   - orchestrator - Orchestrator map from create-orchestrator
+
+   Returns: Updated orchestrator with running futures."
+  [orchestrator]
+  (let [{:keys [running futures discovery-interval-ms poll-interval-ms
+                registry on-agent-unreachable]} orchestrator]
+    (reset! running true)
+
+    ;; Discovery loop
+    (swap! futures conj
+           (future
+             (while @running
+               (try
+                 (run-discovery-pass orchestrator)
+                 (catch Exception _e nil))
+               (Thread/sleep discovery-interval-ms))))
+
+    ;; Poll loop
+    (swap! futures conj
+           (future
+             (while @running
+               (try
+                 (run-poll-pass orchestrator)
+                 (catch Exception _e nil))
+               (Thread/sleep poll-interval-ms))))
+
+    ;; Heartbeat watchdog
+    (let [wd (heartbeat/start-watchdog registry
+               {:check-interval-ms poll-interval-ms
+                :on-unreachable on-agent-unreachable})]
+      (swap! futures conj (:future wd))
+      (assoc orchestrator :watchdog wd))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

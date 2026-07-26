@@ -15,9 +15,12 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-test-runner.interface
-  "Test runner for Babashka tasks. Pass-through to `core`.
+  "Test runner for Babashka tasks. Pass-through to this component's
+   implementation namespaces (`test-discovery`, `stable-derived`,
+   `diagnostic-plan`, `coverage-paths`, `coverage-cmd`, `coverage-exec`
+   — see `work/stratum-lint-baseline-2026-07-24.md` for why the
+   formerly-single `core` namespace was split into these).
 
    Intended runtime: Babashka. `run-all` discovers `*_test.clj` files on
    the bb classpath's `/test` roots. Under JVM Clojure the discovery
@@ -26,135 +29,140 @@
    (`path->ns-symbol`, `discover-test-namespaces`) + the standard
    cognitect test-runner. Coverage execution shells out to a JVM
    Cloverage process using the repo's deps.edn."
-  (:require [ai.miniforge.bb-test-runner.core :as core]))
+  (:require [ai.miniforge.bb-test-runner.coverage-cmd :as coverage-cmd]
+            [ai.miniforge.bb-test-runner.coverage-exec :as coverage-exec]
+            [ai.miniforge.bb-test-runner.coverage-paths :as coverage-paths]
+            [ai.miniforge.bb-test-runner.diagnostic-plan :as diagnostic-plan]
+            [ai.miniforge.bb-test-runner.stable-derived :as stable-derived]
+            [ai.miniforge.bb-test-runner.test-discovery :as test-discovery]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Public API — pass-through only
 
-(defn run-all
+;; Public API — pass-through only
+(defn ^{:stratum 0} run-all
   "Discover and run every `*_test.clj` file under each `/test` root on
    the current Babashka classpath. Exits non-zero via `System/exit` if
    any test fails or errors."
   []
-  (core/run-all))
+  (test-discovery/run-all))
 
-(defn discover-test-namespaces
+(defn ^{:stratum 0} discover-test-namespaces
   "Pure helper: given a seq of `/test` roots on the classpath, return a
    seq of `{:file :ns}` maps. Exposed so callers can inspect discovery
    without actually requiring/running anything."
   [roots]
-  (core/discover-test-namespaces roots))
+  (test-discovery/discover-test-namespaces roots))
 
-(defn path->ns-symbol
+(defn ^{:stratum 0} path->ns-symbol
   "Pure helper: convert a `*_test.clj` file path (relative to a
    classpath `/test` root) into its namespace symbol."
   [relative-path]
-  (core/path->ns-symbol relative-path))
+  (test-discovery/path->ns-symbol relative-path))
 
-(defn stable-tag-globs
+(defn ^{:stratum 0} stable-tag-globs
   "Return the stable-tag glob patterns recognized by Miniforge's
    stable-derived test scope."
   []
-  (core/stable-tag-globs))
+  (stable-derived/stable-tag-globs))
 
-(defn stable-tags-present?
+(defn ^{:stratum 0} stable-tags-present?
   "True when `tags` contains at least one recognized stable tag."
   [tags]
-  (core/stable-tags-present? tags))
+  (stable-derived/stable-tags-present? tags))
 
-(defn parse-project-selector
+(defn ^{:stratum 0} parse-project-selector
   "Parse a Polylith project selector or env value into project names."
   [selector]
-  (core/parse-project-selector selector))
+  (stable-derived/parse-project-selector selector))
 
-(defn format-project-selector
+(defn ^{:stratum 0} format-project-selector
   "Render an explicit Polylith project selector from project names."
   [projects]
-  (core/format-project-selector projects))
+  (stable-derived/format-project-selector projects))
 
-(defn changed-projects-command
+(defn ^{:stratum 0} changed-projects-command
   "Return the argv that asks Polylith for changed-or-affected projects."
   []
-  (core/changed-projects-command))
+  (stable-derived/changed-projects-command))
 
-(defn changed-projects-since-stable-command
+(defn ^{:stratum 0} changed-projects-since-stable-command
   "Return the argv that asks Polylith for changed-or-affected projects
    relative to the current stable tag anchor."
   []
-  (core/changed-projects-since-stable-command))
+  (stable-derived/changed-projects-since-stable-command))
 
-(defn parse-project-list-output
+(defn ^{:stratum 0} parse-project-list-output
   "Parse a changed-or-affected project list response into project names.
 
    Returns a vector on success, or `{:ok? false :error ...}` on invalid input."
   [output]
-  (core/parse-project-list-output output))
+  (stable-derived/parse-project-list-output output))
 
-(defn sanitize-git-worktree-env
+(defn ^{:stratum 0} sanitize-git-worktree-env
   "Remove git worktree/index variables that must not leak into child
    processes spawned from git hook contexts."
   [env]
-  (core/sanitize-git-worktree-env env))
+  (stable-derived/sanitize-git-worktree-env env))
 
-(defn heartbeat-seconds
+(defn ^{:stratum 0} heartbeat-seconds
   "Return the configured heartbeat interval in seconds for long-running
    test commands."
   [env]
-  (core/heartbeat-seconds env))
+  (stable-derived/heartbeat-seconds env))
 
-(defn parse-diagnostic-args
+(defn ^{:stratum 0} parse-diagnostic-args
   "Parse supported stable-derived diagnostic CLI arguments."
   [args]
-  (core/parse-diagnostic-args args))
+  (diagnostic-plan/parse-diagnostic-args args))
 
-(defn order-projects
+(defn ^{:stratum 0} order-projects
   "Apply diagnostic ordering controls to a project vector."
   [projects opts]
-  (core/order-projects projects opts))
+  (stable-derived/order-projects projects opts))
 
-(defn expand-project-groups
+(defn ^{:stratum 0} expand-project-groups
   "Return additive project groups that double in size until full scope."
   [projects start-size]
-  (core/expand-project-groups projects start-size))
+  (stable-derived/expand-project-groups projects start-size))
 
-(defn bisect-project-groups
+(defn ^{:stratum 0} bisect-project-groups
   "Return contiguous project groups in breadth-first binary partition order."
   [projects]
-  (core/bisect-project-groups projects))
+  (stable-derived/bisect-project-groups projects))
 
-(defn diagnostic-test-plan
+(defn ^{:stratum 0} diagnostic-test-plan
   "Return a stable-derived diagnostic plan over an explicit project set."
   [opts]
-  (core/diagnostic-test-plan opts))
+  (diagnostic-plan/diagnostic-test-plan opts))
 
-(defn classify-coverage-paths
+(defn ^{:stratum 0} classify-coverage-paths
   "Pure helper: split merged classpath paths into source and test roots
    suitable for Cloverage."
   [paths]
-  (core/classify-coverage-paths paths))
+  (coverage-paths/classify-coverage-paths paths))
 
-(defn coverage-args
+(defn ^{:stratum 0} coverage-args
   "Pure helper: build the Cloverage argv for a repo deps config."
   [deps-config opts]
-  (core/coverage-args deps-config opts))
+  (coverage-cmd/coverage-args deps-config opts))
 
-(defn load-deps-config
+(defn ^{:stratum 0} load-deps-config
   "Load the repo deps.edn config needed for coverage planning."
   [repo-root]
-  (core/load-deps-config repo-root))
+  (coverage-exec/load-deps-config repo-root))
 
-(defn coverage-install-args
+(defn ^{:stratum 0} coverage-install-args
   "Pure helper: build the argv needed to prefetch the coverage tool."
   []
-  (core/coverage-install-args))
+  (coverage-cmd/coverage-install-args))
 
-(defn install-coverage-tool
+(defn ^{:stratum 0} install-coverage-tool
   "Prefetch the Cloverage dependency into the repo's local Clojure cache.
    Accepts `{:repo-root \".\"}` and returns the process exit code."
   [opts]
-  (core/install-coverage-tool opts))
+  (coverage-exec/install-coverage-tool opts))
 
-(defn run-coverage
+(defn ^{:stratum 0} run-coverage
   "Run Cloverage for the repo rooted at `:repo-root` using the selected
    deps.edn alias. Options:
 
@@ -166,7 +174,7 @@
 
    Returns the process exit code."
   [opts]
-  (core/run-coverage opts))
+  (coverage-exec/run-coverage opts))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

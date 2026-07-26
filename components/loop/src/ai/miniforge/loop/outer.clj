@@ -15,16 +15,30 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.outer
   "Outer loop state machine implementation.
    Manages the SDLC phases: spec -> plan -> design -> implement -> verify -> review -> release -> observe
 
    NOTE: This is a P1 stub implementation. Full implementation in future iteration.
 
-   Layer 0: Phase definitions and state transitions
-   Layer 1: Loop state management
-   Layer 2: Phase execution (stub)"
+   9 real layers (over the 3-layer budget; a namespace split is
+   deferred to Wave 2, see work/stratum-lint-baseline-2026-07-24.md):
+   Layer 0: phases, initial-phase, final-phase, phase-definitions,
+     rollback-event, add-history-entry, add-artifact, phase-succeeded?,
+     log-phase — no same-file dependents among them
+   Layer 1: rollback-transitions (calls phases, rollback-event),
+     get-phase-definition (calls phase-definitions)
+   Layer 2: phase-transition-map (calls rollback-transitions), run-phase
+     (calls get-phase-definition, log-phase, phase-succeeded?)
+   Layer 3: phase-machine-config (calls phase-transition-map)
+   Layer 4: phase-machine (calls phase-machine-config)
+   Layer 5: phase-fsm-state, create-outer-loop (both call phase-machine)
+   Layer 6: current-phase, transition-phase, is-complete? (call
+     phase-fsm-state and/or phase-machine)
+   Layer 7: valid-phase-transition?, get-current-phase, advance-phase,
+     rollback-phase (call transition-phase and/or current-phase)
+   Layer 8: run-outer-loop (calls advance-phase, run-phase,
+     is-complete?)"
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.fsm.interface :as fsm]
@@ -33,20 +47,20 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Phase definitions
 
-(def phases
+;; Phase definitions
+(def ^{:stratum 0} phases
   [:spec :plan :design :implement :verify :review :release :observe])
 
-(def ^:private initial-phase
+(def ^{:stratum 0} ^:private initial-phase
   "Initial outer-loop phase."
   :spec)
 
-(def ^:private final-phase
+(def ^{:stratum 0} ^:private final-phase
   "Terminal outer-loop phase."
   :observe)
 
-(def phase-definitions
+(def ^{:stratum 0} phase-definitions
   {:spec     {:phase/id :spec
               :phase/description (loop-messages/t :outer/spec-description)
               :phase/agent nil  ; No agent, external input
@@ -95,122 +109,12 @@
               :phase/artifacts [:telemetry]
               :phase/requires [:release]}})
 
-(defn- rollback-event
+(defn- ^{:stratum 0} rollback-event
   "Build the rollback event for a target phase."
   [target-phase]
   (keyword "loop" (str "rollback-to-" (name target-phase))))
 
-(defn- rollback-transitions
-  "Build rollback transitions for a phase."
-  [phase]
-  (->> phases
-       (take-while #(not= % phase))
-       (map (fn [target-phase]
-              [(rollback-event target-phase) target-phase]))
-       (into {})))
-
-(defn- phase-transition-map
-  "Build the transition map for a phase state."
-  [phase]
-  (let [next-phase (second (drop-while #(not= % phase) phases))
-        advance-transition (when next-phase {:loop/advance next-phase})
-        rollback-transition (rollback-transitions phase)
-        transitions (merge advance-transition rollback-transition)]
-    (cond-> {}
-      (seq transitions) (assoc :on transitions)
-      (= phase final-phase) (assoc :type :final))))
-
-(def ^:private phase-machine-config
-  "Outer-loop phase machine configuration."
-  {:fsm/id :outer-loop-phases
-   :fsm/initial initial-phase
-   :fsm/context {}
-   :fsm/states (into {}
-                     (map (fn [phase]
-                            [phase (phase-transition-map phase)]))
-                     phases)})
-
-(def ^:private phase-machine
-  "Compiled outer-loop phase machine."
-  (fsm/define-machine phase-machine-config))
-
-(defn- phase-fsm-state
-  "Get the authoritative phase machine snapshot."
-  [loop-state]
-  (get loop-state :loop/fsm-state (fsm/initialize phase-machine)))
-
-(defn- current-phase
-  "Get the authoritative phase from the FSM snapshot."
-  [loop-state]
-  (fsm/current-state (phase-fsm-state loop-state)))
-
-(defn- transition-phase
-  "Apply an outer-loop phase transition.
-
-   Returns updated loop state, or nil if the transition is forbidden — the FSM
-   has no such event from the current state (advancing past the terminal
-   :observe phase, rolling back to a later phase, etc.). The FSM raises
-   :anomalies/fsm-unknown-event for a forbidden transition through its
-   anomaly-returning result API; that one anomaly is converted to the documented
-   nil here (callers — advance-phase, rollback-phase, valid-phase-transition? —
-   branch on nil). Any other failure propagates from the FSM result API."
-  [loop-state event]
-  (let [current-state (phase-fsm-state loop-state)
-        current-phase (fsm/current-state current-state)
-        transitioned (fsm/transition-result phase-machine current-state event)]
-    (when-not (anomaly/anomaly? transitioned)
-      (let [next-phase (fsm/current-state transitioned)]
-        (when (and next-phase
-                   (not= current-phase next-phase))
-          (assoc loop-state
-                 :loop/fsm-state transitioned
-                 :loop/phase next-phase
-                 :loop/updated-at (java.util.Date.)))))))
-
-(defn valid-phase-transition?
-  "Check whether a phase transition event is allowed."
-  [phase event]
-  (some? (transition-phase {:loop/fsm-state {:_state phase}
-                            :loop/phase phase}
-                           event)))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Outer loop state management
-
-(defn create-outer-loop
-  "Create a new outer loop state.
-
-   Arguments:
-   - spec - Map with :spec/id and spec content
-   - context - Optional context map with :config, :budget, etc."
-  [spec context]
-  (let [created-at (java.util.Date.)
-        fsm-state (fsm/initialize phase-machine)
-        loop-phase (fsm/current-state fsm-state)]
-    {:loop/id (random-uuid)
-     :loop/type :outer
-     :loop/fsm-state fsm-state
-     :loop/phase loop-phase
-     :loop/spec {:spec/id (or (:spec/id spec) (random-uuid))}
-     :loop/artifacts {}
-     :loop/history [{:phase loop-phase
-                     :timestamp created-at
-                     :outcome :entered}]
-     :loop/config (get context :config {})
-     :loop/created-at created-at
-     :loop/updated-at created-at}))
-
-(defn get-current-phase
-  "Get the current phase of the outer loop."
-  [loop-state]
-  (current-phase loop-state))
-
-(defn get-phase-definition
-  "Get the definition for a phase."
-  [phase]
-  (get phase-definitions phase))
-
-(defn add-history-entry
+(defn ^{:stratum 0} add-history-entry
   "Add an entry to the loop history."
   [loop-state phase outcome & {:keys [message data]}]
   (update loop-state :loop/history conj
@@ -220,23 +124,20 @@
             message (assoc :message message)
             data (assoc :data data))))
 
-(defn add-artifact
+(defn ^{:stratum 0} add-artifact
   "Add an artifact reference to the loop state."
   [loop-state artifact-type artifact-id]
   (assoc-in loop-state [:loop/artifacts artifact-type] artifact-id))
 
-;------------------------------------------------------------------------------ Layer 1.5
 ;; Result helpers
-
-(defn phase-succeeded?
+(defn ^{:stratum 0} phase-succeeded?
   "Check if a phase result indicates success (supports both :success? and :status patterns)."
   [result]
   (or (:success? result)
       (response/success? result)))
 
 ;; Logging helpers
-
-(defn log-phase
+(defn ^{:stratum 0} log-phase
   "Log a phase event at the specified level, only when logger is available."
   [logger level event-kw phase message & [extra-data]]
   (when logger
@@ -247,54 +148,36 @@
         :warn (log/warn logger :loop event-kw entry)
         :error (log/error logger :loop event-kw entry)))))
 
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} rollback-transitions
+  "Build rollback transitions for a phase."
+  [phase]
+  (->> phases
+       (take-while #(not= % phase))
+       (map (fn [target-phase]
+              [(rollback-event target-phase) target-phase]))
+       (into {})))
+
+(defn ^{:stratum 1} get-phase-definition
+  "Get the definition for a phase."
+  [phase]
+  (get phase-definitions phase))
+
 ;------------------------------------------------------------------------------ Layer 2
-;; Phase execution (stubs)
 
-(defn advance-phase
-  "Advance to the next phase.
-   Stub implementation - just transitions without running inner loops.
+(defn- ^{:stratum 2} phase-transition-map
+  "Build the transition map for a phase state."
+  [phase]
+  (let [next-phase (second (drop-while #(not= % phase) phases))
+        advance-transition (when next-phase {:loop/advance next-phase})
+        rollback-transition (rollback-transitions phase)
+        transitions (merge advance-transition rollback-transition)]
+    (cond-> {}
+      (seq transitions) (assoc :on transitions)
+      (= phase final-phase) (assoc :type :final))))
 
-   Returns updated loop state or nil if cannot advance."
-  [loop-state context]
-  (let [logger (:logger context)
-        current (current-phase loop-state)
-        advanced-state (transition-phase loop-state :loop/advance)
-        next-phase (some-> advanced-state current-phase)]
-    (log-phase logger :info :outer/phase-completed current (loop-messages/t :outer/phase-completed))
-    (if advanced-state
-      (do
-        (log-phase logger :info :outer/phase-entered next-phase (loop-messages/t :outer/phase-entered))
-        (-> advanced-state
-            (add-history-entry current :completed)
-            (add-history-entry next-phase :entered)))
-      ;; Cannot advance or at end
-      (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/cannot-advance-phase)
-                 {:next next-phase}))))
-
-(defn rollback-phase
-  "Rollback to a previous phase.
-   Stub implementation - just transitions without cleanup.
-
-   Returns updated loop state or nil if invalid rollback."
-  [loop-state target-phase context]
-  (let [logger (:logger context)
-        current (current-phase loop-state)
-        rollback-state (transition-phase loop-state (rollback-event target-phase))]
-    (if rollback-state
-      (do
-        (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/rolling-back)
-                   {:to target-phase})
-        (-> rollback-state
-            (add-history-entry current :rolled-back
-                               :data {:target target-phase})
-            (add-history-entry target-phase :entered
-                               :message (loop-messages/t :outer/entered-via-rollback))))
-      (do
-        (log-phase logger :error :outer/phase-failed current (loop-messages/t :outer/invalid-rollback-target)
-                   {:target target-phase})
-        nil))))
-
-(defn run-phase
+(defn ^{:stratum 2} run-phase
   "Run the current phase using the appropriate agent.
 
    Delegates to the phase interceptor registry for real execution.
@@ -335,12 +218,152 @@
                                           (:phase/artifacts definition))
                          :phase phase}))))
 
-(defn is-complete?
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} ^:private phase-machine-config
+  "Outer-loop phase machine configuration."
+  {:fsm/id :outer-loop-phases
+   :fsm/initial initial-phase
+   :fsm/context {}
+   :fsm/states (into {}
+                     (map (fn [phase]
+                            [phase (phase-transition-map phase)]))
+                     phases)})
+
+;------------------------------------------------------------------------------ Layer 4
+
+(def ^{:stratum 4} ^:private phase-machine
+  "Compiled outer-loop phase machine."
+  (fsm/define-machine phase-machine-config))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} phase-fsm-state
+  "Get the authoritative phase machine snapshot."
+  [loop-state]
+  (get loop-state :loop/fsm-state (fsm/initialize phase-machine)))
+
+;; Outer loop state management
+(defn ^{:stratum 5} create-outer-loop
+  "Create a new outer loop state.
+
+   Arguments:
+   - spec - Map with :spec/id and spec content
+   - context - Optional context map with :config, :budget, etc."
+  [spec context]
+  (let [created-at (java.util.Date.)
+        fsm-state (fsm/initialize phase-machine)
+        loop-phase (fsm/current-state fsm-state)]
+    {:loop/id (random-uuid)
+     :loop/type :outer
+     :loop/fsm-state fsm-state
+     :loop/phase loop-phase
+     :loop/spec {:spec/id (or (:spec/id spec) (random-uuid))}
+     :loop/artifacts {}
+     :loop/history [{:phase loop-phase
+                     :timestamp created-at
+                     :outcome :entered}]
+     :loop/config (get context :config {})
+     :loop/created-at created-at
+     :loop/updated-at created-at}))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} current-phase
+  "Get the authoritative phase from the FSM snapshot."
+  [loop-state]
+  (fsm/current-state (phase-fsm-state loop-state)))
+
+(defn- ^{:stratum 6} transition-phase
+  "Apply an outer-loop phase transition.
+
+   Returns updated loop state, or nil if the transition is forbidden — the FSM
+   has no such event from the current state (advancing past the terminal
+   :observe phase, rolling back to a later phase, etc.). The FSM raises
+   :anomalies/fsm-unknown-event for a forbidden transition through its
+   anomaly-returning result API; that one anomaly is converted to the documented
+   nil here (callers — advance-phase, rollback-phase, valid-phase-transition? —
+   branch on nil). Any other failure propagates from the FSM result API."
+  [loop-state event]
+  (let [current-state (phase-fsm-state loop-state)
+        current-phase (fsm/current-state current-state)
+        transitioned (fsm/transition-result phase-machine current-state event)]
+    (when-not (anomaly/anomaly? transitioned)
+      (let [next-phase (fsm/current-state transitioned)]
+        (when (and next-phase
+                   (not= current-phase next-phase))
+          (assoc loop-state
+                 :loop/fsm-state transitioned
+                 :loop/phase next-phase
+                 :loop/updated-at (java.util.Date.)))))))
+
+(defn ^{:stratum 6} is-complete?
   "Check if the outer loop has completed all phases."
   [loop-state]
   (fsm/final? phase-machine (phase-fsm-state loop-state)))
 
-(defn run-outer-loop
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} valid-phase-transition?
+  "Check whether a phase transition event is allowed."
+  [phase event]
+  (some? (transition-phase {:loop/fsm-state {:_state phase}
+                            :loop/phase phase}
+                           event)))
+
+(defn ^{:stratum 7} get-current-phase
+  "Get the current phase of the outer loop."
+  [loop-state]
+  (current-phase loop-state))
+
+;; Phase execution (stubs)
+(defn ^{:stratum 7} advance-phase
+  "Advance to the next phase.
+   Stub implementation - just transitions without running inner loops.
+
+   Returns updated loop state or nil if cannot advance."
+  [loop-state context]
+  (let [logger (:logger context)
+        current (current-phase loop-state)
+        advanced-state (transition-phase loop-state :loop/advance)
+        next-phase (some-> advanced-state current-phase)]
+    (log-phase logger :info :outer/phase-completed current (loop-messages/t :outer/phase-completed))
+    (if advanced-state
+      (do
+        (log-phase logger :info :outer/phase-entered next-phase (loop-messages/t :outer/phase-entered))
+        (-> advanced-state
+            (add-history-entry current :completed)
+            (add-history-entry next-phase :entered)))
+      ;; Cannot advance or at end
+      (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/cannot-advance-phase)
+                 {:next next-phase}))))
+
+(defn ^{:stratum 7} rollback-phase
+  "Rollback to a previous phase.
+   Stub implementation - just transitions without cleanup.
+
+   Returns updated loop state or nil if invalid rollback."
+  [loop-state target-phase context]
+  (let [logger (:logger context)
+        current (current-phase loop-state)
+        rollback-state (transition-phase loop-state (rollback-event target-phase))]
+    (if rollback-state
+      (do
+        (log-phase logger :warn :outer/phase-failed current (loop-messages/t :outer/rolling-back)
+                   {:to target-phase})
+        (-> rollback-state
+            (add-history-entry current :rolled-back
+                               :data {:target target-phase})
+            (add-history-entry target-phase :entered
+                               :message (loop-messages/t :outer/entered-via-rollback))))
+      (do
+        (log-phase logger :error :outer/phase-failed current (loop-messages/t :outer/invalid-rollback-target)
+                   {:target target-phase})
+        nil))))
+
+;------------------------------------------------------------------------------ Layer 8
+
+(defn ^{:stratum 8} run-outer-loop
   "Run the outer loop through all phases.
    Stub implementation - advances through phases without real execution.
 

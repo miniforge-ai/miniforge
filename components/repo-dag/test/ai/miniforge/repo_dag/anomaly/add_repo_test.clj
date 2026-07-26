@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.anomaly.add-repo-test
   "Coverage for `dag/add-repo-anomaly` and its stable alias
    `dag/add-repo`. Three anomaly classes:
@@ -28,22 +27,23 @@
             [ai.miniforge.repo-dag.interface :as dag]
             [ai.miniforge.repo-dag.schema :as schema]))
 
-(def ^:dynamic *manager* nil)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn manager-fixture [f]
+(def ^{:stratum 0} ^:dynamic *manager* nil)
+
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
-
-(def repo-config
+(def ^{:stratum 0} repo-config
   {:repo/url "https://github.com/acme/tf"
    :repo/name "tf"
    :repo/type :terraform-module})
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest add-repo-anomaly-returns-updated-dag
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 1} add-repo-anomaly-returns-updated-dag
   (testing "successful add returns the updated DAG, not an anomaly"
     (let [d (dag/create-dag *manager* "test-dag")
           result (dag/add-repo-anomaly *manager* (:dag/id d) repo-config)]
@@ -52,8 +52,7 @@
       (is (= "tf" (-> result :dag/repos first :repo/name))))))
 
 ;------------------------------------------------------------------------------ Failure path: DAG not found
-
-(deftest add-repo-anomaly-not-found-when-dag-missing
+(deftest ^{:stratum 1} add-repo-anomaly-not-found-when-dag-missing
   (testing "missing DAG yields :not-found anomaly"
     (let [missing-id (random-uuid)
           result (dag/add-repo-anomaly *manager* missing-id repo-config)]
@@ -62,8 +61,7 @@
       (is (= missing-id (get-in result [:anomaly/data :dag-id]))))))
 
 ;------------------------------------------------------------------------------ Failure path: schema-invalid repo-config
-
-(deftest add-repo-anomaly-invalid-input-on-missing-repo-type
+(deftest ^{:stratum 1} add-repo-anomaly-invalid-input-on-missing-repo-type
   (testing "repo-config without :repo/type yields :invalid-input anomaly —
             schema rejection short-circuits via make-repo-node-anomaly
             before the node is appended."
@@ -77,8 +75,7 @@
       (is (= schema/RepoNode (get-in result [:anomaly/data :schema]))))))
 
 ;------------------------------------------------------------------------------ Failure path: duplicate
-
-(deftest add-repo-anomaly-conflict-on-duplicate
+(deftest ^{:stratum 1} add-repo-anomaly-conflict-on-duplicate
   (testing "duplicate repo name yields :conflict anomaly"
     (let [d (dag/create-dag *manager* "test-dag")
           _ (dag/add-repo-anomaly *manager* (:dag/id d) repo-config)
@@ -88,14 +85,13 @@
       (is (= "tf" (get-in result [:anomaly/data :repo-name]))))))
 
 ;------------------------------------------------------------------------------ Alias compatibility
-
-(deftest add-repo-returns-anomaly-on-missing-dag
+(deftest ^{:stratum 1} add-repo-returns-anomaly-on-missing-dag
   (testing "stable alias returns anomaly data on missing DAG"
     (let [result (dag/add-repo *manager* (random-uuid) repo-config)]
       (is (anomaly/anomaly? result))
       (is (= :not-found (:anomaly/type result))))))
 
-(deftest add-repo-returns-anomaly-on-duplicate
+(deftest ^{:stratum 1} add-repo-returns-anomaly-on-duplicate
   (testing "stable alias returns anomaly data on duplicate repo"
     (let [d (dag/create-dag *manager* "test-dag")]
       (dag/add-repo *manager* (:dag/id d) repo-config)
@@ -103,3 +99,5 @@
         (is (anomaly/anomaly? result))
         (is (= :conflict (:anomaly/type result)))
         (is (= "tf" (get-in result [:anomaly/data :repo-name])))))))
+
+(use-fixtures :each manager-fixture)

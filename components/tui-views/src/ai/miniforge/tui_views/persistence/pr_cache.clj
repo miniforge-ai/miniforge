@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence.pr-cache
   "Disk-backed cache for PR analysis results (risk triage, policy evaluation).
 
@@ -28,16 +27,18 @@
 
    Layer 0: Fingerprint + cache entry helpers
    Layer 1: Read/write cache file
-   Layer 2: Apply cache to model, persist from model"
+   Layer 2: Apply cache to model
+   Layer 3: Persist analysis + policy/risk results to the cache file
+   (over the 3-layer budget; Wave 2 namespace-split candidate)"
   (:require
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fingerprint + cache entry helpers
 
-(defn pr-fingerprint
+;; Fingerprint + cache entry helpers
+(defn ^{:stratum 0} pr-fingerprint
   "Compute a fingerprint for a PR that determines cache validity.
    When any of these fields change, cached analysis is stale."
   [pr]
@@ -47,12 +48,19 @@
    :ci-status  (get pr :pr/ci-status)
    :head-sha   (get pr :pr/head-sha)})
 
-(defn pr-cache-key
+(defn ^{:stratum 0} pr-cache-key
   "Canonical cache key for a PR: [repo-string, pr-number]."
   [pr]
   [(:pr/repo pr) (:pr/number pr)])
 
-(defn cache-entry
+;; Read/write cache file
+(def ^{:stratum 0} ^:private cache-dir-path
+  "Default cache directory."
+  (delay (io/file (config/miniforge-home) "cache")))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cache-entry
   "Build a cache entry for a PR with its current analysis results."
   [pr & [{:keys [agent-risk]}]]
   (let [fp (pr-fingerprint pr)]
@@ -63,24 +71,19 @@
       agent-risk
       (assoc :agent-risk agent-risk))))
 
-(defn entry-valid?
+(defn ^{:stratum 1} entry-valid?
   "True when a cache entry's fingerprint matches the current PR."
   [entry pr]
   (= (:fingerprint entry) (pr-fingerprint pr)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Read/write cache file
-
-(def ^:private cache-dir-path
-  "Default cache directory."
-  (delay (io/file (config/miniforge-home) "cache")))
-
-(defn cache-file
+(defn ^{:stratum 1} cache-file
   "Returns the cache file path."
   [& [{:keys [dir]}]]
   (io/file (or dir @cache-dir-path) "pr-analysis.edn"))
 
-(defn read-cache
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} read-cache
   "Read the PR analysis cache from disk. Returns map of {[repo num] -> entry}."
   [& [opts]]
   (let [f (cache-file opts)]
@@ -91,7 +94,7 @@
         (catch Exception _ {}))
       {})))
 
-(defn write-cache!
+(defn ^{:stratum 2} write-cache!
   "Write the PR analysis cache to disk. Runs in a future to avoid blocking."
   [entries & [opts]]
   (future
@@ -102,10 +105,8 @@
       (catch Exception _ nil)))
   nil)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Apply cache to model, persist from model
-
-(defn apply-cached-policy
+(defn ^{:stratum 2} apply-cached-policy
   "Apply cached policy results to PRs that haven't been evaluated yet.
    Only applies when the cache entry's fingerprint matches the current PR."
   [prs cache]
@@ -119,7 +120,7 @@
                 pr))))
         prs))
 
-(defn apply-cached-agent-risk
+(defn ^{:stratum 2} apply-cached-agent-risk
   "Extract cached agent-risk entries into a {[repo num] -> risk-map} map.
    Only includes entries whose fingerprint matches a current PR."
   [prs cache]
@@ -132,7 +133,9 @@
           {}
           prs))
 
-(defn persist-analysis!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} persist-analysis!
   "Persist current PR analysis results to the cache file.
    Merges with existing cache to preserve entries for PRs not currently loaded."
   [prs agent-risk & [opts]]
@@ -147,7 +150,7 @@
                         prs)]
     (write-cache! updated opts)))
 
-(defn persist-policy-result!
+(defn ^{:stratum 3} persist-policy-result!
   "Persist a single PR's policy evaluation result to the cache."
   [pr-id policy-result prs & [opts]]
   (let [[repo number] pr-id
@@ -164,7 +167,7 @@
                              :policy policy-result))]
         (write-cache! (assoc existing k entry) opts)))))
 
-(defn persist-risk-triage!
+(defn ^{:stratum 3} persist-risk-triage!
   "Persist fleet risk triage results to the cache."
   [assessments prs & [opts]]
   (let [existing (read-cache opts)

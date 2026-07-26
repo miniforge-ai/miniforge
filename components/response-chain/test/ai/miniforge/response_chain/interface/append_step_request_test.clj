@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.response-chain.interface.append-step-request-test
   "5-arity append-step that carries the original request as :request
    metadata on the step. Used by downstream consumers (e.g. an
@@ -27,7 +26,9 @@
    [clojure.test :refer [deftest is testing]]
    [malli.core :as m]))
 
-(deftest five-arity-success-attaches-request-to-step
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} five-arity-success-attaches-request-to-step
   (testing "5-arity success path records :request on the step"
     (let [request {:lookup [:person/id "chris"]}
           c0     (chain/create-chain :flow)
@@ -41,7 +42,7 @@
       (is (= request (:request step)))
       (is (= {:id "chris" :name "Christopher Lester"} (:response step))))))
 
-(deftest five-arity-anomaly-attaches-request-to-step
+(deftest ^{:stratum 0} five-arity-anomaly-attaches-request-to-step
   (testing "5-arity anomaly path also records :request on the step"
     (let [request  {:lookup []}
           response {:error :lookup-empty}
@@ -58,21 +59,21 @@
       (is (= response (:response step)))
       (is (= an (:anomaly step))))))
 
-(deftest three-arity-omits-request-key
+(deftest ^{:stratum 0} three-arity-omits-request-key
   (testing "3-arity success path produces a step WITHOUT :request key"
     (let [c0   (chain/create-chain :flow)
           c1   (chain/append-step c0 :op {:result 1})
           step (last (chain/steps c1))]
       (is (not (contains? step :request))))))
 
-(deftest four-arity-omits-request-key
+(deftest ^{:stratum 0} four-arity-omits-request-key
   (testing "4-arity (existing API) produces a step WITHOUT :request key"
     (let [c0   (chain/create-chain :flow)
           c1   (chain/append-step c0 :op nil {:result 1})
           step (last (chain/steps c1))]
       (is (not (contains? step :request))))))
 
-(deftest five-arity-with-nil-request-omits-key
+(deftest ^{:stratum 0} five-arity-with-nil-request-omits-key
   (testing "5-arity with explicit nil request omits :request key"
     (let [c0   (chain/create-chain :flow)
           c1   (chain/append-step c0 :op nil {:result 1} nil)
@@ -80,7 +81,7 @@
       (is (not (contains? step :request)))
       (is (chain/succeeded? c1)))))
 
-(deftest schema-validates-step-with-request
+(deftest ^{:stratum 0} schema-validates-step-with-request
   (testing "Step schema accepts steps that carry :request"
     (let [c0   (chain/create-chain :flow)
           c1   (chain/append-step c0 :op nil "ok" {:original "request"})
@@ -88,7 +89,7 @@
       (is (m/validate chain/Step step))
       (is (= {:original "request"} (:request step))))))
 
-(deftest schema-validates-step-without-request
+(deftest ^{:stratum 0} schema-validates-step-without-request
   (testing "Step schema still accepts steps that omit :request (back-compat)"
     (let [c0   (chain/create-chain :flow)
           c1   (chain/append-step c0 :op {:result 1})
@@ -96,7 +97,7 @@
       (is (m/validate chain/Step step))
       (is (not (contains? step :request))))))
 
-(deftest schema-validates-chain-with-mixed-steps
+(deftest ^{:stratum 0} schema-validates-chain-with-mixed-steps
   (testing "Chain schema accepts a mix of steps with and without :request"
     (let [c (-> (chain/create-chain :flow)
                 (chain/append-step :step-1 {:result 1})
@@ -108,7 +109,7 @@
       (is (contains?     (nth (chain/steps c) 1) :request))
       (is (not (contains? (nth (chain/steps c) 2) :request))))))
 
-(deftest non-keyword-operation-still-records-request
+(deftest ^{:stratum 0} non-keyword-operation-still-records-request
   (testing "non-keyword operation in 5-arity still surfaces :invalid-input AND records the request"
     (let [request {:lookup [:person/id "chris"]}
           c0      (chain/create-chain :flow)
@@ -119,7 +120,7 @@
       (is (= :invalid-input (-> step :anomaly :anomaly/type)))
       (is (= request (:request step))))))
 
-(deftest request-can-be-arbitrary-edn
+(deftest ^{:stratum 0} request-can-be-arbitrary-edn
   (testing ":request accepts any EDN-shape value"
     (doseq [req [{:map "value"}
                  [:vector :of :keywords]

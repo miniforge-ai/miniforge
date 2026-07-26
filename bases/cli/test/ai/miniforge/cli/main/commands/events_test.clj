@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.events-test
   "Unit / integration tests for the `events show` CLI command.
 
@@ -36,11 +35,12 @@
    [ai.miniforge.cli.main.commands.shared :as shared]
    [ai.miniforge.event-stream.interface :as es]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures & factories
+(def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
-(def ^:dynamic *tmp-dir* nil)
-
-(defn tmp-dir-fixture [f]
+(defn ^{:stratum 0} tmp-dir-fixture [f]
   (let [dir (str (fs/create-temp-dir {:prefix "events-test-"}))]
     (binding [*tmp-dir* dir]
       (try
@@ -48,11 +48,8 @@
         (finally
           (fs/delete-tree dir))))))
 
-(use-fixtures :each tmp-dir-fixture)
-
 ;; Synthetic event vectors used across tests.
-
-(defn- make-started-event
+(defn- ^{:stratum 0} make-started-event
   "Minimal `:workflow/started` event."
   [& {:as overrides}]
   (merge {:event/type      :workflow/started
@@ -61,7 +58,7 @@
           :workflow/phase  :plan}
          overrides))
 
-(defn- make-completed-event
+(defn- ^{:stratum 0} make-completed-event
   "Minimal `:workflow/completed` event."
   [& {:as overrides}]
   (merge {:event/type      :workflow/completed
@@ -70,16 +67,95 @@
           :workflow/phase  :release}
          overrides))
 
-(def ^:private synthetic-events
+(def ^{:stratum 0} ^:private nonexistent-base-dir
+  "/nonexistent/events/dir/that/does/not/exist")
+
+(deftest ^{:stratum 0} events-show-cmd-missing-workflow-id-exits-1
+  (testing "exits 1 and prints usage when workflow-id is absent"
+    (let [exit-code (atom nil)]
+      (with-redefs [shared/exit! (fn [code] (reset! exit-code code))]
+        (with-out-str
+          (sut/events-show-cmd {:workflow-id nil})))
+      (is (= 1 @exit-code)))))
+
+(deftest ^{:stratum 0} events-show-cmd-blank-workflow-id-exits-1
+  (testing "exits 1 when workflow-id is an empty string"
+    (let [exit-code (atom nil)]
+      (with-redefs [shared/exit! (fn [code] (reset! exit-code code))]
+        (with-out-str
+          (sut/events-show-cmd {:workflow-id ""})))
+      (is (= 1 @exit-code)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private synthetic-events
   [(make-started-event)
    (make-completed-event)])
 
-(def ^:private nonexistent-base-dir
-  "/nonexistent/events/dir/that/does/not/exist")
+(deftest ^{:stratum 1} events-show-errors-when-workflow-id-blank
+  (testing "pure command returns :error when workflow-id is blank"
+    (let [result (sut/events-show *tmp-dir* " " {})]
+      (is (= :error (:status result)))
+      (is (= 1 (:exit-code result))))))
 
-;------------------------------------------------------------------------------ Layer 0: events-show pure fn
+(deftest ^{:stratum 1} events-show-errors-when-base-dir-missing
+  (testing "returns :error when the events base directory does not exist"
+    (let [result (sut/events-show nonexistent-base-dir "any-wf-id" {})]
+      (is (= :error (:status result)))
+      (is (pos-int? (:exit-code result)))
+      (is (str/includes? (:message result) "not found")))))
 
-(deftest events-show-returns-ok-for-valid-events
+(deftest ^{:stratum 1} events-show-errors-when-workflow-not-found
+  (testing "returns :error when reader returns nil (workflow-id unknown)"
+    (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] nil)]
+                   (sut/events-show *tmp-dir* "ghost-wf-id" {}))]
+      (is (= :error (:status result)))
+      (is (pos-int? (:exit-code result)))
+      (is (str/includes? (:message result) "ghost-wf-id")))))
+
+(deftest ^{:stratum 1} events-show-empty-rendered-timeline-has-fallback
+  (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] [])
+                             es/render-timeline (fn [_ _] "")]
+                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+    (is (= :ok (:status result)))
+    (is (str/includes? (:output result) "no renderable events"))))
+
+(deftest ^{:stratum 1} events-show-reader-exception-is-error
+  (let [result (with-redefs [es/read-workflow-events-by-id
+                             (fn [_ _] (throw (ex-info "broken reader" {})))]
+                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
+    (is (= :error (:status result)))
+    (is (= 1 (:exit-code result)))
+    (is (str/includes? (:message result) "broken reader"))))
+
+(deftest ^{:stratum 1} events-show-cmd-workflow-not-found-exits-1
+  (testing "exits 1 when reader returns nil (workflow-id not in any layout)"
+    (let [exit-code (atom nil)]
+      (with-redefs [app-config/events-dir
+                    (fn [] *tmp-dir*)
+                    es/read-workflow-events-by-id
+                    (fn [_ _] nil)
+                    shared/exit!
+                    (fn [code] (reset! exit-code code))]
+        (with-out-str
+          (sut/events-show-cmd {:workflow-id "ghost-wf-id"})))
+      (is (= 1 @exit-code)))))
+
+(deftest ^{:stratum 1} events-show-cmd-events-dir-missing-exits-1
+  (testing "exits 1 when the events directory itself does not exist"
+    (let [exit-code (atom nil)]
+      (with-redefs [app-config/events-dir
+                    (fn [] nonexistent-base-dir)
+                    shared/exit!
+                    (fn [code] (reset! exit-code code))]
+        (with-out-str
+          (sut/events-show-cmd {:workflow-id "any-wf-id"})))
+      (is (= 1 @exit-code)))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; events-show pure fn
+(deftest ^{:stratum 2} events-show-returns-ok-for-valid-events
   (testing "returns :ok status with non-blank output for a normal event sequence"
     (let [result (with-redefs [es/read-workflow-events-by-id
                                (fn [_ _] synthetic-events)
@@ -89,28 +165,7 @@
       (is (= :ok (:status result)))
       (is (= "rendered timeline" (:output result))))))
 
-(deftest events-show-errors-when-workflow-id-blank
-  (testing "pure command returns :error when workflow-id is blank"
-    (let [result (sut/events-show *tmp-dir* " " {})]
-      (is (= :error (:status result)))
-      (is (= 1 (:exit-code result))))))
-
-(deftest events-show-errors-when-base-dir-missing
-  (testing "returns :error when the events base directory does not exist"
-    (let [result (sut/events-show nonexistent-base-dir "any-wf-id" {})]
-      (is (= :error (:status result)))
-      (is (pos-int? (:exit-code result)))
-      (is (str/includes? (:message result) "not found")))))
-
-(deftest events-show-errors-when-workflow-not-found
-  (testing "returns :error when reader returns nil (workflow-id unknown)"
-    (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] nil)]
-                   (sut/events-show *tmp-dir* "ghost-wf-id" {}))]
-      (is (= :error (:status result)))
-      (is (pos-int? (:exit-code result)))
-      (is (str/includes? (:message result) "ghost-wf-id")))))
-
-(deftest events-show-raw-mode-dumps-edn
+(deftest ^{:stratum 2} events-show-raw-mode-dumps-edn
   (testing ":raw true produces EDN output containing the event type keyword"
     (let [result (with-redefs [es/read-workflow-events-by-id
                                (fn [_ _] synthetic-events)]
@@ -119,7 +174,7 @@
       (is (str/includes? (:output result) "workflow/started"))
       (is (str/includes? (:output result) "workflow/completed")))))
 
-(deftest events-show-custom-gap-threshold
+(deftest ^{:stratum 2} events-show-custom-gap-threshold
   (testing "custom gap-threshold-secs is accepted without error"
     (let [result (with-redefs [es/read-workflow-events-by-id
                                (fn [_ _] synthetic-events)
@@ -130,24 +185,8 @@
       (is (= :ok (:status result)))
       (is (= "gap=5000" (:output result))))))
 
-(deftest events-show-empty-rendered-timeline-has-fallback
-  (let [result (with-redefs [es/read-workflow-events-by-id (fn [_ _] [])
-                             es/render-timeline (fn [_ _] "")]
-                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
-    (is (= :ok (:status result)))
-    (is (str/includes? (:output result) "no renderable events"))))
-
-(deftest events-show-reader-exception-is-error
-  (let [result (with-redefs [es/read-workflow-events-by-id
-                             (fn [_ _] (throw (ex-info "broken reader" {})))]
-                 (sut/events-show *tmp-dir* "test-wf-abc123" {}))]
-    (is (= :error (:status result)))
-    (is (= 1 (:exit-code result)))
-    (is (str/includes? (:message result) "broken reader"))))
-
-;------------------------------------------------------------------------------ Layer 1: events-show-cmd CLI handler
-
-(deftest events-show-cmd-happy-path-prints-timeline
+;; events-show-cmd CLI handler
+(deftest ^{:stratum 2} events-show-cmd-happy-path-prints-timeline
   (testing "prints rendered timeline to stdout when events exist"
     (let [exit-code (atom nil)
           output    (with-redefs [app-config/events-dir
@@ -163,47 +202,7 @@
       (is (nil? @exit-code) "exit! must not be called on success")
       (is (not (str/blank? output))))))
 
-(deftest events-show-cmd-missing-workflow-id-exits-1
-  (testing "exits 1 and prints usage when workflow-id is absent"
-    (let [exit-code (atom nil)]
-      (with-redefs [shared/exit! (fn [code] (reset! exit-code code))]
-        (with-out-str
-          (sut/events-show-cmd {:workflow-id nil})))
-      (is (= 1 @exit-code)))))
-
-(deftest events-show-cmd-blank-workflow-id-exits-1
-  (testing "exits 1 when workflow-id is an empty string"
-    (let [exit-code (atom nil)]
-      (with-redefs [shared/exit! (fn [code] (reset! exit-code code))]
-        (with-out-str
-          (sut/events-show-cmd {:workflow-id ""})))
-      (is (= 1 @exit-code)))))
-
-(deftest events-show-cmd-workflow-not-found-exits-1
-  (testing "exits 1 when reader returns nil (workflow-id not in any layout)"
-    (let [exit-code (atom nil)]
-      (with-redefs [app-config/events-dir
-                    (fn [] *tmp-dir*)
-                    es/read-workflow-events-by-id
-                    (fn [_ _] nil)
-                    shared/exit!
-                    (fn [code] (reset! exit-code code))]
-        (with-out-str
-          (sut/events-show-cmd {:workflow-id "ghost-wf-id"})))
-      (is (= 1 @exit-code)))))
-
-(deftest events-show-cmd-events-dir-missing-exits-1
-  (testing "exits 1 when the events directory itself does not exist"
-    (let [exit-code (atom nil)]
-      (with-redefs [app-config/events-dir
-                    (fn [] nonexistent-base-dir)
-                    shared/exit!
-                    (fn [code] (reset! exit-code code))]
-        (with-out-str
-          (sut/events-show-cmd {:workflow-id "any-wf-id"})))
-      (is (= 1 @exit-code)))))
-
-(deftest events-show-cmd-raw-flag-dumps-edn
+(deftest ^{:stratum 2} events-show-cmd-raw-flag-dumps-edn
   (testing "--raw dumps parsed events as EDN including keyword names"
     (let [exit-code (atom nil)
           output    (with-redefs [app-config/events-dir
@@ -218,6 +217,8 @@
       (is (nil? @exit-code) "exit! must not be called on success")
       (is (str/includes? output "workflow/started"))
       (is (str/includes? output "workflow/completed")))))
+
+(use-fixtures :each tmp-dir-fixture)
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

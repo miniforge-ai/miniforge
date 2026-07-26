@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow-resume.core-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -28,9 +27,9 @@
    [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure extractors
 
-(deftest missing-resume-config-resource-carries-invalid-config-marker
+;; Pure extractors
+(deftest ^{:stratum 0} missing-resume-config-resource-carries-invalid-config-marker
   (testing "Missing classpath resume config is an invalid configuration fault"
     (with-redefs [io/resource (constantly nil)]
       (let [result (@#'core/read-resume-config)]
@@ -41,7 +40,7 @@
         (is (= :invalid-config
                (get-in result [:anomaly/data :config/error])))))))
 
-(deftest reconstruct-context-propagates-resume-config-anomaly-test
+(deftest ^{:stratum 0} reconstruct-context-propagates-resume-config-anomaly-test
   (testing "configuration faults short-circuit before disk reads"
     (let [config-anomaly (anomaly/anomaly
                           :not-found
@@ -57,7 +56,7 @@
         (is (= config-anomaly
                (core/reconstruct-context "/tmp/unused-events" (str (random-uuid)))))))))
 
-(deftest reconstructed-status-predicates-test
+(deftest ^{:stratum 0} reconstructed-status-predicates-test
   (testing "predicates read the reconstructed status flags"
     (let [completed {:completed? true}
           failed {:failed? true}
@@ -70,7 +69,7 @@
       (is (true? (core/paused? paused)))
       (is (false? (core/paused? running))))))
 
-(deftest extract-completed-phases-test
+(deftest ^{:stratum 0} extract-completed-phases-test
   (testing ":success and :skipped count as completed; :failure does not"
     (let [events [{:event/type :workflow/started}
                   {:event/type :workflow/phase-completed
@@ -84,7 +83,7 @@
       (is (= [:explore :plan :release] (core/extract-completed-phases events))
           "a :skipped phase is completed (not re-run); a :failure is omitted"))))
 
-(deftest extract-phase-results-test
+(deftest ^{:stratum 0} extract-phase-results-test
   (testing "builds {phase → {:outcome :duration-ms :timestamp}}"
     (let [events [{:event/type :workflow/phase-completed
                    :workflow/phase :plan
@@ -114,14 +113,14 @@
           result (core/extract-phase-results events)]
       (is (not (contains? (get-in result [:plan :result] {}) :output))))))
 
-(deftest extract-completed-dag-tasks-test
+(deftest ^{:stratum 0} extract-completed-dag-tasks-test
   (testing "collects :dag/task-id values from :dag/task-completed events"
     (let [events [{:event/type :dag/task-completed :dag/task-id "t1"}
                   {:event/type :dag/task-completed :dag/task-id "t2"}
                   {:event/type :dag/task-failed    :dag/task-id "t3"}]]
       (is (= #{"t1" "t2"} (core/extract-completed-dag-tasks events))))))
 
-(deftest extract-completed-dag-artifacts-test
+(deftest ^{:stratum 0} extract-completed-dag-artifacts-test
   (testing "collects artifacts from :dag/task-completed events"
     (let [events [{:event/type :dag/task-completed
                    :dag/result {:data {:artifacts [{:artifact/id "a"}]}}}
@@ -133,7 +132,7 @@
       (is (= [{:artifact/id "a"} {:artifact/id "b"} {:artifact/id "c"}]
              (core/extract-completed-dag-artifacts events))))))
 
-(deftest extract-workspace-checkpoints-test
+(deftest ^{:stratum 0} extract-workspace-checkpoints-test
   (testing "collects persisted workspace provenance for failed-task resume"
     (let [events [{:event/type :workspace/persisted
                    :workspace/branch "task-a"
@@ -154,7 +153,7 @@
       (is (= "task-a" (:branch (first checkpoints))))
       (is (= "/tmp/task-b.bundle" (:bundle-path (second checkpoints)))))))
 
-(deftest extract-dag-pause-info-last-pause-wins-test
+(deftest ^{:stratum 0} extract-dag-pause-info-last-pause-wins-test
   (testing "multiple pause events — latest one wins"
     (let [events [{:event/type :dag/paused
                    :dag/completed-task-ids ["a"]
@@ -170,7 +169,7 @@
     (is (nil? (core/extract-dag-pause-info
                 [{:event/type :workflow/started}])))))
 
-(deftest find-workflow-spec-test
+(deftest ^{:stratum 0} find-workflow-spec-test
   (testing "returns :workflow/spec from the first :workflow/started event"
     (let [events [{:event/type :workflow/started
                    :workflow/spec {:name "planner-convergence" :version "1.0"}}
@@ -181,10 +180,8 @@
   (testing "nil when no :workflow/started event"
     (is (nil? (core/find-workflow-spec [{:event/type :workflow/phase-started}])))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; trim-pipeline
-
-(deftest trim-pipeline-test
+(deftest ^{:stratum 0} trim-pipeline-test
   (testing "already-completed phases are removed; remaining order preserved"
     (let [workflow {:workflow/pipeline [{:phase :explore}
                                         {:phase :plan}
@@ -218,10 +215,8 @@
               {:phase :release}]
              (:workflow/pipeline trimmed))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; resolve-workflow-identity
-
-(deftest resolve-workflow-identity-from-spec-test
+(deftest ^{:stratum 0} resolve-workflow-identity-from-spec-test
   (testing "recorded workflow spec wins — fallback-fn not called"
     (is (= {:workflow-type :financial-etl :workflow-version "1.2.3"}
            (core/resolve-workflow-identity
@@ -234,7 +229,7 @@
              {:workflow-spec {:name "lean-sdlc"}}
              (constantly nil))))))
 
-(deftest resolve-workflow-identity-from-machine-snapshot-test
+(deftest ^{:stratum 0} resolve-workflow-identity-from-machine-snapshot-test
   (testing "machine snapshot identity wins when no workflow spec is present"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "2.0.0"}
            (core/resolve-workflow-identity
@@ -242,7 +237,7 @@
                                 :execution/workflow-version "2.0.0"}}
             (constantly nil))))))
 
-(deftest resolve-workflow-identity-ignores-synthetic-dag-task-workflow-id-test
+(deftest ^{:stratum 0} resolve-workflow-identity-ignores-synthetic-dag-task-workflow-id-test
   (testing "synthetic DAG task workflow ids fall back to a loadable top-level workflow type"
     (is (= {:workflow-type :default-sdlc :workflow-version "2.0.0"}
            (core/resolve-workflow-identity
@@ -250,7 +245,7 @@
                                 :execution/workflow-version "2.0.0"}}
             (constantly :default-sdlc))))))
 
-(deftest resolve-workflow-identity-fallback-test
+(deftest ^{:stratum 0} resolve-workflow-identity-fallback-test
   (testing "no spec → fallback-fn result used as :workflow-type"
     (is (= {:workflow-type :default-sdlc :workflow-version "latest"}
            (core/resolve-workflow-identity
@@ -264,7 +259,7 @@
       (is (= :resume-workflow
              (get-in result [:anomaly/data :operation]))))))
 
-(deftest resolve-workflow-identity-prefers-workflow-type-key-test
+(deftest ^{:stratum 0} resolve-workflow-identity-prefers-workflow-type-key-test
   (testing ":workflow-type wins over :name when both are present"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
            (core/resolve-workflow-identity
@@ -279,7 +274,7 @@
              {:workflow-spec {:workflow/id :canonical-sdlc :version "2.0.0"}}
              (constantly nil))))))
 
-(deftest resolve-workflow-identity-rejects-non-identifier-name-test
+(deftest ^{:stratum 0} resolve-workflow-identity-rejects-non-identifier-name-test
   ;; Regression for the 2026-05-22 dogfood of
   ;; work/in-flight-pr-registry.spec.edn (workflow a92b2c97), where the
   ;; recorded spec was {:name "In-flight PR / branch / task-claim
@@ -308,7 +303,7 @@
                              :version "latest"}}
             (fn [] :canonical-sdlc))))))
 
-(deftest resolve-workflow-identity-rejects-qualified-workflow-types-test
+(deftest ^{:stratum 0} resolve-workflow-identity-rejects-qualified-workflow-types-test
   (testing "slash-containing string identifiers are rejected before keywordization"
     (is (= {:workflow-type :canonical-sdlc :workflow-version "latest"}
            (core/resolve-workflow-identity
@@ -331,10 +326,8 @@
             {:workflow-spec {:name :foo/bar}}
             (fn [] :fallback-sdlc))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; reconstruct-context — integration with the event-stream reader
-
-(defn- with-temp-events-dir [body-fn]
+(defn- ^{:stratum 0} with-temp-events-dir [body-fn]
   (let [base (doto (io/file (System/getProperty "java.io.tmpdir")
                             (str "mf-wr-test-" (random-uuid)))
                .mkdirs)]
@@ -344,10 +337,10 @@
         (doseq [^java.io.File f (reverse (file-seq base))]
           (.delete f))))))
 
-(defn- write-event! [^java.io.File dir filename event-map]
+(defn- ^{:stratum 0} write-event! [^java.io.File dir filename event-map]
   (spit (io/file dir filename) (json/generate-string event-map)))
 
-(def resume-checkpoint-config
+(def ^{:stratum 0} resume-checkpoint-config
   {:base-machine-snapshot {:execution/workflow-id :canonical-sdlc
                            :execution/workflow-version "1.0.0"
                            :execution/status :failed}
@@ -366,14 +359,92 @@
                       :phase-results {:release {:status :retrying}
                                       :plan {:status :completed}}}})
 
-(defn- configured-checkpoint-data
+(deftest ^{:stratum 0} reconstruct-context-prefers-machine-snapshot-test
+  (testing "checkpoint data restores workflow and DAG resume state without requiring event files"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :running
+                                             :execution/dag-result {:paused? true
+                                                                    :completed-task-ids ["task-1" "task-2"]
+                                                                    :artifacts [{:artifact/id "art-1"}]
+                                                                    :pause-reason :rate-limit}}
+                           :manifest {:workflow/phases-completed [:plan]}
+                           :phase-results {:plan {:status :completed}}}]
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= workflow-id (:workflow-id ctx)))
+          (is (= (:machine-snapshot checkpoint-data) (:machine-snapshot ctx)))
+          (is (= [:plan] (:completed-phases ctx)))
+          (is (= {:status :completed}
+                 (get-in ctx [:phase-results :plan])))
+          (is (= #{"task-1" "task-2"} (:completed-dag-tasks ctx)))
+          (is (= [{:artifact/id "art-1"}] (:completed-dag-artifacts ctx)))
+          (is (true? (:dag-paused? ctx)))
+          (is (= :rate-limit (:dag-pause-reason ctx)))
+          (is (= 0 (:event-count ctx))))))))
+
+(deftest ^{:stratum 0} reconstruct-context-uses-checkpoint-status-over-stale-terminal-events-test
+  (testing "a resumed running checkpoint overrides older failed events"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data {:machine-snapshot {:execution/id workflow-id
+                                             :execution/workflow-id :canonical-sdlc
+                                             :execution/workflow-version "1.0.0"
+                                             :execution/status :running}
+                           :manifest {:workflow/phases-completed [:plan]}
+                           :phase-results {:plan {:status :completed}}}
+          events [{:event/type :workflow/failed}]]
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (false? (:failed? ctx)))
+          (is (false? (:completed? ctx))))))))
+
+;; Interface re-exports
+(deftest ^{:stratum 0} interface-reexports-test
+  (testing "interface exposes the domain API"
+    (is (= core/completed? wr/completed?))
+    (is (= core/failed? wr/failed?))
+    (is (= core/paused? wr/paused?))
+    (is (= core/extract-completed-dag-tasks wr/extract-completed-dag-tasks))
+    (is (= core/extract-completed-dag-artifacts wr/extract-completed-dag-artifacts))
+    (is (= core/extract-workspace-checkpoints wr/extract-workspace-checkpoints))
+    (is (= core/extract-completed-phases wr/extract-completed-phases))
+    (is (= core/reconstruct-context wr/reconstruct-context))
+    (is (= core/trim-pipeline wr/trim-pipeline))
+    (is (= core/resolve-workflow-identity wr/resolve-workflow-identity))))
+
+(deftest ^{:stratum 0} trim-pipeline-validates-workflow-shape-test
+  (testing "workflow without :workflow/pipeline is rejected"
+    (let [result (core/trim-pipeline {:wrong-shape true} [])]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))))
+
+  (testing "pipeline entries without :phase keyword are rejected"
+    (let [result (core/trim-pipeline {:workflow/pipeline [{:no-phase "here"}]} [])]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
+
+(deftest ^{:stratum 0} resolve-workflow-identity-validates-fallback-fn-test
+  (testing "non-function fallback is rejected"
+    (let [result (core/resolve-workflow-identity
+                  {:workflow-spec {:name "x"}}
+                  "not a function")]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} configured-checkpoint-data
   [config-key workflow-id]
   (let [checkpoint (get resume-checkpoint-config config-key)]
     (assoc checkpoint :machine-snapshot
            (assoc (:base-machine-snapshot resume-checkpoint-config)
                   :execution/id workflow-id))))
 
-(deftest reconstruct-context-integration-test
+(deftest ^{:stratum 1} reconstruct-context-integration-test
   (with-temp-events-dir
     (fn [base-dir]
       (let [wf-id (str (random-uuid))
@@ -434,7 +505,7 @@
                     :timestamp nil}
                    (:workspace-checkpoint ctx)))))))))
 
-(deftest reconstruct-context-missing-workflow-test
+(deftest ^{:stratum 1} reconstruct-context-missing-workflow-test
   (with-temp-events-dir
     (fn [base-dir]
       (testing "missing workflow dir → :not-found anomaly"
@@ -442,98 +513,8 @@
           (is (anomaly/anomaly? result))
           (is (= :not-found (:anomaly/type result))))))))
 
-(deftest reconstruct-context-prefers-machine-snapshot-test
-  (testing "checkpoint data restores workflow and DAG resume state without requiring event files"
-    (let [workflow-id (str (random-uuid))
-          checkpoint-data {:machine-snapshot {:execution/id workflow-id
-                                             :execution/workflow-id :canonical-sdlc
-                                             :execution/workflow-version "1.0.0"
-                                             :execution/status :running
-                                             :execution/dag-result {:paused? true
-                                                                    :completed-task-ids ["task-1" "task-2"]
-                                                                    :artifacts [{:artifact/id "art-1"}]
-                                                                    :pause-reason :rate-limit}}
-                           :manifest {:workflow/phases-completed [:plan]}
-                           :phase-results {:plan {:status :completed}}}]
-      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
-                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
-        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
-          (is (= workflow-id (:workflow-id ctx)))
-          (is (= (:machine-snapshot checkpoint-data) (:machine-snapshot ctx)))
-          (is (= [:plan] (:completed-phases ctx)))
-          (is (= {:status :completed}
-                 (get-in ctx [:phase-results :plan])))
-          (is (= #{"task-1" "task-2"} (:completed-dag-tasks ctx)))
-          (is (= [{:artifact/id "art-1"}] (:completed-dag-artifacts ctx)))
-          (is (true? (:dag-paused? ctx)))
-          (is (= :rate-limit (:dag-pause-reason ctx)))
-          (is (= 0 (:event-count ctx))))))))
-
-(deftest reconstruct-context-uses-checkpoint-status-over-stale-terminal-events-test
-  (testing "a resumed running checkpoint overrides older failed events"
-    (let [workflow-id (str (random-uuid))
-          checkpoint-data {:machine-snapshot {:execution/id workflow-id
-                                             :execution/workflow-id :canonical-sdlc
-                                             :execution/workflow-version "1.0.0"
-                                             :execution/status :running}
-                           :manifest {:workflow/phases-completed [:plan]}
-                           :phase-results {:plan {:status :completed}}}
-          events [{:event/type :workflow/failed}]]
-      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
-                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
-        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
-          (is (false? (:failed? ctx)))
-          (is (false? (:completed? ctx))))))))
-
-(deftest reconstruct-context-trims-only-completed-checkpoint-phases-test
-  (testing "checkpoint manifests may list failed/retrying phases; resume skips only completed results"
-    (let [workflow-id (str (random-uuid))
-          checkpoint-data (configured-checkpoint-data :blocked-review
-                                                      workflow-id)]
-      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
-                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
-        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
-          (is (= [:explore :plan :implement] (:completed-phases ctx))))))))
-
-(deftest reconstruct-context-merges-latest-successful-events-with-checkpoint-test
-  (testing "a damaged manifest can still resume from successful event history"
-    (let [workflow-id (str (random-uuid))
-          checkpoint-data (configured-checkpoint-data :damaged-manifest
-                                                      workflow-id)
-          events [{:event/type :workflow/phase-completed
-                   :workflow/phase :explore
-                   :phase/outcome :success}
-                  {:event/type :workflow/phase-completed
-                   :workflow/phase :implement
-                   :phase/outcome :failure}
-                  {:event/type :workflow/phase-completed
-                   :workflow/phase :verify
-                   :phase/outcome :success}]]
-      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
-                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
-        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
-          (is (= [:explore :verify :plan] (:completed-phases ctx))))))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Interface re-exports
-
-(deftest interface-reexports-test
-  (testing "interface exposes the domain API"
-    (is (= core/completed? wr/completed?))
-    (is (= core/failed? wr/failed?))
-    (is (= core/paused? wr/paused?))
-    (is (= core/extract-completed-dag-tasks wr/extract-completed-dag-tasks))
-    (is (= core/extract-completed-dag-artifacts wr/extract-completed-dag-artifacts))
-    (is (= core/extract-workspace-checkpoints wr/extract-workspace-checkpoints))
-    (is (= core/extract-completed-phases wr/extract-completed-phases))
-    (is (= core/reconstruct-context wr/reconstruct-context))
-    (is (= core/trim-pipeline wr/trim-pipeline))
-    (is (= core/resolve-workflow-identity wr/resolve-workflow-identity))))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Validation — schemas enforce data shape at the component boundary
-
-(deftest reconstruct-context-validates-workflow-id-test
+(deftest ^{:stratum 1} reconstruct-context-validates-workflow-id-test
   (with-temp-events-dir
     (fn [base-dir]
       (testing "nil workflow-id is rejected before disk access"
@@ -546,7 +527,7 @@
           (is (anomaly/anomaly? result))
           (is (= :invalid-input (:anomaly/type result))))))))
 
-(deftest reconstruct-context-filters-malformed-events-test
+(deftest ^{:stratum 1} reconstruct-context-filters-malformed-events-test
   (with-temp-events-dir
     (fn [base-dir]
       (let [wf-id (str (random-uuid))
@@ -567,7 +548,7 @@
             (is (= 1 (:event-count ctx)))
             (is (= [:plan] (:completed-phases ctx)))))))))
 
-(deftest reconstruct-context-rejects-malformed-only-events-test
+(deftest ^{:stratum 1} reconstruct-context-rejects-malformed-only-events-test
   (with-temp-events-dir
     (fn [base-dir]
       (let [wf-id (str (random-uuid))
@@ -582,21 +563,33 @@
             (is (= :not-found (:anomaly/type result)))
             (is (= 2 (get-in result [:anomaly/data :raw-event-count])))))))))
 
-(deftest trim-pipeline-validates-workflow-shape-test
-  (testing "workflow without :workflow/pipeline is rejected"
-    (let [result (core/trim-pipeline {:wrong-shape true} [])]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))))
+;------------------------------------------------------------------------------ Layer 2
 
-  (testing "pipeline entries without :phase keyword are rejected"
-    (let [result (core/trim-pipeline {:workflow/pipeline [{:no-phase "here"}]} [])]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result))))))
+(deftest ^{:stratum 2} reconstruct-context-trims-only-completed-checkpoint-phases-test
+  (testing "checkpoint manifests may list failed/retrying phases; resume skips only completed results"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data (configured-checkpoint-data :blocked-review
+                                                      workflow-id)]
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] nil)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= [:explore :plan :implement] (:completed-phases ctx))))))))
 
-(deftest resolve-workflow-identity-validates-fallback-fn-test
-  (testing "non-function fallback is rejected"
-    (let [result (core/resolve-workflow-identity
-                  {:workflow-spec {:name "x"}}
-                  "not a function")]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result))))))
+(deftest ^{:stratum 2} reconstruct-context-merges-latest-successful-events-with-checkpoint-test
+  (testing "a damaged manifest can still resume from successful event history"
+    (let [workflow-id (str (random-uuid))
+          checkpoint-data (configured-checkpoint-data :damaged-manifest
+                                                      workflow-id)
+          events [{:event/type :workflow/phase-completed
+                   :workflow/phase :explore
+                   :phase/outcome :success}
+                  {:event/type :workflow/phase-completed
+                   :workflow/phase :implement
+                   :phase/outcome :failure}
+                  {:event/type :workflow/phase-completed
+                   :workflow/phase :verify
+                   :phase/outcome :success}]]
+      (with-redefs [workflow-checkpoints/load-checkpoint-data (fn [_workflow-run-id] checkpoint-data)
+                    es/read-workflow-events-by-id (fn [_events-dir _workflow-run-id] events)]
+        (let [ctx (core/reconstruct-context "/tmp/unused-events" workflow-id)]
+          (is (= [:explore :verify :plan] (:completed-phases ctx))))))))

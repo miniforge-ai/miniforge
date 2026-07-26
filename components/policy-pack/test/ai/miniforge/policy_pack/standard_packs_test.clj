@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.standard-packs-test
   "Tests for the 11 standard reference policy packs (N4 §5).
 
@@ -30,7 +29,9 @@
    [clojure.java.io :as io]
    [ai.miniforge.policy-pack.detection :as detection]))
 
-(def ^:private pack-specs
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private pack-specs
   "Expected pack metadata for each reference pack."
   [{:file "foundations-1.0.0.pack.edn"     :id "miniforge/foundations"            :min-rules 4}
    {:file "terraform-aws-1.0.0.pack.edn"  :id "miniforge/terraform-aws"          :min-rules 5}
@@ -44,24 +45,12 @@
    {:file "control-action-governance-1.0.0.pack.edn" :id "miniforge/control-action-governance" :min-rules 4}
    {:file "data-foundry-quality-1.0.0.pack.edn" :id "miniforge/data-foundry-quality" :min-rules 11}])
 
-(defn- load-pack-resource [filename]
+(defn- ^{:stratum 0} load-pack-resource [filename]
   (let [path (str "policy_pack/packs/" filename)]
     (when-let [resource (io/resource path)]
       (edn/read-string (slurp resource)))))
 
-(deftest all-standard-packs-load-test
-  (doseq [{:keys [file id min-rules]} pack-specs]
-    (testing (str "Pack " file " loads and validates")
-      (let [pack (load-pack-resource file)]
-        (is (some? pack) (str "Resource not found: " file))
-        (when pack
-          (is (= id (:pack/id pack)) (str file " has correct ID"))
-          (is (>= (count (:pack/rules pack)) min-rules)
-              (str file " has at least " min-rules " rules"))
-          (is (= :miniforge/dewey (get-in pack [:pack/taxonomy-ref :taxonomy/id]))
-              (str file " references miniforge/dewey taxonomy")))))))
-
-(deftest compiled-standards-pack-is-valid-edn-test
+(deftest ^{:stratum 0} compiled-standards-pack-is-valid-edn-test
   ;; Regression guard for the corruption that made policy unloadable: the
   ;; compiled standards pack (a phase resource produced by `bb standards:pack`)
   ;; was serialized valid by pprint, then a text-level sanitize regex consumed
@@ -80,7 +69,21 @@
           (is (not (re-find #"/Users/[A-Za-z0-9._-]+/" content))
               "no real local /Users/<name>/ path leaked (doc placeholders like /Users/$USER are fine)"))))))
 
-(deftest all-packs-have-valid-rules-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} all-standard-packs-load-test
+  (doseq [{:keys [file id min-rules]} pack-specs]
+    (testing (str "Pack " file " loads and validates")
+      (let [pack (load-pack-resource file)]
+        (is (some? pack) (str "Resource not found: " file))
+        (when pack
+          (is (= id (:pack/id pack)) (str file " has correct ID"))
+          (is (>= (count (:pack/rules pack)) min-rules)
+              (str file " has at least " min-rules " rules"))
+          (is (= :miniforge/dewey (get-in pack [:pack/taxonomy-ref :taxonomy/id]))
+              (str file " references miniforge/dewey taxonomy")))))))
+
+(deftest ^{:stratum 1} all-packs-have-valid-rules-test
   (doseq [{:keys [file]} pack-specs]
     (testing (str "Rules in " file " have required fields")
       (when-let [pack (load-pack-resource file)]
@@ -92,7 +95,7 @@
           (is (map? (:rule/detection rule)) (str "Rule " (:rule/id rule) " has detection"))
           (is (map? (:rule/enforcement rule)) (str "Rule " (:rule/id rule) " has enforcement")))))))
 
-(deftest total-reference-rules-test
+(deftest ^{:stratum 1} total-reference-rules-test
   (testing "total reference rules across all packs is at least 53"
     (let [total (->> pack-specs
                      (keep (fn [{:keys [file]}]
@@ -106,14 +109,20 @@
 ;; Pin the improved patterns: high-confidence provider shapes + keyword-quoted
 ;; + a conservative unquoted case fire; env refs, config words, and comments do
 ;; not.
-
-(defn- secrets-rule []
+(defn- ^{:stratum 1} secrets-rule []
   (->> (load-pack-resource "foundations-1.0.0.pack.edn")
        :pack/rules
        (filter #(= :foundations/no-hardcoded-secrets (:rule/id %)))
        first))
 
-(deftest no-hardcoded-secrets-detection-test
+;; Finding 7: no-inline-anon-fns missed the reader `#(...)` form; no-latest-tag
+;; missed untagged images (implicitly :latest) and false-fired on :latest-*.
+(defn- ^{:stratum 1} pack-rule [file id]
+  (->> (load-pack-resource file) :pack/rules (filter #(= id (:rule/id %))) first))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} no-hardcoded-secrets-detection-test
   (let [rule (secrets-rule)
         fires? (fn [s] (boolean (detection/detect-content-scan
                                  rule {:artifact/content s :artifact/path "x.clj"} {})))]
@@ -140,13 +149,7 @@
                  "(def x 42)"]]
         (is (not (fires? s)) (str "should NOT fire: " s))))))
 
-;; Finding 7: no-inline-anon-fns missed the reader `#(...)` form; no-latest-tag
-;; missed untagged images (implicitly :latest) and false-fired on :latest-*.
-
-(defn- pack-rule [file id]
-  (->> (load-pack-resource file) :pack/rules (filter #(= id (:rule/id %))) first))
-
-(deftest no-inline-anon-fns-detection-test
+(deftest ^{:stratum 2} no-inline-anon-fns-detection-test
   (let [rule (pack-rule "foundations-1.0.0.pack.edn" :foundations/no-inline-anon-fns)
         fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
     (is (some? rule))
@@ -155,7 +158,7 @@
     (is (not (fires? "(map inc coll)")) "named fn is fine")
     (is (not (fires? "(filter even? coll)")) "named predicate is fine")))
 
-(deftest no-latest-tag-detection-test
+(deftest ^{:stratum 2} no-latest-tag-detection-test
   (let [rule (pack-rule "kubernetes-1.0.0.pack.edn" :k8s/no-latest-tag)
         fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
     (is (some? rule))
@@ -174,8 +177,7 @@
 
 ;; Finding 7: no-open-ingress matched only 0.0.0.0/0 as the sole list element,
 ;; missing multi-CIDR lists and IPv6 any (::/0).
-
-(deftest no-open-ingress-detection-test
+(deftest ^{:stratum 2} no-open-ingress-detection-test
   (let [rule (pack-rule "terraform-aws-1.0.0.pack.edn" :tf-aws/no-open-ingress)
         fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
     (is (some? rule))
@@ -192,8 +194,7 @@
 ;; Finding 7: content-scan matches per-line, so require-resource-limits's
 ;; two-line pattern never matched and (negative mode) fired on EVERY manifest.
 ;; :multiline? makes it match whole-content.
-
-(deftest require-resource-limits-multiline-test
+(deftest ^{:stratum 2} require-resource-limits-multiline-test
   (let [rule (pack-rule "kubernetes-1.0.0.pack.edn" :k8s/require-resource-limits)
         fires? (fn [s] (boolean (detection/detect-content-scan rule {:artifact/content s} {})))]
     (is (some? rule))

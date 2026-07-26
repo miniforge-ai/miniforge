@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.subscription-test
   "Tests for event stream -> TUI message translation."
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.tui-views.subscription :as sub]))
 
-;; ---------------------------------------------------------------------------- Layer 0: translate-event tests
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest translate-workflow-started-test
+;; translate-event tests
+(deftest ^{:stratum 0} translate-workflow-started-test
   (testing "translates workflow/started with spec name"
     (let [[t p] (sub/translate-event {:event/type :workflow/started
                                       :workflow/id :wf-1
@@ -33,7 +33,7 @@
       (is (= :wf-1 (:workflow-id p)))
       (is (= "My WF" (:name p))))))
 
-(deftest translate-workflow-started-alt-keys-test
+(deftest ^{:stratum 0} translate-workflow-started-alt-keys-test
   (testing "translates workflow/started with alternative key names"
     (let [[t p] (sub/translate-event {:event/type :workflow/started
                                       :workflow-id :wf-2
@@ -42,7 +42,7 @@
       (is (= :wf-2 (:workflow-id p)))
       (is (= "Alt WF" (:name p))))))
 
-(deftest translate-phase-started-test
+(deftest ^{:stratum 0} translate-phase-started-test
   (testing "translates workflow/phase-started"
     (let [[t p] (sub/translate-event {:event/type :workflow/phase-started
                                       :workflow/id :wf-1
@@ -50,7 +50,7 @@
       (is (= :msg/phase-changed t))
       (is (= :plan (:phase p))))))
 
-(deftest translate-phase-completed-test
+(deftest ^{:stratum 0} translate-phase-completed-test
   (testing "translates workflow/phase-completed with outcome"
     (let [[t p] (sub/translate-event {:event/type :workflow/phase-completed
                                       :workflow/id :wf-1
@@ -60,7 +60,7 @@
       (is (= :implement (:phase p)))
       (is (= :success (:outcome p))))))
 
-(deftest translate-phase-completed-alt-outcome-test
+(deftest ^{:stratum 0} translate-phase-completed-alt-outcome-test
   (testing "translates phase-completed with alternative outcome path"
     (let [[t p] (sub/translate-event {:event/type :workflow/phase-completed
                                       :workflow/id :wf-1
@@ -69,7 +69,7 @@
       (is (= :msg/phase-done t))
       (is (= :failure (:outcome p))))))
 
-(deftest translate-agent-started-test
+(deftest ^{:stratum 0} translate-agent-started-test
   (testing "translates agent/started"
     (let [[t p] (sub/translate-event {:event/type :agent/started
                                       :workflow/id :wf-1
@@ -79,7 +79,7 @@
       (is (= :planner (:agent p)))
       (is (= {:phase :plan} (:context p))))))
 
-(deftest translate-agent-completed-test
+(deftest ^{:stratum 0} translate-agent-completed-test
   (let [[t p] (sub/translate-event {:event/type :agent/completed
                                     :workflow/id :wf-1
                                     :agent/id :implementer
@@ -88,7 +88,7 @@
     (is (= :implementer (:agent p)))
     (is (= {:outcome :success} (:result p)))))
 
-(deftest translate-agent-failed-test
+(deftest ^{:stratum 0} translate-agent-failed-test
   (let [[t p] (sub/translate-event {:event/type :agent/failed
                                     :workflow/id :wf-1
                                     :agent/id :reviewer
@@ -97,7 +97,7 @@
     (is (= :reviewer (:agent p)))
     (is (= {:message "timeout"} (:error p)))))
 
-(deftest translate-agent-status-test
+(deftest ^{:stratum 0} translate-agent-status-test
   (let [[t p] (sub/translate-event {:event/type :agent/status
                                     :workflow/id :wf-1
                                     :agent/id :planner
@@ -107,7 +107,7 @@
     (is (= :thinking (:status p)))
     (is (= "Analyzing" (:message p)))))
 
-(deftest translate-agent-chunk-test
+(deftest ^{:stratum 0} translate-agent-chunk-test
   (let [[t p] (sub/translate-event {:event/type :agent/chunk
                                     :workflow/id :wf-1
                                     :agent/id :planner
@@ -117,7 +117,7 @@
     (is (= "Hello" (:delta p)))
     (is (false? (:done? p)))))
 
-(deftest translate-agent-chunk-alt-keys-test
+(deftest ^{:stratum 0} translate-agent-chunk-alt-keys-test
   (let [[t p] (sub/translate-event {:event/type :agent/chunk
                                     :workflow-id :wf-1
                                     :agent :planner
@@ -127,28 +127,28 @@
     (is (= "text" (:delta p)))
     (is (true? (:done? p)))))
 
-(deftest translate-workflow-completed-test
+(deftest ^{:stratum 0} translate-workflow-completed-test
   (let [[t p] (sub/translate-event {:event/type :workflow/completed
                                     :workflow/id :wf-1
                                     :workflow/status :success})]
     (is (= :msg/workflow-done t))
     (is (= :success (:status p)))))
 
-(deftest translate-workflow-failed-test
+(deftest ^{:stratum 0} translate-workflow-failed-test
   (let [[t p] (sub/translate-event {:event/type :workflow/failed
                                     :workflow/id :wf-1
                                     :workflow/failure-reason "LLM error"})]
     (is (= :msg/workflow-failed t))
     (is (= "LLM error" (:error p)))))
 
-(deftest translate-gate-started-test
+(deftest ^{:stratum 0} translate-gate-started-test
   (let [[t p] (sub/translate-event {:event/type :gate/started
                                     :workflow/id :wf-1
                                     :gate/id :lint})]
     (is (= :msg/gate-started t))
     (is (= :lint (:gate p)))))
 
-(deftest translate-gate-passed-test
+(deftest ^{:stratum 0} translate-gate-passed-test
   (let [[t p] (sub/translate-event {:event/type :gate/passed
                                     :workflow/id :wf-1
                                     :gate/id :test})]
@@ -156,7 +156,7 @@
     (is (= :test (:gate p)))
     (is (true? (:passed? p)))))
 
-(deftest translate-gate-failed-test
+(deftest ^{:stratum 0} translate-gate-failed-test
   (let [[t p] (sub/translate-event {:event/type :gate/failed
                                     :workflow/id :wf-1
                                     :gate/id :security})]
@@ -164,7 +164,7 @@
     (is (= :security (:gate p)))
     (is (false? (:passed? p)))))
 
-(deftest translate-tool-invoked-test
+(deftest ^{:stratum 0} translate-tool-invoked-test
   (let [[t p] (sub/translate-event {:event/type :tool/invoked
                                     :workflow/id :wf-1
                                     :agent/id :implementer
@@ -172,7 +172,7 @@
     (is (= :msg/tool-invoked t))
     (is (= :tools/read-file (:tool p)))))
 
-(deftest translate-tool-completed-test
+(deftest ^{:stratum 0} translate-tool-completed-test
   (let [[t p] (sub/translate-event {:event/type :tool/completed
                                     :workflow/id :wf-1
                                     :agent/id :implementer
@@ -180,13 +180,12 @@
     (is (= :msg/tool-completed t))
     (is (= :tools/write-file (:tool p)))))
 
-(deftest translate-unknown-event-returns-nil-test
+(deftest ^{:stratum 0} translate-unknown-event-returns-nil-test
   (is (nil? (sub/translate-event {:event/type :custom/unknown-event}))))
 
-;; ---------------------------------------------------------------------------- Layer 0: Chain event translation
+;; Chain event translation
 ;; (complementing chain_events_test.clj with edge cases)
-
-(deftest translate-chain-events-complete-test
+(deftest ^{:stratum 0} translate-chain-events-complete-test
   (testing "all chain event types translate correctly"
     (let [events [{:event/type :chain/started :chain/id :c1 :chain/step-count 2}
                   {:event/type :chain/step-started :chain/id :c1 :step/id :plan :step/index 0 :step/workflow-id :wf1}

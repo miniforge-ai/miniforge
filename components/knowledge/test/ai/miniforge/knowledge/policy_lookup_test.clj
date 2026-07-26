@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.policy-lookup-test
   (:require
    [ai.miniforge.knowledge.interface :as knowledge]
@@ -24,14 +23,14 @@
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures and factories
 
-(defn- make-store
+;; Test fixtures and factories
+(defn- ^{:stratum 0} make-store
   "Create an empty in-memory store with no logger noise."
   []
   (store/create-store))
 
-(defn- rule-zettel
+(defn- ^{:stratum 0} rule-zettel
   "Build a minimal :rule zettel for testing. All keys required by the store."
   [uid title content & {:as overrides}]
   (merge {:zettel/id      (random-uuid)
@@ -45,7 +44,7 @@
           :zettel/created (java.util.Date.)}
          overrides))
 
-(defn- non-rule-zettel
+(defn- ^{:stratum 0} non-rule-zettel
   "Build a :learning zettel (should be excluded from policy lookup)."
   [uid title]
   {:zettel/id      (random-uuid)
@@ -58,7 +57,32 @@
    :zettel/author  "test"
    :zettel/created (java.util.Date.)})
 
-(defn- store-with-rules
+(defn- ^{:stratum 0} titles
+  "Extract rule titles from lookup results for easy assertion."
+  [results]
+  (mapv :rule/title results))
+
+;; Unit tests — policy-lookup/lookup-policy-rules (pure function)
+(deftest ^{:stratum 0} test-nil-store-returns-empty-vector
+  (testing "nil knowledge-store → safe, returns []"
+    (is (= [] (sut/lookup-policy-rules nil {})))))
+
+;; Interface-level tests — knowledge/lookup-policy-rules (boundary + validation)
+(deftest ^{:stratum 0} test-interface-nil-store-safe
+  (testing "interface: nil store → []"
+    (is (= [] (knowledge/lookup-policy-rules nil {})))))
+
+(deftest ^{:stratum 0} test-policy-query-schema-exported
+  (testing "PolicyQuery schema is exported from the interface namespace"
+    (is (some? knowledge/PolicyQuery))))
+
+(deftest ^{:stratum 0} test-policy-result-schema-exported
+  (testing "PolicyResult schema is exported from the interface namespace"
+    (is (some? knowledge/PolicyResult))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} store-with-rules
   "Create a store pre-populated with several rules."
   []
   (doto (make-store)
@@ -79,30 +103,20 @@
                                   :zettel/tags [:clojure :exceptions]))
     (store/put-zettel (non-rule-zettel "learning-42" "A captured learning"))))
 
-(defn- titles
-  "Extract rule titles from lookup results for easy assertion."
-  [results]
-  (mapv :rule/title results))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Unit tests — policy-lookup/lookup-policy-rules (pure function)
-
-(deftest test-nil-store-returns-empty-vector
-  (testing "nil knowledge-store → safe, returns []"
-    (is (= [] (sut/lookup-policy-rules nil {})))))
-
-(deftest test-empty-store-returns-empty-vector
+(deftest ^{:stratum 1} test-empty-store-returns-empty-vector
   (testing "empty store with any query → []"
     (is (= [] (sut/lookup-policy-rules (make-store) {})))))
 
-(deftest test-empty-query-returns-all-rules
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} test-empty-query-returns-all-rules
   (testing "empty query map → all :rule zettels, no learnings"
     (let [results (sut/lookup-policy-rules (store-with-rules) {})]
       (is (= 3 (count results)))
       (is (every? #(contains? % :rule/title) results))
       (is (every? #(contains? % :rule/content) results)))))
 
-(deftest test-result-shape
+(deftest ^{:stratum 2} test-result-shape
   (testing "each result has only :rule/title and :rule/content"
     (let [[first-result] (sut/lookup-policy-rules (store-with-rules) {})]
       (is (string? (:rule/title first-result)))
@@ -111,78 +125,78 @@
       (is (nil? (:zettel/id first-result)))
       (is (nil? (:zettel/type first-result))))))
 
-(deftest test-non-rule-zettels-excluded
+(deftest ^{:stratum 2} test-non-rule-zettels-excluded
   (testing "learnings and other types are not returned"
     (let [results (sut/lookup-policy-rules (store-with-rules) {})
           result-titles (titles results)]
       (is (not (some #{"A captured learning"} result-titles))))))
 
-(deftest test-keyword-query-matches-title
+(deftest ^{:stratum 2} test-keyword-query-matches-title
   (testing ":query matches title substring (case-insensitive)"
     (let [results (sut/lookup-policy-rules (store-with-rules) {:query "Namespace"})]
       (is (= 1 (count results)))
       (is (= "Clojure Namespace Conventions" (:rule/title (first results)))))))
 
-(deftest test-keyword-query-matches-content
+(deftest ^{:stratum 2} test-keyword-query-matches-content
   (testing ":query matches body content (case-insensitive)"
     (let [results (sut/lookup-policy-rules (store-with-rules) {:query "slingshot"})]
       (is (= 1 (count results)))
       (is (= "Clojure Exception Handling" (:rule/title (first results)))))))
 
-(deftest test-keyword-query-case-insensitive
+(deftest ^{:stratum 2} test-keyword-query-case-insensitive
   (testing ":query match is case-insensitive"
     (let [upper (sut/lookup-policy-rules (store-with-rules) {:query "POLYLITH"})
           lower (sut/lookup-policy-rules (store-with-rules) {:query "polylith"})]
       (is (= (count upper) (count lower)))
       (is (= 1 (count lower))))))
 
-(deftest test-keyword-query-no-match-returns-empty
+(deftest ^{:stratum 2} test-keyword-query-no-match-returns-empty
   (testing ":query with no matches → []"
     (is (= [] (sut/lookup-policy-rules (store-with-rules) {:query "xyzzy-nonexistent"})))))
 
-(deftest test-tags-filter-single-tag
+(deftest ^{:stratum 2} test-tags-filter-single-tag
   (testing ":tags with one tag returns matching rules"
     (let [results (sut/lookup-policy-rules (store-with-rules) {:tags [:clojure]})]
       (is (= 2 (count results)))
       (is (= #{"Clojure Namespace Conventions" "Clojure Exception Handling"}
              (set (titles results)))))))
 
-(deftest test-tags-filter-no-match
+(deftest ^{:stratum 2} test-tags-filter-no-match
   (testing ":tags with no matching zettel → []"
     (is (= [] (sut/lookup-policy-rules (store-with-rules) {:tags [:python]})))))
 
-(deftest test-dewey-prefix-exact-match
+(deftest ^{:stratum 2} test-dewey-prefix-exact-match
   (testing ":dewey-prefix exact match returns the matching rule"
     (let [results (sut/lookup-policy-rules (store-with-rules) {:dewey-prefix "001"})]
       (is (= 1 (count results)))
       (is (= "Stratified Design" (:rule/title (first results)))))))
 
-(deftest test-dewey-prefix-matches-children
+(deftest ^{:stratum 2} test-dewey-prefix-matches-children
   (testing ":dewey-prefix \"21\" matches dewey \"210\" and \"211\""
     (let [results (sut/lookup-policy-rules (store-with-rules) {:dewey-prefix "21"})]
       (is (= 2 (count results)))
       (is (= #{"Clojure Namespace Conventions" "Clojure Exception Handling"}
              (set (titles results)))))))
 
-(deftest test-dewey-prefix-no-match
+(deftest ^{:stratum 2} test-dewey-prefix-no-match
   (testing ":dewey-prefix with no matching rules → []"
     (is (= [] (sut/lookup-policy-rules (store-with-rules) {:dewey-prefix "999"})))))
 
-(deftest test-combined-query-and-tags
+(deftest ^{:stratum 2} test-combined-query-and-tags
   (testing "combined :query + :tags → intersection"
     (let [results (sut/lookup-policy-rules (store-with-rules)
                                            {:query "slingshot" :tags [:clojure]})]
       (is (= 1 (count results)))
       (is (= "Clojure Exception Handling" (:rule/title (first results)))))))
 
-(deftest test-combined-tags-and-dewey
+(deftest ^{:stratum 2} test-combined-tags-and-dewey
   (testing "combined :tags + :dewey-prefix → intersection"
     (let [results (sut/lookup-policy-rules (store-with-rules)
                                            {:tags [:clojure] :dewey-prefix "210"})]
       (is (= 1 (count results)))
       (is (= "Clojure Namespace Conventions" (:rule/title (first results)))))))
 
-(deftest test-all-criteria-combined
+(deftest ^{:stratum 2} test-all-criteria-combined
   (testing "all three criteria combined → most specific match"
     (let [results (sut/lookup-policy-rules (store-with-rules)
                                            {:query "slingshot"
@@ -191,38 +205,23 @@
       (is (= 1 (count results)))
       (is (= "Clojure Exception Handling" (:rule/title (first results)))))))
 
-(deftest test-all-criteria-combined-no-match
+(deftest ^{:stratum 2} test-all-criteria-combined-no-match
   (testing "conflicting criteria → []"
     (is (= [] (sut/lookup-policy-rules (store-with-rules)
                                        {:query "slingshot"
                                         :tags [:architecture]})))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Interface-level tests — knowledge/lookup-policy-rules (boundary + validation)
-
-(deftest test-interface-nil-store-safe
-  (testing "interface: nil store → []"
-    (is (= [] (knowledge/lookup-policy-rules nil {})))))
-
-(deftest test-interface-nil-query-treated-as-empty
+(deftest ^{:stratum 2} test-interface-nil-query-treated-as-empty
   (testing "interface: nil query → treated as empty, returns all rules"
     (let [results (knowledge/lookup-policy-rules (store-with-rules) nil)]
       (is (= 3 (count results))))))
 
-(deftest test-interface-invalid-query-returns-empty
+(deftest ^{:stratum 2} test-interface-invalid-query-returns-empty
   (testing "interface: query failing PolicyQuery schema → []"
     ;; :tags must be a vector of keywords, not a string
     (is (= [] (knowledge/lookup-policy-rules (store-with-rules) {:tags "clojure"})))))
 
-(deftest test-interface-valid-query-delegates
+(deftest ^{:stratum 2} test-interface-valid-query-delegates
   (testing "interface: valid query delegates to lookup-policy-rules"
     (let [results (knowledge/lookup-policy-rules (store-with-rules) {:tags [:clojure]})]
       (is (= 2 (count results))))))
-
-(deftest test-policy-query-schema-exported
-  (testing "PolicyQuery schema is exported from the interface namespace"
-    (is (some? knowledge/PolicyQuery))))
-
-(deftest test-policy-result-schema-exported
-  (testing "PolicyResult schema is exported from the interface namespace"
-    (is (some? knowledge/PolicyResult))))

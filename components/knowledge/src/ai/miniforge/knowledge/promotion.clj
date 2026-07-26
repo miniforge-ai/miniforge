@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.promotion
   "Pack promotion with trust level elevation and justification tracking.
    Implements N6 §2.1 pack promotion evidence requirements."
   (:require [ai.miniforge.knowledge.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Promotion Justification Examples
 
-(def justification-template-keys
+;; Promotion Justification Examples
+(def ^{:stratum 0} justification-template-keys
   "Standard justification template keys for pack promotions. The display text
    for each lives in the message catalog under :promotion/<key>."
   #{:safety-scan-passed
@@ -33,33 +32,8 @@
     :policy-compliance
     :automated-validation})
 
-(defn format-justification
-  "Format a promotion justification with optional details.
-
-   Arguments:
-   - template-key - Keyword in justification-template-keys (text from the catalog)
-   - details      - (optional) Additional context string
-
-   Returns formatted justification string.
-
-   Example:
-     (format-justification :safety-scan-passed)
-     => \"passed knowledge-safety scans with no violations\"
-
-     (format-justification :safety-scan-passed \"3 scans completed\")
-     => \"passed knowledge-safety scans with no violations (3 scans completed)\""
-  [template-key & [details]]
-  (let [base (if (contains? justification-template-keys template-key)
-               (messages/t (keyword "promotion" (name template-key)))
-               (messages/t :promotion/generic {:template (name template-key)}))]
-    (if details
-      (messages/t :promotion/with-details {:base base :details details})
-      base)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack Promotion Record
-
-(defn create-promotion-record
+(defn ^{:stratum 0} create-promotion-record
   "Create a pack promotion record for evidence bundle.
 
    Arguments:
@@ -106,14 +80,12 @@
    :pack-hash (or pack-hash "")
    :pack-signature (or pack-signature "")})
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Trust Level Validation
-
-(def valid-trust-levels
+(def ^{:stratum 0} valid-trust-levels
   "Valid trust levels per N6 spec."
   #{:untrusted :tainted :trusted})
 
-(def valid-promotions
+(def ^{:stratum 0} valid-promotions
   "Valid trust level promotion paths.
    Prevents invalid promotions like :tainted -> :trusted without intermediate step."
   #{[:untrusted :trusted]   ; Most common: untrusted pack passes validation
@@ -121,7 +93,48 @@
     [:tainted :untrusted]    ; Clean up tainted content
     [:trusted :untrusted]})  ; Demote if compromised
 
-(defn valid-promotion?
+(defn ^{:stratum 0} record-promotion-in-workflow
+  "Record a pack promotion in workflow state for evidence collection.
+
+   This adds the promotion record to the workflow state so it will be
+   included in the evidence bundle at workflow completion.
+
+   Arguments:
+   - workflow-state   - Current workflow state map
+   - promotion-record - Promotion record from promote-pack
+
+   Returns updated workflow state."
+  [workflow-state promotion-record]
+  (update workflow-state :workflow/pack-promotions
+          (fnil conj [])
+          promotion-record))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} format-justification
+  "Format a promotion justification with optional details.
+
+   Arguments:
+   - template-key - Keyword in justification-template-keys (text from the catalog)
+   - details      - (optional) Additional context string
+
+   Returns formatted justification string.
+
+   Example:
+     (format-justification :safety-scan-passed)
+     => \"passed knowledge-safety scans with no violations\"
+
+     (format-justification :safety-scan-passed \"3 scans completed\")
+     => \"passed knowledge-safety scans with no violations (3 scans completed)\""
+  [template-key & [details]]
+  (let [base (if (contains? justification-template-keys template-key)
+               (messages/t (keyword "promotion" (name template-key)))
+               (messages/t :promotion/generic {:template (name template-key)}))]
+    (if details
+      (messages/t :promotion/with-details {:base base :details details})
+      base)))
+
+(defn ^{:stratum 1} valid-promotion?
   "Check if a trust level promotion is valid.
 
    Arguments:
@@ -134,7 +147,9 @@
        (contains? valid-trust-levels to-trust)
        (contains? valid-promotions [from-trust to-trust])))
 
-(defn validate-promotion
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} validate-promotion
   "Validate a promotion record before recording.
 
    Returns {:valid? bool :errors [string...]}"
@@ -155,9 +170,9 @@
      :errors errors}))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Promotion Execution
 
-(defn promote-pack
+;; Promotion Execution
+(defn ^{:stratum 3} promote-pack
   "Promote a pack to a new trust level with justification.
 
    This creates a promotion record and optionally adds it to workflow state
@@ -187,22 +202,6 @@
         validation (validate-promotion promotion-record)]
     (merge validation
            {:promotion-record promotion-record})))
-
-(defn record-promotion-in-workflow
-  "Record a pack promotion in workflow state for evidence collection.
-
-   This adds the promotion record to the workflow state so it will be
-   included in the evidence bundle at workflow completion.
-
-   Arguments:
-   - workflow-state   - Current workflow state map
-   - promotion-record - Promotion record from promote-pack
-
-   Returns updated workflow state."
-  [workflow-state promotion-record]
-  (update workflow-state :workflow/pack-promotions
-          (fnil conj [])
-          promotion-record))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

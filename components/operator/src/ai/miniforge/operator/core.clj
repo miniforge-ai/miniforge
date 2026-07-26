@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.core
   "Core operator implementation.
    Manages meta-loop: observe signals, detect patterns, propose improvements."
@@ -29,19 +28,17 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
 
-(def default-config
+;; Configuration
+(def ^{:stratum 0} default-config
   "Default operator configuration."
   (config/load-config-resource "config/operator/defaults.edn"
                                [:signal-retention-ms :pattern-window-ms
                                 :min-pattern-occurrences
                                 :auto-apply-threshold :shadow-period-ms]))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Signal management
-
-(defn create-signal
+(defn ^{:stratum 0} create-signal
   "Create a signal record."
   [type data]
   {:signal/id (random-uuid)
@@ -49,16 +46,14 @@
    :signal/data data
    :signal/timestamp (System/currentTimeMillis)})
 
-(defn prune-old-signals
+(defn ^{:stratum 0} prune-old-signals
   "Remove signals older than retention period."
   [signals retention-ms]
   (let [cutoff (- (System/currentTimeMillis) retention-ms)]
     (filterv #(> (:signal/timestamp %) cutoff) signals)))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detection
-
-(defn detect-repeated-failures
+(defn ^{:stratum 0} detect-repeated-failures
   "Detect repeated failure patterns."
   [signals min-occurrences]
   (let [failures (->> signals
@@ -73,7 +68,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 10.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn detect-rollback-patterns
+(defn ^{:stratum 0} detect-rollback-patterns
   "Detect rollback patterns."
   [signals min-occurrences]
   (let [rollbacks (->> signals
@@ -89,7 +84,7 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 5.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defn detect-repair-patterns
+(defn ^{:stratum 0} detect-repair-patterns
   "Detect repair patterns from inner loop."
   [signals min-occurrences]
   (let [repairs (->> signals
@@ -104,27 +99,8 @@
                  :pattern/confidence (min 1.0 (/ (count sigs) 5.0))
                  :pattern/signals (map :signal/id sigs)})))))
 
-(defrecord SimplePatternDetector [config]
-  proto/PatternDetector
-
-  (detect [_this signals]
-    (let [min-occ (:min-pattern-occurrences config)]
-      (concat
-       (detect-repeated-failures signals min-occ)
-       (detect-rollback-patterns signals min-occ)
-       (detect-repair-patterns signals min-occ))))
-
-  (get-pattern-types [_this]
-    #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
-
-(defn create-pattern-detector
-  ([] (create-pattern-detector default-config))
-  ([config] (->SimplePatternDetector config)))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generation
-
-(defn generate-for-repeated-failure
+(defn ^{:stratum 0} generate-for-repeated-failure
   "Generate improvement for repeated phase failures."
   [pattern]
   {:improvement/id (random-uuid)
@@ -141,7 +117,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn generate-for-frequent-rollback
+(defn ^{:stratum 0} generate-for-frequent-rollback
   "Generate improvement for frequent rollbacks."
   [pattern]
   {:improvement/id (random-uuid)
@@ -157,7 +133,7 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defn generate-for-recurring-repair
+(defn ^{:stratum 0} generate-for-recurring-repair
   "Generate improvement for recurring repair patterns."
   [pattern]
   {:improvement/id (random-uuid)
@@ -174,30 +150,8 @@
    :improvement/status :proposed
    :improvement/created-at (System/currentTimeMillis)})
 
-(defrecord SimpleImprovementGenerator []
-  proto/ImprovementGenerator
-
-  (generate-improvements [_this patterns _context]
-    (mapcat
-     (fn [pattern]
-       (case (:pattern/type pattern)
-         :repeated-phase-failure [(generate-for-repeated-failure pattern)]
-         :frequent-rollback [(generate-for-frequent-rollback pattern)]
-         :recurring-repair [(generate-for-recurring-repair pattern)]
-         []))
-     patterns))
-
-  (get-supported-patterns [_this]
-    #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
-
-(defn create-improvement-generator
-  []
-  (->SimpleImprovementGenerator))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Governance
-
-(defrecord SimpleGovernance [config]
+(defrecord ^{:stratum 0} SimpleGovernance [config]
   proto/Governance
 
   (requires-approval? [_this improvement]
@@ -235,14 +189,59 @@
        :required-confidence 0.95
        :shadow-period-ms (* 24 60 60 1000)})))
 
-(defn create-governance
+(defn ^{:stratum 0} create-llm-pattern-detector*
+  "Create an LLM-powered pattern detector.
+   Returns nil if construction fails."
+  [llm-backend]
+  (try
+    (llm-pattern-detector/create-llm-pattern-detector {:llm-client llm-backend})
+    (catch Exception _e nil)))
+
+(defn ^{:stratum 0} create-llm-improvement-generator*
+  "Create an LLM-powered improvement generator.
+   Returns nil if construction fails."
+  [llm-backend]
+  (try
+    (llm-improvement-generator/create-llm-improvement-generator {:llm-client llm-backend})
+    (catch Exception _e nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defrecord ^{:stratum 1} SimplePatternDetector [config]
+  proto/PatternDetector
+
+  (detect [_this signals]
+    (let [min-occ (:min-pattern-occurrences config)]
+      (concat
+       (detect-repeated-failures signals min-occ)
+       (detect-rollback-patterns signals min-occ)
+       (detect-repair-patterns signals min-occ))))
+
+  (get-pattern-types [_this]
+    #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
+
+(defrecord ^{:stratum 1} SimpleImprovementGenerator []
+  proto/ImprovementGenerator
+
+  (generate-improvements [_this patterns _context]
+    (mapcat
+     (fn [pattern]
+       (case (:pattern/type pattern)
+         :repeated-phase-failure [(generate-for-repeated-failure pattern)]
+         :frequent-rollback [(generate-for-frequent-rollback pattern)]
+         :recurring-repair [(generate-for-recurring-repair pattern)]
+         []))
+     patterns))
+
+  (get-supported-patterns [_this]
+    #{:repeated-phase-failure :frequent-rollback :recurring-repair}))
+
+(defn ^{:stratum 1} create-governance
   ([] (create-governance default-config))
   ([config] (->SimpleGovernance config)))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Main Operator implementation
-
-(defrecord SimpleOperator [config signals proposals pattern-detector
+(defrecord ^{:stratum 1} SimpleOperator [config signals proposals pattern-detector
                            improvement-generator governance
                            knowledge-store logger]
   proto/Operator
@@ -376,6 +375,48 @@
                           :reason reason}})
         rejected))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-pattern-detector
+  ([] (create-pattern-detector default-config))
+  ([config] (->SimplePatternDetector config)))
+
+(defn ^{:stratum 2} create-improvement-generator
+  []
+  (->SimpleImprovementGenerator))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} create-operator
+  "Create an operator (meta-agent).
+
+   Options:
+   - :knowledge-store - Knowledge store for rule storage
+   - :config          - Override default configuration
+   - :llm-backend     - LLM client (implements LLMClient protocol).
+                        When provided, uses LLMPatternDetector and
+                        LLMImprovementGenerator instead of the simple
+                        rule-based implementations. Falls back to simple
+                        implementations if the LLM namespaces cannot be loaded."
+  ([] (create-operator {}))
+  ([{:keys [knowledge-store config llm-backend]}]
+   (let [merged-config (merge default-config config)
+         pattern-detector    (or (when llm-backend
+                                   (create-llm-pattern-detector* llm-backend))
+                                 (create-pattern-detector merged-config))
+         improvement-generator (or (when llm-backend
+                                     (create-llm-improvement-generator* llm-backend))
+                                   (create-improvement-generator))]
+     (->SimpleOperator
+      merged-config
+      (atom [])
+      (atom {})
+      pattern-detector
+      improvement-generator
+      (create-governance merged-config)
+      knowledge-store
+      (log/create-logger {:min-level :info})))))
+
 ;; Implement WorkflowObserver to receive workflow events
 (extend-type SimpleOperator
   wf/WorkflowObserver
@@ -419,52 +460,6 @@
                                   :from-phase from-phase
                                   :to-phase to-phase
                                   :reason reason}})))
-
-(defn create-llm-pattern-detector*
-  "Create an LLM-powered pattern detector.
-   Returns nil if construction fails."
-  [llm-backend]
-  (try
-    (llm-pattern-detector/create-llm-pattern-detector {:llm-client llm-backend})
-    (catch Exception _e nil)))
-
-(defn create-llm-improvement-generator*
-  "Create an LLM-powered improvement generator.
-   Returns nil if construction fails."
-  [llm-backend]
-  (try
-    (llm-improvement-generator/create-llm-improvement-generator {:llm-client llm-backend})
-    (catch Exception _e nil)))
-
-(defn create-operator
-  "Create an operator (meta-agent).
-
-   Options:
-   - :knowledge-store - Knowledge store for rule storage
-   - :config          - Override default configuration
-   - :llm-backend     - LLM client (implements LLMClient protocol).
-                        When provided, uses LLMPatternDetector and
-                        LLMImprovementGenerator instead of the simple
-                        rule-based implementations. Falls back to simple
-                        implementations if the LLM namespaces cannot be loaded."
-  ([] (create-operator {}))
-  ([{:keys [knowledge-store config llm-backend]}]
-   (let [merged-config (merge default-config config)
-         pattern-detector    (or (when llm-backend
-                                   (create-llm-pattern-detector* llm-backend))
-                                 (create-pattern-detector merged-config))
-         improvement-generator (or (when llm-backend
-                                     (create-llm-improvement-generator* llm-backend))
-                                   (create-improvement-generator))]
-     (->SimpleOperator
-      merged-config
-      (atom [])
-      (atom {})
-      pattern-detector
-      improvement-generator
-      (create-governance merged-config)
-      knowledge-store
-      (log/create-logger {:min-level :info})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
