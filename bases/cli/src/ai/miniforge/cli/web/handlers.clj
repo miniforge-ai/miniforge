@@ -30,10 +30,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn ^{:stratum 0} parse-pr-path [uri]
-  (let [path-parts (str/split (subs uri 8) #"/")]
-    {:repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
-     :number (Integer/parseInt (second path-parts))}))
+(defn ^{:stratum 0} parse-pr-path
+  "Parse `{:repo ... :number ...}` out of an `/api/pr/<repo>/<number>...`
+   URI. Returns nil on a malformed path (missing/non-numeric PR number,
+   undecodable repo segment) instead of throwing, so callers can respond
+   with a 400 rather than crash request handling on untrusted input."
+  [uri]
+  (try
+    (let [path-parts (str/split (subs uri 8) #"/")]
+      {:repo (java.net.URLDecoder/decode (first path-parts) "UTF-8")
+       :number (Integer/parseInt (second path-parts))})
+    (catch Exception _ nil)))
 
 (defn ^{:stratum 0} parse-body-question [req]
   (when-let [body-str (some-> req :body slurp)]
@@ -88,40 +95,45 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} pr-detail [uri]
-  (let [{:keys [repo number]} (parse-pr-path uri)
-        pr (->> (github/fetch-prs repo)
-                (filter #(= (:number %) number))
-                first)]
-    (if pr
-      (response/html (c/pr-detail pr))
-      (response/not-found "PR not found"))))
+  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+    (let [pr (->> (github/fetch-prs repo)
+                  (filter #(= (:number %) number))
+                  first)]
+      (if pr
+        (response/html (c/pr-detail pr))
+        (response/not-found "PR not found")))
+    (response/bad-request "Invalid PR path")))
 
 (defn ^{:stratum 1} approve [uri]
-  (let [{:keys [repo number]} (parse-pr-path uri)
-        result (github/approve-pr! repo number)]
-    (response/html (c/toast (:message result) (:success result)))))
+  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+    (let [result (github/approve-pr! repo number)]
+      (response/html (c/toast (:message result) (:success result))))
+    (response/bad-request "Invalid PR path")))
 
 (defn ^{:stratum 1} reject [uri req]
-  (let [{:keys [repo number]} (parse-pr-path uri)
-        reason (get-in req [:headers "hx-prompt"] "Changes requested")
-        result (github/request-changes! repo number reason)]
-    (response/html (c/toast (:message result) (:success result)))))
+  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+    (let [reason (get-in req [:headers "hx-prompt"] "Changes requested")
+          result (github/request-changes! repo number reason)]
+      (response/html (c/toast (:message result) (:success result))))
+    (response/bad-request "Invalid PR path")))
 
 (defn ^{:stratum 1} chat [uri req]
-  (let [{:keys [repo number]} (parse-pr-path uri)
-        question (or (parse-body-question req) "What are the key changes in this PR?")
-        diff (github/fetch-pr-diff repo number)
-        resp (if diff
-               (:response (github/chat-about-pr repo number question diff))
-               "Could not fetch PR diff. Make sure you have access to this repository.")]
-    (response/html (c/chat-message question resp))))
+  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+    (let [question (or (parse-body-question req) "What are the key changes in this PR?")
+          diff (github/fetch-pr-diff repo number)
+          resp (if diff
+                 (:response (github/chat-about-pr repo number question diff))
+                 "Could not fetch PR diff. Make sure you have access to this repository.")]
+      (response/html (c/chat-message question resp)))
+    (response/bad-request "Invalid PR path")))
 
 (defn ^{:stratum 1} summary [uri]
-  (let [{:keys [repo number]} (parse-pr-path uri)
-        result (github/generate-pr-summary repo number)]
-    (if (and (not (:success result)) (anomaly/anomaly-map? (:anomaly result)))
-      (response/from-anomaly (:anomaly result))
-      (response/html
-       (if (:success result)
-         (c/ai-summary result)
-         (c/ai-summary-error (:summary result)))))))
+  (if-let [{:keys [repo number]} (parse-pr-path uri)]
+    (let [result (github/generate-pr-summary repo number)]
+      (if (and (not (:success result)) (anomaly/anomaly-map? (:anomaly result)))
+        (response/from-anomaly (:anomaly result))
+        (response/html
+         (if (:success result)
+           (c/ai-summary result)
+           (c/ai-summary-error (:summary result))))))
+    (response/bad-request "Invalid PR path")))
