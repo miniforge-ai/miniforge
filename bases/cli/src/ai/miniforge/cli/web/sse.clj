@@ -51,7 +51,12 @@
   (when-let [sub-id (get-in @subscriptions [workflow-id channel])]
     (when-let [event-stream (get @streams workflow-id)]
       (es/unsubscribe! event-stream sub-id))
-    (swap! subscriptions update workflow-id dissoc channel)))
+    (swap! subscriptions
+           (fn [m]
+             (let [remaining (dissoc (get m workflow-id) channel)]
+               (if (empty? remaining)
+                 (dissoc m workflow-id)
+                 (assoc m workflow-id remaining)))))))
 
 (defn ^{:stratum 1} register! [workflow-id event-stream]
   (swap! streams assoc workflow-id event-stream)

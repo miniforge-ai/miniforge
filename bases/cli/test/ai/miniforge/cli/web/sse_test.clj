@@ -65,6 +65,16 @@
       (is (some? (sse/get-stream "wf-3"))
           "the event stream itself must survive a single channel closing"))))
 
+(deftest ^{:stratum 0} on-close-drops-the-workflow-key-once-its-last-channel-closes-test
+  (testing "no empty {workflow-id {}} entry is left behind in subscriptions"
+    (with-redefs [http/send! (constantly true)]
+      (sse/on-open "wf-6" :channel-a)
+      (sse/on-close "wf-6" :channel-a)
+      (is (not (contains? @sse/subscriptions "wf-6"))
+          (str "expected wf-6 to be fully removed from subscriptions, got: " @sse/subscriptions))
+      (is (some? (sse/get-stream "wf-6"))
+          "the event stream itself is unaffected — only subscription bookkeeping is pruned"))))
+
 (deftest ^{:stratum 0} on-close-is-a-no-op-for-an-unknown-channel-test
   (testing "closing a channel that was never opened doesn't throw"
     (is (nil? (sse/on-close "wf-4" :never-opened)))))
