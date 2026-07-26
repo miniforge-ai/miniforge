@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.classifier-test
   (:require
    [ai.miniforge.pr-lifecycle.classifier :as sut]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Classifier tests
 
-(deftest classify-comment-test
+;; Classifier tests
+(deftest ^{:stratum 0} classify-comment-test
   (testing "filters self comments as noise"
     (is (= {:category :noise
             :confidence :high
@@ -53,7 +52,7 @@
                                               :generate-fn (fn [_] "not-a-category"))
                         [:category :confidence :method])))))
 
-(deftest classify-comments-batch-test
+(deftest ^{:stratum 0} classify-comments-batch-test
   (testing "groups comments by category and reports stats"
     (let [result (sut/classify-comments
                   [{:body "Please add tests" :author "alice"}

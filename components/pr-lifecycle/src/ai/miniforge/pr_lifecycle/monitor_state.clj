@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-state
   "Shared monitor loop state and persistence helpers."
   (:require
@@ -26,13 +25,44 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration + state
 
-(def default-config
+;; Configuration + state
+(def ^{:stratum 0} default-config
   "Default PR monitor loop configuration loaded from shared EDN."
   (config/monitor-defaults))
 
-(defn create-monitor
+(defn ^{:stratum 0} emit!
+  "Publish an event to the configured event bus when present."
+  [monitor event]
+  (let [{:keys [event-bus logger]} (:config @monitor)]
+    (when event-bus
+      (events/publish! event-bus event logger))))
+
+(defn ^{:stratum 0} load-budget-from-disk!
+  "Load a persisted budget into monitor state when it exists."
+  [monitor pr-number]
+  (when-let [persisted (budget/load-budget pr-number)]
+    (swap! monitor assoc-in [:budgets pr-number] persisted)
+    persisted))
+
+(defn ^{:stratum 0} update-budget!
+  "Persist the latest budget state for a PR."
+  [monitor pr-number budget-state]
+  (swap! monitor assoc-in [:budgets pr-number] budget-state)
+  (budget/save-budget! budget-state))
+
+(defn ^{:stratum 0} log-loop-start!
+  "Log loop startup when a logger is present."
+  [monitor author]
+  (let [{:keys [poll-interval-ms logger]} (:config @monitor)]
+    (when logger
+      (log/info logger :pr-monitor :loop/started
+                {:message (str "PR monitor loop started for author: " author)
+                 :data {:poll-interval-ms poll-interval-ms}}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-monitor
   "Create a PR monitor loop state atom from config."
   [config]
   (let [merged (merge default-config config)]
@@ -48,19 +78,7 @@
                       :fixes-pushed []
                       :questions-answered []}})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Shared helpers
-
-(declare load-budget-from-disk!)
-
-(defn emit!
-  "Publish an event to the configured event bus when present."
-  [monitor event]
-  (let [{:keys [event-bus logger]} (:config @monitor)]
-    (when event-bus
-      (events/publish! event-bus event logger))))
-
-(defn get-or-create-budget
+(defn ^{:stratum 1} get-or-create-budget
   "Get an existing budget for a PR, loading from disk when available."
   [monitor pr-number]
   (or (get-in @monitor [:budgets pr-number])
@@ -74,25 +92,3 @@
                                    :abandon-after-hours]))]
         (swap! monitor assoc-in [:budgets pr-number] created)
         created)))
-
-(defn load-budget-from-disk!
-  "Load a persisted budget into monitor state when it exists."
-  [monitor pr-number]
-  (when-let [persisted (budget/load-budget pr-number)]
-    (swap! monitor assoc-in [:budgets pr-number] persisted)
-    persisted))
-
-(defn update-budget!
-  "Persist the latest budget state for a PR."
-  [monitor pr-number budget-state]
-  (swap! monitor assoc-in [:budgets pr-number] budget-state)
-  (budget/save-budget! budget-state))
-
-(defn log-loop-start!
-  "Log loop startup when a logger is present."
-  [monitor author]
-  (let [{:keys [poll-interval-ms logger]} (:config @monitor)]
-    (when logger
-      (log/info logger :pr-monitor :loop/started
-                {:message (str "PR monitor loop started for author: " author)
-                 :data {:poll-interval-ms poll-interval-ms}}))))

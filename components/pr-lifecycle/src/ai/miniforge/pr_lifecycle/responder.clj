@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.responder
   "Automated PR comment response — fetch review comments, generate fixes,
    push, reply, and resolve conversation threads.
@@ -34,9 +33,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; PR URL parsing and comment filtering
 
-(defn parse-pr-url
+;; PR URL parsing and comment filtering
+(defn ^{:stratum 0} parse-pr-url
   "Extract owner, repo, and PR number from a GitHub PR URL.
    Returns {:owner :repo :number} or nil."
   [url]
@@ -45,34 +44,11 @@
      :repo (nth match 2)
      :number (parse-long (nth match 3))}))
 
-(defn parse-pr-url-result
-  "Anomaly-returning version of `parse-pr-url`. Returns the parsed map
-   when `url` is a recognizable GitHub PR URL, or an `:invalid-input`
-   anomaly carrying `:url` in `:anomaly/data`.
-
-   This is the canonical, anomaly-returning entry point. The
-   orchestrator returns the anomaly unchanged so callers can decide
-   how to surface it."
-  [url]
-  (or (parse-pr-url url)
-      (anomaly/anomaly :invalid-input
-                       "Could not parse PR number from URL"
-                       {:url url})))
-
-(def ^:private bot-authors
+(def ^{:stratum 0} ^:private bot-authors
   "Authors to exclude from comment processing."
   #{"github-actions" "github-actions[bot]" "miniforge[bot]"})
 
-(defn filter-actionable-comments
-  "Filter review comments to unresolved, non-bot, code-review comments.
-   Returns vector of normalized comment maps."
-  [comments]
-  (->> comments
-       (remove #(contains? bot-authors (:comment/author %)))
-       (filter #(= :review-comment (:comment/type %)))
-       vec))
-
-(defn group-comments-by-file
+(defn ^{:stratum 0} group-comments-by-file
   "Group comments by their file path for batch processing.
    Returns [{:path :comments :description :comment-ids}]."
   [comments]
@@ -85,38 +61,22 @@
                 :description (str/join "\n\n" (map :comment/body cs))
                 :comment-ids (mapv :comment/id cs)}))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Context gathering
-
-(defn- fetch-pr-diff
+(defn- ^{:stratum 0} fetch-pr-diff
   "Fetch the PR diff once for all comment groups."
   [worktree-path pr-number]
   (let [r (process/sh "gh" "pr" "diff" (str pr-number) :dir worktree-path)]
     (when (zero? (:exit r)) (:out r))))
 
-(defn- read-file-content
+(defn- ^{:stratum 0} read-file-content
   "Read a file's content from the worktree. Returns nil if missing."
   [worktree-path path]
   (try
     (slurp (str worktree-path "/" path))
     (catch Exception _ nil)))
 
-(defn gather-context
-  "Gather PR diff and file contents for all comment groups upfront.
-   Returns {:diff string :files [{:path :content}]}."
-  [worktree-path pr-number groups]
-  (let [diff (fetch-pr-diff worktree-path pr-number)
-        paths (distinct (map :path groups))
-        files (->> paths
-                   (map (fn [p] {:path p :content (read-file-content worktree-path p)}))
-                   (filter :content)
-                   vec)]
-    {:diff diff :files files}))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Fix spec generation
-
-(defn build-fix-spec
+(defn ^{:stratum 0} build-fix-spec
   "Build a lightweight workflow spec from review comments on a file.
    Uses :comment-fix workflow (implement + gates only) instead of full SDLC.
    Includes pre-gathered file contents so the explore phase is skipped."
@@ -134,10 +94,8 @@
       file-content
       (assoc :task/existing-files [{:path path :content file-content}]))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Reply and resolution
-
-(defn reply-and-resolve!
+(defn ^{:stratum 0} reply-and-resolve!
   "Reply to a review comment and resolve its conversation thread.
    Returns {:replied? bool :resolved? bool :error string-or-nil}."
   [worktree-path pr-number comment-id message]
@@ -155,10 +113,8 @@
      :error (when-not replied?
               (get-in reply-result [:error :message] "Reply failed"))}))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Orchestration primitives
-
-(defn- fix-succeeded?
+(defn- ^{:stratum 0} fix-succeeded?
   "True when a workflow result indicates success or partial success.
    A DAG workflow may fail overall but still produce PRs for completed tasks."
   [result]
@@ -167,25 +123,7 @@
        (or (not= :failed (get result :execution/status))
            (seq (get-in result [:execution/dag-result :pr-infos])))))
 
-(defn- run-fix-for-group
-  "Run a fix workflow for a comment group. Returns result map or {:error msg}."
-  [run-fix-fn group context opts]
-  (let [spec (build-fix-spec group context)]
-    (try
-      (run-fix-fn spec opts)
-      (catch Exception e
-        {:error (.getMessage e)}))))
-
-(defn- reply-to-fixed-comments
-  "Reply and resolve all comments in a group after a successful fix."
-  [worktree-path pr-number comment-ids fix-pr-url]
-  (let [message (if fix-pr-url
-                  (str "Fixed in " fix-pr-url)
-                  "Fixed in latest push. Changes address the review feedback.")]
-    (mapv #(reply-and-resolve! worktree-path pr-number % message)
-          comment-ids)))
-
-(defn- fix-result
+(defn- ^{:stratum 0} fix-result
   "Build a normalized fix result map."
   [path comment-ids succeeded? reply-results error]
   {:path path
@@ -195,7 +133,73 @@
    :resolved? (when reply-results (every? :resolved? reply-results))
    :error error})
 
-(defn- process-comment-group
+(defn- ^{:stratum 0} respond-result
+  "Build the response summary map."
+  [pr-number comments-found files-processed fixes pushed?]
+  {:pr-number pr-number
+   :comments-found comments-found
+   :files-processed files-processed
+   :fixes fixes
+   :pushed? pushed?})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-pr-url-result
+  "Anomaly-returning version of `parse-pr-url`. Returns the parsed map
+   when `url` is a recognizable GitHub PR URL, or an `:invalid-input`
+   anomaly carrying `:url` in `:anomaly/data`.
+
+   This is the canonical, anomaly-returning entry point. The
+   orchestrator returns the anomaly unchanged so callers can decide
+   how to surface it."
+  [url]
+  (or (parse-pr-url url)
+      (anomaly/anomaly :invalid-input
+                       "Could not parse PR number from URL"
+                       {:url url})))
+
+(defn ^{:stratum 1} filter-actionable-comments
+  "Filter review comments to unresolved, non-bot, code-review comments.
+   Returns vector of normalized comment maps."
+  [comments]
+  (->> comments
+       (remove #(contains? bot-authors (:comment/author %)))
+       (filter #(= :review-comment (:comment/type %)))
+       vec))
+
+(defn ^{:stratum 1} gather-context
+  "Gather PR diff and file contents for all comment groups upfront.
+   Returns {:diff string :files [{:path :content}]}."
+  [worktree-path pr-number groups]
+  (let [diff (fetch-pr-diff worktree-path pr-number)
+        paths (distinct (map :path groups))
+        files (->> paths
+                   (map (fn [p] {:path p :content (read-file-content worktree-path p)}))
+                   (filter :content)
+                   vec)]
+    {:diff diff :files files}))
+
+(defn- ^{:stratum 1} run-fix-for-group
+  "Run a fix workflow for a comment group. Returns result map or {:error msg}."
+  [run-fix-fn group context opts]
+  (let [spec (build-fix-spec group context)]
+    (try
+      (run-fix-fn spec opts)
+      (catch Exception e
+        {:error (.getMessage e)}))))
+
+(defn- ^{:stratum 1} reply-to-fixed-comments
+  "Reply and resolve all comments in a group after a successful fix."
+  [worktree-path pr-number comment-ids fix-pr-url]
+  (let [message (if fix-pr-url
+                  (str "Fixed in " fix-pr-url)
+                  "Fixed in latest push. Changes address the review feedback.")]
+    (mapv #(reply-and-resolve! worktree-path pr-number % message)
+          comment-ids)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} process-comment-group
   "Fix one file's comments, reply on success. Returns fix result map."
   [worktree-path pr-number run-fix-fn context opts {:keys [path comment-ids] :as group}]
   (let [result (run-fix-for-group run-fix-fn group context opts)
@@ -206,7 +210,7 @@
                   (reply-to-fixed-comments worktree-path pr-number comment-ids fix-pr-url) nil)
       (fix-result path comment-ids false nil (get result :error)))))
 
-(defn fetch-actionable-comments-result
+(defn ^{:stratum 2} fetch-actionable-comments-result
   "Anomaly-returning fetch + filter. Returns
    `{:comments vector :groups vector}` on success, or a `:fault`
    anomaly when the upstream `poller/fetch-pr-comments` errors.
@@ -226,19 +230,10 @@
         {:comments actionable
          :groups (group-comments-by-file actionable)}))))
 
-(defn- respond-result
-  "Build the response summary map."
-  [pr-number comments-found files-processed fixes pushed?]
-  {:pr-number pr-number
-   :comments-found comments-found
-   :files-processed files-processed
-   :fixes fixes
-   :pushed? pushed?})
+;------------------------------------------------------------------------------ Layer 3
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Main entry point
-
-(defn respond-to-comments!
+(defn ^{:stratum 3} respond-to-comments!
   "Fetch review comments, generate fixes in parallel, push, reply, and resolve.
 
    Comment groups (one per file) are processed in parallel via futures.

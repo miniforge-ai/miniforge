@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-worklist
   "Persisted PR monitor work-list — schema, path helpers, and disk I/O.
 
@@ -57,44 +56,44 @@
    [java.security MessageDigest]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Named constants and Malli schema
 
-(def ^:private t
+;; Named constants and Malli schema
+(def ^{:stratum 0} ^:private t
   "Component-scoped message translator. All emitted strings go through this."
   (msg/create-translator "config/pr-lifecycle/messages/system.edn"
                          :pr-lifecycle/system))
 
-(def ^:private pr-monitor-dir-name
+(def ^{:stratum 0} ^:private pr-monitor-dir-name
   "Subdirectory name under home-dir for all work-list files."
   "pr-monitor")
 
-(def ^:private worklist-file-extension
+(def ^{:stratum 0} ^:private worklist-file-extension
   "File extension for persisted work-list EDN files."
   ".edn")
 
-(def ^:private sha-algorithm
+(def ^{:stratum 0} ^:private sha-algorithm
   "Hash algorithm for repo-key derivation."
   "SHA-256")
 
-(def ^:private repo-key-prefix-length
+(def ^{:stratum 0} ^:private repo-key-prefix-length
   "Number of hex characters taken from the SHA-256 digest as the repo-key."
   12)
 
-(def ^:private unsigned-byte-mask
+(def ^{:stratum 0} ^:private unsigned-byte-mask
   "Mask for converting a signed Java byte to unsigned (0–255) for hex formatting."
   0xff)
 
-(def ^:private open-pr-state
+(def ^{:stratum 0} ^:private open-pr-state
   "GitHub PR state string indicating the PR is still open."
   "OPEN")
 
-(def ^:private gh-state-pattern
+(def ^{:stratum 0} ^:private gh-state-pattern
   "Regex to extract the state field from `gh pr view --json state` output.
    Tolerates optional whitespace around the colon — `gh`'s JSON is compact
    today, but a pretty-printed `\"state\": \"OPEN\"` must still match."
   #"\"state\"\s*:\s*\"([^\"]+)\"")
 
-(def WorklistPrEntry
+(def ^{:stratum 0} WorklistPrEntry
   "Malli schema for a single PR entry inside a WorklistEntry.
 
    Operational parameters (:pr/poll-interval, :pr/abandon-after-hours)
@@ -108,7 +107,9 @@
    [:pr/poll-interval {:optional true} :int]
    [:pr/abandon-after-hours {:optional true} :int]])
 
-(def WorklistEntry
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} WorklistEntry
   "Malli schema for the persisted work-list EDN file.
 
    - :worklist/repo-key   — 12-hex-char prefix of SHA-256(remote-origin-url)
@@ -119,27 +120,15 @@
    [:worklist/prs [:vector WorklistPrEntry]]
    [:worklist/updated-at inst?]])
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pure helpers
-
-(defn- sha256-hex
+(defn- ^{:stratum 1} sha256-hex
   "Return the full lowercase hex SHA-256 digest of `s`."
   [s]
   (let [md    (MessageDigest/getInstance sha-algorithm)
         bytes (.digest md (.getBytes ^String s StandardCharsets/UTF_8))]
     (apply str (map #(format "%02x" (bit-and % unsigned-byte-mask)) bytes))))
 
-(defn repo-key
-  "Derive a stable, filesystem-safe key from `remote-url` (typically the
-   value of `git remote get-url origin`).
-
-   Returns the first `repo-key-prefix-length` characters of the lowercase
-   hex SHA-256 digest — long enough to be collision-resistant across the
-   repos a single monitor instance will track."
-  [remote-url]
-  (subs (sha256-hex remote-url) 0 repo-key-prefix-length))
-
-(defn worklist-path
+(defn ^{:stratum 1} worklist-path
   "Compute the absolute path for the work-list EDN file.
 
    - `home-dir` — miniforge home directory (from app-config/home-dir)
@@ -149,74 +138,7 @@
   [home-dir rkey]
   (str (fs/path home-dir pr-monitor-dir-name (str rkey worklist-file-extension))))
 
-(defn- validate-entry
-  "Return `entry` when it satisfies WorklistEntry, or an :invalid-input anomaly.
-   Pure — no I/O."
-  [entry]
-  (if (m/validate WorklistEntry entry)
-    entry
-    (anomaly/validation-anomaly
-     (t :worklist/validation-failed)
-     :WorklistEntry
-     entry
-     (me/humanize (m/explain WorklistEntry entry)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Disk I/O and GitHub shell calls
-
-(defn persist-worklist!
-  "Validate `entry` against WorklistEntry and write it as EDN to `path`.
-   Creates parent directories as needed.
-
-   Returns:
-   - `(schema/success :worklist entry)` on success.
-   - `(schema/failure :worklist <msg>)` on validation or I/O failure.
-   Dynamic context (path, errors) in the :error value, not the message key."
-  [path entry]
-  (let [validated (validate-entry entry)]
-    (if (anomaly/anomaly? validated)
-      (schema/failure :worklist
-                      {:message (t :worklist/invalid-entry)
-                       :errors  (get-in validated [:anomaly/data :errors])})
-      (try+
-       (fs/create-dirs (fs/parent path))
-       (spit path (pr-str entry))
-       (schema/success :worklist entry)
-       (catch Object ex
-         (schema/failure :worklist
-                         {:message (t :worklist/write-failed)
-                          :path    path
-                          :cause   (ex-message ex)}))))))
-
-(defn load-worklist
-  "Read and validate a WorklistEntry EDN from `path`.
-
-   Returns:
-   - `(schema/success :worklist entry)` on success.
-   - `(schema/failure :worklist <msg>)` when path is missing, unreadable,
-     or content does not satisfy WorklistEntry."
-  [path]
-  (cond
-    (not (fs/exists? path))
-    (schema/failure :worklist {:message (t :worklist/not-found) :path path})
-
-    :else
-    (try+
-     (let [entry     (edn/read-string (slurp path))
-           validated (validate-entry entry)]
-       (if (anomaly/anomaly? validated)
-         (schema/failure :worklist
-                         {:message (t :worklist/corrupt)
-                          :path    path
-                          :errors  (get-in validated [:anomaly/data :errors])})
-         (schema/success :worklist entry)))
-     (catch Object ex
-       (schema/failure :worklist
-                       {:message (t :worklist/read-failed)
-                        :path    path
-                        :cause   (ex-message ex)})))))
-
-(defn- fetch-pr-state
+(defn- ^{:stratum 1} fetch-pr-state
   "Shell `gh pr view <number> --repo <repo> --json state` and return the
    state string (\"OPEN\", \"MERGED\", \"CLOSED\"), or an anomaly on
    process failure or missing output field."
@@ -241,7 +163,31 @@
                       {:pr/number number :pr/repo repo
                        :cause (ex-message ex)}))))
 
-(defn prune-closed-prs
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} repo-key
+  "Derive a stable, filesystem-safe key from `remote-url` (typically the
+   value of `git remote get-url origin`).
+
+   Returns the first `repo-key-prefix-length` characters of the lowercase
+   hex SHA-256 digest — long enough to be collision-resistant across the
+   repos a single monitor instance will track."
+  [remote-url]
+  (subs (sha256-hex remote-url) 0 repo-key-prefix-length))
+
+(defn- ^{:stratum 2} validate-entry
+  "Return `entry` when it satisfies WorklistEntry, or an :invalid-input anomaly.
+   Pure — no I/O."
+  [entry]
+  (if (m/validate WorklistEntry entry)
+    entry
+    (anomaly/validation-anomaly
+     (t :worklist/validation-failed)
+     :WorklistEntry
+     entry
+     (me/humanize (m/explain WorklistEntry entry)))))
+
+(defn ^{:stratum 2} prune-closed-prs
   "Remove merged or closed PR entries from `entry` by querying GitHub.
 
    For each PR in `:worklist/prs`, shells `gh pr view <number> --repo
@@ -274,6 +220,61 @@
                    (if (= state open-pr-state)
                      (conj kept pr-entry)
                      kept))))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Disk I/O and GitHub shell calls
+(defn ^{:stratum 3} persist-worklist!
+  "Validate `entry` against WorklistEntry and write it as EDN to `path`.
+   Creates parent directories as needed.
+
+   Returns:
+   - `(schema/success :worklist entry)` on success.
+   - `(schema/failure :worklist <msg>)` on validation or I/O failure.
+   Dynamic context (path, errors) in the :error value, not the message key."
+  [path entry]
+  (let [validated (validate-entry entry)]
+    (if (anomaly/anomaly? validated)
+      (schema/failure :worklist
+                      {:message (t :worklist/invalid-entry)
+                       :errors  (get-in validated [:anomaly/data :errors])})
+      (try+
+       (fs/create-dirs (fs/parent path))
+       (spit path (pr-str entry))
+       (schema/success :worklist entry)
+       (catch Object ex
+         (schema/failure :worklist
+                         {:message (t :worklist/write-failed)
+                          :path    path
+                          :cause   (ex-message ex)}))))))
+
+(defn ^{:stratum 3} load-worklist
+  "Read and validate a WorklistEntry EDN from `path`.
+
+   Returns:
+   - `(schema/success :worklist entry)` on success.
+   - `(schema/failure :worklist <msg>)` when path is missing, unreadable,
+     or content does not satisfy WorklistEntry."
+  [path]
+  (cond
+    (not (fs/exists? path))
+    (schema/failure :worklist {:message (t :worklist/not-found) :path path})
+
+    :else
+    (try+
+     (let [entry     (edn/read-string (slurp path))
+           validated (validate-entry entry)]
+       (if (anomaly/anomaly? validated)
+         (schema/failure :worklist
+                         {:message (t :worklist/corrupt)
+                          :path    path
+                          :errors  (get-in validated [:anomaly/data :errors])})
+         (schema/success :worklist entry)))
+     (catch Object ex
+       (schema/failure :worklist
+                       {:message (t :worklist/read-failed)
+                        :path    path
+                        :cause   (ex-message ex)})))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

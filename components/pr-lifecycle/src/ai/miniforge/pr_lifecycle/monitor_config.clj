@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-config
   "Load shared PR monitor defaults from EDN configuration."
   (:require
@@ -19,9 +18,9 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas + config loading
 
-(def MonitorDefaults
+;; Schemas + config loading
+(def ^{:stratum 0} MonitorDefaults
   [:map
    [:poll-interval-ms nat-int?]
    [:self-author {:optional true} [:maybe :string]]
@@ -29,15 +28,19 @@
    [:max-total-fix-attempts-per-pr pos-int?]
    [:abandon-after-hours pos-int?]])
 
-(def MonitorConfig
-  [:map
-   [:pr-monitor/defaults MonitorDefaults]])
-
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-(defn- load-monitor-config
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} MonitorConfig
+  [:map
+   [:pr-monitor/defaults MonitorDefaults]])
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} load-monitor-config
   []
   (->> (config/load-config-resource
         "config/pr-monitor/defaults.edn"
@@ -45,18 +48,22 @@
         {:hint "Add components/pr-lifecycle/resources to your classpath"})
        (validate! MonitorConfig)))
 
-(def ^:private monitor-config
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} ^:private monitor-config
   (delay (load-monitor-config)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Public helpers
+;------------------------------------------------------------------------------ Layer 4
 
-(defn monitor-defaults
+;; Public helpers
+(defn ^{:stratum 4} monitor-defaults
   "Return the shared PR monitor defaults map."
   []
   (:pr-monitor/defaults @monitor-config))
 
-(defn budget-defaults
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} budget-defaults
   "Return just the budget-related defaults used by the monitor loop."
   []
   (select-keys (monitor-defaults)

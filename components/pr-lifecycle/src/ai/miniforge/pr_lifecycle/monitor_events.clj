@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-events
   "PR monitor loop event types and constructors.
 
@@ -23,9 +22,9 @@
    [ai.miniforge.pr-lifecycle.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event types
 
-(def monitor-event-types
+;; Event types
+(def ^{:stratum 0} monitor-event-types
   "Valid PR monitor loop event types."
   #{:pr-monitor/poll-completed       ; Poll cycle completed
     :pr-monitor/comment-received     ; New comment detected
@@ -40,25 +39,23 @@
     :pr-monitor/escalated            ; Escalated to human intervention
     :pr-monitor/cycle-completed      ; Full monitor cycle completed
     :pr-monitor/loop-started         ; Monitor loop started for a PR
-    :pr-monitor/loop-stopped})       ; Monitor loop stopped
+    :pr-monitor/loop-stopped})  ; Monitor loop stopped
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Event constructors
-
-(defn poll-completed
+(defn ^{:stratum 0} poll-completed
   "Create a poll-completed event."
   [pr-number data]
   (events/create-event :pr-monitor/poll-completed
                        (merge {:pr/id pr-number} data)))
 
-(defn comment-received
+(defn ^{:stratum 0} comment-received
   "Create a comment-received event."
   [pr-number comment-data]
   (events/create-event :pr-monitor/comment-received
                        {:pr/id pr-number
                         :comment comment-data}))
 
-(defn comment-classified
+(defn ^{:stratum 0} comment-classified
   "Create a comment-classified event."
   [pr-number comment-data classification]
   (events/create-event :pr-monitor/comment-classified
@@ -66,7 +63,7 @@
                         :comment comment-data
                         :classification classification}))
 
-(defn decision-recorded
+(defn ^{:stratum 0} decision-recorded
   "Create a decision-recorded event: the typed classify→act decision for a
    comment. `action` is the chosen verb (:fix :answer :approve :skip), recorded
    as one act with provenance back to the comment and its classification."
@@ -78,7 +75,7 @@
                         :decision/category category
                         :decision/confidence confidence}))
 
-(defn fix-started
+(defn ^{:stratum 0} fix-started
   "Create a fix-started event."
   [pr-number comment-id attempt]
   (events/create-event :pr-monitor/fix-started
@@ -86,7 +83,7 @@
                         :comment/id comment-id
                         :fix/attempt attempt}))
 
-(defn fix-pushed
+(defn ^{:stratum 0} fix-pushed
   "Create a fix-pushed event."
   [pr-number comment-id commit-sha]
   (events/create-event :pr-monitor/fix-pushed
@@ -94,7 +91,7 @@
                         :comment/id comment-id
                         :pr/sha commit-sha}))
 
-(defn reply-posted
+(defn ^{:stratum 0} reply-posted
   "Create a reply-posted event."
   [pr-number comment-id reply-type]
   (events/create-event :pr-monitor/reply-posted
@@ -102,14 +99,14 @@
                         :comment/id comment-id
                         :reply/type reply-type}))
 
-(defn question-answered
+(defn ^{:stratum 0} question-answered
   "Create a question-answered event."
   [pr-number comment-id]
   (events/create-event :pr-monitor/question-answered
                        {:pr/id pr-number
                         :comment/id comment-id}))
 
-(defn budget-warning
+(defn ^{:stratum 0} budget-warning
   "Create a budget-warning event."
   [pr-number budget-remaining budget-total]
   (events/create-event :pr-monitor/budget-warning
@@ -117,13 +114,13 @@
                         :budget/remaining budget-remaining
                         :budget/total budget-total}))
 
-(defn budget-exhausted
+(defn ^{:stratum 0} budget-exhausted
   "Create a budget-exhausted event. This is a hard stop."
   [pr-number budget-data]
   (events/create-event :pr-monitor/budget-exhausted
                        (merge {:pr/id pr-number} budget-data)))
 
-(defn escalated
+(defn ^{:stratum 0} escalated
   "Create an escalated-to-human event."
   [pr-number reason data]
   (events/create-event :pr-monitor/escalated
@@ -131,13 +128,13 @@
                                :escalation/reason reason}
                               data)))
 
-(defn cycle-completed
+(defn ^{:stratum 0} cycle-completed
   "Create a cycle-completed event."
   [pr-number cycle-data]
   (events/create-event :pr-monitor/cycle-completed
                        (merge {:pr/id pr-number} cycle-data)))
 
-(defn loop-started
+(defn ^{:stratum 0} loop-started
   "Create a loop-started event."
   [pr-number config]
   (events/create-event :pr-monitor/loop-started
@@ -147,7 +144,7 @@
                                                      :max-total-fix-attempts-per-pr
                                                      :abandon-after-hours])}))
 
-(defn loop-stopped
+(defn ^{:stratum 0} loop-stopped
   "Create a loop-stopped event."
   [pr-number reason]
   (events/create-event :pr-monitor/loop-stopped

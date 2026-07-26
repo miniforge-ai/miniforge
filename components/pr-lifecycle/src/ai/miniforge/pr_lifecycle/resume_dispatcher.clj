@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.resume-dispatcher
   "Resume Signal Dispatcher (N13 §2.7 §Dispatch).
 
@@ -51,9 +50,9 @@
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration + primer schema
 
-(def ^:private config
+;; Configuration + primer schema
+(def ^{:stratum 0} ^:private config
   "Component config loaded from
    `resources/config/resume-dispatcher/defaults.edn`. Tunables for
    webhook retry budget, request timeout, etc., live in EDN so
@@ -62,26 +61,14 @@
       slurp
       edn/read-string))
 
-(def webhook-max-attempts
-  "Number of webhook POST attempts (initial + retries) before giving up."
-  (:webhook/max-attempts config))
-
-(def webhook-timeout-ms
-  "Per-attempt timeout for the webhook POST."
-  (:webhook/timeout-ms config))
-
-(def webhook-backoff-base-ms
-  "Initial backoff (doubled per retry)."
-  (:webhook/backoff-base-ms config))
-
-(def supported-channel-kinds
+(def ^{:stratum 0} supported-channel-kinds
   "Channel kinds with a real handler in v0.
    `:pty` and `:miniforge-ipc` are recognized as valid registry
    values (per listener-registry config) but dispatch is not wired
    yet — they return `:resume-dispatcher/not-yet-wired`."
   #{:webhook})
 
-(def ResumePrimer
+(def ^{:stratum 0} ResumePrimer
   "Resume primer payload delivered to each listener (N13 §2.7)."
   [:map
    [:resume/pr-url       :string]
@@ -92,10 +79,8 @@
                           [:agent/id   :string]
                           [:session/id {:optional true} [:maybe :string]]]]])
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pure helpers (primer construction + channel classification)
-
-(defn build-primer
+(defn ^{:stratum 0} build-primer
   "Pure: assemble the resume primer per N13 §2.7 from a merged-PR
    record + a single listener entry.
 
@@ -112,38 +97,7 @@
    :resume/listener     (cond-> {:agent/id (:agent/id listener)}
                           (:session/id listener) (assoc :session/id (:session/id listener)))})
 
-(defn validate-primer-result
-  "Validate primer shape. Returns a DAG ok result carrying the primer, or a
-   DAG err result with the same diagnostic payload the legacy throwing wrapper
-   exposes."
-  [primer]
-  (if (m/validate ResumePrimer primer)
-    (dag/ok primer)
-    (dag/err :resume-dispatcher/invalid-primer
-             "invalid resume primer"
-             {:errors (m/explain ResumePrimer primer)
-              :anomaly :resume-dispatcher/invalid-primer
-              :primer primer})))
-
-(defn validate-primer!
-  "Boundary wrapper around the canonical DAG-result-returning
-   `validate-primer-result`. Prefer `validate-primer-result`; this retains
-   the historical ex-info contract for direct callers."
-  [primer]
-  (let [result (validate-primer-result primer)]
-    (if (dag/ok? result)
-      (:data result)
-      (throw (ex-info (get-in result [:error :message])
-                      (get-in result [:error :data]))))))
-
-(defn channel-supported?
-  "Pure predicate: true when the listener's channel kind has a real
-   handler in v0."
-  [listener]
-  (contains? supported-channel-kinds
-             (get-in listener [:resume-channel :channel/kind])))
-
-(defn- not-yet-wired-error
+(defn- ^{:stratum 0} not-yet-wired-error
   "Build the typed error returned for `:pty` / `:miniforge-ipc`
    listeners until the cooperating runtimes ship."
   [listener]
@@ -155,51 +109,7 @@
              {:channel/kind kind
               :listener/id  (:listener/id listener)})))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Channel handlers (per-kind I/O)
-
-(defn- backoff-ms
-  "Pure: exponential backoff for webhook retries — base * 2^attempt."
-  [attempt]
-  (* webhook-backoff-base-ms (long (Math/pow 2 attempt))))
-
-(defn- timeout-seconds
-  "Convert `webhook-timeout-ms` to a curl `--max-time` string with
-   millisecond precision. `curl --max-time` accepts decimals, so we
-   format `<seconds>.<thousandths>` rather than `(quot ms 1000)` —
-   the latter truncates to 0 if operators tune `:webhook/timeout-ms`
-   below 1000ms, and `--max-time 0` disables the timeout entirely
-   (would let the dispatcher hang on a slow/broken endpoint)."
-  []
-  (format "%.3f" (/ (double webhook-timeout-ms) 1000.0)))
-
-(defn- post-webhook-once
-  "Single HTTP POST attempt to the listener's `:channel/target` URL.
-   Returns DAG result. Curl invoked via `babashka.process` to keep
-   this brick BB-compatible without pulling extra HTTP deps."
-  [target-url json-body]
-  (try
-    (let [r (process/shell {:in json-body
-                            :out :string
-                            :err :string
-                            :continue true}
-                           "curl" "--silent" "--show-error" "--fail"
-                           "--max-time" (timeout-seconds)
-                           "-X" "POST"
-                           "-H" "Content-Type: application/json"
-                           "--data-binary" "@-"
-                           target-url)]
-      (if (zero? (:exit r))
-        (dag/ok {:body (str/trim (:out r ""))})
-        (dag/err :resume-dispatcher/webhook-http-failed
-                 (str "curl exit " (:exit r) ": " (str/trim (:err r "")))
-                 {:exit-code (:exit r) :target target-url})))
-    (catch Throwable e
-      (dag/err :resume-dispatcher/webhook-exception
-               (.getMessage e)
-               {:target target-url}))))
-
-(defn sleep!
+(defn ^{:stratum 0} sleep!
   "Synchronous backoff wait between retry attempts. Wraps
    `Thread/sleep` in a redefable var so unit tests can null it out
    without forcing `#'ns/var` quoting on a private.
@@ -229,7 +139,100 @@
   [ms]
   (Thread/sleep (long ms)))
 
-(defn- post-webhook-with-retry
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} webhook-max-attempts
+  "Number of webhook POST attempts (initial + retries) before giving up."
+  (:webhook/max-attempts config))
+
+(def ^{:stratum 1} webhook-timeout-ms
+  "Per-attempt timeout for the webhook POST."
+  (:webhook/timeout-ms config))
+
+(def ^{:stratum 1} webhook-backoff-base-ms
+  "Initial backoff (doubled per retry)."
+  (:webhook/backoff-base-ms config))
+
+(defn ^{:stratum 1} validate-primer-result
+  "Validate primer shape. Returns a DAG ok result carrying the primer, or a
+   DAG err result with the same diagnostic payload the legacy throwing wrapper
+   exposes."
+  [primer]
+  (if (m/validate ResumePrimer primer)
+    (dag/ok primer)
+    (dag/err :resume-dispatcher/invalid-primer
+             "invalid resume primer"
+             {:errors (m/explain ResumePrimer primer)
+              :anomaly :resume-dispatcher/invalid-primer
+              :primer primer})))
+
+(defn ^{:stratum 1} channel-supported?
+  "Pure predicate: true when the listener's channel kind has a real
+   handler in v0."
+  [listener]
+  (contains? supported-channel-kinds
+             (get-in listener [:resume-channel :channel/kind])))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} validate-primer!
+  "Boundary wrapper around the canonical DAG-result-returning
+   `validate-primer-result`. Prefer `validate-primer-result`; this retains
+   the historical ex-info contract for direct callers."
+  [primer]
+  (let [result (validate-primer-result primer)]
+    (if (dag/ok? result)
+      (:data result)
+      (throw (ex-info (get-in result [:error :message])
+                      (get-in result [:error :data]))))))
+
+;; Channel handlers (per-kind I/O)
+(defn- ^{:stratum 2} backoff-ms
+  "Pure: exponential backoff for webhook retries — base * 2^attempt."
+  [attempt]
+  (* webhook-backoff-base-ms (long (Math/pow 2 attempt))))
+
+(defn- ^{:stratum 2} timeout-seconds
+  "Convert `webhook-timeout-ms` to a curl `--max-time` string with
+   millisecond precision. `curl --max-time` accepts decimals, so we
+   format `<seconds>.<thousandths>` rather than `(quot ms 1000)` —
+   the latter truncates to 0 if operators tune `:webhook/timeout-ms`
+   below 1000ms, and `--max-time 0` disables the timeout entirely
+   (would let the dispatcher hang on a slow/broken endpoint)."
+  []
+  (format "%.3f" (/ (double webhook-timeout-ms) 1000.0)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} post-webhook-once
+  "Single HTTP POST attempt to the listener's `:channel/target` URL.
+   Returns DAG result. Curl invoked via `babashka.process` to keep
+   this brick BB-compatible without pulling extra HTTP deps."
+  [target-url json-body]
+  (try
+    (let [r (process/shell {:in json-body
+                            :out :string
+                            :err :string
+                            :continue true}
+                           "curl" "--silent" "--show-error" "--fail"
+                           "--max-time" (timeout-seconds)
+                           "-X" "POST"
+                           "-H" "Content-Type: application/json"
+                           "--data-binary" "@-"
+                           target-url)]
+      (if (zero? (:exit r))
+        (dag/ok {:body (str/trim (:out r ""))})
+        (dag/err :resume-dispatcher/webhook-http-failed
+                 (str "curl exit " (:exit r) ": " (str/trim (:err r "")))
+                 {:exit-code (:exit r) :target target-url})))
+    (catch Throwable e
+      (dag/err :resume-dispatcher/webhook-exception
+               (.getMessage e)
+               {:target target-url}))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} post-webhook-with-retry
   "Webhook POST with bounded retries + exponential backoff.
 
    Backoff schedule: a failed attempt at index `i` sleeps
@@ -258,7 +261,9 @@
           (sleep! (backoff-ms attempt))
           (recur (inc attempt)))))))
 
-(defn- dispatch-via-webhook!
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} dispatch-via-webhook!
   "Send the primer to the listener's webhook URL. Returns DAG result.
    Cheshire's default keyword serialization already preserves the
    `<ns>/<name>` form (e.g. `:resume/pr-url → \"resume/pr-url\"`),
@@ -276,15 +281,17 @@
       :else
       (post-webhook-with-retry target body))))
 
-(def ^:private channel-handlers
+;------------------------------------------------------------------------------ Layer 6
+
+(def ^{:stratum 6} ^:private channel-handlers
   "Channel-kind → handler. Closed v0 set; unsupported kinds route to
    `not-yet-wired-error`."
   {:webhook dispatch-via-webhook!})
 
-;------------------------------------------------------------------------------ Layer 3
-;; Dispatcher entry points (orchestrate registry + channel + transition)
+;------------------------------------------------------------------------------ Layer 7
 
-(defn dispatch-to-channel!
+;; Dispatcher entry points (orchestrate registry + channel + transition)
+(defn ^{:stratum 7} dispatch-to-channel!
   "Pure-ish wrapper: validate primer, look up channel handler,
    invoke. Returns DAG result. Does NOT mark the listener
    `:dispatched` — that's the caller's job after success."
@@ -298,7 +305,9 @@
           (handler (:data primer-result) listener)
           (not-yet-wired-error listener))))))
 
-(defn dispatch-listener!
+;------------------------------------------------------------------------------ Layer 8
+
+(defn ^{:stratum 8} dispatch-listener!
   "Build primer + dispatch + mark dispatched on success.
    Returns `(dag/ok {:listener/id ... :dispatch-id ... :outcome :delivered})`
    on success or the failing DAG result with `:listener/id` attached
@@ -334,7 +343,9 @@
                     :dispatch-id dispatch-id
                     :mark-error  (:error mark-r)}))))))
 
-(defn dispatch-pr-merge!
+;------------------------------------------------------------------------------ Layer 9
+
+(defn ^{:stratum 9} dispatch-pr-merge!
   "Walk every `:active` listener for `pr-url` and dispatch each.
    Always returns a DAG result for shape consistency:
 

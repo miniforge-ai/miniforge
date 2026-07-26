@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.merge-test
   "Unit tests for merge policy and readiness evaluation.
 
@@ -27,17 +26,17 @@
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
    [ai.miniforge.pr-lifecycle.merge :as merge]))
 
-;------------------------------------------------------------------------------ Merge Methods
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest merge-methods-test
+;------------------------------------------------------------------------------ Merge Methods
+(deftest ^{:stratum 0} merge-methods-test
   (testing "All merge methods are defined"
     (is (= 3 (count merge/merge-methods)))
     (are [method] (contains? merge/merge-methods method)
       :merge :squash :rebase)))
 
 ;------------------------------------------------------------------------------ Default Merge Policy
-
-(deftest default-merge-policy-test
+(deftest ^{:stratum 0} default-merge-policy-test
   (testing "Default policy has expected values"
     (let [policy merge/default-merge-policy]
       (is (= :squash (:method policy))
@@ -51,8 +50,7 @@
       (is (true? (:auto-rebase-on-stale? policy))))))
 
 ;------------------------------------------------------------------------------ Merge Readiness Evaluation
-
-(deftest evaluate-merge-readiness-all-green-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-all-green-test
   (testing "All checks passing yields ready"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? true}))
@@ -67,7 +65,7 @@
         (is (true? (:ready? result)))
         (is (empty? (:blocking result)))))))
 
-(deftest evaluate-merge-readiness-ci-not-green-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-ci-not-green-test
   (testing "CI not green blocks merge"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? false}))
@@ -82,7 +80,7 @@
         (is (false? (:ready? result)))
         (is (some #{:ci-not-green} (:blocking result)))))))
 
-(deftest evaluate-merge-readiness-not-approved-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-not-approved-test
   (testing "Missing approval blocks merge"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? true}))
@@ -97,7 +95,7 @@
         (is (false? (:ready? result)))
         (is (some #{:not-approved} (:blocking result)))))))
 
-(deftest evaluate-merge-readiness-branch-stale-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-branch-stale-test
   (testing "Stale branch blocks merge"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? true}))
@@ -112,7 +110,7 @@
         (is (false? (:ready? result)))
         (is (some #{:branch-not-up-to-date} (:blocking result)))))))
 
-(deftest evaluate-merge-readiness-unresolved-threads-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-unresolved-threads-test
   (testing "Unresolved threads block merge"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? true}))
@@ -127,7 +125,7 @@
         (is (false? (:ready? result)))
         (is (some #{:unresolved-threads} (:blocking result)))))))
 
-(deftest evaluate-merge-readiness-multiple-blockers-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-multiple-blockers-test
   (testing "Multiple blocking conditions are all reported"
     (with-redefs [merge/check-ci-status
                   (fn [_ _] (dag/ok {:ci-green? false}))
@@ -142,7 +140,7 @@
         (is (false? (:ready? result)))
         (is (= 4 (count (:blocking result))))))))
 
-(deftest evaluate-merge-readiness-relaxed-policy-test
+(deftest ^{:stratum 0} evaluate-merge-readiness-relaxed-policy-test
   (testing "Relaxed policy skips disabled checks"
     (let [relaxed-policy {:method :squash
                           :require-ci-green? false
@@ -156,8 +154,7 @@
       (is (empty? (:blocking result))))))
 
 ;------------------------------------------------------------------------------ Attempt Merge with Mocks
-
-(deftest attempt-merge-ready-and-succeeds-test
+(deftest ^{:stratum 0} attempt-merge-ready-and-succeeds-test
   (testing "Merge succeeds when ready"
     (with-redefs [merge/evaluate-merge-readiness
                   (fn [_ _ _] {:ready? true :checks {} :blocking []})
@@ -169,7 +166,7 @@
         (is (dag/ok? result))
         (is (true? (:merged? (:data result))))))))
 
-(deftest attempt-merge-not-ready-no-rebase-test
+(deftest ^{:stratum 0} attempt-merge-not-ready-no-rebase-test
   (testing "Merge blocked without auto-rebase yields error"
     (with-redefs [merge/evaluate-merge-readiness
                   (fn [_ _ _] {:ready? false
@@ -182,8 +179,7 @@
         (is (dag/err? result))))))
 
 ;------------------------------------------------------------------------------ Stage 3d: conflict-resolution dispatch
-
-(def ^:private conflicting-readiness
+(def ^{:stratum 0} ^:private conflicting-readiness
   "Readiness map shaped like evaluate-merge-readiness output where
    the branch check failed via CONFLICTING (DIRTY mergeStateStatus)."
   {:ready? false
@@ -191,7 +187,42 @@
                              :raw "{\"mergeable\":\"CONFLICTING\",\"mergeStateStatus\":\"DIRTY\"}"})}
    :blocking [:branch-not-up-to-date]})
 
-(deftest attempt-merge-conflicting-engages-resolver-test
+(deftest ^{:stratum 0} pr-info-from-gh-rejects-malformed-json-test
+  (testing "PR #805 review fix: pr-info-from-gh now parses gh's
+            JSON output via Cheshire (the same parser
+            github.clj / pr_poller.clj already use). When gh's
+            output isn't valid JSON, return a structured
+            :pr-info-invalid-json dag/err instead of silently
+            returning nils. The previous regex parser would have
+            quietly succeeded on partial matches and broken
+            downstream — Cheshire fails loud."
+    (with-redefs [merge/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output "not actually json {{{"}))]
+      (let [r (#'merge/pr-info-from-gh "/tmp" 123)]
+        (is (dag/err? r))
+        (is (= :pr-info-invalid-json (:code (:error r))))))))
+
+(deftest ^{:stratum 0} pr-info-from-gh-parses-valid-json-test
+  (testing "Happy path: well-formed gh JSON output parses into
+            the {:pr/* ...} shape via Cheshire."
+    (with-redefs [merge/run-gh-command
+                  (fn [_ _]
+                    (dag/ok {:output (str "{\"number\":42,"
+                                          "\"headRefName\":\"feat/y\","
+                                          "\"baseRefName\":\"develop\","
+                                          "\"headRefOid\":\"sha-head\","
+                                          "\"baseRefOid\":\"sha-base\"}")}))]
+      (let [r (#'merge/pr-info-from-gh "/tmp" 42)]
+        (is (dag/ok? r))
+        (is (= "feat/y" (:pr/branch (:data r))))
+        (is (= "develop" (:pr/base (:data r))))
+        (is (= "sha-head" (:pr/head-sha (:data r))))
+        (is (= "sha-base" (:pr/base-sha (:data r))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} attempt-merge-conflicting-engages-resolver-test
   (testing "When branch-check raw classifies as :conflicting AND
             policy enables auto-resolve AND context carries
             :resolve-fn, attempt-merge dispatches to
@@ -229,7 +260,7 @@
               "attempt-merge returns the resolution outcome directly
                — no rebase fallback when conflict-resolution engaged"))))))
 
-(deftest attempt-merge-conflicting-without-resolver-falls-through-test
+(deftest ^{:stratum 1} attempt-merge-conflicting-without-resolver-falls-through-test
   (testing "When the branch is :conflicting but context has no
             :resolve-fn (workflow side didn't inject one), the
             conflict-resolution dispatch declines (returns nil)
@@ -248,7 +279,7 @@
         (is (= :not-ready (:code (:error result)))
             "fell through to the not-ready path")))))
 
-(deftest attempt-merge-conflicting-unresolvable-anomaly-becomes-dag-err-test
+(deftest ^{:stratum 1} attempt-merge-conflicting-unresolvable-anomaly-becomes-dag-err-test
   (testing "PR #805 review fix: conflict-resolution can return a
             terminal `:dag-multi-parent-unresolvable` anomaly map.
             Letting that bubble out of attempt-merge breaks the
@@ -289,40 +320,7 @@
           (is (= terminal-anomaly (get-in result [:error :data :anomaly]))
               "original anomaly preserved for diagnostic surfacing"))))))
 
-(deftest pr-info-from-gh-rejects-malformed-json-test
-  (testing "PR #805 review fix: pr-info-from-gh now parses gh's
-            JSON output via Cheshire (the same parser
-            github.clj / pr_poller.clj already use). When gh's
-            output isn't valid JSON, return a structured
-            :pr-info-invalid-json dag/err instead of silently
-            returning nils. The previous regex parser would have
-            quietly succeeded on partial matches and broken
-            downstream — Cheshire fails loud."
-    (with-redefs [merge/run-gh-command
-                  (fn [_ _]
-                    (dag/ok {:output "not actually json {{{"}))]
-      (let [r (#'merge/pr-info-from-gh "/tmp" 123)]
-        (is (dag/err? r))
-        (is (= :pr-info-invalid-json (:code (:error r))))))))
-
-(deftest pr-info-from-gh-parses-valid-json-test
-  (testing "Happy path: well-formed gh JSON output parses into
-            the {:pr/* ...} shape via Cheshire."
-    (with-redefs [merge/run-gh-command
-                  (fn [_ _]
-                    (dag/ok {:output (str "{\"number\":42,"
-                                          "\"headRefName\":\"feat/y\","
-                                          "\"baseRefName\":\"develop\","
-                                          "\"headRefOid\":\"sha-head\","
-                                          "\"baseRefOid\":\"sha-base\"}")}))]
-      (let [r (#'merge/pr-info-from-gh "/tmp" 42)]
-        (is (dag/ok? r))
-        (is (= "feat/y" (:pr/branch (:data r))))
-        (is (= "develop" (:pr/base (:data r))))
-        (is (= "sha-head" (:pr/head-sha (:data r))))
-        (is (= "sha-base" (:pr/base-sha (:data r))))))))
-
-(deftest attempt-merge-conflicting-with-policy-disabled-falls-through-test
+(deftest ^{:stratum 1} attempt-merge-conflicting-with-policy-disabled-falls-through-test
   (testing "Even with a :resolve-fn on context, if policy's
             :auto-resolve-conflicts? is false, the dispatch
             declines and we fall through to rebase/not-ready.

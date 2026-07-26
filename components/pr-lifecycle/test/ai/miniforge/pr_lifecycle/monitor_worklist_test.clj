@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-worklist-test
   "Tests for the PR monitor work-list namespace.
 
@@ -30,11 +29,12 @@
    [ai.miniforge.schema.interface :as schema]
    [ai.miniforge.pr-lifecycle.monitor-worklist :as worklist]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:private known-url "https://github.com/miniforge-ai/miniforge.git")
 
-(def ^:private known-url "https://github.com/miniforge-ai/miniforge.git")
-
-(defn- make-pr-entry
+(defn- ^{:stratum 0} make-pr-entry
   "Build a minimal valid WorklistPrEntry."
   [number repo]
   {:pr/url      (str "https://github.com/" repo "/pull/" number)
@@ -42,7 +42,73 @@
    :pr/repo     repo
    :pr/added-at (java.util.Date.)})
 
-(defn- make-entry
+;; worklist-path
+(deftest ^{:stratum 0} worklist-path-test
+  (testing "assembles path under pr-monitor subdir with .edn extension"
+    (let [home "/home/user/.miniforge"
+          rkey "abc123def456"
+          path (worklist/worklist-path home rkey)]
+      (is (str/includes? path "pr-monitor"))
+      (is (str/includes? path rkey))
+      (is (str/ends-with? path ".edn"))))
+
+  (testing "path starts with home-dir"
+    (let [home "/custom/home"
+          path (worklist/worklist-path home "deadbeef1234")]
+      (is (str/starts-with? path home)))))
+
+(deftest ^{:stratum 0} persist-worklist-invalid-entry-test
+  (testing "returns schema/failure on schema mismatch, no file written"
+    (fs/with-temp-dir [tmp {}]
+      (let [path  (str (fs/path tmp "worklist.edn"))
+            ;; Missing required :worklist/updated-at
+            entry {:worklist/repo-key "abc123def456"
+                   :worklist/prs      []}]
+        (let [result (worklist/persist-worklist! path entry)]
+          (is (schema/failed? result))
+          (is (not (fs/exists? path))))))))
+
+(deftest ^{:stratum 0} load-worklist-missing-test
+  (testing "returns schema/failure for a non-existent path"
+    (let [result (worklist/load-worklist "/no/such/path/worklist.edn")]
+      (is (schema/failed? result))
+      (is (some? (:error result))))))
+
+(deftest ^{:stratum 0} load-worklist-corrupt-edn-test
+  (testing "returns schema/failure for unparseable EDN"
+    (fs/with-temp-dir [tmp {}]
+      (let [path (str (fs/path tmp "worklist.edn"))]
+        (spit path "this is not valid EDN }{{{")
+        (is (schema/failed? (worklist/load-worklist path))))))
+
+  (testing "returns schema/failure for EDN that fails WorklistEntry schema"
+    (fs/with-temp-dir [tmp {}]
+      (let [path (str (fs/path tmp "worklist.edn"))]
+        ;; Valid EDN but wrong shape
+        (spit path (pr-str {:not-a-worklist true}))
+        (is (schema/failed? (worklist/load-worklist path)))))))
+
+(deftest ^{:stratum 0} fetch-pr-state-tolerates-whitespace-json-test
+  ;; Copilot #1198: gh's --json is compact today, but a pretty-printed
+  ;; `"state": "OPEN"` (whitespace around the colon) must still parse.
+  (testing "whitespace around the colon in gh JSON still extracts the state"
+    (with-redefs [process/process (fn [& _] (future {:exit 0
+                                                     :out "{\n  \"state\": \"OPEN\"\n}"
+                                                     :err ""}))]
+      (is (= "OPEN"
+             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+              {:pr/number 1 :pr/repo "org/repo"})))))
+  (testing "compact JSON still parses"
+    (with-redefs [process/process (fn [& _] (future {:exit 0
+                                                     :out "{\"state\":\"MERGED\"}"
+                                                     :err ""}))]
+      (is (= "MERGED"
+             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
+              {:pr/number 2 :pr/repo "org/repo"}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} make-entry
   "Build a minimal valid WorklistEntry for testing."
   ([]
    (make-entry [(make-pr-entry 42 "org/repo")]))
@@ -51,13 +117,14 @@
     :worklist/prs        prs
     :worklist/updated-at (java.util.Date.)}))
 
-(def ^:private open-pr   (make-pr-entry 1 "org/repo"))
-(def ^:private merged-pr (make-pr-entry 2 "org/repo"))
-(def ^:private closed-pr (make-pr-entry 3 "org/repo"))
+(def ^{:stratum 1} ^:private open-pr   (make-pr-entry 1 "org/repo"))
 
-;------------------------------------------------------------------------------ Layer 1: repo-key
+(def ^{:stratum 1} ^:private merged-pr (make-pr-entry 2 "org/repo"))
 
-(deftest repo-key-deterministic-test
+(def ^{:stratum 1} ^:private closed-pr (make-pr-entry 3 "org/repo"))
+
+;; repo-key
+(deftest ^{:stratum 1} repo-key-deterministic-test
   (testing "same URL always produces the same key"
     (is (= (worklist/repo-key known-url)
            (worklist/repo-key known-url))))
@@ -72,25 +139,10 @@
   (testing "key is lowercase hex"
     (is (re-matches #"[0-9a-f]+" (worklist/repo-key known-url)))))
 
-;------------------------------------------------------------------------------ Layer 1: worklist-path
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest worklist-path-test
-  (testing "assembles path under pr-monitor subdir with .edn extension"
-    (let [home "/home/user/.miniforge"
-          rkey "abc123def456"
-          path (worklist/worklist-path home rkey)]
-      (is (str/includes? path "pr-monitor"))
-      (is (str/includes? path rkey))
-      (is (str/ends-with? path ".edn"))))
-
-  (testing "path starts with home-dir"
-    (let [home "/custom/home"
-          path (worklist/worklist-path home "deadbeef1234")]
-      (is (str/starts-with? path home)))))
-
-;------------------------------------------------------------------------------ Layer 2: persist-worklist!
-
-(deftest persist-worklist-happy-test
+;; persist-worklist!
+(deftest ^{:stratum 2} persist-worklist-happy-test
   (testing "creates dirs and writes EDN, returns schema/success"
     (fs/with-temp-dir [tmp {}]
       (let [rkey  "abc123def456"
@@ -101,18 +153,7 @@
           (is (= entry (:worklist result)))
           (is (fs/exists? path)))))))
 
-(deftest persist-worklist-invalid-entry-test
-  (testing "returns schema/failure on schema mismatch, no file written"
-    (fs/with-temp-dir [tmp {}]
-      (let [path  (str (fs/path tmp "worklist.edn"))
-            ;; Missing required :worklist/updated-at
-            entry {:worklist/repo-key "abc123def456"
-                   :worklist/prs      []}]
-        (let [result (worklist/persist-worklist! path entry)]
-          (is (schema/failed? result))
-          (is (not (fs/exists? path))))))))
-
-(deftest persist-worklist-io-error-test
+(deftest ^{:stratum 2} persist-worklist-io-error-test
   (testing "returns schema/failure when a file blocks directory creation"
     (fs/with-temp-dir [tmp {}]
       ;; Place a regular file where fs/create-dirs would need to create a dir
@@ -123,9 +164,8 @@
               result (worklist/persist-worklist! path entry)]
           (is (schema/failed? result)))))))
 
-;------------------------------------------------------------------------------ Layer 2: load-worklist
-
-(deftest load-worklist-happy-test
+;; load-worklist
+(deftest ^{:stratum 2} load-worklist-happy-test
   (testing "round-trips a persisted entry"
     (fs/with-temp-dir [tmp {}]
       (let [rkey  "abc123def456"
@@ -136,29 +176,8 @@
           (is (schema/succeeded? result))
           (is (= entry (:worklist result))))))))
 
-(deftest load-worklist-missing-test
-  (testing "returns schema/failure for a non-existent path"
-    (let [result (worklist/load-worklist "/no/such/path/worklist.edn")]
-      (is (schema/failed? result))
-      (is (some? (:error result))))))
-
-(deftest load-worklist-corrupt-edn-test
-  (testing "returns schema/failure for unparseable EDN"
-    (fs/with-temp-dir [tmp {}]
-      (let [path (str (fs/path tmp "worklist.edn"))]
-        (spit path "this is not valid EDN }{{{")
-        (is (schema/failed? (worklist/load-worklist path))))))
-
-  (testing "returns schema/failure for EDN that fails WorklistEntry schema"
-    (fs/with-temp-dir [tmp {}]
-      (let [path (str (fs/path tmp "worklist.edn"))]
-        ;; Valid EDN but wrong shape
-        (spit path (pr-str {:not-a-worklist true}))
-        (is (schema/failed? (worklist/load-worklist path)))))))
-
-;------------------------------------------------------------------------------ Layer 2: prune-closed-prs
-
-(deftest prune-keeps-open-drops-merged-closed-test
+;; prune-closed-prs
+(deftest ^{:stratum 2} prune-keeps-open-drops-merged-closed-test
   (testing "keeps OPEN entries, drops MERGED and CLOSED"
     (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                   (fn [{:pr/keys [number]}]
@@ -190,25 +209,7 @@
                     (:worklist/updated-at entry))
             "dropping a PR must advance the last-write instant")))))
 
-(deftest fetch-pr-state-tolerates-whitespace-json-test
-  ;; Copilot #1198: gh's --json is compact today, but a pretty-printed
-  ;; `"state": "OPEN"` (whitespace around the colon) must still parse.
-  (testing "whitespace around the colon in gh JSON still extracts the state"
-    (with-redefs [process/process (fn [& _] (future {:exit 0
-                                                     :out "{\n  \"state\": \"OPEN\"\n}"
-                                                     :err ""}))]
-      (is (= "OPEN"
-             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
-              {:pr/number 1 :pr/repo "org/repo"})))))
-  (testing "compact JSON still parses"
-    (with-redefs [process/process (fn [& _] (future {:exit 0
-                                                     :out "{\"state\":\"MERGED\"}"
-                                                     :err ""}))]
-      (is (= "MERGED"
-             (#'ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
-              {:pr/number 2 :pr/repo "org/repo"}))))))
-
-(deftest prune-gh-failure-test
+(deftest ^{:stratum 2} prune-gh-failure-test
   (testing "returns anomaly when fetch-pr-state returns anomaly"
     (with-redefs [ai.miniforge.pr-lifecycle.monitor-worklist/fetch-pr-state
                   (fn [pr]

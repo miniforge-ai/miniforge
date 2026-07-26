@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.fix-loop
   "Automated fix generation for CI failures and review feedback.
 
@@ -33,9 +32,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fix context building
 
-(defn create-fix-context
+;; Fix context building
+(defn ^{:stratum 0} create-fix-context
   "Build context pack for fix generation.
 
    Arguments:
@@ -81,7 +80,7 @@
 
    :fix/created-at (java.util.Date.)})
 
-(defn build-fix-prompt
+(defn ^{:stratum 0} build-fix-prompt
   "Build a prompt for the fix agent based on failure type.
 
    Arguments:
@@ -127,10 +126,8 @@
            "Summary: " summary "\n\n"
            "Affected files: " affected-files))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Fix generation
-
-(defn generate-fix
+(defn ^{:stratum 0} generate-fix
   "Generate a fix using the inner loop.
 
    Arguments:
@@ -161,10 +158,8 @@
     ;; Use inner loop for generate → validate → repair cycle
     (loop/run-simple task generate-fn loop-context)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Fix application
-
-(defn apply-fix-to-worktree
+(defn ^{:stratum 0} apply-fix-to-worktree
   "Apply a fix artifact to the git worktree.
 
    Arguments:
@@ -200,7 +195,7 @@
                       :data {:error (.getMessage e)}}))
         (dag/err :fix-apply-failed (.getMessage e))))))
 
-(defn commit-fix
+(defn ^{:stratum 0} commit-fix
   "Commit fix changes and push to the PR branch.
 
    Arguments:
@@ -235,10 +230,8 @@
             (dag/err :push-failed (:error push-result))))
         (dag/err :commit-failed (:error stage-result))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Conversation resolution
-
-(defn resolve-comment-thread
+(defn ^{:stratum 0} resolve-comment-thread
   "Resolve a conversation thread after creating a fix PR.
 
    Arguments:
@@ -288,10 +281,10 @@
                                        (not parent-pr-number) "no parent-pr-number")}}))
         (dag/ok {:skipped true :reason "missing-metadata"})))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Fix loop orchestration
+;------------------------------------------------------------------------------ Layer 1
 
-(defn run-fix-loop
+;; Fix loop orchestration
+(defn ^{:stratum 1} run-fix-loop
   "Run the complete fix loop for a failure.
 
    This is the main entry point for automated fix generation.
@@ -426,9 +419,9 @@
                    new-metrics)))))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Specialized fix functions
 
-(defn fix-ci-failure
+;; Specialized fix functions
+(defn ^{:stratum 2} fix-ci-failure
   "Convenience function for fixing CI failures.
 
    Arguments:
@@ -447,7 +440,7 @@
     (run-fix-loop task pr-info failure-info generate-fn context
                   :worktree-path (:worktree-path context))))
 
-(defn fix-review-feedback
+(defn ^{:stratum 2} fix-review-feedback
   "Convenience function for fixing review feedback.
 
    Arguments:
@@ -478,7 +471,7 @@
                   :worktree-path (:worktree-path context)
                   :auto-resolve-comments (:auto-resolve-comments context true))))
 
-(defn fix-merge-conflict
+(defn ^{:stratum 2} fix-merge-conflict
   "Convenience function for fixing merge conflicts.
 
    Arguments:
