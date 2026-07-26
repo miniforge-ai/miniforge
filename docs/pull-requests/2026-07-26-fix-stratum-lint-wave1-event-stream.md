@@ -213,6 +213,25 @@ the actual public `digest-content`). Moved the banner from above
 on the file afterward — zero diff, confirms the new placement is
 stable. No behavior change; comment-position only.
 
+### Review-round fix: a stale docstring on `listeners.clj`'s privacy/capability map
+
+GitHub Copilot's second review pass (after the `timeline.clj` fix
+above) flagged `privacy->min-capability`'s docstring: it claims
+`:internal events -> :advise or higher`, but the map itself sets
+`:internal :observe` — the same minimum capability as `:public`.
+Verified this is pre-existing (traces back to `components/event-stream`'s
+original introduction, #175 — long before stratum-lint touched this
+file) and that there's no test or spec to determine which side is
+"correct": `work/n08-oci-governance.spec.edn` documents the whole
+capability-gating layer as ~10% implemented and explicitly defers
+privacy-tier policy to a spec that doesn't define this mapping.
+Fixed the docstring to describe the map's actual current behavior
+(no behavior change) rather than tightening the map to match the old
+docstring's claim, which would be an unverifiable security-policy
+decision — see Related Issues for the follow-up. Re-ran `--fix` (zero
+diff), `clj-kondo` (0 errors/warnings), and `listeners_test.clj` (5
+tests, 21 assertions, 0 failures/errors) after the change.
+
 ## Testing Plan
 
 1. Confirmed the stratum-lint pin in `tasks/stratum.clj`
@@ -307,6 +326,11 @@ stable. No behavior change; comment-position only.
     pre-existing `clojure.string` warning), and ran
     `timeline_test.clj` directly (15 tests, 66 assertions, 0
     failures/errors).
+12. Second Copilot review pass (after the `timeline.clj` push) flagged
+    `listeners.clj`'s stale `privacy->min-capability` docstring above.
+    Fixed, re-ran `--fix` (zero diff), `clj-kondo` (0 errors, 0
+    warnings), and `listeners_test.clj` directly (5 tests, 21
+    assertions, 0 failures/errors).
 
 ## Deployment Plan
 
@@ -384,19 +408,32 @@ time for these 12 files until Wave 2 splits them.
   [stratum-lint#15](https://github.com/miniforge-ai/stratum-lint/pull/15)
   and PR #1526 (pin bump). Re-confirmed safe for this component in
   Motivation above; no action needed.
-- Pre-existing docstring/data mismatch noticed while verifying a
-  Copilot low-confidence (suppressed, not posted as an actionable
-  comment) note: `listeners.clj`'s `privacy->min-capability` docstring
-  says `:internal events -> :advise or higher`, but the map itself has
-  `:internal :observe` — the same minimum capability as `:public`,
-  meaning the `:internal` privacy tier currently adds no additional
-  access restriction over `:public`. Confirmed directly against the
-  code; pre-dates this PR (present since at least #854/#1158), not
-  introduced or touched by the stratum-lint fix. Not resolved here:
-  fixing the docstring would just paper over a possible real
-  authorization gap, and fixing the map would change runtime N8 OCI
-  access-control behavior — a decision that deserves its own
-  dedicated review, not a fold-in to a stratum-lint autofix PR.
+- Pre-existing docstring/data mismatch, first noticed via a Copilot
+  low-confidence suppressed note and confirmed as a real, separately
+  posted review comment on the second pass: `listeners.clj`'s
+  `privacy->min-capability` docstring said `:internal events -> :advise
+  or higher`, but the map itself has `:internal :observe` — the same
+  minimum capability as `:public`, meaning the `:internal` privacy tier
+  currently adds no additional access restriction over `:public`.
+  Confirmed pre-dating this PR back to `components/event-stream`'s
+  original introduction (#175) — the stratum-lint fix only reorders,
+  it never touched this docstring's text. No test covers
+  `privacy->min-capability` or its caller either way, and
+  `work/n08-oci-governance.spec.edn` documents the whole capability
+  layer as "~10% implemented," explicitly deferring privacy-tier
+  policy to a spec that doesn't define this mapping yet. Given that,
+  fixed the docstring to describe current behavior accurately rather
+  than changing the map — changing the map would be a security-policy
+  decision (tightening `:internal` event access) that isn't
+  verifiable as correct from the code alone, and doesn't belong in a
+  stratum-lint autofix PR. Matches this program's precedent for
+  exactly this situation (`observer`'s Wave 1 PR fixed a stale
+  docstring claiming unsupported `:json` format support by correcting
+  the doc to match the code, not the reverse, when the "right"
+  behavior wasn't obvious from code alone). The underlying
+  privacy-tiering policy question (should `:internal` require more
+  than `:observe`?) is a genuine product decision, flagged separately
+  for follow-up — not resolved here.
 
 ## Checklist
 
@@ -430,4 +467,10 @@ time for these 12 files until Wave 2 splits them.
 - [x] GitHub Copilot review comment (`timeline.clj`'s misplaced `;;
       Public API` banner) verified directly against the PR's GitHub
       API data and fixed; stability re-confirmed under `--fix`
+- [x] Second Copilot review pass comment (`listeners.clj`'s stale
+      `privacy->min-capability` docstring) verified directly, confirmed
+      pre-existing (traces to #175) and unresolvable to a "correct"
+      map from code/spec alone; fixed the docstring to match current
+      behavior rather than changing runtime access-control behavior;
+      underlying policy question flagged separately in Related Issues
 - [x] No `--no-verify`; pre-commit hook runs normally at commit time

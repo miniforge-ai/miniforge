@@ -46,7 +46,8 @@
 (def ^{:stratum 0} privacy->min-capability
   "Map from event privacy level to minimum listener capability required.
    :public events -> any listener (:observe)
-   :internal events -> :advise or higher
+   :internal events -> :observe (same as :public; tiered gating not yet
+   implemented, see work/n08-oci-governance.spec.edn)
    :confidential events -> :control only"
   {:public       :observe
    :internal     :observe
