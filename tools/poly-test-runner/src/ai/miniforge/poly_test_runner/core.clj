@@ -37,7 +37,10 @@
    building helpers verbatim, swapping in a statement runner that always
    finishes the full doseq, then throws once at the end if anything failed
    — satisfying the TestRunner contract (`run-tests` must throw on failure)
-   without masking untested bricks."
+   without masking untested bricks WITHIN A PROJECT. It does not reach the
+   outer per-project doseq in test-runner-orchestrator.core/run, which can
+   still abort remaining projects; that gap is unfixed and tracked
+   separately."
   (:require
    [polylith.clj.core.clojure-test-test-runner.core :as builtin]
    [polylith.clj.core.test-runner-contract.interface :as test-runner-contract]
@@ -57,7 +60,15 @@
       (let [{:keys [error fail pass]}
             (try
               (eval-in-project statement)
-              (catch Exception e
+              (catch VirtualMachineError e
+                ;; OutOfMemoryError, StackOverflowError, etc. — not safe to
+                ;; treat as a single failed statement and keep looping.
+                (throw e))
+              (catch Throwable e
+                ;; Throwable, not Exception: an Error (e.g. a namespace's
+                ;; :require throwing NoClassDefFoundError) must also be
+                ;; converted to a result here, or it would defeat the whole
+                ;; point of this runner by escaping the doseq uncaught.
                 (.printStackTrace e)
                 (println (str (color/error color-mode "Couldn't run test statement")
                                " for the " (color/project project-name color-mode)
@@ -92,7 +103,7 @@
                                (into [] (comp cat (map builtin/->test-statement)))
                                (delay))]
     (reify test-runner-contract/TestRunner
-      (test-runner-name [_] "Resilient clojure.test runner (completes every brick even if an earlier one errors)")
+      (test-runner-name [_] "Resilient clojure.test runner (completes every brick within a project even if an earlier one errors)")
 
       (test-sources-present? [_] @test-sources-present*)
 
