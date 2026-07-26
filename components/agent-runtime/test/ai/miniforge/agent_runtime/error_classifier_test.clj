@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.error-classifier-test
   "Unit tests for error classification and message generation."
   (:require [clojure.test :refer [deftest is testing are]]
@@ -23,7 +22,9 @@
             [ai.miniforge.agent-runtime.interface :as classifier]
             [ai.miniforge.failure-classifier.interface :as failure-classifier]))
 
-(deftest classify-error-emits-canonical-failure-class
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} classify-error-emits-canonical-failure-class
   (testing "classification carries a :failure/class from failure-classifier's
             canonical set — one taxonomy, referenced not redefined"
     (doseq [err ["connection refused" "Simple error string" "anything at all"]]
@@ -36,10 +37,8 @@
     (is (= :failure.class/task-code
            (:failure/class (classifier/classify-error "Simple error string" nil))))))
 
-;------------------------------------------------------------------------------ Layer 0 Tests
 ;; Pattern matching and classification
-
-(deftest test-agent-backend-classification
+(deftest ^{:stratum 0} test-agent-backend-classification
   (testing "Agent backend error patterns"
     (are [error-msg] (= :agent-backend
                        (:type (classifier/classify-error error-msg nil)))
@@ -51,7 +50,7 @@
       "agent is undefined"
       "handoff failed for agent")))
 
-(deftest test-task-code-classification
+(deftest ^{:stratum 0} test-task-code-classification
   (testing "Task code error patterns"
     (are [error-msg] (= :task-code
                        (:type (classifier/classify-error error-msg nil)))
@@ -64,7 +63,7 @@
       "Unexpected token at line 42"
       "Parse error: missing closing parenthesis")))
 
-(deftest test-external-classification
+(deftest ^{:stratum 0} test-external-classification
   (testing "External service error patterns"
     (are [error-msg] (= :external
                        (:type (classifier/classify-error error-msg nil)))
@@ -78,12 +77,12 @@
       "Connection refused to api.github.com"
       "DNS lookup failed for github.com")))
 
-(deftest test-default-classification
+(deftest ^{:stratum 0} test-default-classification
   (testing "Unknown errors default to task-code (conservative)"
     (is (= :task-code
            (:type (classifier/classify-error "Some unknown error" nil))))))
 
-(deftest test-vendor-attribution
+(deftest ^{:stratum 0} test-vendor-attribution
   (testing "Correct vendor attribution for each error type"
     (is (= "Claude Code"
            (:vendor (classifier/classify-error "classifyHandoffIfNeeded is not defined" nil))))
@@ -92,7 +91,7 @@
     (is (= "External Service"
            (:vendor (classifier/classify-error "ECONNREFUSED" nil))))))
 
-(deftest test-extract-completed-work
+(deftest ^{:stratum 0} test-extract-completed-work
   (testing "Extract work items from task state"
     (is (= []
            (classifier/extract-completed-work nil)))
@@ -126,10 +125,8 @@
     (is (= ["5 commits made"]
            (classifier/extract-completed-work {:commits-made 5})))))
 
-;------------------------------------------------------------------------------ Layer 1 Tests
 ;; Message formatting
-
-(deftest test-format-error-message
+(deftest ^{:stratum 0} test-format-error-message
   (testing "Agent backend error message formatting"
     (let [classified (classifier/classify-error
                       "classifyHandoffIfNeeded is not defined"
@@ -177,10 +174,8 @@
       (is (str/includes? message "Partial work completed"))
       (is (str/includes? message "✅ Created branch: feat/new-feature")))))
 
-;------------------------------------------------------------------------------ Layer 2 Tests
 ;; URL generation and retry logic
-
-(deftest test-generate-report-url
+(deftest ^{:stratum 0} test-generate-report-url
   (testing "Claude Code report URL generation"
     (let [url (classifier/generate-report-url
                :agent-backend
@@ -205,7 +200,7 @@
     (let [classified (classifier/classify-error "ECONNREFUSED" nil)]
       (is (nil? (:report-url classified))))))
 
-(deftest test-should-retry
+(deftest ^{:stratum 0} test-should-retry
   (testing "Agent backend errors with completed work - don't retry"
     (let [classified (classifier/classify-error
                       "classifyHandoffIfNeeded is not defined"
@@ -230,10 +225,8 @@
                       nil)]
       (is (true? (:should-retry classified))))))
 
-;------------------------------------------------------------------------------ Integration Tests
 ;; Full classification flow
-
-(deftest test-classify-error-full
+(deftest ^{:stratum 0} test-classify-error-full
   (testing "Full classification of agent backend error"
     (let [result (classifier/classify-error
                   (ex-info "classifyHandoffIfNeeded is not defined" {})
@@ -269,7 +262,7 @@
       (is (nil? (:report-url result)))
       (is (true? (:should-retry result))))))
 
-(deftest test-exception-handling
+(deftest ^{:stratum 0} test-exception-handling
   (testing "Classify Exception objects"
     (let [ex (ex-info "Test error" {:some :data})
           result (classifier/classify-error ex nil)]

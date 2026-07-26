@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.error-classifier.core
   "Core error classification logic.
 
@@ -25,7 +24,9 @@
    [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]
    [ai.miniforge.failure-classifier.interface :as failure-classifier]))
 
-(def ^:private retry-type->failure-class
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private retry-type->failure-class
   "Map the narrow retry-classification `:type` to the ONE canonical failure
    class. The failure taxonomy (N1 §5.3.3) is owned by `failure-classifier`
    (its single source of truth) — referenced here, never redefined. `:type`
@@ -35,17 +36,8 @@
    :task-code     :failure.class/task-code
    :external      :failure.class/external})
 
-(defn- ->failure-class
-  "Derive the canonical failure class for a retry `:type`, validated against
-   failure-classifier's set so we can never emit a non-canonical class."
-  [retry-type]
-  (let [c (get retry-type->failure-class retry-type :failure.class/unknown)]
-    (if (failure-classifier/valid-failure-class? c) c :failure.class/unknown)))
-
-;;------------------------------------------------------------------------------ Layer 0
 ;; Error message extraction
-
-(defn extract-error-context
+(defn ^{:stratum 0} extract-error-context
   "Extract relevant context from error for classification.
 
    Arguments:
@@ -58,10 +50,8 @@
     (string? error) error
     :else (str error)))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Completed work extraction
-
-(defn extract-completed-work
+(defn ^{:stratum 0} extract-completed-work
   "Extract completed work items from task state.
 
    Arguments:
@@ -106,10 +96,8 @@
       @items)
     []))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Retry logic
-
-(defn determine-confidence
+(defn ^{:stratum 0} determine-confidence
   "Calculate confidence score for classification.
 
    Arguments:
@@ -123,7 +111,7 @@
     0.95
     0.5))
 
-(defn should-retry?
+(defn ^{:stratum 0} should-retry?
   "Determine if user should retry based on error type.
 
    Arguments:
@@ -138,10 +126,19 @@
     :external true
     true))
 
-;;------------------------------------------------------------------------------ Layer 3
-;; Main classification function
+;------------------------------------------------------------------------------ Layer 1
 
-(defn classify-error
+(defn- ^{:stratum 1} ->failure-class
+  "Derive the canonical failure class for a retry `:type`, validated against
+   failure-classifier's set so we can never emit a non-canonical class."
+  [retry-type]
+  (let [c (get retry-type->failure-class retry-type :failure.class/unknown)]
+    (if (failure-classifier/valid-failure-class? c) c :failure.class/unknown)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Main classification function
+(defn ^{:stratum 2} classify-error
   "Classify an error by matching against known patterns.
 
    Arguments:

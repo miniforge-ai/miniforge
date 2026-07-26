@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.error-classifier.messages
   "User-facing error message generation.
 
@@ -24,10 +23,10 @@
   (:require
    [clojure.string :as str]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Completed work formatting
+;------------------------------------------------------------------------------ Layer 0
 
-(defn format-completed-work-section
+;; Completed work formatting
+(defn ^{:stratum 0} format-completed-work-section
   "Format completed work items for display.
 
    Arguments:
@@ -40,10 +39,26 @@
     (str "\n\nPartial work completed:\n"
          (str/join "\n" (map #(str icon-prefix " " %) completed-work)))))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Error type specific formatting
+(defn ^{:stratum 0} add-suggestions
+  "Add troubleshooting suggestions to error message.
 
-(defn format-agent-backend-error
+   Arguments:
+     message - Base error message
+     error-type - Classification keyword
+
+   Returns: Message with added suggestions"
+  [message error-type]
+  (let [suggestions (case error-type
+                      :agent-backend "\n\nTroubleshooting:\n- This is a bug in the agent system\n- Your code is fine\n- Report the issue and retry later"
+                      :task-code "\n\nTroubleshooting:\n- Check the error details above\n- Fix the code issue\n- Run tests locally before retrying"
+                      :external "\n\nTroubleshooting:\n- Wait a few minutes\n- Check service status\n- Retry with exponential backoff"
+                      "")]
+    (str message suggestions)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Error type specific formatting
+(defn ^{:stratum 1} format-agent-backend-error
   "Format agent backend error message.
 
    Arguments:
@@ -64,7 +79,7 @@
        (when report-url
          (str "\n\nReport this issue:\n" report-url))))
 
-(defn format-task-code-error
+(defn ^{:stratum 1} format-task-code-error
   "Format task code error message.
 
    Arguments:
@@ -77,7 +92,7 @@
        (format-completed-work-section completed-work "⏸️ ")
        "\n\nFix the issue and retry your task."))
 
-(defn format-external-error
+(defn ^{:stratum 1} format-external-error
   "Format external service error message.
 
    Arguments:
@@ -90,10 +105,10 @@
        (format-completed-work-section completed-work "✅")
        "\n\nWait a few minutes and retry. This is usually transient."))
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Main formatting function
+;------------------------------------------------------------------------------ Layer 2
 
-(defn format-error-message
+;; Main formatting function
+(defn ^{:stratum 2} format-error-message
   "Generate user-friendly error message with context.
 
    Arguments:
@@ -106,19 +121,3 @@
     :task-code (format-task-code-error classified-error)
     :external (format-external-error classified-error)
     (str "❌ Error: " (:message classified-error))))
-
-(defn add-suggestions
-  "Add troubleshooting suggestions to error message.
-
-   Arguments:
-     message - Base error message
-     error-type - Classification keyword
-
-   Returns: Message with added suggestions"
-  [message error-type]
-  (let [suggestions (case error-type
-                      :agent-backend "\n\nTroubleshooting:\n- This is a bug in the agent system\n- Your code is fine\n- Report the issue and retry later"
-                      :task-code "\n\nTroubleshooting:\n- Check the error details above\n- Fix the code issue\n- Run tests locally before retrying"
-                      :external "\n\nTroubleshooting:\n- Wait a few minutes\n- Check service status\n- Retry with exponential backoff"
-                      "")]
-    (str message suggestions)))
