@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.defaults
   "Default configuration for operator LLM components.
 
@@ -23,9 +22,9 @@
    without modifying code.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pattern detector defaults
 
-(def pattern-detector-system-prompt
+;; Pattern detector defaults
+(def ^{:stratum 0} pattern-detector-system-prompt
   "You are a workflow pattern analyzer for a software engineering meta-agent.
 Your job: detect meaningful patterns in workflow execution signals.
 
@@ -46,14 +45,8 @@ Respond with ONLY a JSON array of pattern objects, no other text:
 
 Return an empty array [] if no significant patterns are detected.")
 
-(def pattern-detector-defaults
-  {:system-prompt pattern-detector-system-prompt
-   :max-tokens 500})
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Improvement generator defaults
-
-(def improvement-generator-system-prompt
+(def ^{:stratum 0} improvement-generator-system-prompt
   "You are a process improvement advisor for a software engineering meta-agent.
 Your job: generate concrete improvement proposals from detected workflow patterns.
 
@@ -75,7 +68,7 @@ Respond with ONLY a JSON array of improvement objects, no other text:
 
 Return an empty array [] if no improvements can be confidently proposed.")
 
-(def improvement-types
+(def ^{:stratum 0} improvement-types
   "All improvement types the generator can produce."
   #{:prompt-change
     :gate-adjustment
@@ -84,7 +77,13 @@ Return an empty array [] if no improvements can be confidently proposed.")
     :budget-adjustment
     :workflow-modification})
 
-(def improvement-generator-defaults
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} pattern-detector-defaults
+  {:system-prompt pattern-detector-system-prompt
+   :max-tokens 500})
+
+(def ^{:stratum 1} improvement-generator-defaults
   {:system-prompt improvement-generator-system-prompt
    :improvement-types improvement-types
    :max-tokens 600})
