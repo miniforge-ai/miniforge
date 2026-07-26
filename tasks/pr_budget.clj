@@ -95,11 +95,11 @@
   "Rationale string when `pr-body` contains the override marker, else
    nil. `pr-body` may be nil (e.g. an empty PR description)."
   [pr-body]
-  (some-> pr-body
-          (->> (re-find override-marker-re))
-          second
-          str/trim
-          not-empty))
+  (when pr-body
+    (some-> (re-find override-marker-re pr-body)
+            second
+            str/trim
+            not-empty)))
 
 ;------------------------------------------------------------------------------ Layer 2
 
