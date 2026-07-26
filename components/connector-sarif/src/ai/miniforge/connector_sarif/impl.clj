@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-sarif.impl
   "SARIF connector implementation — connect, discover, extract, checkpoint."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
@@ -25,28 +24,36 @@
             [ai.miniforge.response.interface :as response]
             [clojure.string :as str]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; --------------------------------------------------------------------------
 ;; Handle state
+(def ^{:stratum 0} ^:private handles (connector/create-handle-registry))
 
-(def ^:private handles (connector/create-handle-registry))
+(defn- ^{:stratum 0} generate-handle [] (str "sarif-" (java.util.UUID/randomUUID)))
 
-(defn- generate-handle [] (str "sarif-" (java.util.UUID/randomUUID)))
-
-(defn- require-handle
-  "Look up handle state or return an anomaly."
-  [handle]
-  (connector/require-handle handles handle
-                            {:message (str "Unknown handle: " handle)}))
-
-(defn- handle-anomaly->response [handle-anomaly]
+(defn- ^{:stratum 0} handle-anomaly->response [handle-anomaly]
   (response/make-anomaly :anomalies/not-found
                          (:anomaly/message handle-anomaly)
                          (:anomaly/data handle-anomaly)))
 
 ;; --------------------------------------------------------------------------
-;; Connect / Close
+;; Discover
+(defn- ^{:stratum 0} build-schema-descriptor [schema-type count]
+  {:schema/name schema-type
+   :schema/record-count count})
 
-(defn do-connect
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} require-handle
+  "Look up handle state or return an anomaly."
+  [handle]
+  (connector/require-handle handles handle
+                            {:message (str "Unknown handle: " handle)}))
+
+;; --------------------------------------------------------------------------
+;; Connect / Close
+(defn ^{:stratum 1} do-connect
   "Validate config and establish a connection handle."
   [config]
   (let [{:keys [valid? errors]} (schema/validate-config config)]
@@ -62,20 +69,15 @@
         {:connection/handle handle
          :connector/status  :connected}))))
 
-(defn do-close
+(defn ^{:stratum 1} do-close
   "Release a connection handle."
   [handle]
   (connector/remove-handle! handles handle)
   {:connector/status :closed})
 
-;; --------------------------------------------------------------------------
-;; Discover
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- build-schema-descriptor [schema-type count]
-  {:schema/name schema-type
-   :schema/record-count count})
-
-(defn do-discover
+(defn ^{:stratum 2} do-discover
   "Discover available schemas in the connected source."
   [handle _opts]
   (let [state (require-handle handle)]
@@ -106,8 +108,7 @@
 
 ;; --------------------------------------------------------------------------
 ;; Extract
-
-(defn do-extract
+(defn ^{:stratum 2} do-extract
   "Extract records for a given schema."
   [handle _schema-name opts]
   (let [state (require-handle handle)]
@@ -133,8 +134,7 @@
 
 ;; --------------------------------------------------------------------------
 ;; Checkpoint
-
-(defn do-checkpoint
+(defn ^{:stratum 2} do-checkpoint
   "Persist cursor state for resumable extraction."
   [handle _connector-id _cursor-state]
   (let [state (require-handle handle)]
