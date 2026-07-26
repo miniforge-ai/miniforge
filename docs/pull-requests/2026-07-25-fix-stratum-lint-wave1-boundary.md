@@ -64,8 +64,10 @@ way, so the invariant check fires exactly as before. Left as-is.
 
 1. Confirmed idempotency: ran `--fix` a second time — zero diff, zero
    "rewrote" output.
-2. Read every changed file's full diff (all 11). Changes are heading
-   text, `^{:stratum n}` metadata, and def/deftest reordering only. No
+2. Read every changed file's full diff (all 11). The mechanical `--fix`
+   pass itself is heading text, `^{:stratum n}` metadata, and
+   def/deftest reordering only — one review follow-up commit (step 3
+   below) added a real, narrow content change on top of that. No
    same-line trailing comments existed in any of these files before the
    fix (checked via `grep` against the pre-fix content), so the
    comment-reattachment risk this wave watches for does not apply. No
@@ -93,26 +95,28 @@ commit time) until Wave 2 splits it.
 
 ## Related Issues/PRs
 
-+ Baseline: `work/stratum-lint-baseline-2026-07-24.md` (Wave 1 —
+- Baseline: `work/stratum-lint-baseline-2026-07-24.md` (Wave 1 —
   mechanical relabeling via `--fix`, decorative-heading files only)
-+ Follow-on: Wave 2 namespace split for
+- Follow-on: Wave 2 namespace split for
   `components/boundary/src/ai/miniforge/boundary/core.clj` (4 real
   layers, over the 3-layer budget)
-+ Sibling Wave 1 PR docs:
+- Sibling Wave 1 PR docs:
   `docs/pull-requests/2026-07-25-fix-stratum-lint-wave1-bb-config.md`,
   `docs/pull-requests/2026-07-25-fix-stratum-lint-wave1-dag-primitives.md`,
   `docs/pull-requests/2026-07-25-fix-stratum-lint-wave1-tool.md`
 
 ## Checklist
 
-+ [x] `--fix` run over the whole component (`src` and `test`)
-+ [x] Idempotency verified (second `--fix` pass: zero diff)
-+ [x] Diff reviewed file-by-file; mechanical-only (heading + metadata +
-      reorder); no comment-attachment issue found (none existed to
-      break); no stale decorative banners survived
-+ [x] `clj-kondo` clean (0 errors; 1 pre-existing, unrelated warning)
-+ [x] Plain lint re-run post-fix: `contract.clj`'s SL003 fully resolved;
+- [x] `--fix` run over the whole component (`src` and `test`)
+- [x] Idempotency verified (second `--fix` pass: zero diff)
+- [x] Diff reviewed file-by-file; mechanical `--fix` pass is
+      heading/metadata/reorder-only; no comment-attachment issue found
+      (none existed to break); no stale decorative banners survived
+- [x] `clj-kondo` clean (0 errors, 0 warnings — the one warning found
+      during review was fixed in a follow-up commit, not pre-existing
+      and left alone)
+- [x] Plain lint re-run post-fix: `contract.clj`'s SL003 fully resolved;
       `core.clj`'s SL003 remains (4 real layers, re-counted down from 6,
       genuinely over budget — Wave 2 follow-up, not this PR)
-+ [x] Component test suite: 47 tests, 73 assertions, 0 failures, 0 errors
-+ [x] No `--no-verify`; pre-commit hook runs normally at commit time
+- [x] Component test suite: 47 tests, 73 assertions, 0 failures, 0 errors
+- [x] No `--no-verify`; pre-commit hook runs normally at commit time
