@@ -178,7 +178,6 @@
                 (:zettel/digest z2))
           "rotated digest comes from content, not from the spoof attempt"))))
 
-;------------------------------------------------------------------------------ Layer 2.5
 ;; Schema digest validation — accepts canonical lowercase hex; rejects
 ;; uppercase / non-hex / wrong-length.
 (deftest ^{:stratum 1} test-digest-schema-accepts-canonical-hex
