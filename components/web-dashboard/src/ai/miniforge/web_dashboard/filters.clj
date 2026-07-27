@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.filters
   "Filter specification and application for web dashboard.
 
@@ -25,9 +24,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Derived field registry
 
-(def derived-fields
+;; Derived field registry
+(def ^{:stratum 0} derived-fields
   "Registry of derived field extractors.
    Maps derived-id -> extraction function."
   {:derived/has-testing
@@ -47,10 +46,8 @@
    :derived/is-completed
    (fn [item] (= :completed (get-in item [:execution/status])))})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Filter specifications
-
-(def filter-specs
+(def ^{:stratum 0} filter-specs
   "Portable filter specifications.
 
    Each spec defines:
@@ -160,10 +157,24 @@
     :filter/applicable-to #{:evidence}
     :filter/value {:kind :derived :derived/id :derived/is-completed}}])
 
-;------------------------------------------------------------------------------ Layer 2
-;; Value extraction
+(defn ^{:stratum 0} merge-filter-state
+  "Merge global and pane-local filters into a single AST.
 
-(defn extract-value
+   Arguments:
+   - global-filters: Global filter AST
+   - pane-filters: Pane-local filter AST
+
+   Returns: Combined AST"
+  [global-filters pane-filters]
+  (let [global-clauses (:clauses global-filters [])
+        pane-clauses (:clauses pane-filters [])]
+    {:op :and
+     :clauses (concat global-clauses pane-clauses)}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Value extraction
+(defn ^{:stratum 1} extract-value
   "Extract value from item using filter spec."
   [item {:keys [filter/value]}]
   (case (:kind value)
@@ -181,10 +192,23 @@
 
     nil))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Filter AST evaluation
+;; Filter state management
+(defn ^{:stratum 1} get-applicable-filters
+  "Get all filters applicable to a pane, grouped by scope.
 
-(defn eval-clause
+   Returns:
+   {:global [...global filter specs...]
+    :local  [...local filter specs...]}"
+  [pane]
+  (let [applicable (filter #(contains? (:filter/applicable-to %) pane)
+                          filter-specs)]
+    {:global (filter #(= :global (:filter/scope %)) applicable)
+     :local (filter #(= :local (:filter/scope %)) applicable)}))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Filter AST evaluation
+(defn ^{:stratum 2} eval-clause
   "Evaluate a single filter clause against an item."
   [item {:keys [filter/id op value]}]
   (let [spec (first (filter #(= id (:filter/id %)) filter-specs))
@@ -209,7 +233,28 @@
                          item-value)
       true)))
 
-(defn eval-filter-ast
+;; Facet computation
+(defn ^{:stratum 2} compute-facets
+  "Compute faceted counts for filter options.
+
+   Arguments:
+   - items: Collection of items
+   - filter-id: Filter to compute facets for
+   - pane: Current pane
+
+   Returns: Map of value -> count"
+  [items filter-id pane]
+  (let [spec (first (filter #(= filter-id (:filter/id %)) filter-specs))]
+    (when (contains? (:filter/applicable-to spec) pane)
+      (->> items
+           (map #(extract-value % spec))
+           (filter some?)
+           frequencies
+           (sort-by val >)))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} eval-filter-ast
   "Evaluate filter AST against an item.
 
    AST format:
@@ -224,10 +269,27 @@
     :not (not (eval-filter-ast item (first (:clauses ast))))
     true))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Filter application
+(defn ^{:stratum 3} compute-all-facets
+  "Compute facets for all applicable filters in a pane.
 
-(defn apply-filters
+   Arguments:
+   - items: Collection of items
+   - pane: Current pane keyword
+
+   Returns: Map of filter-id -> {value count}"
+  [items pane]
+  (let [applicable-specs (filter #(contains? (:filter/applicable-to %) pane)
+                                filter-specs)]
+    (into {}
+          (map (fn [spec]
+                 [(:filter/id spec)
+                  (compute-facets items (:filter/id spec) pane)])
+               applicable-specs))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Filter application
+(defn ^{:stratum 4} apply-filters
   "Apply filter AST to a collection of items.
 
    Arguments:
@@ -249,70 +311,3 @@
                                     clauses)
           ast' (assoc ast :clauses applicable-clauses)]
       (filter #(eval-filter-ast % ast') items))))
-
-;------------------------------------------------------------------------------ Layer 5
-;; Facet computation
-
-(defn compute-facets
-  "Compute faceted counts for filter options.
-
-   Arguments:
-   - items: Collection of items
-   - filter-id: Filter to compute facets for
-   - pane: Current pane
-
-   Returns: Map of value -> count"
-  [items filter-id pane]
-  (let [spec (first (filter #(= filter-id (:filter/id %)) filter-specs))]
-    (when (contains? (:filter/applicable-to spec) pane)
-      (->> items
-           (map #(extract-value % spec))
-           (filter some?)
-           frequencies
-           (sort-by val >)))))
-
-(defn compute-all-facets
-  "Compute facets for all applicable filters in a pane.
-
-   Arguments:
-   - items: Collection of items
-   - pane: Current pane keyword
-
-   Returns: Map of filter-id -> {value count}"
-  [items pane]
-  (let [applicable-specs (filter #(contains? (:filter/applicable-to %) pane)
-                                filter-specs)]
-    (into {}
-          (map (fn [spec]
-                 [(:filter/id spec)
-                  (compute-facets items (:filter/id spec) pane)])
-               applicable-specs))))
-
-;------------------------------------------------------------------------------ Layer 6
-;; Filter state management
-
-(defn get-applicable-filters
-  "Get all filters applicable to a pane, grouped by scope.
-
-   Returns:
-   {:global [...global filter specs...]
-    :local  [...local filter specs...]}"
-  [pane]
-  (let [applicable (filter #(contains? (:filter/applicable-to %) pane)
-                          filter-specs)]
-    {:global (filter #(= :global (:filter/scope %)) applicable)
-     :local (filter #(= :local (:filter/scope %)) applicable)}))
-
-(defn merge-filter-state
-  "Merge global and pane-local filters into a single AST.
-
-   Arguments:
-   - global-filters: Global filter AST
-   - pane-filters: Pane-local filter AST
-
-   Returns: Combined AST"
-  [global-filters pane-filters]
-  (let [global-clauses (:clauses global-filters [])
-        pane-clauses (:clauses pane-filters [])]
-    {:op :and
-     :clauses (concat global-clauses pane-clauses)}))

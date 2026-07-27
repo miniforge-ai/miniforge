@@ -15,53 +15,55 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.schema
   "Malli schemas for workflow spec payloads.
-   Layer 0: Enums and base types
-   Layer 1: Composite SpecPayload schema
-   Layer 2: Validation helpers"
+   Layer 0: Enums and base types (intent-types, source-formats, PlanTask, CodeArtifact)
+   Layer 1: Composite schemas built on Layer 0 (SpecIntent, SpecProvenance)
+   Layer 2: SpecPayload / SpecInput, composing Layers 0-1
+   Layer 3: Validation helpers"
   (:require
    [malli.core :as m]
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums and base types
 
-(def intent-types
+;; Enums and base types
+(def ^{:stratum 0} intent-types
   [:refactor :feature :bugfix :general :chore :docs :test :performance])
 
-(def source-formats
+(def ^{:stratum 0} source-formats
   [:yaml :edn :json :markdown])
 
-;------------------------------------------------------------------------------ Layer 1
-;; Composite schemas
-
-(def SpecIntent
-  [:map
-   [:type (into [:enum] intent-types)]
-   [:scope {:optional true} [:vector :string]]])
-
-(def PlanTask
+(def ^{:stratum 0} PlanTask
   [:map
    [:task/id [:or :keyword :uuid]]
    [:task/description :string]
    [:task/type {:optional true} :keyword]
    [:task/dependencies {:optional true} [:vector [:or :keyword :uuid]]]])
 
-(def CodeArtifact
+(def ^{:stratum 0} CodeArtifact
   [:map
    [:code/id [:or :string :uuid]]
    [:code/files {:optional true} [:vector :string]]])
 
-(def SpecProvenance
+;------------------------------------------------------------------------------ Layer 1
+
+;; Composite schemas
+(def ^{:stratum 1} SpecIntent
+  [:map
+   [:type (into [:enum] intent-types)]
+   [:scope {:optional true} [:vector :string]]])
+
+(def ^{:stratum 1} SpecProvenance
   [:map
    [:source-file :string]
    [:source-format (into [:enum] source-formats)]
    [:loaded-at inst?]
    [:file-size :int]])
 
-(def SpecPayload
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} SpecPayload
   "Schema for a normalized spec payload — the canonical format.
 
    All fields use the :spec/* namespace. Required: title, description.
@@ -91,7 +93,7 @@
    ;; Added by parse-spec-file
    [:spec/provenance {:optional true} SpecProvenance]])
 
-(def SpecInput
+(def ^{:stratum 2} SpecInput
   "Schema for raw spec input — what the user writes in :spec/* format.
    This is the canonical input format before normalization."
   [:map
@@ -115,26 +117,26 @@
    [:workflow/type {:optional true} :keyword]
    [:workflow/version {:optional true} :string]])
 
-;------------------------------------------------------------------------------ Layer 2
-;; Validation helpers
+;------------------------------------------------------------------------------ Layer 3
 
-(defn valid-spec-input?
+;; Validation helpers
+(defn ^{:stratum 3} valid-spec-input?
   "Returns true if value is a valid SpecInput."
   [value]
   (m/validate SpecInput value))
 
-(defn valid-spec-payload?
+(defn ^{:stratum 3} valid-spec-payload?
   "Returns true if value is a valid normalized SpecPayload."
   [value]
   (m/validate SpecPayload value))
 
-(defn explain-spec-input
+(defn ^{:stratum 3} explain-spec-input
   "Returns human-readable explanation of input validation errors, or nil if valid."
   [value]
   (when-let [explanation (m/explain SpecInput value)]
     (me/humanize explanation)))
 
-(defn explain-spec-payload
+(defn ^{:stratum 3} explain-spec-payload
   "Returns human-readable explanation of payload validation errors, or nil if valid."
   [value]
   (when-let [explanation (m/explain SpecPayload value)]

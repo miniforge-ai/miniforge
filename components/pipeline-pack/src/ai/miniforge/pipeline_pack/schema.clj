@@ -1,32 +1,52 @@
 (ns ai.miniforge.pipeline-pack.schema
   "Malli schemas for pipeline pack manifests.
 
-   Layer 0: Enums (TrustLevel, AuthorityChannel)
-   Layer 1: PackManifest schema
-   Layer 2: Validation helpers"
+   Layer 0: enum value vectors, plus schema-generic validation helpers
+   Layer 1: TrustLevel/AuthorityChannel enum schemas (built from Layer 0's vectors)
+   Layer 2: PipelinePackManifest
+   Layer 3: valid-manifest?/validate-manifest (compose Layer 0's helpers with Layer 2's schema)"
   (:require
    [malli.core :as m]
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Enums
 
-(def trust-levels
+;; Enums
+(def ^{:stratum 0} trust-levels
   [:tainted :untrusted :trusted])
 
-(def TrustLevel
-  (into [:enum] trust-levels))
-
-(def authority-channels
+(def ^{:stratum 0} authority-channels
   [:authority/data :authority/instruction])
 
-(def AuthorityChannel
-  (into [:enum] authority-channels))
+;; Validation helpers
+(defn ^{:stratum 0} valid?
+  [schema value]
+  (m/validate schema value))
+
+(defn ^{:stratum 0} validate
+  [schema value]
+  (if (m/validate schema value)
+    {:valid? true :errors nil}
+    {:valid? false
+     :errors (me/humanize (m/explain schema value))}))
+
+(defn ^{:stratum 0} explain
+  [schema value]
+  (when-let [explanation (m/explain schema value)]
+    (me/humanize explanation)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Pack manifest schema
 
-(def PipelinePackManifest
+(def ^{:stratum 1} TrustLevel
+  (into [:enum] trust-levels))
+
+(def ^{:stratum 1} AuthorityChannel
+  (into [:enum] authority-channels))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Pack manifest schema
+(def ^{:stratum 2} PipelinePackManifest
   "Schema for a pipeline pack manifest.
 
    Trust model mirrors policy-pack:
@@ -49,29 +69,12 @@
    [:pack/created-at inst?]
    [:pack/updated-at inst?]])
 
-;------------------------------------------------------------------------------ Layer 2
-;; Validation helpers
+;------------------------------------------------------------------------------ Layer 3
 
-(defn valid?
-  [schema value]
-  (m/validate schema value))
-
-(defn validate
-  [schema value]
-  (if (m/validate schema value)
-    {:valid? true :errors nil}
-    {:valid? false
-     :errors (me/humanize (m/explain schema value))}))
-
-(defn explain
-  [schema value]
-  (when-let [explanation (m/explain schema value)]
-    (me/humanize explanation)))
-
-(defn valid-manifest?
+(defn ^{:stratum 3} valid-manifest?
   [value]
   (valid? PipelinePackManifest value))
 
-(defn validate-manifest
+(defn ^{:stratum 3} validate-manifest
   [value]
   (validate PipelinePackManifest value))

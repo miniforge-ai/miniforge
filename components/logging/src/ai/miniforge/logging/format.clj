@@ -15,26 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.format
   "Pure log level and formatting helpers shared by logger core and sinks.")
 
-(def ^:private level-order
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private level-order
   {:trace 0 :debug 1 :info 2 :warn 3 :error 4 :fatal 5})
 
-(defn level-enabled?
-  "Check if a log level should be emitted given the configured minimum level."
-  [configured-level entry-level]
-  (let [configured-ord (get level-order configured-level 0)
-        entry-ord (get level-order entry-level 0)]
-    (>= entry-ord configured-ord)))
-
-(defn format-edn
+(defn ^{:stratum 0} format-edn
   "Format a log entry as an EDN string for output."
   [entry]
   (pr-str entry))
 
-(defn format-human
+(defn ^{:stratum 0} format-human
   "Format a log entry as a human-readable string."
   [entry]
   (let [{:log/keys [timestamp level category event message]} entry]
@@ -42,3 +36,12 @@
          " [" (name level) "] "
          (name category) "/" (name event)
          (when message (str " - " message)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} level-enabled?
+  "Check if a log level should be emitted given the configured minimum level."
+  [configured-level entry-level]
+  (let [configured-ord (get level-order configured-level 0)
+        entry-ord (get level-order entry-level 0)]
+    (>= entry-ord configured-ord)))

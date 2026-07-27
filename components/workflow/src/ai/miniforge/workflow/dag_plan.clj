@@ -93,7 +93,7 @@
                (inc level-count)
                (max max-width width))))))
 
-;--- Layer 1: Plan to DAG Conversion
+;--- Layer 0: Plan to DAG Conversion
 (defn ^{:stratum 0} normalize-task-id
   "Preserve task IDs in their domain-native form.
    UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
@@ -132,7 +132,7 @@
                   task)))
             dag-tasks))))
 
-;--- Layer 1: Branch Resolution
+;--- Layer 0: Branch Resolution
 (defn ^{:stratum 0} default-spec-branch
   "Branch the orchestrator should treat as the spec's parent — the one root
    tasks acquire off and dep-resolution falls back to.
@@ -195,7 +195,7 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;--- Layer 0: Plan Analysis
+;--- Layer 2: Plan Analysis
 (defn ^{:stratum 2} parallelizable-plan? [plan]
   (let [tasks (:plan/tasks plan [])]
     (when (> (count tasks) 1)

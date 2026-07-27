@@ -15,20 +15,17 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.etag-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [ai.miniforge.connector-http.etag :as etag]))
 
-;;------------------------------------------------------------------------------ Layer 0
 ;; Fixtures
-
 (use-fixtures :each (fn [f] (etag/clear-cache!) (f)))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Tests
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest store-and-retrieve-etag-test
+;; Tests
+(deftest ^{:stratum 0} store-and-retrieve-etag-test
   (testing "stores and retrieves ETag for URL"
     (etag/store-etag! "https://api.github.com/repos/org/repo/pulls" "W/\"abc123\"")
     (is (= "W/\"abc123\"" (etag/get-etag "https://api.github.com/repos/org/repo/pulls"))))
@@ -40,7 +37,7 @@
     (etag/store-etag! "https://example.com" nil)
     (is (nil? (etag/get-etag "https://example.com")))))
 
-(deftest add-etag-header-test
+(deftest ^{:stratum 0} add-etag-header-test
   (testing "adds If-None-Match when ETag cached"
     (etag/store-etag! "https://example.com" "W/\"xyz\"")
     (let [headers (etag/add-etag-header {"Accept" "application/json"} "https://example.com")]
@@ -52,21 +49,21 @@
       (is (nil? (get headers "If-None-Match")))
       (is (= "text/html" (get headers "Accept"))))))
 
-(deftest extract-etag-test
+(deftest ^{:stratum 0} extract-etag-test
   (testing "extracts etag from response headers"
     (is (= "W/\"abc\"" (etag/extract-etag {"etag" "W/\"abc\""}))))
 
   (testing "returns nil when no etag header"
     (is (nil? (etag/extract-etag {"content-type" "application/json"})))))
 
-(deftest not-modified-test
+(deftest ^{:stratum 0} not-modified-test
   (testing "304 is not-modified"
     (is (true? (etag/not-modified? 304))))
 
   (testing "200 is not not-modified"
     (is (false? (etag/not-modified? 200)))))
 
-(deftest clear-cache-test
+(deftest ^{:stratum 0} clear-cache-test
   (testing "clear-cache! removes all entries"
     (etag/store-etag! "https://a.com" "e1")
     (etag/store-etag! "https://b.com" "e2")

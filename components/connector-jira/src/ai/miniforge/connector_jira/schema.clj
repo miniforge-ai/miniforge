@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-jira.schema
   "Malli schemas for the Jira connector.
 
@@ -26,10 +25,10 @@
             [malli.core :as m]
             [malli.error :as me]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Config schemas (user → connector boundary)
+;------------------------------------------------------------------------------ Layer 0
 
-(def JiraConfig
+;; Config schemas (user → connector boundary)
+(def ^{:stratum 0} JiraConfig
   "Schema for Jira connector configuration.
    Requires :jira/site (the Atlassian subdomain, e.g. \"mycompany\")."
   [:map
@@ -40,10 +39,8 @@
    [:jira/email {:optional true} [:maybe string?]]
    [:jira/cloud-id {:optional true} [:maybe string?]]])
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; API response schemas (Jira API → connector boundary)
-
-(def JiraIssue
+(def ^{:stratum 0} JiraIssue
   "Schema for a Jira issue record from /rest/api/3/search."
   [:map
    [:id string?]
@@ -54,27 +51,27 @@
              [:updated {:optional true} [:maybe string?]]
              [:created {:optional true} [:maybe string?]]]]])
 
-(def JiraProject
+(def ^{:stratum 0} JiraProject
   "Schema for a Jira project record from /rest/api/3/project/search."
   [:map
    [:id string?]
    [:key string?]
    [:name string?]])
 
-(def JiraBoard
+(def ^{:stratum 0} JiraBoard
   "Schema for a Jira board record from /rest/agile/1.0/board."
   [:map
    [:id int?]
    [:name string?]])
 
-(def JiraSprint
+(def ^{:stratum 0} JiraSprint
   "Schema for a Jira sprint record from the sprints endpoint."
   [:map
    [:id int?]
    [:name string?]
    [:state string?]])
 
-(def JiraComment
+(def ^{:stratum 0} JiraComment
   "Schema for a Jira comment record from issue comments endpoint."
   [:map
    [:id string?]
@@ -82,24 +79,15 @@
    [:created {:optional true} [:maybe string?]]
    [:updated {:optional true} [:maybe string?]]])
 
-(def JiraPaginatedResponse
+(def ^{:stratum 0} JiraPaginatedResponse
   "Schema for the offset-paginated response envelope."
   [:map
    [:startAt int?]
    [:maxResults int?]
    [:total int?]])
 
-(def ^:private resource->schema
-  {:issues   JiraIssue
-   :projects JiraProject
-   :boards   JiraBoard
-   :sprints  JiraSprint
-   :comments JiraComment})
-
-;;------------------------------------------------------------------------------ Layer 2
 ;; Validation
-
-(defn validate
+(defn ^{:stratum 0} validate
   "Validate value against schema."
   [schema value]
   (if (m/validate schema value)
@@ -107,7 +95,7 @@
     {:valid? false
      :errors (me/humanize (m/explain schema value))}))
 
-(defn validate!
+(defn ^{:stratum 0} validate!
   "Validate and throw on failure."
   [schema value]
   (when-not (m/validate schema value)
@@ -118,17 +106,30 @@
                               :value value}))
   value)
 
-(defn validate-response
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private resource->schema
+  {:issues   JiraIssue
+   :projects JiraProject
+   :boards   JiraBoard
+   :sprints  JiraSprint
+   :comments JiraComment})
+
+(defn ^{:stratum 1} validate-response
   "Validate a paginated response envelope. Returns {:valid? bool :errors ...}."
   [body]
   (validate JiraPaginatedResponse body))
 
-(defn record-schema
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} record-schema
   "Look up the record schema for a resource keyword, or nil."
   [resource-key]
   (get resource->schema resource-key))
 
-(defn validate-records
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} validate-records
   "Validate a batch of records against the schema for the given resource.
    Returns records unchanged if valid; logs and filters invalid records."
   [resource-key records]

@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.interface.protocols.llm-client
   "Public protocol for LLM client interaction.
 
    This is an extensibility point - users can implement custom LLM clients
    by implementing this protocol.")
 
-(defprotocol LLMClient
+;------------------------------------------------------------------------------ Layer 0
+
+(defprotocol ^{:stratum 0} LLMClient
   "Protocol for LLM interaction."
   (complete* [this request]
     "Send a completion request, returns result map.")

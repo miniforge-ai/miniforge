@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.graph
   "Utility functions for directed graphs represented as dependency maps.
    dep-map convention: {node-id #{predecessor-id ...}}")
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Graph construction
+;------------------------------------------------------------------------------ Layer 0
 
-(defn successors-of
+;; Graph construction
+(defn ^{:stratum 0} successors-of
   "Build a forward adjacency map from a dependency map.
    For each node, returns the set of nodes that directly follow it.
    Every node in dep-map gets an entry, even if it has no successors."
@@ -36,7 +35,7 @@
           (zipmap (keys dep-map) (repeat #{}))
           dep-map))
 
-(defn predecessor-counts
+(defn ^{:stratum 0} predecessor-counts
   "Return a map of {node-id count} counting unsatisfied predecessors per node."
   [dep-map]
   (reduce-kv (fn [counts node predecessors]

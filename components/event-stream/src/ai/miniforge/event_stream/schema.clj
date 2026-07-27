@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.schema
   "N3-compliant event schemas for workflow observability.
 
@@ -35,15 +34,15 @@
    [ai.miniforge.event-stream.digest :as digest]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Shared payload schemas
 
-(def TransitionRequest
+;; Shared payload schemas
+(def ^{:stratum 0} TransitionRequest
   "Schema for a phase transition request payload."
   [:map
    [:transition/type keyword?]
    [:transition/target keyword?]])
 
-(def RefusalReason
+(def ^{:stratum 0} RefusalReason
   "Closed vocabulary for why an agent or phase refuses to proceed.
 
    One vocabulary shared by every refusal act on the stream — phase
@@ -73,8 +72,7 @@
 ;; `:map` entries; every event schema below uses `with-identity` to
 ;; append the same set. A single edit here propagates through every
 ;; event without missing one.
-
-(def ^:private identity-entries
+(def ^{:stratum 0} ^:private identity-entries
   "Four optional fields every event schema accepts so subscribers
    can scope authorization without retrofitting the wire format."
   [[:org/id       {:optional true} uuid?]
@@ -82,181 +80,14 @@
    [:repo/id      {:optional true} string?]
    [:auth/context {:optional true} map?]])
 
-(defn with-identity
-  "Pure: append the Decision-14 identity quartet to `base-schema`'s
-   `:map` entries. Order in Malli `:map` is irrelevant for validation;
-   the helper keeps the per-event schemas focused on their own
-   payload while every event accepts the same identity set."
-  [base-schema]
-  (into base-schema identity-entries))
-
-(def ^:private sha256-hex-pattern
+(def ^{:stratum 0} ^:private sha256-hex-pattern
   "Lowercase SHA-256 hexadecimal digest shape."
   (re-pattern (str "^[0-9a-f]{" digest/sha256-hex-length "}$")))
 
-(def DigestSummary
-  "Schema for bounded digest payloads attached to tool lifecycle events."
-  [:map
-   [:digest/preview string?]
-   [:digest/sha256 [:re sha256-hex-pattern]]
-   [:digest/original-size [:and int? [:>= 0]]]])
-
-;------------------------------------------------------------------------------ Layer 0
-;; Event envelope (base schema all events must conform to)
-
-(def EventEnvelope
-  "Base envelope schema for all events per N3 spec section 2."
-  (with-identity
-   [:map
-    [:event/type keyword?]              ; REQUIRED: event type identifier
-    [:event/id uuid?]                   ; REQUIRED: unique event ID
-    [:event/timestamp inst?]            ; REQUIRED: ISO-8601 timestamp
-    [:event/version string?]            ; REQUIRED: event schema version
-    [:event/sequence-number int?]       ; REQUIRED: monotonic sequence within workflow
-    [:workflow/id uuid?]                ; REQUIRED: workflow this event belongs to
-    [:workflow/phase {:optional true} keyword?]     ; OPTIONAL: current phase
-    [:agent/id {:optional true} keyword?]           ; OPTIONAL: agent that emitted event
-    [:agent/instance-id {:optional true} uuid?]     ; OPTIONAL: specific agent instance
-    [:event/parent-id {:optional true} uuid?]       ; OPTIONAL: parent event ID (for causality)
-    [:message string?]]))               ; REQUIRED: human-readable message
-
-;------------------------------------------------------------------------------ Layer 1
-;; Workflow lifecycle event schemas
-
-(def WorkflowStarted
-  "Schema for workflow/started event.
-
-   `:routing/trigger-event-id` (N5-delta-4 §4.3) is the bridge the
-   automation-edge-correlator uses to map a handler workflow back to its
-   originating routing trigger. Optional — workflows started outside the
-   routing path (operator-initiated runs, etc.) omit the field, and the
-   correlator's heuristic-fallback path (§3.5 case 2) covers the absence."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/started]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/spec {:optional true} map?]
-    [:workflow/intent {:optional true} map?]
-    ;; Plain `uuid?`, not `[:maybe uuid?]`: the producer-side contract
-    ;; (`core/workflow-started`) explicitly omits this key when the value
-    ;; is nil rather than emitting `{:routing/trigger-event-id nil}`. The
-    ;; envelope is therefore EITHER a real uuid or the key is absent —
-    ;; never a nil payload. Schema enforces that invariant.
-    [:routing/trigger-event-id {:optional true} uuid?]
-    [:message string?]]))
-
-(def PhaseStarted
-  "Schema for workflow/phase-started event."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/phase-started]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase keyword?]
-    [:phase/expected-agent {:optional true} keyword?]
-    [:phase/context {:optional true} map?]
-    [:message string?]]))
-
-(def PhaseCompleted
-  "Schema for workflow/phase-completed event."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/phase-completed]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase keyword?]
-    [:phase/duration-ms {:optional true} int?]
-    ;; `:phase/outcome` is the typed-act surface for a phase boundary on the
-    ;; observed layer (stream + evidence). The internal phase-result `:status`
-    ;; stays a 2-valued control flag for the FSM; this enum carries the full act.
-    ;; INFORM → :success/:failure/:skipped; REFUSE → :blocked (+ :phase/blocked-reason);
-    ;; REQUEST(redirect) → :redirected (+ :phase/transition-request).
-    [:phase/outcome {:optional true}
-     [:enum :success :failure :skipped :blocked :redirected]]
-    ;; Machine-readable cause, present when :phase/outcome is :blocked.
-    [:phase/blocked-reason {:optional true} RefusalReason]
-    ;; Review verdict, present only for the review phase. Carried so resume can
-    ;; reconstruct a blocked review from events alone — the event is a writer of
-    ;; this datum, one canonical location, no lossy reconstruction.
-    [:phase/review-decision {:optional true} keyword?]
-    [:phase/artifacts {:optional true} [:vector uuid?]]
-    [:phase/transition-request {:optional true} TransitionRequest]
-    [:phase/redirect-to {:optional true} keyword?]
-    [:phase/error {:optional true} map?]
-    [:phase/tokens {:optional true} int?]
-    [:phase/cost-usd {:optional true} number?]
-    [:message string?]]))
-
-(def WorkspacePersisted
-  "Schema for workspace/persisted event.
-
-   Emitted at phase boundaries when persist-workspace! has captured a
-   checkpoint. Carries enough provenance for the dashboard / evidence
-   bundle to surface 'inspect or resume from this archive'."
-  (with-identity
-   [:map
-      [:event/type [:= :workspace/persisted]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workspace/phase {:optional true} keyword?]
-    [:workspace/env-id {:optional true} string?]
-    [:workspace/branch {:optional true} string?]
-    [:workspace/commit-sha {:optional true} string?]
-    [:workspace/bundle-path {:optional true} string?]
-    [:workspace/tier {:optional true} [:enum :worktree :remote]]
-    [:message string?]]))
-
-(def WorkflowCompleted
-  "Schema for workflow/completed event."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/completed]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/status [:enum :success :failure :cancelled]]
-    [:workflow/duration-ms {:optional true} int?]
-    [:workflow/evidence-bundle-id {:optional true} uuid?]
-    [:workflow/tokens {:optional true} int?]
-    [:workflow/cost-usd {:optional true} number?]
-    [:message string?]]))
-
-(def WorkflowFailed
-  "Schema for workflow/failed event."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/failed]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/failure-phase {:optional true} keyword?]
-    [:workflow/failure-reason {:optional true} string?]
-    [:workflow/error-details {:optional true} map?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 1.4
 ;; Zettelkasten lifecycle event schemas (added for miniforge-fleet's
 ;; Phase E.3 outbox path — Fleet's ingest consumes these to grow the
 ;; cross-instance event log).
-
-(def ^:private zettel-type-enum
+(def ^{:stratum 0} ^:private zettel-type-enum
   "Closed enum of zettel types accepted in the outbox event stream.
 
    MUST stay in sync with `ai.miniforge.knowledge.schema/ZettelType`
@@ -267,412 +98,15 @@
    type, mirror the addition here."
   [:enum :rule :concept :learning :example :hub :question :decision])
 
-(def ZettelPromoted
-  "Schema for zettel/promoted event.
-
-   Emitted when a zettel revision transitions to `:trusted` state and
-   is therefore eligible to ride the Fleet event log per Decision 6
-   (trust on revision) + Decision 8 (privacy gates) of miniforge-
-   fleet's Phase E plan. The event carries the revision-keyed identity
-   triple plus the zettel's content + Fleet-share metadata so the
-   ingest path can run its boundary validation without a separate
-   round-trip into the local Zettelkasten store.
-
-   The producer attaches `:fleet/oss-version` per Decision 13 so
-   Fleet's E.4 quarantine + E.9 migration registry have the version
-   pin they need without a second event-shape change later.
-
-   Required fields beyond the envelope:
-     :zettel/id          UUID
-     :zettel/revision-id UUID
-     :zettel/digest      lowercase 64-char hex
-     :zettel/uid         human-readable id
-     :zettel/title       short display name
-     :zettel/content     markdown body
-     :zettel/type        closed enum mirroring knowledge.schema/ZettelType
-                          (`:rule` / `:concept` / `:learning` /
-                           `:example` / `:hub` / `:question` /
-                           `:decision`)
-     :fleet/oss-version  version pin (per Decision 13)
-
-   Optional Fleet-share intent (populated when the producer wants
-   the zettel to actually ride the Fleet event log; absence means
-   the promotion was local-only):
-     :fleet/shareable        boolean
-     :fleet/share-scope      :org / :team / :repo / :workflow
-     :privacy/classification :public-org / :internal / :restricted /
-                              :secret"
-  [:map
-   [:event/type [:= :zettel/promoted]]
-   [:event/id uuid?]
-   [:event/timestamp inst?]
-   [:event/version string?]
-   [:event/sequence-number int?]
-   [:workflow/id uuid?]
-
-   ;; Revision-keyed zettel identity (Decision 6).
-   [:zettel/id          uuid?]
-   [:zettel/revision-id uuid?]
-   [:zettel/digest      [:re #"^[0-9a-f]{64}$"]]
-
-   ;; Zettel content the Fleet ingest path validates against the
-   ;; privacy gates (Decision 8). Carried alongside the triple so
-   ;; subscribers don't need a round-trip to the producer's store.
-   [:zettel/uid     [:string {:min 1}]]
-   [:zettel/title   [:string {:min 1 :max 200}]]
-   [:zettel/content [:string {:min 1}]]
-   [:zettel/type    zettel-type-enum]
-
-   ;; Version provenance (Decision 13).
-   [:fleet/oss-version [:string {:min 1}]]
-
-   ;; Optional Fleet-share intent (Decision 8).
-   [:fleet/shareable        {:optional true} boolean?]
-   [:fleet/share-scope      {:optional true}
-    [:enum :org :team :repo :workflow]]
-   [:privacy/classification {:optional true}
-    [:enum :public-org :internal :restricted :secret]]
-
-   ;; Identity propagation (Decision 14, added in event-stream side
-   ;; via the matching PR for prerequisite #10).
-   [:org/id       {:optional true} uuid?]
-   [:workspace/id {:optional true} uuid?]
-   [:repo/id      {:optional true} string?]
-   [:auth/context {:optional true} map?]
-   [:message string?]])
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; PR lifecycle event schemas
-
-(def PRCreated
-  "Schema for pr/created event.
-
-   Emitted when a workflow or operator-owned PR train creates a PR that
-   should appear in the supervisory PR fleet. `:workflow/id` is the owning
-   workflow run when one exists, and nil for operator-scoped train entries."
-  (with-identity
-   [:map
-      [:event/type [:= :pr/created]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id [:maybe uuid?]]
-    [:pr/repo string?]
-    [:pr/number int?]
-    [:pr/url string?]
-    [:pr/branch string?]
-    [:pr/title {:optional true} string?]
-    [:pr/author {:optional true} string?]
-    [:pr/merge-order {:optional true} int?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Agent lifecycle event schemas
-
-(def AgentStarted
-  "Schema for agent/started event."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/started]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase {:optional true} keyword?]
-    [:agent/id keyword?]
-    [:agent/instance-id {:optional true} uuid?]
-    [:agent/context {:optional true} map?]
-    [:message string?]]))
-
-(def AgentCompleted
-  "Schema for agent/completed event."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/completed]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:agent/id keyword?]
-    [:agent/instance-id {:optional true} uuid?]
-    [:agent/duration-ms {:optional true} int?]
-    [:agent/outcome {:optional true} [:enum :success :failure]]
-    [:agent/output {:optional true} map?]
-    [:agent/artifacts {:optional true} [:vector uuid?]]
-    [:message string?]]))
-
-(def AgentChunk
-  "Schema for agent/chunk event (streaming output)."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/chunk]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:agent/id keyword?]
-    [:chunk/delta string?]              ; The chunk of text
-    [:chunk/done? {:optional true} boolean?]
-    [:message string?]]))
-
-(def AgentStatus
-  "Schema for agent/status event (real-time progress)."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/status]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase {:optional true} keyword?]
-    [:agent/id keyword?]
-    [:agent/instance-id {:optional true} uuid?]
-    [:status/type [:enum :reading :thinking :generating :validating :repairing :running :waiting :communicating]]
-    [:status/detail {:optional true} string?]
-    [:status/progress-percent {:optional true} int?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 2.5
-;; Tool-call lifecycle and phase heartbeat schemas (GROUP 1+2 foundation)
-
-(def AgentToolCallStarted
-  "Schema for agent/tool-call-started event.
-
-   Emitted when an agent begins executing a single tool call.  Distinct
-   from the legacy :agent/tool-call which records tool calls in aggregate;
-   this event marks the precise start of execution for one call so
-   latency and stuck-call detection are possible."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/tool-call-started]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:tool/name {:optional true} string?]
-    [:tool/names {:optional true} [:vector string?]]
-    [:tool/args-digest {:optional true} DigestSummary]
-    [:tool/call-id {:optional true} string?]
-    [:agent/id keyword?]
-    [:message string?]]))
-
-(def ToolCallCompleted
-  "Schema for tool/call-completed event.
-
-   Emitted when a tool call finishes (success or failure).  Pairs with
-   :agent/tool-call-started via :tool/call-id to close the latency span."
-  (with-identity
-   [:map
-      [:event/type [:= :tool/call-completed]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:tool/call-id {:optional true} string?]
-    [:tool/result-digest {:optional true} DigestSummary]
-    [:tool/duration-ms {:optional true} int?]
-    [:tool/success? {:optional true} boolean?]
-    [:tool/error {:optional true} map?]
-    [:message string?]]))
-
-(def PhaseHeartbeat
-  "Schema for workflow/phase-heartbeat event.
-
-   Emitted periodically by long-running phases so supervisors can
-   detect stalls without requiring the phase to complete.  Carries
-   the time elapsed since the phase became active and the gap since
-   the last substantive event, enabling gap-based alerting."
-  (with-identity
-   [:map
-      [:event/type [:= :workflow/phase-heartbeat]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:phase/active-since inst?]
-    [:phase/events-emitted int?]
-    [:phase/last-event-at inst?]
-    [:phase/gap-since-last-event-ms int?]
-    [:message string?]]))
-
-(def AgentStreamStalled
-  "Schema for agent/stream-stalled event."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/stream-stalled]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase keyword?]
-    [:stream/gap-duration-ms int?]
-    [:agent/backend keyword?]
-    [:message string?]]))
-
-(def AgentSessionCaptured
-  "Schema for agent/session-captured event."
-  (with-identity
-   [:map
-      [:event/type [:= :agent/session-captured]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workflow/phase keyword?]
-    [:agent/backend keyword?]
-    [:agent/session-id string?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Self-healing event schemas
-
-(def WorkaroundApplied
-  "Schema for self-healing/workaround-applied event."
-  (with-identity
-   [:map
-      [:event/type [:= :self-healing/workaround-applied]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:workaround-id {:optional true} keyword?]
-    [:pattern-id keyword?]
-    [:success? boolean?]
-    [:message string?]]))
-
-(def BackendSwitched
-  "Schema for self-healing/backend-switched event."
-  (with-identity
-   [:map
-      [:event/type [:= :self-healing/backend-switched]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:from keyword?]
-    [:to keyword?]
-    [:reason string?]
-    [:cooldown-until inst?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 4
-;; LLM event schemas
-
-(def LLMRequest
-  "Schema for llm/request event."
-  (with-identity
-   [:map
-      [:event/type [:= :llm/request]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:agent/id {:optional true} keyword?]
-    [:agent/instance-id {:optional true} uuid?]
-    [:llm/model string?]
-    [:llm/prompt-tokens {:optional true} int?]
-    [:llm/request-id uuid?]
-    [:message string?]]))
-
-(def LLMResponse
-  "Schema for llm/response event."
-  (with-identity
-   [:map
-      [:event/type [:= :llm/response]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id uuid?]
-    [:agent/id {:optional true} keyword?]
-    [:agent/instance-id {:optional true} uuid?]
-    [:llm/model string?]
-    [:llm/request-id uuid?]
-    [:llm/completion-tokens {:optional true} int?]
-    [:llm/total-tokens {:optional true} int?]
-    [:llm/duration-ms {:optional true} int?]
-    [:llm/cost-usd {:optional true} number?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 4.5
-;; Dependency health event schemas
-
-(def DependencyHealthUpdated
-  "Schema for dependency/health-updated event."
-  (with-identity
-   [:map
-      [:event/type [:= :dependency/health-updated]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id {:optional true} [:maybe uuid?]]
-    [:dependency/id keyword?]
-    [:dependency/source keyword?]
-    [:dependency/kind keyword?]
-    [:dependency/status keyword?]
-    [:dependency/failure-count int?]
-    [:dependency/window-size int?]
-    [:dependency/incident-counts map?]
-    [:dependency/vendor {:optional true} keyword?]
-    [:dependency/class {:optional true} keyword?]
-    [:dependency/retryability {:optional true} keyword?]
-    [:failure/class {:optional true} keyword?]
-    [:dependency/previous-status {:optional true} keyword?]
-    [:dependency/last-observed-at {:optional true} inst?]
-    [:dependency/last-recovered-at {:optional true} inst?]
-    [:message string?]]))
-
-(def DependencyRecovered
-  "Schema for dependency/recovered event."
-  (with-identity
-   [:map
-      [:event/type [:= :dependency/recovered]]
-    [:event/id uuid?]
-    [:event/timestamp inst?]
-    [:event/version string?]
-    [:event/sequence-number int?]
-    [:workflow/id {:optional true} [:maybe uuid?]]
-    [:dependency/id keyword?]
-    [:dependency/source keyword?]
-    [:dependency/kind keyword?]
-    [:dependency/status [:= :healthy]]
-    [:dependency/failure-count int?]
-    [:dependency/window-size int?]
-    [:dependency/incident-counts map?]
-    [:dependency/vendor {:optional true} keyword?]
-    [:dependency/class {:optional true} keyword?]
-    [:dependency/retryability {:optional true} keyword?]
-    [:failure/class {:optional true} keyword?]
-    [:dependency/previous-status {:optional true} keyword?]
-    [:dependency/last-observed-at {:optional true} inst?]
-    [:dependency/last-recovered-at {:optional true} inst?]
-    [:message string?]]))
-
-;------------------------------------------------------------------------------ Layer 5
 ;; Privacy levels and OCI event schemas (N8)
-
-(def PrivacyLevel
+(def ^{:stratum 0} PrivacyLevel
   "Privacy classification for events.
    - :public    — safe for external dashboards and audit logs
    - :internal  — visible to team members and internal tools
    - :confidential — restricted to control-plane operators only"
   [:enum :public :internal :confidential])
 
-(def default-event-privacy
+(def ^{:stratum 0} default-event-privacy
   "Built-in privacy level for each event type category.
    Events not listed default to :internal."
   {:workflow/started    :public
@@ -755,7 +189,98 @@
    :repo-index/quality-measured :internal
    :repo-index/coverage-changed :internal})
 
-(defn create-privacy-config
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-identity
+  "Pure: append the Decision-14 identity quartet to `base-schema`'s
+   `:map` entries. Order in Malli `:map` is irrelevant for validation;
+   the helper keeps the per-event schemas focused on their own
+   payload while every event accepts the same identity set."
+  [base-schema]
+  (into base-schema identity-entries))
+
+(def ^{:stratum 1} DigestSummary
+  "Schema for bounded digest payloads attached to tool lifecycle events."
+  [:map
+   [:digest/preview string?]
+   [:digest/sha256 [:re sha256-hex-pattern]]
+   [:digest/original-size [:and int? [:>= 0]]]])
+
+(def ^{:stratum 1} ZettelPromoted
+  "Schema for zettel/promoted event.
+
+   Emitted when a zettel revision transitions to `:trusted` state and
+   is therefore eligible to ride the Fleet event log per Decision 6
+   (trust on revision) + Decision 8 (privacy gates) of miniforge-
+   fleet's Phase E plan. The event carries the revision-keyed identity
+   triple plus the zettel's content + Fleet-share metadata so the
+   ingest path can run its boundary validation without a separate
+   round-trip into the local Zettelkasten store.
+
+   The producer attaches `:fleet/oss-version` per Decision 13 so
+   Fleet's E.4 quarantine + E.9 migration registry have the version
+   pin they need without a second event-shape change later.
+
+   Required fields beyond the envelope:
+     :zettel/id          UUID
+     :zettel/revision-id UUID
+     :zettel/digest      lowercase 64-char hex
+     :zettel/uid         human-readable id
+     :zettel/title       short display name
+     :zettel/content     markdown body
+     :zettel/type        closed enum mirroring knowledge.schema/ZettelType
+                          (`:rule` / `:concept` / `:learning` /
+                           `:example` / `:hub` / `:question` /
+                           `:decision`)
+     :fleet/oss-version  version pin (per Decision 13)
+
+   Optional Fleet-share intent (populated when the producer wants
+   the zettel to actually ride the Fleet event log; absence means
+   the promotion was local-only):
+     :fleet/shareable        boolean
+     :fleet/share-scope      :org / :team / :repo / :workflow
+     :privacy/classification :public-org / :internal / :restricted /
+                              :secret"
+  [:map
+   [:event/type [:= :zettel/promoted]]
+   [:event/id uuid?]
+   [:event/timestamp inst?]
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+
+   ;; Revision-keyed zettel identity (Decision 6).
+   [:zettel/id          uuid?]
+   [:zettel/revision-id uuid?]
+   [:zettel/digest      [:re #"^[0-9a-f]{64}$"]]
+
+   ;; Zettel content the Fleet ingest path validates against the
+   ;; privacy gates (Decision 8). Carried alongside the triple so
+   ;; subscribers don't need a round-trip to the producer's store.
+   [:zettel/uid     [:string {:min 1}]]
+   [:zettel/title   [:string {:min 1 :max 200}]]
+   [:zettel/content [:string {:min 1}]]
+   [:zettel/type    zettel-type-enum]
+
+   ;; Version provenance (Decision 13).
+   [:fleet/oss-version [:string {:min 1}]]
+
+   ;; Optional Fleet-share intent (Decision 8).
+   [:fleet/shareable        {:optional true} boolean?]
+   [:fleet/share-scope      {:optional true}
+    [:enum :org :team :repo :workflow]]
+   [:privacy/classification {:optional true}
+    [:enum :public-org :internal :restricted :secret]]
+
+   ;; Identity propagation (Decision 14, added in event-stream side
+   ;; via the matching PR for prerequisite #10).
+   [:org/id       {:optional true} uuid?]
+   [:workspace/id {:optional true} uuid?]
+   [:repo/id      {:optional true} string?]
+   [:auth/context {:optional true} map?]
+   [:message string?]])
+
+(defn ^{:stratum 1} create-privacy-config
   "Create a privacy configuration by merging overrides into defaults.
 
    Arguments:
@@ -765,7 +290,7 @@
   [overrides]
   (merge default-event-privacy overrides))
 
-(defn event-privacy
+(defn ^{:stratum 1} event-privacy
   "Get the privacy level for an event type.
 
    Arguments:
@@ -779,9 +304,465 @@
   ([event-type config]
    (get config event-type :internal)))
 
-;; Supervision event schema
+;------------------------------------------------------------------------------ Layer 2
 
-(def ToolUseEvaluated
+;; Event envelope (base schema all events must conform to)
+(def ^{:stratum 2} EventEnvelope
+  "Base envelope schema for all events per N3 spec section 2."
+  (with-identity
+   [:map
+    [:event/type keyword?]              ; REQUIRED: event type identifier
+    [:event/id uuid?]                   ; REQUIRED: unique event ID
+    [:event/timestamp inst?]            ; REQUIRED: ISO-8601 timestamp
+    [:event/version string?]            ; REQUIRED: event schema version
+    [:event/sequence-number int?]       ; REQUIRED: monotonic sequence within workflow
+    [:workflow/id uuid?]                ; REQUIRED: workflow this event belongs to
+    [:workflow/phase {:optional true} keyword?]     ; OPTIONAL: current phase
+    [:agent/id {:optional true} keyword?]           ; OPTIONAL: agent that emitted event
+    [:agent/instance-id {:optional true} uuid?]     ; OPTIONAL: specific agent instance
+    [:event/parent-id {:optional true} uuid?]       ; OPTIONAL: parent event ID (for causality)
+    [:message string?]]))  ; REQUIRED: human-readable message
+
+;; Workflow lifecycle event schemas
+(def ^{:stratum 2} WorkflowStarted
+  "Schema for workflow/started event.
+
+   `:routing/trigger-event-id` (N5-delta-4 §4.3) is the bridge the
+   automation-edge-correlator uses to map a handler workflow back to its
+   originating routing trigger. Optional — workflows started outside the
+   routing path (operator-initiated runs, etc.) omit the field, and the
+   correlator's heuristic-fallback path (§3.5 case 2) covers the absence."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/spec {:optional true} map?]
+    [:workflow/intent {:optional true} map?]
+    ;; Plain `uuid?`, not `[:maybe uuid?]`: the producer-side contract
+    ;; (`core/workflow-started`) explicitly omits this key when the value
+    ;; is nil rather than emitting `{:routing/trigger-event-id nil}`. The
+    ;; envelope is therefore EITHER a real uuid or the key is absent —
+    ;; never a nil payload. Schema enforces that invariant.
+    [:routing/trigger-event-id {:optional true} uuid?]
+    [:message string?]]))
+
+(def ^{:stratum 2} PhaseStarted
+  "Schema for workflow/phase-started event."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/phase-started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:phase/expected-agent {:optional true} keyword?]
+    [:phase/context {:optional true} map?]
+    [:message string?]]))
+
+(def ^{:stratum 2} PhaseCompleted
+  "Schema for workflow/phase-completed event."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/phase-completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:phase/duration-ms {:optional true} int?]
+    ;; `:phase/outcome` is the typed-act surface for a phase boundary on the
+    ;; observed layer (stream + evidence). The internal phase-result `:status`
+    ;; stays a 2-valued control flag for the FSM; this enum carries the full act.
+    ;; INFORM → :success/:failure/:skipped; REFUSE → :blocked (+ :phase/blocked-reason);
+    ;; REQUEST(redirect) → :redirected (+ :phase/transition-request).
+    [:phase/outcome {:optional true}
+     [:enum :success :failure :skipped :blocked :redirected]]
+    ;; Machine-readable cause, present when :phase/outcome is :blocked.
+    [:phase/blocked-reason {:optional true} RefusalReason]
+    ;; Review verdict, present only for the review phase. Carried so resume can
+    ;; reconstruct a blocked review from events alone — the event is a writer of
+    ;; this datum, one canonical location, no lossy reconstruction.
+    [:phase/review-decision {:optional true} keyword?]
+    [:phase/artifacts {:optional true} [:vector uuid?]]
+    [:phase/transition-request {:optional true} TransitionRequest]
+    [:phase/redirect-to {:optional true} keyword?]
+    [:phase/error {:optional true} map?]
+    [:phase/tokens {:optional true} int?]
+    [:phase/cost-usd {:optional true} number?]
+    [:message string?]]))
+
+(def ^{:stratum 2} WorkspacePersisted
+  "Schema for workspace/persisted event.
+
+   Emitted at phase boundaries when persist-workspace! has captured a
+   checkpoint. Carries enough provenance for the dashboard / evidence
+   bundle to surface 'inspect or resume from this archive'."
+  (with-identity
+   [:map
+      [:event/type [:= :workspace/persisted]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workspace/phase {:optional true} keyword?]
+    [:workspace/env-id {:optional true} string?]
+    [:workspace/branch {:optional true} string?]
+    [:workspace/commit-sha {:optional true} string?]
+    [:workspace/bundle-path {:optional true} string?]
+    [:workspace/tier {:optional true} [:enum :worktree :remote]]
+    [:message string?]]))
+
+(def ^{:stratum 2} WorkflowCompleted
+  "Schema for workflow/completed event."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/status [:enum :success :failure :cancelled]]
+    [:workflow/duration-ms {:optional true} int?]
+    [:workflow/evidence-bundle-id {:optional true} uuid?]
+    [:workflow/tokens {:optional true} int?]
+    [:workflow/cost-usd {:optional true} number?]
+    [:message string?]]))
+
+(def ^{:stratum 2} WorkflowFailed
+  "Schema for workflow/failed event."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/failed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/failure-phase {:optional true} keyword?]
+    [:workflow/failure-reason {:optional true} string?]
+    [:workflow/error-details {:optional true} map?]
+    [:message string?]]))
+
+;; PR lifecycle event schemas
+(def ^{:stratum 2} PRCreated
+  "Schema for pr/created event.
+
+   Emitted when a workflow or operator-owned PR train creates a PR that
+   should appear in the supervisory PR fleet. `:workflow/id` is the owning
+   workflow run when one exists, and nil for operator-scoped train entries."
+  (with-identity
+   [:map
+      [:event/type [:= :pr/created]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id [:maybe uuid?]]
+    [:pr/repo string?]
+    [:pr/number int?]
+    [:pr/url string?]
+    [:pr/branch string?]
+    [:pr/title {:optional true} string?]
+    [:pr/author {:optional true} string?]
+    [:pr/merge-order {:optional true} int?]
+    [:message string?]]))
+
+;; Agent lifecycle event schemas
+(def ^{:stratum 2} AgentStarted
+  "Schema for agent/started event."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase {:optional true} keyword?]
+    [:agent/id keyword?]
+    [:agent/instance-id {:optional true} uuid?]
+    [:agent/context {:optional true} map?]
+    [:message string?]]))
+
+(def ^{:stratum 2} AgentCompleted
+  "Schema for agent/completed event."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:agent/id keyword?]
+    [:agent/instance-id {:optional true} uuid?]
+    [:agent/duration-ms {:optional true} int?]
+    [:agent/outcome {:optional true} [:enum :success :failure]]
+    [:agent/output {:optional true} map?]
+    [:agent/artifacts {:optional true} [:vector uuid?]]
+    [:message string?]]))
+
+(def ^{:stratum 2} AgentChunk
+  "Schema for agent/chunk event (streaming output)."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/chunk]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:agent/id keyword?]
+    [:chunk/delta string?]              ; The chunk of text
+    [:chunk/done? {:optional true} boolean?]
+    [:message string?]]))
+
+(def ^{:stratum 2} AgentStatus
+  "Schema for agent/status event (real-time progress)."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/status]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase {:optional true} keyword?]
+    [:agent/id keyword?]
+    [:agent/instance-id {:optional true} uuid?]
+    [:status/type [:enum :reading :thinking :generating :validating :repairing :running :waiting :communicating]]
+    [:status/detail {:optional true} string?]
+    [:status/progress-percent {:optional true} int?]
+    [:message string?]]))
+
+;; Tool-call lifecycle and phase heartbeat schemas (GROUP 1+2 foundation)
+(def ^{:stratum 2} AgentToolCallStarted
+  "Schema for agent/tool-call-started event.
+
+   Emitted when an agent begins executing a single tool call.  Distinct
+   from the legacy :agent/tool-call which records tool calls in aggregate;
+   this event marks the precise start of execution for one call so
+   latency and stuck-call detection are possible."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/tool-call-started]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/name {:optional true} string?]
+    [:tool/names {:optional true} [:vector string?]]
+    [:tool/args-digest {:optional true} DigestSummary]
+    [:tool/call-id {:optional true} string?]
+    [:agent/id keyword?]
+    [:message string?]]))
+
+(def ^{:stratum 2} ToolCallCompleted
+  "Schema for tool/call-completed event.
+
+   Emitted when a tool call finishes (success or failure).  Pairs with
+   :agent/tool-call-started via :tool/call-id to close the latency span."
+  (with-identity
+   [:map
+      [:event/type [:= :tool/call-completed]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:tool/call-id {:optional true} string?]
+    [:tool/result-digest {:optional true} DigestSummary]
+    [:tool/duration-ms {:optional true} int?]
+    [:tool/success? {:optional true} boolean?]
+    [:tool/error {:optional true} map?]
+    [:message string?]]))
+
+(def ^{:stratum 2} PhaseHeartbeat
+  "Schema for workflow/phase-heartbeat event.
+
+   Emitted periodically by long-running phases so supervisors can
+   detect stalls without requiring the phase to complete.  Carries
+   the time elapsed since the phase became active and the gap since
+   the last substantive event, enabling gap-based alerting."
+  (with-identity
+   [:map
+      [:event/type [:= :workflow/phase-heartbeat]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:phase/active-since inst?]
+    [:phase/events-emitted int?]
+    [:phase/last-event-at inst?]
+    [:phase/gap-since-last-event-ms int?]
+    [:message string?]]))
+
+(def ^{:stratum 2} AgentStreamStalled
+  "Schema for agent/stream-stalled event."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/stream-stalled]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:stream/gap-duration-ms int?]
+    [:agent/backend keyword?]
+    [:message string?]]))
+
+(def ^{:stratum 2} AgentSessionCaptured
+  "Schema for agent/session-captured event."
+  (with-identity
+   [:map
+      [:event/type [:= :agent/session-captured]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workflow/phase keyword?]
+    [:agent/backend keyword?]
+    [:agent/session-id string?]
+    [:message string?]]))
+
+;; Self-healing event schemas
+(def ^{:stratum 2} WorkaroundApplied
+  "Schema for self-healing/workaround-applied event."
+  (with-identity
+   [:map
+      [:event/type [:= :self-healing/workaround-applied]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:workaround-id {:optional true} keyword?]
+    [:pattern-id keyword?]
+    [:success? boolean?]
+    [:message string?]]))
+
+(def ^{:stratum 2} BackendSwitched
+  "Schema for self-healing/backend-switched event."
+  (with-identity
+   [:map
+      [:event/type [:= :self-healing/backend-switched]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:from keyword?]
+    [:to keyword?]
+    [:reason string?]
+    [:cooldown-until inst?]
+    [:message string?]]))
+
+;; LLM event schemas
+(def ^{:stratum 2} LLMRequest
+  "Schema for llm/request event."
+  (with-identity
+   [:map
+      [:event/type [:= :llm/request]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:agent/id {:optional true} keyword?]
+    [:agent/instance-id {:optional true} uuid?]
+    [:llm/model string?]
+    [:llm/prompt-tokens {:optional true} int?]
+    [:llm/request-id uuid?]
+    [:message string?]]))
+
+(def ^{:stratum 2} LLMResponse
+  "Schema for llm/response event."
+  (with-identity
+   [:map
+      [:event/type [:= :llm/response]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id uuid?]
+    [:agent/id {:optional true} keyword?]
+    [:agent/instance-id {:optional true} uuid?]
+    [:llm/model string?]
+    [:llm/request-id uuid?]
+    [:llm/completion-tokens {:optional true} int?]
+    [:llm/total-tokens {:optional true} int?]
+    [:llm/duration-ms {:optional true} int?]
+    [:llm/cost-usd {:optional true} number?]
+    [:message string?]]))
+
+;; Dependency health event schemas
+(def ^{:stratum 2} DependencyHealthUpdated
+  "Schema for dependency/health-updated event."
+  (with-identity
+   [:map
+      [:event/type [:= :dependency/health-updated]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:dependency/id keyword?]
+    [:dependency/source keyword?]
+    [:dependency/kind keyword?]
+    [:dependency/status keyword?]
+    [:dependency/failure-count int?]
+    [:dependency/window-size int?]
+    [:dependency/incident-counts map?]
+    [:dependency/vendor {:optional true} keyword?]
+    [:dependency/class {:optional true} keyword?]
+    [:dependency/retryability {:optional true} keyword?]
+    [:failure/class {:optional true} keyword?]
+    [:dependency/previous-status {:optional true} keyword?]
+    [:dependency/last-observed-at {:optional true} inst?]
+    [:dependency/last-recovered-at {:optional true} inst?]
+    [:message string?]]))
+
+(def ^{:stratum 2} DependencyRecovered
+  "Schema for dependency/recovered event."
+  (with-identity
+   [:map
+      [:event/type [:= :dependency/recovered]]
+    [:event/id uuid?]
+    [:event/timestamp inst?]
+    [:event/version string?]
+    [:event/sequence-number int?]
+    [:workflow/id {:optional true} [:maybe uuid?]]
+    [:dependency/id keyword?]
+    [:dependency/source keyword?]
+    [:dependency/kind keyword?]
+    [:dependency/status [:= :healthy]]
+    [:dependency/failure-count int?]
+    [:dependency/window-size int?]
+    [:dependency/incident-counts map?]
+    [:dependency/vendor {:optional true} keyword?]
+    [:dependency/class {:optional true} keyword?]
+    [:dependency/retryability {:optional true} keyword?]
+    [:failure/class {:optional true} keyword?]
+    [:dependency/previous-status {:optional true} keyword?]
+    [:dependency/last-observed-at {:optional true} inst?]
+    [:dependency/last-recovered-at {:optional true} inst?]
+    [:message string?]]))
+
+;; Supervision event schema
+(def ^{:stratum 2} ToolUseEvaluated
   "Schema for supervision/tool-use-evaluated event."
   (with-identity
    [:map
@@ -799,7 +780,7 @@
     [:workflow/phase {:optional true} keyword?]
     [:message string?]]))
 
-(def InterventionRequested
+(def ^{:stratum 2} InterventionRequested
   "Schema for supervisory/intervention-requested event."
   (with-identity
    [:map
@@ -823,7 +804,7 @@
     [:intervention/updated-at inst?]
     [:message string?]]))
 
-(def InterventionStateChanged
+(def ^{:stratum 2} InterventionStateChanged
   "Schema for supervisory/intervention-state-changed event."
   (with-identity
    [:map
@@ -850,7 +831,7 @@
     [:intervention/updated-at {:optional true} inst?]
     [:message string?]]))
 
-(def OperatorInterventionAnomaly
+(def ^{:stratum 2} OperatorInterventionAnomaly
   "Schema for confidential operator-consumer anomaly events."
   (with-identity
    [:map
@@ -882,8 +863,7 @@
 ;; (§3.5 case 2) covers absence at the producer side; the explicit-id path
 ;; (§3.5 case 1) needs N15-4's `:routing/trigger-event-id` on the handler
 ;; workflow's `:workflow/started`.
-
-(def PrMonitorReviewCommentsArrived
+(def ^{:stratum 2} PrMonitorReviewCommentsArrived
   "Schema for `:pr-monitor/review-comments-arrived` event (N5-delta-4 §4.2.1).
 
    Emitted by the PR-watcher sub-modules in `components/pr-lifecycle`
@@ -912,7 +892,7 @@
     [:comments/agent-session-id {:optional true} [:maybe uuid?]]
     [:message string?]]))
 
-(def PrMonitorCiFailed
+(def ^{:stratum 2} PrMonitorCiFailed
   "Schema for `:pr-monitor/ci-failed` event (N5-delta-4 §4.2.2).
 
    Emitted by the PR-watcher sub-modules in `components/pr-lifecycle`
@@ -936,7 +916,7 @@
     [:ci/conclusion keyword?]
     [:message string?]]))
 
-(def StandardsReviewPosted
+(def ^{:stratum 2} StandardsReviewPosted
   "Schema for `:standards-review/posted` event (N5-delta-4 §4.2.3).
 
    Emitted by `components/standards-reviewer` (deferred; the component
@@ -970,7 +950,7 @@
 ;; here we accept the entity as an open `map?` so that adding fields to the
 ;; producer's schema does not require a wire-schema edit in lockstep — the
 ;; consumer (Rust core) round-trips the open shape per §1.3.
-(def AutomationEdgeUpserted
+(def ^{:stratum 2} AutomationEdgeUpserted
   "Schema for `:supervisory/automation-edge-upserted` event (N5-delta-4 §4.1).
 
    Carries the full AutomationEdge entity in `:supervisory/entity`. The
@@ -1003,8 +983,7 @@
     [:message string?]]))
 
 ;; OCI container event schemas
-
-(def ContainerStarted
+(def ^{:stratum 2} ContainerStarted
   "Schema for oci/container-started event."
   (with-identity
    [:map
@@ -1019,7 +998,7 @@
     [:oci/trust-level {:optional true} [:enum :untrusted :trusted :privileged]]
     [:message string?]]))
 
-(def ContainerCompleted
+(def ^{:stratum 2} ContainerCompleted
   "Schema for oci/container-completed event."
   (with-identity
    [:map
@@ -1034,15 +1013,13 @@
     [:oci/duration-ms {:optional true} int?]
     [:message string?]]))
 
-;------------------------------------------------------------------------------ Layer 5.5
 ;; Reliability metric event schemas (RN-03, N3 §3.17)
 ;;
 ;; Schemas for the 4 reliability metric events emitted by the SLI
 ;; computation engine (RN-04). Field names match the assoc'd keys in
 ;; the existing core.clj constructors (sli-computed, slo-breach,
 ;; error-budget-update, degradation-mode-changed).
-
-(def SliComputed
+(def ^{:stratum 2} SliComputed
   "Schema for :reliability/sli-computed event.
 
    Emitted by the SLI computation engine (RN-04) each time an SLI value
@@ -1066,7 +1043,7 @@
     [:sli/dimensions {:optional true} map?]
     [:message string?]]))
 
-(def SloBreach
+(def ^{:stratum 2} SloBreach
   "Schema for :reliability/slo-breach event.
 
    Emitted when an SLO target is missed for :standard or :critical
@@ -1089,7 +1066,7 @@
     [:slo/window keyword?]
     [:message string?]]))
 
-(def ErrorBudgetUpdate
+(def ^{:stratum 2} ErrorBudgetUpdate
   "Schema for :reliability/error-budget-update event.
 
    Emitted when error-budget state is recomputed after each SLI window
@@ -1112,7 +1089,7 @@
     [:budget/window keyword?]
     [:message string?]]))
 
-(def DegradationModeChanged
+(def ^{:stratum 2} DegradationModeChanged
   "Schema for :reliability/degradation-mode-changed event.
 
    Emitted when the system transitions between degradation modes per
@@ -1131,15 +1108,13 @@
     [:degradation/trigger string?]
     [:message string?]]))
 
-;------------------------------------------------------------------------------ Layer 6
 ;; Repository intelligence event schemas (RN-19/20)
 ;;
 ;; Schemas for the 2 repo-index events emitted by the index quality
 ;; tracker (RN-19/20).  `:index/id` is a string slug identifying the
 ;; index (e.g. "main-code-index"); quality and coverage are ratios
 ;; in [0.0, 1.0]; staleness is elapsed wall-clock milliseconds.
-
-(def RepoIndexQualityMeasured
+(def ^{:stratum 2} RepoIndexQualityMeasured
   "Schema for :repo-index/quality-measured event.
 
    Emitted by the index quality tracker (RN-19) each time it samples
@@ -1164,7 +1139,7 @@
     [:index/measured-at {:optional true} inst?]
     [:message string?]]))
 
-(def RepoIndexCoverageChanged
+(def ^{:stratum 2} RepoIndexCoverageChanged
   "Schema for :repo-index/coverage-changed event.
 
    Emitted by the index quality tracker (RN-20) when the coverage ratio
@@ -1197,8 +1172,7 @@
 ;; decision is the third such act, but the PR-monitor runs on its own decoupled
 ;; event bus — see `pr-lifecycle/monitor-events` `:pr-monitor/decision-recorded`
 ;; — so its typed act lives there, not on this stream.)
-
-(def AgentMessageSent
+(def ^{:stratum 2} AgentMessageSent
   "Schema for `:agent/message-sent` event (N3 §3.7).
 
    Emitted by `core/inter-agent-message-sent` when one agent sends a message to
@@ -1219,7 +1193,7 @@
     [:message/content {:optional true} string?]
     [:message string?]]))
 
-(def AgentMessageReceived
+(def ^{:stratum 2} AgentMessageReceived
   "Schema for `:agent/message-received` event (N3 §3.7).
 
    Emitted by `core/inter-agent-message-received`. See AgentMessageSent for the
@@ -1239,7 +1213,7 @@
     [:message/content {:optional true} string?]
     [:message string?]]))
 
-(def MetaLoopHaltRequested
+(def ^{:stratum 2} MetaLoopHaltRequested
   "Schema for `:meta-loop/halt-requested` event.
 
    The REFUSE act for the meta-loop: a meta-agent (progress monitor, test-quality,

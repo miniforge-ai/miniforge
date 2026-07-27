@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.digest
   "Content integrity verification for governance config files.
 
@@ -34,9 +33,9 @@
    [java.security MessageDigest]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
 
-(defn bytes->hex
+;; No in-namespace dependencies.
+(defn ^{:stratum 0} bytes->hex
   "Convert byte array to lowercase hex string. Babashka/GraalVM compatible."
   [^bytes ba]
   (let [sb (StringBuilder. (* 2 (alength ba)))]
@@ -44,7 +43,7 @@
       (.append sb (format "%02x" (aget ba i))))
     (.toString sb)))
 
-(defn load-digest-manifest
+(defn ^{:stratum 0} load-digest-manifest
   "Load governance/digests.edn from classpath.
    Returns a map of config-key -> digest-string, or nil if not found."
   []
@@ -55,9 +54,9 @@
         nil))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
 
-(defn sha256-hex
+;; Composes Layer 0.
+(defn ^{:stratum 1} sha256-hex
   "Compute SHA-256 hex digest of a string.
    Returns a prefixed string like \"sha256:a1b2c3d4...\"."
   [^String content]
@@ -66,9 +65,9 @@
     (str "sha256:" (bytes->hex hash-bytes))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Composes Layer 0 (`load-digest-manifest`) + Layer 1 (`sha256-hex`).
 
-(defn verify-governance-file
+;; Composes Layer 0 (`load-digest-manifest`) + Layer 1 (`sha256-hex`).
+(defn ^{:stratum 2} verify-governance-file
   "Verify content against the digest manifest.
 
    Arguments:

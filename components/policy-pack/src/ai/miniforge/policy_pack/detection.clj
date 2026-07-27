@@ -15,13 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.detection
   "Rule violation detection implementations.
 
-   Layer 0: Pattern matching utilities
-   Layer 1: Detection type implementations
-   Layer 2: Unified detection dispatcher
+   Layer 0: Pattern/plan-resource primitives, state-comparison, semantic and
+     capability detectors, violation-severity filters and formatting —
+     pure or leaf-level, no same-file dependents yet
+   Layer 1: find-matches, any-pattern-matches-multiline?, ast-analysis
+     detection, plan-resource-counts, custom-fn resolution/registration
+     helpers, violation location/message builders (over Layer 0)
+   Layer 2: any-pattern-matches?, detector-predicate?, detect-custom,
+     custom-fn-resolvable?, violation->error (over Layer 1)
+   Layer 3: detect-content-scan/diff-analysis/plan-output, register-custom-fn!
+     (over Layer 2)
+   Layer 4: detect-violation (unified per-type dispatcher, over Layer 3)
+   Layer 5: check-rules (over detect-violation)
+
+   6 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem.
 
    Supports detection types:
    - :content-scan - Regex against artifact content
@@ -40,9 +51,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pattern matching utilities
 
-(defn ensure-pattern
+;; Pattern matching utilities
+(defn ^{:stratum 0} ensure-pattern
   "Convert string or regex to compiled pattern."
   [p]
   (cond
@@ -50,40 +61,7 @@
     (string? p) (re-pattern p)
     :else nil))
 
-(defn find-matches
-  "Find all matches of a pattern in content.
-   Returns vector of {:match string :line int :column int :context string}."
-  [pattern content context-lines]
-  (when-let [pat (ensure-pattern pattern)]
-    (let [lines (str/split-lines content)
-          context-lines (or context-lines 2)]
-      (->> lines
-           (map-indexed vector)
-           (keep (fn [[idx line]]
-                   (when-let [match (re-find pat line)]
-                     (let [match-str (if (string? match) match (first match))
-                           start (max 0 (- idx context-lines))
-                           end (min (count lines) (+ idx context-lines 1))
-                           context-vec (subvec (vec lines) start end)]
-                       {:match match-str
-                        :line (inc idx)  ; 1-indexed
-                        :column (when-let [idx (str/index-of line match-str)]
-                                  (inc idx))
-                        :context (str/join "\n" context-vec)}))))
-           vec))))
-
-(defn any-pattern-matches?
-  "Check if any of the patterns match the content.
-   Returns the first matching pattern's matches, or nil."
-  [patterns content context-lines]
-  (when (seq patterns)
-    (some (fn [p]
-            (let [matches (find-matches p content context-lines)]
-              (when (seq matches)
-                matches)))
-          patterns)))
-
-(defn extract-patterns
+(defn ^{:stratum 0} extract-patterns
   "Extract pattern(s) from detection config.
    Returns vector of patterns."
   [detection]
@@ -93,116 +71,8 @@
       pattern [pattern]
       :else [])))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Content scan detection
-
-(defn any-pattern-matches-multiline?
-  "Like `any-pattern-matches?` but matches each pattern against the WHOLE content
-   rather than line-by-line, for rules whose pattern must span lines (e.g. a k8s
-   `resources:` block followed by `limits:`). Returns a one-element matches vec
-   (with the match's `:line`/`:column` and a bounded `:context` — never the whole
-   file, to avoid payload bloat and leaking unrelated content) on the first hit,
-   or nil."
-  [patterns content]
-  (some (fn [p]
-          (when-let [pat (ensure-pattern p)]
-            (let [matcher (re-matcher pat content)]
-              (when (.find matcher)
-                (let [start     (.start matcher)
-                      match-str (.group matcher)
-                      before    (subs content 0 start)
-                      last-nl   (str/last-index-of before "\n")
-                      match-cap (if (> (count match-str) 200)
-                                  (str (subs match-str 0 200) "…")
-                                  match-str)]
-                  [{:match   match-str
-                    :line    (inc (count (re-seq #"\n" before)))
-                    :column  (inc (- start (if last-nl (inc last-nl) 0)))
-                    :context match-cap}])))))
-        patterns))
-
-(defn detect-content-scan
-  "Detect violations by scanning artifact content.
-
-   Looks for pattern matches in the artifact's content field.
-
-   Arguments:
-   - rule - Rule with :rule/detection config
-   - artifact - Artifact with :artifact/content
-   - context - Execution context (unused for content-scan)
-
-   Honors `:rule/detection :mode`:
-   - `:positive` (default) — a pattern MATCH is a violation.
-   - `:negative` — the ABSENCE of any pattern match is a violation (the rule
-     requires the pattern to be present, e.g. a copyright header or a k8s
-     resource limit). Applicability (file-globs, phases) scopes which artifacts
-     a negative rule can flag, so a missing pattern only fires on relevant files.
-
-   Honors `:rule/detection :multiline?`: when true the patterns are matched
-   against the whole content instead of line-by-line, so a pattern that spans
-   lines (`resources:\\n  limits:`) can match. Line-oriented patterns keep the
-   default per-line behavior.
-
-   Returns:
-   - Violation map if detected, nil otherwise"
-  [rule artifact _context]
-  (let [detection (:rule/detection rule)
-        content (:artifact/content artifact)
-        patterns (extract-patterns detection)
-        context-lines (:context-lines detection 2)
-        mode (:mode detection :positive)
-        violation (fn [matches]
-                    {:type :content-scan
-                     :rule-id (:rule/id rule)
-                     :matches (vec matches)
-                     :artifact-path (:artifact/path artifact)
-                     :message (get-in rule [:rule/enforcement :message])})]
-    (when (and content (seq patterns))
-      (let [matches (if (:multiline? detection)
-                      (any-pattern-matches-multiline? patterns content)
-                      (any-pattern-matches? patterns content context-lines))]
-        (if (= :negative mode)
-          (when-not matches (violation nil))
-          (when matches (violation matches)))))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Diff analysis detection
-
-(defn detect-diff-analysis
-  "Detect violations by analyzing git diff.
-
-   Looks for pattern matches in:
-   - The artifact's diff field (if present)
-   - The context's diff field
-
-   Useful for detecting removed lines, changed patterns, etc.
-
-   Arguments:
-   - rule - Rule with :rule/detection config
-   - artifact - Artifact with optional :artifact/diff
-   - context - Context with optional :diff
-
-   Returns:
-   - Violation map if detected, nil otherwise"
-  [rule artifact context]
-  (let [detection (:rule/detection rule)
-        ;; Diff can be on artifact or in context
-        diff (or (:artifact/diff artifact)
-                 (:diff context))
-        patterns (extract-patterns detection)
-        context-lines (:context-lines detection 3)]
-    (when (and diff (seq patterns))
-      (when-let [matches (any-pattern-matches? patterns diff context-lines)]
-        {:type :diff-analysis
-         :rule-id (:rule/id rule)
-         :matches matches
-         :artifact-path (:artifact/path artifact)
-         :message (get-in rule [:rule/enforcement :message])}))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Plan output detection
-
-(defn parse-plan-resources
+(defn ^{:stratum 0} parse-plan-resources
   "Parse terraform plan output to extract resource changes.
    Returns vector of {:action :resource :details}."
   [plan-output]
@@ -244,87 +114,8 @@
            (distinct)
            vec))))
 
-(defn detect-plan-output
-  "Detect violations by analyzing terraform plan output.
-
-   Parses plan output and checks for:
-   - Resource patterns matching replace/destroy actions
-   - Specific patterns in plan text
-
-   Arguments:
-   - rule - Rule with :rule/detection config
-   - artifact - Artifact (may contain plan output)
-   - context - Context with :terraform-plan
-
-   Returns:
-   - Violation map if detected, nil otherwise"
-  [rule artifact context]
-  (let [detection (:rule/detection rule)
-        plan-output (or (:terraform-plan context)
-                        (:artifact/content artifact))
-        patterns (extract-patterns detection)
-        resource-patterns (get-in rule [:rule/applies-to :resource-patterns])]
-    (when plan-output
-      ;; Two detection modes:
-      ;; 1. Pattern match against raw plan text
-      ;; 2. Parse plan and check resource changes
-      (let [pattern-matches (when (seq patterns)
-                              (any-pattern-matches? patterns plan-output 2))
-            ;; Parse resources and check for concerning actions
-            parsed (parse-plan-resources plan-output)
-            resource-violations
-            (when (and (seq resource-patterns) (seq parsed))
-              (->> parsed
-                   (filter (fn [{:keys [resource action]}]
-                             (and (#{:replace :destroy} action)
-                                  (some (fn [rp]
-                                          (re-find (ensure-pattern rp) resource))
-                                        resource-patterns))))
-                   seq))]
-        (when (or pattern-matches resource-violations)
-          {:type :plan-output
-           :rule-id (:rule/id rule)
-           :matches (or pattern-matches [])
-           :resource-violations (vec resource-violations)
-           :message (get-in rule [:rule/enforcement :message])})))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; AST analysis detection (tree-sitter CLI)
-
-(defn detect-ast-analysis
-  "Detect violations by structural pattern matching via tree-sitter.
-
-   Requires the tree-sitter CLI to be available on PATH.
-   Falls back to nil (no violation) if tree-sitter is unavailable.
-
-   Arguments:
-   - rule - Rule with :rule/detection containing :query (tree-sitter S-expression pattern)
-   - artifact - Artifact with :artifact/content and :artifact/path
-   - context - Execution context (may contain :lang override)
-
-   Returns:
-   - Violation map if detected, nil otherwise"
-  [rule artifact context]
-  (when (ast/tree-sitter-available?)
-    (let [detection (:rule/detection rule)
-          query     (or (:query detection) (first (extract-patterns detection)))
-          content   (:artifact/content artifact)
-          path      (:artifact/path artifact "")
-          lang      (ast/detect-language path (:lang context))]
-      (when (and content query)
-        (let [ext    (ast/file-extension path)
-              result (ast/run-query content (str query) lang ext)]
-          (when (and (schema/succeeded? result) (seq (:matches result)))
-            {:type          :ast-analysis
-             :rule-id       (:rule/id rule)
-             :matches       (:matches result)
-             :artifact-path path
-             :message       (get-in rule [:rule/enforcement :message])}))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; State comparison detection
-
-(defn detect-state-comparison
+(defn ^{:stratum 0} detect-state-comparison
   "Detect violations by comparing desired state to current state.
 
    Uses clojure.data/diff to find structural drift between two EDN maps.
@@ -350,25 +141,8 @@
                            :current-only only-current}
            :message       (get-in rule [:rule/enforcement :message])})))))
 
-(defn plan-resource-counts
-  "Aggregate resource change counts from terraform plan output.
-   Returns {:creates int :updates int :destroys int}."
-  [plan-output]
-  (let [resources (parse-plan-resources plan-output)]
-    (reduce (fn [acc {:keys [action]}]
-              (case action
-                :create  (update acc :creates inc)
-                :destroy (update acc :destroys inc)
-                :update  (update acc :updates inc)
-                :replace (-> acc (update :creates inc) (update :destroys inc))
-                acc))
-            {:creates 0 :updates 0 :destroys 0}
-            resources)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Custom detection
-
-(defonce ^{:private true
+(defonce ^{:stratum 0} ^{:private true
            :doc "Explicit extension registry for custom policy detectors.
 
 Keys are the symbols stored under `:rule/detection :custom-fn`; values are
@@ -377,75 +151,21 @@ depending on ambient namespace loading or raw var resolution."}
   custom-fn-registry
   (atom {}))
 
-(defn- declared-method?
+(defn- ^{:stratum 0} declared-method?
   [method-name arity f]
   (some (fn [^java.lang.reflect.Method method]
           (and (= method-name (.getName method))
                (= arity (count (.getParameterTypes method)))))
         (.getDeclaredMethods (class f))))
 
-(defn- variadic-accepts-arity?
-  [arity f]
-  (when (declared-method? "getRequiredArity" 0 f)
-    (try
-      (<= (.getRequiredArity f) arity)
-      (catch Throwable _ false))))
-
-(defn- reflectable-invoke?
+(defn- ^{:stratum 0} reflectable-invoke?
   "True when `f`'s class declares any `invoke` method. JVM functions do; SCI
    functions under babashka do not, so arity reflection is blind there."
   [f]
   (boolean (some #(= "invoke" (.getName ^java.lang.reflect.Method %))
                  (.getDeclaredMethods (class f)))))
 
-(defn- detector-predicate?
-  "True when `f` is a custom detector fn. On the JVM its 2-arity shape is verified
-   by reflection; under babashka/SCI (whose fn classes expose no reflectable
-   `invoke` methods, or where reflection is unavailable) arity cannot be
-   introspected, so any `fn?` is accepted rather than rejecting a valid detector
-   we cannot check — this lets detector namespaces register at LOAD time on both
-   runtimes, instead of deferring registration to first use."
-  [f]
-  (and (fn? f)
-       (try
-         (or (declared-method? "invoke" 2 f)
-             (variadic-accepts-arity? 2 f)
-             (not (reflectable-invoke? f)))
-         ;; Reflection/introspection failure (e.g. babashka) → accept the fn.
-         ;; Catch Exception, not Throwable, so JVM Errors are not masked.
-         (catch Exception _ true))))
-
-(defn register-custom-fn!
-  "Register `f` as the detector implementation for `custom-fn-sym`.
-
-   Custom policy detectors are an explicit extension point. Callers that own a
-   detector namespace should register the symbol they place in policy-pack EDN
-   before compiling or applying packs."
-  [custom-fn-sym f]
-  (when-not (symbol? custom-fn-sym)
-    (throw (ex-info "Custom detector key must be a symbol"
-                    {:custom-fn custom-fn-sym})))
-  (when-not (detector-predicate? f)
-    (throw (ex-info "Custom detector value must be a two-arity predicate function"
-                    {:custom-fn custom-fn-sym
-                     :value-type (some-> f class .getName)})))
-  (swap! custom-fn-registry assoc custom-fn-sym f)
-  f)
-
-(defn unregister-custom-fn!
-  "Remove a registered custom detector. Intended for tests and reload hygiene."
-  [custom-fn-sym]
-  (swap! custom-fn-registry dissoc custom-fn-sym)
-  nil)
-
-(defn- resolve-custom-fn
-  "Look up a `:custom` rule's `:custom-fn` symbol in the explicit registry.
-   Missing registrations are the no-op case routed to the judge."
-  [rule]
-  (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
-    (get @custom-fn-registry custom-fn-sym)))
-
-(defn- run-resolved-custom
+(defn- ^{:stratum 0} run-resolved-custom
   "Run an already-resolved custom fn against `artifact`/`context`, adapting
    the result (or a thrown exception) into a violation map, or nil on pass.
    The fn is resolved once by the caller, so neither `detect-custom` nor the
@@ -467,37 +187,8 @@ depending on ambient namespace loading or raw var resolution."}
        :error (.getMessage e)
        :message (str "Custom detection failed: " (.getMessage e))})))
 
-(defn detect-custom
-  "Detect violations using a custom function.
-
-   The custom function is specified by registered symbol in :custom-fn and must:
-   - Accept [artifact context]
-   - Return violation map or nil
-
-   Arguments:
-   - rule - Rule with :rule/detection containing :custom-fn
-   - artifact - Artifact being checked
-   - context - Execution context
-
-   Returns:
-   - Violation map if detected, nil otherwise"
-  [rule artifact context]
-  (when-let [f (resolve-custom-fn rule)]
-    (run-resolved-custom f rule artifact context)))
-
-(defn custom-fn-resolvable?
-  "True when a `:custom` rule names a registered `:custom-fn` symbol.
-
-   A `:custom` rule with no resolvable `:custom-fn` is the no-op case the
-   compiled standards pack is full of (PR #979): such rules route to the
-   LLM-as-judge semantic detector instead of silently never firing."
-  [rule]
-  (some? (resolve-custom-fn rule)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Semantic (LLM-as-judge) detection
-
-(defn detect-semantic
+(defn ^{:stratum 0} detect-semantic
   "Detect violations for a heuristic `:custom` rule via the LLM-as-judge.
 
    policy-pack is depended ON by semantic-analyzer, so this namespace cannot
@@ -556,10 +247,8 @@ depending on ambient namespace loading or raw var resolution."}
            :error    (.getMessage e)
            :message  (str "Semantic detection failed: " (.getMessage e))})))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Capability detection (mechanical tool-gate checks via the registry)
-
-(defn detect-capability
+(defn ^{:stratum 0} detect-capability
   "Detect violations by running a registered mechanical-check capability.
 
    Looks up `(get-in rule [:rule/detection :capability])` in the capability
@@ -604,10 +293,408 @@ depending on ambient namespace loading or raw var resolution."}
                :rule-id  (:rule/id rule)
                :severity (:rule/severity rule))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Unified detection dispatcher
+;; Violation classification helpers
+(defn ^{:stratum 0} blocking-violations
+  [violations]
+  (filter #(= :hard-halt (get-in % [:rule :rule/enforcement :action]))
+          violations))
 
-(defn detect-violation
+(defn ^{:stratum 0} approval-required-violations
+  [violations]
+  (filter #(= :require-approval (get-in % [:rule :rule/enforcement :action]))
+          violations))
+
+(defn ^{:stratum 0} warning-violations
+  [violations]
+  (filter #(= :warn (get-in % [:rule :rule/enforcement :action]))
+          violations))
+
+(defn ^{:stratum 0} audit-violations
+  "Filter violations that are audit-only."
+  [violations]
+  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
+          violations))
+
+(defn- ^{:stratum 0} normalize-line
+  "A finding's line number, or nil when the judge omitted it. The
+   semantic-analyzer's raw->violation defaults a missing `:line` to 0,
+   which is not a valid editor line — carrying it forward would point the
+   agent/tooling at an impossible location."
+  [line]
+  (when (and (integer? line) (pos? line)) line))
+
+(defn ^{:stratum 0} violation->warning
+  [{:keys [rule violation]}]
+  {:code (:rule/id rule)
+   :message (:message violation)
+   :severity (:rule/severity rule)})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} find-matches
+  "Find all matches of a pattern in content.
+   Returns vector of {:match string :line int :column int :context string}."
+  [pattern content context-lines]
+  (when-let [pat (ensure-pattern pattern)]
+    (let [lines (str/split-lines content)
+          context-lines (or context-lines 2)]
+      (->> lines
+           (map-indexed vector)
+           (keep (fn [[idx line]]
+                   (when-let [match (re-find pat line)]
+                     (let [match-str (if (string? match) match (first match))
+                           start (max 0 (- idx context-lines))
+                           end (min (count lines) (+ idx context-lines 1))
+                           context-vec (subvec (vec lines) start end)]
+                       {:match match-str
+                        :line (inc idx)  ; 1-indexed
+                        :column (when-let [idx (str/index-of line match-str)]
+                                  (inc idx))
+                        :context (str/join "\n" context-vec)}))))
+           vec))))
+
+;; Content scan detection
+(defn ^{:stratum 1} any-pattern-matches-multiline?
+  "Like `any-pattern-matches?` but matches each pattern against the WHOLE content
+   rather than line-by-line, for rules whose pattern must span lines (e.g. a k8s
+   `resources:` block followed by `limits:`). Returns a one-element matches vec
+   (with the match's `:line`/`:column` and a bounded `:context` — never the whole
+   file, to avoid payload bloat and leaking unrelated content) on the first hit,
+   or nil."
+  [patterns content]
+  (some (fn [p]
+          (when-let [pat (ensure-pattern p)]
+            (let [matcher (re-matcher pat content)]
+              (when (.find matcher)
+                (let [start     (.start matcher)
+                      match-str (.group matcher)
+                      before    (subs content 0 start)
+                      last-nl   (str/last-index-of before "\n")
+                      match-cap (if (> (count match-str) 200)
+                                  (str (subs match-str 0 200) "…")
+                                  match-str)]
+                  [{:match   match-str
+                    :line    (inc (count (re-seq #"\n" before)))
+                    :column  (inc (- start (if last-nl (inc last-nl) 0)))
+                    :context match-cap}])))))
+        patterns))
+
+;; AST analysis detection (tree-sitter CLI)
+(defn ^{:stratum 1} detect-ast-analysis
+  "Detect violations by structural pattern matching via tree-sitter.
+
+   Requires the tree-sitter CLI to be available on PATH.
+   Falls back to nil (no violation) if tree-sitter is unavailable.
+
+   Arguments:
+   - rule - Rule with :rule/detection containing :query (tree-sitter S-expression pattern)
+   - artifact - Artifact with :artifact/content and :artifact/path
+   - context - Execution context (may contain :lang override)
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact context]
+  (when (ast/tree-sitter-available?)
+    (let [detection (:rule/detection rule)
+          query     (or (:query detection) (first (extract-patterns detection)))
+          content   (:artifact/content artifact)
+          path      (:artifact/path artifact "")
+          lang      (ast/detect-language path (:lang context))]
+      (when (and content query)
+        (let [ext    (ast/file-extension path)
+              result (ast/run-query content (str query) lang ext)]
+          (when (and (schema/succeeded? result) (seq (:matches result)))
+            {:type          :ast-analysis
+             :rule-id       (:rule/id rule)
+             :matches       (:matches result)
+             :artifact-path path
+             :message       (get-in rule [:rule/enforcement :message])}))))))
+
+(defn ^{:stratum 1} plan-resource-counts
+  "Aggregate resource change counts from terraform plan output.
+   Returns {:creates int :updates int :destroys int}."
+  [plan-output]
+  (let [resources (parse-plan-resources plan-output)]
+    (reduce (fn [acc {:keys [action]}]
+              (case action
+                :create  (update acc :creates inc)
+                :destroy (update acc :destroys inc)
+                :update  (update acc :updates inc)
+                :replace (-> acc (update :creates inc) (update :destroys inc))
+                acc))
+            {:creates 0 :updates 0 :destroys 0}
+            resources)))
+
+(defn- ^{:stratum 1} variadic-accepts-arity?
+  [arity f]
+  (when (declared-method? "getRequiredArity" 0 f)
+    (try
+      (<= (.getRequiredArity f) arity)
+      (catch Throwable _ false))))
+
+(defn ^{:stratum 1} unregister-custom-fn!
+  "Remove a registered custom detector. Intended for tests and reload hygiene."
+  [custom-fn-sym]
+  (swap! custom-fn-registry dissoc custom-fn-sym)
+  nil)
+
+(defn- ^{:stratum 1} resolve-custom-fn
+  "Look up a `:custom` rule's `:custom-fn` symbol in the explicit registry.
+   Missing registrations are the no-op case routed to the judge."
+  [rule]
+  (when-let [custom-fn-sym (get-in rule [:rule/detection :custom-fn])]
+    (get @custom-fn-registry custom-fn-sym)))
+
+(defn- ^{:stratum 1} violation-location
+  "Location for a gate finding, spanning both detector shapes. Content-scan
+   / diff detectors carry top-level `:matches` + `:artifact-path`. The
+   semantic (LLM-judge) detector instead nests its per-file hits — each
+   `{:file :line :current}` from `semantic-analyzer` — under `:violations`,
+   with no top-level `:matches`/`:artifact-path`. Reading only the top-level
+   keys collapsed every semantic finding to `{:matches nil :path nil}`,
+   dropping the file/line/snippet the judge produced and leaving the
+   redirect agent nothing to act on. Surface the nested hits so a semantic
+   finding names concrete sites like the mechanical detectors do."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    {:matches (mapv #(-> (select-keys % [:file :line :current :rationale])
+                         (update :line normalize-line))
+                    hits)
+     :path    (:file (first hits))}
+    {:matches (:matches violation)
+     :path    (:artifact-path violation)}))
+
+(defn- ^{:stratum 1} violation-message
+  "Finding message shown to the redirect/review agent. A semantic
+   violation's top-level `:message` is only the generic rule statement; the
+   judge's specific per-instance findings (what/where) live in `:violations`
+   (each `:rationale` is the judge's message for that site). Fold each hit
+   into the message as `path:line — rationale [snippet]` so the agent sees
+   the concrete instances to change, not just the rule — the other half of
+   why unlocalized semantic findings couldn't be acted on. Non-semantic
+   detectors keep their single `:message` unchanged."
+  [violation]
+  (if-let [hits (seq (:violations violation))]
+    (str (:message violation)
+         "\n"
+         (str/join
+          "\n"
+          (map (fn [{:keys [file line current rationale]}]
+                 (str "  - " file
+                      (when-let [l (normalize-line line)] (str ":" l))
+                      (when-not (str/blank? rationale) (str " — " rationale))
+                      (when-not (str/blank? current) (str "  [" current "]"))))
+               hits)))
+    (:message violation)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} any-pattern-matches?
+  "Check if any of the patterns match the content.
+   Returns the first matching pattern's matches, or nil."
+  [patterns content context-lines]
+  (when (seq patterns)
+    (some (fn [p]
+            (let [matches (find-matches p content context-lines)]
+              (when (seq matches)
+                matches)))
+          patterns)))
+
+(defn- ^{:stratum 2} detector-predicate?
+  "True when `f` is a custom detector fn. On the JVM its 2-arity shape is verified
+   by reflection; under babashka/SCI (whose fn classes expose no reflectable
+   `invoke` methods, or where reflection is unavailable) arity cannot be
+   introspected, so any `fn?` is accepted rather than rejecting a valid detector
+   we cannot check — this lets detector namespaces register at LOAD time on both
+   runtimes, instead of deferring registration to first use."
+  [f]
+  (and (fn? f)
+       (try
+         (or (declared-method? "invoke" 2 f)
+             (variadic-accepts-arity? 2 f)
+             (not (reflectable-invoke? f)))
+         ;; Reflection/introspection failure (e.g. babashka) → accept the fn.
+         ;; Catch Exception, not Throwable, so JVM Errors are not masked.
+         (catch Exception _ true))))
+
+(defn ^{:stratum 2} detect-custom
+  "Detect violations using a custom function.
+
+   The custom function is specified by registered symbol in :custom-fn and must:
+   - Accept [artifact context]
+   - Return violation map or nil
+
+   Arguments:
+   - rule - Rule with :rule/detection containing :custom-fn
+   - artifact - Artifact being checked
+   - context - Execution context
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact context]
+  (when-let [f (resolve-custom-fn rule)]
+    (run-resolved-custom f rule artifact context)))
+
+(defn ^{:stratum 2} custom-fn-resolvable?
+  "True when a `:custom` rule names a registered `:custom-fn` symbol.
+
+   A `:custom` rule with no resolvable `:custom-fn` is the no-op case the
+   compiled standards pack is full of (PR #979): such rules route to the
+   LLM-as-judge semantic detector instead of silently never firing."
+  [rule]
+  (some? (resolve-custom-fn rule)))
+
+(defn ^{:stratum 2} violation->error
+  [{:keys [rule violation]}]
+  {:code (:rule/id rule)
+   :message (violation-message violation)
+   :severity (:rule/severity rule)
+   :location (violation-location violation)
+   :remediation (get-in rule [:rule/enforcement :remediation])})
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} detect-content-scan
+  "Detect violations by scanning artifact content.
+
+   Looks for pattern matches in the artifact's content field.
+
+   Arguments:
+   - rule - Rule with :rule/detection config
+   - artifact - Artifact with :artifact/content
+   - context - Execution context (unused for content-scan)
+
+   Honors `:rule/detection :mode`:
+   - `:positive` (default) — a pattern MATCH is a violation.
+   - `:negative` — the ABSENCE of any pattern match is a violation (the rule
+     requires the pattern to be present, e.g. a copyright header or a k8s
+     resource limit). Applicability (file-globs, phases) scopes which artifacts
+     a negative rule can flag, so a missing pattern only fires on relevant files.
+
+   Honors `:rule/detection :multiline?`: when true the patterns are matched
+   against the whole content instead of line-by-line, so a pattern that spans
+   lines (`resources:\\n  limits:`) can match. Line-oriented patterns keep the
+   default per-line behavior.
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact _context]
+  (let [detection (:rule/detection rule)
+        content (:artifact/content artifact)
+        patterns (extract-patterns detection)
+        context-lines (:context-lines detection 2)
+        mode (:mode detection :positive)
+        violation (fn [matches]
+                    {:type :content-scan
+                     :rule-id (:rule/id rule)
+                     :matches (vec matches)
+                     :artifact-path (:artifact/path artifact)
+                     :message (get-in rule [:rule/enforcement :message])})]
+    (when (and content (seq patterns))
+      (let [matches (if (:multiline? detection)
+                      (any-pattern-matches-multiline? patterns content)
+                      (any-pattern-matches? patterns content context-lines))]
+        (if (= :negative mode)
+          (when-not matches (violation nil))
+          (when matches (violation matches)))))))
+
+;; Diff analysis detection
+(defn ^{:stratum 3} detect-diff-analysis
+  "Detect violations by analyzing git diff.
+
+   Looks for pattern matches in:
+   - The artifact's diff field (if present)
+   - The context's diff field
+
+   Useful for detecting removed lines, changed patterns, etc.
+
+   Arguments:
+   - rule - Rule with :rule/detection config
+   - artifact - Artifact with optional :artifact/diff
+   - context - Context with optional :diff
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact context]
+  (let [detection (:rule/detection rule)
+        ;; Diff can be on artifact or in context
+        diff (or (:artifact/diff artifact)
+                 (:diff context))
+        patterns (extract-patterns detection)
+        context-lines (:context-lines detection 3)]
+    (when (and diff (seq patterns))
+      (when-let [matches (any-pattern-matches? patterns diff context-lines)]
+        {:type :diff-analysis
+         :rule-id (:rule/id rule)
+         :matches matches
+         :artifact-path (:artifact/path artifact)
+         :message (get-in rule [:rule/enforcement :message])}))))
+
+(defn ^{:stratum 3} detect-plan-output
+  "Detect violations by analyzing terraform plan output.
+
+   Parses plan output and checks for:
+   - Resource patterns matching replace/destroy actions
+   - Specific patterns in plan text
+
+   Arguments:
+   - rule - Rule with :rule/detection config
+   - artifact - Artifact (may contain plan output)
+   - context - Context with :terraform-plan
+
+   Returns:
+   - Violation map if detected, nil otherwise"
+  [rule artifact context]
+  (let [detection (:rule/detection rule)
+        plan-output (or (:terraform-plan context)
+                        (:artifact/content artifact))
+        patterns (extract-patterns detection)
+        resource-patterns (get-in rule [:rule/applies-to :resource-patterns])]
+    (when plan-output
+      ;; Two detection modes:
+      ;; 1. Pattern match against raw plan text
+      ;; 2. Parse plan and check resource changes
+      (let [pattern-matches (when (seq patterns)
+                              (any-pattern-matches? patterns plan-output 2))
+            ;; Parse resources and check for concerning actions
+            parsed (parse-plan-resources plan-output)
+            resource-violations
+            (when (and (seq resource-patterns) (seq parsed))
+              (->> parsed
+                   (filter (fn [{:keys [resource action]}]
+                             (and (#{:replace :destroy} action)
+                                  (some (fn [rp]
+                                          (re-find (ensure-pattern rp) resource))
+                                        resource-patterns))))
+                   seq))]
+        (when (or pattern-matches resource-violations)
+          {:type :plan-output
+           :rule-id (:rule/id rule)
+           :matches (or pattern-matches [])
+           :resource-violations (vec resource-violations)
+           :message (get-in rule [:rule/enforcement :message])})))))
+
+(defn ^{:stratum 3} register-custom-fn!
+  "Register `f` as the detector implementation for `custom-fn-sym`.
+
+   Custom policy detectors are an explicit extension point. Callers that own a
+   detector namespace should register the symbol they place in policy-pack EDN
+   before compiling or applying packs."
+  [custom-fn-sym f]
+  (when-not (symbol? custom-fn-sym)
+    (throw (ex-info "Custom detector key must be a symbol"
+                    {:custom-fn custom-fn-sym})))
+  (when-not (detector-predicate? f)
+    (throw (ex-info "Custom detector value must be a two-arity predicate function"
+                    {:custom-fn custom-fn-sym
+                     :value-type (some-> f class .getName)})))
+  (swap! custom-fn-registry assoc custom-fn-sym f)
+  f)
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Unified detection dispatcher
+(defn ^{:stratum 4} detect-violation
   "Detect violations for a rule against an artifact.
 
    Dispatches to the appropriate detection implementation based on
@@ -639,7 +726,9 @@ depending on ambient namespace loading or raw var resolution."}
       :capability (detect-capability rule artifact context)
       nil)))
 
-(defn check-rules
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} check-rules
   "Check multiple rules against an artifact.
 
    Returns vector of violations found.
@@ -659,94 +748,6 @@ depending on ambient namespace loading or raw var resolution."}
                   :violation violation
                   :timestamp (java.time.Instant/now)})))
        vec))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Violation classification helpers
-
-(defn blocking-violations
-  [violations]
-  (filter #(= :hard-halt (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
-(defn approval-required-violations
-  [violations]
-  (filter #(= :require-approval (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
-(defn warning-violations
-  [violations]
-  (filter #(= :warn (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
-(defn audit-violations
-  "Filter violations that are audit-only."
-  [violations]
-  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
-          violations))
-
-(defn- normalize-line
-  "A finding's line number, or nil when the judge omitted it. The
-   semantic-analyzer's raw->violation defaults a missing `:line` to 0,
-   which is not a valid editor line — carrying it forward would point the
-   agent/tooling at an impossible location."
-  [line]
-  (when (and (integer? line) (pos? line)) line))
-
-(defn- violation-location
-  "Location for a gate finding, spanning both detector shapes. Content-scan
-   / diff detectors carry top-level `:matches` + `:artifact-path`. The
-   semantic (LLM-judge) detector instead nests its per-file hits — each
-   `{:file :line :current}` from `semantic-analyzer` — under `:violations`,
-   with no top-level `:matches`/`:artifact-path`. Reading only the top-level
-   keys collapsed every semantic finding to `{:matches nil :path nil}`,
-   dropping the file/line/snippet the judge produced and leaving the
-   redirect agent nothing to act on. Surface the nested hits so a semantic
-   finding names concrete sites like the mechanical detectors do."
-  [violation]
-  (if-let [hits (seq (:violations violation))]
-    {:matches (mapv #(-> (select-keys % [:file :line :current :rationale])
-                         (update :line normalize-line))
-                    hits)
-     :path    (:file (first hits))}
-    {:matches (:matches violation)
-     :path    (:artifact-path violation)}))
-
-(defn- violation-message
-  "Finding message shown to the redirect/review agent. A semantic
-   violation's top-level `:message` is only the generic rule statement; the
-   judge's specific per-instance findings (what/where) live in `:violations`
-   (each `:rationale` is the judge's message for that site). Fold each hit
-   into the message as `path:line — rationale [snippet]` so the agent sees
-   the concrete instances to change, not just the rule — the other half of
-   why unlocalized semantic findings couldn't be acted on. Non-semantic
-   detectors keep their single `:message` unchanged."
-  [violation]
-  (if-let [hits (seq (:violations violation))]
-    (str (:message violation)
-         "\n"
-         (str/join
-          "\n"
-          (map (fn [{:keys [file line current rationale]}]
-                 (str "  - " file
-                      (when-let [l (normalize-line line)] (str ":" l))
-                      (when-not (str/blank? rationale) (str " — " rationale))
-                      (when-not (str/blank? current) (str "  [" current "]"))))
-               hits)))
-    (:message violation)))
-
-(defn violation->error
-  [{:keys [rule violation]}]
-  {:code (:rule/id rule)
-   :message (violation-message violation)
-   :severity (:rule/severity rule)
-   :location (violation-location violation)
-   :remediation (get-in rule [:rule/enforcement :remediation])})
-
-(defn violation->warning
-  [{:keys [rule violation]}]
-  {:code (:rule/id rule)
-   :message (:message violation)
-   :severity (:rule/severity rule)})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

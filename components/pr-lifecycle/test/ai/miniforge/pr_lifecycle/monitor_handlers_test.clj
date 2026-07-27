@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-handlers-test
   (:require
    [ai.miniforge.pr-lifecycle.monitor-handlers :as handlers]
    [ai.miniforge.pr-lifecycle.monitor-state :as state]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest decision-action-maps-categories-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} decision-action-maps-categories-test
   (testing "each comment category maps to the PR-monitor's action verb"
     (is (= :fix     (#'handlers/decision-action :change-request)))
     (is (= :answer  (#'handlers/decision-action :question)))
@@ -31,7 +32,7 @@
     (is (= :skip    (#'handlers/decision-action :noise)))
     (is (= :skip    (#'handlers/decision-action :anything-unrecognised)))))
 
-(deftest route-comment-records-typed-decision-test
+(deftest ^{:stratum 0} route-comment-records-typed-decision-test
   (testing "route-comment emits one :pr-monitor/decision-recorded act with provenance"
     (let [emitted (atom [])]
       (with-redefs [state/emit! (fn [_ ev] (swap! emitted conj ev))

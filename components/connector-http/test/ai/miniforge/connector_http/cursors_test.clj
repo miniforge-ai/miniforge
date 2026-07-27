@@ -15,25 +15,22 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.cursors-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-http.cursors :as cursors]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Fixtures
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private ts-fn
+;; Fixtures
+(def ^{:stratum 0} ^:private ts-fn
   "Standard timestamp extractor for test records."
   #(or (:updated_at %) (:created_at %)))
 
-(def ^:private resource-def
+(def ^{:stratum 0} ^:private resource-def
   {:cursor-type :timestamp-watermark})
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Tests
-
-(deftest parse-timestamp-test
+(deftest ^{:stratum 0} parse-timestamp-test
   (testing "parses valid ISO-8601 timestamp to Instant"
     (is (some? (cursors/parse-timestamp "2024-01-15T10:00:00Z"))))
 
@@ -46,7 +43,9 @@
   (testing "returns nil for blank string"
     (is (nil? (cursors/parse-timestamp "   ")))))
 
-(deftest after-cursor?-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} after-cursor?-test
   (testing "returns true when cursor is nil (no prior watermark)"
     (is (true? (cursors/after-cursor? ts-fn nil {:updated_at "2024-01-15T10:00:00Z"}))))
 
@@ -74,7 +73,7 @@
                                        :cursor/value "2024-01-14T00:00:00Z"}
                                       {:created_at "2024-01-15T10:00:00Z"})))))
 
-(deftest last-record-cursor-test
+(deftest ^{:stratum 1} last-record-cursor-test
   (testing "returns nil for empty records"
     (is (nil? (cursors/last-record-cursor resource-def []))))
 
@@ -98,7 +97,7 @@
                                              [{:created_at "2024-01-15T10:00:00Z"}])]
       (is (= "2024-01-15T10:00:00Z" (:cursor/value cursor))))))
 
-(deftest sort-by-timestamp-test
+(deftest ^{:stratum 1} sort-by-timestamp-test
   (testing "sorts records ascending by timestamp"
     (let [records [{:updated_at "2024-01-15T10:00:00Z"}
                    {:updated_at "2024-01-13T08:00:00Z"}
@@ -117,7 +116,7 @@
   (testing "empty collection returns empty"
     (is (empty? (cursors/sort-by-timestamp ts-fn [])))))
 
-(deftest max-timestamp-cursor-test
+(deftest ^{:stratum 1} max-timestamp-cursor-test
   (testing "returns nil for empty records"
     (is (nil? (cursors/max-timestamp-cursor ts-fn []))))
 

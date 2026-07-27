@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.interface-test
   "Unit tests for artifact core helpers."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.artifact.interface :as artifact]))
 
-(deftest build-artifact-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} build-artifact-test
   (testing "build-artifact assembles required fields"
     (let [id (random-uuid)
           artifact-map (artifact/build-artifact
@@ -35,7 +36,7 @@
       (is (= [] (:artifact/parents artifact-map)))
       (is (= {} (:artifact/metadata artifact-map))))))
 
-(deftest parent-child-helpers-test
+(deftest ^{:stratum 0} parent-child-helpers-test
   (testing "add-parent and add-child append identifiers"
     (let [base (artifact/build-artifact
                 {:id (random-uuid)

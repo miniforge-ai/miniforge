@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.components.primitives
   "Primitive UI components for web dashboard.
 
@@ -26,16 +25,27 @@
   (:require
    [clojure.string :as str]))
 
-;------------------------------------------------------------------------------ Helper
+;------------------------------------------------------------------------------ Layer 0
 
-(defn build-class
+;------------------------------------------------------------------------------ Helper
+(defn ^{:stratum 0} build-class
   "Build CSS class string from opts and modifiers."
   [{:keys [class]} base-class & modifiers]
   (str/join " " (filter some? (concat [base-class] modifiers [class]))))
 
-;------------------------------------------------------------------------------ Layer 0: Primitives
+(defn ^{:stratum 0} status-dot
+  "Colored status indicator dot.
 
-(defn button
+   Statuses: :running, :completed, :failed, :pending, :blocked
+
+   Example: (status-dot :running)"
+  [status]
+  [:span {:class (str "status-dot " (name status))} "●"])
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Primitives
+(defn ^{:stratum 1} button
   "Button component with variants and sizes.
 
    Options:
@@ -54,7 +64,7 @@
       html-attrs)
      label]))
 
-(defn badge
+(defn ^{:stratum 1} badge
   "Badge component for labels and status indicators.
 
    Options:
@@ -69,7 +79,7 @@
    (when icon [:span.badge-icon icon])
    label])
 
-(defn card
+(defn ^{:stratum 1} card
   "Card component with optional title and footer.
 
    Options:
@@ -84,7 +94,7 @@
    [:div.card-body content]
    (when footer [:div.card-footer footer])])
 
-(defn stat-card
+(defn ^{:stratum 1} stat-card
   "Metric card for dashboard with large value and label.
 
    Options:
@@ -106,7 +116,7 @@
         :neutral "→"
         "")])])
 
-(defn progress-bar
+(defn ^{:stratum 1} progress-bar
   "Progress bar component showing completion percentage.
 
    Options:
@@ -122,16 +132,7 @@
      :class (str "progress-" (name variant))}]
    (when show-label [:div.progress-label (str percent "%")])])
 
-(defn status-dot
-  "Colored status indicator dot.
-
-   Statuses: :running, :completed, :failed, :pending, :blocked
-
-   Example: (status-dot :running)"
-  [status]
-  [:span {:class (str "status-dot " (name status))} "●"])
-
-(defn icon
+(defn ^{:stratum 1} icon
   "Unicode icon component with optional label.
 
    Icons: :check, :cross, :clock, :dot, :circle, :arrow-right, :arrow-down, :arrow-right-small

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.network-health
   "URL-driven network connectivity probe.
 
@@ -37,19 +36,17 @@
   (:require [org.httpkit.client :as http]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:const default-probe-timeout-ms
+;; Constants
+(def ^{:stratum 0} ^:const default-probe-timeout-ms
   "Maximum time a single probe is allowed to wait for an HTTP response
    before being considered failed. 3s is a generous ceiling — a healthy
    provider responds in <500ms; a 3s ceiling tolerates a slow CDN edge
    without making the probe itself a stagnation source."
   3000)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Probe primitive
-
-(defn- response-proves-connectivity?
+(defn- ^{:stratum 0} response-proves-connectivity?
   "True when an http-kit response map shows the request reached an HTTP
    peer and got a response back — regardless of status code. A 4xx or
    even a 5xx means the network is up; only an exception (`:error`) or
@@ -59,7 +56,9 @@
                 (nil? (:error response))
                 (pos-int? (:status response)))))
 
-(defn network-healthy?
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} network-healthy?
   "Probe `probe-url` for a live HTTP response and return true/false.
 
    Returns true when the probe receives an HTTP response within

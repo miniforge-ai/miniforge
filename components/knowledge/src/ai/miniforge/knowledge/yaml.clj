@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge.yaml
   "YAML frontmatter parsing for markdown files.
 
@@ -26,9 +25,9 @@
    [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure parsing helpers
 
-(defn parse-array-value
+;; Pure parsing helpers
+(defn ^{:stratum 0} parse-array-value
   "Parse array-style value [item1, item2] into vector.
    Returns parsed vector or original string on failure."
   [v]
@@ -38,7 +37,7 @@
       ;; If EDN parsing fails, split by comma
       (vec (map str/trim (str/split (str/replace v #"[\[\]]" "") #","))))))
 
-(defn parse-scalar-value
+(defn ^{:stratum 0} parse-scalar-value
   "Parse a scalar YAML value into appropriate Clojure type.
    Handles: booleans, numbers, and strings (with quote removal)."
   [v]
@@ -55,30 +54,14 @@
     :else
     (str/replace v #"^[\"']|[\"']$" "")))
 
-(defn parse-value
-  "Parse a YAML value, handling arrays and scalars."
-  [v]
-  (if (str/starts-with? v "[")
-    (parse-array-value v)
-    (parse-scalar-value v)))
-
-(defn parse-key-value-line
-  "Parse a key: value line into [key value] pair.
-   Returns [key nil] for key with no value, or nil if line doesn't match pattern."
-  [line]
-  (when-let [[_ k v] (re-find #"^(\w+):\s*(.*)$" line)]
-    (if (str/blank? v)
-      [(keyword k) nil]
-      [(keyword k) (parse-value v)])))
-
-(defn parse-list-item
+(defn ^{:stratum 0} parse-list-item
   "Parse a list item line (e.g., '  - item').
    Returns the item value or nil if not a list item."
   [line]
   (when (str/starts-with? line "  - ")
     (str/trim (subs line 4))))
 
-(defn add-to-collection
+(defn ^{:stratum 0} add-to-collection
   "Add a value to an existing collection field.
    Creates vector if field doesn't exist, appends to existing vector."
   [existing value]
@@ -87,10 +70,45 @@
     (nil? existing) [value]
     :else [existing value]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Stateful accumulation (using reduce instead of atom)
+(defn ^{:stratum 0} split-frontmatter
+  "Split markdown content into frontmatter and body.
+   Returns {:frontmatter string :body string} or nil if no frontmatter."
+  [content]
+  (let [lines (str/split-lines content)]
+    (when (and (seq lines) (= "---" (first lines)))
+      (let [end-idx (->> (rest lines)
+                         (map-indexed vector)
+                         (filter (fn [[_ line]] (= "---" line)))
+                         first
+                         first)]
+        (when end-idx
+          {:frontmatter (str/join "\n" (take end-idx (rest lines)))
+           :body (str/join "\n" (drop (+ end-idx 2) lines))})))))
 
-(defn process-yaml-line
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-value
+  "Parse a YAML value, handling arrays and scalars."
+  [v]
+  (if (str/starts-with? v "[")
+    (parse-array-value v)
+    (parse-scalar-value v)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} parse-key-value-line
+  "Parse a key: value line into [key value] pair.
+   Returns [key nil] for key with no value, or nil if line doesn't match pattern."
+  [line]
+  (when-let [[_ k v] (re-find #"^(\w+):\s*(.*)$" line)]
+    (if (str/blank? v)
+      [(keyword k) nil]
+      [(keyword k) (parse-value v)])))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Stateful accumulation (using reduce instead of atom)
+(defn ^{:stratum 3} process-yaml-line
   "Process a single YAML line and update accumulator.
    Returns updated accumulator map."
   [acc line]
@@ -115,7 +133,9 @@
     :else
     acc))
 
-(defn parse-yaml-frontmatter
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} parse-yaml-frontmatter
   "Parse YAML frontmatter into EDN map.
    Simple parser for basic YAML - handles:
    - key: value
@@ -127,18 +147,3 @@
   [yaml-str]
   (let [lines (str/split-lines yaml-str)]
     (reduce process-yaml-line {} lines)))
-
-(defn split-frontmatter
-  "Split markdown content into frontmatter and body.
-   Returns {:frontmatter string :body string} or nil if no frontmatter."
-  [content]
-  (let [lines (str/split-lines content)]
-    (when (and (seq lines) (= "---" (first lines)))
-      (let [end-idx (->> (rest lines)
-                         (map-indexed vector)
-                         (filter (fn [[_ line]] (= "---" line)))
-                         first
-                         first)]
-        (when end-idx
-          {:frontmatter (str/join "\n" (take end-idx (rest lines)))
-           :body (str/join "\n" (drop (+ end-idx 2) lines))})))))

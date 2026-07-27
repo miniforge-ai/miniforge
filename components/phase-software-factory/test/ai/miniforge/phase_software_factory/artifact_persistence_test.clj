@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.artifact-persistence-test
   "Integration tests for environment promotion and fail-fast validation.
 
@@ -42,41 +41,61 @@
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Test Fixtures
+(def ^{:stratum 0} ^:dynamic *test-worktree* nil)
 
-(def ^:dynamic *test-worktree* nil)
-
-(def phase-test-config-resource
+(def ^{:stratum 0} phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
-(defn create-temp-worktree []
+(defn ^{:stratum 0} create-temp-worktree []
   (let [temp-dir (io/file (System/getProperty "java.io.tmpdir")
                           (str "artifact-persist-test-" (random-uuid)))]
     (.mkdirs temp-dir)
     (.getPath temp-dir)))
 
-(defn cleanup-temp-worktree [dir-path]
+(defn ^{:stratum 0} cleanup-temp-worktree [dir-path]
   (when dir-path
     (try (fs/delete-tree dir-path) (catch Exception _e nil))))
 
-(defn worktree-fixture [f]
+(defn ^{:stratum 0} execute-phase-enter [phase-name ctx]
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
+        enter-fn (:enter interceptor)]
+    (enter-fn ctx)))
+
+(defn ^{:stratum 0} execute-phase-leave [phase-name ctx]
+  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
+        leave-fn (:leave interceptor)
+        updated-ctx (leave-fn ctx)]
+    (assoc-in updated-ctx [:execution/phase-results phase-name]
+              (:phase updated-ctx))))
+
+(defn ^{:stratum 0} mock-curator-success
+  "Curator mock that returns success, mirroring the implementer's output/metrics.
+   Used when tests don't need the curator's no-files-written behavior."
+  [{:keys [implementer-result]}]
+  (response/success (:output implementer-result)
+                    {:metrics (:metrics implementer-result)}))
+
+(defn ^{:stratum 0} mock-curator-error
+  "Curator mock that returns the same error the implementer produced.
+   Used by tests verifying retry/budget logic on agent errors."
+  [{:keys [implementer-result]}]
+  (let [err (:error implementer-result)]
+    (response/error (or (:message err) "Mock curator error")
+                    {:data (or (:data err) {})})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} worktree-fixture [f]
   (let [worktree (create-temp-worktree)]
     (binding [*test-worktree* worktree]
       (try (f)
            (finally (cleanup-temp-worktree worktree))))))
 
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (try
-      (binding [loader/phase-loader-config-resource phase-test-config-resource]
-        (worktree-fixture f))
-      (finally
-        (phase/reset-phase-loader!)))))
-
 ;------------------------------------------------------------------------------ Test Helpers
-
-(defn create-base-context []
+(defn ^{:stratum 1} create-base-context []
   {:execution/id (random-uuid)
    :execution/environment-id (random-uuid)
    :execution/worktree-path *test-worktree*
@@ -86,36 +105,10 @@
    :execution/metrics {:tokens 0 :duration-ms 0}
    :execution/phase-results {}})
 
-(defn execute-phase-enter [phase-name ctx]
-  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
-        enter-fn (:enter interceptor)]
-    (enter-fn ctx)))
-
-(defn execute-phase-leave [phase-name ctx]
-  (let [interceptor (phase/get-phase-interceptor {:phase phase-name})
-        leave-fn (:leave interceptor)
-        updated-ctx (leave-fn ctx)]
-    (assoc-in updated-ctx [:execution/phase-results phase-name]
-              (:phase updated-ctx))))
-
-(defn mock-curator-success
-  "Curator mock that returns success, mirroring the implementer's output/metrics.
-   Used when tests don't need the curator's no-files-written behavior."
-  [{:keys [implementer-result]}]
-  (response/success (:output implementer-result)
-                    {:metrics (:metrics implementer-result)}))
-
-(defn mock-curator-error
-  "Curator mock that returns the same error the implementer produced.
-   Used by tests verifying retry/budget logic on agent errors."
-  [{:keys [implementer-result]}]
-  (let [err (:error implementer-result)]
-    (response/error (or (:message err) "Mock curator error")
-                    {:data (or (:data err) {})})))
+;------------------------------------------------------------------------------ Layer 2
 
 ;------------------------------------------------------------------------------ Tests
-
-(deftest test-verify-fails-without-environment
+(deftest ^{:stratum 2} test-verify-fails-without-environment
   (testing "verify phase throws when no execution environment-id is in context"
     (let [ctx (dissoc (create-base-context) :execution/environment-id)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -129,7 +122,7 @@
             (is (= :verify (:phase data)))
             (is (some? (:hint data)))))))))
 
-(deftest test-release-skips-when-no-implement-result
+(deftest ^{:stratum 2} test-release-skips-when-no-implement-result
   (testing "release phase skips when implement phase result is absent and worktree is clean"
     (let [ctx (-> (create-base-context)
                   ;; No implement result in phase-results (phase never ran)
@@ -138,7 +131,7 @@
       (is (= :completed (get-in result [:phase :status]))
           "Release should skip (complete) when implement status is nil and no dirty files"))))
 
-(deftest test-release-gate-is-env-not-impl-status
+(deftest ^{:stratum 2} test-release-gate-is-env-not-impl-status
   (testing "release fails on the env-based zero-files gate, not on impl-status"
     ;; Regression contract change: the previous behavior was to throw
     ;; `:release/no-implement-artifact` whenever the implement result map
@@ -165,7 +158,7 @@
            than the previously-misleading 'no code artifact from implement'
            message"))))
 
-(deftest test-implement-writes-to-environment
+(deftest ^{:stratum 2} test-implement-writes-to-environment
   (testing "implement phase completes with environment-id when agent writes files directly"
     (let [env-id (random-uuid)]
       (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
@@ -196,7 +189,7 @@
           (is (.exists (io/file *test-worktree* "src/feature.clj"))
               "Agent-written file should exist in the executor environment"))))))
 
-(deftest test-implement-fails-on-agent-error
+(deftest ^{:stratum 2} test-implement-fails-on-agent-error
   (testing "leave-implement retries when agent returns :error and within budget"
     (with-redefs [agent/create-implementer (fn [_] {:type :mock-implementer})
                   agent/invoke (fn [_ _ _]
@@ -228,6 +221,15 @@
             "Phase status should be :failed when budget exhausted")
         (is (= :failed (get-in ctx-left [:execution/phase-results :implement :status]))
             "Stored phase result should also show :failed")))))
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (worktree-fixture f))
+      (finally
+        (phase/reset-phase-loader!)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

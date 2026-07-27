@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.tiers
   "Automation tier enforcement for PR trains.
 
@@ -31,40 +30,66 @@
 
    Tier definitions are loaded from resources/config/governance/tiers.edn
    and can be overridden by passing a custom definitions map to `tier-allows?`
-   and related functions.
-
-   Layer 0: Tier definitions (data)
-   Layer 1: Tier enforcement functions"
+   and related functions."
   (:require
    [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Tier definitions — pure data, no code
 
-(def default-tier-definitions
+;; Tier definitions — pure data, no code
+(def ^{:stratum 0} default-tier-definitions
   "Default automation tier constraint definitions loaded from
    resources/config/governance/tiers.edn."
   (config/load-governance-config :tiers))
 
-;; Backward-compatible alias
-(def tier-definitions
-  "Automation tier constraint definitions."
-  default-tier-definitions)
-
-(def risk-level-order
+(def ^{:stratum 0} risk-level-order
   "Risk levels ordered from lowest to highest."
   {:low 0 :medium 1 :high 2 :critical 3})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Tier enforcement functions
+(defn ^{:stratum 0} get-repo-tier
+  "Look up the automation tier for a repository.
 
-(defn risk-within-limit?
+   Arguments:
+   - repo-config - Map of repo-id -> config with :automation-tier
+   - repo-id - Repository identifier string
+
+   Returns: Keyword :tier-0 through :tier-3 (default: :tier-1)"
+  [repo-config repo-id]
+  (get-in repo-config [repo-id :automation-tier] :tier-1))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Backward-compatible alias
+(def ^{:stratum 1} tier-definitions
+  "Automation tier constraint definitions."
+  default-tier-definitions)
+
+;; Tier enforcement functions
+(defn ^{:stratum 1} risk-within-limit?
   "Check if a risk level is within the tier's maximum allowed level."
   [actual-level max-level]
   (<= (get risk-level-order actual-level 99)
       (get risk-level-order max-level 99)))
 
-(defn check-operation
+(defn ^{:stratum 1} get-automation-tier
+  "Get the effective automation tier with full definition.
+
+   Arguments:
+   - repo-config - Repository configuration map
+   - repo-id - Repository identifier
+   - tiers - Optional tier definitions map
+
+   Returns: {:tier kw :definition map}"
+  ([repo-config repo-id]
+   (get-automation-tier repo-config repo-id default-tier-definitions))
+  ([repo-config repo-id tiers]
+   (let [tier (get-repo-tier repo-config repo-id)]
+     {:tier tier
+      :definition (get tiers tier)})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} check-operation
   "Check if a tier definition allows an operation given readiness and risk."
   [tier-def operation-key readiness risk-level]
   (and (get tier-def operation-key)
@@ -74,7 +99,9 @@
               (or (nil? min-readiness)
                   (>= readiness min-readiness))))))
 
-(defn tier-allows?
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} tier-allows?
   "Check if a tier allows a specific operation given readiness and risk.
 
    Arguments:
@@ -96,46 +123,21 @@
          :auto-merge   (check-operation tier-def :auto-merge? readiness risk-level)
          false)))))
 
-(defn get-repo-tier
-  "Look up the automation tier for a repository.
+;------------------------------------------------------------------------------ Layer 4
 
-   Arguments:
-   - repo-config - Map of repo-id -> config with :automation-tier
-   - repo-id - Repository identifier string
-
-   Returns: Keyword :tier-0 through :tier-3 (default: :tier-1)"
-  [repo-config repo-id]
-  (get-in repo-config [repo-id :automation-tier] :tier-1))
-
-(defn can-auto-approve?
+(defn ^{:stratum 4} can-auto-approve?
   "Convenience: check if a PR can be auto-approved given its tier, readiness, and risk."
   ([tier readiness risk]
    (tier-allows? tier :auto-approve readiness risk))
   ([tier readiness risk tiers]
    (tier-allows? tier :auto-approve readiness risk tiers)))
 
-(defn can-auto-merge?
+(defn ^{:stratum 4} can-auto-merge?
   "Convenience: check if a PR can be auto-merged given its tier, readiness, and risk."
   ([tier readiness risk]
    (tier-allows? tier :auto-merge readiness risk))
   ([tier readiness risk tiers]
    (tier-allows? tier :auto-merge readiness risk tiers)))
-
-(defn get-automation-tier
-  "Get the effective automation tier with full definition.
-
-   Arguments:
-   - repo-config - Repository configuration map
-   - repo-id - Repository identifier
-   - tiers - Optional tier definitions map
-
-   Returns: {:tier kw :definition map}"
-  ([repo-config repo-id]
-   (get-automation-tier repo-config repo-id default-tier-definitions))
-  ([repo-config repo-id tiers]
-   (let [tier (get-repo-tier repo-config repo-id)]
-     {:tier tier
-      :definition (get tiers tier)})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

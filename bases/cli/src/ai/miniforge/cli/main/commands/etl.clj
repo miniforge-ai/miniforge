@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.etl
   "ETL commands:
      - `etl repo <url>`                — clone+analyze a git repository
@@ -44,9 +43,9 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers — shared by etl repo
 
-(defn validate-git-url
+;; Helpers — shared by etl repo
+(defn ^{:stratum 0} validate-git-url
   "Return true when url begins with a recognised git transport prefix."
   [url]
   (boolean
@@ -55,7 +54,7 @@
        (str/starts-with? url "ssh://")
        (str/starts-with? url "http://"))))
 
-(defn- git-clone-temp
+(defn- ^{:stratum 0} git-clone-temp
   "Shallow-clone `url` into a temporary directory.
    Returns a schema/success or schema/failure result."
   [url]
@@ -69,10 +68,8 @@
     (catch Exception e
       (schema/failure :path (ex-message e)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack-path resolution (shared by run + validate)
-
-(defn- single-file-under
+(defn- ^{:stratum 0} single-file-under
   "If exactly one .edn file lives under `dir/subdir`, return its abs path;
    otherwise nil (caller decides whether to error)."
   [dir subdir]
@@ -82,29 +79,7 @@
         (when (= 1 (count ednfiles))
           (str (first ednfiles)))))))
 
-(defn- resolve-pipeline-path
-  "Resolve `pack-or-pipeline` into `[pack-dir pipeline-path]` as absolute
-   paths. `pack-dir` is nil when the caller passed a pipeline EDN
-   directly (no envs/ lookup possible)."
-  [pack-or-pipeline]
-  (let [f (fs/file pack-or-pipeline)]
-    (cond
-      (fs/directory? f)
-      (if-let [p (single-file-under f "pipelines")]
-        [(str (fs/absolutize f)) (str (fs/absolutize p))]
-        (response/throw-anomaly! :anomalies/not-found
-                                 (str "Could not find a single pipelines/*.edn under " f)
-                                 {:pack-dir (str (fs/absolutize f))}))
-
-      (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
-      [nil (str (fs/absolutize f))]
-
-      :else
-      (response/throw-anomaly! :anomalies/incorrect
-                               (str "Not a pack directory or pipeline EDN: " pack-or-pipeline)
-                               {:input pack-or-pipeline}))))
-
-(defn- resolve-env-path
+(defn- ^{:stratum 0} resolve-env-path
   "Resolve `--env`, which may be a `.edn` path or a bare env name that
    maps to `<pack-dir>/envs/<name>.edn`. Returns an absolute path or
    throws on an unresolvable input."
@@ -131,24 +106,8 @@
                              (str "--env was a name but pipeline was given directly; pass a .edn path instead: " env)
                              {:env env})))
 
-(defn- resolve-pack-paths
-  "Given the positional arg to `etl run` / `etl validate` and the `--env`
-   flag, return `[pipeline-path env-path]` as absolute file paths, or
-   throw ex-info on an unresolvable input.
-
-   - If `pack-or-pipeline` is a directory, look for one `pipelines/*.edn`.
-   - If it's an .edn file, use it as the pipeline.
-   - `env` may be a path or a bare env name that resolves to
-     `<pack>/envs/<name>.edn` when pack-or-pipeline is a directory."
-  [pack-or-pipeline env]
-  (let [[pack-dir pipeline-path] (resolve-pipeline-path pack-or-pipeline)
-        env-path                 (resolve-env-path env pack-dir)]
-    [pipeline-path env-path]))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; JVM shell-out (run / list / validate)
-
-(defn- find-miniforge-root
+(defn- ^{:stratum 0} find-miniforge-root
   "Walk up from `start` until a directory containing both `workspace.edn`
    and `bases/etl/deps.edn` is found. Returns the absolute path or nil
    if no such ancestor exists (i.e., not inside a miniforge checkout
@@ -167,7 +126,31 @@
        :else
        (recur (fs/parent dir))))))
 
-(defn- shell-etl!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} resolve-pipeline-path
+  "Resolve `pack-or-pipeline` into `[pack-dir pipeline-path]` as absolute
+   paths. `pack-dir` is nil when the caller passed a pipeline EDN
+   directly (no envs/ lookup possible)."
+  [pack-or-pipeline]
+  (let [f (fs/file pack-or-pipeline)]
+    (cond
+      (fs/directory? f)
+      (if-let [p (single-file-under f "pipelines")]
+        [(str (fs/absolutize f)) (str (fs/absolutize p))]
+        (response/throw-anomaly! :anomalies/not-found
+                                 (str "Could not find a single pipelines/*.edn under " f)
+                                 {:pack-dir (str (fs/absolutize f))}))
+
+      (and (fs/regular-file? f) (str/ends-with? (str f) ".edn"))
+      [nil (str (fs/absolutize f))]
+
+      :else
+      (response/throw-anomaly! :anomalies/incorrect
+                               (str "Not a pack directory or pipeline EDN: " pack-or-pipeline)
+                               {:input pack-or-pipeline}))))
+
+(defn- ^{:stratum 1} shell-etl!
   "Shell out to the JVM etl entry point from the miniforge root. `args`
    are the post-`-m` args: the subcommand name and its flags. Streams
    stdout/stderr to the user's terminal. Returns the subprocess exit
@@ -182,10 +165,8 @@
     (do (display/print-error (messages/t :etl/run-requires-checkout))
         1)))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Repository analysis (etl repo)
-
-(defn- analyze-repo-url!
+(defn- ^{:stratum 1} analyze-repo-url!
   "Clone repo and run repo-analyzer against the temporary checkout."
   [url]
   (let [clone-result (git-clone-temp url)]
@@ -210,10 +191,24 @@
             (try (fs/delete-tree repo-path)
                  (catch Exception _ nil))))))))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Command implementations
+;------------------------------------------------------------------------------ Layer 2
 
-(defn etl-repo-cmd
+(defn- ^{:stratum 2} resolve-pack-paths
+  "Given the positional arg to `etl run` / `etl validate` and the `--env`
+   flag, return `[pipeline-path env-path]` as absolute file paths, or
+   throw ex-info on an unresolvable input.
+
+   - If `pack-or-pipeline` is a directory, look for one `pipelines/*.edn`.
+   - If it's an .edn file, use it as the pipeline.
+   - `env` may be a path or a bare env name that resolves to
+     `<pack>/envs/<name>.edn` when pack-or-pipeline is a directory."
+  [pack-or-pipeline env]
+  (let [[pack-dir pipeline-path] (resolve-pipeline-path pack-or-pipeline)
+        env-path                 (resolve-env-path env pack-dir)]
+    [pipeline-path env-path]))
+
+;; Command implementations
+(defn ^{:stratum 2} etl-repo-cmd
   "Run the ETL pipeline against a git repository URL.
 
    Clones the repository, extracts structured metadata (languages, packs,
@@ -234,7 +229,26 @@
             (when (pos? exit-code)
               (shared/exit! exit-code))))))))
 
-(defn etl-run-cmd
+(defn ^{:stratum 2} etl-list-cmd
+  "List pipeline EDN files discovered under a search path.
+
+   Usage: miniforge etl list [<search-path>]
+          (defaults to `.`)"
+  [opts]
+  (let [path (get opts :paths ".")]
+    (shared/exit! (shell-etl! ["list" path]))))
+
+(defn ^{:stratum 2} etl-registry-cmd
+  "Export the product-owned ETL state-variable registry as EDN or JSON."
+  [opts]
+  (if-let [out (:out opts)]
+    (shared/exit! (shell-etl! ["registry" "--out" out]))
+    (shared/usage-error! :etl/registry-usage
+                         "etl registry --out <registry.edn|.json>")))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} etl-run-cmd
   "Execute a Data Foundry ETL pack.
 
    Usage:
@@ -271,16 +285,7 @@
           (display/print-error (ex-message e))
           (shared/exit! 1))))))
 
-(defn etl-list-cmd
-  "List pipeline EDN files discovered under a search path.
-
-   Usage: miniforge etl list [<search-path>]
-          (defaults to `.`)"
-  [opts]
-  (let [path (get opts :paths ".")]
-    (shared/exit! (shell-etl! ["list" path]))))
-
-(defn etl-validate-cmd
+(defn ^{:stratum 3} etl-validate-cmd
   "Load + resolve a pack without executing. Surfaces loader, env, or
    resolver errors.
 
@@ -296,14 +301,6 @@
         (catch clojure.lang.ExceptionInfo e
           (display/print-error (ex-message e))
           (shared/exit! 1))))))
-
-(defn etl-registry-cmd
-  "Export the product-owned ETL state-variable registry as EDN or JSON."
-  [opts]
-  (if-let [out (:out opts)]
-    (shared/exit! (shell-etl! ["registry" "--out" out]))
-    (shared/usage-error! :etl/registry-usage
-                         "etl registry --out <registry.edn|.json>")))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

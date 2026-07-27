@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.phase-software-factory.verify-failure-modes-test
   "Tests for verify phase failure modes.
 
@@ -29,24 +28,16 @@
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.verify :as verify]))
 
-(def phase-test-config-resource
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} phase-test-config-resource
   "config/phase/test-support-namespaces.edn")
 
-(use-fixtures :each
-  (fn [f]
-    (phase/reset-phase-loader!)
-    (try
-      (binding [loader/phase-loader-config-resource phase-test-config-resource]
-        (f))
-      (finally
-        (phase/reset-phase-loader!)))))
-
 ;------------------------------------------------------------------------------ Test Fixtures
-
-(def ^:private run-tests-var
+(def ^{:stratum 0} ^:private run-tests-var
   #'verify/run-tests!)
 
-(defn create-base-context
+(defn ^{:stratum 0} create-base-context
   "Base context with executor environment."
   []
   {:execution/id (random-uuid)
@@ -56,103 +47,7 @@
    :execution/metrics {:tokens 0 :duration-ms 0}
    :execution/phase-results {}})
 
-(defn with-passing-tests [body-fn]
-  (with-redefs-fn
-    {run-tests-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
-                                    :fail-count 0 :error-count 0
-                                    :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
-    body-fn))
-
-(defn with-failing-tests [body-fn]
-  (with-redefs-fn
-    {run-tests-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
-                                    :fail-count 2 :error-count 1
-                                    :output "Ran 3 tests.\n2 failures, 1 error."})}
-    body-fn))
-
-;------------------------------------------------------------------------------ Enter Tests
-
-(deftest verify-succeeds-when-tests-pass-test
-  (testing "verify phase returns :success when test suite passes"
-    (with-passing-tests
-      (fn []
-        (let [ctx (-> (create-base-context)
-                      (assoc :phase-config {:phase :verify}))
-              interceptor (phase/get-phase-interceptor {:phase :verify})
-              result ((:enter interceptor) ctx)]
-
-          (is (= :success (get-in result [:phase :result :status]))
-              "Verify should succeed when all tests pass")
-
-          (is (= 0 (get-in result [:phase :result :metrics :fail-count]))
-              "No failures captured in metrics when all tests pass")
-          (is (pos? (get-in result [:phase :result :metrics :pass-count]))
-              "Pass count captured in metrics"))))))
-
-(deftest verify-fails-when-tests-fail-test
-  (testing "verify phase returns :error when test suite fails"
-    (with-failing-tests
-      (fn []
-        (let [ctx (-> (create-base-context)
-                      (assoc :phase-config {:phase :verify}))
-              interceptor (phase/get-phase-interceptor {:phase :verify})
-              result ((:enter interceptor) ctx)]
-
-          (is (= :error (get-in result [:phase :result :status]))
-              "Verify should fail when tests fail")
-
-          (is (some? (get-in result [:phase :result :error :message]))
-              "Error message should be present")
-
-          (is (pos? (get-in result [:phase :result :metrics :fail-count]))
-              "Fail count captured in metrics when tests fail"))))))
-
-(deftest verify-with-missing-environment-id-test
-  (testing "verify phase fails fast when no execution environment-id is in context"
-    (let [ctx (-> (create-base-context)
-                  (dissoc :execution/environment-id)
-                  (assoc :phase-config {:phase :verify}))
-          interceptor (phase/get-phase-interceptor {:phase :verify})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Verify phase has no execution environment"
-                            ((:enter interceptor) ctx))
-          "Verify should throw when no execution environment is available"))))
-
-(deftest verify-handles-test-runner-error-gracefully-test
-  (testing "verify phase handles test runner exception as test failure"
-    (with-redefs-fn
-      {run-tests-var (fn [_ & _opts] {:passed? false :test-count 0 :fail-count 0 :error-count 1
-                                      :output "bb: command not found"})}
-      (fn []
-        (let [ctx (-> (create-base-context)
-                      (assoc :phase-config {:phase :verify}))
-              interceptor (phase/get-phase-interceptor {:phase :verify})
-              result ((:enter interceptor) ctx)]
-          (is (= :error (get-in result [:phase :result :status]))
-              "Runner error should produce :error result")
-          (is (some? (get-in result [:phase :result :metrics :test-output]))
-              "Test output captured in metrics even on runner error"))))))
-
-(deftest verify-preserves-unparseable-test-output-test
-  (testing "unparseable test output is surfaced as actionable verify feedback"
-    (with-redefs-fn
-      {run-tests-var (fn [_ & _opts] {:passed? false
-                                      :test-count 0
-                                      :assertion-count 0
-                                      :fail-count 0
-                                      :error-count 1
-                                      :parse-error? true
-                                      :output "Syntax error compiling at src/example.clj:12:3"})}
-      (fn []
-        (let [ctx (-> (create-base-context)
-                      (assoc :phase-config {:phase :verify}))
-              interceptor (phase/get-phase-interceptor {:phase :verify})
-              result ((:enter interceptor) ctx)
-              message (get-in result [:phase :result :error :message])]
-          (is (str/includes? message (messages/t :verify/output-unparseable)))
-          (is (str/includes? message "Syntax error compiling")))))))
-
-(deftest parse-test-output-marks-unparseable-output-test
+(deftest ^{:stratum 0} parse-test-output-marks-unparseable-output-test
   (testing "the real parser treats unparseable output as one actionable error"
     (let [result (verify/parse-test-output "Syntax error compiling at src/example.clj:12:3"
                                            1)]
@@ -161,7 +56,7 @@
       (is (= 1 (:error-count result)))
       (is (= 0 (:fail-count result))))))
 
-(deftest parse-test-output-exit-code-is-authoritative-test
+(deftest ^{:stratum 0} parse-test-output-exit-code-is-authoritative-test
   ;; A change-scoped runner can print a clean "Ran N ... 0 failures, 0 errors"
   ;; line from in-scope bricks while another brick fails to COMPILE and the
   ;; runner exits non-zero. The parser must not report success on the text
@@ -182,7 +77,79 @@
         (is (false? (:passed? r)))
         (is (= 1 (:error-count r)) "a failed run must not report 0 errors")))))
 
-(deftest verify-bounds-unparseable-output-preview-test
+;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
+(defn ^{:stratum 0} make-leave-ctx
+  "Build a minimal context suitable for leave-verify."
+  [result on-fail]
+  (cond-> {:phase {:started-at (- (System/currentTimeMillis) 1000)
+                   :result result
+                   :iterations 1}
+           :execution {:phases-completed []}
+           :execution/metrics {:tokens 0 :duration-ms 0}}
+    on-fail (assoc :phase-config {:on-fail on-fail})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} with-passing-tests [body-fn]
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? true :test-count 5 :assertion-count 10
+                                    :fail-count 0 :error-count 0
+                                    :output "Ran 5 tests containing 10 assertions.\n0 failures, 0 errors."})}
+    body-fn))
+
+(defn ^{:stratum 1} with-failing-tests [body-fn]
+  (with-redefs-fn
+    {run-tests-var (fn [_ & _opts] {:passed? false :test-count 3 :assertion-count 6
+                                    :fail-count 2 :error-count 1
+                                    :output "Ran 3 tests.\n2 failures, 1 error."})}
+    body-fn))
+
+(deftest ^{:stratum 1} verify-with-missing-environment-id-test
+  (testing "verify phase fails fast when no execution environment-id is in context"
+    (let [ctx (-> (create-base-context)
+                  (dissoc :execution/environment-id)
+                  (assoc :phase-config {:phase :verify}))
+          interceptor (phase/get-phase-interceptor {:phase :verify})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Verify phase has no execution environment"
+                            ((:enter interceptor) ctx))
+          "Verify should throw when no execution environment is available"))))
+
+(deftest ^{:stratum 1} verify-handles-test-runner-error-gracefully-test
+  (testing "verify phase handles test runner exception as test failure"
+    (with-redefs-fn
+      {run-tests-var (fn [_ & _opts] {:passed? false :test-count 0 :fail-count 0 :error-count 1
+                                      :output "bb: command not found"})}
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
+          (is (= :error (get-in result [:phase :result :status]))
+              "Runner error should produce :error result")
+          (is (some? (get-in result [:phase :result :metrics :test-output]))
+              "Test output captured in metrics even on runner error"))))))
+
+(deftest ^{:stratum 1} verify-preserves-unparseable-test-output-test
+  (testing "unparseable test output is surfaced as actionable verify feedback"
+    (with-redefs-fn
+      {run-tests-var (fn [_ & _opts] {:passed? false
+                                      :test-count 0
+                                      :assertion-count 0
+                                      :fail-count 0
+                                      :error-count 1
+                                      :parse-error? true
+                                      :output "Syntax error compiling at src/example.clj:12:3"})}
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)
+              message (get-in result [:phase :result :error :message])]
+          (is (str/includes? message (messages/t :verify/output-unparseable)))
+          (is (str/includes? message "Syntax error compiling")))))))
+
+(deftest ^{:stratum 1} verify-bounds-unparseable-output-preview-test
   (testing "long unparseable output is bounded in the verify error message"
     (let [preview-limit @#'verify/verify-error-preview-limit
           suffix @#'verify/truncated-output-suffix
@@ -206,19 +173,7 @@
             (is (= (+ (count prefix) 1 preview-limit (count suffix))
                    (count message)))))))))
 
-;------------------------------------------------------------------------------ Leave-verify redirect suppression tests (PR #288)
-
-(defn make-leave-ctx
-  "Build a minimal context suitable for leave-verify."
-  [result on-fail]
-  (cond-> {:phase {:started-at (- (System/currentTimeMillis) 1000)
-                   :result result
-                   :iterations 1}
-           :execution {:phases-completed []}
-           :execution/metrics {:tokens 0 :duration-ms 0}}
-    on-fail (assoc :phase-config {:on-fail on-fail})))
-
-(deftest leave-verify-normal-failure-emits-repair-requested-verdict-test
+(deftest ^{:stratum 1} leave-verify-normal-failure-emits-repair-requested-verdict-test
   (testing "Phase 3: normal verify failure with :on-fail configured sets
             verdict :repair-requested on the phase result. FSM's
             guarded :phase/fail array dispatches to on-fail :implement
@@ -233,7 +188,7 @@
           ":phase/verdict on the result is what determine-phase-event reads")
       (is (phase/failed? (get result :phase))))))
 
-(deftest leave-verify-parse-error-with-provider-words-emits-repair-requested-test
+(deftest ^{:stratum 1} leave-verify-parse-error-with-provider-words-emits-repair-requested-test
   (testing "parse-error previews are actionable even when test output
             contains provider-like fragments. Verdict :repair-requested
             because the failure isn't a real timeout/rate-limit."
@@ -246,7 +201,7 @@
       (is (= :repair-requested (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase))))))
 
-(deftest leave-verify-emits-verify-timeout-verdict-test
+(deftest ^{:stratum 1} leave-verify-emits-verify-timeout-verdict-test
   (testing "Phase 3: timeout error sets verdict :verify/timeout. The
             FSM's :verdict/terminal? guard routes :phase/fail straight
             to :failed, bypassing :on-fail :implement — retrying the
@@ -262,7 +217,7 @@
       (is (true? (get-in result [:phase :error :timeout?]))
           "legacy :timeout? flag still in the error map (Phase 4 removes)"))))
 
-(deftest leave-verify-emits-verify-rate-limited-verdict-test
+(deftest ^{:stratum 1} leave-verify-emits-verify-rate-limited-verdict-test
   (testing "Phase 3: rate-limit error sets verdict :verify/rate-limited.
             FSM terminates rather than redirecting to implement —
             retrying the implementer doesn't change the provider quota."
@@ -282,7 +237,7 @@
             result (verify/leave-verify ctx)]
         (is (= :verify/rate-limited (get-in result [:phase :verdict])))))))
 
-(deftest leave-verify-emits-exhausted-when-no-on-fail-test
+(deftest ^{:stratum 1} leave-verify-emits-exhausted-when-no-on-fail-test
   (testing "Phase 3: failed verify without :on-fail set emits verdict
             :exhausted. FSM has no redirect target to take — the
             guarded array's third branch is absent at compile time."
@@ -293,8 +248,54 @@
       (is (= :exhausted (get-in result [:phase :verdict])))
       (is (phase/failed? (get result :phase))))))
 
-;------------------------------------------------------------------------------ Rich Comment
+;------------------------------------------------------------------------------ Layer 2
 
+;------------------------------------------------------------------------------ Enter Tests
+(deftest ^{:stratum 2} verify-succeeds-when-tests-pass-test
+  (testing "verify phase returns :success when test suite passes"
+    (with-passing-tests
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
+
+          (is (= :success (get-in result [:phase :result :status]))
+              "Verify should succeed when all tests pass")
+
+          (is (= 0 (get-in result [:phase :result :metrics :fail-count]))
+              "No failures captured in metrics when all tests pass")
+          (is (pos? (get-in result [:phase :result :metrics :pass-count]))
+              "Pass count captured in metrics"))))))
+
+(deftest ^{:stratum 2} verify-fails-when-tests-fail-test
+  (testing "verify phase returns :error when test suite fails"
+    (with-failing-tests
+      (fn []
+        (let [ctx (-> (create-base-context)
+                      (assoc :phase-config {:phase :verify}))
+              interceptor (phase/get-phase-interceptor {:phase :verify})
+              result ((:enter interceptor) ctx)]
+
+          (is (= :error (get-in result [:phase :result :status]))
+              "Verify should fail when tests fail")
+
+          (is (some? (get-in result [:phase :result :error :message]))
+              "Error message should be present")
+
+          (is (pos? (get-in result [:phase :result :metrics :fail-count]))
+              "Fail count captured in metrics when tests fail"))))))
+
+(use-fixtures :each
+  (fn [f]
+    (phase/reset-phase-loader!)
+    (try
+      (binding [loader/phase-loader-config-resource phase-test-config-resource]
+        (f))
+      (finally
+        (phase/reset-phase-loader!)))))
+
+;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.phase-software-factory.verify-failure-modes-test)
   :leave-this-here)

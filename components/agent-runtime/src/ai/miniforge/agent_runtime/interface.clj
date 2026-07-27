@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.interface
   "Agent runtime public interface.
 
@@ -39,9 +38,9 @@
    [ai.miniforge.agent-runtime.error-classifier.reporting :as reporting]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Error classification
 
-(def classify-error
+;; Error classification
+(def ^{:stratum 0} classify-error
   "Classify an error by matching against known patterns.
 
    Arguments:
@@ -68,16 +67,14 @@
          :should-retry false}"
   core/classify-error)
 
-(def external-patterns
+(def ^{:stratum 0} external-patterns
   "Compiled external-service error patterns used for shared recovery decisions.
    Each entry is a pattern map from the error classifier with keys such as
    :regex, :type, :vendor, and :rate-limit?."
   patterns/external-patterns)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Message formatting
-
-(def format-error-message
+(def ^{:stratum 0} format-error-message
   "Generate user-friendly error message with context.
 
    Arguments:
@@ -94,7 +91,7 @@
      => \"⚠️  Agent System Error (Not Your Fault!)...\""
   messages/format-error-message)
 
-(def extract-completed-work
+(def ^{:stratum 0} extract-completed-work
   "Extract completed work items from task state.
 
    Arguments:
@@ -112,10 +109,8 @@
          \"PR created at https://...\"]"
   core/extract-completed-work)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Reporting and retry logic
-
-(def generate-report-url
+(def ^{:stratum 0} generate-report-url
   "Generate vendor-specific issue reporting URL with pre-filled context.
 
    Arguments:
@@ -132,7 +127,7 @@
      => \"https://github.com/anthropics/claude-code/issues/new?title=...\""
   reporting/get-vendor-report-url)
 
-(defn should-retry?
+(defn ^{:stratum 0} should-retry?
   "Determine if user should retry based on error type.
 
    Arguments:

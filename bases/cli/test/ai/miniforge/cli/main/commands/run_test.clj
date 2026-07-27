@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.run-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -25,7 +24,9 @@
    [ai.miniforge.cli.spec-parser :as spec-parser]
    [ai.miniforge.cli.workflow-runner :as workflow-runner]))
 
-(deftest run-spec-workflow-propagates-worktree-into-execution-opts-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} run-spec-workflow-propagates-worktree-into-execution-opts-test
   (testing "--worktree becomes authoritative execution worktree metadata"
     (let [captured-spec (atom nil)
           captured-opts (atom nil)]
@@ -48,7 +49,7 @@
                (:spec/source-dir @captured-spec))
             "source-dir should stay anchored to the spec's repo, not the execution worktree")))))
 
-(deftest detect-input-type-and-markdown-spec-regression-test
+(deftest ^{:stratum 0} detect-input-type-and-markdown-spec-regression-test
   (testing "markdown-spec? recognizes markdown spec files"
     (is (true? (#'sut/markdown-spec? "/tmp/behavioral.md")))
     (is (true? (#'sut/markdown-spec? "/tmp/behavioral.markdown")))

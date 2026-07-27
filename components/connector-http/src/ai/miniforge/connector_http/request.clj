@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-http.request
   "Shared HTTP GET request pattern for REST API connectors.
    Handles ETag conditional requests, response classification, and
@@ -32,15 +31,15 @@
             [babashka.http-client :as http]
             [cheshire.core :as json]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Predicates and classifiers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn ok?
+;; Predicates and classifiers
+(defn ^{:stratum 0} ok?
   "Predicate: is the HTTP status a success (2xx)?"
   [status]
   (<= 200 status 299))
 
-(defn classify-error
+(defn ^{:stratum 0} classify-error
   "Classify a non-success HTTP status into an error category keyword."
   [status]
   (cond
@@ -48,45 +47,20 @@
     (<= 500 status 599) :server-error
     :else               :client-error))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Response builders
-
-(defn success-response
+(defn ^{:stratum 0} success-response
   "Build a schema/success from a 2xx response. Caches the ETag for the URL."
   [url resp]
   (etag/store-etag! url (etag/extract-etag (:headers resp)))
   (schema/success :body (json/parse-string (:body resp) keyword)
                   {:headers (:headers resp)}))
 
-(defn not-modified-response
+(defn ^{:stratum 0} not-modified-response
   "Build a schema/success for a 304 Not Modified response."
   [resp]
   (schema/success :body nil {:headers (:headers resp) :not-modified true}))
 
-(defn error-response
-  [status resp msgs]
-  (let [request-failed (:request-failed msgs)]
-    (case (classify-error status)
-      :rate-limited (schema/failure :body (:rate-limited msgs)                      {:error-type :rate-limited})
-      :server-error (schema/failure :body (request-failed status (:server-error msgs)) {:error-type :transient})
-      :client-error (schema/failure :body (request-failed status (:body resp))      {:error-type :permanent}))))
-
-;;------------------------------------------------------------------------------ Layer 2
-;; Request execution and post-request helpers
-
-(defn do-request
-  [url headers query-params error-fn]
-  (let [resp   (http/get url {:headers      (etag/add-etag-header headers url)
-                              :query-params query-params
-                              :as           :string
-                              :throw        false})
-        status (:status resp)]
-    (cond
-      (etag/not-modified? status) (not-modified-response resp)
-      (ok? status)                (success-response url resp)
-      :else                       (error-fn status resp))))
-
-(defn throw-on-failure!
+(defn ^{:stratum 0} throw-on-failure!
   "Throw an anomaly if result is a failure. Returns result unchanged on success.
 
    The thrown ExceptionInfo carries `:anomaly/category :anomalies/unavailable`
@@ -100,13 +74,36 @@
                              {:error-type (:error-type result)}))
   result)
 
-(defn next-url
+(defn ^{:stratum 0} next-url
   [resp]
   (some-> (:headers resp)
           (get "link")
           page/parse-link-header
           page/link-header-next-url))
 
-(defn coerce-records
+(defn ^{:stratum 0} coerce-records
   [body]
   (if (sequential? body) (vec body) [body]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} error-response
+  [status resp msgs]
+  (let [request-failed (:request-failed msgs)]
+    (case (classify-error status)
+      :rate-limited (schema/failure :body (:rate-limited msgs)                      {:error-type :rate-limited})
+      :server-error (schema/failure :body (request-failed status (:server-error msgs)) {:error-type :transient})
+      :client-error (schema/failure :body (request-failed status (:body resp))      {:error-type :permanent}))))
+
+;; Request execution and post-request helpers
+(defn ^{:stratum 1} do-request
+  [url headers query-params error-fn]
+  (let [resp   (http/get url {:headers      (etag/add-etag-header headers url)
+                              :query-params query-params
+                              :as           :string
+                              :throw        false})
+        status (:status resp)]
+    (cond
+      (etag/not-modified? status) (not-modified-response resp)
+      (ok? status)                (success-response url resp)
+      :else                       (error-fn status resp))))

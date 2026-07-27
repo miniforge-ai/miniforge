@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.orchestrator.interface
   "Public API for the orchestrator component.
    Provides workflow execution, task routing, and knowledge coordination."
@@ -24,9 +23,9 @@
    [ai.miniforge.orchestrator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol re-exports
 
-(def Orchestrator
+;; Protocol re-exports
+(def ^{:stratum 0} Orchestrator
   "Protocol satisfied by control-plane instances.
 
    Defines the workflow lifecycle contract: execute-workflow,
@@ -35,14 +34,14 @@
    extend or check satisfies? against the published contract."
   proto/Orchestrator)
 
-(def TaskRouter
+(def ^{:stratum 0} TaskRouter
   "Protocol satisfied by task-router instances.
 
    Defines route-task and can-handle?, mapping task types to agent
    roles. Re-exported for extension and satisfies? checks."
   proto/TaskRouter)
 
-(def BudgetManager
+(def ^{:stratum 0} BudgetManager
   "Protocol satisfied by budget-manager instances.
 
    Defines track-usage, check-budget, and set-budget for tracking
@@ -50,7 +49,7 @@
    extension and satisfies? checks."
   proto/BudgetManager)
 
-(def KnowledgeCoordinator
+(def ^{:stratum 0} KnowledgeCoordinator
   "Protocol satisfied by knowledge-coordinator instances.
 
    Defines inject-for-agent, capture-execution-learning, and
@@ -58,10 +57,8 @@
    capture. Re-exported for extension and satisfies? checks."
   proto/KnowledgeCoordinator)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Orchestrator creation
-
-(def create-control-plane
+(def ^{:stratum 0} create-control-plane
   "Create a control plane (orchestrator) with all components.
 
    The control plane is the central coordination layer:
@@ -86,18 +83,16 @@
   core/create-control-plane)
 
 ;; Backward compatibility alias
-(def create-orchestrator
+(def ^{:stratum 0} create-orchestrator
   "Alias for create-control-plane (backward compatibility)."
   core/create-orchestrator)
 
-(def default-config
+(def ^{:stratum 0} default-config
   "Default orchestrator configuration."
   core/default-config)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Workflow execution
-
-(defn execute-workflow
+(defn ^{:stratum 0} execute-workflow
   "Execute a complete workflow from specification to results.
 
    Arguments:
@@ -119,7 +114,7 @@
   [orchestrator spec context]
   (proto/execute-workflow orchestrator spec context))
 
-(defn get-workflow-status
+(defn ^{:stratum 0} get-workflow-status
   "Get the current status of a workflow execution.
 
    Returns:
@@ -133,12 +128,12 @@
   [orchestrator workflow-id]
   (proto/get-workflow-status orchestrator workflow-id))
 
-(defn cancel-workflow
+(defn ^{:stratum 0} cancel-workflow
   "Cancel a running workflow."
   [orchestrator workflow-id]
   (proto/cancel-workflow orchestrator workflow-id))
 
-(defn get-workflow-results
+(defn ^{:stratum 0} get-workflow-results
   "Get the results of a completed workflow.
 
    Returns:
@@ -148,20 +143,18 @@
   [orchestrator workflow-id]
   (proto/get-workflow-results orchestrator workflow-id))
 
-(defn pause-workflow
+(defn ^{:stratum 0} pause-workflow
   "Pause a running workflow for human review."
   [orchestrator workflow-id]
   (proto/pause-workflow orchestrator workflow-id))
 
-(defn resume-workflow
+(defn ^{:stratum 0} resume-workflow
   "Resume a paused workflow."
   [orchestrator workflow-id]
   (proto/resume-workflow orchestrator workflow-id))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Task routing
-
-(def create-router
+(def ^{:stratum 0} create-router
   "Create a task router.
 
    Example:
@@ -169,7 +162,7 @@
      (create-router {:custom-routes {...}})"
   core/create-router)
 
-(defn route-task
+(defn ^{:stratum 0} route-task
   "Determine which agent should handle a task.
 
    Returns:
@@ -178,26 +171,24 @@
   [router task context]
   (proto/route-task router task context))
 
-(defn can-handle?
+(defn ^{:stratum 0} can-handle?
   "Check if an agent role can handle a task type."
   [router task agent-role]
   (proto/can-handle? router task agent-role))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Budget management
-
-(def create-budget-manager
+(def ^{:stratum 0} create-budget-manager
   "Create a budget manager for tracking resource usage."
   core/create-budget-manager)
 
-(defn track-usage
+(defn ^{:stratum 0} track-usage
   "Record resource usage for a workflow.
 
    usage: {:tokens int :cost-usd double :duration-ms int}"
   [budget-mgr workflow-id usage]
   (proto/track-usage budget-mgr workflow-id usage))
 
-(defn check-budget
+(defn ^{:stratum 0} check-budget
   "Check if workflow is within budget.
 
    Returns:
@@ -208,15 +199,13 @@
   [budget-mgr workflow-id]
   (proto/check-budget budget-mgr workflow-id))
 
-(defn set-budget
+(defn ^{:stratum 0} set-budget
   "Set budget limits for a workflow."
   [budget-mgr workflow-id budget]
   (proto/set-budget budget-mgr workflow-id budget))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Knowledge coordination
-
-(def create-knowledge-coordinator
+(def ^{:stratum 0} create-knowledge-coordinator
   "Create a knowledge coordinator.
 
    Arguments:
@@ -230,7 +219,7 @@
      (create-knowledge-coordinator k-store {:knowledge-injection? true})"
   core/create-knowledge-coordinator)
 
-(defn inject-for-agent
+(defn ^{:stratum 0} inject-for-agent
   "Get knowledge to inject for an agent working on a task.
 
    Returns:
@@ -240,7 +229,7 @@
   [coordinator agent-role task context]
   (proto/inject-for-agent coordinator agent-role task context))
 
-(defn capture-execution-learning
+(defn ^{:stratum 0} capture-execution-learning
   "Capture learnings from an agent execution.
 
    execution-result should include:
@@ -253,7 +242,7 @@
   [coordinator execution-result]
   (proto/capture-execution-learning coordinator execution-result))
 
-(defn should-promote-learning?
+(defn ^{:stratum 0} should-promote-learning?
   "Check if a learning should be promoted to rule.
 
    Returns:

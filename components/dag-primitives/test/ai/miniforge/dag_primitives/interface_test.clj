@@ -15,20 +15,20 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.interface-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-primitives.interface :as dp]))
 
-;;------------------------------------------------------------------------------ Topological sort
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest topological-sort-linear-chain
+;;------------------------------------------------------------------------------ Topological sort
+(deftest ^{:stratum 0} topological-sort-linear-chain
   (testing "A → B → C returns [A B C]"
     (let [result (dp/topological-sort {:a #{} :b #{:a} :c #{:b}})]
       (is (dp/ok? result))
       (is (= [:a :b :c] (:data result))))))
 
-(deftest topological-sort-parallel-roots
+(deftest ^{:stratum 0} topological-sort-parallel-roots
   (testing "Two independent roots both precede their shared dependent"
     (let [result (dp/topological-sort {:a #{} :b #{} :c #{:a :b}})]
       (is (dp/ok? result))
@@ -37,7 +37,7 @@
         (is (< (.indexOf order :a) (.indexOf order :c)))
         (is (< (.indexOf order :b) (.indexOf order :c)))))))
 
-(deftest topological-sort-diamond
+(deftest ^{:stratum 0} topological-sort-diamond
   (testing "Diamond: A → B, A → C, B → D, C → D"
     (let [result (dp/topological-sort {:a #{} :b #{:a} :c #{:a} :d #{:b :c}})]
       (is (dp/ok? result))
@@ -46,26 +46,26 @@
         (is (= :a (first order)))
         (is (= :d (last order)))))))
 
-(deftest topological-sort-single-node
+(deftest ^{:stratum 0} topological-sort-single-node
   (testing "Single node with no deps"
     (let [result (dp/topological-sort {:a #{}})]
       (is (dp/ok? result))
       (is (= [:a] (:data result))))))
 
-(deftest topological-sort-empty
+(deftest ^{:stratum 0} topological-sort-empty
   (testing "Empty graph"
     (let [result (dp/topological-sort {})]
       (is (dp/ok? result))
       (is (= [] (:data result))))))
 
-(deftest topological-sort-cycle-detected
+(deftest ^{:stratum 0} topological-sort-cycle-detected
   (testing "Cycle returns err with :cycle-detected"
     (let [result (dp/topological-sort {:a #{:c} :b #{:a} :c #{:b}})]
       (is (dp/err? result))
       (is (= :cycle-detected (get-in result [:error :code])))
       (is (= #{:a :b :c} (get-in result [:error :data :cycle-nodes]))))))
 
-(deftest topological-sort-partial-cycle
+(deftest ^{:stratum 0} topological-sort-partial-cycle
   (testing "Cycle in part of graph; acyclic nodes still processed"
     (let [result (dp/topological-sort {:root #{} :a #{:b} :b #{:a}})]
       (is (dp/err? result))
@@ -73,50 +73,49 @@
       (is (= #{:a :b} (get-in result [:error :data :cycle-nodes]))))))
 
 ;;------------------------------------------------------------------------------ Result monad
-
-(deftest ok-construction
+(deftest ^{:stratum 0} ok-construction
   (is (dp/ok? (dp/ok {:x 1})))
   (is (= {:x 1} (:data (dp/ok {:x 1})))))
 
-(deftest err-construction
+(deftest ^{:stratum 0} err-construction
   (is (dp/err? (dp/err :bad "oops")))
   (is (= :bad (get-in (dp/err :bad "oops") [:error :code])))
   (is (= {:detail "x"} (get-in (dp/err :bad "oops" {:detail "x"}) [:error :data]))))
 
-(deftest unwrap-ok
+(deftest ^{:stratum 0} unwrap-ok
   (is (= 42 (dp/unwrap (dp/ok 42)))))
 
-(deftest unwrap-err-throws
+(deftest ^{:stratum 0} unwrap-err-throws
   (is (thrown? Exception (dp/unwrap (dp/err :e "e")))))
 
-(deftest unwrap-or-default
+(deftest ^{:stratum 0} unwrap-or-default
   (is (= :fallback (dp/unwrap-or (dp/err :e "e") :fallback))))
 
-(deftest map-ok-transforms-data
+(deftest ^{:stratum 0} map-ok-transforms-data
   (let [result (dp/map-ok (dp/ok 5) inc)]
     (is (dp/ok? result))
     (is (= 6 (:data result)))))
 
-(deftest map-ok-passes-through-err
+(deftest ^{:stratum 0} map-ok-passes-through-err
   (let [e (dp/err :e "e")]
     (is (= e (dp/map-ok e inc)))))
 
-(deftest and-then-chains
+(deftest ^{:stratum 0} and-then-chains
   (let [result (dp/and-then (dp/ok 5) #(dp/ok (* % 2)))]
     (is (dp/ok? result))
     (is (= 10 (:data result)))))
 
-(deftest and-then-short-circuits-on-err
+(deftest ^{:stratum 0} and-then-short-circuits-on-err
   (let [e      (dp/err :e "e")
         result (dp/and-then e #(dp/ok (inc %)))]
     (is (= e result))))
 
-(deftest collect-all-ok
+(deftest ^{:stratum 0} collect-all-ok
   (let [result (dp/collect [(dp/ok 1) (dp/ok 2) (dp/ok 3)])]
     (is (dp/ok? result))
     (is (= [1 2 3] (:data result)))))
 
-(deftest collect-first-err-short-circuits
+(deftest ^{:stratum 0} collect-first-err-short-circuits
   (let [e      (dp/err :bad "bad")
         result (dp/collect [(dp/ok 1) e (dp/ok 3)])]
     (is (= e result))))

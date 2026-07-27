@@ -15,25 +15,22 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.dag-integration-test
   "Integration tests exercising realistic multi-layer DAG workflows."
   (:require [clojure.test :as test :refer [deftest testing is use-fixtures]]
             [ai.miniforge.repo-dag.interface :as dag]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *manager* nil)
 
-(def ^:dynamic *manager* nil)
-
-(defn manager-fixture [f]
+(defn ^{:stratum 0} manager-fixture [f]
   (binding [*manager* (dag/create-manager)]
     (f)))
 
-(use-fixtures :each manager-fixture)
-
 ;------------------------------------------------------------------------------ Helpers
-
-(defn- build-infra-dag!
+(defn- ^{:stratum 0} build-infra-dag!
   "Builds a realistic infrastructure DAG:
    tf-modules -> tf-live -> k8s -> argocd -> app1
                                           -> app2"
@@ -64,9 +61,10 @@
     (dag/add-edge manager (:dag/id d) "argocd" "app2" :library-before-consumer :sequential)
     (:dag/id d)))
 
-;------------------------------------------------------------------------------ Integration tests
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest full-pipeline-topo-order-test
+;------------------------------------------------------------------------------ Integration tests
+(deftest ^{:stratum 1} full-pipeline-topo-order-test
   (testing "realistic infra DAG produces valid topological order"
     (let [dag-id (build-infra-dag! *manager*)
           result (dag/compute-topo-order *manager* dag-id)
@@ -82,7 +80,7 @@
       (is (< (.indexOf order "argocd") (.indexOf order "app1")))
       (is (< (.indexOf order "argocd") (.indexOf order "app2"))))))
 
-(deftest full-pipeline-affected-repos-test
+(deftest ^{:stratum 1} full-pipeline-affected-repos-test
   (testing "change to tf-modules affects all downstream"
     (let [dag-id (build-infra-dag! *manager*)
           affected (dag/affected-repos *manager* dag-id "tf-modules")]
@@ -98,7 +96,7 @@
           affected (dag/affected-repos *manager* dag-id "app1")]
       (is (= #{} affected)))))
 
-(deftest full-pipeline-upstream-repos-test
+(deftest ^{:stratum 1} full-pipeline-upstream-repos-test
   (testing "app1 depends on entire chain"
     (let [dag-id (build-infra-dag! *manager*)
           upstream (dag/upstream-repos *manager* dag-id "app1")]
@@ -109,7 +107,7 @@
           upstream (dag/upstream-repos *manager* dag-id "tf-modules")]
       (is (= #{} upstream)))))
 
-(deftest full-pipeline-merge-order-test
+(deftest ^{:stratum 1} full-pipeline-merge-order-test
   (testing "merge order for subset respects dependencies"
     (let [dag-id (build-infra-dag! *manager*)
           result (dag/merge-order *manager* dag-id #{"tf-modules" "k8s" "app1"})]
@@ -119,14 +117,14 @@
         (is (< (.indexOf order "tf-modules") (.indexOf order "k8s")))
         (is (< (.indexOf order "k8s") (.indexOf order "app1")))))))
 
-(deftest full-pipeline-validation-test
+(deftest ^{:stratum 1} full-pipeline-validation-test
   (testing "realistic DAG passes validation"
     (let [dag-id (build-infra-dag! *manager*)
           result (dag/validate-dag *manager* dag-id)]
       (is (:valid? result))
       (is (empty? (:errors result))))))
 
-(deftest full-pipeline-layers-test
+(deftest ^{:stratum 1} full-pipeline-layers-test
   (testing "realistic DAG has repos in correct layers"
     (let [dag-id (build-infra-dag! *manager*)
           current-dag (dag/get-dag *manager* dag-id)
@@ -136,7 +134,7 @@
       (is (= #{"k8s" "argocd"} (set (:platform layers))))
       (is (= #{"app1" "app2"} (set (:application layers)))))))
 
-(deftest remove-middle-node-test
+(deftest ^{:stratum 1} remove-middle-node-test
   (testing "removing middle node breaks chain but keeps other repos"
     (let [dag-id (build-infra-dag! *manager*)
           updated (dag/remove-repo *manager* dag-id "k8s")]
@@ -150,7 +148,7 @@
         (is (contains? edge-pairs ["argocd" "app1"]))
         (is (contains? edge-pairs ["argocd" "app2"]))))))
 
-(deftest multiple-dags-independence-test
+(deftest ^{:stratum 1} multiple-dags-independence-test
   (testing "operations on one DAG do not affect another"
     (let [dag1-id (build-infra-dag! *manager*)
           d2 (dag/create-dag *manager* "other-dag")
@@ -160,3 +158,5 @@
       (is (= 6 (count (:dag/repos (dag/get-dag *manager* dag1-id)))))
       ;; dag2 should have 1 repo
       (is (= 1 (count (:dag/repos (dag/get-dag *manager* (:dag/id d2)))))))))
+
+(use-fixtures :each manager-fixture)

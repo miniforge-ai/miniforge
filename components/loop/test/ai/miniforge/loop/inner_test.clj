@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.inner-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [ai.miniforge.anomaly.interface :as anomaly]
@@ -26,30 +25,30 @@
             [ai.miniforge.loop.repair :as repair]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def test-task
+;; Test fixtures
+(def ^{:stratum 0} test-task
   {:task/id (random-uuid)
    :task/type :implement})
 
-(defn make-generate-fn
+(defn ^{:stratum 0} make-generate-fn
   "Create a generate function that produces the given artifact."
   [artifact & {:keys [tokens] :or {tokens 100}}]
   (fn [_task _ctx]
     {:artifact artifact
      :tokens tokens}))
 
-(defn valid-artifact []
+(defn ^{:stratum 0} valid-artifact []
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content "(defn hello [] \"world\")"})
 
-(defn invalid-artifact []
+(defn ^{:stratum 0} invalid-artifact []
   {:artifact/id (random-uuid)
    :artifact/type :code
    :artifact/content "(defn broken ["})
 
-(defn reachable-states
+(defn ^{:stratum 0} reachable-states
   [initial-state transitions]
   (loop [visited #{}
          pending [initial-state]]
@@ -61,10 +60,8 @@
                  (into (pop pending) next-states))))
       visited)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; State transition tests
-
-(deftest valid-transition-test
+(deftest ^{:stratum 0} valid-transition-test
   (testing "pending -> generating is valid"
     (is (inner/valid-transition? :pending :generating)))
 
@@ -90,7 +87,7 @@
     (is (not (inner/valid-transition? :complete :pending)))
     (is (not (inner/valid-transition? :complete :generating)))))
 
-(deftest terminal-state-test
+(deftest ^{:stratum 0} terminal-state-test
   (testing ":complete is terminal"
     (is (inner/terminal-state? :complete)))
 
@@ -106,7 +103,29 @@
   (testing ":generating is not terminal"
     (is (not (inner/terminal-state? :generating)))))
 
-(deftest inner-loop-machine-reachability-test
+;------------------------------------------------------------------------------ sum-repair-result-metrics — pin per-attempt aggregation
+(def ^{:stratum 0} ^:private sum-repair-result-metrics
+  (var-get #'inner/sum-repair-result-metrics))
+
+;; Cost epsilon for IEEE-double tolerance — 0.005 + 0.012 ≈ 0.017
+;; round-trips through doubles without exact equality.
+(def ^{:stratum 0} ^:private cost-usd-epsilon 1.0e-6)
+
+(def ^{:stratum 0} ^:private repair-result-fixture
+  "Shape that matches what repair/attempt-repair returns:
+   per-attempt entries live under :results, NOT at the top level.
+   Aggregation has to traverse :results to see real token / cost
+   counts."
+  {:success? false
+   :attempts 2
+   :results  [{:strategy :llm-fix :tokens-used 500  :cost-usd 0.005}
+              {:strategy :retry   :tokens-used 0    :cost-usd 0.0}
+              {:strategy :llm-fix :tokens-used 1200 :cost-usd 0.012}]
+   :errors   [{:code :test}]})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} inner-loop-machine-reachability-test
   (let [reachable (reachable-states inner/initial-loop-state
                                     inner/valid-transitions)
         expected-states #{:pending :generating :validating
@@ -119,7 +138,7 @@
       (is (true? (fsm/final? inner/inner-loop-machine {:_state :escalated})))
       (is (false? (fsm/final? inner/inner-loop-machine {:_state :generating}))))))
 
-(deftest transition-test
+(deftest ^{:stratum 1} transition-test
   (let [loop-state (inner/create-inner-loop test-task {})]
     (testing "transition-result returns updated state for valid transition"
       (let [next-state (inner/transition-result loop-state :generating)]
@@ -157,10 +176,8 @@
                                            (loop-messages/t :inner/invalid-transition)))
                               (inner/transition terminal-state :generating)))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Loop state creation tests
-
-(deftest create-inner-loop-test
+(deftest ^{:stratum 1} create-inner-loop-test
   (testing "creates loop with required fields"
     (let [loop-state (inner/create-inner-loop test-task {})]
       (is (uuid? (:loop/id loop-state)))
@@ -178,10 +195,8 @@
           loop-state (inner/create-inner-loop test-task {:budget budget})]
       (is (= budget (get-in loop-state [:loop/config :budget]))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Termination tests
-
-(deftest should-terminate-test
+(deftest ^{:stratum 1} should-terminate-test
   (testing "terminal state triggers termination"
     (let [loop-state (-> (inner/create-inner-loop test-task {})
                          (assoc :loop/state :complete))]
@@ -204,10 +219,8 @@
     (let [loop-state (inner/create-inner-loop test-task {:max-iterations 5})]
       (is (nil? (inner/should-terminate? loop-state))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Step function tests
-
-(deftest generate-step-test
+(deftest ^{:stratum 1} generate-step-test
   (testing "successful generation transitions to validating"
     (let [loop-state (inner/create-inner-loop test-task {})
           generate-fn (make-generate-fn (valid-artifact))
@@ -242,7 +255,7 @@
       (is (= "java.lang.Exception" (get-in anom [:anomaly/data :anomaly/ex-class]))
           "exception class preserved under :anomaly/data"))))
 
-(deftest validate-step-test
+(deftest ^{:stratum 1} validate-step-test
   (testing "all gates pass transitions to complete"
     (let [loop-state (-> (inner/create-inner-loop test-task {})
                          (assoc :loop/state :validating)
@@ -259,7 +272,7 @@
       (is (= :repairing (:loop/state result)))
       (is (seq (:loop/errors result))))))
 
-(deftest repair-step-test
+(deftest ^{:stratum 1} repair-step-test
   (let [mock-repair-fn (fn [artifact _errors _ctx]
                          {:success? true
                           :artifact (assoc artifact
@@ -288,10 +301,8 @@
                                     {})]
       (is (= :escalated (:loop/state result))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Full loop tests
-
-(deftest run-inner-loop-test
+(deftest ^{:stratum 1} run-inner-loop-test
   (testing "successful generation completes in one iteration"
     (let [loop-state (inner/create-inner-loop test-task {:max-iterations 5})
           generate-fn (make-generate-fn (valid-artifact))
@@ -356,7 +367,7 @@
       (is (not (:success result)))
       (is (= :max-iterations (get-in result [:termination :reason]))))))
 
-(deftest run-simple-test
+(deftest ^{:stratum 1} run-simple-test
   (testing "run-simple with valid generation"
     (let [result (inner/run-simple test-task
                                    (make-generate-fn (valid-artifact))
@@ -364,28 +375,7 @@
       (is (:success result))
       (is (= 1 (:iterations result))))))
 
-;------------------------------------------------------------------------------ sum-repair-result-metrics — pin per-attempt aggregation
-
-(def ^:private sum-repair-result-metrics
-  (var-get #'inner/sum-repair-result-metrics))
-
-;; Cost epsilon for IEEE-double tolerance — 0.005 + 0.012 ≈ 0.017
-;; round-trips through doubles without exact equality.
-(def ^:private cost-usd-epsilon 1.0e-6)
-
-(def ^:private repair-result-fixture
-  "Shape that matches what repair/attempt-repair returns:
-   per-attempt entries live under :results, NOT at the top level.
-   Aggregation has to traverse :results to see real token / cost
-   counts."
-  {:success? false
-   :attempts 2
-   :results  [{:strategy :llm-fix :tokens-used 500  :cost-usd 0.005}
-              {:strategy :retry   :tokens-used 0    :cost-usd 0.0}
-              {:strategy :llm-fix :tokens-used 1200 :cost-usd 0.012}]
-   :errors   [{:code :test}]})
-
-(deftest sum-repair-result-metrics-aggregates-from-results-vector-test
+(deftest ^{:stratum 1} sum-repair-result-metrics-aggregates-from-results-vector-test
   (testing "Per-attempt metrics in :results sum into the returned
             map. Pin the contract: callers can thread the result
             into update-metrics and have it flow into :loop/metrics
@@ -398,7 +388,7 @@
       (is (< (Math/abs (- 0.017 cost-usd)) cost-usd-epsilon)
           "cost-usd summed within IEEE rounding tolerance"))))
 
-(deftest sum-repair-result-metrics-handles-empty-or-missing-results-test
+(deftest ^{:stratum 1} sum-repair-result-metrics-handles-empty-or-missing-results-test
   (testing "Empty / missing :results returns zero metrics rather
             than nil — keeps downstream merge-with + safe."
     (let [no-results {:success? false :attempts 0}]

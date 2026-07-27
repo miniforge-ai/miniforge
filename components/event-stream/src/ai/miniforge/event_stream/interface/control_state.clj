@@ -15,40 +15,39 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.control-state
   "Control-state helpers for the event-stream public API."
   (:require
    [ai.miniforge.event-stream.control :as control]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Control state primitives
 
-(def create-control-state
+;; Control state primitives
+(def ^{:stratum 0} create-control-state
   "Create a control-state atom for driving workflow pause/resume/cancel
    from the CLI poller or TUI. Returns an atom holding
    {:paused false :stopped false :adjustments {}}."
   control/create-control-state)
 
-(def pause!
+(def ^{:stratum 0} pause!
   "Set the control-state atom's :paused flag true. Returns the new
    state map."
   control/pause!)
 
-(def resume!
+(def ^{:stratum 0} resume!
   "Clear the control-state atom's :paused flag (set false). Returns the
    new state map."
   control/resume!)
 
-(def cancel!
+(def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
    state map."
   control/cancel!)
 
-(def paused?
+(def ^{:stratum 0} paused?
   "Return the boolean :paused flag from a control-state atom."
   control/paused?)
 
-(def cancelled?
+(def ^{:stratum 0} cancelled?
   "Return the boolean :stopped flag from a control-state atom."
   control/cancelled?)

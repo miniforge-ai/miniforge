@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-github.impl
   "Implementation functions for the GitHub REST API connector."
   (:require [ai.miniforge.anomaly.interface :as anomaly]
@@ -27,18 +26,13 @@
             [ai.miniforge.response.interface :as response])
   (:import [java.util UUID]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; -- Handle state --
-
-(def ^:private handles (connector/create-handle-registry))
-
-(defn get-handle [handle] (connector/get-handle handles handle))
-(defn store-handle! [handle state] (connector/store-handle! handles handle state))
-(defn remove-handle! [handle] (connector/remove-handle! handles handle))
-(defn touch-handle! [handle] (connector/touch-handle! handles handle))
+(def ^{:stratum 0} ^:private handles (connector/create-handle-registry))
 
 ;; -- Auth --
-
-(defn- build-auth-headers
+(defn- ^{:stratum 0} build-auth-headers
   "Build authorization headers from auth config.
    Supports :api-key (Bearer token) and :oauth2 (Bearer token)."
   [{:auth/keys [method credential-id]}]
@@ -50,66 +44,42 @@
 ;; -- Rate limiting --
 ;; Uses response-header-driven rate limiting via connector-http/rate-limit.
 ;; GitHub returns x-ratelimit-remaining and x-ratelimit-reset on every response.
-
-(def ^:private github-rate-headers
+(def ^{:stratum 0} ^:private github-rate-headers
   {:remaining "x-ratelimit-remaining"
    :reset     "x-ratelimit-reset"
    :limit     "x-ratelimit-limit"})
 
-(defn- update-rate-limits!
-  "Parse rate limit headers from a response and store in handle state."
-  [handle response-headers]
-  (when-let [info (http/parse-rate-headers response-headers github-rate-headers)]
-    (http/update-rate-state! handles handle info)))
-
 ;; -- Record filters --
-
-(defn- issue-not-pr?
+(defn- ^{:stratum 0} issue-not-pr?
   "Predicate: true if a GitHub issue record is NOT a pull request.
    GitHub's /issues endpoint returns PRs mixed in — they have a :pull_request key."
   [record]
   (nil? (:pull_request record)))
 
-(defn- filter-issues
-  "Filter PRs from issues endpoint results. Only applied to :issues resource."
-  [resource-key records]
-  (if (= :issues resource-key)
-    (filterv issue-not-pr? records)
-    records))
-
 ;; -- HTTP helpers --
-
-(defn- github-headers
+(defn- ^{:stratum 0} github-headers
   "Merge auth headers with GitHub-required headers."
   [auth-headers]
   (merge auth-headers
          {"Accept"               "application/vnd.github+json"
           "X-GitHub-Api-Version" "2022-11-28"}))
 
-(defn- error-response
+(defn- ^{:stratum 0} error-response
   [status resp]
   (http/error-response status resp
     {:rate-limited   (msg/t :github/rate-limited)
      :request-failed (fn [s e] (msg/t :github/request-failed {:status s :error e}))}))
 
-(defn- do-request
-  [url headers query-params]
-  (http/do-request url headers query-params error-response))
-
-(defn- response-records
-  [resource-key resp]
-  (filter-issues resource-key (http/coerce-records (:body resp))))
-
-(defn- final-cursor
+(defn- ^{:stratum 0} final-cursor
   [resource-def records]
   (http/last-record-cursor resource-def records))
 
-(defn- page-fetch-result
+(defn- ^{:stratum 0} page-fetch-result
   [records cursor]
   {:records records
    :cursor  cursor})
 
-(defn- timestamp-value
+(defn- ^{:stratum 0} timestamp-value
   "Extract the most recent timestamp from a record.
    Reviews use :submitted_at; other resources use :updated_at/:created_at."
   [record]
@@ -117,32 +87,7 @@
       (:created_at record)
       (:submitted_at record)))
 
-(defn- fetch-all-pages
-  [handle resource-key resource-def headers url query-params]
-  (loop [next-request-url url
-         next-query-params query-params
-         accumulated []]
-    (http/acquire-permit! handles handle {})
-    (let [resp (http/throw-on-failure! (do-request next-request-url headers next-query-params))]
-      (update-rate-limits! handle (:headers resp))
-      (touch-handle! handle)
-      (if (:not-modified resp)
-        (page-fetch-result [] nil)
-        (let [page-records (response-records resource-key resp)
-              all-records  (into accumulated page-records)]
-          (if-let [next-link (http/next-url resp)]
-            (recur next-link nil all-records)
-            (page-fetch-result all-records
-                               (final-cursor resource-def all-records))))))))
-
-
-(defn- resource-records
-  [handle resource-key resource-def config headers cursor opts]
-  (let [url          (resources/build-url (:github/base-url config) resource-def config)
-        query-params (resources/build-query-params resource-def cursor opts)]
-    (:records (fetch-all-pages handle resource-key resource-def headers url query-params))))
-
-(defn- enrich-review
+(defn- ^{:stratum 0} enrich-review
   [pull review]
   (assoc review
          :pull_number (:number pull)
@@ -151,39 +96,7 @@
          :pull_html_url (:html_url pull)
          :pull_state (:state pull)))
 
-(defn- pull-review-records
-  [handle reviews-resource config headers cursor opts pull]
-  (let [review-config (assoc config :github/pull-number (:number pull))
-        records       (resource-records handle :reviews reviews-resource review-config headers nil opts)]
-    (->> records
-         (map #(enrich-review pull %))
-         (filter #(http/after-cursor? timestamp-value cursor %)))))
-
-(defn- extract-reviews
-  [handle config headers cursor opts]
-  (let [pulls-resource (resources/get-resource :pulls)
-        pulls          (resource-records handle :pulls pulls-resource config headers cursor opts)
-        reviews        (->> pulls
-                            (mapcat #(pull-review-records handle
-                                                          (resources/get-resource :reviews)
-                                                          config
-                                                          headers
-                                                          cursor
-                                                          opts
-                                                          %))
-                            (http/sort-by-timestamp timestamp-value)
-                            vec)]
-    (connector/extract-result reviews (http/max-timestamp-cursor timestamp-value reviews) false)))
-
-;; -- Helpers --
-
-(defn- require-handle
-  "Retrieve handle state or return an anomaly."
-  [handle]
-  (connector/require-handle handles handle
-                            {:message (msg/t :github/handle-not-found {:handle handle})}))
-
-(defn- require-resource!
+(defn- ^{:stratum 0} require-resource!
   "Look up resource def or throw."
   [schema-name]
   (or (resources/get-resource (keyword schema-name))
@@ -191,18 +104,57 @@
                                (msg/t :github/resource-unknown {:resource schema-name})
                                {:resource schema-name})))
 
-(defn- validation-errors
+(defn- ^{:stratum 0} validation-errors
   "Extract errors from a validation result, centralizing knowledge of the :errors key."
   [result]
   (:errors result))
 
-(defn- connector-anomaly->response
+(defn- ^{:stratum 0} connector-anomaly->response
   "Convert connector validation anomalies to the response anomaly shape
    expected by current connector protocol consumers."
   [category message anomaly]
   (response/make-anomaly category message (:anomaly/data anomaly)))
 
-(defn- validate-connect
+(defn ^{:stratum 0} do-checkpoint
+  "Persist cursor state. Returns checkpoint-result."
+  [cursor-state]
+  (connector/checkpoint-result cursor-state))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-handle [handle] (connector/get-handle handles handle))
+
+(defn ^{:stratum 1} store-handle! [handle state] (connector/store-handle! handles handle state))
+
+(defn ^{:stratum 1} remove-handle! [handle] (connector/remove-handle! handles handle))
+
+(defn ^{:stratum 1} touch-handle! [handle] (connector/touch-handle! handles handle))
+
+(defn- ^{:stratum 1} update-rate-limits!
+  "Parse rate limit headers from a response and store in handle state."
+  [handle response-headers]
+  (when-let [info (http/parse-rate-headers response-headers github-rate-headers)]
+    (http/update-rate-state! handles handle info)))
+
+(defn- ^{:stratum 1} filter-issues
+  "Filter PRs from issues endpoint results. Only applied to :issues resource."
+  [resource-key records]
+  (if (= :issues resource-key)
+    (filterv issue-not-pr? records)
+    records))
+
+(defn- ^{:stratum 1} do-request
+  [url headers query-params]
+  (http/do-request url headers query-params error-response))
+
+;; -- Helpers --
+(defn- ^{:stratum 1} require-handle
+  "Retrieve handle state or return an anomaly."
+  [handle]
+  (connector/require-handle handles handle
+                            {:message (msg/t :github/handle-not-found {:handle handle})}))
+
+(defn- ^{:stratum 1} validate-connect
   "Validate config and auth sequentially.
 
    Returns nil on success. Returns a response anomaly map for config
@@ -228,8 +180,14 @@
                                        (msg/t :github/auth-invalid {:errors errors})
                                        auth-anomaly))))))
 
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} response-records
+  [resource-key resp]
+  (filter-issues resource-key (http/coerce-records (:body resp))))
+
 ;; -- Lifecycle --
-(defn do-connect
+(defn ^{:stratum 2} do-connect
   "Validate config and auth, register handle.
 
    Returns a connect-result map on success or a response anomaly map when
@@ -245,15 +203,14 @@
                              :last-request-at nil})
       (connector/connect-result handle))))
 
-(defn do-close
+(defn ^{:stratum 2} do-close
   "Remove handle state. Returns close-result."
   [handle]
   (remove-handle! handle)
   (connector/close-result))
 
 ;; -- Source --
-
-(defn do-discover
+(defn ^{:stratum 2} do-discover
   "Return available resource schemas based on config."
   [handle]
   (let [handle-state (require-handle handle)]
@@ -263,7 +220,65 @@
                                    handle-state)
       (connector/discover-result (resources/resource-schemas)))))
 
-(defn do-extract
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} fetch-all-pages
+  [handle resource-key resource-def headers url query-params]
+  (loop [next-request-url url
+         next-query-params query-params
+         accumulated []]
+    (http/acquire-permit! handles handle {})
+    (let [resp (http/throw-on-failure! (do-request next-request-url headers next-query-params))]
+      (update-rate-limits! handle (:headers resp))
+      (touch-handle! handle)
+      (if (:not-modified resp)
+        (page-fetch-result [] nil)
+        (let [page-records (response-records resource-key resp)
+              all-records  (into accumulated page-records)]
+          (if-let [next-link (http/next-url resp)]
+            (recur next-link nil all-records)
+            (page-fetch-result all-records
+                               (final-cursor resource-def all-records))))))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} resource-records
+  [handle resource-key resource-def config headers cursor opts]
+  (let [url          (resources/build-url (:github/base-url config) resource-def config)
+        query-params (resources/build-query-params resource-def cursor opts)]
+    (:records (fetch-all-pages handle resource-key resource-def headers url query-params))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn- ^{:stratum 5} pull-review-records
+  [handle reviews-resource config headers cursor opts pull]
+  (let [review-config (assoc config :github/pull-number (:number pull))
+        records       (resource-records handle :reviews reviews-resource review-config headers nil opts)]
+    (->> records
+         (map #(enrich-review pull %))
+         (filter #(http/after-cursor? timestamp-value cursor %)))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} extract-reviews
+  [handle config headers cursor opts]
+  (let [pulls-resource (resources/get-resource :pulls)
+        pulls          (resource-records handle :pulls pulls-resource config headers cursor opts)
+        reviews        (->> pulls
+                            (mapcat #(pull-review-records handle
+                                                          (resources/get-resource :reviews)
+                                                          config
+                                                          headers
+                                                          cursor
+                                                          opts
+                                                          %))
+                            (http/sort-by-timestamp timestamp-value)
+                            vec)]
+    (connector/extract-result reviews (http/max-timestamp-cursor timestamp-value reviews) false)))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} do-extract
   "Extract records from a GitHub API resource."
   [handle schema-name opts]
   (let [handle-state (require-handle handle)]
@@ -282,8 +297,3 @@
                 query-params (resources/build-query-params resource-def cursor opts)
                 {:keys [records cursor]} (fetch-all-pages handle resource-key resource-def headers url query-params)]
             (connector/extract-result records cursor false)))))))
-
-(defn do-checkpoint
-  "Persist cursor state. Returns checkpoint-result."
-  [cursor-state]
-  (connector/checkpoint-result cursor-state))

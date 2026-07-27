@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.core-test
   "Unit tests for reporting core helpers."
   (:require
@@ -23,21 +22,23 @@
    [ai.miniforge.reporting.core :as core]
    [ai.miniforge.logging.interface :as log]))
 
-(deftest test-safe-get-returns-value-on-success
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} test-safe-get-returns-value-on-success
   (testing "safe-get returns the fn result when no exception is thrown"
     (is (= 42 (core/safe-get (fn [] 42))))
     (is (= :ok (core/safe-get (constantly :ok))))))
 
-(deftest test-safe-get-returns-nil-on-exception
+(deftest ^{:stratum 0} test-safe-get-returns-nil-on-exception
   (testing "safe-get without logger returns nil when fn throws"
     (is (nil? (core/safe-get (fn [] (throw (Exception. "boom"))))))))
 
-(deftest test-safe-get-with-logger-returns-nil-on-exception
+(deftest ^{:stratum 0} test-safe-get-with-logger-returns-nil-on-exception
   (testing "safe-get with logger returns nil when fn throws"
     (let [[logger _] (log/collecting-logger)]
       (is (nil? (core/safe-get logger (fn [] (throw (Exception. "boom")))))))))
 
-(deftest test-safe-get-with-logger-emits-warn-on-exception
+(deftest ^{:stratum 0} test-safe-get-with-logger-emits-warn-on-exception
   (testing "safe-get emits :reporting/safe-get-error at WARN when logger is provided"
     (let [[logger entries] (log/collecting-logger)]
       (core/safe-get logger (fn [] (throw (Exception. "boom"))))
@@ -45,13 +46,13 @@
                       (= :warn (:log/level %)))
                 @entries)))))
 
-(deftest test-safe-get-with-logger-returns-value-on-success
+(deftest ^{:stratum 0} test-safe-get-with-logger-returns-value-on-success
   (testing "safe-get with logger returns value and does not log when fn succeeds"
     (let [[logger entries] (log/collecting-logger)]
       (is (= 42 (core/safe-get logger (fn [] 42))))
       (is (empty? @entries)))))
 
-(deftest test-safe-get-nil-logger-is-safe
+(deftest ^{:stratum 0} test-safe-get-nil-logger-is-safe
   (testing "safe-get with nil logger behaves like no-logger variant"
     (is (nil? (core/safe-get nil (fn [] (throw (Exception. "boom"))))))
     (is (= 42 (core/safe-get nil (fn [] 42))))))

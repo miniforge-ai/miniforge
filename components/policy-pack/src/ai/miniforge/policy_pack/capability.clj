@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.capability
   "Registry of named mechanical-check capabilities.
 
@@ -43,17 +42,15 @@
    [ai.miniforge.anomaly.interface :as anomaly]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Registry state
 
-(defonce ^{:doc "Registry of capability-keyword -> {:meta map :check fn}.
+;; Registry state
+(defonce ^{:stratum 0} ^{:doc "Registry of capability-keyword -> {:meta map :check fn}.
    Starts empty; mechanical capabilities are injected by the gate layer."}
   registry
   (atom {}))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Validation
-
-(defn- valid-registration?
+(defn- ^{:stratum 0} valid-registration?
   "True when `entry` is a well-formed capability registration:
    a map with a `:meta` map and an `:check` that is an actual function
    (a fn). Keywords/symbols are IFn but are not valid checks, so `fn?`
@@ -63,10 +60,10 @@
        (map? (:meta entry))
        (fn? (:check entry))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public API — all return data, never throw
+;------------------------------------------------------------------------------ Layer 1
 
-(defn register-capability!
+;; Public API — all return data, never throw
+(defn ^{:stratum 1} register-capability!
   [k entry]
   (cond
     (not (keyword? k))
@@ -83,15 +80,15 @@
     (do (swap! registry assoc k entry)
         entry)))
 
-(defn get-capability
+(defn ^{:stratum 1} get-capability
   [k]
   (get @registry k))
 
-(defn list-capabilities
+(defn ^{:stratum 1} list-capabilities
   []
   (set (keys @registry)))
 
-(defn capability-available?
+(defn ^{:stratum 1} capability-available?
   [k]
   (contains? @registry k))
 

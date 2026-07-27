@@ -15,16 +15,16 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.alias-test
   "Tests for workflow type aliasing and spec key fallback in the workflow runner."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.workflow-runner :as sut]))
 
-;------------------------------------------------------------------------------ resolve-workflow-alias
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest resolve-workflow-alias-test
+;------------------------------------------------------------------------------ resolve-workflow-alias
+(deftest ^{:stratum 0} resolve-workflow-alias-test
   (testing ":standard-sdlc resolves to :canonical-sdlc"
     (is (= :canonical-sdlc (sut/resolve-workflow-alias :standard-sdlc))))
 
@@ -36,8 +36,7 @@
     (is (= :test-only (sut/resolve-workflow-alias :test-only)))))
 
 ;------------------------------------------------------------------------------ load-or-create-workflow alias integration
-
-(deftest load-or-create-workflow-aliases-standard-sdlc-test
+(deftest ^{:stratum 0} load-or-create-workflow-aliases-standard-sdlc-test
   (testing ":standard-sdlc is resolved to :canonical-sdlc before loading"
     (let [loaded-type (atom nil)
           fake-loader (fn [workflow-id _version _opts]
@@ -49,8 +48,7 @@
           ":standard-sdlc should be translated to :canonical-sdlc before the loader is called"))))
 
 ;------------------------------------------------------------------------------ select-workflow-type spec key fallback
-
-(deftest select-workflow-type-reads-workflow-type-key-test
+(deftest ^{:stratum 0} select-workflow-type-reads-workflow-type-key-test
   (testing ":spec/workflow-type takes precedence over :workflow/type"
     (let [spec {:spec/workflow-type :explicit-type
                 :workflow/type :fallback-type}

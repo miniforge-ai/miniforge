@@ -92,6 +92,16 @@
           (and (= uri "/logout") (= (:request-method req) :post))
           (auth/handle-logout auth-state req)
 
+          ;; Control gate: state-mutating requests require an authenticated
+          ;; operator session even when browse-auth is disabled (#1460).
+          ;; `current-session` is nil whenever auth is unconfigured, so a
+          ;; no-auth dashboard refuses every mutation while read-only views
+          ;; stay open. Intentional machine endpoints (event ingest, agent
+          ;; register/heartbeat) are `public-request?` and excluded.
+          (and (auth/mutating-request? req)
+               (nil? (auth/current-session auth-state req)))
+          (auth/control-unauthorized-response auth-state req)
+
           ;; Auth gate for browser-facing routes
           (and (auth/enabled? auth-state)
                (not (auth/public-request? req))
@@ -245,7 +255,7 @@
           (let [listener-id (subs uri 16)]
             (handlers/handle-api-listener-deregister state listener-id))
 
-          (= uri "/api/train/action")
+          (and (= uri "/api/train/action") (= (:request-method req) :post))
           (handlers/handle-api-train-action state params)
 
           (= uri "/api/filter-fields")

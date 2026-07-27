@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-dag.anomaly.validate-schema-test
   "Coverage for `core/validate-schema-anomaly` and its stable alias
    `core/validate-schema`. Schema rejection is an :invalid-input anomaly;
@@ -25,19 +24,22 @@
             [ai.miniforge.repo-dag.core :as core]
             [ai.miniforge.repo-dag.interface :as dag]))
 
-(def valid-repo
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} valid-repo
   {:repo/url "https://github.com/acme/tf"
    :repo/name "tf"
    :repo/type :terraform-module
    :repo/layer :foundations
    :repo/default-branch "main"})
 
-(def invalid-repo
+(def ^{:stratum 0} invalid-repo
   {:repo/name "missing-required-fields"})
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest validate-schema-anomaly-returns-value-on-success
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 1} validate-schema-anomaly-returns-value-on-success
   (testing "valid value passes through unchanged"
     (is (= valid-repo (core/validate-schema-anomaly dag/RepoNode valid-repo))))
   (testing "result is identical to the input (no copy)"
@@ -45,18 +47,17 @@
                     (core/validate-schema-anomaly dag/RepoNode valid-repo)))))
 
 ;------------------------------------------------------------------------------ Failure path
-
-(deftest validate-schema-anomaly-returns-anomaly-on-failure
+(deftest ^{:stratum 1} validate-schema-anomaly-returns-anomaly-on-failure
   (testing "invalid value yields a canonical anomaly"
     (let [result (core/validate-schema-anomaly dag/RepoNode invalid-repo)]
       (is (anomaly/anomaly? result)))))
 
-(deftest validate-schema-anomaly-uses-invalid-input-type
+(deftest ^{:stratum 1} validate-schema-anomaly-uses-invalid-input-type
   (testing "schema validation failure is :invalid-input"
     (let [result (core/validate-schema-anomaly dag/RepoNode invalid-repo)]
       (is (= :invalid-input (:anomaly/type result))))))
 
-(deftest validate-schema-anomaly-data-carries-context
+(deftest ^{:stratum 1} validate-schema-anomaly-data-carries-context
   (testing "anomaly carries schema, value, and humanized errors"
     (let [result (core/validate-schema-anomaly dag/RepoNode invalid-repo)
           data   (:anomaly/data result)]
@@ -66,12 +67,11 @@
       (is (map? (:errors data))))))
 
 ;------------------------------------------------------------------------------ Alias compatibility
-
-(deftest validate-schema-still-returns-on-success
+(deftest ^{:stratum 1} validate-schema-still-returns-on-success
   (testing "stable alias returns the value unchanged"
     (is (= valid-repo (core/validate-schema dag/RepoNode valid-repo)))))
 
-(deftest validate-schema-returns-anomaly-on-failure
+(deftest ^{:stratum 1} validate-schema-returns-anomaly-on-failure
   (testing "stable alias returns the same anomaly data on bad input"
     (let [result (core/validate-schema dag/RepoNode invalid-repo)
           data (:anomaly/data result)]

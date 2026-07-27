@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.http
   "JDK `java.net.http` request-builder helper shared by the fleet sinks.
 
@@ -25,7 +24,9 @@
    dedicated `http-utils` brick if a third consumer outside the
    sink-layer arrives.")
 
-(defn- invoke-static
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} invoke-static
   [class-name method-name param-types args]
   (.invoke (.getMethod (Class/forName class-name)
                        method-name
@@ -33,7 +34,9 @@
            nil
            (object-array args)))
 
-(defn build-json-post
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-json-post
   "Build an HTTP POST request with a JSON string `body` and a Bearer
    `api-key` header. `timeout-ms` sets the request-level timeout via
    `HttpRequest.Builder.timeout`."

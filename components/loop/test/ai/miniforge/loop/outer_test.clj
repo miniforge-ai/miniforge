@@ -15,17 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.outer-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.loop.outer :as outer]))
 
-(def test-spec
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} test-spec
   {:spec/id (random-uuid)
    :description "Exercise outer-loop phase transitions"})
 
-(deftest valid-phase-transition-test
+(deftest ^{:stratum 0} valid-phase-transition-test
   (testing "advance and rollback transitions are explicit"
     (is (outer/valid-phase-transition? :spec :loop/advance))
     (is (outer/valid-phase-transition? :review :loop/advance))
@@ -36,14 +37,16 @@
     (is (not (outer/valid-phase-transition? :observe :loop/advance)))
     (is (not (outer/valid-phase-transition? :plan :loop/rollback-to-review)))))
 
-(deftest phase-definition-test
+(deftest ^{:stratum 0} phase-definition-test
   (testing "phase definitions expose localized descriptions"
     (is (= "Specification received and validated"
            (:phase/description (outer/get-phase-definition :spec))))
     (is (= "Monitor deployment and collect telemetry"
            (:phase/description (outer/get-phase-definition :observe))))))
 
-(deftest advance-phase-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} advance-phase-test
   (testing "advancing updates the authoritative phase and history"
     (let [loop-state (outer/create-outer-loop test-spec {})
           advanced (outer/advance-phase loop-state {})]
@@ -58,7 +61,7 @@
       (is (= :observe (outer/get-current-phase loop-state)))
       (is (nil? (outer/advance-phase loop-state {}))))))
 
-(deftest rollback-phase-test
+(deftest ^{:stratum 1} rollback-phase-test
   (testing "rollback to an earlier phase is allowed"
     (let [loop-state (nth (iterate #(outer/advance-phase % {}) (outer/create-outer-loop test-spec {}))
                           3)

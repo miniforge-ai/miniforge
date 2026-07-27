@@ -15,29 +15,26 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-jira.interface
   "Public API for the Jira Cloud REST API connector component."
   (:require [ai.miniforge.connector-jira.core :as core]
             [ai.miniforge.connector-jira.schema :as schema]
             [ai.miniforge.connector.interface :as conn]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Schemas (exported for consumers)
+;------------------------------------------------------------------------------ Layer 0
 
-(def JiraConfig
+;; Schemas (exported for consumers)
+(def ^{:stratum 0} JiraConfig
   "Malli schema for Jira connector configuration."
   schema/JiraConfig)
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Factory and metadata
-
-(defn create-jira-connector
+(defn ^{:stratum 0} create-jira-connector
   "Create a new JiraConnector instance."
   []
   (core/->JiraConnector))
 
-(def connector-metadata
+(def ^{:stratum 0} connector-metadata
   "Registration metadata for the Jira Cloud REST API connector."
   {:connector/name         "Jira Cloud REST API Connector"
    :connector/type         :source

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.bb-config.interface
   "Per-repo config loader. Reads `<repo-root>/bb-tasks.edn` and returns
    the slice for a named task. Pass-through to `core`."
@@ -23,15 +22,15 @@
   (:require [ai.miniforge.bb-config.core :as core]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Public API — pass-through only
 
-(defn load
+;; Public API — pass-through only
+(defn ^{:stratum 0} load
   "Load and return the whole config map. `{}` if no file exists.
    Default path: `<repo-root>/bb-tasks.edn`."
   ([] (core/load))
   ([path] (core/load path)))
 
-(defn get
+(defn ^{:stratum 0} get
   "Return the config slice for `task-key`. `source` may be a pre-loaded
    map or a path string; defaults to the repo-root `bb-tasks.edn`."
   ([task-key] (core/get task-key))

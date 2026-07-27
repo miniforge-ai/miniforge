@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.digest-test
   (:require
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.config.digest :as digest]))
 
-(deftest sha256-hex-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} sha256-hex-test
   (testing "produces consistent hex digest with sha256: prefix"
     (let [result (digest/sha256-hex "hello")]
       (is (string? result))
@@ -44,7 +45,7 @@
     (let [result (digest/sha256-hex "")]
       (is (.startsWith result "sha256:")))))
 
-(deftest load-digest-manifest-test
+(deftest ^{:stratum 0} load-digest-manifest-test
   (testing "loads digest manifest from classpath"
     (let [manifest (digest/load-digest-manifest)]
       (is (map? manifest))
@@ -54,7 +55,7 @@
       (is (contains? manifest :knowledge-safety))
       (is (every? #(.startsWith % "sha256:") (vals manifest))))))
 
-(deftest verify-governance-file-test
+(deftest ^{:stratum 0} verify-governance-file-test
   (testing "returns :ok for matching content"
     (let [manifest (digest/load-digest-manifest)
           content (slurp (io/resource "config/governance/readiness.edn"))]

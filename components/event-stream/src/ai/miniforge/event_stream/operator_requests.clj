@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.operator-requests
   "Writer side of the operator control channel (Phase D decision 1).
 
@@ -49,9 +48,9 @@
    [java.nio.file Files StandardCopyOption]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Request shaping
 
-(def ^:private required-request-keys
+;; Request shaping
+(def ^{:stratum 0} ^:private required-request-keys
   "Fields a client must supply. Everything else on the wire envelope is
    stamped here or re-derived server-side by the consumer."
   [:intervention/type
@@ -60,11 +59,7 @@
    :intervention/requested-by
    :intervention/request-source])
 
-(defn- missing-request-keys
-  [request]
-  (remove #(some? (get request %)) required-request-keys))
-
-(defn- target-uuid
+(defn- ^{:stratum 0} target-uuid
   "The target id as a UUID, or nil when it is not one. `parse-uuid`
    returns nil (never throws) for a malformed string on our Clojure, so
    this stays total."
@@ -73,26 +68,7 @@
     target-id
     (some-> target-id str parse-uuid)))
 
-(defn- invalid-workflow-target?
-  "True when a `:workflow`-targeted request carries a target id that is
-   not a UUID. Such a request cannot route to a run's audit trail, so it
-   is rejected as `:invalid-input` rather than written with no
-   `:workflow/id` (a silent soft-failure) — honouring the fn contract."
-  [request]
-  (and (= :workflow (:intervention/target-type request))
-       (nil? (target-uuid (:intervention/target-id request)))))
-
-(defn- request-workflow-id
-  "The `:workflow/id` the envelope routes on: present only for
-   workflow-targeted interventions whose target id is a UUID. Mirrors
-   the consumer's `intervention-workflow-id` so the request and its
-   lifecycle events land in the same run's audit trail. Assumes the
-   target has already passed [[invalid-workflow-target?]]."
-  [request]
-  (when (= :workflow (:intervention/target-type request))
-    (target-uuid (:intervention/target-id request))))
-
-(defn- proposed-intervention
+(defn- ^{:stratum 0} proposed-intervention
   "The InterventionRequest body of the wire event. `:proposed` state and
    the timestamps are the client's *claim*; the consumer rebuilds the
    record with server authority and ignores them. They are written
@@ -115,10 +91,53 @@
       (:intervention/details request)
       (assoc :intervention/details (:intervention/details request)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Event construction
+;; Atomic publication into the operator directory
+(defn- ^{:stratum 0} write-event-file!
+  "Serialize `event` and land it in `{base-dir}/operator/` atomically:
+   write a sibling `.tmp` then `Files/move` with `ATOMIC_MOVE` — the
+   repo-wide atomic-update idiom (see `archive.clj`). A reader can never
+   observe a half-written request, and the `.tmp` suffix keeps the
+   partial file out of the consumer's `.json` listing."
+  ^java.io.File [base-dir event]
+  (let [target (sinks/operator-event-file-path base-dir event)
+        tmp (io/file (.getParentFile target) (str (.getName target) ".tmp"))]
+    (spit tmp (sinks/event->transit-json event) :encoding "UTF-8")
+    (Files/move (.toPath tmp)
+                (.toPath target)
+                (into-array java.nio.file.CopyOption
+                            [StandardCopyOption/ATOMIC_MOVE
+                             StandardCopyOption/REPLACE_EXISTING]))
+    target))
 
-(defn intervention-request-event
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} missing-request-keys
+  [request]
+  (remove #(some? (get request %)) required-request-keys))
+
+(defn- ^{:stratum 1} invalid-workflow-target?
+  "True when a `:workflow`-targeted request carries a target id that is
+   not a UUID. Such a request cannot route to a run's audit trail, so it
+   is rejected as `:invalid-input` rather than written with no
+   `:workflow/id` (a silent soft-failure) — honouring the fn contract."
+  [request]
+  (and (= :workflow (:intervention/target-type request))
+       (nil? (target-uuid (:intervention/target-id request)))))
+
+(defn- ^{:stratum 1} request-workflow-id
+  "The `:workflow/id` the envelope routes on: present only for
+   workflow-targeted interventions whose target id is a UUID. Mirrors
+   the consumer's `intervention-workflow-id` so the request and its
+   lifecycle events land in the same run's audit trail. Assumes the
+   target has already passed [[invalid-workflow-target?]]."
+  [request]
+  (when (= :workflow (:intervention/target-type request))
+    (target-uuid (:intervention/target-id request))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Event construction
+(defn ^{:stratum 2} intervention-request-event
   "Build the `:supervisory/intervention-requested` event for `request`,
    or an `:invalid-input` anomaly when a required field is missing.
 
@@ -152,27 +171,9 @@
                                    (request-workflow-id request)
                                    intervention))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Atomic publication into the operator directory
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- write-event-file!
-  "Serialize `event` and land it in `{base-dir}/operator/` atomically:
-   write a sibling `.tmp` then `Files/move` with `ATOMIC_MOVE` — the
-   repo-wide atomic-update idiom (see `archive.clj`). A reader can never
-   observe a half-written request, and the `.tmp` suffix keeps the
-   partial file out of the consumer's `.json` listing."
-  ^java.io.File [base-dir event]
-  (let [target (sinks/operator-event-file-path base-dir event)
-        tmp (io/file (.getParentFile target) (str (.getName target) ".tmp"))]
-    (spit tmp (sinks/event->transit-json event) :encoding "UTF-8")
-    (Files/move (.toPath tmp)
-                (.toPath target)
-                (into-array java.nio.file.CopyOption
-                            [StandardCopyOption/ATOMIC_MOVE
-                             StandardCopyOption/REPLACE_EXISTING]))
-    target))
-
-(defn request-intervention!
+(defn ^{:stratum 3} request-intervention!
   "Write an intervention request into `{events-dir}/operator/` for the
    operator-event consumer to pick up.
 

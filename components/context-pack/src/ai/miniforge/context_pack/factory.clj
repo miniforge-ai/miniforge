@@ -1,16 +1,15 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.context-pack.factory
   "Factory functions for context-pack domain maps.
 
    Layer 0 — pure data construction.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; ContextPack
 
-(defn ->context-pack
+;; ContextPack
+(defn ^{:stratum 0} ->context-pack
   [phase budget repo-map-text files search-results]
   {:phase phase
    :budget budget
@@ -21,10 +20,8 @@
    :exhausted? false
    :sources []})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Budget audit
-
-(defn ->budget-audit
+(defn ^{:stratum 0} ->budget-audit
   [phase budget tokens-used exhausted? source-count]
   {:phase phase
    :budget budget
@@ -36,19 +33,15 @@
                   (double (/ tokens-used budget))
                   0.0)})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Source tracking
-
-(defn ->source
+(defn ^{:stratum 0} ->source
   [kind path tokens]
   {:kind kind
    :path path
    :tokens tokens})
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Pack context (used by implement phase to cache context-pack results)
-
-(defn ->pack-context
+(defn ^{:stratum 0} ->pack-context
   [repo-index context-pack]
   {:repo-index repo-index
    :context-pack context-pack

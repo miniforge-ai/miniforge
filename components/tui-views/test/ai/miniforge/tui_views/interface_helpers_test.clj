@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.interface-helpers-test
   "Tests for extracted helper functions in interface.clj:
    action parsing, risk line parsing, chat message conversion."
@@ -23,9 +22,10 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.tui-views.interface :as iface]))
 
-;; ---------------------------------------------------------------------------- parse-risk-line
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest parse-risk-line-test
+;; ---------------------------------------------------------------------------- parse-risk-line
+(deftest ^{:stratum 0} parse-risk-line-test
   (testing "parses valid RISK line"
     (let [r (iface/parse-risk-line "RISK: owner/repo#42 | high | Large change with failing CI")]
       (is (= ["owner/repo" 42] (:id r)))
@@ -38,8 +38,7 @@
     (is (nil? (iface/parse-risk-line "RISK: malformed")))))
 
 ;; ---------------------------------------------------------------------------- parse-risk-triage-response
-
-(deftest parse-risk-triage-response-test
+(deftest ^{:stratum 0} parse-risk-triage-response-test
   (testing "parses multi-line response"
     (let [content "RISK: a/b#1 | low | Small\nSome noise\nRISK: c/d#2 | high | Big"
           result (iface/parse-risk-triage-response content)]
@@ -51,8 +50,7 @@
     (is (empty? (iface/parse-risk-triage-response "no risk lines here")))))
 
 ;; ---------------------------------------------------------------------------- action-match->action
-
-(deftest action-match->action-test
+(deftest ^{:stratum 0} action-match->action-test
   (let [match ["[ACTION: review | Review policy | Run packs]" "review" " Review policy " " Run packs "]
         result (iface/action-match->action match)]
     (is (= :review (:action result)))
@@ -60,8 +58,7 @@
     (is (= "Run packs" (:description result)))))
 
 ;; ---------------------------------------------------------------------------- parse-actions
-
-(deftest parse-actions-test
+(deftest ^{:stratum 0} parse-actions-test
   (testing "extracts actions from LLM text"
     (let [text "Some analysis.\n[ACTION: review | Check | Run review]\nMore text."
           [clean actions] (iface/parse-actions text)]
@@ -75,15 +72,13 @@
       (is (empty? actions)))))
 
 ;; ---------------------------------------------------------------------------- chat-msg->llm-msg
-
-(deftest chat-msg->llm-msg-test
+(deftest ^{:stratum 0} chat-msg->llm-msg-test
   (let [result (iface/chat-msg->llm-msg {:role :user :content "hello"})]
     (is (= "user" (:role result)))
     (is (= "hello" (:content result)))))
 
 ;; ---------------------------------------------------------------------------- format-pr-summary-line
-
-(deftest format-pr-summary-line-test
+(deftest ^{:stratum 0} format-pr-summary-line-test
   (let [pr {:pr/repo "acme/app" :pr/number 42 :pr/title "Fix bug"}
         result (iface/format-pr-summary-line pr)]
     (is (= "- acme/app#42 Fix bug" result))))

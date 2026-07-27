@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-github.resources
   "GitHub resource type registry and URL/param builders.
    Resource definitions are loaded from an EDN resource file at startup."
@@ -25,27 +24,11 @@
             [clojure.java.io :as io]
             [clojure.string :as str]))
 
-(def ^:private resource-path "config/connector-github/resources.edn")
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- load-resources []
-  (if-let [res (io/resource resource-path)]
-    (edn/read-string (slurp res))
-    (response/throw-anomaly! :anomalies/not-found
-                             (msg/t :github/resources-not-found {:path resource-path})
-                             {:path resource-path
-                              :classpath/resource resource-path
-                              :config/resource resource-path})))
+(def ^{:stratum 0} ^:private resource-path "config/connector-github/resources.edn")
 
-(def github-resources
-  "Registry of GitHub REST API v3 resource types, loaded from EDN."
-  (delay (load-resources)))
-
-(defn get-resource
-  "Look up a resource definition by key."
-  [resource-key]
-  (get @github-resources resource-key))
-
-(defn build-url
+(defn ^{:stratum 0} build-url
   "Build a GitHub API URL by substituting {org}, {owner}, {repo}, {pull_number}
    from config into the resource endpoint template."
   [base-url resource-def config]
@@ -61,7 +44,7 @@
              (str/replace "{repo}" (or (:github/repo config) ""))
              (str/replace "{pull_number}" (str (or (:github/pull-number config) "")))))))
 
-(defn build-query-params
+(defn ^{:stratum 0} build-query-params
   "Build query params for a GitHub API request, merging resource defaults,
    sort/direction, per_page, and incremental cursor value."
   [resource-def cursor opts]
@@ -77,7 +60,31 @@
       (and incr-param cursor-value)
       (assoc incr-param cursor-value))))
 
-(defn resource-schemas
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-resources []
+  (if-let [res (io/resource resource-path)]
+    (edn/read-string (slurp res))
+    (response/throw-anomaly! :anomalies/not-found
+                             (msg/t :github/resources-not-found {:path resource-path})
+                             {:path resource-path
+                              :classpath/resource resource-path
+                              :config/resource resource-path})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} github-resources
+  "Registry of GitHub REST API v3 resource types, loaded from EDN."
+  (delay (load-resources)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} get-resource
+  "Look up a resource definition by key."
+  [resource-key]
+  (get @github-resources resource-key))
+
+(defn ^{:stratum 3} resource-schemas
   "Return discover-compatible schema list for all known GitHub resources."
   []
   (mapv (fn [[resource-key resource-def]]

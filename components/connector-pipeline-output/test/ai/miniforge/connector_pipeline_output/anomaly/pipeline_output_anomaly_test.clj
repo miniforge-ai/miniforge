@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-pipeline-output.anomaly.pipeline-output-anomaly-test
   "Coverage for `format/write-records` and
    schema validation anomaly-data conversion.
@@ -27,7 +26,9 @@
             [ai.miniforge.connector-pipeline-output.schema :as schema])
   (:import (clojure.lang ExceptionInfo)))
 
-(deftest write-records-unsupported-format-throws-anomaly
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} write-records-unsupported-format-throws-anomaly
   (testing "unsupported format raises :anomalies/unsupported"
     (try
       (fmt/write-records :weird "/tmp" "run-1" [])
@@ -37,13 +38,13 @@
         (is (= :anomalies/unsupported (:anomaly/category (ex-data e))))
         (is (= :weird (:format (ex-data e))))))))
 
-(deftest validate-schema-failure-returns-errors
+(deftest ^{:stratum 0} validate-schema-failure-returns-errors
   (testing "schema validation failure returns structured errors"
     (let [result (schema/validate schema/OutputConfig {})]
       (is (false? (:valid? result)))
       (is (some? (:errors result))))))
 
-(deftest validate-schema-success-returns-valid
+(deftest ^{:stratum 0} validate-schema-success-returns-valid
   (testing "valid value returns a valid result"
     (let [valid {:output/dir "/tmp/out" :output/format :edn}]
       (is (= {:valid? true :errors nil}

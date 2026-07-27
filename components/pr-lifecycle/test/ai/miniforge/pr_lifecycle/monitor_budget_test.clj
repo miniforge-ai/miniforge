@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-budget-test
   (:require
    [ai.miniforge.pr-lifecycle.monitor-budget :as sut]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Budget tests
 
-(deftest record-fix-attempt-test
+;; Budget tests
+(deftest ^{:stratum 0} record-fix-attempt-test
   (testing "defaults are loaded from monitor config"
     (let [budget (sut/create-budget 42)]
       (is (= 3 (get-in budget [:limits :max-fix-attempts-per-comment])))
@@ -42,7 +41,7 @@
       (is (= 1 (sut/comment-attempts-remaining budget 1001)))
       (is (= 7 (sut/total-attempts-remaining budget))))))
 
-(deftest any-budget-exhausted-test
+(deftest ^{:stratum 0} any-budget-exhausted-test
   (testing "reports comment limit when a single comment runs out of attempts"
     (let [budget (-> (sut/create-budget 42)
                      (sut/record-fix-attempt 1001)

@@ -15,26 +15,25 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.completion
   "Tab-completion for command mode.
 
    Pure functions that manage the completion popup state.
    Depends on command.clj for completion metadata.
-   Layer 3."
+   Layers 0-1."
   (:require
    [clojure.string :as str]
    [ai.miniforge.tui-views.update.command :as command]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State helpers
 
-(defn dismiss
+;; State helpers
+(defn ^{:stratum 0} dismiss
   "Clear completion state."
   [model]
   (assoc model :completing? false :completions [] :completion-idx nil))
 
-(defn apply-browse-side-effect
+(defn ^{:stratum 0} apply-browse-side-effect
   [model result]
   (if-let [fx (:side-effect result)]
     (assoc model
@@ -43,33 +42,40 @@
            :flash-message "Browsing remote repos...")
     model))
 
-(defn strip-browse-sentinel
+(defn ^{:stratum 0} strip-browse-sentinel
   [completions]
   (->> completions
        (remove #{"browse"})
        vec))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Navigation
-
-(defn next-completion
+(defn ^{:stratum 0} next-completion
   "Move to the next completion option (wraps around)."
   [model]
   (let [n (count (:completions model))
         idx (get model :completion-idx 0)]
     (assoc model :completion-idx (mod (inc idx) n))))
 
-(defn prev-completion
+(defn ^{:stratum 0} prev-completion
   "Move to the previous completion option (wraps around)."
   [model]
   (let [n (count (:completions model))
         idx (get model :completion-idx 0)]
     (assoc model :completion-idx (mod (+ idx (dec n)) n))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Accept / fill
+;; Tab handler
+(defn ^{:stratum 0} exact-command-arg-completions
+  [model buf]
+  (let [partial (subs buf 1)]
+    (when (and (not (str/blank? partial))
+               (some #{partial} (command/complete-command-name partial)))
+      {:buffer (str ":" partial " ")
+       :result (command/compute-completions model (str ":" partial " "))})))
 
-(defn accept
+;------------------------------------------------------------------------------ Layer 1
+
+;; Accept / fill
+(defn ^{:stratum 1} accept
   "Accept the currently highlighted completion into the command buffer.
    Returns model with buffer updated and completion dismissed."
   [model]
@@ -100,18 +106,7 @@
               (assoc :command-buf (str ":" selected " "))
               dismiss))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Tab handler
-
-(defn exact-command-arg-completions
-  [model buf]
-  (let [partial (subs buf 1)]
-    (when (and (not (str/blank? partial))
-               (some #{partial} (command/complete-command-name partial)))
-      {:buffer (str ":" partial " ")
-       :result (command/compute-completions model (str ":" partial " "))})))
-
-(defn handle-tab
+(defn ^{:stratum 1} handle-tab
   "Handle Tab press in command mode.
    If not completing: compute completions and open popup.
    If already completing: cycle to next option."
@@ -153,7 +148,7 @@
         ;; No completions available -- no-op
         :else model))))
 
-(defn handle-shift-tab
+(defn ^{:stratum 1} handle-shift-tab
   "Handle Shift+Tab press in command mode.
    If not completing: compute completions and select last item.
    If already completing: cycle to previous option."

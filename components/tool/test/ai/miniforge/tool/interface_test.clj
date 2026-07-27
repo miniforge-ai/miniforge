@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tool.interface-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [ai.miniforge.anomaly.interface :as anomaly]
@@ -23,47 +22,18 @@
             [ai.miniforge.event-stream.interface :as es]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(defn echo-handler [params _ctx]
+;; Test fixtures
+(defn ^{:stratum 0} echo-handler [params _ctx]
   (:message params))
 
-(defn add-handler [params _ctx]
+(defn ^{:stratum 0} add-handler [params _ctx]
   (+ (:a params) (:b params)))
 
-(defn throwing-handler [_params _ctx]
+(defn ^{:stratum 0} throwing-handler [_params _ctx]
   (throw (Exception. "Intentional error")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Tool creation tests
-
-(deftest create-tool-test
-  (testing "creates tool with all options"
-    (let [tool (tool/create-tool
-                {:id :test/echo
-                 :name "Echo Tool"
-                 :description "Echoes the message"
-                 :parameters {:message {:type :string :required true}}
-                 :handler echo-handler
-                 :metadata {:version "1.0"}})]
-      (is (some? tool))
-      (is (= :test/echo (tool/tool-id tool)))))
-
-  (testing "creates tool with minimal options"
-    (let [tool (tool/create-tool
-                {:id :test/simple
-                 :handler (constantly :ok)})]
-      (is (some? tool))
-      (is (= :test/simple (tool/tool-id tool)))))
-
-  (testing "returns anomaly on non-namespaced id"
-    (let [result (tool/create-tool {:id :no-namespace
-                                    :handler (constantly :ok)})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))
-      (is (= :no-namespace (get-in result [:anomaly/data :id]))))))
-
-(deftest tool-info-test
+(deftest ^{:stratum 0} tool-info-test
   (testing "returns tool information"
     (let [tool (tool/create-tool
                 {:id :test/info
@@ -80,8 +50,7 @@
       (is (= {:author "test"} (:metadata info))))))
 
 ;; Registry tests
-
-(deftest create-registry-test
+(deftest ^{:stratum 0} create-registry-test
   (testing "creates empty registry"
     (let [registry (tool/create-registry)]
       (is (some? registry))
@@ -91,7 +60,7 @@
     (let [registry (tool/create-registry {:logger nil})]
       (is (some? registry)))))
 
-(deftest register-tool-test
+(deftest ^{:stratum 0} register-tool-test
   (testing "registers a tool"
     (let [registry (tool/create-registry)
           my-tool (tool/create-tool {:id :test/registered
@@ -109,7 +78,7 @@
       (is (some? found))
       (is (= :test/retrieve (tool/tool-id found))))))
 
-(deftest unregister-tool-test
+(deftest ^{:stratum 0} unregister-tool-test
   (testing "unregisters a tool"
     (let [registry (tool/create-registry)
           my-tool (tool/create-tool {:id :test/remove
@@ -119,7 +88,7 @@
       (is (nil? (tool/get-tool registry :test/remove)))
       (is (empty? (tool/list-tools registry))))))
 
-(deftest find-tools-test
+(deftest ^{:stratum 0} find-tools-test
   (testing "finds tools by name"
     (let [registry (tool/create-registry)
           _ (tool/register! registry
@@ -167,9 +136,110 @@
       (is (empty? (tool/find-tools registry "malformed-metadata-token"))
           "malformed metadata is not stringified into searchable text"))))
 
-;; Execution tests
+(deftest ^{:stratum 0} execute-by-id-test
+  (testing "executes tool by id from registry"
+    (let [registry (tool/create-registry)
+          _ (tool/register! registry
+                            (tool/create-tool
+                             {:id :test/by-id
+                              :handler (fn [params _ctx] (* (:n params) 2))}))
+          result (tool/execute-by-id registry :test/by-id {:n 21} {})]
+      (is (tool/success? result))
+      (is (= 42 (tool/get-result result)))))
 
-(deftest execute-test
+  (testing "returns error for unknown tool"
+    (let [registry (tool/create-registry)
+          result (tool/execute-by-id registry :test/unknown {} {})]
+      (is (not (tool/success? result)))
+      (is (= :not-found (get-in (tool/get-error result) [:type]))))))
+
+;; Protocol method tests (N1 conformance)
+(deftest ^{:stratum 0} validate-args-test
+  (testing "validate-args protocol method works"
+    (let [my-tool (tool/create-tool
+                   {:id :test/validate
+                    :parameters {:x {:required true}
+                                 :y {:required false}}
+                    :handler (constantly nil)})
+          valid-result (tool/validate-args my-tool {:x 10 :y 20})
+          invalid-result (tool/validate-args my-tool {:y 20})]
+      (is (:valid? valid-result))
+      (is (not (:valid? invalid-result)))
+      (is (seq (:errors invalid-result)))))
+
+  (testing "validate-args with all required params"
+    (let [my-tool (tool/create-tool
+                   {:id :test/all-required
+                    :parameters {:a {:required true}
+                                 :b {:required true}}
+                    :handler (constantly nil)})
+          result (tool/validate-args my-tool {:a 1 :b 2})]
+      (is (:valid? result))
+      (is (empty? (:errors result))))))
+
+(deftest ^{:stratum 0} get-schema-test
+  (testing "get-schema protocol method returns parameters"
+    (let [params {:message {:type :string :required true}
+                  :count {:type :number :required false}}
+          my-tool (tool/create-tool
+                   {:id :test/schema
+                    :parameters params
+                    :handler (constantly nil)})
+          schema (tool/get-schema my-tool)]
+      (is (= params schema))))
+
+  (testing "get-schema returns empty map for parameterless tool"
+    (let [my-tool (tool/create-tool
+                   {:id :test/no-params
+                    :handler (constantly :ok)})
+          schema (tool/get-schema my-tool)]
+      (is (map? schema)))))
+
+;; Response helper tests
+(deftest ^{:stratum 0} response-helpers-test
+  (testing "success? returns true for successful result"
+    (is (tool/success? {:success true :result "ok"})))
+
+  (testing "success? returns false for failed result"
+    (is (not (tool/success? {:success false :error {:type "error"}}))))
+
+  (testing "get-result extracts result"
+    (is (= "value" (tool/get-result {:success true :result "value"}))))
+
+  (testing "get-error extracts error"
+    (is (= {:type "err"} (tool/get-error {:success false :error {:type "err"}})))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Tool creation tests
+(deftest ^{:stratum 1} create-tool-test
+  (testing "creates tool with all options"
+    (let [tool (tool/create-tool
+                {:id :test/echo
+                 :name "Echo Tool"
+                 :description "Echoes the message"
+                 :parameters {:message {:type :string :required true}}
+                 :handler echo-handler
+                 :metadata {:version "1.0"}})]
+      (is (some? tool))
+      (is (= :test/echo (tool/tool-id tool)))))
+
+  (testing "creates tool with minimal options"
+    (let [tool (tool/create-tool
+                {:id :test/simple
+                 :handler (constantly :ok)})]
+      (is (some? tool))
+      (is (= :test/simple (tool/tool-id tool)))))
+
+  (testing "returns anomaly on non-namespaced id"
+    (let [result (tool/create-tool {:id :no-namespace
+                                    :handler (constantly :ok)})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= :no-namespace (get-in result [:anomaly/data :id]))))))
+
+;; Execution tests
+(deftest ^{:stratum 1} execute-test
   (testing "executes tool successfully"
     (let [my-tool (tool/create-tool
                    {:id :test/exec
@@ -206,26 +276,8 @@
       (is (not (tool/success? result)))
       (is (= :execution-error (get-in (tool/get-error result) [:type]))))))
 
-(deftest execute-by-id-test
-  (testing "executes tool by id from registry"
-    (let [registry (tool/create-registry)
-          _ (tool/register! registry
-                            (tool/create-tool
-                             {:id :test/by-id
-                              :handler (fn [params _ctx] (* (:n params) 2))}))
-          result (tool/execute-by-id registry :test/by-id {:n 21} {})]
-      (is (tool/success? result))
-      (is (= 42 (tool/get-result result)))))
-
-  (testing "returns error for unknown tool"
-    (let [registry (tool/create-registry)
-          result (tool/execute-by-id registry :test/unknown {} {})]
-      (is (not (tool/success? result)))
-      (is (= :not-found (get-in (tool/get-error result) [:type]))))))
-
 ;; Invocation tracking tests
-
-(deftest invocation-tracking-test
+(deftest ^{:stratum 1} invocation-tracking-test
   (testing "records successful invocation"
     (let [context (tool/attach-invocation-tracking {})
           my-tool (tool/create-tool
@@ -254,67 +306,8 @@
       (is (= :test/track-error (:tool/id invocation)))
       (is (= :validation-error (get-in invocation [:tool/error :type]))))))
 
-;; Protocol method tests (N1 conformance)
-
-(deftest validate-args-test
-  (testing "validate-args protocol method works"
-    (let [my-tool (tool/create-tool
-                   {:id :test/validate
-                    :parameters {:x {:required true}
-                                 :y {:required false}}
-                    :handler (constantly nil)})
-          valid-result (tool/validate-args my-tool {:x 10 :y 20})
-          invalid-result (tool/validate-args my-tool {:y 20})]
-      (is (:valid? valid-result))
-      (is (not (:valid? invalid-result)))
-      (is (seq (:errors invalid-result)))))
-
-  (testing "validate-args with all required params"
-    (let [my-tool (tool/create-tool
-                   {:id :test/all-required
-                    :parameters {:a {:required true}
-                                 :b {:required true}}
-                    :handler (constantly nil)})
-          result (tool/validate-args my-tool {:a 1 :b 2})]
-      (is (:valid? result))
-      (is (empty? (:errors result))))))
-
-(deftest get-schema-test
-  (testing "get-schema protocol method returns parameters"
-    (let [params {:message {:type :string :required true}
-                  :count {:type :number :required false}}
-          my-tool (tool/create-tool
-                   {:id :test/schema
-                    :parameters params
-                    :handler (constantly nil)})
-          schema (tool/get-schema my-tool)]
-      (is (= params schema))))
-
-  (testing "get-schema returns empty map for parameterless tool"
-    (let [my-tool (tool/create-tool
-                   {:id :test/no-params
-                    :handler (constantly :ok)})
-          schema (tool/get-schema my-tool)]
-      (is (map? schema)))))
-
-;; Response helper tests
-
-(deftest response-helpers-test
-  (testing "success? returns true for successful result"
-    (is (tool/success? {:success true :result "ok"})))
-
-  (testing "success? returns false for failed result"
-    (is (not (tool/success? {:success false :error {:type "error"}}))))
-
-  (testing "get-result extracts result"
-    (is (= "value" (tool/get-result {:success true :result "value"}))))
-
-  (testing "get-error extracts error"
-    (is (= {:type "err"} (tool/get-error {:success false :error {:type "err"}})))))
-
 ;; Event emission wiring tests
-
-(deftest tool-emits-events-on-execution-test
+(deftest ^{:stratum 1} tool-emits-events-on-execution-test
   (testing "tool emits tool/invoked and tool/completed events when event-stream is in context"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -331,7 +324,7 @@
       (is (some #(= :tool/invoked (:event/type %)) events))
       (is (some #(= :tool/completed (:event/type %)) events)))))
 
-(deftest tool-works-without-event-stream-test
+(deftest ^{:stratum 1} tool-works-without-event-stream-test
   (testing "tool executes normally without event-stream in context"
     (let [my-tool (tool/create-tool
                    {:id :test/no-stream

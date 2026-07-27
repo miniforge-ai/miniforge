@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.logging.sinks-test
   (:require
    [ai.miniforge.logging.sinks :as sinks]
@@ -23,7 +22,9 @@
   (:import
    (clojure.lang ExceptionInfo)))
 
-(deftest create-sink-invalid-config-carries-invalid-config-data
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} create-sink-invalid-config-carries-invalid-config-data
   (testing "non-map non-vector sink config is an invalid config setup failure"
     (let [thrown (try
                    (sinks/create-sink "not-a-sink")

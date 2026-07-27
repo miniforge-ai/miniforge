@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.knowledge-pack.interface
   "Public API for the knowledge-pack component (Zettelkasten
    distribution layer).
@@ -44,18 +43,18 @@
      `verify-pack` — verify a pack against a zettel store. Returns
                      `{:valid? :pack/discrepancy :ref/discrepancies}`.
 
-   Two strata:
-     Layer 0 — schema re-exports.
-     Layer 1 — operation re-exports."
+   One stratum: every export here is a re-export of a var from
+   `pack`/`schema`/`verify` (schema re-exports, then operation
+   re-exports); none reference each other within this file."
   (:require
    [ai.miniforge.knowledge-pack.pack   :as pack-impl]
    [ai.miniforge.knowledge-pack.schema :as schema-impl]
    [ai.miniforge.knowledge-pack.verify :as verify-impl]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports.
 
-(def ZettelRef
+;; Schema re-exports.
+(def ^{:stratum 0} ZettelRef
   "Malli schema (`[:map {:closed false}]`) for the canonical
    Decision-6 content-addressed reference to a zettel revision: the
    `(:zettel/id, :zettel/revision-id, :zettel/digest)` triple. `id`
@@ -65,7 +64,7 @@
    logical id."
   schema-impl/ZettelRef)
 
-(def KnowledgePack
+(def ^{:stratum 0} KnowledgePack
   "Malli schema (`[:map {:closed false}]`) for a knowledge-pack
    manifest: a curated, content-addressed collection of zettel
    revisions. Required keys: `:pack/id` (uuid), `:pack/uid`,
@@ -79,10 +78,8 @@
    are optional; the constructors stamp the derived identity fields."
   schema-impl/KnowledgePack)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Operation re-exports.
-
-(def build-pack
+(def ^{:stratum 0} build-pack
   "Construct a fresh content-addressed pack manifest.
    `(build-pack uid title version zettels & opts)`. `uid` / `title` /
    `version` are strings; `zettels` is a sequence of zettel MAPS (not
@@ -94,7 +91,7 @@
    `zettel->ref`) if any zettel lacks the required reference fields."
   pack-impl/build-pack)
 
-(def update-pack
+(def ^{:stratum 0} update-pack
   "Apply `changes` to a pack and re-stamp its revision identity.
    `(update-pack pack changes)` -> updated pack map. Caller-supplied
    `:pack/digest` / `:pack/revision-id` in `changes` are dropped;
@@ -105,7 +102,7 @@
    `:pack/description` / `:pack/zettels` / `:pack/dependencies`)."
   pack-impl/update-pack)
 
-(def add-zettel
+(def ^{:stratum 0} add-zettel
   "Append a zettel reference to a pack's manifest.
    `(add-zettel pack zettel)` -> updated pack map. `zettel` is a
    zettel MAP (projected via `zettel->ref`); the pack revision
@@ -113,13 +110,13 @@
    reference fields."
   pack-impl/add-zettel)
 
-(def remove-zettel
+(def ^{:stratum 0} remove-zettel
   "Remove every reference to `zettel-id` from a pack's manifest.
    `(remove-zettel pack zettel-id)` -> updated pack map. The revision
    rotates only if a reference was actually removed."
   pack-impl/remove-zettel)
 
-(def zettel->ref
+(def ^{:stratum 0} zettel->ref
   "Pure projection from a zettel map to its content-addressed
    reference triple. `(zettel->ref zettel)` -> `{:zettel/id
    :zettel/revision-id :zettel/digest}`. Throws `ex-info` if any of
@@ -127,20 +124,20 @@
    `knowledge.zettel/update-zettel` first)."
   pack-impl/zettel->ref)
 
-(def compute-digest
+(def ^{:stratum 0} compute-digest
   "Pure: SHA-256 hex string of the pack's canonical-EDN content
    projection. `(compute-digest pack)` -> 64-char hex string. Stable
    across map-key reorderings and non-content metadata changes;
    rotates when a content-bearing field changes."
   pack-impl/compute-digest)
 
-(def revision-id-from-digest
+(def ^{:stratum 0} revision-id-from-digest
   "Pure: derive a stable UUID from a digest hex string.
    `(revision-id-from-digest digest)` -> `java.util.UUID`. Two packs
    with identical content projections land on the same revision-id."
   pack-impl/revision-id-from-digest)
 
-(def verify-pack
+(def ^{:stratum 0} verify-pack
   "Verify a pack against a zettel store.
    `(verify-pack pack lookup-fn)` where `lookup-fn` is
    `(fn [zettel-id revision-id] -> zettel-map | nil)`. Returns a map

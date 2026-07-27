@@ -15,35 +15,38 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.storage
   "Persist and load repo indexes to `.miniforge/index/`.
 
-   Layer 1 — depends on schema (Layer 0)."
+   Filesystem I/O only — no dependency on schema or factory."
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Path helpers
 
-(def ^:private index-dir-name
+;; Path helpers
+(def ^{:stratum 0} ^:private index-dir-name
   "Directory name for storing indexes within the repo."
   ".miniforge/index")
 
-(defn- index-dir
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} index-dir
   "Get the index directory path for a repo root."
   [repo-root]
   (io/file repo-root index-dir-name))
 
-(defn- index-file
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} index-file
   "Get the index file path for a given tree-sha."
   [repo-root tree-sha]
   (io/file (index-dir repo-root) (str tree-sha ".edn")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Persistence
+;------------------------------------------------------------------------------ Layer 3
 
-(defn save-index
+;; Persistence
+(defn ^{:stratum 3} save-index
   "Save a repo index to disk, keyed by tree-sha.
 
    Arguments:
@@ -62,7 +65,7 @@
     (catch Exception _
       nil)))
 
-(defn load-index
+(defn ^{:stratum 3} load-index
   "Load a previously saved repo index by tree-sha.
 
    Arguments:
@@ -79,7 +82,9 @@
     (catch Exception _
       nil)))
 
-(defn cached-index
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} cached-index
   "Load the cached index for the current HEAD tree-sha, if available.
 
    Arguments:

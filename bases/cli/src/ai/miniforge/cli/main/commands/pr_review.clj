@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-review
   "PR Review implementation — N13 §2.2 Standards Reviewer entry point.
 
@@ -50,32 +49,22 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
-(def ^:private default-standards-path ".standards")
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private default-standards-path ".standards")
 
 ;; ── Table layout for emit-table ──────────────────────────────────────
 ;; Column widths (chars). Tuned for 100-col terminals: file paths get
 ;; the bulk, line is 6 (covers up to a million-line file), severity is
 ;; 12 (longest keyword name like ":warning" plus padding), rule trails
 ;; with no fixed width.
-(def ^:private file-col-width      60)
-(def ^:private line-col-width      6)
-(def ^:private severity-col-width  12)
+(def ^{:stratum 0} ^:private file-col-width      60)
 
-(def ^:private table-header-fmt
-  (str "%-" file-col-width "s %-" line-col-width "s %-" severity-col-width "s %s%n"))
+(def ^{:stratum 0} ^:private line-col-width      6)
 
-(def ^:private table-row-fmt
-  (str "%-" file-col-width "s %-" line-col-width "d %-" severity-col-width "s %s%n"))
+(def ^{:stratum 0} ^:private severity-col-width  12)
 
-(defn- separator-row
-  "Build the dashed underline row used between header and body."
-  []
-  (let [dashes (fn [n] (apply str (repeat n "-")))]
-    (str (dashes file-col-width) " "
-         (dashes line-col-width) " "
-         (dashes severity-col-width) " ----")))
-
-(defn- resolve-pack
+(defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path; returns the loaded pack map or nil."
   [pack-ref]
   (cond
@@ -89,7 +78,7 @@
       (when-let [url (io/resource resource-path)]
         (edn/read-string (slurp url))))))
 
-(defn- pack-info
+(defn- ^{:stratum 0} pack-info
   "Best-effort pack-info extraction for the rendered comment payload.
    Falls back to {:pack/id <pack-ref-or-default> :pack/version \"0.0.0\"}
    when the pack does not declare an id/version."
@@ -108,7 +97,7 @@
     :else
     {:pack/id "miniforge-standards" :pack/version "0.0.0"}))
 
-(defn- print-summary
+(defn- ^{:stratum 0} print-summary
   "Print a one-line summary of the review."
   [{:pr-review/keys [summary]}]
   (display/print-info
@@ -119,33 +108,19 @@
                 :files        (:files-affected summary)
                 :rules        (:rules-violated summary)})))
 
-(defn- emit-table
-  "Print a human-readable table of comments."
-  [comments]
-  (when (seq comments)
-    (println)
-    (printf table-header-fmt "FILE" "LINE" "SEVERITY" "RULE")
-    (println (separator-row))
-    (doseq [c comments]
-      (printf table-row-fmt
-              (:comment/path c)
-              (:comment/line c)
-              (name (or (get-in c [:comment/payload :violation/severity]) :info))
-              (str (get-in c [:comment/payload :violation/rule-id]))))))
-
-(defn- emit-edn
+(defn- ^{:stratum 0} emit-edn
   "Print the comments vector as pretty EDN to stdout."
   [comments]
   (pprint/pprint comments))
 
-(defn- emit-json
+(defn- ^{:stratum 0} emit-json
   "Print the comments vector as RFC 8259-compliant JSON via cheshire.
    Keywords are stringified; the internal `(str)` call in the key-fn
    handles the leading colon for deterministic output."
   [comments]
   (println (json/generate-string comments {:key-fn name})))
 
-(defn- review-summary-body
+(defn- ^{:stratum 0} review-summary-body
   "Build the markdown body for the posted PR review from the
    pr-review result's summary."
   [{:pr-review/keys [summary]}]
@@ -156,7 +131,23 @@
                :files        (:files-affected summary)
                :rules        (:rules-violated summary)}))
 
-(defn- maybe-post-review!
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private table-header-fmt
+  (str "%-" file-col-width "s %-" line-col-width "s %-" severity-col-width "s %s%n"))
+
+(def ^{:stratum 1} ^:private table-row-fmt
+  (str "%-" file-col-width "s %-" line-col-width "d %-" severity-col-width "s %s%n"))
+
+(defn- ^{:stratum 1} separator-row
+  "Build the dashed underline row used between header and body."
+  []
+  (let [dashes (fn [n] (apply str (repeat n "-")))]
+    (str (dashes file-col-width) " "
+         (dashes line-col-width) " "
+         (dashes severity-col-width) " ----")))
+
+(defn- ^{:stratum 1} maybe-post-review!
   "When the operator opted in via `--post`, batch-post the rendered
    comments to the PR via `pr-lifecycle.interface/post-review!`.
 
@@ -196,7 +187,25 @@
                        {:code    (str (get-in r [:error :code]))
                         :message (get-in r [:error :message])})))))))
 
-(defn run-pr-review!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} emit-table
+  "Print a human-readable table of comments."
+  [comments]
+  (when (seq comments)
+    (println)
+    (printf table-header-fmt "FILE" "LINE" "SEVERITY" "RULE")
+    (println (separator-row))
+    (doseq [c comments]
+      (printf table-row-fmt
+              (:comment/path c)
+              (:comment/line c)
+              (name (or (get-in c [:comment/payload :violation/severity]) :info))
+              (str (get-in c [:comment/payload :violation/rule-id]))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} run-pr-review!
   "Run a PR-scoped standards review against an existing repo checkout.
 
    Arguments:
@@ -256,7 +265,9 @@
                           result))
     result))
 
-(defn run-pr-review-by-path-cmd
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} run-pr-review-by-path-cmd
   "CLI entry point for `miniforge pr review --repo <path> --base <ref>`.
 
    For when the operator already has a checkout — useful in dogfood and

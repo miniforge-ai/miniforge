@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent-runtime.error-classifier.reporting
   "Vendor reporting and issue tracking for error classification.
 
@@ -23,10 +22,10 @@
   (:require
    [clojure.string :as str]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Vendor information
+;------------------------------------------------------------------------------ Layer 0
 
-(def vendor-info
+;; Vendor information
+(def ^{:stratum 0} vendor-info
   "Vendor information for issue reporting"
   {"Claude Code" {:name "Claude Code"
                   :repo-url "https://github.com/anthropics/claude-code"
@@ -38,10 +37,8 @@
                        :repo-url nil
                        :issue-template nil}})
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; URL generation
-
-(defn build-issue-title
+(defn ^{:stratum 0} build-issue-title
   "Build issue title based on error type."
   [error-type]
   (case error-type
@@ -50,7 +47,7 @@
     :external "External Service Error"
     "Error"))
 
-(defn build-issue-body
+(defn ^{:stratum 0} build-issue-body
   "Build issue body with error context."
   [error-context]
   (let [{:keys [message task-id timestamp]} error-context]
@@ -60,7 +57,9 @@
          (when timestamp
            (str "\nTimestamp: " timestamp)))))
 
-(defn get-vendor-report-url
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-vendor-report-url
   "Generate vendor-specific issue reporting URL with pre-filled context.
 
    Arguments:
@@ -80,5 +79,7 @@
              "?title=" title-param
              "&body=" (java.net.URLEncoder/encode body "UTF-8"))))))
 
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Alias for backward compatibility
-(def generate-report-url get-vendor-report-url)
+(def ^{:stratum 2} generate-report-url get-vendor-report-url)

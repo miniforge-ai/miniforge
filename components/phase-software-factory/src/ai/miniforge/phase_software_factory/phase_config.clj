@@ -1,7 +1,6 @@
 ;; Title: Miniforge.ai
 ;; Copyright 2025-2026 Christopher Lester (christopher@miniforge.ai)
 ;; Licensed under the Apache License, Version 2.0
-
 (ns ai.miniforge.phase-software-factory.phase-config
   "Load phase defaults from EDN configuration.
 
@@ -9,16 +8,24 @@
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
-(def ^:private config-path "config/phase/defaults.edn")
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- load-phase-defaults []
+(def ^{:stratum 0} ^:private config-path "config/phase/defaults.edn")
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-phase-defaults []
   (if-let [res (io/resource config-path)]
     (get (edn/read-string (slurp res)) :phase/defaults {})
     {}))
 
-(def ^:private phase-defaults (delay (load-phase-defaults)))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn defaults-for
+(def ^{:stratum 2} ^:private phase-defaults (delay (load-phase-defaults)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} defaults-for
   "Get the default config map for a given phase keyword.
    Returns the config from defaults.edn, or an empty map if not found."
   [phase-kw]

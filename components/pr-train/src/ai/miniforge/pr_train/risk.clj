@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.risk
   "Explainable risk assessment for PRs with concrete factors.
 
@@ -24,37 +23,21 @@
    critical file modifications.
 
    All thresholds are loaded from resources/config/governance/risk.edn and can
-   be overridden by passing a config to `assess-risk`.
-
-   Layer 0: Configuration and risk factor definitions
-   Layer 1: Factor assessment functions
-   Layer 2: Aggregation and risk level classification"
+   be overridden by passing a config to `assess-risk`."
   (:require
    [ai.miniforge.config.interface :as config]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration
 
-(def default-config
+;; Configuration
+(def ^{:stratum 0} default-config
   "Default risk assessment configuration loaded from resources/config/governance/risk.edn.
    All thresholds and weights are tunable — pass overrides to `assess-risk`
    via the `:config` key."
   (config/load-governance-config :risk))
 
-;; Derived public vars for backward compatibility and external use
-(def risk-factors
-  "Risk factor definitions with weights."
-  (into {} (map (fn [[k v]] [k {:weight v :description (name k)}])
-                (:weights default-config))))
-
-(def risk-levels
-  "Risk level thresholds."
-  (:levels default-config))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Threshold scoring helper
-
-(defn score-by-thresholds
+(defn ^{:stratum 0} score-by-thresholds
   "Score a value against descending thresholds. Returns the score for the first
    threshold exceeded, or 0.0 if none match."
   [value thresholds scores compare-fn]
@@ -63,47 +46,7 @@
             (map vector thresholds scores))
       0.0))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Factor assessment functions — each returns {:value any :score 0.0-1.0 :explanation str}
-
-(defn assess-change-size
-  "Assess risk from change size. Larger changes = higher risk."
-  [pr-data cfg]
-  (let [{:keys [additions deletions]} (get pr-data :change-size {:additions 0 :deletions 0})
-        total (+ (or additions 0) (or deletions 0))
-        {:keys [thresholds scores]} (:change-size cfg)
-        score (score-by-thresholds total thresholds scores >)]
-    {:value {:additions additions :deletions deletions :total total}
-     :score score
-     :explanation (str total " lines changed"
-                       (when (> total 500) " (large change)"))}))
-
-(defn assess-dependency-fanout
-  "Assess risk from dependency fanout. More dependents = higher risk."
-  [_train pr cfg]
-  (let [blocks (:pr/blocks pr [])
-        fanout (count blocks)
-        {:keys [thresholds scores exact-one]} (:dependency-fanout cfg)
-        score (if (= fanout 1)
-                exact-one
-                (score-by-thresholds fanout thresholds scores >))]
-    {:value fanout
-     :score score
-     :explanation (str fanout " downstream PRs depend on this")}))
-
-(defn assess-test-coverage-delta
-  "Assess risk from test coverage changes. Decreased coverage = higher risk."
-  [pr-data cfg]
-  (let [delta (get pr-data :test-coverage-delta 0.0)
-        {:keys [thresholds scores]} (:test-coverage-delta cfg)
-        score (score-by-thresholds delta thresholds scores <)]
-    {:value delta
-     :score score
-     :explanation (if (neg? delta)
-                    (str "Coverage decreased by " (Math/abs delta) "%")
-                    (str "Coverage changed by " (if (pos? delta) "+" "") delta "%"))}))
-
-(defn assess-author-experience
+(defn ^{:stratum 0} assess-author-experience
   "Assess risk from author experience. Less experience = higher risk."
   [author-history cfg]
   (let [commits (get author-history :total-commits 0)
@@ -119,7 +62,57 @@
      :score score
      :explanation (str commits " total commits, " recent " recent")}))
 
-(defn assess-review-staleness
+;------------------------------------------------------------------------------ Layer 1
+
+;; Derived public vars for backward compatibility and external use
+(def ^{:stratum 1} risk-factors
+  "Risk factor definitions with weights."
+  (into {} (map (fn [[k v]] [k {:weight v :description (name k)}])
+                (:weights default-config))))
+
+(def ^{:stratum 1} risk-levels
+  "Risk level thresholds."
+  (:levels default-config))
+
+;; Factor assessment functions — each returns {:value any :score 0.0-1.0 :explanation str}
+(defn ^{:stratum 1} assess-change-size
+  "Assess risk from change size. Larger changes = higher risk."
+  [pr-data cfg]
+  (let [{:keys [additions deletions]} (get pr-data :change-size {:additions 0 :deletions 0})
+        total (+ (or additions 0) (or deletions 0))
+        {:keys [thresholds scores]} (:change-size cfg)
+        score (score-by-thresholds total thresholds scores >)]
+    {:value {:additions additions :deletions deletions :total total}
+     :score score
+     :explanation (str total " lines changed"
+                       (when (> total 500) " (large change)"))}))
+
+(defn ^{:stratum 1} assess-dependency-fanout
+  "Assess risk from dependency fanout. More dependents = higher risk."
+  [_train pr cfg]
+  (let [blocks (:pr/blocks pr [])
+        fanout (count blocks)
+        {:keys [thresholds scores exact-one]} (:dependency-fanout cfg)
+        score (if (= fanout 1)
+                exact-one
+                (score-by-thresholds fanout thresholds scores >))]
+    {:value fanout
+     :score score
+     :explanation (str fanout " downstream PRs depend on this")}))
+
+(defn ^{:stratum 1} assess-test-coverage-delta
+  "Assess risk from test coverage changes. Decreased coverage = higher risk."
+  [pr-data cfg]
+  (let [delta (get pr-data :test-coverage-delta 0.0)
+        {:keys [thresholds scores]} (:test-coverage-delta cfg)
+        score (score-by-thresholds delta thresholds scores <)]
+    {:value delta
+     :score score
+     :explanation (if (neg? delta)
+                    (str "Coverage decreased by " (Math/abs delta) "%")
+                    (str "Coverage changed by " (if (pos? delta) "+" "") delta "%"))}))
+
+(defn ^{:stratum 1} assess-review-staleness
   "Assess risk from review staleness. Stale reviews = higher risk."
   [pr-data cfg]
   (let [hours (get pr-data :hours-since-last-review 0)
@@ -129,7 +122,7 @@
      :score score
      :explanation (str hours " hours since last review")}))
 
-(defn assess-complexity-delta
+(defn ^{:stratum 1} assess-complexity-delta
   "Assess risk from complexity changes. Increased complexity = higher risk."
   [pr-data cfg]
   (let [delta (get pr-data :complexity-delta 0)
@@ -140,7 +133,7 @@
      :explanation (str "Complexity " (if (pos? delta) "increased" "changed")
                        " by " delta)}))
 
-(defn assess-critical-files
+(defn ^{:stratum 1} assess-critical-files
   "Assess risk from modifications to critical files."
   [pr-data cfg]
   (let [changed-files (get pr-data :changed-files [])
@@ -159,10 +152,8 @@
                     (str count-critical " critical file(s) modified")
                     "No critical files modified")}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Aggregation and risk level classification
-
-(defn score->level
+(defn ^{:stratum 1} score->level
   "Convert risk score to risk level keyword."
   ([score] (score->level score (:levels default-config)))
   ([score levels]
@@ -172,7 +163,9 @@
      (>= score (:medium levels))   :medium
      :else                         :low)))
 
-(defn assess-risk
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} assess-risk
   "Assess overall risk for a PR.
 
    Arguments:

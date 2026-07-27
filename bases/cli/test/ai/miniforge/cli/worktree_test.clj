@@ -15,20 +15,23 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.worktree-test
   (:require
    [babashka.fs :as fs]
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.worktree :as sut]))
 
-(defn- delete-tree!
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} delete-tree!
   [path]
   (when (fs/exists? path)
     (doseq [entry (reverse (file-seq (fs/file path)))]
       (fs/delete entry))))
 
-(deftest worktree-root-prefers-nearest-git-marker-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} worktree-root-prefers-nearest-git-marker-test
   (let [tmp (fs/create-temp-dir {:prefix "miniforge-worktree-root-"})
         repo-root (fs/path tmp "repo")
         nested-worktree (fs/path repo-root ".claude" "worktrees" "agent-123")
@@ -43,7 +46,7 @@
       (finally
         (delete-tree! tmp)))))
 
-(deftest worktree-root-finds-parent-repo-when-no-child-marker-test
+(deftest ^{:stratum 1} worktree-root-finds-parent-repo-when-no-child-marker-test
   (let [tmp (fs/create-temp-dir {:prefix "miniforge-worktree-parent-"})
         repo-root (fs/path tmp "repo")
         nested-src (fs/path repo-root "components" "sample")]

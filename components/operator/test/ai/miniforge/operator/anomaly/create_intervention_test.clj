@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.anomaly.create-intervention-test
   "Coverage for the anomaly-returning `create-intervention` and its
    boundary-throwing sibling `create-intervention!`. Every validation
@@ -35,9 +34,10 @@
             [ai.miniforge.operator.intervention :as intervention]
             [ai.miniforge.operator.messages :as messages]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- intervention-request
+;------------------------------------------------------------------------------ Helpers
+(defn- ^{:stratum 0} intervention-request
   [intervention-type target-id & {:as extra}]
   (merge {:intervention/type intervention-type
           :intervention/target-id target-id
@@ -45,9 +45,65 @@
           :intervention/request-source :tui}
          extra))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Failure path: missing target-id
+(deftest ^{:stratum 0} create-intervention-invalid-input-on-missing-target-id
+  (testing "missing :intervention/target-id yields :invalid-input"
+    (let [result (op/create-intervention
+                  {:intervention/type :retry
+                   :intervention/requested-by "operator@example.com"
+                   :intervention/request-source :tui})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= (messages/t :intervention/target-id-required)
+             (:anomaly/message result)))
+      (is (= :retry
+             (get-in result [:anomaly/data :intervention/type]))))))
 
-(deftest create-intervention-returns-request-on-success
+;------------------------------------------------------------------------------ Failure path: missing requester
+(deftest ^{:stratum 0} create-intervention-invalid-input-on-missing-requested-by
+  (testing "missing :intervention/requested-by yields :invalid-input"
+    (let [result (op/create-intervention
+                  {:intervention/type :retry
+                   :intervention/target-id (random-uuid)
+                   :intervention/request-source :tui})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= (messages/t :intervention/requester-required)
+             (:anomaly/message result)))
+      (is (nil? (get-in result [:anomaly/data :intervention/requested-by])))
+      (is (= :tui
+             (get-in result [:anomaly/data :intervention/request-source]))))))
+
+(deftest ^{:stratum 0} create-intervention-invalid-input-on-missing-request-source
+  (testing "missing :intervention/request-source yields :invalid-input"
+    (let [result (op/create-intervention
+                  {:intervention/type :retry
+                   :intervention/target-id (random-uuid)
+                   :intervention/requested-by "operator@example.com"})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= (messages/t :intervention/requester-required)
+             (:anomaly/message result)))
+      (is (= "operator@example.com"
+             (get-in result [:anomaly/data :intervention/requested-by])))
+      (is (nil? (get-in result [:anomaly/data :intervention/request-source]))))))
+
+;------------------------------------------------------------------------------ Cascade short-circuits in order
+(deftest ^{:stratum 0} create-intervention-cascade-stops-at-first-rejection
+  (testing "an unknown type short-circuits before later checks would also fire —
+            request omits target-id and requester, but only the type anomaly
+            surfaces"
+    (let [result (op/create-intervention
+                  {:intervention/type :unknown-action})]
+      (is (anomaly/anomaly? result))
+      (is (= :invalid-input (:anomaly/type result)))
+      (is (= (messages/t :intervention/unknown-type)
+             (:anomaly/message result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 1} create-intervention-returns-request-on-success
   (testing "valid request returns the constructed intervention, not an anomaly"
     (let [target-id (random-uuid)
           result (op/create-intervention
@@ -58,8 +114,7 @@
       (is (= :proposed (:intervention/state result))))))
 
 ;------------------------------------------------------------------------------ Failure path: unknown intervention type
-
-(deftest create-intervention-invalid-input-on-unknown-type
+(deftest ^{:stratum 1} create-intervention-invalid-input-on-unknown-type
   (testing "unknown intervention type yields :invalid-input anomaly"
     (let [result (op/create-intervention
                   (intervention-request :unknown-action (random-uuid)))]
@@ -71,8 +126,7 @@
              (get-in result [:anomaly/data :intervention/type]))))))
 
 ;------------------------------------------------------------------------------ Failure path: target type cannot be resolved
-
-(deftest create-intervention-invalid-input-when-target-type-unresolvable
+(deftest ^{:stratum 1} create-intervention-invalid-input-when-target-type-unresolvable
   (testing "intervention type with no default target type and no caller-supplied
             target type yields :invalid-input — exercised via a synthetic type
             patched into the bounded vocabulary"
@@ -91,8 +145,7 @@
                (get-in result [:anomaly/data :intervention/type])))))))
 
 ;------------------------------------------------------------------------------ Failure path: target type not recognized
-
-(deftest create-intervention-invalid-input-on-unknown-target-type
+(deftest ^{:stratum 1} create-intervention-invalid-input-on-unknown-target-type
   (testing "caller-supplied target type that is not in the recognized set yields
             :invalid-input"
     (let [result (op/create-intervention
@@ -106,8 +159,7 @@
              (get-in result [:anomaly/data :intervention/target-type]))))))
 
 ;------------------------------------------------------------------------------ Failure path: target type unsupported by verb
-
-(deftest create-intervention-invalid-input-on-unsupported-target-type
+(deftest ^{:stratum 1} create-intervention-invalid-input-on-unsupported-target-type
   (testing "a workflow verb cannot be redirected to another known target type"
     (let [result (op/create-intervention
                   (intervention-request :pause (random-uuid)
@@ -118,67 +170,8 @@
              (get-in result
                      [:anomaly/data :intervention/supported-target-type]))))))
 
-;------------------------------------------------------------------------------ Failure path: missing target-id
-
-(deftest create-intervention-invalid-input-on-missing-target-id
-  (testing "missing :intervention/target-id yields :invalid-input"
-    (let [result (op/create-intervention
-                  {:intervention/type :retry
-                   :intervention/requested-by "operator@example.com"
-                   :intervention/request-source :tui})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))
-      (is (= (messages/t :intervention/target-id-required)
-             (:anomaly/message result)))
-      (is (= :retry
-             (get-in result [:anomaly/data :intervention/type]))))))
-
-;------------------------------------------------------------------------------ Failure path: missing requester
-
-(deftest create-intervention-invalid-input-on-missing-requested-by
-  (testing "missing :intervention/requested-by yields :invalid-input"
-    (let [result (op/create-intervention
-                  {:intervention/type :retry
-                   :intervention/target-id (random-uuid)
-                   :intervention/request-source :tui})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))
-      (is (= (messages/t :intervention/requester-required)
-             (:anomaly/message result)))
-      (is (nil? (get-in result [:anomaly/data :intervention/requested-by])))
-      (is (= :tui
-             (get-in result [:anomaly/data :intervention/request-source]))))))
-
-(deftest create-intervention-invalid-input-on-missing-request-source
-  (testing "missing :intervention/request-source yields :invalid-input"
-    (let [result (op/create-intervention
-                  {:intervention/type :retry
-                   :intervention/target-id (random-uuid)
-                   :intervention/requested-by "operator@example.com"})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))
-      (is (= (messages/t :intervention/requester-required)
-             (:anomaly/message result)))
-      (is (= "operator@example.com"
-             (get-in result [:anomaly/data :intervention/requested-by])))
-      (is (nil? (get-in result [:anomaly/data :intervention/request-source]))))))
-
-;------------------------------------------------------------------------------ Cascade short-circuits in order
-
-(deftest create-intervention-cascade-stops-at-first-rejection
-  (testing "an unknown type short-circuits before later checks would also fire —
-            request omits target-id and requester, but only the type anomaly
-            surfaces"
-    (let [result (op/create-intervention
-                  {:intervention/type :unknown-action})]
-      (is (anomaly/anomaly? result))
-      (is (= :invalid-input (:anomaly/type result)))
-      (is (= (messages/t :intervention/unknown-type)
-             (:anomaly/message result))))))
-
 ;------------------------------------------------------------------------------ Boundary variant
-
-(deftest create-intervention-bang-throws-on-anomaly
+(deftest ^{:stratum 1} create-intervention-bang-throws-on-anomaly
   (testing "boundary variant throws ex-info carrying the anomaly's message"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           (re-pattern (java.util.regex.Pattern/quote
@@ -186,7 +179,7 @@
                           (op/create-intervention!
                            (intervention-request :unknown-action (random-uuid)))))))
 
-(deftest create-intervention-bang-returns-on-success
+(deftest ^{:stratum 1} create-intervention-bang-returns-on-success
   (testing "boundary variant returns the constructed intervention on success"
     (let [target-id (random-uuid)
           result (op/create-intervention!

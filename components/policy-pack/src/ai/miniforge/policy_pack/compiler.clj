@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.compiler
   "Compile/validate the detection binding of a policy pack.
 
@@ -49,19 +48,83 @@
    [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Per-rule classification
 
-(def ^{:doc "Detection types that bind to a mechanism directly by their type."}
+;; Per-rule classification
+(def ^{:stratum 0} ^{:doc "Detection types that bind to a mechanism directly by their type."}
   by-type-detectors
   #{:content-scan :diff-analysis :plan-output :state-comparison :ast-analysis})
 
-(defn rule-enabled?
+(defn ^{:stratum 0} rule-enabled?
   "True unless the rule explicitly sets `:rule/enabled?` to false.
    A missing `:rule/enabled?` means enabled (the shipped pack omits it)."
   [rule]
   (not (false? (:rule/enabled? rule))))
 
-(defn resolve-detector
+(defn- ^{:stratum 0} detector-class
+  [detector]
+  (if (= :semantic detector)
+    :heuristic
+    :deterministic))
+
+(defn- ^{:stratum 0} code-files
+  [artifacts]
+  (or (get artifacts :code/files)
+      (get artifacts :files)))
+
+(defn- ^{:stratum 0} code-files-present?
+  [artifacts]
+  (or (contains? artifacts :code/files)
+      (contains? artifacts :files)))
+
+(defn- ^{:stratum 0} file-entry->artifact
+  [file-entry]
+  (let [path    (or (get file-entry :artifact/path)
+                    (get file-entry :path))
+        content (or (get file-entry :artifact/content)
+                    (get file-entry :content))]
+    (cond-> file-entry
+      path    (assoc :artifact/path path)
+      content (assoc :artifact/content content))))
+
+(defn- ^{:stratum 0} semantic-context-ready?
+  [context]
+  (and (fn? (:semantic-analyze-fn context))
+       (some? (:llm-client context))
+       (fn? (:complete-fn context))))
+
+(defn- ^{:stratum 0} violation-with-rule
+  [rule violation]
+  (assoc violation
+         :rule-id  (or (:rule-id violation) (:rule/id rule))
+         :severity (or (:severity violation) (:rule/severity rule))))
+
+(defn- ^{:stratum 0} exception-violation
+  [rule detector e]
+  {:type     :check-error
+   :rule-id  (:rule/id rule)
+   :severity (:rule/severity rule)
+   :detector detector
+   :error    (ex-message e)
+   :message  (str "Policy check failed: " (ex-message e))})
+
+(defn- ^{:stratum 0} missing-semantic-wiring-violation
+  [rule]
+  {:type     :semantic-error
+   :rule-id  (:rule/id rule)
+   :severity (:rule/severity rule)
+   :message  "Semantic policy check requires :semantic-analyze-fn, :llm-client, and :complete-fn"})
+
+(defn- ^{:stratum 0} anomaly-rule-id
+  [a]
+  (get-in a [:anomaly/data :rule/id]))
+
+(defn- ^{:stratum 0} compiled-entry-detector
+  [entry]
+  (:detector entry))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resolve-detector
   "Return the detection-mechanism keyword that `rule` binds to.
 
    One of the `by-type-detectors`, or `:capability` / `:custom` / `:semantic`,
@@ -98,40 +161,14 @@
       :else
       :none)))
 
-(defn- detector-class
-  [detector]
-  (if (= :semantic detector)
-    :heuristic
-    :deterministic))
-
-(defn- rule-metadata
+(defn- ^{:stratum 1} rule-metadata
   [rule detector]
   {:rule/id       (:rule/id rule)
    :rule/severity (:rule/severity rule)
    :detector      detector
    :class         (detector-class detector)})
 
-(defn- code-files
-  [artifacts]
-  (or (get artifacts :code/files)
-      (get artifacts :files)))
-
-(defn- code-files-present?
-  [artifacts]
-  (or (contains? artifacts :code/files)
-      (contains? artifacts :files)))
-
-(defn- file-entry->artifact
-  [file-entry]
-  (let [path    (or (get file-entry :artifact/path)
-                    (get file-entry :path))
-        content (or (get file-entry :artifact/content)
-                    (get file-entry :content))]
-    (cond-> file-entry
-      path    (assoc :artifact/path path)
-      content (assoc :artifact/content content))))
-
-(defn- normalize-artifacts
+(defn- ^{:stratum 1} normalize-artifacts
   "Normalize N4 check input into artifact maps that existing detectors accept."
   [artifacts]
   (cond
@@ -140,54 +177,32 @@
     (map? artifacts) [(file-entry->artifact artifacts)]
     :else []))
 
-(defn- artifact-inputs
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} artifact-inputs
   [detector artifacts]
   (let [normalized (normalize-artifacts artifacts)]
     (if (and (= :semantic detector) (seq normalized))
       [(first normalized)]
       normalized)))
 
-(defn- semantic-context-ready?
-  [context]
-  (and (fn? (:semantic-analyze-fn context))
-       (some? (:llm-client context))
-       (fn? (:complete-fn context))))
-
-(defn- violation-with-rule
-  [rule violation]
-  (assoc violation
-         :rule-id  (or (:rule-id violation) (:rule/id rule))
-         :severity (or (:severity violation) (:rule/severity rule))))
-
-(defn- detect-rule-violations
-  [rule detector artifacts context]
-  (->> (artifact-inputs detector artifacts)
-       (keep #(detection/detect-violation rule % context))
-       (mapv #(violation-with-rule rule %))))
-
-(defn- exception-violation
-  [rule detector e]
-  {:type     :check-error
-   :rule-id  (:rule/id rule)
-   :severity (:rule/severity rule)
-   :detector detector
-   :error    (ex-message e)
-   :message  (str "Policy check failed: " (ex-message e))})
-
-(defn- missing-semantic-wiring-violation
-  [rule]
-  {:type     :semantic-error
-   :rule-id  (:rule/id rule)
-   :severity (:rule/severity rule)
-   :message  "Semantic policy check requires :semantic-analyze-fn, :llm-client, and :complete-fn"})
-
-(defn- check-result
+(defn- ^{:stratum 2} check-result
   [rule detector violations]
   {:passed?    (empty? violations)
    :violations violations
    :metadata   (rule-metadata rule detector)})
 
-(defn- compile-check-fn
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} detect-rule-violations
+  [rule detector artifacts context]
+  (->> (artifact-inputs detector artifacts)
+       (keep #(detection/detect-violation rule % context))
+       (mapv #(violation-with-rule rule %))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} compile-check-fn
   [rule detector]
   (fn [artifacts context]
     (try
@@ -199,7 +214,9 @@
       (catch Exception e
         (check-result rule detector [(exception-violation rule detector e)])))))
 
-(defn compile-rule-check
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} compile-rule-check
   "Compile one enabled rule into an executable N4 check entry.
 
    Returns:
@@ -229,18 +246,10 @@
        :detector detector
        :check-fn (compile-check-fn rule detector)})))
 
-(defn- anomaly-rule-id
-  [a]
-  (get-in a [:anomaly/data :rule/id]))
+;------------------------------------------------------------------------------ Layer 6
 
-(defn- compiled-entry-detector
-  [entry]
-  (:detector entry))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack-level validation
-
-(defn compile-pack-checks
+(defn ^{:stratum 6} compile-pack-checks
   "Compile every enabled rule in `pack` into executable check entries.
 
    Returns:
@@ -271,7 +280,9 @@
          :detector-counts (frequencies (map compiled-entry-detector compiled))
          :compiled-rules  compiled}))))
 
-(defn compile-pack
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} compile-pack
   "Validate that every ENABLED rule in `pack` binds to a detection mechanism.
 
    `pack` is a PackManifest map carrying `:pack/rules`.

@@ -23,6 +23,8 @@
   :pr/reuse-no-url "gh pr view returned no PR URL"
 
   ;; push HTTPS+token fallback
+  :push/https-fallback-setup-failed
+  "Push failed and the HTTPS token fallback could not be applied: repointing origin to the token URL failed, so origin is unchanged (no token persisted). Push error: {push-error}. Set-url error: {set-url-error}"
   :push/https-fallback-restore-failed
   "Pushed via HTTPS token fallback but could not restore the origin remote URL; it may still embed the GitHub token. Scrub it: git remote set-url origin {remote-url}. Restore error: {restore-error}"
   :push/https-fallback-push-and-restore-failed

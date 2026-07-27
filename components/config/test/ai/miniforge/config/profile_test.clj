@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.config.profile-test
   "Tests for user profile loading and token resolution."
   (:require
@@ -23,9 +22,9 @@
    [ai.miniforge.config.profile :as profile]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; validate-profile tests
 
-(deftest validate-profile-valid-test
+;; validate-profile tests
+(deftest ^{:stratum 0} validate-profile-valid-test
   (testing "Valid profile passes validation"
     (let [p {:tokens {:github "tok-123" :gitlab "tok-456"}
              :identity {:name "Test User" :email "test@example.com"}
@@ -34,35 +33,33 @@
       (is (:valid? result))
       (is (empty? (:errors result))))))
 
-(deftest validate-profile-empty-test
+(deftest ^{:stratum 0} validate-profile-empty-test
   (testing "Empty profile is valid (all fields optional)"
     (let [result (profile/validate-profile {})]
       (is (:valid? result)))))
 
-(deftest validate-profile-bad-tokens-test
+(deftest ^{:stratum 0} validate-profile-bad-tokens-test
   (testing "Non-map :tokens fails"
     (let [result (profile/validate-profile {:tokens "not-a-map"})]
       (is (not (:valid? result)))
       (is (some #(re-find #":tokens" %) (:errors result))))))
 
-(deftest validate-profile-bad-identity-test
+(deftest ^{:stratum 0} validate-profile-bad-identity-test
   (testing "Non-map :identity fails"
     (let [result (profile/validate-profile {:identity "not-a-map"})]
       (is (not (:valid? result))))))
 
-(deftest validate-profile-bad-email-test
+(deftest ^{:stratum 0} validate-profile-bad-email-test
   (testing "Non-string email fails"
     (let [result (profile/validate-profile {:identity {:email 123}})]
       (is (not (:valid? result))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; load-profile tests
-
-(deftest load-profile-missing-file-test
+(deftest ^{:stratum 0} load-profile-missing-file-test
   (testing "Missing file returns nil"
     (is (nil? (profile/load-profile "/tmp/nonexistent-miniforge-profile.edn")))))
 
-(deftest load-profile-roundtrip-test
+(deftest ^{:stratum 0} load-profile-roundtrip-test
   (testing "Aero reads profile with #env tags"
     (let [tmp (java.io.File/createTempFile "profile-test" ".edn")]
       (try
@@ -73,10 +70,8 @@
         (finally
           (.delete tmp))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; resolve-token tests
-
-(deftest resolve-token-from-profile-test
+(deftest ^{:stratum 0} resolve-token-from-profile-test
   (testing "Token resolved from profile when no env override"
     (let [profile {:tokens {:github "profile-gh-token"
                             :gitlab "profile-gl-token"}}]
@@ -87,12 +82,12 @@
       (is (= "profile-gl-token"
              (profile/resolve-token :gitlab {:profile profile}))))))
 
-(deftest resolve-token-nil-for-unknown-host-test
+(deftest ^{:stratum 0} resolve-token-nil-for-unknown-host-test
   (testing "Unknown host kind with no profile returns nil"
     (let [profile {:tokens {}}]
       (is (nil? (profile/resolve-token :custom {:profile profile}))))))
 
-(deftest resolve-token-profile-nil-test
+(deftest ^{:stratum 0} resolve-token-profile-nil-test
   (testing "Nil profile with no env vars falls through"
     ;; With empty profile and no matching env var, should return nil for :custom
     (is (nil? (profile/resolve-token :custom {:profile {}})))))

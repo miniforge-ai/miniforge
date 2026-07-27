@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.review-scheduler
   "Auto-trigger plumbing for the N13 Standards Reviewer (#818).
 
@@ -35,7 +34,9 @@
    [cheshire.core :as json]
    [clojure.string :as str]))
 
-(defn- run-gh
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} run-gh
   [args worktree-path]
   (try
     (let [r (apply process/shell
@@ -49,7 +50,36 @@
     (catch Exception e
       (dag/err :gh-exception (.getMessage e)))))
 
-(defn existing-review-shas
+;; Per-PR ephemeral worktree
+(defn- ^{:stratum 0} git-sh
+  "Run a git subcommand from `repo` and return DAG result. Args are
+   the trailing args after `git -C <repo>`."
+  [repo & args]
+  (try
+    (let [r (apply process/shell
+                   {:dir (str repo)
+                    :out :string :err :string :continue true}
+                   "git" "-C" (str repo) args)]
+      (if (zero? (:exit r))
+        (dag/ok {:output (str/trim (:out r ""))})
+        (dag/err :git-command-failed (str/trim (:err r ""))
+                 {:exit-code (:exit r) :args (vec args)})))
+    (catch Exception e
+      (dag/err :git-exception (.getMessage e)))))
+
+;; Review-needs predicate
+(defn ^{:stratum 0} pr-needs-review?
+  "Pure predicate. Returns true when `pr` (a `:pr/sha`-bearing map
+   from `pr-poller/poll-open-prs`) has no entry in `existing-shas`
+   (the set returned by `existing-review-shas`)."
+  [pr existing-shas]
+  (let [sha (:pr/sha pr)]
+    (and (string? sha)
+         (not (contains? (or existing-shas #{}) sha)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} existing-review-shas
   "Return a `(dag/ok #{sha …})` of head SHAs for which we've already
    posted a standards review on `pr-number`. A review counts if its
    body contains `review-marker`.
@@ -80,26 +110,7 @@
           (dag/err :json-parse-error (.getMessage e))))
       result)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Per-PR ephemeral worktree
-
-(defn- git-sh
-  "Run a git subcommand from `repo` and return DAG result. Args are
-   the trailing args after `git -C <repo>`."
-  [repo & args]
-  (try
-    (let [r (apply process/shell
-                   {:dir (str repo)
-                    :out :string :err :string :continue true}
-                   "git" "-C" (str repo) args)]
-      (if (zero? (:exit r))
-        (dag/ok {:output (str/trim (:out r ""))})
-        (dag/err :git-command-failed (str/trim (:err r ""))
-                 {:exit-code (:exit r) :args (vec args)})))
-    (catch Exception e
-      (dag/err :git-exception (.getMessage e)))))
-
-(defn fetch-pr-head!
+(defn ^{:stratum 1} fetch-pr-head!
   "Fetch the PR head into a stable local ref so an ephemeral worktree
    can check it out without racing FETCH_HEAD. Ref shape is
    `refs/miniforge-review/pr-<n>`. Returns DAG result."
@@ -107,7 +118,7 @@
   (git-sh base-repo "fetch" "origin"
           (str "+refs/pull/" pr-number "/head:refs/miniforge-review/pr-" pr-number)))
 
-(defn add-pr-worktree!
+(defn ^{:stratum 1} add-pr-worktree!
   "Create a detached-HEAD worktree at `sha` rooted under `tmp-dir`.
    Returns DAG result with `:worktree-path`."
   [base-repo sha tmp-dir]
@@ -116,7 +127,7 @@
       (dag/ok {:worktree-path (str tmp-dir)})
       r)))
 
-(defn remove-pr-worktree!
+(defn ^{:stratum 1} remove-pr-worktree!
   "Best-effort cleanup of a previously-added ephemeral worktree.
    Always attempts both `git worktree remove --force` AND filesystem
    delete so a half-created worktree doesn't leak."
@@ -125,7 +136,23 @@
     (try (fs/delete-tree worktree-path) (catch Throwable _ nil))
     (dag/ok {:removed worktree-path})))
 
-(defn with-pr-worktree
+(defn ^{:stratum 1} partition-needs-review
+  "Split a vector of `pr-poller`-shaped PR maps into
+   `{:needs-review [...] :already-reviewed [...]}` against the
+   `existing-shas-by-pr` map (keyed by `:pr/number`)."
+  [prs existing-shas-by-pr]
+  (reduce
+   (fn [acc pr]
+     (let [shas (get existing-shas-by-pr (:pr/number pr) #{})]
+       (if (pr-needs-review? pr shas)
+         (update acc :needs-review conj pr)
+         (update acc :already-reviewed conj pr))))
+   {:needs-review [] :already-reviewed []}
+   prs))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} with-pr-worktree
   "Bracketing helper: fetch PR head, create an ephemeral detached
    worktree at that SHA under `/tmp/mf-review-<sha>`, invoke `f`
    with the worktree path + the resolved SHA, then clean up.
@@ -167,29 +194,3 @@
                 (dag/ok {:result r :sha sha}))
               (finally
                 (remove-pr-worktree! base-repo tmp)))))))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Review-needs predicate
-
-(defn pr-needs-review?
-  "Pure predicate. Returns true when `pr` (a `:pr/sha`-bearing map
-   from `pr-poller/poll-open-prs`) has no entry in `existing-shas`
-   (the set returned by `existing-review-shas`)."
-  [pr existing-shas]
-  (let [sha (:pr/sha pr)]
-    (and (string? sha)
-         (not (contains? (or existing-shas #{}) sha)))))
-
-(defn partition-needs-review
-  "Split a vector of `pr-poller`-shaped PR maps into
-   `{:needs-review [...] :already-reviewed [...]}` against the
-   `existing-shas-by-pr` map (keyed by `:pr/number`)."
-  [prs existing-shas-by-pr]
-  (reduce
-   (fn [acc pr]
-     (let [shas (get existing-shas-by-pr (:pr/number pr) #{})]
-       (if (pr-needs-review? pr shas)
-         (update acc :needs-review conj pr)
-         (update acc :already-reviewed conj pr))))
-   {:needs-review [] :already-reviewed []}
-   prs))

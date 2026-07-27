@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-sarif.core
   "SarifConnector defrecord — thin protocol wrapper delegating to impl."
   (:require [ai.miniforge.connector.interface :as connector]
             [ai.miniforge.connector-sarif.impl :as impl]))
 
-(defrecord SarifConnector []
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} SarifConnector []
   connector/Connector
   (connect [_ config _auth] (impl/do-connect config))
   (close   [_ handle]       (impl/do-close handle))

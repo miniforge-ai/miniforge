@@ -15,13 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.registry
   "Policy pack registry protocol and in-memory implementation.
 
-   Layer 0: Protocol definition
-   Layer 1: In-memory registry implementation
-   Layer 2: Registry constructors"
+   Layer 0: PolicyPackRegistry protocol, parse-datever, glob-matches?,
+     dedupe-by-id
+   Layer 1: compare-versions, rule-applies? (over parse-datever/glob-matches?)
+   Layer 2: latest-version (over compare-versions)
+   Layer 3: InMemoryPackRegistry (implements the Layer 0 protocol, uses
+     latest-version/rule-applies?/dedupe-by-id)
+   Layer 4: create-registry (constructs InMemoryPackRegistry)
+
+   5 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.policy-pack.crypto :as crypto]
@@ -30,9 +36,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Protocol definition
 
-(defprotocol PolicyPackRegistry
+;; Protocol definition
+(defprotocol ^{:stratum 0} PolicyPackRegistry
   "Protocol for managing policy packs.
 
    Provides CRUD operations, import/export, validation,
@@ -100,10 +106,8 @@
      - :phase - Current workflow phase
      Returns vector of applicable rules."))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Version comparison helpers
-
-(defn parse-datever
+(defn ^{:stratum 0} parse-datever
   "Parse DateVer string (YYYY.MM.DD) into comparable vector."
   [version-str]
   (when version-str
@@ -112,24 +116,8 @@
       (catch Exception _
         nil))))
 
-(defn compare-versions
-  "Compare two DateVer version strings.
-   Returns negative if a < b, 0 if equal, positive if a > b."
-  [a b]
-  (let [va (or (parse-datever a) [0 0 0])
-        vb (or (parse-datever b) [0 0 0])]
-    (compare va vb)))
-
-(defn latest-version
-  "Get the latest version from a collection of version strings."
-  [versions]
-  (when (seq versions)
-    (first (sort-by identity (comparator #(pos? (compare-versions %1 %2))) versions))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Rule applicability checking
-
-(defn glob-matches?
+(defn ^{:stratum 0} glob-matches?
   "Simple glob pattern matching.
    Supports * (any within segment) and ** (any path segments)."
   [pattern path]
@@ -147,7 +135,25 @@
       (catch Exception _
         false))))
 
-(defn rule-applies?
+(defn ^{:stratum 0} dedupe-by-id
+  "Remove duplicate rules, keeping the last occurrence (later pack wins)."
+  [rules]
+  (vals (reduce (fn [acc rule]
+                  (assoc acc (:rule/id rule) rule))
+                {}
+                rules)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} compare-versions
+  "Compare two DateVer version strings.
+   Returns negative if a < b, 0 if equal, positive if a > b."
+  [a b]
+  (let [va (or (parse-datever a) [0 0 0])
+        vb (or (parse-datever b) [0 0 0])]
+    (compare va vb)))
+
+(defn ^{:stratum 1} rule-applies?
   "Check if a rule applies to the given context.
 
    Context map:
@@ -180,18 +186,18 @@
          (empty? phases)
          (contains? phases (:phase context))))))
 
-(defn dedupe-by-id
-  "Remove duplicate rules, keeping the last occurrence (later pack wins)."
-  [rules]
-  (vals (reduce (fn [acc rule]
-                  (assoc acc (:rule/id rule) rule))
-                {}
-                rules)))
+;------------------------------------------------------------------------------ Layer 2
 
-;------------------------------------------------------------------------------ Layer 1
+(defn ^{:stratum 2} latest-version
+  "Get the latest version from a collection of version strings."
+  [versions]
+  (when (seq versions)
+    (first (sort-by identity (comparator #(pos? (compare-versions %1 %2))) versions))))
+
+;------------------------------------------------------------------------------ Layer 3
+
 ;; In-memory registry implementation
-
-(defrecord InMemoryPackRegistry [state]
+(defrecord ^{:stratum 3} InMemoryPackRegistry [state]
   PolicyPackRegistry
 
   (register-pack [_this pack]
@@ -328,10 +334,10 @@
            (dedupe-by-id)
            vec))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Registry constructors
+;------------------------------------------------------------------------------ Layer 4
 
-(defn create-registry
+;; Registry constructors
+(defn ^{:stratum 4} create-registry
   "Create an in-memory policy pack registry.
 
    Options:

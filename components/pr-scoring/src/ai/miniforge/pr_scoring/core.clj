@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-scoring.core
   "PR scoring component — produces `:pr/scored` events per N5-delta-2 §3.
 
@@ -60,44 +59,24 @@
    [ai.miniforge.event-stream.interface.events :as events]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Subscription key
+(def ^{:stratum 0} ^:private subscriber-id ::pr-scoring)
 
-(def ^:private subscriber-id ::pr-scoring)
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Trigger events — loaded from data
-
-(def trigger-config-resource
+(def ^{:stratum 0} trigger-config-resource
   "config/pr-scoring/triggers.edn")
 
-(defn load-default-triggers
-  "Read the default trigger-event-types set from the resource at
-   [[trigger-config-resource]]. Callers MAY override at component
-   construction time via the `:trigger-event-types` option to [[create]]
-   — the config is data, not compiled-in logic."
-  []
-  (if-let [r (io/resource trigger-config-resource)]
-    (edn/read-string (slurp r))
-    (throw (ex-info "pr-scoring: missing trigger-event-types config resource"
-                    {:resource trigger-config-resource}))))
-
-(def default-trigger-event-types
-  (delay (load-default-triggers)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Default scorer (no-op)
-
-(defn default-scorer-fn
+(defn ^{:stratum 0} default-scorer-fn
   "Placeholder scorer — returns `nil` so no `:pr/scored` events are
    emitted. Replace with a real scorer at `create` time once the
    `pr-train` + `policy-pack` integration lands."
   [_pr-event]
   nil)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Event handling
-
-(defn- emit-scored!
+(defn- ^{:stratum 0} emit-scored!
   "Call `scorer-fn` on `event` and, if scores are returned, publish a
    `:pr/scored` event on `stream` carrying them."
   [stream scorer-fn event]
@@ -109,7 +88,20 @@
                                    scores
                                    (select-keys event [:workflow/id])))))
 
-(defn- handle-event!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} load-default-triggers
+  "Read the default trigger-event-types set from the resource at
+   [[trigger-config-resource]]. Callers MAY override at component
+   construction time via the `:trigger-event-types` option to [[create]]
+   — the config is data, not compiled-in logic."
+  []
+  (if-let [r (io/resource trigger-config-resource)]
+    (edn/read-string (slurp r))
+    (throw (ex-info "pr-scoring: missing trigger-event-types config resource"
+                    {:resource trigger-config-resource}))))
+
+(defn- ^{:stratum 1} handle-event!
   "Entry point for every event the stream delivers. No-op unless the
    event type is in `triggers`. A scorer-fn that throws is suppressed
    silently (for the scaffold) — a follow-up PR wires proper structured
@@ -120,10 +112,34 @@
       (emit-scored! stream scorer-fn event)
       (catch Throwable _t nil))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Lifecycle
+(defn ^{:stratum 1} stop!
+  "Unsubscribe. Idempotent."
+  [component]
+  (let [{:keys [stream subscribed?]} @component]
+    (when subscribed?
+      (es/unsubscribe! stream subscriber-id)
+      (swap! component assoc :subscribed? false))
+    component))
 
-(defn create
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} default-trigger-event-types
+  (delay (load-default-triggers)))
+
+(defn ^{:stratum 2} start!
+  "Subscribe to the stream. Idempotent — repeat calls are no-ops."
+  [component]
+  (let [{:keys [stream scorer-fn triggers subscribed?]} @component]
+    (when-not subscribed?
+      (es/subscribe! stream subscriber-id
+                     (fn [event] (handle-event! triggers scorer-fn stream event)))
+      (swap! component assoc :subscribed? true))
+    component))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Lifecycle
+(defn ^{:stratum 3} create
   "Build a fresh pr-scoring component instance bound to `stream`. Does
    not subscribe yet — call `start!` to begin consuming events.
 
@@ -141,26 +157,9 @@
           :triggers (or trigger-event-types @default-trigger-event-types)
           :subscribed? false})))
 
-(defn start!
-  "Subscribe to the stream. Idempotent — repeat calls are no-ops."
-  [component]
-  (let [{:keys [stream scorer-fn triggers subscribed?]} @component]
-    (when-not subscribed?
-      (es/subscribe! stream subscriber-id
-                     (fn [event] (handle-event! triggers scorer-fn stream event)))
-      (swap! component assoc :subscribed? true))
-    component))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn stop!
-  "Unsubscribe. Idempotent."
-  [component]
-  (let [{:keys [stream subscribed?]} @component]
-    (when subscribed?
-      (es/unsubscribe! stream subscriber-id)
-      (swap! component assoc :subscribed? false))
-    component))
-
-(defn attach!
+(defn ^{:stratum 4} attach!
   "Create + start in one step."
   ([stream] (attach! stream {}))
   ([stream opts] (start! (create stream opts))))

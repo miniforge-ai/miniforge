@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.context-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -23,7 +22,9 @@
    [ai.miniforge.cli.workflow-runner.context :as sut]
    [ai.miniforge.event-stream.interface :as es]))
 
-(deftest create-workflow-context-prefers-explicit-execution-worktree-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} create-workflow-context-prefers-explicit-execution-worktree-test
   (testing "execution-opts worktree-path overrides discovered repo root"
     (with-redefs [worktree/worktree-root (constantly "/tmp/repo-root")
                   es/create-streaming-callback (fn [& _] nil)
@@ -42,7 +43,7 @@
         (is (= {:worktree-path "/tmp/execution-worktree"}
                (:execution/opts context)))))))
 
-(deftest create-workflow-context-falls-back-to-discovered-worktree-test
+(deftest ^{:stratum 0} create-workflow-context-falls-back-to-discovered-worktree-test
   (testing "repo root is used only when no explicit execution worktree is present"
     (with-redefs [worktree/worktree-root (constantly "/tmp/repo-root")
                   es/create-streaming-callback (fn [& _] nil)

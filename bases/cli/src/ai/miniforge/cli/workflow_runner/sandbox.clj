@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.sandbox
   "Container sandbox setup for isolated workflow execution. Runtime-agnostic:
    the host's container runtime is auto-selected (Podman first, Docker
@@ -35,15 +34,15 @@
    [ai.miniforge.dag-executor.interface :as dag]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
 
-(defn sandbox-release-fn [executor environment-id]
+;; No in-namespace dependencies.
+(defn ^{:stratum 0} sandbox-release-fn [executor environment-id]
   (fn []
     (try
       (dag/release-environment! executor environment-id)
       (catch Exception _ nil))))
 
-(defn- git-remote-url
+(defn- ^{:stratum 0} git-remote-url
   "Get git remote origin URL from a directory. Returns nil on failure."
   [dir]
   (try
@@ -53,15 +52,15 @@
         (str/trim (:out result))))
     (catch Exception _ nil)))
 
-(defn infer-branch [spec enriched-spec]
+(defn ^{:stratum 0} infer-branch [spec enriched-spec]
   (or (:spec/branch spec)
       (get-in enriched-spec [:spec/context :git-branch])
       "main"))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
 
-(defn infer-repo-url [spec enriched-spec]
+;; Composes Layer 0.
+(defn ^{:stratum 1} infer-repo-url [spec enriched-spec]
   (or (:spec/repo-url spec)
       (get-in enriched-spec [:spec/context :repo-url])
       ;; If spec came from a file in a different repo, use that repo's remote.
@@ -72,10 +71,10 @@
       (git-remote-url ".")))
 
 ;------------------------------------------------------------------------------ Layer 2
+
 ;; Sandbox preparation — composes Layer 1 (`infer-repo-url`) plus
 ;; Layer 0 (`infer-branch`).
-
-(defn prepare-sandbox [spec enriched-spec]
+(defn ^{:stratum 2} prepare-sandbox [spec enriched-spec]
   (let [prep-result (dag/prepare-runtime-executor!
                      (runtime-env/selection-config {:image-type :clojure}))]
     (if-not (dag/ok? prep-result)
@@ -96,9 +95,9 @@
                      :sandbox-workdir "/workspace"})))))))
 
 ;------------------------------------------------------------------------------ Layer 3
-;; Composes Layer 2.
 
-(defn setup-sandbox-context [base-context sandbox? spec enriched-spec quiet]
+;; Composes Layer 2.
+(defn ^{:stratum 3} setup-sandbox-context [base-context sandbox? spec enriched-spec quiet]
   (if-not sandbox?
     [base-context nil]
     (do

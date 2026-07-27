@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.kahn
   "Generic Kahn's algorithm for topological sort.
    Operates on a plain dependency map — no domain types."
@@ -23,20 +22,18 @@
             [ai.miniforge.dag-primitives.graph  :as graph]
             [ai.miniforge.dag-primitives.result :as result]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Queue construction
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- initial-queue
+;; Queue construction
+(defn- ^{:stratum 0} initial-queue
   "Seed the ready queue with all nodes that have no predecessors,
    preserving the caller-supplied tie-breaking order."
   [in-degree ordered-nodes]
   (into clojure.lang.PersistentQueue/EMPTY
         (filter #(zero? (get in-degree %)) ordered-nodes)))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; Kahn step
-
-(defn- process-node
+(defn- ^{:stratum 0} process-node
   "Remove node from the queue, decrement in-degrees for its successors,
    and enqueue any successor whose in-degree just reached zero."
   [adj in-degree queue result node]
@@ -45,10 +42,10 @@
         ready   (filter #(zero? (get new-deg %)) succs)]
     [(into (pop queue) ready) new-deg (conj result node)]))
 
-;;------------------------------------------------------------------------------ Layer 2
-;; Topological sort
+;------------------------------------------------------------------------------ Layer 1
 
-(defn topological-sort
+;; Topological sort
+(defn ^{:stratum 1} topological-sort
   "Kahn's algorithm on a generic dependency map.
 
    dep-map: {node-id #{predecessor-node-id ...}}

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.crypto
   "Cryptographic signature verification for policy packs.
 
@@ -30,9 +29,9 @@
    consider adopting gloss for structured binary codec work.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Ed25519 verification via reflection
 
-(defn verify-ed25519
+;; Ed25519 verification via reflection
+(defn ^{:stratum 0} verify-ed25519
   "Verify an Ed25519 signature against content bytes.
 
    Arguments:
@@ -63,10 +62,8 @@
     (catch Exception e
       {:verified? false :reason (.getMessage e)})))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pack content hashing
-
-(defn pack-signable-bytes
+(defn ^{:stratum 0} pack-signable-bytes
   "Compute the signable byte representation of a pack manifest.
    Strips signature fields and serializes the remainder as sorted EDN."
   [pack]

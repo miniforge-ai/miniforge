@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.pr-poller-test
   (:require
    [ai.miniforge.pr-lifecycle.pr-poller :as sut]
    [ai.miniforge.dag-executor.interface :as dag]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest current-github-login-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} current-github-login-test
   (testing "returns the trimmed login on success"
     (with-redefs [sut/run-gh (fn [_args _wt] (dag/ok {:output "  octocat\n"}))]
       (is (= "octocat" (sut/current-github-login "/tmp/repo")))))
@@ -33,7 +34,7 @@
     (with-redefs [sut/run-gh (fn [_args _wt] (dag/ok {:output "   "}))]
       (is (nil? (sut/current-github-login "/tmp/repo"))))))
 
-(deftest parse-gh-comments-test
+(deftest ^{:stratum 0} parse-gh-comments-test
   (testing "normalizes review comments with file context"
     (let [comments (#'sut/parse-gh-comments
                     "[{\"id\":1,\"body\":\"Please fix\",\"created_at\":\"2026-04-01T12:00:00Z\",\"path\":\"src/core.clj\",\"line\":42,\"user\":{\"login\":\"reviewer\"}}]"
@@ -43,7 +44,7 @@
       (is (= "src/core.clj" (:comment/path (first comments))))
       (is (= 42 (:comment/line (first comments)))))))
 
-(deftest comments-since-test
+(deftest ^{:stratum 0} comments-since-test
   (testing "returns comments strictly newer than the watermark"
     (let [comments [{:comment/created-at "2026-04-01T12:00:00Z" :comment/id 1}
                     {:comment/created-at "2026-04-01T12:05:00Z" :comment/id 2}]]

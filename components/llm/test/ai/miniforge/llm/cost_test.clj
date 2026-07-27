@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.cost-test
   "Pins the contract for the cost-estimate fallback used when the
    upstream CLI doesn't surface total_cost_usd in its streaming
@@ -25,6 +24,8 @@
    [ai.miniforge.llm.cost :as sut]
    [clojure.test :refer [deftest is testing]]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Cost tolerance — pricing literals in the EDN table (`3.00`,
 ;; `0.25`, …) read as BigDecimal, so the intermediate arithmetic
 ;; mixes BigDecimal with int tokens and produces BigDecimal; the
@@ -32,15 +33,10 @@
 ;; primitive double, but a tight epsilon keeps the assertions
 ;; stable across any cast-order surprises (and matches the
 ;; tolerance pattern used in dag-orchestrator-test).
-(def ^:private cost-usd-epsilon 1.0e-9)
-
-(defn- approx=
-  [expected actual]
-  (< (Math/abs (double (- expected actual))) cost-usd-epsilon))
+(def ^{:stratum 0} ^:private cost-usd-epsilon 1.0e-9)
 
 ;------------------------------------------------------------------------------ pricing-for-model
-
-(deftest pricing-for-model-returns-entry-for-known-model-test
+(deftest ^{:stratum 0} pricing-for-model-returns-entry-for-known-model-test
   (testing "Models in the cost table return their {:input-per-1m
             :output-per-1m} pair so the estimate-cost arithmetic
             can multiply through."
@@ -48,7 +44,7 @@
       (is (= 3.0  (:input-per-1m p)))
       (is (= 15.0 (:output-per-1m p))))))
 
-(deftest pricing-for-model-nil-for-unknown-model-test
+(deftest ^{:stratum 0} pricing-for-model-nil-for-unknown-model-test
   (testing "Unknown / unpriced models return nil so estimate-cost
             can fold to a $0.00 estimate rather than throwing."
     (is (nil? (sut/pricing-for-model "not-a-real-model")))
@@ -56,7 +52,7 @@
         "free / local models simply aren't in the table — caller
          interprets nil as 'no pricing, no estimate'")))
 
-(deftest pricing-for-model-nil-input-safe-test
+(deftest ^{:stratum 0} pricing-for-model-nil-input-safe-test
   (testing "nil / non-string input returns nil rather than NPE-ing
             on the get lookup — callers may pass through a config
             map's :model value without coercion."
@@ -64,19 +60,7 @@
     (is (nil? (sut/pricing-for-model :keyword-not-string)))
     (is (nil? (sut/pricing-for-model 42)))))
 
-;------------------------------------------------------------------------------ estimate-cost
-
-(deftest estimate-cost-priced-model-test
-  (testing "Known model + usage → USD computed via
-            (in-tokens × in-per-1M + out-tokens × out-per-1M)
-            / 1,000,000. sonnet-4-6 at 3.0/15.0 with 10k input +
-            2k output = (10000 * 3 + 2000 * 15) / 1M = 60000/1M = 0.06"
-    (is (approx= 0.06
-                 (sut/estimate-cost {:input-tokens 10000
-                                     :output-tokens 2000}
-                                    "claude-sonnet-4-6")))))
-
-(deftest estimate-cost-unpriced-model-returns-zero-test
+(deftest ^{:stratum 0} estimate-cost-unpriced-model-returns-zero-test
   (testing "Unpriced model → 0.0 rather than nil or throw. Lets the
             caller assoc the value into the streaming response
             unconditionally without a nil-guard."
@@ -84,7 +68,7 @@
                                    :output-tokens 50000}
                                   "free-local-model")))))
 
-(deftest estimate-cost-missing-or-nonnumeric-token-counts-return-zero-test
+(deftest ^{:stratum 0} estimate-cost-missing-or-nonnumeric-token-counts-return-zero-test
   (testing "Missing usage or non-numeric token counts with a priced model
             return 0.0 — absent tokens mean zero cost, no surprises."
     (is (= 0.0 (sut/estimate-cost nil "claude-sonnet-4-6")))
@@ -99,31 +83,8 @@
                                    :output-tokens :unknown}
                                   "claude-sonnet-4-6")))))
 
-(deftest estimate-cost-missing-input-or-output-tokens-test
-  (testing "Partial usage maps (only :input-tokens, only
-            :output-tokens) default the missing side to 0."
-    (is (approx= 0.03
-                 (sut/estimate-cost {:input-tokens 10000}
-                                    "claude-sonnet-4-6"))
-        "10000 * 3/1M = 0.03 — :output-tokens default 0 contributes 0")
-    (is (approx= 0.03
-                 (sut/estimate-cost {:output-tokens 2000}
-                                    "claude-sonnet-4-6"))
-        "2000 * 15/1M = 0.03 — :input-tokens default 0 contributes 0")))
-
-(deftest estimate-cost-haiku-cheap-pricing-test
-  (testing "Haiku's much cheaper pricing demonstrates the table
-            is per-model (not a constant rate). 10k+2k tokens at
-            $0.25/$1.25 per 1M = (10000*0.25 + 2000*1.25)/1M =
-            (2500 + 2500)/1M = 0.005"
-    (is (approx= 0.005
-                 (sut/estimate-cost {:input-tokens 10000
-                                     :output-tokens 2000}
-                                    "claude-haiku-4-5-20251001")))))
-
 ;------------------------------------------------------------------------------ Exceptions-as-data: cost-table load failure
-
-(deftest cost-table-load-failure-yields-empty-map-test
+(deftest ^{:stratum 0} cost-table-load-failure-yields-empty-map-test
   (testing "Slurp / edn-parse failure on the EDN resource must NOT
             cause estimate-cost / pricing-for-model to throw — both
             are documented as exceptions-as-data (never throw). The
@@ -159,6 +120,47 @@
               "resource failure caught at delay boundary, defaults to {}")
           (is (pos? @load-attempts)
               "the boundary guard actually exercised the failing path"))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} approx=
+  [expected actual]
+  (< (Math/abs (double (- expected actual))) cost-usd-epsilon))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;------------------------------------------------------------------------------ estimate-cost
+(deftest ^{:stratum 2} estimate-cost-priced-model-test
+  (testing "Known model + usage → USD computed via
+            (in-tokens × in-per-1M + out-tokens × out-per-1M)
+            / 1,000,000. sonnet-4-6 at 3.0/15.0 with 10k input +
+            2k output = (10000 * 3 + 2000 * 15) / 1M = 60000/1M = 0.06"
+    (is (approx= 0.06
+                 (sut/estimate-cost {:input-tokens 10000
+                                     :output-tokens 2000}
+                                    "claude-sonnet-4-6")))))
+
+(deftest ^{:stratum 2} estimate-cost-missing-input-or-output-tokens-test
+  (testing "Partial usage maps (only :input-tokens, only
+            :output-tokens) default the missing side to 0."
+    (is (approx= 0.03
+                 (sut/estimate-cost {:input-tokens 10000}
+                                    "claude-sonnet-4-6"))
+        "10000 * 3/1M = 0.03 — :output-tokens default 0 contributes 0")
+    (is (approx= 0.03
+                 (sut/estimate-cost {:output-tokens 2000}
+                                    "claude-sonnet-4-6"))
+        "2000 * 15/1M = 0.03 — :input-tokens default 0 contributes 0")))
+
+(deftest ^{:stratum 2} estimate-cost-haiku-cheap-pricing-test
+  (testing "Haiku's much cheaper pricing demonstrates the table
+            is per-model (not a constant rate). 10k+2k tokens at
+            $0.25/$1.25 per 1M = (10000*0.25 + 2000*1.25)/1M =
+            (2500 + 2500)/1M = 0.005"
+    (is (approx= 0.005
+                 (sut/estimate-cost {:input-tokens 10000
+                                     :output-tokens 2000}
+                                    "claude-haiku-4-5-20251001")))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

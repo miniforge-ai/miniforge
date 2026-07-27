@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.protocol
   "Operator protocols for meta-loop management.
 
@@ -26,9 +25,9 @@
    - Manages the self-improvement loop")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Signal types
 
-(def signal-types
+;; Signal types
+(def ^{:stratum 0} signal-types
   #{:workflow-complete
     :workflow-failed
     :phase-rollback
@@ -38,7 +37,7 @@
     :budget-exceeded
     :quality-regression})
 
-(def improvement-types
+(def ^{:stratum 0} improvement-types
   #{:prompt-change
     :gate-adjustment
     :policy-update
@@ -46,10 +45,8 @@
     :budget-adjustment
     :workflow-modification})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Operator protocol
-
-(defprotocol Operator
+(defprotocol ^{:stratum 0} Operator
   "Protocol for the meta-agent that manages self-improvement."
 
   (observe-signal [this signal]
@@ -87,10 +84,8 @@
      :proposed state (already :applied, :rejected, or missing) — callers must
      nil-check."))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Pattern detector protocol
-
-(defprotocol PatternDetector
+(defprotocol ^{:stratum 0} PatternDetector
   "Protocol for detecting patterns in workflow signals."
 
   (detect [this signals]
@@ -100,10 +95,8 @@
   (get-pattern-types [this]
     "Get the pattern types this detector can identify."))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Improvement generator protocol
-
-(defprotocol ImprovementGenerator
+(defprotocol ^{:stratum 0} ImprovementGenerator
   "Protocol for generating improvement proposals from patterns."
 
   (generate-improvements [this patterns context]
@@ -113,10 +106,8 @@
   (get-supported-patterns [this]
     "Get pattern types this generator can handle."))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Governance protocol
-
-(defprotocol Governance
+(defprotocol ^{:stratum 0} Governance
   "Protocol for improvement governance.
    Controls what improvements can be applied automatically vs requiring approval."
 

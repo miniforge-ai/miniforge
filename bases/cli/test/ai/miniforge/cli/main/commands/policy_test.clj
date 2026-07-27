@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.policy-test
   "Unit tests for policy pack CLI commands."
   (:require
@@ -25,11 +24,12 @@
    [ai.miniforge.cli.main.commands.policy :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
+(def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
-(def ^:dynamic *tmp-dir* nil)
-
-(defn tmp-dir-fixture [f]
+(defn ^{:stratum 0} tmp-dir-fixture [f]
   (let [dir (str (fs/create-temp-dir {:prefix "policy-test-"}))]
     (binding [*tmp-dir* dir]
       (try
@@ -37,9 +37,7 @@
         (finally
           (fs/delete-tree dir))))))
 
-(use-fixtures :each tmp-dir-fixture)
-
-(defn make-pack
+(defn ^{:stratum 0} make-pack
   "Build a minimal policy pack for testing."
   ([]
    (make-pack {}))
@@ -52,16 +50,7 @@
                          :rule/description "Test rule"}]}
           overrides)))
 
-;------------------------------------------------------------------------------ Layer 1: Tests
-
-(deftest policy-list-cmd-no-component-empty-dir-test
-  (testing "list command shows 'no packs' when no packs available"
-    (with-redefs [sut/component-packs (constantly nil)
-                  app-config/home-dir (constantly *tmp-dir*)]
-      (let [output (with-out-str (sut/policy-list-cmd {}))]
-        (is (re-find #"(?i)no installed" output))))))
-
-(deftest policy-list-cmd-component-results-test
+(deftest ^{:stratum 0} policy-list-cmd-component-results-test
   (testing "list command displays component results when available"
     (with-redefs [sut/component-packs
                   (constantly [{:pack/id "foundations-1.0.0"
@@ -70,14 +59,38 @@
       (let [output (with-out-str (sut/policy-list-cmd {}))]
         (is (.contains output "foundations-1.0.0"))))))
 
-(deftest policy-show-cmd-missing-pack-id-test
+(deftest ^{:stratum 0} policy-show-cmd-missing-pack-id-test
   (testing "show command exits with error when no pack-id provided"
     (let [exited? (atom false)]
       (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
         (with-out-str (sut/policy-show-cmd {}))
         (is @exited?)))))
 
-(deftest policy-show-cmd-not-found-test
+(deftest ^{:stratum 0} policy-install-cmd-missing-path-test
+  (testing "install command exits with error when no path provided"
+    (let [exited? (atom false)]
+      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
+        (with-out-str (sut/policy-install-cmd {}))
+        (is @exited?)))))
+
+(deftest ^{:stratum 0} policy-install-cmd-file-not-found-test
+  (testing "install command exits with error when pack file doesn't exist"
+    (let [exited? (atom false)]
+      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
+        (with-out-str (sut/policy-install-cmd {:path "/tmp/nonexistent.pack.edn"}))
+        (is @exited?)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ Layer 1: Tests
+(deftest ^{:stratum 1} policy-list-cmd-no-component-empty-dir-test
+  (testing "list command shows 'no packs' when no packs available"
+    (with-redefs [sut/component-packs (constantly nil)
+                  app-config/home-dir (constantly *tmp-dir*)]
+      (let [output (with-out-str (sut/policy-list-cmd {}))]
+        (is (re-find #"(?i)no installed" output))))))
+
+(deftest ^{:stratum 1} policy-show-cmd-not-found-test
   (testing "show command reports not found for unknown pack"
     (let [exited? (atom false)]
       (with-redefs [sut/load-installed-pack (constantly nil)
@@ -86,21 +99,7 @@
         (with-out-str (sut/policy-show-cmd {:pack-id "nonexistent"}))
         (is @exited?)))))
 
-(deftest policy-install-cmd-missing-path-test
-  (testing "install command exits with error when no path provided"
-    (let [exited? (atom false)]
-      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
-        (with-out-str (sut/policy-install-cmd {}))
-        (is @exited?)))))
-
-(deftest policy-install-cmd-file-not-found-test
-  (testing "install command exits with error when pack file doesn't exist"
-    (let [exited? (atom false)]
-      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
-        (with-out-str (sut/policy-install-cmd {:path "/tmp/nonexistent.pack.edn"}))
-        (is @exited?)))))
-
-(deftest policy-install-cmd-valid-pack-test
+(deftest ^{:stratum 1} policy-install-cmd-valid-pack-test
   (testing "install command copies a valid pack file"
     (let [pack (make-pack)
           src-path (str *tmp-dir* "/my-pack.pack.edn")]
@@ -109,3 +108,5 @@
         (let [output (with-out-str (sut/policy-install-cmd {:path src-path}))]
           (is (.contains output "Installed"))
           (is (fs/exists? (str *tmp-dir* "/packs/my-pack.pack.edn"))))))))
+
+(use-fixtures :each tmp-dir-fixture)

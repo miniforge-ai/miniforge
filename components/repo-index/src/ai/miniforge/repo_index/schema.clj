@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.repo-index.schema
   "Malli schemas for repo index domain types.
 
    Layer 0 — pure data definitions, no dependencies.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File Record
 
-(def FileRecord
+;; File Record
+(def ^{:stratum 0} FileRecord
   [:map
    [:path [:string {:min 1}]]
    [:blob-sha [:string {:min 7}]]
@@ -33,10 +32,25 @@
    [:language [:maybe :string]]
    [:generated? :boolean]])
 
-;------------------------------------------------------------------------------ Layer 0
-;; Repo Index
+;; RepoMapEntry
+(def ^{:stratum 0} RepoMapEntry
+  [:map
+   [:path [:string {:min 1}]]
+   [:lang [:maybe :string]]
+   [:lines :int]
+   [:size :int]])
 
-(def RepoIndex
+;; Snippet
+(def ^{:stratum 0} Snippet
+  [:map
+   [:start-line :int]
+   [:end-line :int]
+   [:text [:string {:min 0}]]])
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Repo Index
+(def ^{:stratum 1} RepoIndex
   [:map
    [:tree-sha [:string {:min 7}]]
    [:repo-root [:string {:min 1}]]
@@ -46,17 +60,8 @@
    [:languages [:map-of :string :int]]
    [:indexed-at inst?]])
 
-;------------------------------------------------------------------------------ Layer 0
-;; Repo Map Slice
-
-(def RepoMapEntry
-  [:map
-   [:path [:string {:min 1}]]
-   [:lang [:maybe :string]]
-   [:lines :int]
-   [:size :int]])
-
-(def RepoMapSlice
+;; RepoMapSlice
+(def ^{:stratum 1} RepoMapSlice
   [:map
    [:tree-sha [:string {:min 7}]]
    [:entries [:vector RepoMapEntry]]
@@ -65,16 +70,8 @@
    [:truncated? :boolean]
    [:token-estimate :int]])
 
-;------------------------------------------------------------------------------ Layer 0
-;; Search Hit
-
-(def Snippet
-  [:map
-   [:start-line :int]
-   [:end-line :int]
-   [:text [:string {:min 0}]]])
-
-(def SearchHit
+;; SearchHit
+(def ^{:stratum 1} SearchHit
   [:map
    [:path [:string {:min 1}]]
    [:score :double]

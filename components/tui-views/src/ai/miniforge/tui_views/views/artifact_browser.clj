@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.artifact-browser
   "Artifact browser -- N5 Section 3.2.4.
 
@@ -30,9 +29,9 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Rendering
 
-(defn render
+;; Rendering
+(defn ^{:stratum 0} render
   "Render the artifact browser.
    model: full app model
    [cols rows]: available screen area"

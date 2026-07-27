@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.scan
   "Scan command — run compliance scanner against a repository.
 
@@ -36,12 +35,13 @@
    [ai.miniforge.semantic-analyzer.interface :as semantic]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Pack resolution
+(def ^{:stratum 0} ^:private default-standards-path ".standards")
 
-(def ^:private default-standards-path ".standards")
-(def ^:private repo-config-path ".miniforge/config.edn")
+(def ^{:stratum 0} ^:private repo-config-path ".miniforge/config.edn")
 
-(defn- resolve-pack
+(defn- ^{:stratum 0} resolve-pack
   "Resolve a pack by name or path. Returns the loaded pack map or nil."
   [pack-ref]
   (cond
@@ -53,24 +53,7 @@
       (when-let [url (io/resource resource-path)]
         (edn/read-string (slurp url))))))
 
-(defn- load-repo-config
-  "Load .miniforge/config.edn from the repo root. Returns nil if absent."
-  [repo-path]
-  (let [path (fs/path repo-path repo-config-path)]
-    (when (fs/exists? path)
-      (edn/read-string (slurp (str path))))))
-
-(defn- resolve-packs-from-config
-  "Load all packs declared in :repo/packs. Returns merged pack or nil."
-  [repo-config]
-  (let [pack-names (get repo-config :repo/packs [])]
-    (when (seq pack-names)
-      (let [packs (keep resolve-pack pack-names)
-            rules (vec (mapcat :pack/rules packs))]
-        (when (seq rules)
-          {:pack/rules rules})))))
-
-(defn- resolve-rules-selector
+(defn- ^{:stratum 0} resolve-rules-selector
   "Parse the --rules option into a selector value."
   [rules-opt]
   (cond
@@ -79,24 +62,7 @@
     (= "always-apply" rules-opt) :always-apply
     :else                      (keyword rules-opt)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Pipeline steps
-
-(defn- build-scan-opts
-  "Build scan options from CLI opts and repo config.
-   Priority: --pack flag > repo config :repo/packs > no pack."
-  [repo-path opts]
-  (let [explicit-pack (when-let [p (get opts :pack)] (resolve-pack p))
-        repo-config   (when-not explicit-pack (load-repo-config repo-path))
-        config-pack   (when repo-config (resolve-packs-from-config repo-config))
-        pack          (or explicit-pack config-pack)
-        rules         (resolve-rules-selector (get opts :rules))
-        since         (get opts :since)]
-    (cond-> {:rules rules}
-      pack  (assoc :pack pack)
-      since (assoc :since since))))
-
-(defn- print-scan-summary
+(defn- ^{:stratum 0} print-scan-summary
   "Print scan result summary. Returns the scan result."
   [scan-result]
   (display/print-info
@@ -106,7 +72,7 @@
                 :duration-ms (:scan-duration-ms scan-result)}))
   scan-result)
 
-(defn- classify-and-report
+(defn- ^{:stratum 0} classify-and-report
   "Classify violations and print counts. Returns classified violations."
   [violations]
   (let [classified (scanner/classify violations)
@@ -117,7 +83,7 @@
                  {:auto-count auto-count :review-count review-count}))
     classified))
 
-(defn- plan-and-print
+(defn- ^{:stratum 0} plan-and-print
   "Generate plan, optionally print work spec. Returns plan result."
   [classified repo-path report?]
   (let [plan-result (scanner/plan classified repo-path)]
@@ -126,7 +92,7 @@
       (println (:work-spec plan-result)))
     plan-result))
 
-(defn- execute-if-requested
+(defn- ^{:stratum 0} execute-if-requested
   "Apply auto-fixes if --execute flag is set."
   [plan-result repo-path execute?]
   (when (and execute? (seq (filter :auto-fixable? (mapcat :task/violations (:dag-tasks plan-result)))))
@@ -137,7 +103,7 @@
                    {:fixed (get exec-result :violations-fixed 0)
                     :files (get exec-result :files-changed 0)})))))
 
-(defn- run-linters
+(defn- ^{:stratum 0} run-linters
   "Run language-specific linters for detected technologies.
    Returns vector of linter violations."
   [repo-path repo-config]
@@ -161,7 +127,7 @@
                                             {:tech (name tech) :duration-ms duration-ms}))))
         (:violations result)))))
 
-(defn- run-linter-fixes!
+(defn- ^{:stratum 0} run-linter-fixes!
   "Run linter --fix for detected technologies."
   [repo-path repo-config]
   (let [detected (get repo-config :repo/technologies #{})
@@ -175,7 +141,7 @@
                                           :scan/linter-fix-applied
                                           :scan/linter-fix-failed))})))))
 
-(defn- print-rule-result
+(defn- ^{:stratum 0} print-rule-result
   "Print a single rule's analysis result."
   [result]
   (let [rule-name (name (get result :rule/id :unknown))
@@ -192,12 +158,31 @@
                     :files       (:files-analyzed result)
                     :duration-ms (:duration-ms result)})))))
 
-(defn- rule-has-matching-files?
+(defn- ^{:stratum 0} rule-has-matching-files?
   "True when a rule's file globs match at least one file in the repo."
   [repo-path rule]
   (seq (semantic/select-files-for-rule repo-path rule)))
 
-(defn- run-semantic-analysis
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-repo-config
+  "Load .miniforge/config.edn from the repo root. Returns nil if absent."
+  [repo-path]
+  (let [path (fs/path repo-path repo-config-path)]
+    (when (fs/exists? path)
+      (edn/read-string (slurp (str path))))))
+
+(defn- ^{:stratum 1} resolve-packs-from-config
+  "Load all packs declared in :repo/packs. Returns merged pack or nil."
+  [repo-config]
+  (let [pack-names (get repo-config :repo/packs [])]
+    (when (seq pack-names)
+      (let [packs (keep resolve-pack pack-names)
+            rules (vec (mapcat :pack/rules packs))]
+        (when (seq rules)
+          {:pack/rules rules})))))
+
+(defn- ^{:stratum 1} run-semantic-analysis
   "Run LLM-based semantic analysis on behavioral rules in parallel.
    Only runs rules that have matching files in the repo."
   [repo-path standards-path]
@@ -228,7 +213,26 @@
                                       {:message (.getMessage e)}))
       [])))
 
-(defn- run-scan
+;------------------------------------------------------------------------------ Layer 2
+
+;; Pipeline steps
+(defn- ^{:stratum 2} build-scan-opts
+  "Build scan options from CLI opts and repo config.
+   Priority: --pack flag > repo config :repo/packs > no pack."
+  [repo-path opts]
+  (let [explicit-pack (when-let [p (get opts :pack)] (resolve-pack p))
+        repo-config   (when-not explicit-pack (load-repo-config repo-path))
+        config-pack   (when repo-config (resolve-packs-from-config repo-config))
+        pack          (or explicit-pack config-pack)
+        rules         (resolve-rules-selector (get opts :rules))
+        since         (get opts :since)]
+    (cond-> {:rules rules}
+      pack  (assoc :pack pack)
+      since (assoc :since since))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} run-scan
   "Execute the scan→linters→semantic→classify→plan→execute pipeline."
   [repo-path opts]
   (let [standards   (get opts :standards default-standards-path)
@@ -288,10 +292,10 @@
               (run-linter-fixes! repo-path repo-config))
             (execute-if-requested plan-result repo-path true)))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Command entry point
+;------------------------------------------------------------------------------ Layer 4
 
-(defn scan-cmd
+;; Command entry point
+(defn ^{:stratum 4} scan-cmd
   "CLI entry point for the scan command."
   [opts]
   (let [repo-path (get opts :repo (str (fs/cwd)))]

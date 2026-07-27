@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.detect-format-test
   "Coverage for `core/detect-format` (anomaly-returning) and its
    boundary escalation through `parse-spec-file`.
@@ -30,9 +29,10 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Anomaly-returning happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest detect-format-known-extensions
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+(deftest ^{:stratum 0} detect-format-known-extensions
   (testing "supported extensions return their format keyword"
     (is (= :edn      (core/detect-format "spec.edn")))
     (is (= :json     (core/detect-format "spec.json")))
@@ -41,14 +41,13 @@
     (is (= :yaml     (core/detect-format "spec.yml")))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure path
-
-(deftest detect-format-unsupported-returns-anomaly
+(deftest ^{:stratum 0} detect-format-unsupported-returns-anomaly
   (testing "unknown extension yields :invalid-input anomaly"
     (let [result (core/detect-format "spec.toml")]
       (is (anomaly/anomaly? result))
       (is (= :invalid-input (:anomaly/type result))))))
 
-(deftest detect-format-anomaly-data-carries-triage-info
+(deftest ^{:stratum 0} detect-format-anomaly-data-carries-triage-info
   (testing "anomaly data carries path, extension, and supported set"
     (let [result (core/detect-format "spec.toml")
           data   (:anomaly/data result)]
@@ -62,8 +61,7 @@
 ;; that exists on disk but has an unsupported extension, the
 ;; `detect-format` anomaly is rethrown as ex-info carrying the
 ;; `:anomaly/type` for downstream classification.
-
-(deftest parse-spec-file-escalates-unsupported-extension
+(deftest ^{:stratum 0} parse-spec-file-escalates-unsupported-extension
   (testing "unsupported extension surfaces as ex-info from parse-spec-file"
     (let [tmp (fs/create-temp-file {:suffix ".toml"})]
       (try

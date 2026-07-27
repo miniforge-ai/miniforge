@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.conflict-resolution
   "Spec §6.4 hook: when a PR transitions MERGEABLE→NON_MERGEABLE
    (CONFLICTING with its base branch), invoke the multi-parent merge
@@ -44,9 +43,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; State classification
 
-(def conflict-marker-re
+;; State classification
+(def ^{:stratum 0} conflict-marker-re
   "Heuristic match for GitHub `mergeable` and `mergeStateStatus`
    fields when the PR is CONFLICTING with its base. We match both
    the lowercase `mergeable: \"CONFLICTING\"` and the
@@ -57,29 +56,8 @@
    is don't auto-resolve)."
   #"(?i)CONFLICTING|\"mergeStateStatus\"\s*:\s*\"DIRTY\"")
 
-(defn classify-merge-state
-  "Parse GitHub's mergeable / mergeStateStatus JSON output into a
-   simple keyword. Inputs come from `gh pr view --json
-   mergeable,mergeStateStatus`. Returns one of:
-   - :mergeable     — clean, OK to merge
-   - :conflicting   — CONFLICTING with base; resolution can engage
-   - :unknown       — GitHub hasn't computed yet, or anything else
-
-   Conservative on classification: only emit :conflicting when we
-   see a clear conflict signal. UNKNOWN/PENDING stay :unknown so
-   the caller polls again rather than running the resolution
-   sub-workflow on a state GitHub itself isn't sure about."
-  [gh-output]
-  (cond
-    (or (nil? gh-output) (str/blank? gh-output)) :unknown
-    (re-find conflict-marker-re gh-output) :conflicting
-    (re-find #"(?i)\"mergeable\"\s*:\s*\"MERGEABLE\"" gh-output) :mergeable
-    :else :unknown))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Worktree probes (Stage 3b)
-
-(defn- run-cmd
+(defn- ^{:stratum 0} run-cmd
   [cwd args]
   (try
     (let [r (apply process/shell
@@ -92,67 +70,8 @@
     (catch Exception e
       (dag/err :command-exception (.getMessage e) {:args args}))))
 
-(defn extract-conflict-paths
-  "Run `git diff --name-only --diff-filter=U` in `worktree-path` to
-   list paths the index has marked unmerged. Returns a vector of
-   relative path strings (possibly empty), or a dag/err if git
-   itself failed.
-
-   Spec §6.1 conflict-input requires this list — the resolution
-   agent reads each path's content (via build-resolution-task in
-   workflow.merge-resolution) so the LLM can see what to fix."
-  [worktree-path]
-  (let [r (run-cmd worktree-path
-                   ["git" "diff" "--name-only" "--diff-filter=U"])]
-    (if (dag/ok? r)
-      (let [out (:output (:data r))]
-        (dag/ok (if (str/blank? out)
-                  []
-                  (vec (str/split-lines out)))))
-      r)))
-
-(defn rev-parse
-  "Resolve a ref to a full SHA in `worktree-path`. Wraps `git
-   rev-parse <ref>` and returns the trimmed SHA via dag/ok or a
-   dag/err on failure."
-  [worktree-path ref]
-  (let [r (run-cmd worktree-path ["git" "rev-parse" ref])]
-    (if (dag/ok? r)
-      (dag/ok {:sha (:output (:data r))})
-      r)))
-
-(defn push-resolution!
-  "Push the worktree's current HEAD to origin/<pr-branch> via plain
-   `git push`. The resolution commit is a merge commit on top of
-   the PR branch's existing HEAD (parents = [PR-HEAD base-HEAD]),
-   so the push is a fast-forward update of the PR branch — no
-   force-push needed.
-
-   Plain push rejects non-fast-forwards by default, which is the
-   right safety: if upstream moved out from under us between merge
-   attempt and push, the conflict-input we resolved against is
-   stale and we'd want to re-evaluate rather than overwrite the
-   new state.
-
-   Returns dag/ok `{:pushed-sha <sha>}` on success, or the dag/err
-   from the underlying git push on failure."
-  [worktree-path pr-branch]
-  (let [push-r (run-cmd worktree-path
-                        ["git" "push" "origin"
-                         (str "HEAD:" pr-branch)])]
-    (if (dag/ok? push-r)
-      (let [sha-r (rev-parse worktree-path "HEAD")]
-        (if (dag/ok? sha-r)
-          (dag/ok {:pushed?    true
-                   :pushed-sha (:sha (:data sha-r))
-                   :pr-branch  pr-branch})
-          sha-r))
-      push-r)))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; conflict-input shape
-
-(defn build-pr-conflict-input
+(defn ^{:stratum 0} build-pr-conflict-input
   "Assemble the conflict-input map that workflow.merge-resolution/
    resolve-conflict! expects, with the two-parent shape from spec
    §6.4: PR branch + PR base. Order is fixed (PR branch first, base
@@ -182,10 +101,90 @@
    :merge/conflicts  (mapv (fn [p] {:path p :stages ["1" "2" "3"]})
                            conflict-paths)})
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public entry — orchestrate the §6.4 hook (Stage 3c)
+;------------------------------------------------------------------------------ Layer 1
 
-(defn resolve-pr-conflicts!
+(defn ^{:stratum 1} classify-merge-state
+  "Parse GitHub's mergeable / mergeStateStatus JSON output into a
+   simple keyword. Inputs come from `gh pr view --json
+   mergeable,mergeStateStatus`. Returns one of:
+   - :mergeable     — clean, OK to merge
+   - :conflicting   — CONFLICTING with base; resolution can engage
+   - :unknown       — GitHub hasn't computed yet, or anything else
+
+   Conservative on classification: only emit :conflicting when we
+   see a clear conflict signal. UNKNOWN/PENDING stay :unknown so
+   the caller polls again rather than running the resolution
+   sub-workflow on a state GitHub itself isn't sure about."
+  [gh-output]
+  (cond
+    (or (nil? gh-output) (str/blank? gh-output)) :unknown
+    (re-find conflict-marker-re gh-output) :conflicting
+    (re-find #"(?i)\"mergeable\"\s*:\s*\"MERGEABLE\"" gh-output) :mergeable
+    :else :unknown))
+
+(defn ^{:stratum 1} extract-conflict-paths
+  "Run `git diff --name-only --diff-filter=U` in `worktree-path` to
+   list paths the index has marked unmerged. Returns a vector of
+   relative path strings (possibly empty), or a dag/err if git
+   itself failed.
+
+   Spec §6.1 conflict-input requires this list — the resolution
+   agent reads each path's content (via build-resolution-task in
+   workflow.merge-resolution) so the LLM can see what to fix."
+  [worktree-path]
+  (let [r (run-cmd worktree-path
+                   ["git" "diff" "--name-only" "--diff-filter=U"])]
+    (if (dag/ok? r)
+      (let [out (:output (:data r))]
+        (dag/ok (if (str/blank? out)
+                  []
+                  (vec (str/split-lines out)))))
+      r)))
+
+(defn ^{:stratum 1} rev-parse
+  "Resolve a ref to a full SHA in `worktree-path`. Wraps `git
+   rev-parse <ref>` and returns the trimmed SHA via dag/ok or a
+   dag/err on failure."
+  [worktree-path ref]
+  (let [r (run-cmd worktree-path ["git" "rev-parse" ref])]
+    (if (dag/ok? r)
+      (dag/ok {:sha (:output (:data r))})
+      r)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} push-resolution!
+  "Push the worktree's current HEAD to origin/<pr-branch> via plain
+   `git push`. The resolution commit is a merge commit on top of
+   the PR branch's existing HEAD (parents = [PR-HEAD base-HEAD]),
+   so the push is a fast-forward update of the PR branch — no
+   force-push needed.
+
+   Plain push rejects non-fast-forwards by default, which is the
+   right safety: if upstream moved out from under us between merge
+   attempt and push, the conflict-input we resolved against is
+   stale and we'd want to re-evaluate rather than overwrite the
+   new state.
+
+   Returns dag/ok `{:pushed-sha <sha>}` on success, or the dag/err
+   from the underlying git push on failure."
+  [worktree-path pr-branch]
+  (let [push-r (run-cmd worktree-path
+                        ["git" "push" "origin"
+                         (str "HEAD:" pr-branch)])]
+    (if (dag/ok? push-r)
+      (let [sha-r (rev-parse worktree-path "HEAD")]
+        (if (dag/ok? sha-r)
+          (dag/ok {:pushed?    true
+                   :pushed-sha (:sha (:data sha-r))
+                   :pr-branch  pr-branch})
+          sha-r))
+      push-r)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Public entry — orchestrate the §6.4 hook (Stage 3c)
+(defn ^{:stratum 3} resolve-pr-conflicts!
   "Spec §6.4 entry point. Run the merge-resolution sub-workflow on
    a PR that's CONFLICTING with its base, then push the resolution
    commit to the PR branch.

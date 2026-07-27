@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.artifact.protocols.records.transit-store
   "TransitArtifactStore record that implements the ArtifactStore protocol.
 
@@ -43,7 +42,9 @@
    [ai.miniforge.artifact.interface.protocols.artifact-store :as p]
    [ai.miniforge.artifact.protocols.impl.transit-store :as impl]))
 
-(defrecord TransitArtifactStore [artifacts-dir cache index logger]
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} TransitArtifactStore [artifacts-dir cache index logger]
   p/ArtifactStore
 
   (save [this artifact]
@@ -61,7 +62,9 @@
   (close [this]
     (impl/close-store this)))
 
-(defn create-transit-store
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-transit-store
   ([] (create-transit-store {}))
   ([{:keys [dir logger]}]
    (let [artifacts-dir (impl/artifacts-dir dir)]

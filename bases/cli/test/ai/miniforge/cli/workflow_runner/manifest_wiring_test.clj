@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.manifest-wiring-test
   "Unit tests for the BD-2b sub-3a manifest wiring helpers in
    `workflow_runner.clj`. The manifest module itself
@@ -29,9 +28,10 @@
    [ai.miniforge.event-stream.interface :as es]
    [clojure.test :refer [deftest is]]))
 
-;------------------------------------------------------------------------------ Fixture
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- mock-manifest-fns
+;------------------------------------------------------------------------------ Fixture
+(defn- ^{:stratum 0} mock-manifest-fns
   "Build a map of mock manifest fns recording every call into `calls`.
    `start-heartbeat!` returns a sentinel handle that `stop-heartbeat!`
    recognises."
@@ -50,7 +50,65 @@
                          heartbeat-handle)
      'stop-heartbeat!  (fn [hb] (swap! calls conj [:stop-heartbeat hb]))}))
 
-(defn- with-mocked-manifest
+;------------------------------------------------------------------------------ archive-workflow-manifest!
+(deftest ^{:stratum 0} archive-workflow-manifest!-no-op-when-marked?-false
+  ;; If mark-manifest-terminal! never wrote (manifest absent or no
+  ;; event stream), there's nothing to archive — the archive op
+  ;; would error on the missing manifest. Skip in that case.
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
+      (let [handle {:dir (java.io.File. "/tmp/x") :marked? (atom false)}]
+        (sut/archive-workflow-manifest! handle :wid)
+        (is (empty? @archive-calls)
+            "no archive call when marked? is false")))))
+
+(deftest ^{:stratum 0} archive-workflow-manifest!-no-op-when-dir-nil
+  ;; nil dir means dashboard-only run; no manifest to archive.
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
+      (sut/archive-workflow-manifest! {:dir nil :marked? (atom true)} :wid)
+      (is (empty? @archive-calls)))))
+
+(deftest ^{:stratum 0} archive-workflow-manifest!-invokes-archive-workflow!
+  (let [archive-calls (atom [])]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
+                                                           (swap! archive-calls conj args))}]
+      (sut/archive-workflow-manifest!
+       {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+       :wid)
+      (is (= [[:wid]] @archive-calls)
+          "archive-workflow! called once with the workflow id"))))
+
+(deftest ^{:stratum 0} archive-workflow-manifest!-swallows-archive-failures
+  ;; Per the docstring, archive failures must not propagate — the
+  ;; boot-time recovery pass picks up half-finished archives. A
+  ;; failing archive should log to stderr and return nil.
+  (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
+                                                         (throw (RuntimeException. "rename failed")))}]
+    (binding [*err* (java.io.PrintWriter. (java.io.StringWriter.))]
+      (is (nil? (sut/archive-workflow-manifest!
+                 {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+                 :wid))
+          "archive exception must not propagate"))))
+
+(deftest ^{:stratum 0} archive-workflow-manifest!-logs-archive-anomalies
+  (let [archive-anomaly (anomaly/anomaly :invalid-input
+                                         "manifest invalid"
+                                         {:reason :test})]
+    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
+                                                           archive-anomaly)}]
+      (let [err (java.io.StringWriter.)]
+        (binding [*err* err]
+          (is (nil? (sut/archive-workflow-manifest!
+                     {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
+                     :wid)))
+          (is (re-find #"manifest invalid" (str err))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} with-mocked-manifest
   "Bind manifest interface functions. Returns whatever `f` returns;
    the call log is in `calls`."
   [f]
@@ -66,48 +124,7 @@
                   es/workflow-dir (fn [wid] (java.io.File. (str "/tmp/test-" wid)))]
       (f calls))))
 
-;------------------------------------------------------------------------------ start-workflow-manifest!
-
-(deftest start-workflow-manifest!-no-op-when-event-stream-is-nil
-  (with-mocked-manifest
-    (fn [calls]
-      (is (nil? (sut/start-workflow-manifest! :wid nil)))
-      (is (empty? @calls)
-          "no manifest writes when there's no event stream
-           (dashboard-only runs don't persist events)"))))
-
-(deftest start-workflow-manifest!-inits-and-starts-heartbeat
-  (with-mocked-manifest
-    (fn [calls]
-      (let [handle (sut/start-workflow-manifest! :wid :fake-es)
-            ordered (mapv first @calls)]
-        (is (some? handle))
-        (is (some? (:dir handle)))
-        (is (= :mock-heartbeat-handle (:heartbeat handle)))
-        (is (false? @(:marked? handle))
-            "marked? starts false; flips on first mark-manifest-terminal!")
-        (is (= [:init-active :save :start-heartbeat] ordered)
-            "lifecycle order: build active manifest → save → start heartbeat")))))
-
-;------------------------------------------------------------------------------ mark-manifest-terminal!
-
-(deftest mark-manifest-terminal!-no-op-when-handle-nil
-  (with-mocked-manifest
-    (fn [calls]
-      (sut/mark-manifest-terminal! nil :completed)
-      (is (empty? @calls)))))
-
-(deftest mark-manifest-terminal!-loads-marks-and-saves
-  (with-mocked-manifest
-    (fn [calls]
-      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
-        (reset! calls [])
-        (sut/mark-manifest-terminal! handle :completed)
-        (is (= [:load :mark-terminal :save] (mapv first @calls))
-            "mark-terminal must load → transition → save in order")
-        (is (true? @(:marked? handle)))))))
-
-(deftest mark-manifest-terminal!-leaves-marked?-false-when-manifest-absent
+(deftest ^{:stratum 1} mark-manifest-terminal!-leaves-marked?-false-when-manifest-absent
   ;; load-manifest returns nil when the file isn't on disk (e.g. the
   ;; archive flow moved it between ticks). Marking must not flip the
   ;; idempotency flag in that case — otherwise the finally's
@@ -135,39 +152,7 @@
         (is (= [:load] (mapv first @calls))
             "load was attempted but no save fired (nothing to update)")))))
 
-(deftest mark-manifest-terminal!-idempotent-via-marked?
-  (with-mocked-manifest
-    (fn [calls]
-      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
-        (reset! calls [])
-        (sut/mark-manifest-terminal! handle :completed)
-        ;; Second call (e.g. the finally block firing :cancelled after
-        ;; the happy path already marked :completed) must be a no-op
-        ;; so we don't overwrite the success status.
-        (sut/mark-manifest-terminal! handle :cancelled)
-        (let [statuses (filter #(= :mark-terminal (first %)) @calls)]
-          (is (= 1 (count statuses))
-              "second mark-manifest-terminal! must not fire after marked? is true")
-          (is (= [:mark-terminal :completed] (first statuses))
-              "the first status sticks"))))))
-
-;------------------------------------------------------------------------------ finish-workflow-manifest!
-
-(deftest finish-workflow-manifest!-no-op-when-handle-nil
-  (with-mocked-manifest
-    (fn [calls]
-      (sut/finish-workflow-manifest! nil)
-      (is (empty? @calls)))))
-
-(deftest finish-workflow-manifest!-stops-heartbeat
-  (with-mocked-manifest
-    (fn [calls]
-      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
-        (reset! calls [])
-        (sut/finish-workflow-manifest! handle)
-        (is (= [[:stop-heartbeat :mock-heartbeat-handle]] @calls))))))
-
-(deftest finish-workflow-manifest!-swallows-throwables
+(deftest ^{:stratum 1} finish-workflow-manifest!-swallows-throwables
   ;; stop-heartbeat! is called from a finally block during shutdown.
   ;; An IO failure there must not mask the actual workflow result.
   (let [calls (atom [])
@@ -185,64 +170,7 @@
         (is (nil? (sut/finish-workflow-manifest! handle))
             "stop-heartbeat! throw must not propagate")))))
 
-;------------------------------------------------------------------------------ archive-workflow-manifest!
-
-(deftest archive-workflow-manifest!-no-op-when-marked?-false
-  ;; If mark-manifest-terminal! never wrote (manifest absent or no
-  ;; event stream), there's nothing to archive — the archive op
-  ;; would error on the missing manifest. Skip in that case.
-  (let [archive-calls (atom [])]
-    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
-                                                           (swap! archive-calls conj args))}]
-      (let [handle {:dir (java.io.File. "/tmp/x") :marked? (atom false)}]
-        (sut/archive-workflow-manifest! handle :wid)
-        (is (empty? @archive-calls)
-            "no archive call when marked? is false")))))
-
-(deftest archive-workflow-manifest!-no-op-when-dir-nil
-  ;; nil dir means dashboard-only run; no manifest to archive.
-  (let [archive-calls (atom [])]
-    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
-                                                           (swap! archive-calls conj args))}]
-      (sut/archive-workflow-manifest! {:dir nil :marked? (atom true)} :wid)
-      (is (empty? @archive-calls)))))
-
-(deftest archive-workflow-manifest!-invokes-archive-workflow!
-  (let [archive-calls (atom [])]
-    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& args]
-                                                           (swap! archive-calls conj args))}]
-      (sut/archive-workflow-manifest!
-       {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
-       :wid)
-      (is (= [[:wid]] @archive-calls)
-          "archive-workflow! called once with the workflow id"))))
-
-(deftest archive-workflow-manifest!-swallows-archive-failures
-  ;; Per the docstring, archive failures must not propagate — the
-  ;; boot-time recovery pass picks up half-finished archives. A
-  ;; failing archive should log to stderr and return nil.
-  (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
-                                                         (throw (RuntimeException. "rename failed")))}]
-    (binding [*err* (java.io.PrintWriter. (java.io.StringWriter.))]
-      (is (nil? (sut/archive-workflow-manifest!
-                 {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
-                 :wid))
-          "archive exception must not propagate"))))
-
-(deftest archive-workflow-manifest!-logs-archive-anomalies
-  (let [archive-anomaly (anomaly/anomaly :invalid-input
-                                         "manifest invalid"
-                                         {:reason :test})]
-    (with-redefs [sut/*manifest-ops* {:archive-workflow! (fn [& _]
-                                                           archive-anomaly)}]
-      (let [err (java.io.StringWriter.)]
-        (binding [*err* err]
-          (is (nil? (sut/archive-workflow-manifest!
-                     {:dir (java.io.File. "/tmp/x") :marked? (atom true)}
-                     :wid)))
-          (is (re-find #"manifest invalid" (str err))))))))
-
-(deftest finish-workflow-manifest!-restores-interrupt-flag
+(deftest ^{:stratum 1} finish-workflow-manifest!-restores-interrupt-flag
   ;; stop-heartbeat! raises InterruptedException via awaitTermination.
   ;; Swallowing it without restoring the thread's interrupt flag
   ;; breaks cooperative cancellation — outer frames lose the signal
@@ -270,3 +198,75 @@
         (is (true? interrupted?)
             "current thread's interrupt flag must be restored
              so cooperative-cancellation callers above us see it")))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;------------------------------------------------------------------------------ start-workflow-manifest!
+(deftest ^{:stratum 2} start-workflow-manifest!-no-op-when-event-stream-is-nil
+  (with-mocked-manifest
+    (fn [calls]
+      (is (nil? (sut/start-workflow-manifest! :wid nil)))
+      (is (empty? @calls)
+          "no manifest writes when there's no event stream
+           (dashboard-only runs don't persist events)"))))
+
+(deftest ^{:stratum 2} start-workflow-manifest!-inits-and-starts-heartbeat
+  (with-mocked-manifest
+    (fn [calls]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)
+            ordered (mapv first @calls)]
+        (is (some? handle))
+        (is (some? (:dir handle)))
+        (is (= :mock-heartbeat-handle (:heartbeat handle)))
+        (is (false? @(:marked? handle))
+            "marked? starts false; flips on first mark-manifest-terminal!")
+        (is (= [:init-active :save :start-heartbeat] ordered)
+            "lifecycle order: build active manifest → save → start heartbeat")))))
+
+;------------------------------------------------------------------------------ mark-manifest-terminal!
+(deftest ^{:stratum 2} mark-manifest-terminal!-no-op-when-handle-nil
+  (with-mocked-manifest
+    (fn [calls]
+      (sut/mark-manifest-terminal! nil :completed)
+      (is (empty? @calls)))))
+
+(deftest ^{:stratum 2} mark-manifest-terminal!-loads-marks-and-saves
+  (with-mocked-manifest
+    (fn [calls]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
+        (reset! calls [])
+        (sut/mark-manifest-terminal! handle :completed)
+        (is (= [:load :mark-terminal :save] (mapv first @calls))
+            "mark-terminal must load → transition → save in order")
+        (is (true? @(:marked? handle)))))))
+
+(deftest ^{:stratum 2} mark-manifest-terminal!-idempotent-via-marked?
+  (with-mocked-manifest
+    (fn [calls]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
+        (reset! calls [])
+        (sut/mark-manifest-terminal! handle :completed)
+        ;; Second call (e.g. the finally block firing :cancelled after
+        ;; the happy path already marked :completed) must be a no-op
+        ;; so we don't overwrite the success status.
+        (sut/mark-manifest-terminal! handle :cancelled)
+        (let [statuses (filter #(= :mark-terminal (first %)) @calls)]
+          (is (= 1 (count statuses))
+              "second mark-manifest-terminal! must not fire after marked? is true")
+          (is (= [:mark-terminal :completed] (first statuses))
+              "the first status sticks"))))))
+
+;------------------------------------------------------------------------------ finish-workflow-manifest!
+(deftest ^{:stratum 2} finish-workflow-manifest!-no-op-when-handle-nil
+  (with-mocked-manifest
+    (fn [calls]
+      (sut/finish-workflow-manifest! nil)
+      (is (empty? @calls)))))
+
+(deftest ^{:stratum 2} finish-workflow-manifest!-stops-heartbeat
+  (with-mocked-manifest
+    (fn [calls]
+      (let [handle (sut/start-workflow-manifest! :wid :fake-es)]
+        (reset! calls [])
+        (sut/finish-workflow-manifest! handle)
+        (is (= [[:stop-heartbeat :mock-heartbeat-handle]] @calls))))))

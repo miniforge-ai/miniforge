@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-pipeline-output.impl
   "Implementation functions for the pipeline output connector."
   (:require [ai.miniforge.connector.interface :as connector]
@@ -26,24 +25,12 @@
   (:import [java.time Instant]
            [java.util UUID]))
 
-;;------------------------------------------------------------------------------ Layer 0
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Handle state
+(def ^{:stratum 0} ^:private handles (atom {}))
 
-(def ^:private handles (atom {}))
-
-(defn- get-handle [handle] (get @handles handle))
-(defn- store-handle! [handle state] (swap! handles assoc handle state))
-(defn- remove-handle! [handle] (swap! handles dissoc handle))
-
-(defn- require-handle!
-  "Retrieve handle state or return an anomaly."
-  [handle]
-  (or (get-handle handle)
-      (response/make-anomaly :anomalies/not-found
-                             (msg/t :output/handle-not-found {:handle handle})
-                             {:handle handle})))
-
-(defn- schema-validation-anomaly
+(defn- ^{:stratum 0} schema-validation-anomaly
   "Return an anomaly for a failed schema validation result."
   [value validation]
   (when-not (:valid? validation)
@@ -52,10 +39,53 @@
                            {:errors (:errors validation)
                             :value  value})))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; Lifecycle
+;; Manifest factory
+(defn- ^{:stratum 0} build-manifest
+  "Build a manifest map."
+  [handle-state schema-name records-file record-count]
+  {:manifest/version       "1.0"
+   :manifest/run-id        (:output/run-id handle-state)
+   :manifest/pipeline-name (:output/pipeline-name handle-state)
+   :manifest/format        (:output/format handle-state)
+   :manifest/record-count  record-count
+   :manifest/schema-name   schema-name
+   :manifest/created-at    (str (Instant/now))
+   :manifest/records-file  records-file})
 
-(defn do-connect
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} get-handle [handle] (get @handles handle))
+
+(defn- ^{:stratum 1} store-handle! [handle state] (swap! handles assoc handle state))
+
+(defn- ^{:stratum 1} remove-handle! [handle] (swap! handles dissoc handle))
+
+;; Write helpers
+(defn- ^{:stratum 1} write-and-validate-manifest!
+  "Build, validate, and write the manifest + JSON Schema, or return an anomaly."
+  [handle-state dir run-id schema-name records-file record-count datasets]
+  (let [manifest (cond-> (build-manifest handle-state schema-name records-file record-count)
+                   (seq datasets) (assoc :manifest/datasets datasets))
+        manifest-contract (dissoc manifest :manifest/datasets)
+        validation (schema/validate schema/Manifest manifest-contract)]
+    (if-let [anomaly (schema-validation-anomaly manifest-contract validation)]
+      anomaly
+      (do
+        (fmt/write-manifest dir run-id manifest)
+        (fmt/write-json-schema dir run-id (schema/manifest-json-schema))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} require-handle!
+  "Retrieve handle state or return an anomaly."
+  [handle]
+  (or (get-handle handle)
+      (response/make-anomaly :anomalies/not-found
+                             (msg/t :output/handle-not-found {:handle handle})
+                             {:handle handle})))
+
+;; Lifecycle
+(defn ^{:stratum 2} do-connect
   "Validate config at boundary and register handle."
   [config]
   (let [config-with-defaults (cond-> config
@@ -71,43 +101,12 @@
                                :output/pipeline-name (:output/pipeline-name config)})
         (connector/connect-result handle)))))
 
-(defn do-close [handle]
+(defn ^{:stratum 2} do-close [handle]
   (remove-handle! handle)
   (connector/close-result))
 
-;; Manifest factory
-
-(defn- build-manifest
-  "Build a manifest map."
-  [handle-state schema-name records-file record-count]
-  {:manifest/version       "1.0"
-   :manifest/run-id        (:output/run-id handle-state)
-   :manifest/pipeline-name (:output/pipeline-name handle-state)
-   :manifest/format        (:output/format handle-state)
-   :manifest/record-count  record-count
-   :manifest/schema-name   schema-name
-   :manifest/created-at    (str (Instant/now))
-   :manifest/records-file  records-file})
-
-;; Write helpers
-
-(defn- write-and-validate-manifest!
-  "Build, validate, and write the manifest + JSON Schema, or return an anomaly."
-  [handle-state dir run-id schema-name records-file record-count datasets]
-  (let [manifest (cond-> (build-manifest handle-state schema-name records-file record-count)
-                   (seq datasets) (assoc :manifest/datasets datasets))
-        manifest-contract (dissoc manifest :manifest/datasets)
-        validation (schema/validate schema/Manifest manifest-contract)]
-    (if-let [anomaly (schema-validation-anomaly manifest-contract validation)]
-      anomaly
-      (do
-        (fmt/write-manifest dir run-id manifest)
-        (fmt/write-json-schema dir run-id (schema/manifest-json-schema))))))
-
-;;------------------------------------------------------------------------------ Layer 2
 ;; Sink operations
-
-(defn- publish-combined!
+(defn- ^{:stratum 2} publish-combined!
   "Write all records as a single file."
   [handle-state records opts]
   (let [{:output/keys [dir format run-id]} handle-state
@@ -118,7 +117,7 @@
       manifest-result
       (connector/publish-result (count records) 0))))
 
-(defn- publish-per-dataset!
+(defn- ^{:stratum 2} publish-per-dataset!
   "Write separate record files per dataset, plus a combined file."
   [handle-state records datasets opts]
   (let [{:output/keys [dir format run-id]} handle-state
@@ -130,7 +129,9 @@
       manifest-result
       (connector/publish-result (count records) 0))))
 
-(defn do-publish
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} do-publish
   "Write records to the pipeline output store.
    When :publish/datasets is present in opts with >1 dataset, writes
    separate files per dataset alongside the combined records file."

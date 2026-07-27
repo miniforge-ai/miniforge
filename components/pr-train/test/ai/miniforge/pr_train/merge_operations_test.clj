@@ -15,18 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-train.merge-operations-test
   "Tests for ready-to-merge, blocking, merge, and fail-merge operations."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.pr-train.interface :as train]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; State management tests
 ;; ============================================================================
-
-(deftest update-pr-status-test
+(deftest ^{:stratum 0} update-pr-status-test
   (testing "update-pr-status transitions PR state"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -51,7 +51,7 @@
       (is (nil? (train/update-pr-status mgr train-id 123 :approved)))
       (is (= :draft (:pr/status (train/get-pr-from-train mgr train-id 123)))))))
 
-(deftest update-pr-ci-status-test
+(deftest ^{:stratum 0} update-pr-ci-status-test
   (testing "update-pr-ci-status updates CI status"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -66,8 +66,7 @@
 ;; ============================================================================
 ;; Ready-to-merge tests
 ;; ============================================================================
-
-(deftest ready-to-merge-test
+(deftest ^{:stratum 0} ready-to-merge-test
   (testing "PR is ready when deps merged, approved, CI passed, gates passed"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -116,8 +115,7 @@
 ;; ============================================================================
 ;; Blocking PR tests
 ;; ============================================================================
-
-(deftest get-blocking-test
+(deftest ^{:stratum 0} get-blocking-test
   (testing "blocking PRs are those that could proceed but aren't ready"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -137,8 +135,7 @@
 ;; ============================================================================
 ;; Merge action tests
 ;; ============================================================================
-
-(deftest merge-next-test
+(deftest ^{:stratum 0} merge-next-test
   (testing "merge-next marks the next ready PR as merging"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -157,7 +154,7 @@
         (is (some? (:train result)))
         (is (= :merging (:pr/status (train/get-pr-from-train mgr train-id 100))))))))
 
-(deftest complete-merge-test
+(deftest ^{:stratum 0} complete-merge-test
   (testing "complete-merge marks PR as merged"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]
@@ -173,7 +170,7 @@
       (train/complete-merge mgr train-id 100)
       (is (= :merged (:pr/status (train/get-pr-from-train mgr train-id 100)))))))
 
-(deftest fail-merge-test
+(deftest ^{:stratum 0} fail-merge-test
   (testing "fail-merge marks PR as failed and creates rollback plan"
     (let [mgr (train/create-manager)
           train-id (train/create-train mgr "Test" (random-uuid) nil)]

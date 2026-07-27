@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -29,7 +28,9 @@
    [ai.miniforge.workflow-resume.interface :as wr]
    [slingshot.slingshot :refer [throw+]]))
 
-(deftest help-cmd-uses-generic-workflow-examples-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} help-cmd-uses-generic-workflow-examples-test
   (testing "CLI help shows generic workflow examples instead of SDLC-specific ones"
     (let [output (with-out-str (sut/help-cmd {}))
           title (messages/t :help/title {:binary (app-config/binary-name)
@@ -39,7 +40,7 @@
         (is (.contains output (app-config/command-string example))))
       (is (not (.contains output "canonical-sdlc-v1"))))))
 
-(deftest help-cmd-reads-copy-from-message-catalog-test
+(deftest ^{:stratum 0} help-cmd-reads-copy-from-message-catalog-test
   (testing "help output is assembled from message resources rather than hardcoded strings"
     (with-redefs [app-config/binary-name (constantly "engine")
                   app-config/description (constantly "desc")
@@ -65,7 +66,7 @@
         (is (.contains output "NOTE:engine"))
         (is (.contains output "TUI:engine-tui"))))))
 
-(deftest create-pr-train-manager-handles-construction-errors-test
+(deftest ^{:stratum 0} create-pr-train-manager-handles-construction-errors-test
   (testing "manager construction failure logs a warning and returns nil"
     (with-redefs [pr-train/create-manager
                   (fn [] (throw (ex-info "train boom" {})))]
@@ -73,7 +74,7 @@
                      (is (nil? (#'sut/create-pr-train-manager))))]
         (is (.contains output "train boom"))))))
 
-(deftest create-pr-train-manager-handles-non-throwable-sling-test
+(deftest ^{:stratum 0} create-pr-train-manager-handles-non-throwable-sling-test
   (testing "slingshot data throws do not break the warning path"
     (with-redefs [pr-train/create-manager
                   (fn [] (throw+ {:type :boom :message "train data boom"}))]
@@ -81,7 +82,7 @@
                      (is (nil? (#'sut/create-pr-train-manager))))]
         (is (.contains output "train data boom"))))))
 
-(deftest create-repo-dag-manager-handles-construction-errors-test
+(deftest ^{:stratum 0} create-repo-dag-manager-handles-construction-errors-test
   (testing "manager construction failure logs a warning and returns nil"
     (with-redefs [repo-dag/create-manager
                   (fn [] (throw (ex-info "dag boom" {})))]
@@ -89,16 +90,14 @@
                      (is (nil? (#'sut/create-repo-dag-manager))))]
         (is (.contains output "dag boom"))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Dispatch table coverage
+(def ^{:stratum 0} ^:private test-running-stale-threshold-ms 300000)
 
-(def ^:private test-running-stale-threshold-ms 300000)
+(def ^{:stratum 0} ^:private test-invalid-running-stale-threshold "invalid-threshold")
 
-(def ^:private test-invalid-running-stale-threshold "invalid-threshold")
+(def ^{:stratum 0} ^:private test-reconstructed-event-count 1)
 
-(def ^:private test-reconstructed-event-count 1)
-
-(deftest dispatch-table-includes-pr-monitor-test
+(deftest ^{:stratum 0} dispatch-table-includes-pr-monitor-test
   (testing "pr monitor command is registered in dispatch table"
     (let [entries (filter #(= ["pr" "monitor"] (:cmds %)) sut/dispatch-table)]
       (is (= 1 (count entries)) "Exactly one pr monitor entry")
@@ -107,7 +106,12 @@
              (:spec (first entries)))
           "Spec includes --author, --poll-interval, and --repo"))))
 
-(deftest workflow-status-summary-marks-quiet-running-checkpoints-stale-test
+;; pr-monitor-cmd helpers
+(def ^{:stratum 0} ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} workflow-status-summary-marks-quiet-running-checkpoints-stale-test
   (testing "running workflows with old last events are surfaced as stale"
     (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
           stale-ts "2026-05-17T00:10:59Z"]
@@ -128,7 +132,7 @@
         (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
-(deftest workflow-status-summary-keeps-recent-running-checkpoints-running-test
+(deftest ^{:stratum 1} workflow-status-summary-keeps-recent-running-checkpoints-running-test
   (testing "running workflows with recent events remain running"
     (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
           recent-ts "2026-05-17T00:12:00Z"]
@@ -149,7 +153,7 @@
         (is (= :running
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
-(deftest workflow-status-summary-falls-back-for-invalid-stale-threshold-test
+(deftest ^{:stratum 1} workflow-status-summary-falls-back-for-invalid-stale-threshold-test
   (testing "invalid stale threshold config falls back to the default threshold"
     (let [now-ms (.toEpochMilli (java.time.Instant/parse "2026-05-17T00:16:00Z"))
           stale-ts "2026-05-17T00:10:59Z"]
@@ -170,12 +174,7 @@
         (is (= :stale
                (:status (#'sut/workflow-status-summary "workflow-id"))))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; pr-monitor-cmd helpers
-
-(def ^:private test-bounds {:min-poll-interval-s 5 :max-poll-interval-s 3600})
-
-(deftest parse-poll-interval-test
+(deftest ^{:stratum 1} parse-poll-interval-test
   (testing "Valid interval returns milliseconds"
     (is (= 30000 (#'cmd-pr-monitor/parse-poll-interval "30" test-bounds))))
   (testing "Nil interval returns nil (domain default applies)"

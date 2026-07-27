@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-review-monitor
   "N13 §2.2 Standards Reviewer auto-trigger.
 
@@ -37,9 +36,10 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.interface :as pr-lifecycle]))
 
-;; ── helpers ──────────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- gh-pr-base-ref
+;; ── helpers ──────────────────────────────────────────────────────────
+(defn- ^{:stratum 0} gh-pr-base-ref
   "Resolve the base-branch ref for `pr-number` via `gh pr view`,
    running in `worktree-path` so {owner}/{repo} resolves from the
    git remote. Returns `\"origin/<base>\"` or nil on failure."
@@ -57,7 +57,22 @@
           (when (seq name) (str "origin/" name)))))
     (catch Throwable _ nil)))
 
-(defn- review-one-pr!
+(defn- ^{:stratum 0} existing-shas-by-pr
+  "For each PR in `prs`, look up the marker-bearing review SHAs.
+   Returns a map keyed by `:pr/number`. PRs whose lookup fails get
+   an empty set (so we treat them as needing review and let the
+   per-PR error path catch any subsequent failure)."
+  [base-repo prs]
+  (reduce
+   (fn [acc {:pr/keys [number]}]
+     (let [r (pr-lifecycle/existing-review-shas base-repo number)]
+       (assoc acc number (if (dag/ok? r) (:data r) #{}))))
+   {}
+   prs))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} review-one-pr!
   "Bracket: ephemeral worktree at PR head SHA → run pr-review with
    --post against that worktree. Per-PR errors don't abort the pass
    — they're surfaced to the operator and we move on."
@@ -88,20 +103,9 @@
                         :code (str (get-in r [:error :code]))
                         :message (or (get-in r [:error :message]) "")})))))))
 
-(defn- existing-shas-by-pr
-  "For each PR in `prs`, look up the marker-bearing review SHAs.
-   Returns a map keyed by `:pr/number`. PRs whose lookup fails get
-   an empty set (so we treat them as needing review and let the
-   per-PR error path catch any subsequent failure)."
-  [base-repo prs]
-  (reduce
-   (fn [acc {:pr/keys [number]}]
-     (let [r (pr-lifecycle/existing-review-shas base-repo number)]
-       (assoc acc number (if (dag/ok? r) (:data r) #{}))))
-   {}
-   prs))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- run-pass!
+(defn- ^{:stratum 2} run-pass!
   "One pass over the in-scope open PR set."
   [base-repo author review-opts]
   (let [r (pr-lifecycle/poll-open-prs base-repo author)]
@@ -126,9 +130,10 @@
           (doseq [pr needs-review]
             (review-one-pr! base-repo pr review-opts)))))))
 
-;; ── command entry ────────────────────────────────────────────────────
+;------------------------------------------------------------------------------ Layer 3
 
-(defn pr-review-monitor-cmd
+;; ── command entry ────────────────────────────────────────────────────
+(defn ^{:stratum 3} pr-review-monitor-cmd
   "CLI entry for `bb miniforge pr review-monitor`.
 
    v0: single-pass when `--once` (the only mode). The persistent

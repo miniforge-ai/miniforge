@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-jira.impl
   "Implementation functions for the Jira Cloud REST API connector.
    Small composable functions organized in a stratified DAG."
@@ -28,24 +27,13 @@
             [ai.miniforge.response.interface :as response])
   (:import [java.util Base64 UUID]))
 
-;;------------------------------------------------------------------------------ Layer 0
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Handle state
-
-(def ^:private handles (connector/create-handle-registry))
-
-(defn- store-handle! [handle state] (connector/store-handle! handles handle state))
-(defn- remove-handle! [handle] (connector/remove-handle! handles handle))
-(defn- touch-handle! [handle] (connector/touch-handle! handles handle))
-
-(defn- require-handle
-  "Retrieve handle state or return an anomaly."
-  [handle]
-  (connector/require-handle handles handle
-                            {:message (msg/t :jira/handle-not-found {:handle handle})}))
+(def ^{:stratum 0} ^:private handles (connector/create-handle-registry))
 
 ;; Auth — Jira Cloud uses Basic auth (email:api-token)
-
-(defn- build-auth-headers
+(defn- ^{:stratum 0} build-auth-headers
   "Build authorization headers for Jira Cloud.
    Basic auth: Base64(email:api-token)."
   [config {:auth/keys [credential-id]}]
@@ -56,14 +44,7 @@
      "Accept"        "application/json"
      "Content-Type"  "application/json"}))
 
-(defn- resolve-auth-headers
-  "Build auth headers from config + auth, defaulting to empty map."
-  [config auth]
-  (if (:auth/credential-id auth)
-    (build-auth-headers config auth)
-    {}))
-
-(defn- validate-auth
+(defn- ^{:stratum 0} validate-auth
   "Validate auth credential reference, returning a localized response anomaly on failure."
   [auth]
   (when-let [auth-anomaly (connector/validate-auth auth)]
@@ -72,7 +53,7 @@
                              (msg/t :jira/auth-invalid {:errors errors})
                              (:anomaly/data auth-anomaly)))))
 
-(defn- handle-anomaly->response
+(defn- ^{:stratum 0} handle-anomaly->response
   "Convert connector handle validation anomalies to the response anomaly shape
    expected by current connector protocol consumers."
   [handle-anomaly]
@@ -80,20 +61,14 @@
                          (:anomaly/message handle-anomaly)
                          (:anomaly/data handle-anomaly)))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; HTTP — Jira uses offset pagination (startAt + maxResults), not Link headers.
-
-(defn- error-response
+(defn- ^{:stratum 0} error-response
   [status resp]
   (http/error-response status resp
     {:rate-limited   (msg/t :jira/rate-limited)
      :request-failed (fn [s e] (msg/t :jira/request-failed {:status s :error e}))}))
 
-(defn- do-request
-  [url headers query-params]
-  (http/do-request url headers query-params error-response))
-
-(defn- require-resource!
+(defn- ^{:stratum 0} require-resource!
   "Look up resource def or throw."
   [schema-name]
   (or (resources/get-resource (keyword schema-name))
@@ -101,13 +76,43 @@
                                (msg/t :jira/resource-unknown {:resource schema-name})
                                {:resource schema-name})))
 
-(defn- timestamp-value
+(defn- ^{:stratum 0} timestamp-value
   [record]
   (or (:updated record)
       (get-in record [:fields :updated])
       (get-in record [:fields :created])))
 
-(defn- fetch-all-pages
+(defn ^{:stratum 0} do-checkpoint [cursor-state]
+  (connector/checkpoint-result cursor-state))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} store-handle! [handle state] (connector/store-handle! handles handle state))
+
+(defn- ^{:stratum 1} remove-handle! [handle] (connector/remove-handle! handles handle))
+
+(defn- ^{:stratum 1} touch-handle! [handle] (connector/touch-handle! handles handle))
+
+(defn- ^{:stratum 1} require-handle
+  "Retrieve handle state or return an anomaly."
+  [handle]
+  (connector/require-handle handles handle
+                            {:message (msg/t :jira/handle-not-found {:handle handle})}))
+
+(defn- ^{:stratum 1} resolve-auth-headers
+  "Build auth headers from config + auth, defaulting to empty map."
+  [config auth]
+  (if (:auth/credential-id auth)
+    (build-auth-headers config auth)
+    {}))
+
+(defn- ^{:stratum 1} do-request
+  [url headers query-params]
+  (http/do-request url headers query-params error-response))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} fetch-all-pages
   "Fetch all pages from a Jira endpoint using offset pagination.
    response-key is the JSON key containing the records array (e.g. :issues, :values)."
   [handle url headers query-params response-key]
@@ -124,10 +129,8 @@
         all-records
         (recur (count all-records) all-records)))))
 
-;;------------------------------------------------------------------------------ Layer 2
 ;; Lifecycle and source operations
-
-(defn do-connect
+(defn ^{:stratum 2} do-connect
   "Validate config at boundary, register handle."
   [config auth]
   (if-not (:jira/site config)
@@ -145,17 +148,19 @@
                                  :last-request-at nil})
           (connector/connect-result handle))))))
 
-(defn do-close [handle]
+(defn ^{:stratum 2} do-close [handle]
   (remove-handle! handle)
   (connector/close-result))
 
-(defn do-discover [handle]
+(defn ^{:stratum 2} do-discover [handle]
   (let [handle-state (require-handle handle)]
     (if (anomaly/anomaly? handle-state)
       (handle-anomaly->response handle-state)
       (connector/discover-result (resources/resource-schemas)))))
 
-(defn do-extract
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} do-extract
   "Extract records from a Jira Cloud API resource.
    Validates records at the API boundary — malformed records from
    the Jira API are filtered out before entering the pipeline."
@@ -174,6 +179,3 @@
             cursor       (when (= :timestamp-watermark (:cursor-type resource-def))
                            (http/max-timestamp-cursor timestamp-value records))]
         (connector/extract-result records cursor false)))))
-
-(defn do-checkpoint [cursor-state]
-  (connector/checkpoint-result cursor-state))

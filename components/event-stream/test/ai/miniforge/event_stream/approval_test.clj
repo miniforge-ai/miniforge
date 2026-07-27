@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.approval-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -23,11 +22,12 @@
    [ai.miniforge.event-stream.approval :as approval]
    [ai.miniforge.response.interface :as response]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Quorum approval tests
 ;; ============================================================================
-
-(deftest quorum-approval-test
+(deftest ^{:stratum 0} quorum-approval-test
   (testing "quorum of 2 from 3 signers"
     (let [action-id (random-uuid)
           req (es/create-approval-request action-id ["alice" "bob" "carol"] 2)]
@@ -56,8 +56,7 @@
 ;; ============================================================================
 ;; Immediate rejection tests
 ;; ============================================================================
-
-(deftest rejection-test
+(deftest ^{:stratum 0} rejection-test
   (testing "any rejection immediately rejects"
     (let [req (es/create-approval-request (random-uuid) ["alice" "bob" "carol"] 3)
           r (es/submit-approval req "alice" :reject {:reason "Too risky"})]
@@ -68,8 +67,7 @@
 ;; ============================================================================
 ;; Expiry tests
 ;; ============================================================================
-
-(deftest expiry-test
+(deftest ^{:stratum 0} expiry-test
   (testing "check-approval-status detects expiry"
     ;; Backdate :approval/expires-at into the past so it is unambiguously
     ;; expired without waiting for wall-clock time to advance.
@@ -87,8 +85,7 @@
 ;; ============================================================================
 ;; Duplicate signer prevention tests
 ;; ============================================================================
-
-(deftest duplicate-signer-test
+(deftest ^{:stratum 0} duplicate-signer-test
   (testing "same signer cannot sign twice"
     (let [req (es/create-approval-request (random-uuid) ["alice" "bob"] 2)
           r1 (es/submit-approval req "alice" :approve)
@@ -100,8 +97,7 @@
 ;; ============================================================================
 ;; Unauthorized signer tests
 ;; ============================================================================
-
-(deftest unauthorized-signer-test
+(deftest ^{:stratum 0} unauthorized-signer-test
   (testing "unauthorized signer is rejected"
     (let [req (es/create-approval-request (random-uuid) ["alice" "bob"] 1)
           r (es/submit-approval req "eve" :approve)]
@@ -111,8 +107,7 @@
 ;; ============================================================================
 ;; Cancel tests
 ;; ============================================================================
-
-(deftest cancel-test
+(deftest ^{:stratum 0} cancel-test
   (testing "pending request can be cancelled"
     (let [req (es/create-approval-request (random-uuid) ["alice"] 1)
           r (es/cancel-approval req "admin" "No longer needed")]
@@ -129,8 +124,7 @@
 ;; ============================================================================
 ;; Approval manager tests
 ;; ============================================================================
-
-(deftest approval-manager-test
+(deftest ^{:stratum 0} approval-manager-test
   (testing "store and retrieve approval"
     (let [mgr (es/create-approval-manager)
           req (es/create-approval-request (random-uuid) ["alice"] 1)]
@@ -159,8 +153,7 @@
 ;; ============================================================================
 ;; Event emission tests
 ;; ============================================================================
-
-(deftest approval-events-test
+(deftest ^{:stratum 0} approval-events-test
   (testing "approval event constructors create correct events"
     (let [stream (es/create-event-stream {:sinks []})
           wf-id (random-uuid)
@@ -192,8 +185,7 @@
 ;; ============================================================================
 ;; Control action integration tests
 ;; ============================================================================
-
-(deftest control-action-with-approval-test
+(deftest ^{:stratum 0} control-action-with-approval-test
   (testing "gate-override requires approval"
     (is (true? (es/requires-approval? :gate-override)))
     (is (true? (es/requires-approval? :budget-escalation))))

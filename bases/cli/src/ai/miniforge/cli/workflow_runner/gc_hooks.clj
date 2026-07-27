@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.gc-hooks
   "Lightweight, pure GC-queue hooks called on workflow lifecycle events.
 
@@ -40,13 +39,14 @@
      (partial enqueue-workflow-gc-best-effort! gc-queue/enqueue-workflow-gc!)
      (partial run-gc-pass-best-effort! worktree/worktree-root gc-queue/run-deferred-gc!)
 
-   Layer 0: enqueue on workflow finish (accepts enqueue-fn)
-   Layer 1: GC pass on workflow start (accepts worktree-root-fn + gc-fn)")
+   Layer 0 — both: `enqueue-workflow-gc-best-effort!` (accepts enqueue-fn)
+   and `run-gc-pass-best-effort!` (accepts worktree-root-fn + gc-fn) are
+   peers; neither calls the other.")
 
-;;------------------------------------------------------------------------------ Layer 0
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Enqueue hook — called at workflow completion (success or failure)
-
-(defn enqueue-workflow-gc-best-effort!
+(defn ^{:stratum 0} enqueue-workflow-gc-best-effort!
   "Append `workflow-id` to the scratch-ref GC queue via `enqueue-fn`.
 
    `enqueue-fn` — a 1-arity function that accepts the workflow-id string and
@@ -60,10 +60,8 @@
     (enqueue-fn workflow-id)
     (catch Exception _ nil)))
 
-;;------------------------------------------------------------------------------ Layer 1
 ;; GC pass hook — called once at each workflow start
-
-(defn run-gc-pass-best-effort!
+(defn ^{:stratum 0} run-gc-pass-best-effort!
   "Run the deferred scratch-ref GC pass using the current git repo root.
 
    `worktree-root-fn` — a 0-arity function that returns the parent git repo

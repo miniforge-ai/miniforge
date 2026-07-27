@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-pipeline-output.interface
   "Public API for the pipeline output connector.
    A generic file-based sink that writes pipeline results in a structured
@@ -27,12 +26,14 @@
             [ai.miniforge.connector-pipeline-output.schema :as schema]
             [ai.miniforge.connector.interface :as conn]))
 
-(defn create-pipeline-output-connector
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} create-pipeline-output-connector
   "Create a new PipelineOutputConnector instance."
   []
   (core/->PipelineOutputConnector))
 
-(def connector-metadata
+(def ^{:stratum 0} connector-metadata
   "Registration metadata for the pipeline output connector."
   {:connector/name         "Pipeline Output Connector"
    :connector/type         :sink
@@ -43,38 +44,35 @@
    :connector/maintainer   "data-foundry"})
 
 ;; -- Public Contract Schemas (Malli) --
-
-(def Manifest
+(def ^{:stratum 0} Manifest
   "Malli schema for pipeline output manifest.
    Consumers use this to validate manifests read from the output store."
   schema/Manifest)
 
-(def OutputConfig
+(def ^{:stratum 0} OutputConfig
   "Malli schema for pipeline output connector config.
    Pipeline packs use this to validate their output stage config."
   schema/OutputConfig)
 
 ;; -- Public Contract Schemas (JSON Schema) --
-
-(defn manifest-json-schema
+(defn ^{:stratum 0} manifest-json-schema
   "Return the Manifest as JSON Schema for non-Clojure consumers."
   []
   (schema/manifest-json-schema))
 
-(defn config-json-schema
+(defn ^{:stratum 0} config-json-schema
   "Return the OutputConfig as JSON Schema for non-Clojure consumers."
   []
   (schema/config-json-schema))
 
 ;; -- Validation --
-
-(defn validate-manifest
+(defn ^{:stratum 0} validate-manifest
   "Validate a manifest map against the Manifest schema.
    Returns {:valid? bool :errors map-or-nil}."
   [manifest]
   (schema/validate-manifest manifest))
 
-(defn validate-config
+(defn ^{:stratum 0} validate-config
   "Validate a config map against the OutputConfig schema.
    Returns {:valid? bool :errors map-or-nil}."
   [config]

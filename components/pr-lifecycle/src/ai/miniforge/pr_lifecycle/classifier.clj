@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.classifier
   "Comment classification for PR reviews.
 
@@ -31,16 +30,16 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schemas + bot detection
 
-(def ClassifiedComment
+;; Schemas + bot detection
+(def ^{:stratum 0} ClassifiedComment
   [:map
    [:category keyword?]
    [:confidence keyword?]
    [:method keyword?]
    [:comment map?]])
 
-(def ClassificationStats
+(def ^{:stratum 0} ClassificationStats
   [:map
    [:total nat-int?]
    [:change-requests nat-int?]
@@ -49,74 +48,33 @@
    [:bot-comments nat-int?]
    [:noise nat-int?]])
 
-(def ClassifiedCommentsBatch
-  [:map
-   [:change-requests [:vector ClassifiedComment]]
-   [:questions [:vector ClassifiedComment]]
-   [:approvals [:vector ClassifiedComment]]
-   [:bot-comments [:vector ClassifiedComment]]
-   [:noise [:vector ClassifiedComment]]
-   [:all [:vector ClassifiedComment]]
-   [:stats ClassificationStats]])
-
-(defn- validate!
+(defn- ^{:stratum 0} validate!
   [result-schema value]
   (schema/validate result-schema value))
 
-(def bot-login-patterns
+(def ^{:stratum 0} bot-login-patterns
   "Login substrings and suffixes for known bots."
   #{"dependabot" "renovate" "codecov" "github-actions"
     "stale" "mergify" "greenkeeper" "snyk-bot"
     "sonarcloud" "codeclimate" "coveralls"
     "hound" "percy" "chromatic" "netlify"})
 
-(defn bot-author?
-  "Check if a comment author is a bot.
-
-   Matches known bot login patterns and the [bot] suffix convention."
-  [author]
-  (when (and author (string? author) (seq author))
-    (let [lower (str/lower-case author)]
-      (or (some #(str/includes? lower %) bot-login-patterns)
-          (str/ends-with? lower "[bot]")
-          (str/ends-with? lower "-bot")
-          (str/ends-with? lower "-app")))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Approval detection
-
-(def approval-phrases
+(def ^{:stratum 0} approval-phrases
   "Phrases that indicate approval."
   #{"lgtm" "looks good to me" "looks good" "approved" "ship it"
     "+1" "looks great" "well done" "nice work" "excellent"
     "no objections" "good to go" "thumbs up"})
 
-(defn approval-comment?
-  "Check if a comment body expresses approval."
-  [body]
-  (when (and body (seq body))
-    (let [lower (str/lower-case (str/trim body))]
-      (boolean (some #(str/includes? lower %) approval-phrases)))))
-
-;------------------------------------------------------------------------------ Layer 0
 ;; Question detection (heuristic)
-
-(def ^:private question-patterns
+(def ^{:stratum 0} ^:private question-patterns
   "Regex patterns that suggest a comment is a question."
   [#"\?"
    #"(?i)^(why|what|how|when|where|could you|can you|would you|should we|is this|are these|do we|does this)"
    #"(?i)\b(curious|wondering|question|clarify|explain|understand|reason for)\b"])
 
-(defn question-comment?
-  "Check if a comment body is a question (heuristic)."
-  [body]
-  (when (and body (seq body))
-    (boolean (some #(re-find % body) question-patterns))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; LLM-based classification
-
-(def classification-prompt-template
+(def ^{:stratum 0} classification-prompt-template
   "Prompt template for LLM-based comment classification.
 
    The generate-fn receives this prompt and returns a single category word."
@@ -134,12 +92,7 @@ Comment:
 Respond with ONLY the category name (change-request, question, approval, or noise).
 Do not include any other text.")
 
-(defn build-classify-prompt
-  "Build the classification prompt for a comment body."
-  [body]
-  (format classification-prompt-template (str/replace (or body "") "\"" "\\\"" )))
-
-(defn parse-llm-classification
+(defn ^{:stratum 0} parse-llm-classification
   "Parse the LLM response into a classification keyword.
 
    Returns nil if the response cannot be parsed."
@@ -153,18 +106,53 @@ Do not include any other text.")
             "noise"          :noise}
            cleaned))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Unified classifier
+(defn- ^{:stratum 0} grouped-comments
+  [classified-comments]
+  (group-by :category classified-comments))
 
-(defn- heuristic-category
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ClassifiedCommentsBatch
+  [:map
+   [:change-requests [:vector ClassifiedComment]]
+   [:questions [:vector ClassifiedComment]]
+   [:approvals [:vector ClassifiedComment]]
+   [:bot-comments [:vector ClassifiedComment]]
+   [:noise [:vector ClassifiedComment]]
+   [:all [:vector ClassifiedComment]]
+   [:stats ClassificationStats]])
+
+(defn ^{:stratum 1} bot-author?
+  "Check if a comment author is a bot.
+
+   Matches known bot login patterns and the [bot] suffix convention."
+  [author]
+  (when (and author (string? author) (seq author))
+    (let [lower (str/lower-case author)]
+      (or (some #(str/includes? lower %) bot-login-patterns)
+          (str/ends-with? lower "[bot]")
+          (str/ends-with? lower "-bot")
+          (str/ends-with? lower "-app")))))
+
+(defn ^{:stratum 1} approval-comment?
+  "Check if a comment body expresses approval."
   [body]
-  (cond
-    (question-comment? body)                                          :question
-    (pos? (triage/score-indicators body triage/actionable-indicators)) :change-request
-    (approval-comment? body)                                          :approval
-    :else                                                             :noise))
+  (when (and body (seq body))
+    (let [lower (str/lower-case (str/trim body))]
+      (boolean (some #(str/includes? lower %) approval-phrases)))))
 
-(defn- build-classification
+(defn ^{:stratum 1} question-comment?
+  "Check if a comment body is a question (heuristic)."
+  [body]
+  (when (and body (seq body))
+    (boolean (some #(re-find % body) question-patterns))))
+
+(defn ^{:stratum 1} build-classify-prompt
+  "Build the classification prompt for a comment body."
+  [body]
+  (format classification-prompt-template (str/replace (or body "") "\"" "\\\"" )))
+
+(defn- ^{:stratum 1} build-classification
   [category confidence method comment]
   (validate!
    ClassifiedComment
@@ -173,25 +161,7 @@ Do not include any other text.")
     :method method
     :comment comment}))
 
-(defn- llm-category
-  [body generate-fn]
-  (let [prompt   (build-classify-prompt body)
-        response (try (generate-fn prompt) (catch Exception _e nil))]
-    (parse-llm-classification response)))
-
-(defn- classify-human-comment
-  [comment body generate-fn]
-  (if generate-fn
-    (if-let [category (llm-category body generate-fn)]
-      (build-classification category :high :llm comment)
-      (build-classification (heuristic-category body) :low :heuristic-fallback comment))
-    (build-classification (heuristic-category body) :medium :heuristic comment)))
-
-(defn- grouped-comments
-  [classified-comments]
-  (group-by :category classified-comments))
-
-(defn- stats-for
+(defn- ^{:stratum 1} stats-for
   [classified-comments grouped]
   (validate!
    ClassificationStats
@@ -202,7 +172,36 @@ Do not include any other text.")
     :bot-comments    (count (get grouped :bot-comment))
     :noise           (count (get grouped :noise))}))
 
-(defn classify-comment
+;------------------------------------------------------------------------------ Layer 2
+
+;; Unified classifier
+(defn- ^{:stratum 2} heuristic-category
+  [body]
+  (cond
+    (question-comment? body)                                          :question
+    (pos? (triage/score-indicators body triage/actionable-indicators)) :change-request
+    (approval-comment? body)                                          :approval
+    :else                                                             :noise))
+
+(defn- ^{:stratum 2} llm-category
+  [body generate-fn]
+  (let [prompt   (build-classify-prompt body)
+        response (try (generate-fn prompt) (catch Exception _e nil))]
+    (parse-llm-classification response)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} classify-human-comment
+  [comment body generate-fn]
+  (if generate-fn
+    (if-let [category (llm-category body generate-fn)]
+      (build-classification category :high :llm comment)
+      (build-classification (heuristic-category body) :low :heuristic-fallback comment))
+    (build-classification (heuristic-category body) :medium :heuristic comment)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} classify-comment
   "Classify a single comment into a category.
 
    Arguments:
@@ -241,7 +240,9 @@ Do not include any other text.")
       :else
       (classify-human-comment comment body generate-fn))))
 
-(defn classify-comments
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} classify-comments
   "Classify a batch of comments.
 
    Arguments:

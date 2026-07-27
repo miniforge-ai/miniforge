@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tool.core
   "Tool protocol and registry implementation.
    Layer 0: Pure functions for tool definitions and validation
@@ -30,9 +29,9 @@
    [ai.miniforge.tool.tracking :as tracking]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Tool schema and validation
 
-(def tool-schema
+;; Tool schema and validation
+(def ^{:stratum 0} tool-schema
   "Schema for tool definitions (Phase 0 - minimal implementation).
 
    Phase 0 provides core tool protocol for agent use.
@@ -54,15 +53,15 @@
    :tool/description :string
    :tool/parameters  :map       ; parameter spec {:param {:type :string :required true}}
    :tool/handler     :fn        ; (fn [params context] -> result)
-   :tool/metadata    :map})     ; optional metadata (can include future MCP fields)
+   :tool/metadata    :map})  ; optional metadata (can include future MCP fields)
 
-(defn valid-tool-id?
+(defn ^{:stratum 0} valid-tool-id?
   "Check if tool ID is valid (namespaced keyword)."
   [id]
   (and (keyword? id)
        (namespace id)))
 
-(defn validate-params
+(defn ^{:stratum 0} validate-params
   "Validate parameters against a parameter spec.
    Returns {:valid? true} or {:valid? false :errors [...]}."
   [param-spec params]
@@ -74,7 +73,7 @@
       {:valid? false
        :errors (mapv #(messages/t :tool/missing-parameter {:param (name %)}) missing)})))
 
-(defn build-tool-definition
+(defn ^{:stratum 0} build-tool-definition
   "Build a tool definition map from parts."
   [{:keys [id name description parameters handler metadata]
     :or {parameters {} metadata {}}}]
@@ -85,20 +84,18 @@
    :tool/handler handler
    :tool/metadata metadata})
 
-(defn tool-summary
+(defn ^{:stratum 0} tool-summary
   "Create a brief summary of a tool for display."
   [tool]
   (messages/t :tool/summary {:name (:tool/name tool) :description (:tool/description tool)}))
 
-(defn- searchable-text
+(defn- ^{:stratum 0} searchable-text
   "Return string metadata as searchable text; ignore absent or malformed values."
   [value]
   (if (string? value) value ""))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Tool protocol and registry
-
-(defprotocol Tool
+(defprotocol ^{:stratum 0} Tool
   "Protocol for executable tools."
   (tool-id [this] "Return the tool's identifier.")
   (tool-info [this] "Return tool metadata and description.")
@@ -106,7 +103,7 @@
   (validate-args [this args] "Validate arguments against tool schema. Returns {:valid? bool :errors [...]}")
   (get-schema [this] "Return tool parameter schema."))
 
-(defprotocol ToolRegistry
+(defprotocol ^{:stratum 0} ToolRegistry
   "Protocol for tool registration and lookup."
   (register-tool [this tool] "Register a tool in the registry.")
   (unregister-tool [this tool-id] "Remove a tool from the registry.")
@@ -114,7 +111,7 @@
   (list-tools [this] "List all registered tools.")
   (find-tools [this query] "Find tools matching query."))
 
-(defn emit-tool-event!
+(defn ^{:stratum 0} emit-tool-event!
   "Emit a tool lifecycle event when the context carries an event stream."
   [context tool-id event-type & [extra]]
   (try
@@ -127,7 +124,21 @@
         (events/publish! stream (constructor stream wf-id agent-id tool-id extra))))
     (catch Exception _ nil)))
 
-(defrecord FunctionTool [id name description parameters handler metadata]
+(defn ^{:stratum 0} execute-tool
+  "Execute a tool from a registry by ID.
+   Returns execution result or error if tool not found."
+  [registry tool-id params context]
+  (if-let [tool (get-tool registry tool-id)]
+    (execute tool params context)
+    (let [not-found-msg (messages/t :tool/not-found {:tool-id tool-id})]
+      {:success false
+       :error {:type :not-found
+               :message not-found-msg}
+       :anomaly (anomaly/anomaly :not-found not-found-msg {})})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defrecord ^{:stratum 1} FunctionTool [id name description parameters handler metadata]
   Tool
   (tool-id [_this] id)
   (tool-info [_this]
@@ -171,7 +182,7 @@
   (get-schema [_this]
     parameters))
 
-(defrecord AtomRegistry [tools-atom logger]
+(defrecord ^{:stratum 1} AtomRegistry [tools-atom logger]
   ToolRegistry
   (register-tool [_this tool]
     (let [id (tool-id tool)]
@@ -203,7 +214,9 @@
                        (or (str/includes? (str/lower-case (searchable-text (:name info))) q)
                            (str/includes? (str/lower-case (searchable-text (:description info))) q)))))))))
 
-(defn create-function-tool
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-function-tool
   "Create a function-based tool.
 
    Options:
@@ -229,7 +242,7 @@
                     handler
                     metadata)))
 
-(defn create-registry
+(defn ^{:stratum 2} create-registry
   "Create a new tool registry.
 
    Options:
@@ -237,18 +250,6 @@
   ([] (create-registry {}))
   ([{:keys [logger]}]
    (->AtomRegistry (atom {}) logger)))
-
-(defn execute-tool
-  "Execute a tool from a registry by ID.
-   Returns execution result or error if tool not found."
-  [registry tool-id params context]
-  (if-let [tool (get-tool registry tool-id)]
-    (execute tool params context)
-    (let [not-found-msg (messages/t :tool/not-found {:tool-id tool-id})]
-      {:success false
-       :error {:type :not-found
-               :message not-found-msg}
-       :anomaly (anomaly/anomaly :not-found not-found-msg {})})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

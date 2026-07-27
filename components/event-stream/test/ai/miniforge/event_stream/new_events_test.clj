@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.new-events-test
   "Tests for GROUP 1+2 foundation event constructors:
      :agent/tool-call-started, :tool/call-completed, :workflow/phase-heartbeat.
@@ -32,25 +31,37 @@
    [ai.miniforge.event-stream.messages :as messages]
    [ai.miniforge.event-stream.schema :as schema]))
 
-(defn- stream [] (es/create-event-stream {:sinks []}))
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private sample-args-digest
+(defn- ^{:stratum 0} stream [] (es/create-event-stream {:sinks []}))
+
+(def ^{:stratum 0} ^:private sample-args-digest
   (es/digest-content {:file "/tmp/input.clj"}))
 
-(def ^:private sample-result-digest
+(def ^{:stratum 0} ^:private sample-result-digest
   (es/digest-content {:outcome :ok}))
 
-(def ^:private short-tool-duration-ms 42)
-(def ^:private failure-tool-duration-ms 10)
-(def ^:private sample-error-code 404)
-(def ^:private heartbeat-gap-ms 3000)
-(def ^:private heartbeat-events-emitted 17)
-(def ^:private stale-heartbeat-gap-ms 5000)
-(def ^:private heartbeat-event-count 42)
-(def ^:private zero-heartbeat-gap-ms 0)
-(def ^:private zero-heartbeat-event-count 0)
+(def ^{:stratum 0} ^:private short-tool-duration-ms 42)
 
-(deftest operator-scoped-pr-created-allows-nil-workflow
+(def ^{:stratum 0} ^:private failure-tool-duration-ms 10)
+
+(def ^{:stratum 0} ^:private sample-error-code 404)
+
+(def ^{:stratum 0} ^:private heartbeat-gap-ms 3000)
+
+(def ^{:stratum 0} ^:private heartbeat-events-emitted 17)
+
+(def ^{:stratum 0} ^:private stale-heartbeat-gap-ms 5000)
+
+(def ^{:stratum 0} ^:private heartbeat-event-count 42)
+
+(def ^{:stratum 0} ^:private zero-heartbeat-gap-ms 0)
+
+(def ^{:stratum 0} ^:private zero-heartbeat-event-count 0)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} operator-scoped-pr-created-allows-nil-workflow
   (let [event (assoc (es/create-envelope (stream) :pr/created nil "PR joined train")
                      :pr/repo "acme/repo"
                      :pr/number 7
@@ -60,8 +71,7 @@
     (is (m/validate schema/PRCreated event))))
 
 ;------------------------------------------------------------------------------ :agent/tool-call-started
-
-(deftest agent-tool-call-started-event-type
+(deftest ^{:stratum 1} agent-tool-call-started-event-type
   (testing "emits :agent/tool-call-started event type"
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :implementer
@@ -70,7 +80,7 @@
       (is (= :agent/tool-call-started (:event/type ev)))
       (is (m/validate schema/AgentToolCallStarted ev)))))
 
-(deftest agent-tool-call-started-required-fields
+(deftest ^{:stratum 1} agent-tool-call-started-required-fields
   (testing "carries tool name, call-id, and agent-id"
     (let [wf-id (random-uuid)
           ev    (es/agent-tool-call-started
@@ -83,7 +93,7 @@
       (is (= "tc_002" (:tool/call-id ev)))
       (is (map? (:tool/args-digest ev))))))
 
-(deftest agent-tool-call-started-optional-fields-absent-when-nil
+(deftest ^{:stratum 1} agent-tool-call-started-optional-fields-absent-when-nil
   (testing "optional keys are absent when not supplied"
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :reviewer {})]
@@ -93,7 +103,7 @@
       (is (not (contains? ev :tool/call-id)))
       (is (not (contains? ev :tool/args-digest))))))
 
-(deftest agent-tool-call-started-carries-batched-tool-names
+(deftest ^{:stratum 1} agent-tool-call-started-carries-batched-tool-names
   (testing "multi-tool provider blocks retain the vector of tool names"
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :implementer
@@ -101,7 +111,7 @@
       (is (= ["Read" "Write"] (:tool/names ev)))
       (is (m/validate schema/AgentToolCallStarted ev)))))
 
-(deftest agent-tool-call-started-envelope-fields
+(deftest ^{:stratum 1} agent-tool-call-started-envelope-fields
   (testing "envelope fields are present and typed correctly"
     (let [ev (es/agent-tool-call-started
               (stream) (random-uuid) :tester
@@ -113,8 +123,7 @@
       (is (int? (:event/sequence-number ev))))))
 
 ;------------------------------------------------------------------------------ :tool/call-completed
-
-(deftest tool-call-completed-event-type
+(deftest ^{:stratum 1} tool-call-completed-event-type
   (testing "emits :tool/call-completed event type"
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
@@ -124,7 +133,7 @@
       (is (= :tool/call-completed (:event/type ev)))
       (is (m/validate schema/ToolCallCompleted ev)))))
 
-(deftest tool-call-completed-success-fields
+(deftest ^{:stratum 1} tool-call-completed-success-fields
   (testing "success path carries all expected keys"
     (let [wf-id (random-uuid)
           ev    (es/tool-call-completed
@@ -138,7 +147,7 @@
       (is (= short-tool-duration-ms (:tool/duration-ms ev)))
       (is (map? (:tool/result-digest ev))))))
 
-(deftest tool-call-completed-failure-carries-error
+(deftest ^{:stratum 1} tool-call-completed-failure-carries-error
   (testing "failure path carries :tool/error map"
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
@@ -149,7 +158,7 @@
       (is (false? (:tool/success? ev)))
       (is (= {:message "file not found" :code sample-error-code} (:tool/error ev))))))
 
-(deftest tool-call-completed-no-error-on-success
+(deftest ^{:stratum 1} tool-call-completed-no-error-on-success
   (testing "error key absent when not supplied"
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
@@ -158,7 +167,7 @@
                :tool/duration-ms failure-tool-duration-ms})]
       (is (not (contains? ev :tool/error))))))
 
-(deftest tool-call-completed-unknown-outcome-message
+(deftest ^{:stratum 1} tool-call-completed-unknown-outcome-message
   (testing "omitted success flag produces neutral completion message"
     (let [ev (es/tool-call-completed
               (stream) (random-uuid)
@@ -169,8 +178,7 @@
       (is (m/validate schema/ToolCallCompleted ev)))))
 
 ;------------------------------------------------------------------------------ :workflow/phase-heartbeat
-
-(deftest phase-heartbeat-event-type
+(deftest ^{:stratum 1} phase-heartbeat-event-type
   (testing "emits :workflow/phase-heartbeat event type"
     (let [now (java.util.Date.)
           ev  (es/phase-heartbeat
@@ -182,7 +190,7 @@
       (is (= :workflow/phase-heartbeat (:event/type ev)))
       (is (m/validate schema/PhaseHeartbeat ev)))))
 
-(deftest phase-heartbeat-required-fields
+(deftest ^{:stratum 1} phase-heartbeat-required-fields
   (testing "carries phase timing and event-count fields"
     (let [active-since (java.util.Date.)
           last-event   (java.util.Date.)
@@ -200,7 +208,7 @@
       (is (= last-event (:phase/last-event-at ev)))
       (is (= stale-heartbeat-gap-ms (:phase/gap-since-last-event-ms ev))))))
 
-(deftest phase-heartbeat-zero-gap-is-valid
+(deftest ^{:stratum 1} phase-heartbeat-zero-gap-is-valid
   (testing "gap of 0ms is a valid value (not treated as falsy)"
     (let [now (java.util.Date.)
           ev  (es/phase-heartbeat
@@ -213,8 +221,7 @@
       (is (= zero-heartbeat-event-count (:phase/events-emitted ev))))))
 
 ;------------------------------------------------------------------------------ backward compatibility
-
-(deftest legacy-agent-tool-call-unaffected
+(deftest ^{:stratum 1} legacy-agent-tool-call-unaffected
   (testing "legacy :agent/tool-call constructor still works and has the old event type"
     (let [ev (es/agent-tool-call (stream) (random-uuid) :implementer
                                  {:tool-name "Read" :tool-call-id "old_001"})]
@@ -222,7 +229,7 @@
       (is (= "Read" (:tool/name ev)))
       (is (= "old_001" (:tool/call-id ev))))))
 
-(deftest new-events-have-distinct-types-from-legacy
+(deftest ^{:stratum 1} new-events-have-distinct-types-from-legacy
   (testing "new event types do not collide with legacy :agent/tool-call"
     (let [s     (stream)
           wf-id (random-uuid)

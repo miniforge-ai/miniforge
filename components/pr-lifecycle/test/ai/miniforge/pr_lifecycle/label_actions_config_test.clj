@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.label-actions-config-test
   "Structural validity tests for the M1 PR-label-actions registry EDN.
 
@@ -26,16 +25,22 @@
             [clojure.set :as set]
             [clojure.test :refer [deftest is testing]]))
 
-(def ^:private config-path
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private config-path
   "config/pr-lifecycle/label-actions.edn")
 
-(defn- load-registry []
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} load-registry []
   (-> (io/resource config-path)
       slurp
       edn/read-string
       :pr-label-actions/registry))
 
-(deftest registry-resource-loads
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} registry-resource-loads
   (testing "the registry resource exists on the classpath and parses as EDN"
     (let [r (io/resource config-path)]
       (is (some? r)
@@ -43,7 +48,7 @@
     (let [registry (load-registry)]
       (is (map? registry) "Registry must be a map keyed by label string"))))
 
-(deftest registry-keys-are-strings
+(deftest ^{:stratum 2} registry-keys-are-strings
   (testing "label keys are STRINGS (GitHub-native), never keywords or symbols"
     (let [registry (load-registry)]
       (doseq [[k _] registry]
@@ -51,7 +56,7 @@
             (str "Label registry key " (pr-str k)
                  " must be a string — GitHub labels are not keywords"))))))
 
-(deftest dogfood-fix-entry-shape
+(deftest ^{:stratum 2} dogfood-fix-entry-shape
   (testing "the seed dogfood-fix entry has the canonical M1 shape"
     (let [entry (get (load-registry) "dogfood-fix")]
       (is (some? entry) "dogfood-fix entry must be present in the registry")
@@ -66,7 +71,7 @@
         (is (= true (:workflow.base-sha/not-ancestor-of-merge applies))
             ":applies-when must declare the not-ancestor-of-merge predicate")))))
 
-(deftest every-entry-has-required-keys
+(deftest ^{:stratum 2} every-entry-has-required-keys
   (testing "every registry entry declares :action, :description, :on-conflict, :applies-when"
     (let [registry (load-registry)
           required #{:action :description :on-conflict :applies-when}]

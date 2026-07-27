@@ -15,25 +15,28 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.observer.alert-subscriber-test
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.observer.alert-subscriber :as sut]
    [clojure.test :refer [deftest is]]))
 
-(defn- heartbeat [wf-id gap]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} heartbeat [wf-id gap]
   {:event/type :workflow/phase-heartbeat
    :workflow/id wf-id
    :phase/gap-since-last-event-ms gap
    :event/timestamp #inst "2026-05-21T00:00:01Z"})
 
-(def phase-rule
+(def ^{:stratum 0} phase-rule
   {:alert/id :phase-gap
    :alert/type :phase-gap
    :alert/threshold {:threshold-ms 10}})
 
-(deftest subscriber-publishes-alert-event
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} subscriber-publishes-alert-event
   (let [stream (es/create-event-stream {:sinks []})
         wf-id (random-uuid)
         handle (sut/start-alert-subscriber! stream wf-id [phase-rule])]
@@ -51,7 +54,7 @@
     (is (= 1 (count (filter #(= :observer/alert-fired (:event/type %))
                             (es/get-events stream)))))))
 
-(deftest no-op-when-rules-empty
+(deftest ^{:stratum 1} no-op-when-rules-empty
   (let [stream (es/create-event-stream {:sinks []})
         handle (sut/start-alert-subscriber! stream "wf" [])]
     (is (:noop? handle))
@@ -59,7 +62,7 @@
     (is (= 1 (count (es/get-events stream))))
     (is (nil? (sut/stop-alert-subscriber! stream nil)))))
 
-(deftest rules-from-config-reads-observability-alerts
+(deftest ^{:stratum 1} rules-from-config-reads-observability-alerts
   (is (= [phase-rule]
          (sut/rules-from-config {:observability {:alerts [phase-rule]}})))
   (is (= [] (sut/rules-from-config {}))))

@@ -99,7 +99,7 @@
 
 (def ^{:stratum 0} propagate-failures dag-finalize/propagate-failures)
 
-;--- Layer 1: Synchronous DAG Execution
+;--- Layer 0: Synchronous DAG Execution
 (defn ^{:stratum 0} compute-ready-tasks [tasks-map completed-ids failed-ids]
   (->> tasks-map
        (filter (fn [[task-id task]]
@@ -198,7 +198,7 @@
                  {:branch    branch
                   :pr-branch (get-in result [:data :pr-info :branch])}))))))
 
-;--- Layer 2: Workflow Integration
+;--- Layer 0: Workflow Integration
 (defn ^{:stratum 0} warn-potential-monolith
   "Log a warning when a plan may be under-decomposed — single task but
    multiple components or many files."

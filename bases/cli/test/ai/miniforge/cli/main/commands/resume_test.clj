@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.resume-test
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -33,7 +32,9 @@
    [ai.miniforge.workflow-resume.interface :as wr]
    [slingshot.slingshot :refer [try+]]))
 
-(deftest resolve-resume-workflow-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} resolve-resume-workflow-test
   (testing "recorded workflow spec wins over configured fallback"
     (with-redefs [selection-config/resolve-selection-profile
                   (fn [_profile]
@@ -61,7 +62,7 @@
            #"Could not resolve a workflow type for resume"
            (sut/resolve-resume-workflow {}))))))
 
-(deftest throw-resume-anomaly-preserves-canonical-metadata-test
+(deftest ^{:stratum 0} throw-resume-anomaly-preserves-canonical-metadata-test
   (testing "CLI escalation keeps the original return-value anomaly fields"
     (let [source (anomaly/anomaly :invalid-input
                                   "Invalid resume request"
@@ -74,10 +75,8 @@
       (is (= (:anomaly/at source) (:anomaly/at thrown)))
       (is (= "bad" (:workflow-id thrown))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; read-event-file — bug fix coverage
-
-(defn- with-temp-events-dir [body-fn]
+(defn- ^{:stratum 0} with-temp-events-dir [body-fn]
   (let [base (doto (io/file (System/getProperty "java.io.tmpdir")
                             (str "mf-resume-test-" (random-uuid)))
                .mkdirs)]
@@ -87,44 +86,10 @@
         (doseq [^java.io.File f (reverse (file-seq base))]
           (.delete f))))))
 
-(defn- write-event! [^java.io.File dir filename event-map]
+(defn- ^{:stratum 0} write-event! [^java.io.File dir filename event-map]
   (spit (io/file dir filename) (json/generate-string event-map)))
 
-(deftest read-event-file-reads-per-event-json-from-workflow-dir-test
-  ;; Regression guard for the iter-20 resume bug. Before this fix,
-  ;; read-event-file looked for a single {workflow-id}.edn file that
-  ;; was never written (the sink writes one .json per event to a dir),
-  ;; so `mf run --resume <id>` always threw :anomalies/not-found.
-  (with-temp-events-dir
-    (fn [base-dir]
-      (let [wf-id (str (random-uuid))
-            wf-dir (doto (io/file base-dir wf-id) .mkdirs)]
-        (write-event! wf-dir "20260420T000001Z-a.json"
-                      {"~:event/type" "~:workflow/started"
-                       "~:workflow/id" (str "~u" wf-id)})
-        (write-event! wf-dir "20260420T000002Z-b.json"
-                      {"~:event/type" "~:workflow/phase-completed"
-                       "~:workflow/phase" "~:plan"
-                       "~:phase/outcome" "~:success"})
-        (testing "reads events in timestamp order with transit prefixes stripped"
-          (with-redefs [sut/events-dir (.getPath base-dir)]
-            (let [events (sut/read-event-file wf-id)]
-              (is (= 2 (count events)))
-              (is (= :workflow/started (:event/type (first events))))
-              (is (= :workflow/phase-completed (:event/type (second events))))
-              (is (= :plan (:workflow/phase (second events))))
-              (is (= :success (:phase/outcome (second events)))))))))))
-
-(deftest read-event-file-missing-workflow-returns-nil-test
-  ;; The CLI wrapper now returns nil for missing workflows; the
-  ;; user-facing :anomalies/not-found comes from the workflow-resume
-  ;; component's `reconstruct-context` when callers use that path.
-  (with-temp-events-dir
-    (fn [base-dir]
-      (with-redefs [sut/events-dir (.getPath base-dir)]
-        (is (nil? (sut/read-event-file (str (random-uuid)))))))))
-
-(deftest resume-workflow-passes-dag-recovery-data-test
+(deftest ^{:stratum 0} resume-workflow-passes-dag-recovery-data-test
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)
         run-pipeline-workflow (atom nil)
@@ -173,7 +138,7 @@
                 :bundle-path "/tmp/task-a.bundle"}
                (:resume-workspace @run-pipeline-opts)))))))
 
-(deftest terminal-status-predicate-test
+(deftest ^{:stratum 0} terminal-status-predicate-test
   (testing "explicit terminal statuses are accepted"
     (doseq [s [:completed :completed-with-warnings :failed :aborted :cancelled]]
       (is (sut/terminal-status? s) (str s " must be terminal"))))
@@ -181,7 +146,7 @@
     (doseq [s [:running :pending :paused nil :unknown :draining]]
       (is (not (sut/terminal-status? s)) (str s " must NOT be terminal")))))
 
-(deftest resume-workflow-non-terminal-status-throws-test
+(deftest ^{:stratum 0} resume-workflow-non-terminal-status-throws-test
   ;; Regression for the silent fast-fail blocker from the 2026-05-16
   ;; event-log-tool-visibility dogfood. Resume used to print
   ;; "Resumed workflow completed with status: :running" and exit 0,
@@ -214,7 +179,7 @@
            (sut/resume-workflow workflow-id {:quiet true}))
           "Resume must throw, not silently return, when run-pipeline returns :running"))))
 
-(deftest resume-print-phase-prefers-fsm-snapshot-test
+(deftest ^{:stratum 0} resume-print-phase-prefers-fsm-snapshot-test
   (testing "machine snapshot's :execution/current-phase wins over pipeline head"
     (is (= "verify"
            (#'sut/resume-print-phase
@@ -229,7 +194,7 @@
   (testing "both empty → nil"
     (is (nil? (#'sut/resume-print-phase nil [])))))
 
-(deftest resume-workflow-trims-failed-checkpoint-before-running-test
+(deftest ^{:stratum 0} resume-workflow-trims-failed-checkpoint-before-running-test
   (let [workflow-id (random-uuid)
         run-pipeline-opts (atom nil)
         run-pipeline-workflow (atom nil)
@@ -275,3 +240,39 @@
         (is (true? (:resume-reset-terminal? @run-pipeline-opts)))
         (is (= workflow-id
                (get-in @run-pipeline-opts [:resume-machine-snapshot :execution/id])))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} read-event-file-reads-per-event-json-from-workflow-dir-test
+  ;; Regression guard for the iter-20 resume bug. Before this fix,
+  ;; read-event-file looked for a single {workflow-id}.edn file that
+  ;; was never written (the sink writes one .json per event to a dir),
+  ;; so `mf run --resume <id>` always threw :anomalies/not-found.
+  (with-temp-events-dir
+    (fn [base-dir]
+      (let [wf-id (str (random-uuid))
+            wf-dir (doto (io/file base-dir wf-id) .mkdirs)]
+        (write-event! wf-dir "20260420T000001Z-a.json"
+                      {"~:event/type" "~:workflow/started"
+                       "~:workflow/id" (str "~u" wf-id)})
+        (write-event! wf-dir "20260420T000002Z-b.json"
+                      {"~:event/type" "~:workflow/phase-completed"
+                       "~:workflow/phase" "~:plan"
+                       "~:phase/outcome" "~:success"})
+        (testing "reads events in timestamp order with transit prefixes stripped"
+          (with-redefs [sut/events-dir (.getPath base-dir)]
+            (let [events (sut/read-event-file wf-id)]
+              (is (= 2 (count events)))
+              (is (= :workflow/started (:event/type (first events))))
+              (is (= :workflow/phase-completed (:event/type (second events))))
+              (is (= :plan (:workflow/phase (second events))))
+              (is (= :success (:phase/outcome (second events)))))))))))
+
+(deftest ^{:stratum 1} read-event-file-missing-workflow-returns-nil-test
+  ;; The CLI wrapper now returns nil for missing workflows; the
+  ;; user-facing :anomalies/not-found comes from the workflow-resume
+  ;; component's `reconstruct-context` when callers use that path.
+  (with-temp-events-dir
+    (fn [base-dir]
+      (with-redefs [sut/events-dir (.getPath base-dir)]
+        (is (nil? (sut/read-event-file (str (random-uuid)))))))))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-pipeline-output.schema
   "Malli schemas, validation, and JSON Schema export for the pipeline
    output contract. These schemas define the public API that downstream
@@ -24,19 +23,29 @@
             [malli.error :as me]
             [malli.json-schema :as json-schema]))
 
-;; -------------------------------------------------------------------------- Layer 0
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Enums
+(def ^{:stratum 0} supported-formats #{:edn :json})
 
-(def supported-formats #{:edn :json})
-
-(def OutputFormat
+(def ^{:stratum 0} OutputFormat
   "Supported record output formats."
   [:enum :edn :json])
 
-;; -------------------------------------------------------------------------- Layer 1
-;; Schemas
+;; Validation
+(defn ^{:stratum 0} validate
+  "Validate value against schema.
+   Returns {:valid? bool :errors map-or-nil}."
+  [schema value]
+  (if (m/validate schema value)
+    {:valid? true :errors nil}
+    {:valid? false
+     :errors (me/humanize (m/explain schema value))}))
 
-(def OutputConfig
+;------------------------------------------------------------------------------ Layer 1
+
+;; Schemas
+(def ^{:stratum 1} OutputConfig
   "Config schema for pipeline output connector.
    :output/dir is required; all others have defaults."
   [:map
@@ -45,7 +54,7 @@
    [:output/run-id {:optional true} [:string {:min 1}]]
    [:output/pipeline-name {:optional true} [:string {:min 1}]]])
 
-(def Manifest
+(def ^{:stratum 1} Manifest
   "Schema for the pipeline output manifest file.
    This is the public contract — consumers read the manifest to discover
    what was produced and where."
@@ -59,38 +68,26 @@
    [:manifest/created-at [:string {:min 1}]]
    [:manifest/records-file [:string {:min 1}]]])
 
-;; -------------------------------------------------------------------------- Layer 2
-;; Validation
+;------------------------------------------------------------------------------ Layer 2
 
-(defn validate
-  "Validate value against schema.
-   Returns {:valid? bool :errors map-or-nil}."
-  [schema value]
-  (if (m/validate schema value)
-    {:valid? true :errors nil}
-    {:valid? false
-     :errors (me/humanize (m/explain schema value))}))
-
-(defn validate-config
+(defn ^{:stratum 2} validate-config
   "Validate a pipeline output config map."
   [value]
   (validate OutputConfig value))
 
-(defn validate-manifest
+(defn ^{:stratum 2} validate-manifest
   "Validate a pipeline output manifest map."
   [value]
   (validate Manifest value))
 
-;; -------------------------------------------------------------------------- Layer 3
 ;; JSON Schema export (for non-Clojure consumers)
-
-(defn manifest-json-schema
+(defn ^{:stratum 2} manifest-json-schema
   "Return the Manifest schema as JSON Schema (for external consumers).
    Write this to the output directory so non-Clojure clients can validate."
   []
   (json-schema/transform Manifest))
 
-(defn config-json-schema
+(defn ^{:stratum 2} config-json-schema
   "Return the OutputConfig schema as JSON Schema."
   []
   (json-schema/transform OutputConfig))

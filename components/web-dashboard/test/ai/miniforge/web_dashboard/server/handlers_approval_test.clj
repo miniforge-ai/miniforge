@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.handlers-approval-test
   "Tests for the multi-party approval API handlers (N8).
 
@@ -31,19 +30,20 @@
    [cheshire.core :as json]
    [ai.miniforge.web-dashboard.server.handlers :as sut]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn fresh-state
+;------------------------------------------------------------------------------ Helpers
+(defn ^{:stratum 0} fresh-state
   "Create a fresh atom state for handler tests."
   []
   (atom {}))
 
-(defn parse-body
+(defn ^{:stratum 0} parse-body
   "Parse a JSON response body into a Clojure map."
   [response]
   (json/parse-string (:body response) true))
 
-(defn create-approval-body
+(defn ^{:stratum 0} create-approval-body
   "Build a JSON body string for POST /api/approvals."
   [action-id signers quorum & [extra]]
   (json/generate-string
@@ -52,16 +52,17 @@
            :quorum quorum}
           extra)))
 
-(defn sign-body
+(defn ^{:stratum 0} sign-body
   "Build a JSON body string for POST /api/approvals/:id/sign."
   [signer decision & [reason]]
   (json/generate-string
    (cond-> {:signer signer :decision (name decision)}
      reason (assoc :reason reason))))
 
-;------------------------------------------------------------------------------ Tests
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest create-approval-test
+;------------------------------------------------------------------------------ Tests
+(deftest ^{:stratum 1} create-approval-test
   (testing "POST /api/approvals — creates approval and returns id"
     (let [state (fresh-state)
           action-id (random-uuid)
@@ -88,7 +89,7 @@
           data (parse-body response)]
       (is (= "created" (:status data))))))
 
-(deftest get-approval-test
+(deftest ^{:stratum 1} get-approval-test
   (testing "GET /api/approvals/:id — returns approval status"
     (let [state (fresh-state)
           action-id (random-uuid)
@@ -121,7 +122,7 @@
           response (sut/handle-api-approval-get state (str (random-uuid)))]
       (is (= 404 (:status response))))))
 
-(deftest sign-approval-test
+(deftest ^{:stratum 1} sign-approval-test
   (testing "POST /api/approvals/:id/sign — first signature, still pending"
     (let [state (fresh-state)
           create-resp (sut/handle-api-approval-create
@@ -181,7 +182,7 @@
       (is (= 400 (:status response)))
       (is (= "incorrect" (get-in data [:error :code]))))))
 
-(deftest approval-round-trip-test
+(deftest ^{:stratum 1} approval-round-trip-test
   (testing "Full lifecycle: create → sign → get shows updated status"
     (let [state (fresh-state)
           create-resp (sut/handle-api-approval-create
@@ -208,7 +209,7 @@
       (is (= "approved" (:status after-two)))
       (is (= 2 (:signatures after-two))))))
 
-(deftest create-approval-exception-returns-anomaly-test
+(deftest ^{:stratum 1} create-approval-exception-returns-anomaly-test
   (testing "POST /api/approvals returns an anomaly response for invalid request bodies"
     (let [state (fresh-state)
           response (sut/handle-api-approval-create state "{not-json")

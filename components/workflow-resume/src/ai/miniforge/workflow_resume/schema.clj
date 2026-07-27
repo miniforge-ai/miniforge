@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow-resume.schema
   "Malli schemas for workflow-resume inputs + event shape.
 
@@ -34,23 +33,21 @@
    [malli.error :as me]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event shape — minimum fields the component actually reads
 
-(def EventBase
+;; Event shape — minimum fields the component actually reads
+(def ^{:stratum 0} EventBase
   "Every event we care about has `:event/type` as the discriminator.
    Extractors filter on it; without it, an event has no meaning here."
   [:map {:closed false}
    [:event/type keyword?]])
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Inputs to the public API
-
-(def ReconstructContextInput
+(def ^{:stratum 0} ReconstructContextInput
   [:map {:closed false}
    [:events-dir some?]
    [:workflow-id [:or string? uuid?]]])
 
-(def TrimPipelineInput
+(def ^{:stratum 0} TrimPipelineInput
   [:map {:closed false}
    [:workflow [:map {:closed false}
                [:workflow/pipeline [:vector
@@ -58,24 +55,14 @@
                                      [:phase keyword?]]]]]]
    [:completed-phases [:sequential keyword?]]])
 
-(def ResolveWorkflowIdentityInput
+(def ^{:stratum 0} ResolveWorkflowIdentityInput
   [:map {:closed false}
    [:reconstructed [:map {:closed false}
                     [:workflow-spec {:optional true}
                      [:maybe [:map {:closed false}]]]]]
    [:fallback-fn fn?]])
 
-;------------------------------------------------------------------------------ Layer 1
-;; Validation helpers
-
-(defn valid-event?
-  "True when `ev` is a map with a keyword `:event/type`. Used by the
-   reader to filter events that were parseable-as-JSON but shaped
-   wrong (e.g. from an older miniforge with a different event format)."
-  [ev]
-  (m/validate EventBase ev))
-
-(defn validate
+(defn ^{:stratum 0} validate
   "Return `value` if it matches `schema`, otherwise return a canonical
    `:invalid-input` anomaly."
   [schema value opts]
@@ -88,3 +75,13 @@
      (merge {:schema (m/form schema)
              :errors (me/humanize (m/explain schema value))}
             (dissoc opts :message :schema-name)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Validation helpers
+(defn ^{:stratum 1} valid-event?
+  "True when `ev` is a map with a keyword `:event/type`. Used by the
+   reader to filter events that were parseable-as-JSON but shaped
+   wrong (e.g. from an older miniforge with a different event format)."
+  [ev]
+  (m/validate EventBase ev))

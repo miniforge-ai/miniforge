@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.server.control-plane
   "HTTP handlers for the control plane API.
 
@@ -33,16 +32,16 @@
    [ai.miniforge.control-plane.interface :as cp]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; JSON helpers
 
-(defn- parse-json-body
+;; JSON helpers
+(defn- ^{:stratum 0} parse-json-body
   "Parse JSON request body. Returns parsed map or nil on error."
   [body-str]
   (try
     (json/parse-string body-str true)
     (catch Exception _ nil)))
 
-(defn- agent->json
+(defn- ^{:stratum 0} agent->json
   "Convert agent record to JSON-safe map (stringify UUIDs and dates)."
   [agent-record]
   (when agent-record
@@ -54,7 +53,7 @@
         (update :agent/tags #(mapv name %))
         (update :agent/decisions #(mapv str %)))))
 
-(defn- decision->json
+(defn- ^{:stratum 0} decision->json
   "Convert decision record to JSON-safe map."
   [decision]
   (when decision
@@ -66,15 +65,29 @@
           (:decision/resolved-at decision) (update :decision/resolved-at str)
           (:decision/deadline decision)    (update :decision/deadline str)))))
 
-(defn- error-response [status message]
+(defn- ^{:stratum 0} error-response [status message]
   {:status status
    :headers {"Content-Type" "application/json"}
    :body (json/generate-string {:error message})})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Agent API handlers
+(defn ^{:stratum 0} handle-cp-summary
+  "GET /api/control-plane/summary
+   Get control plane overview stats."
+  [state]
+  (let [registry (get-in @state [:control-plane :registry])
+        decision-manager (get-in @state [:control-plane :decision-manager])
+        agents (cp/list-agents registry)
+        by-status (cp/agents-by-status registry)]
+    (responses/json-response
+     {:total_agents (count agents)
+      :agents_by_status (into {} (map (fn [[k v]] [(name k) (count v)]) by-status))
+      :pending_decisions (cp/count-pending decision-manager)
+      :agents_needing_attention (count (filter #(#{:blocked :unreachable} (:agent/status %)) agents))})))
 
-(defn handle-register-agent
+;------------------------------------------------------------------------------ Layer 1
+
+;; Agent API handlers
+(defn ^{:stratum 1} handle-register-agent
   "POST /api/control-plane/agents/register
    Register a new agent with the control plane."
   [state body-str]
@@ -97,7 +110,7 @@
         :already_registered (some? existing)}))
     (error-response 400 (messages/t :cp/error-invalid-json))))
 
-(defn handle-agent-heartbeat
+(defn ^{:stratum 1} handle-agent-heartbeat
   "POST /api/control-plane/agents/:id/heartbeat
    Record a heartbeat and optionally submit decisions."
   [state agent-id-str body-str]
@@ -144,7 +157,7 @@
               :decisions_resolved resolved})))))
     (error-response 400 (messages/t :cp/error-invalid-json))))
 
-(defn handle-list-agents
+(defn ^{:stratum 1} handle-list-agents
   "GET /api/control-plane/agents
    List all registered agents, optionally filtered."
   [state params]
@@ -157,7 +170,7 @@
      {:agents (mapv agent->json agents)
       :total (count agents)})))
 
-(defn handle-get-agent
+(defn ^{:stratum 1} handle-get-agent
   "GET /api/control-plane/agents/:id
    Get a single agent's details."
   [state agent-id-str]
@@ -173,7 +186,7 @@
                   :pending_decisions (mapv decision->json pending))))
         (error-response 404 (messages/t :cp/error-agent-not-found))))))
 
-(defn handle-delete-agent
+(defn ^{:stratum 1} handle-delete-agent
   "DELETE /api/control-plane/agents/:id
    Deregister an agent."
   [state agent-id-str]
@@ -185,10 +198,8 @@
         (responses/json-response {:removed (str (:agent/id removed))})
         (error-response 404 (messages/t :cp/error-agent-not-found))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Decision API handlers
-
-(defn handle-list-decisions
+(defn ^{:stratum 1} handle-list-decisions
   "GET /api/control-plane/decisions
    List pending decisions, sorted by priority."
   [state _params]
@@ -202,7 +213,7 @@
      {:decisions (mapv decision->json pending)
       :total (count pending)})))
 
-(defn handle-resolve-decision
+(defn ^{:stratum 1} handle-resolve-decision
   "POST /api/control-plane/decisions/:id/resolve
    Resolve a pending decision."
   [state decision-id-str body-str]
@@ -224,10 +235,8 @@
           (error-response 404 (messages/t :cp/error-decision-not-found)))))
     (error-response 400 (messages/t :cp/error-invalid-json))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Command handlers
-
-(defn handle-agent-command
+(defn ^{:stratum 1} handle-agent-command
   "POST /api/control-plane/agents/:id/command
    Send a control command to an agent."
   [state agent-id-str body-str]
@@ -249,17 +258,3 @@
              {:success true
               :agent (agent->json (cp/get-agent registry agent-id))})))))
     (error-response 400 (messages/t :cp/error-invalid-json))))
-
-(defn handle-cp-summary
-  "GET /api/control-plane/summary
-   Get control plane overview stats."
-  [state]
-  (let [registry (get-in @state [:control-plane :registry])
-        decision-manager (get-in @state [:control-plane :decision-manager])
-        agents (cp/list-agents registry)
-        by-status (cp/agents-by-status registry)]
-    (responses/json-response
-     {:total_agents (count agents)
-      :agents_by_status (into {} (map (fn [[k v]] [(name k) (count v)]) by-status))
-      :pending_decisions (cp/count-pending decision-manager)
-      :agents_needing_attention (count (filter #(#{:blocked :unreachable} (:agent/status %)) agents))})))

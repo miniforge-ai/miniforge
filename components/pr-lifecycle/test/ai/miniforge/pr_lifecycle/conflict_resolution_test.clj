@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.conflict-resolution-test
   "Stage 3 slices 3a + 3b + 3c: tests for the pure-data classifiers,
    the conflict-input builder, the git-plumbing probes, and the
@@ -30,9 +29,10 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
-;------------------------------------------------------------------------------ Test data
+;------------------------------------------------------------------------------ Layer 0
 
-(def ^:private sample-pr
+;------------------------------------------------------------------------------ Test data
+(def ^{:stratum 0} ^:private sample-pr
   {:pr/id        123
    :pr/branch    "feat/widget"
    :pr/base      "main"
@@ -40,8 +40,7 @@
    :pr/base-sha  "def5678cafebabe"})
 
 ;------------------------------------------------------------------------------ classify-merge-state
-
-(deftest classify-merge-state-recognizes-conflicting-test
+(deftest ^{:stratum 0} classify-merge-state-recognizes-conflicting-test
   (testing "GitHub mergeable=CONFLICTING and/or mergeStateStatus=DIRTY
             classify as :conflicting — the only signals the §6.4
             hook should auto-engage on."
@@ -53,14 +52,14 @@
             "{\"mergeable\":\"UNKNOWN\",\"mergeStateStatus\":\"DIRTY\"}"))
         "DIRTY alone is enough — GitHub flags conflicts that way")))
 
-(deftest classify-merge-state-recognizes-mergeable-test
+(deftest ^{:stratum 0} classify-merge-state-recognizes-mergeable-test
   (testing "Clean mergeable PRs classify as :mergeable so the
             caller's auto-engage check short-circuits."
     (is (= :mergeable
            (sut/classify-merge-state
             "{\"mergeable\":\"MERGEABLE\",\"mergeStateStatus\":\"CLEAN\"}")))))
 
-(deftest classify-merge-state-defaults-to-unknown-test
+(deftest ^{:stratum 0} classify-merge-state-defaults-to-unknown-test
   (testing "Anything we can't confidently classify falls into
             :unknown. Nil / blank / weird payloads must not auto-
             trigger resolution — the caller polls or surfaces
@@ -73,9 +72,19 @@
             "{\"mergeable\":\"UNKNOWN\",\"mergeStateStatus\":\"PENDING\"}"))
         "GitHub still computing → :unknown, not :mergeable")))
 
-;------------------------------------------------------------------------------ build-pr-conflict-input
+;------------------------------------------------------------------------------ extract-conflict-paths (real git fixture)
+(defn- ^{:stratum 0} run-git! [cwd & args]
+  (let [r (apply shell/sh "git" "-C" cwd args)]
+    (when-not (zero? (:exit r))
+      (throw (ex-info (str "git " (str/join " " args) " failed: "
+                           (:err r))
+                      {:cwd cwd :result r})))
+    r))
 
-(deftest build-pr-conflict-input-shape-test
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ build-pr-conflict-input
+(deftest ^{:stratum 1} build-pr-conflict-input-shape-test
   (testing "Two-parent shape per spec §6.4: PR branch first (order 0),
             base second (order 1). Order is fixed so replays produce
             the same input-key. Conflicts carry the placeholder
@@ -102,7 +111,7 @@
       (is (= ["src/conflict.txt" "src/other.clj"]
              (mapv :path (:merge/conflicts input)))))))
 
-(deftest build-pr-conflict-input-empty-paths-test
+(deftest ^{:stratum 1} build-pr-conflict-input-empty-paths-test
   (testing "Zero conflict paths still produces a valid shape with
             an empty :merge/conflicts vector. Caller's no-conflicts
             check is what prevents the dead-end resolution
@@ -110,17 +119,7 @@
     (let [input (sut/build-pr-conflict-input sample-pr [])]
       (is (= [] (:merge/conflicts input))))))
 
-;------------------------------------------------------------------------------ extract-conflict-paths (real git fixture)
-
-(defn- run-git! [cwd & args]
-  (let [r (apply shell/sh "git" "-C" cwd args)]
-    (when-not (zero? (:exit r))
-      (throw (ex-info (str "git " (str/join " " args) " failed: "
-                           (:err r))
-                      {:cwd cwd :result r})))
-    r))
-
-(defn- temp-conflict-repo!
+(defn- ^{:stratum 1} temp-conflict-repo!
   "Set up a real repo with an induced conflict between two branches.
    Returns the repo path; caller deletes when done."
   []
@@ -148,20 +147,7 @@
               "fixture expected merge to conflict"))
     repo))
 
-(deftest extract-conflict-paths-returns-unmerged-paths-test
-  (testing "extract-conflict-paths reads `git diff --name-only
-            --diff-filter=U` so an unmerged index surfaces as a
-            vector of relative paths. Real-git fixture rather than
-            a mock — the filter behaviour is git's, not ours, so a
-            mock would just re-encode our own assumption."
-    (let [repo (temp-conflict-repo!)]
-      (try
-        (let [r (sut/extract-conflict-paths repo)]
-          (is (dag/ok? r))
-          (is (= ["conflict.txt"] (:data r))))
-        (finally (fs/delete-tree repo))))))
-
-(deftest extract-conflict-paths-empty-when-no-conflicts-test
+(deftest ^{:stratum 1} extract-conflict-paths-empty-when-no-conflicts-test
   (testing "Clean worktree → empty vector, not nil. Caller branches
             on (empty? paths) and would mis-handle nil."
     (let [repo (str (fs/create-temp-dir {:prefix "pr-clean-test-"}))]
@@ -179,8 +165,7 @@
         (finally (fs/delete-tree repo))))))
 
 ;------------------------------------------------------------------------------ rev-parse + push-resolution! (push mocked — no remote)
-
-(deftest rev-parse-resolves-head-test
+(deftest ^{:stratum 1} rev-parse-resolves-head-test
   (testing "rev-parse against HEAD on a fresh init+commit returns
             the 40-char commit SHA via dag/ok."
     (let [repo (str (fs/create-temp-dir {:prefix "pr-rev-test-"}))]
@@ -198,7 +183,7 @@
               "rev-parse returns full SHA"))
         (finally (fs/delete-tree repo))))))
 
-(deftest push-resolution-surfaces-failure-when-no-remote-test
+(deftest ^{:stratum 1} push-resolution-surfaces-failure-when-no-remote-test
   (testing "push-resolution! against a repo with no `origin` remote
             surfaces git's failure as a dag/err with :command-failed.
             Without this, an unconfigured remote would silently
@@ -218,9 +203,54 @@
           (is (= :command-failed (:code (:error r)))))
         (finally (fs/delete-tree repo))))))
 
-;------------------------------------------------------------------------------ resolve-pr-conflicts! (orchestrator)
+(deftest ^{:stratum 1} resolve-pr-conflicts-no-conflicts-detected-test
+  (testing "If extract-conflict-paths comes back empty (caller
+            staged the wrong worktree, or git already cleaned the
+            markers), resolve-pr-conflicts! short-circuits with a
+            clear dag/err rather than handing an empty conflict-
+            input to the resolver — that would fail downstream
+            with a less helpful message."
+    (let [repo (str (fs/create-temp-dir {:prefix "pr-empty-test-"}))]
+      (try
+        (run-git! repo "init" "-b" "main")
+        (run-git! repo "config" "user.email" "t@t")
+        (run-git! repo "config" "user.name" "t")
+        (run-git! repo "config" "commit.gpgsign" "false")
+        (spit (str repo "/x.txt") "x\n")
+        (run-git! repo "add" "x.txt")
+        (run-git! repo "commit" "-m" "x")
+        (let [resolve-called? (atom false)
+              r (sut/resolve-pr-conflicts!
+                 {:worktree-path repo
+                  :pr            sample-pr
+                  :resolve-fn    (fn [_]
+                                   (reset! resolve-called? true)
+                                   (dag/ok {}))
+                  :context       {}})]
+          (is (dag/err? r))
+          (is (= :no-conflicts-detected (:code (:error r))))
+          (is (false? @resolve-called?)
+              "the injected resolver was not called — short-circuit
+               happened before the dead-end invocation"))
+        (finally (fs/delete-tree repo))))))
 
-(deftest resolve-pr-conflicts-happy-path-test
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} extract-conflict-paths-returns-unmerged-paths-test
+  (testing "extract-conflict-paths reads `git diff --name-only
+            --diff-filter=U` so an unmerged index surfaces as a
+            vector of relative paths. Real-git fixture rather than
+            a mock — the filter behaviour is git's, not ours, so a
+            mock would just re-encode our own assumption."
+    (let [repo (temp-conflict-repo!)]
+      (try
+        (let [r (sut/extract-conflict-paths repo)]
+          (is (dag/ok? r))
+          (is (= ["conflict.txt"] (:data r))))
+        (finally (fs/delete-tree repo))))))
+
+;------------------------------------------------------------------------------ resolve-pr-conflicts! (orchestrator)
+(deftest ^{:stratum 2} resolve-pr-conflicts-happy-path-test
   (testing "End-to-end on a real conflicted worktree with an injected
             resolve-fn that simulates the merge-resolution sub-
             workflow's success contract: writes a clean file, commits,
@@ -258,7 +288,7 @@
             (is (= "feat/widget" (:pr-branch (:data r)))))
           (finally (fs/delete-tree repo)))))))
 
-(deftest resolve-pr-conflicts-forwards-resolver-keys-test
+(deftest ^{:stratum 2} resolve-pr-conflicts-forwards-resolver-keys-test
   (testing "resolve-pr-conflicts! must hand the resolver exactly the
             keys workflow.merge-resolution/resolve-conflict!
             destructures: :conflict-input, :host-repo,
@@ -299,38 +329,7 @@
             (is (some? (:conflict-input opts))))
           (finally (fs/delete-tree repo)))))))
 
-(deftest resolve-pr-conflicts-no-conflicts-detected-test
-  (testing "If extract-conflict-paths comes back empty (caller
-            staged the wrong worktree, or git already cleaned the
-            markers), resolve-pr-conflicts! short-circuits with a
-            clear dag/err rather than handing an empty conflict-
-            input to the resolver — that would fail downstream
-            with a less helpful message."
-    (let [repo (str (fs/create-temp-dir {:prefix "pr-empty-test-"}))]
-      (try
-        (run-git! repo "init" "-b" "main")
-        (run-git! repo "config" "user.email" "t@t")
-        (run-git! repo "config" "user.name" "t")
-        (run-git! repo "config" "commit.gpgsign" "false")
-        (spit (str repo "/x.txt") "x\n")
-        (run-git! repo "add" "x.txt")
-        (run-git! repo "commit" "-m" "x")
-        (let [resolve-called? (atom false)
-              r (sut/resolve-pr-conflicts!
-                 {:worktree-path repo
-                  :pr            sample-pr
-                  :resolve-fn    (fn [_]
-                                   (reset! resolve-called? true)
-                                   (dag/ok {}))
-                  :context       {}})]
-          (is (dag/err? r))
-          (is (= :no-conflicts-detected (:code (:error r))))
-          (is (false? @resolve-called?)
-              "the injected resolver was not called — short-circuit
-               happened before the dead-end invocation"))
-        (finally (fs/delete-tree repo))))))
-
-(deftest resolve-pr-conflicts-passes-unresolvable-anomaly-through-test
+(deftest ^{:stratum 2} resolve-pr-conflicts-passes-unresolvable-anomaly-through-test
   (testing "When the injected resolver returns the
             :dag-multi-parent-unresolvable terminal anomaly,
             resolve-pr-conflicts! passes it through unchanged so

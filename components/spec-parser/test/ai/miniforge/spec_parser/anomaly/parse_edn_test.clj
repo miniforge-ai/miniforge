@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.parse-edn-test
   "Coverage for `core/parse-edn` (anomaly-returning) and its boundary
    escalation through `parse-spec-file`.
@@ -28,16 +27,16 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Anomaly-returning happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest parse-edn-valid-content
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+(deftest ^{:stratum 0} parse-edn-valid-content
   (testing "valid EDN parses to data"
     (is (= {:spec/title "T" :spec/description "D"}
            (core/parse-edn "{:spec/title \"T\" :spec/description \"D\"}")))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure path
-
-(deftest parse-edn-malformed-returns-anomaly
+(deftest ^{:stratum 0} parse-edn-malformed-returns-anomaly
   (testing "unbalanced braces yield :invalid-input anomaly"
     (let [result (core/parse-edn "{:a 1")]
       (is (anomaly/anomaly? result))
@@ -46,8 +45,7 @@
       (is (string? (get-in result [:anomaly/data :error]))))))
 
 ;------------------------------------------------------------------------------ Boundary escalation
-
-(deftest parse-spec-file-escalates-malformed-edn
+(deftest ^{:stratum 0} parse-spec-file-escalates-malformed-edn
   (testing "malformed EDN surfaces as ex-info from parse-spec-file"
     (let [tmp (fs/create-temp-file {:suffix ".edn"})]
       (try

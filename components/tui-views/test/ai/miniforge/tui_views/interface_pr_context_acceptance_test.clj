@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.interface-pr-context-acceptance-test
   "Acceptance tests for PR context rendering and action parsing
    in the TUI interface layer.
@@ -31,9 +30,10 @@
    [ai.miniforge.tui-views.interface :as iface]
    [ai.miniforge.tui-views.persistence.github :as github]))
 
-;; ---------------------------------------------------------------------------- build-pr-context-str acceptance
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest pr-context-str-includes-provider-detection-test
+;; ---------------------------------------------------------------------------- build-pr-context-str acceptance
+(deftest ^{:stratum 0} pr-context-str-includes-provider-detection-test
   (testing "GitHub provider detected for standard repo slug"
     (let [ctx (iface/build-pr-context-str
                 {:pr/repo "acme/app" :pr/number 1 :pr/title "T"
@@ -52,7 +52,7 @@
                  :pr/branch "b" :pr/status :open})]
       (is (str/includes? ctx "GitHub")))))
 
-(deftest pr-context-str-risk-factors-rendering-test
+(deftest ^{:stratum 0} pr-context-str-risk-factors-rendering-test
   (testing "multiple risk factors are each rendered on a separate line"
     (let [ctx (iface/build-pr-context-str
                 {:pr/repo "r" :pr/number 1 :pr/title "T"
@@ -73,7 +73,7 @@
                  :pr/risk {:risk/level :low :risk/factors []}})]
       (is (not (str/includes? ctx "Risk factors"))))))
 
-(deftest pr-context-str-readiness-rendering-test
+(deftest ^{:stratum 0} pr-context-str-readiness-rendering-test
   (testing "readiness without ready? flag omits (ready) suffix"
     (let [ctx (iface/build-pr-context-str
                 {:pr/repo "r" :pr/number 1 :pr/title "T"
@@ -82,7 +82,7 @@
       (is (str/includes? ctx "Readiness score: 50"))
       (is (not (str/includes? ctx "(ready)"))))))
 
-(deftest pr-context-str-change-size-with-files-count-test
+(deftest ^{:stratum 0} pr-context-str-change-size-with-files-count-test
   (testing "includes file count when changed-files-count is positive"
     (let [ctx (iface/build-pr-context-str
                 {:pr/repo "r" :pr/number 1 :pr/title "T"
@@ -102,7 +102,7 @@
       (is (str/includes? ctx "+5/-3"))
       (is (not (str/includes? ctx "files"))))))
 
-(deftest pr-context-str-policy-packs-rendering-test
+(deftest ^{:stratum 0} pr-context-str-policy-packs-rendering-test
   (testing "shows pack names when packs-applied is present"
     (let [ctx (iface/build-pr-context-str
                 {:pr/repo "r" :pr/number 1 :pr/title "T"
@@ -121,8 +121,7 @@
       (is (not (str/includes? ctx "packs:"))))))
 
 ;; ---------------------------------------------------------------------------- parse-actions round-trip
-
-(deftest parse-actions-round-trip-test
+(deftest ^{:stratum 0} parse-actions-round-trip-test
   (testing "parse-actions → action-match->action produces correct action maps"
     (let [text (str "I analyzed the PR.\n"
                     "[ACTION: review | Run Policy | Evaluate against security pack]\n"
@@ -140,7 +139,7 @@
       (is (= "Evaluate against security pack" (:description (first actions))))
       (is (= :open (:action (second actions)))))))
 
-(deftest parse-actions-trims-whitespace-test
+(deftest ^{:stratum 0} parse-actions-trims-whitespace-test
   (testing "labels and descriptions are trimmed"
     (let [[_ actions] (iface/parse-actions
                         "[ACTION: sync |  Refresh PRs  |  Reload from disk  ]")]
@@ -148,32 +147,30 @@
       (is (= "Refresh PRs" (:label (first actions))))
       (is (= "Reload from disk" (:description (first actions)))))))
 
-(deftest parse-actions-empty-input-test
+(deftest ^{:stratum 0} parse-actions-empty-input-test
   (testing "empty string returns empty clean and no actions"
     (let [[clean actions] (iface/parse-actions "")]
       (is (= "" clean))
       (is (empty? actions)))))
 
 ;; ---------------------------------------------------------------------------- parse-risk-line edge cases
-
-(deftest parse-risk-line-whitespace-in-level-test
+(deftest ^{:stratum 0} parse-risk-line-whitespace-in-level-test
   (testing "trims whitespace from level"
     (let [r (iface/parse-risk-line "RISK: org/repo#10 |  high  | reason here")]
       (is (= "high" (:level r))))))
 
-(deftest parse-risk-line-with-hash-in-repo-name-test
+(deftest ^{:stratum 0} parse-risk-line-with-hash-in-repo-name-test
   (testing "handles repo names with org containing hyphens"
     (let [r (iface/parse-risk-line "RISK: my-org/my-repo#999 | critical | big change")]
       (is (= ["my-org/my-repo" 999] (:id r))))))
 
-(deftest parse-risk-line-zero-pr-number-test
+(deftest ^{:stratum 0} parse-risk-line-zero-pr-number-test
   (testing "handles PR number 0"
     (let [r (iface/parse-risk-line "RISK: r/r#0 | low | trivial")]
       (is (= ["r/r" 0] (:id r))))))
 
 ;; ---------------------------------------------------------------------------- handle-fetch-pr-diff number coercion
-
-(deftest handle-fetch-pr-diff-large-number-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-large-number-test
   (testing "handles large PR numbers correctly"
     (with-redefs [github/fetch-pr-diff-and-detail
                   (fn [repo number]
@@ -181,7 +178,7 @@
       (let [[_ payload] (iface/handle-fetch-pr-diff {:repo "r" :number 999999})]
         (is (= ["r" 999999] (:pr-id payload)))))))
 
-(deftest handle-fetch-pr-diff-string-zero-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-string-zero-test
   (testing "handles string '0' as PR number"
     (with-redefs [github/fetch-pr-diff-and-detail
                   (fn [repo number]

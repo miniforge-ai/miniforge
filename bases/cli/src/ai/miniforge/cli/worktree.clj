@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.worktree
   "Resolve the nearest checkout root, preferring the nearest .git marker.
 
@@ -28,27 +27,31 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Path resolution
 
-(def ^:private git-marker-name
+;; Path resolution
+(def ^{:stratum 0} ^:private git-marker-name
   ".git")
 
-(defn- file->dir
+(defn- ^{:stratum 0} file->dir
   [path]
   (let [file (fs/file path)]
     (if (fs/directory? file)
       file
       (fs/parent file))))
 
-(defn- canonical-dir
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} canonical-dir
   [path]
   (some-> path file->dir fs/canonicalize str))
 
-(defn- git-marker-path
+(defn- ^{:stratum 1} git-marker-path
   [dir]
   (fs/path dir git-marker-name))
 
-(defn nearest-git-root
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} nearest-git-root
   "Walk upward from start-path and return the nearest directory containing
    a .git file or directory. Returns nil when no checkout is found."
   ([] (nearest-git-root (System/getProperty "user.dir")))
@@ -62,7 +65,9 @@
            (or (nil? parent) (= dir parent)) nil
            :else (recur parent)))))))
 
-(defn worktree-root
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} worktree-root
   "Return the canonical checkout root for start-path.
 
    Prefers the nearest .git marker. Falls back to git rev-parse only when
@@ -76,10 +81,10 @@
          (when (zero? exit)
            (some-> out str/trim not-empty))))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Git metadata
+;------------------------------------------------------------------------------ Layer 4
 
-(defn git-info
+;; Git metadata
+(defn ^{:stratum 4} git-info
   "Return basic git metadata for the resolved worktree root.
 
    Returns nil when start-path is not inside a git checkout."

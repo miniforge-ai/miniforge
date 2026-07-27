@@ -60,7 +60,7 @@
     (when pr-info
       (merge pr-info
              {:task-id (:task/id task-def)
-              :deps (set (map dag-plan/normalize-task-id (:task/dependencies task-def [])))}))))
+              :deps (:task/deps task-def #{})}))))
 
 (defn- ^{:stratum 0} task-result-branch
   "Branch name produced by the sub-workflow's persist step for this task.

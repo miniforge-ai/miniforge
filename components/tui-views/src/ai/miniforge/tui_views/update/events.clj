@@ -15,12 +15,11 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.events
   "Event stream message handlers.
 
    Pure functions that handle workflow events from the event stream.
-   Layer 2."
+   Layers 0-3 (over the 3-layer budget; Wave 2 namespace-split candidate)."
   (:require
    [clojure.string]
    [ai.miniforge.tui-views.effect :as effect]
@@ -30,65 +29,48 @@
    [ai.miniforge.tui-views.update.filter :as filter]
    [ai.miniforge.tui-views.view.project.helpers :as helpers]))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 0
+
 ;; Event stream message handlers
-
 ;; Helper functions
-
-(defn repo-from-pr-url
+(defn ^{:stratum 0} repo-from-pr-url
   "Extract 'owner/repo' from a GitHub PR URL.
    e.g. 'https://github.com/owner/repo/pull/123' → 'owner/repo'."
   [url]
   (when-let [[_ owner-repo] (re-find #"github\.com/([^/]+/[^/]+)/pull/" (str url))]
     owner-repo))
 
-(defn index-workflow-pr
-  "Add a [repo, pr-number] → workflow-id entry to the reverse index.
-   No-op when pr-info lacks required fields or repo can't be extracted."
-  [model workflow-id pr-info]
-  (if-let [repo (and pr-info
-                     (:pr-number pr-info)
-                     (:pr-url pr-info)
-                     (repo-from-pr-url (:pr-url pr-info)))]
-    (assoc-in model [:workflow-pr-index [repo (:pr-number pr-info)]] workflow-id)
-    model))
-
-(defn annotate-pr-with-workflow
+(defn ^{:stratum 0} annotate-pr-with-workflow
   "Annotate a PR with :pr/workflow-id from the reverse index, if present."
   [wf-pr-idx pr]
   (let [pr-key [(:pr/repo pr) (:pr/number pr)]
         wf-id  (get wf-pr-idx pr-key)]
     (cond-> pr wf-id (assoc :pr/workflow-id wf-id))))
 
-(defn pr-match?
+(defn ^{:stratum 0} pr-match?
   "True when pr matches by [repo, number]."
   [repo number pr]
   (and (= (:pr/repo pr) repo) (= (:pr/number pr) number)))
 
-(defn assessment->risk-entry
+(defn ^{:stratum 0} assessment->risk-entry
   "Convert a single LLM triage assessment into a [pr-id risk-map] pair."
   [{:keys [id level reason]}]
   [id {:level (keyword level) :reason reason}])
 
-(defn assessments->risk-map
-  "Convert a vector of LLM triage assessments into {[repo num] {:level :reason}}."
-  [assessments]
-  (into {} (map assessment->risk-entry) assessments))
-
-(defn find-workflow-idx
+(defn ^{:stratum 0} find-workflow-idx
   "Find index of workflow with given ID in workflows vector."
   [workflows workflow-id]
   (some (fn [[i wf]] (when (= (:id wf) workflow-id) i))
         (map-indexed vector workflows)))
 
-(defn update-workflow-at
+(defn ^{:stratum 0} update-workflow-at
   "Update workflow at index using update-fn."
   [model idx update-fn]
   (if idx
     (update-in model [:workflows idx] update-fn)
     model))
 
-(defn update-workflow-snapshot
+(defn ^{:stratum 0} update-workflow-snapshot
   "Apply a persisted-detail event reducer to the workflow row snapshot."
   [model idx workflow-id event]
   (if idx
@@ -97,14 +79,7 @@
                                                 event))
     model))
 
-(defn upsert-workflow
-  "Insert a workflow row or merge it into the existing row with the same id."
-  [model workflow]
-  (if-let [idx (find-workflow-idx (:workflows model) (:id workflow))]
-    (assoc-in model [:workflows idx] (merge (get-in model [:workflows idx]) workflow))
-    (update model :workflows conj workflow)))
-
-(defn update-detail-if-active
+(defn ^{:stratum 0} update-detail-if-active
   "Apply update-fn to detail if workflow-id matches active detail."
   [model workflow-id update-fn]
   (if (and workflow-id
@@ -112,57 +87,14 @@
     (update-fn model)
     model))
 
-(defn ensure-workflow
-  "Ensure a workflow row exists so updates remain visible even if
-   :workflow/started arrives late or is missing."
-  [model workflow-id]
-  (if (or (nil? workflow-id)
-          (find-workflow-idx (:workflows model) workflow-id))
-    model
-    (update model :workflows conj (model/make-workflow {:id workflow-id
-                                                        :status :running}))))
-
 ;; Timestamp wrapper
-
-(defn with-timestamp
+(defn ^{:stratum 0} with-timestamp
   "Wrap a handler result with :last-updated timestamp."
   [model]
   (assoc model :last-updated (java.util.Date.)))
 
-;; Event helpers — extracted to avoid cond-> inside -> antipattern
-
-(defn apply-phase-change
-  "Update workflow phase in list and detail context."
-  [model idx workflow-id phase]
-  (as-> model m
-    (if idx (assoc-in m [:workflows idx :phase] phase) m)
-    (update-detail-if-active m workflow-id
-      #(update-in % [:detail :phases] conj {:phase phase :status :running}))))
-
-(defn apply-agent-status-update
-  "Update agent status in workflow list and detail context."
-  [model idx workflow-id agent status message]
-  (let [agent-entry {:status status :message message}]
-    (as-> model m
-      (if idx (assoc-in m [:workflows idx :agents agent] agent-entry) m)
-      (update-detail-if-active m workflow-id
-        #(assoc-in % [:detail :current-agent] (assoc agent-entry :agent agent))))))
-
-(defn apply-gate-result
-  "Record gate result in workflow list, flash on failure, and update detail."
-  [model idx workflow-id gate passed? payload]
-  (as-> model m
-    (if idx (update-in m [:workflows idx :gate-results] conj payload) m)
-    (if (not passed?)
-      (assoc m :flash-message (msg/t :flash/gate-failed {:gate (if gate (name gate) "")}))
-      m)
-    (update-detail-if-active m workflow-id
-      (fn [m'] (update-in m' [:detail :evidence :validation :results]
-                           (fnil conj []) payload)))))
-
 ;; Event handlers
-
-(defn link-chain-instance
+(defn ^{:stratum 0} link-chain-instance
   "When a chain step is active, record the workflow instance UUID so
    the view layer can show the chain indicator on the correct row."
   [model workflow-id]
@@ -172,7 +104,7 @@
     (assoc-in model [:active-chain :current-step :instance-id] workflow-id)
     model))
 
-(defn apply-evidence-intent
+(defn ^{:stratum 0} apply-evidence-intent
   "Seed evidence intent from workflow spec."
   [model spec name]
   (if spec
@@ -180,30 +112,7 @@
               {:description (get spec :name name) :spec spec})
     model))
 
-(defn handle-workflow-added [model {:keys [workflow-id name spec]}]
-  (let [event (persistence/workflow-started-event workflow-id spec)
-        wf (assoc (model/make-workflow {:id workflow-id
-                                        :name (or name (:name spec))
-                                        :status :running})
-                  :detail-snapshot (persistence/apply-detail-event
-                                    (persistence/empty-detail workflow-id)
-                                    event))]
-    (-> model
-        (upsert-workflow wf)
-        (link-chain-instance workflow-id)
-        (update-detail-if-active workflow-id
-          #(apply-evidence-intent % spec name))
-        with-timestamp)))
-
-(defn handle-phase-changed [model {:keys [workflow-id phase]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/phase-started-event workflow-id phase))
-        (apply-phase-change idx workflow-id phase)
-        with-timestamp)))
-
-(defn update-phase-status
+(defn ^{:stratum 0} update-phase-status
   "Update a phase entry's status and duration in the phases vector."
   [phases phase phase-status duration-ms]
   (mapv (fn [p]
@@ -212,213 +121,20 @@
             p))
         phases))
 
-(defn normalize-artifact
+(defn ^{:stratum 0} normalize-artifact
   "Normalize an artifact entry, ensuring it has phase and required keys."
   [artifact phase]
   (persistence/normalize-artifact artifact phase))
 
-(defn apply-phase-completion
-  "Update detail model with phase completion data: status and artifacts."
-  [model phase phase-status duration-ms artifacts]
-  (let [model (update-in model [:detail :phases]
-                          update-phase-status phase phase-status duration-ms)]
-    (if (seq artifacts)
-      (update-in model [:detail :artifacts] into
-                 (mapv #(normalize-artifact % phase) artifacts))
-      model)))
-
-(defn handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms
-                                       tokens cost-usd]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)
-        phase-status (case outcome :success :success :failed :failed :success)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/phase-completed-event workflow-id phase outcome
-                                                                     artifacts duration-ms
-                                                                     {:tokens tokens
-                                                                      :cost-usd cost-usd}))
-        (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
-        (update-detail-if-active workflow-id
-          #(apply-phase-completion % phase phase-status duration-ms artifacts))
-        with-timestamp)))
-
-(defn handle-agent-status [model {:keys [workflow-id agent status message]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/agent-status-event workflow-id agent status message))
-        (apply-agent-status-update idx workflow-id agent status message)
-        with-timestamp)))
-
-(defn handle-agent-started [model {:keys [workflow-id agent]}]
-  (handle-agent-status model {:workflow-id workflow-id :agent agent
-                              :status :started :message nil}))
-
-(defn handle-agent-completed [model {:keys [workflow-id agent]}]
-  (handle-agent-status model {:workflow-id workflow-id :agent agent
-                              :status :completed :message nil}))
-
-(defn handle-agent-failed [model {:keys [workflow-id agent]}]
-  (let [agent-kw (or agent :unknown)]
-    (-> (handle-agent-status model {:workflow-id workflow-id :agent agent-kw
-                                    :status :failed :message nil})
-        (assoc :flash-message (msg/t :flash/agent-failed {:agent (name agent-kw)})))))
-
-(defn handle-agent-output [model {:keys [workflow-id delta]}]
-  (-> model
-      (update-workflow-snapshot (find-workflow-idx (:workflows model) workflow-id)
-                                workflow-id
-                                (persistence/agent-chunk-event workflow-id delta))
-      (update-detail-if-active workflow-id
-        #(update-in % [:detail :agent-output] str delta))
-      with-timestamp))
-
-(defn apply-workflow-completion
+(defn ^{:stratum 0} apply-workflow-completion
   "Update detail model with workflow completion data."
   [model evidence-bundle-id duration-ms]
   (cond-> model
     evidence-bundle-id (assoc-in [:detail :evidence :bundle-id] evidence-bundle-id)
     duration-ms        (assoc-in [:detail :duration-ms] duration-ms)))
 
-(defn handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id
-                                          tokens cost-usd pr-info]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/workflow-completed-event workflow-id status
-                                                                       duration-ms evidence-bundle-id
-                                                                       {:tokens tokens
-                                                                        :cost-usd cost-usd}))
-        (update-workflow-at idx #(cond-> (assoc % :status (or status :success)
-                                                   :progress 100 :duration-ms duration-ms)
-                                    pr-info (assoc :pr-info pr-info)))
-        (index-workflow-pr workflow-id pr-info)
-        (update-detail-if-active workflow-id
-          #(apply-workflow-completion % evidence-bundle-id duration-ms))
-        with-timestamp)))
-
-(defn handle-workflow-failed [model {:keys [workflow-id error]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/workflow-failed-event workflow-id error))
-        (update-workflow-at idx #(assoc % :status :failed :error error))
-        with-timestamp)))
-
-(defn handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/gate-event workflow-id gate passed?
-                                                          (:event/timestamp payload)))
-        (apply-gate-result idx workflow-id gate passed? payload)
-        with-timestamp)))
-
-(defn handle-gate-started [model {:keys [gate]}]
-  (-> model
-      (assoc :flash-message (msg/t :flash/gate-running
-                                   {:gate (if gate (name gate) (msg/t :flash/gate-unknown))}))
-      with-timestamp))
-
-(defn handle-tool-invoked [model {:keys [workflow-id agent tool]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)
-        agent-id (or agent :agent)
-        status-message (msg/t :flash/tool-invoked
-                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/agent-status-event workflow-id agent-id
-                                                                  :tool-running status-message))
-        (apply-agent-status-update idx workflow-id agent-id :tool-running status-message)
-        with-timestamp)))
-
-(defn handle-tool-completed [model {:keys [workflow-id agent tool]}]
-  (let [idx (find-workflow-idx (:workflows model) workflow-id)
-        agent-id (or agent :agent)
-        status-message (msg/t :flash/tool-completed
-                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
-    (-> model
-        (update-workflow-snapshot idx workflow-id
-                                  (persistence/agent-status-event workflow-id agent-id
-                                                                  :tool-completed status-message))
-        (apply-agent-status-update idx workflow-id agent-id :tool-completed status-message)
-        with-timestamp)))
-
-;------------------------------------------------------------------------------ Layer 2b
-;; Chain event handlers
-
-(defn handle-chain-started
-  "Set active chain in model when a chain begins execution."
-  [model {:keys [chain-id step-count]}]
-  (-> model
-      (assoc :active-chain {:chain-id chain-id
-                            :step-count step-count
-                            :current-step nil
-                            :status :running})
-      (assoc :flash-message (msg/t :flash/chain-started
-                                   {:chain (name chain-id) :steps step-count}))
-      with-timestamp))
-
-(defn handle-chain-step-started
-  "Update active chain with current step info."
-  [model {:keys [chain-id step-id step-index workflow-id]}]
-  (-> model
-      (assoc-in [:active-chain :current-step]
-                {:step-id step-id
-                 :step-index step-index
-                 :workflow-id workflow-id})
-      (assoc :flash-message (msg/t :flash/chain-step-started
-                                   {:chain (name chain-id)
-                                    :step (inc step-index)
-                                    :total (get-in model [:active-chain :step-count])
-                                    :step-id (name step-id)}))
-      with-timestamp))
-
-(defn handle-chain-step-completed
-  "Mark current chain step as completed."
-  [model {:keys [chain-id step-index]}]
-  (-> model
-      (assoc :flash-message (msg/t :flash/chain-step-completed
-                                   {:chain (name chain-id) :step (inc step-index)}))
-      with-timestamp))
-
-(defn handle-chain-step-failed
-  "Mark current chain step as failed, update chain status."
-  [model {:keys [chain-id step-index error]}]
-  (-> model
-      (assoc-in [:active-chain :status] :failed)
-      (assoc :flash-message (msg/t :flash/chain-step-failed
-                                   {:chain (name chain-id)
-                                    :step (inc step-index)
-                                    :error error}))
-      with-timestamp))
-
-(defn handle-chain-completed
-  "Mark chain as completed and clear active chain."
-  [model {:keys [chain-id duration-ms step-count]}]
-  (-> model
-      (assoc :active-chain nil)
-      (assoc :flash-message (msg/t :flash/chain-completed
-                                   {:chain (name chain-id)
-                                    :steps step-count
-                                    :duration duration-ms}))
-      with-timestamp))
-
-(defn handle-chain-failed
-  "Mark chain as failed and record error."
-  [model {:keys [chain-id failed-step error]}]
-  (-> model
-      (assoc-in [:active-chain :status] :failed)
-      (assoc :flash-message (msg/t :flash/chain-failed
-                                   {:chain (name chain-id)
-                                    :step (if failed-step (name failed-step) "")
-                                    :error error}))
-      with-timestamp))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; PR event handlers
-
-(defn build-pr-summary-for-triage
+(defn ^{:stratum 0} build-pr-summary-for-triage
   "Build a compact text summary of a PR for fleet-level risk triage.
    Always includes the mechanical risk assessment so the triage agent
    can use it as one input signal."
@@ -444,13 +160,663 @@
                    (str " [" (clojure.string/join ", " (map name factors)) "]")))
       (:pr/workflow-id pr) (str " | miniforge-sourced"))))
 
-(defn pr-triage-summary
+(defn ^{:stratum 0} handle-repos-discovered
+  "Handle result of a :discover-repos side effect.
+   Shows discovery results and triggers a PR sync."
+  [model {:keys [success? added discovered owner repos error]}]
+  (if success?
+    (assoc model
+           :fleet-repos (vec (or repos (:fleet-repos model) []))
+           :flash-message (msg/t :flash/repos-discovered
+                                 {:count discovered
+                                  :owner-suffix (if owner
+                                                  (msg/t :flash/from-owner-suffix {:owner owner})
+                                                  "")
+                                  :added added})
+           :side-effect (effect/sync-prs))
+    (assoc model :flash-message
+           (msg/t :flash/discover-failed
+                  {:error (or error (msg/t :flash/unknown-error))}))))
+
+(defn ^{:stratum 0} repos-browsed-ok
+  "Success path: populate browse-repos cache, reset repo-manager if source
+   is :repo-manager, and flash a summary."
+  [model {:keys [repos owner provider warnings source]}]
+  (let [repo-list (vec (or repos []))
+        base (assoc model
+                    :browse-repos repo-list
+                    :browse-repos-loading? false)
+        candidate-count (count (model/browse-candidate-repos base))
+        provider-name (name (or provider :github))
+        warnings* (vec (or warnings []))
+        base (if (= source :repo-manager)
+               (assoc base
+                      :repo-manager-source :browse
+                      :selected-idx 0
+                      :filtered-indices nil
+                      :search-matches []
+                      :search-match-idx nil
+                      ;; Pre-select fleet repos so they appear checked
+                      :selected-ids (set (get base :fleet-repos []))
+                      :visual-anchor nil)
+               base)]
+    (assoc base :flash-message
+           (msg/t :flash/repos-browsed
+                  {:count (count repo-list)
+                   :provider provider-name
+                   :owner-suffix (if owner
+                                   (msg/t :flash/from-owner-suffix {:owner owner})
+                                   "")
+                   :candidates candidate-count
+                   :warnings-suffix (if (seq warnings*)
+                                      (msg/t :flash/warnings-suffix {:count (count warnings*)})
+                                      "")}))))
+
+(defn ^{:stratum 0} repos-browsed-err
+  "Failure path: clear loading flag and flash error details."
+  [model {:keys [error error-source provider]}]
+  (assoc model
+         :browse-repos-loading? false
+         :flash-message (msg/t :flash/repo-browse-failed
+                               {:source-suffix (if error-source
+                                                 (msg/t :flash/error-source-suffix
+                                                        {:source (name error-source)})
+                                                 "")
+                                :provider-suffix (if provider
+                                                   (msg/t :flash/provider-suffix
+                                                          {:provider (name provider)})
+                                                   "")
+                                :error (or (some-> error str not-empty)
+                                           (msg/t :flash/no-error-details))})))
+
+;; PR monitor event handlers — N5-delta §5
+(defn- ^{:stratum 0} update-pr-by-id
+  "Apply update-fn to the PR identified by pr-id in :pr-items.
+   pr-id is the raw :pr/id value from the event (number or [repo number])."
+  [model pr-id update-fn]
+  (update model :pr-items
+          (fn [prs]
+            (mapv (fn [pr]
+                    (let [match? (or (= pr-id (:pr/number pr))
+                                     (= pr-id [(:pr/repo pr) (:pr/number pr)]))]
+                      (if match? (update-fn pr) pr)))
+                  (or prs [])))))
+
+;; Subscription health handler
+(defn ^{:stratum 0} handle-subscription-status-changed
+  "Update subscription status and last-event timestamp in model."
+  [model {:keys [status last-event-at]}]
+  (assoc model
+         :subscription/status       (or status :connected)
+         :subscription/last-event-at last-event-at))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} index-workflow-pr
+  "Add a [repo, pr-number] → workflow-id entry to the reverse index.
+   No-op when pr-info lacks required fields or repo can't be extracted."
+  [model workflow-id pr-info]
+  (if-let [repo (and pr-info
+                     (:pr-number pr-info)
+                     (:pr-url pr-info)
+                     (repo-from-pr-url (:pr-url pr-info)))]
+    (assoc-in model [:workflow-pr-index [repo (:pr-number pr-info)]] workflow-id)
+    model))
+
+(defn ^{:stratum 1} assessments->risk-map
+  "Convert a vector of LLM triage assessments into {[repo num] {:level :reason}}."
+  [assessments]
+  (into {} (map assessment->risk-entry) assessments))
+
+(defn ^{:stratum 1} upsert-workflow
+  "Insert a workflow row or merge it into the existing row with the same id."
+  [model workflow]
+  (if-let [idx (find-workflow-idx (:workflows model) (:id workflow))]
+    (assoc-in model [:workflows idx] (merge (get-in model [:workflows idx]) workflow))
+    (update model :workflows conj workflow)))
+
+(defn ^{:stratum 1} ensure-workflow
+  "Ensure a workflow row exists so updates remain visible even if
+   :workflow/started arrives late or is missing."
+  [model workflow-id]
+  (if (or (nil? workflow-id)
+          (find-workflow-idx (:workflows model) workflow-id))
+    model
+    (update model :workflows conj (model/make-workflow {:id workflow-id
+                                                        :status :running}))))
+
+;; Event helpers — extracted to avoid cond-> inside -> antipattern
+(defn ^{:stratum 1} apply-phase-change
+  "Update workflow phase in list and detail context."
+  [model idx workflow-id phase]
+  (as-> model m
+    (if idx (assoc-in m [:workflows idx :phase] phase) m)
+    (update-detail-if-active m workflow-id
+      #(update-in % [:detail :phases] conj {:phase phase :status :running}))))
+
+(defn ^{:stratum 1} apply-agent-status-update
+  "Update agent status in workflow list and detail context."
+  [model idx workflow-id agent status message]
+  (let [agent-entry {:status status :message message}]
+    (as-> model m
+      (if idx (assoc-in m [:workflows idx :agents agent] agent-entry) m)
+      (update-detail-if-active m workflow-id
+        #(assoc-in % [:detail :current-agent] (assoc agent-entry :agent agent))))))
+
+(defn ^{:stratum 1} apply-gate-result
+  "Record gate result in workflow list, flash on failure, and update detail."
+  [model idx workflow-id gate passed? payload]
+  (as-> model m
+    (if idx (update-in m [:workflows idx :gate-results] conj payload) m)
+    (if (not passed?)
+      (assoc m :flash-message (msg/t :flash/gate-failed {:gate (if gate (name gate) "")}))
+      m)
+    (update-detail-if-active m workflow-id
+      (fn [m'] (update-in m' [:detail :evidence :validation :results]
+                           (fnil conj []) payload)))))
+
+(defn ^{:stratum 1} apply-phase-completion
+  "Update detail model with phase completion data: status and artifacts."
+  [model phase phase-status duration-ms artifacts]
+  (let [model (update-in model [:detail :phases]
+                          update-phase-status phase phase-status duration-ms)]
+    (if (seq artifacts)
+      (update-in model [:detail :artifacts] into
+                 (mapv #(normalize-artifact % phase) artifacts))
+      model)))
+
+(defn ^{:stratum 1} handle-agent-output [model {:keys [workflow-id delta]}]
+  (-> model
+      (update-workflow-snapshot (find-workflow-idx (:workflows model) workflow-id)
+                                workflow-id
+                                (persistence/agent-chunk-event workflow-id delta))
+      (update-detail-if-active workflow-id
+        #(update-in % [:detail :agent-output] str delta))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-workflow-failed [model {:keys [workflow-id error]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/workflow-failed-event workflow-id error))
+        (update-workflow-at idx #(assoc % :status :failed :error error))
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-gate-started [model {:keys [gate]}]
+  (-> model
+      (assoc :flash-message (msg/t :flash/gate-running
+                                   {:gate (if gate (name gate) (msg/t :flash/gate-unknown))}))
+      with-timestamp))
+
+;; Chain event handlers
+(defn ^{:stratum 1} handle-chain-started
+  "Set active chain in model when a chain begins execution."
+  [model {:keys [chain-id step-count]}]
+  (-> model
+      (assoc :active-chain {:chain-id chain-id
+                            :step-count step-count
+                            :current-step nil
+                            :status :running})
+      (assoc :flash-message (msg/t :flash/chain-started
+                                   {:chain (name chain-id) :steps step-count}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-chain-step-started
+  "Update active chain with current step info."
+  [model {:keys [chain-id step-id step-index workflow-id]}]
+  (-> model
+      (assoc-in [:active-chain :current-step]
+                {:step-id step-id
+                 :step-index step-index
+                 :workflow-id workflow-id})
+      (assoc :flash-message (msg/t :flash/chain-step-started
+                                   {:chain (name chain-id)
+                                    :step (inc step-index)
+                                    :total (get-in model [:active-chain :step-count])
+                                    :step-id (name step-id)}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-chain-step-completed
+  "Mark current chain step as completed."
+  [model {:keys [chain-id step-index]}]
+  (-> model
+      (assoc :flash-message (msg/t :flash/chain-step-completed
+                                   {:chain (name chain-id) :step (inc step-index)}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-chain-step-failed
+  "Mark current chain step as failed, update chain status."
+  [model {:keys [chain-id step-index error]}]
+  (-> model
+      (assoc-in [:active-chain :status] :failed)
+      (assoc :flash-message (msg/t :flash/chain-step-failed
+                                   {:chain (name chain-id)
+                                    :step (inc step-index)
+                                    :error error}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-chain-completed
+  "Mark chain as completed and clear active chain."
+  [model {:keys [chain-id duration-ms step-count]}]
+  (-> model
+      (assoc :active-chain nil)
+      (assoc :flash-message (msg/t :flash/chain-completed
+                                   {:chain (name chain-id)
+                                    :steps step-count
+                                    :duration duration-ms}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-chain-failed
+  "Mark chain as failed and record error."
+  [model {:keys [chain-id failed-step error]}]
+  (-> model
+      (assoc-in [:active-chain :status] :failed)
+      (assoc :flash-message (msg/t :flash/chain-failed
+                                   {:chain (name chain-id)
+                                    :step (if failed-step (name failed-step) "")
+                                    :error error}))
+      with-timestamp))
+
+(defn ^{:stratum 1} pr-triage-summary
   "Build a {:id [repo num] :summary str} map for fleet risk triage."
   [pr]
   {:id      [(:pr/repo pr) (:pr/number pr)]
    :summary (build-pr-summary-for-triage pr)})
 
-(defn handle-prs-synced
+(defn ^{:stratum 1} merge-matching-pr
+  "Merge updated fields into the PR matching [repo, number]; pass others through."
+  [repo number pr-data prs]
+  (mapv (fn [pr]
+          (if (pr-match? repo number pr)
+            (merge pr (dissoc pr-data :pr/repo :pr/number))
+            pr))
+        (or prs [])))
+
+(defn ^{:stratum 1} remove-matching-pr
+  "Remove the PR matching [repo, number] from the vector."
+  [repo number prs]
+  (into [] (remove #(pr-match? repo number %)) (or prs [])))
+
+(defn ^{:stratum 1} handle-policy-evaluated
+  "Handle result of an :evaluate-policy side effect.
+   Merges policy evaluation result into the matching PR in :pr-items
+   and updates the active detail if this PR is currently shown."
+  [model {:keys [pr-id result]}]
+  (let [[repo number] pr-id
+        update-policy (fn [pr]
+                        (if (and (= (:pr/repo pr) repo)
+                                 (= (:pr/number pr) number))
+                          (assoc pr :pr/policy result)
+                          pr))
+        model (update model :pr-items (fn [prs] (mapv update-policy (or prs []))))
+        ;; Also update active detail if this PR is currently shown
+        active-pr (get-in model [:detail :selected-pr])
+        model (if (and active-pr
+                       (= (:pr/repo active-pr) repo)
+                       (= (:pr/number active-pr) number))
+                (assoc-in model [:detail :selected-pr :pr/policy] result)
+                model)]
+    (-> model
+        (assoc :flash-message
+               (cond
+                 (:evaluation/passed? result)
+                 (msg/t :flash/policy-passed)
+
+                 (nil? (:evaluation/passed? result))
+                 (msg/t :flash/policy-error
+                        {:error (get result :evaluation/error (msg/t :flash/policy-error-unknown))})
+
+                 :else
+                 (msg/t :flash/policy-failed
+                        {:count (count (:evaluation/violations result))})))
+        (assoc :side-effect (effect/cache-policy-result pr-id result (:pr-items model)))
+        with-timestamp)))
+
+;; Train event handlers
+(defn ^{:stratum 1} handle-train-created
+  "Handle result of a :create-train side effect."
+  [model {:keys [train-id train-name]}]
+  (-> model
+      (assoc :active-train-id train-id)
+      (assoc :flash-message (msg/t :flash/train-created
+                                   {:name (or train-name (msg/t :train/default-name))}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-prs-added-to-train
+  "Handle result of :add-to-train side effect.
+   Updates detail train data and flashes count."
+  [model {:keys [train added]}]
+  (-> model
+      (assoc-in [:detail :selected-train] train)
+      (assoc :flash-message (msg/t :flash/prs-added-to-train {:count (or added 0)}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-merge-started
+  "Handle result of :merge-next side effect."
+  [model {:keys [pr-number]}]
+  (-> model
+      (assoc :flash-message (msg/t :flash/merge-started {:number pr-number}))
+      with-timestamp))
+
+;; Batch action event handlers
+(defn ^{:stratum 1} handle-review-completed
+  "Handle result of :review-prs side effect.
+   Updates PRs with policy results and flashes summary."
+  [model {:keys [results]}]
+  (let [results-by-id (into {}
+                            (map (fn [{:keys [pr-id result]}] [pr-id result]))
+                            (or results []))
+        updated-prs (mapv (fn [pr]
+                            (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
+                              (if-let [result (get results-by-id pr-id)]
+                                (assoc pr :pr/policy result)
+                                pr)))
+                          (:pr-items model []))
+        passed (count (filter #(get-in % [:result :evaluation/passed?]) results))
+        failed (- (count results) passed)]
+    (-> model
+        (assoc :pr-items updated-prs)
+        (assoc :flash-message (msg/t :flash/review-completed
+                                     {:passed passed :failed failed}))
+        (assoc :side-effects
+               (mapv (fn [{:keys [pr-id result]}]
+                       (effect/cache-policy-result pr-id result updated-prs))
+                     results))
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-remediation-completed
+  "Handle result of :remediate-prs side effect."
+  [model {:keys [fixed failed]}]
+  (-> model
+      (assoc :flash-message (msg/t :flash/remediation-completed
+                                   {:fixed (or fixed 0) :failed (or failed 0)}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-decomposition-started
+  "Handle result of :decompose-pr side effect."
+  [model {:keys [pr-id sub-prs message] :as _payload}]
+  (-> model
+      (assoc :flash-message (or message
+                                (msg/t :flash/decomposition-started
+                                       {:number (second pr-id)
+                                        :count (count (or sub-prs []))})))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-repos-browsed
+  "Handle result of a :browse-repos side effect.
+   Populates :browse-repos cache used by :add-repo completion."
+  [model {:keys [success?] :as payload}]
+  (-> (if success?
+        (repos-browsed-ok model payload)
+        (repos-browsed-err model payload))
+      with-timestamp))
+
+;; Chat event handlers
+(defn ^{:stratum 1} handle-chat-response
+  "Handle result of a :chat-send side effect.
+   Appends assistant message to chat history, clears pending state.
+   Stores suggested actions for execution via number keys."
+  [model {:keys [content actions workflow-id]}]
+  (let [actions-vec (or actions [])
+        assistant-msg {:role :assistant
+                       :content (or content (msg/t :flash/chat-no-response))
+                       :timestamp (java.util.Date.)
+                       :actions actions-vec
+                       :workflow-id workflow-id}
+        updated (-> model
+                    (update-in [:chat :messages] conj assistant-msg)
+                    (assoc-in [:chat :pending?] false)
+                    (assoc-in [:chat :suggested-actions] actions-vec)
+                    (assoc-in [:chat :scroll-offset] nil) ;; pin to bottom on new message
+                    with-timestamp)
+        tk (:chat-active-key updated)]
+    (cond-> updated
+      tk (assoc-in [:chat-threads tk] (:chat updated)))))
+
+(defn ^{:stratum 1} handle-chat-action-result
+  "Handle result of a :chat-execute-action side effect.
+   Shows result of executing a chat-suggested action."
+  [model {:keys [success? message]}]
+  (-> model
+      (assoc :flash-message (or message
+                                (if success?
+                                  (msg/t :flash/action-completed)
+                                  (msg/t :flash/action-failed))))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-loop-started
+  "Mark a PR as actively monitored."
+  [model {:keys [pr-id]}]
+  (-> model
+      (update-pr-by-id pr-id #(assoc % :pr/monitor-active? true))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-loop-stopped
+  "Clear active-monitor flag on a PR."
+  [model {:keys [pr-id reason]}]
+  (-> model
+      (update-pr-by-id pr-id #(dissoc % :pr/monitor-active?))
+      (assoc :flash-message (msg/t :flash/monitor-stopped
+                                   {:pr-id pr-id
+                                    :reason-suffix (if reason
+                                                     (msg/t :flash/reason-suffix {:reason reason})
+                                                     "")}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-fix-started
+  "Flash that a fix cycle has begun for a PR."
+  [model {:keys [pr-id attempt]}]
+  (-> model
+      (assoc :flash-message (msg/t :flash/fix-started
+                                   {:pr-id pr-id
+                                    :attempt-suffix (if attempt
+                                                      (msg/t :flash/attempt-suffix
+                                                             {:attempt attempt})
+                                                      "")}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-fix-pushed
+  "Flash that a fix commit was pushed for a PR."
+  [model {:keys [pr-id sha]}]
+  (let [short-sha (when sha (subs (str sha) 0 (min 7 (count (str sha)))))]
+    (-> model
+        (assoc :flash-message (msg/t :flash/fix-pushed
+                                     {:pr-id pr-id
+                                      :sha-suffix (if short-sha
+                                                    (msg/t :flash/sha-suffix {:sha short-sha})
+                                                    "")}))
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-pr-monitor-budget-warning
+  "Set budget-warning flag on a PR."
+  [model {:keys [pr-id remaining total]}]
+  (-> model
+      (update-pr-by-id pr-id #(assoc % :pr/monitor-budget-warning? true))
+      (assoc :flash-message (msg/t :flash/budget-warning
+                                   {:pr-id pr-id :remaining remaining :total total}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-budget-exhausted
+  "Set budget-exhausted flag on a PR and clear active-monitor."
+  [model {:keys [pr-id]}]
+  (-> model
+      (update-pr-by-id pr-id #(-> %
+                                   (assoc :pr/monitor-budget-exhausted? true)
+                                   (dissoc :pr/monitor-active?)))
+      (assoc :flash-message (msg/t :flash/budget-exhausted {:pr-id pr-id}))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-pr-monitor-escalated
+  "Set escalated flag on a PR and add an attention item."
+  [model {:keys [pr-id reason]}]
+  (let [attn-item {:attention/id          (random-uuid)
+                   :attention/severity    :critical
+                   :attention/summary     (msg/t :flash/pr-escalated-summary
+                                                 {:pr-id pr-id
+                                                  :reason-suffix (if reason
+                                                                   (msg/t :flash/reason-em-suffix
+                                                                          {:reason reason})
+                                                                   "")})
+                   :attention/source-type :pr-monitor
+                   :attention/source-id   pr-id
+                   :attention/created-at  (java.util.Date.)}]
+    (-> model
+        (update-pr-by-id pr-id #(assoc % :pr/monitor-escalated? true))
+        (update :attention-items (fnil conj []) attn-item)
+        (assoc :flash-message (msg/t :flash/pr-escalated {:pr-id pr-id}))
+        with-timestamp)))
+
+;; Control-plane event handlers — N5-delta §3
+(defn ^{:stratum 1} handle-control-plane-agent-discovered
+  "Upsert an agent session record."
+  [model {:keys [session-id agent-data]}]
+  (let [session (assoc (or agent-data {}) :session/id session-id)
+        sessions (get model :agent-sessions [])
+        idx (some (fn [[i s]] (when (= session-id (:session/id s)) i))
+                  (map-indexed vector sessions))]
+    (-> model
+        (assoc :agent-sessions
+               (if idx
+                 (assoc sessions idx (merge (get sessions idx) session))
+                 (conj sessions session)))
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-control-plane-status-changed
+  "Update status on an existing agent session."
+  [model {:keys [session-id status]}]
+  (-> model
+      (update :agent-sessions
+              (fn [sessions]
+                (mapv (fn [s]
+                        (if (= session-id (:session/id s))
+                          (assoc s :session/status status)
+                          s))
+                      (or sessions []))))
+      with-timestamp))
+
+(defn ^{:stratum 1} handle-control-plane-decision-submitted
+  "Add a decision-pending attention item."
+  [model {:keys [decision-id data]}]
+  (let [attn-item {:attention/id          (random-uuid)
+                   :attention/severity    :warning
+                   :attention/summary     (msg/t :flash/decision-pending {:decision-id decision-id})
+                   :attention/source-type :control-plane
+                   :attention/source-id   decision-id
+                   :attention/created-at  (java.util.Date.)
+                   :attention/data        data}]
+    (-> model
+        (update :attention-items (fnil conj []) attn-item)
+        with-timestamp)))
+
+(defn ^{:stratum 1} handle-control-plane-decision-resolved
+  "Remove the attention item for a resolved decision."
+  [model {:keys [decision-id]}]
+  (-> model
+      (update :attention-items
+              (fn [items]
+                (into [] (remove #(= decision-id (:attention/source-id %)))
+                      (or items []))))
+      with-timestamp))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} handle-workflow-added [model {:keys [workflow-id name spec]}]
+  (let [event (persistence/workflow-started-event workflow-id spec)
+        wf (assoc (model/make-workflow {:id workflow-id
+                                        :name (or name (:name spec))
+                                        :status :running})
+                  :detail-snapshot (persistence/apply-detail-event
+                                    (persistence/empty-detail workflow-id)
+                                    event))]
+    (-> model
+        (upsert-workflow wf)
+        (link-chain-instance workflow-id)
+        (update-detail-if-active workflow-id
+          #(apply-evidence-intent % spec name))
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-phase-changed [model {:keys [workflow-id phase]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/phase-started-event workflow-id phase))
+        (apply-phase-change idx workflow-id phase)
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-phase-done [model {:keys [workflow-id phase outcome artifacts duration-ms
+                                       tokens cost-usd]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
+        phase-status (case outcome :success :success :failed :failed :success)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/phase-completed-event workflow-id phase outcome
+                                                                     artifacts duration-ms
+                                                                     {:tokens tokens
+                                                                      :cost-usd cost-usd}))
+        (update-workflow-at idx #(update % :progress (fn [p] (min 100 (+ (or p 0) 20)))))
+        (update-detail-if-active workflow-id
+          #(apply-phase-completion % phase phase-status duration-ms artifacts))
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-agent-status [model {:keys [workflow-id agent status message]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent status message))
+        (apply-agent-status-update idx workflow-id agent status message)
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-workflow-done [model {:keys [workflow-id status duration-ms evidence-bundle-id
+                                          tokens cost-usd pr-info]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/workflow-completed-event workflow-id status
+                                                                       duration-ms evidence-bundle-id
+                                                                       {:tokens tokens
+                                                                        :cost-usd cost-usd}))
+        (update-workflow-at idx #(cond-> (assoc % :status (or status :success)
+                                                   :progress 100 :duration-ms duration-ms)
+                                    pr-info (assoc :pr-info pr-info)))
+        (index-workflow-pr workflow-id pr-info)
+        (update-detail-if-active workflow-id
+          #(apply-workflow-completion % evidence-bundle-id duration-ms))
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-gate-result [model {:keys [workflow-id gate passed?] :as payload}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/gate-event workflow-id gate passed?
+                                                          (:event/timestamp payload)))
+        (apply-gate-result idx workflow-id gate passed? payload)
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-tool-invoked [model {:keys [workflow-id agent tool]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
+        agent-id (or agent :agent)
+        status-message (msg/t :flash/tool-invoked
+                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent-id
+                                                                  :tool-running status-message))
+        (apply-agent-status-update idx workflow-id agent-id :tool-running status-message)
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-tool-completed [model {:keys [workflow-id agent tool]}]
+  (let [idx (find-workflow-idx (:workflows model) workflow-id)
+        agent-id (or agent :agent)
+        status-message (msg/t :flash/tool-completed
+                              {:tool (if tool (name tool) (msg/t :flash/tool-unknown))})]
+    (-> model
+        (update-workflow-snapshot idx workflow-id
+                                  (persistence/agent-status-event workflow-id agent-id
+                                                                  :tool-completed status-message))
+        (apply-agent-status-update idx workflow-id agent-id :tool-completed status-message)
+        with-timestamp)))
+
+(defn ^{:stratum 2} handle-prs-synced
   "Handle result of a :sync-prs side effect.
    Replaces :pr-items with freshly fetched data.
    Preserves the current selection position, clamping to new bounds.
@@ -509,257 +875,21 @@
       risk-changed? (assoc :agent-risk-hash pr-hash)
       (seq effects) (assoc :side-effects effects))))
 
-(defn merge-matching-pr
-  "Merge updated fields into the PR matching [repo, number]; pass others through."
-  [repo number pr-data prs]
-  (mapv (fn [pr]
-          (if (pr-match? repo number pr)
-            (merge pr (dissoc pr-data :pr/repo :pr/number))
-            pr))
-        (or prs [])))
-
-(defn remove-matching-pr
-  "Remove the PR matching [repo, number] from the vector."
-  [repo number prs]
-  (into [] (remove #(pr-match? repo number %)) (or prs [])))
-
-(defn handle-pr-updated
+(defn ^{:stratum 2} handle-pr-updated
   "Update a single PR in :pr-items by [repo, number] match."
   [model {:keys [pr/repo pr/number] :as pr-data}]
   (-> model
       (update :pr-items (partial merge-matching-pr repo number pr-data))
       with-timestamp))
 
-(defn handle-pr-removed
+(defn ^{:stratum 2} handle-pr-removed
   "Remove a PR from :pr-items by [repo, number] match."
   [model {:keys [pr/repo pr/number]}]
   (-> model
       (update :pr-items (partial remove-matching-pr repo number))
       with-timestamp))
 
-(defn handle-policy-evaluated
-  "Handle result of an :evaluate-policy side effect.
-   Merges policy evaluation result into the matching PR in :pr-items
-   and updates the active detail if this PR is currently shown."
-  [model {:keys [pr-id result]}]
-  (let [[repo number] pr-id
-        update-policy (fn [pr]
-                        (if (and (= (:pr/repo pr) repo)
-                                 (= (:pr/number pr) number))
-                          (assoc pr :pr/policy result)
-                          pr))
-        model (update model :pr-items (fn [prs] (mapv update-policy (or prs []))))
-        ;; Also update active detail if this PR is currently shown
-        active-pr (get-in model [:detail :selected-pr])
-        model (if (and active-pr
-                       (= (:pr/repo active-pr) repo)
-                       (= (:pr/number active-pr) number))
-                (assoc-in model [:detail :selected-pr :pr/policy] result)
-                model)]
-    (-> model
-        (assoc :flash-message
-               (cond
-                 (:evaluation/passed? result)
-                 (msg/t :flash/policy-passed)
-
-                 (nil? (:evaluation/passed? result))
-                 (msg/t :flash/policy-error
-                        {:error (get result :evaluation/error (msg/t :flash/policy-error-unknown))})
-
-                 :else
-                 (msg/t :flash/policy-failed
-                        {:count (count (:evaluation/violations result))})))
-        (assoc :side-effect (effect/cache-policy-result pr-id result (:pr-items model)))
-        with-timestamp)))
-
-;------------------------------------------------------------------------------ Layer 3b
-;; Train event handlers
-
-(defn handle-train-created
-  "Handle result of a :create-train side effect."
-  [model {:keys [train-id train-name]}]
-  (-> model
-      (assoc :active-train-id train-id)
-      (assoc :flash-message (msg/t :flash/train-created
-                                   {:name (or train-name (msg/t :train/default-name))}))
-      with-timestamp))
-
-(defn handle-prs-added-to-train
-  "Handle result of :add-to-train side effect.
-   Updates detail train data and flashes count."
-  [model {:keys [train added]}]
-  (-> model
-      (assoc-in [:detail :selected-train] train)
-      (assoc :flash-message (msg/t :flash/prs-added-to-train {:count (or added 0)}))
-      with-timestamp))
-
-(defn handle-merge-started
-  "Handle result of :merge-next side effect."
-  [model {:keys [pr-number]}]
-  (-> model
-      (assoc :flash-message (msg/t :flash/merge-started {:number pr-number}))
-      with-timestamp))
-
-;------------------------------------------------------------------------------ Layer 3c
-;; Batch action event handlers
-
-(defn handle-review-completed
-  "Handle result of :review-prs side effect.
-   Updates PRs with policy results and flashes summary."
-  [model {:keys [results]}]
-  (let [results-by-id (into {}
-                            (map (fn [{:keys [pr-id result]}] [pr-id result]))
-                            (or results []))
-        updated-prs (mapv (fn [pr]
-                            (let [pr-id [(:pr/repo pr) (:pr/number pr)]]
-                              (if-let [result (get results-by-id pr-id)]
-                                (assoc pr :pr/policy result)
-                                pr)))
-                          (:pr-items model []))
-        passed (count (filter #(get-in % [:result :evaluation/passed?]) results))
-        failed (- (count results) passed)]
-    (-> model
-        (assoc :pr-items updated-prs)
-        (assoc :flash-message (msg/t :flash/review-completed
-                                     {:passed passed :failed failed}))
-        (assoc :side-effects
-               (mapv (fn [{:keys [pr-id result]}]
-                       (effect/cache-policy-result pr-id result updated-prs))
-                     results))
-        with-timestamp)))
-
-(defn handle-remediation-completed
-  "Handle result of :remediate-prs side effect."
-  [model {:keys [fixed failed]}]
-  (-> model
-      (assoc :flash-message (msg/t :flash/remediation-completed
-                                   {:fixed (or fixed 0) :failed (or failed 0)}))
-      with-timestamp))
-
-(defn handle-decomposition-started
-  "Handle result of :decompose-pr side effect."
-  [model {:keys [pr-id sub-prs message] :as _payload}]
-  (-> model
-      (assoc :flash-message (or message
-                                (msg/t :flash/decomposition-started
-                                       {:number (second pr-id)
-                                        :count (count (or sub-prs []))})))
-      with-timestamp))
-
-(defn handle-repos-discovered
-  "Handle result of a :discover-repos side effect.
-   Shows discovery results and triggers a PR sync."
-  [model {:keys [success? added discovered owner repos error]}]
-  (if success?
-    (assoc model
-           :fleet-repos (vec (or repos (:fleet-repos model) []))
-           :flash-message (msg/t :flash/repos-discovered
-                                 {:count discovered
-                                  :owner-suffix (if owner
-                                                  (msg/t :flash/from-owner-suffix {:owner owner})
-                                                  "")
-                                  :added added})
-           :side-effect (effect/sync-prs))
-    (assoc model :flash-message
-           (msg/t :flash/discover-failed
-                  {:error (or error (msg/t :flash/unknown-error))}))))
-
-(defn repos-browsed-ok
-  "Success path: populate browse-repos cache, reset repo-manager if source
-   is :repo-manager, and flash a summary."
-  [model {:keys [repos owner provider warnings source]}]
-  (let [repo-list (vec (or repos []))
-        base (assoc model
-                    :browse-repos repo-list
-                    :browse-repos-loading? false)
-        candidate-count (count (model/browse-candidate-repos base))
-        provider-name (name (or provider :github))
-        warnings* (vec (or warnings []))
-        base (if (= source :repo-manager)
-               (assoc base
-                      :repo-manager-source :browse
-                      :selected-idx 0
-                      :filtered-indices nil
-                      :search-matches []
-                      :search-match-idx nil
-                      ;; Pre-select fleet repos so they appear checked
-                      :selected-ids (set (get base :fleet-repos []))
-                      :visual-anchor nil)
-               base)]
-    (assoc base :flash-message
-           (msg/t :flash/repos-browsed
-                  {:count (count repo-list)
-                   :provider provider-name
-                   :owner-suffix (if owner
-                                   (msg/t :flash/from-owner-suffix {:owner owner})
-                                   "")
-                   :candidates candidate-count
-                   :warnings-suffix (if (seq warnings*)
-                                      (msg/t :flash/warnings-suffix {:count (count warnings*)})
-                                      "")}))))
-
-(defn repos-browsed-err
-  "Failure path: clear loading flag and flash error details."
-  [model {:keys [error error-source provider]}]
-  (assoc model
-         :browse-repos-loading? false
-         :flash-message (msg/t :flash/repo-browse-failed
-                               {:source-suffix (if error-source
-                                                 (msg/t :flash/error-source-suffix
-                                                        {:source (name error-source)})
-                                                 "")
-                                :provider-suffix (if provider
-                                                   (msg/t :flash/provider-suffix
-                                                          {:provider (name provider)})
-                                                   "")
-                                :error (or (some-> error str not-empty)
-                                           (msg/t :flash/no-error-details))})))
-
-(defn handle-repos-browsed
-  "Handle result of a :browse-repos side effect.
-   Populates :browse-repos cache used by :add-repo completion."
-  [model {:keys [success?] :as payload}]
-  (-> (if success?
-        (repos-browsed-ok model payload)
-        (repos-browsed-err model payload))
-      with-timestamp))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Chat event handlers
-
-(defn handle-chat-response
-  "Handle result of a :chat-send side effect.
-   Appends assistant message to chat history, clears pending state.
-   Stores suggested actions for execution via number keys."
-  [model {:keys [content actions workflow-id]}]
-  (let [actions-vec (or actions [])
-        assistant-msg {:role :assistant
-                       :content (or content (msg/t :flash/chat-no-response))
-                       :timestamp (java.util.Date.)
-                       :actions actions-vec
-                       :workflow-id workflow-id}
-        updated (-> model
-                    (update-in [:chat :messages] conj assistant-msg)
-                    (assoc-in [:chat :pending?] false)
-                    (assoc-in [:chat :suggested-actions] actions-vec)
-                    (assoc-in [:chat :scroll-offset] nil) ;; pin to bottom on new message
-                    with-timestamp)
-        tk (:chat-active-key updated)]
-    (cond-> updated
-      tk (assoc-in [:chat-threads tk] (:chat updated)))))
-
-(defn handle-chat-action-result
-  "Handle result of a :chat-execute-action side effect.
-   Shows result of executing a chat-suggested action."
-  [model {:keys [success? message]}]
-  (-> model
-      (assoc :flash-message (or message
-                                (if success?
-                                  (msg/t :flash/action-completed)
-                                  (msg/t :flash/action-failed))))
-      with-timestamp))
-
-(defn handle-fleet-risk-triaged
+(defn ^{:stratum 2} handle-fleet-risk-triaged
   "Handle result of :fleet-risk-triage side effect.
    Merges per-PR agent risk assessments into the model."
   [model {:keys [assessments error]}]
@@ -773,163 +903,18 @@
           (assoc :side-effect (effect/cache-risk-triage risk-map (:pr-items model)))
           with-timestamp))))
 
-;------------------------------------------------------------------------------ Layer 5
-;; PR monitor event handlers — N5-delta §5
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- update-pr-by-id
-  "Apply update-fn to the PR identified by pr-id in :pr-items.
-   pr-id is the raw :pr/id value from the event (number or [repo number])."
-  [model pr-id update-fn]
-  (update model :pr-items
-          (fn [prs]
-            (mapv (fn [pr]
-                    (let [match? (or (= pr-id (:pr/number pr))
-                                     (= pr-id [(:pr/repo pr) (:pr/number pr)]))]
-                      (if match? (update-fn pr) pr)))
-                  (or prs [])))))
+(defn ^{:stratum 3} handle-agent-started [model {:keys [workflow-id agent]}]
+  (handle-agent-status model {:workflow-id workflow-id :agent agent
+                              :status :started :message nil}))
 
-(defn handle-pr-monitor-loop-started
-  "Mark a PR as actively monitored."
-  [model {:keys [pr-id]}]
-  (-> model
-      (update-pr-by-id pr-id #(assoc % :pr/monitor-active? true))
-      with-timestamp))
+(defn ^{:stratum 3} handle-agent-completed [model {:keys [workflow-id agent]}]
+  (handle-agent-status model {:workflow-id workflow-id :agent agent
+                              :status :completed :message nil}))
 
-(defn handle-pr-monitor-loop-stopped
-  "Clear active-monitor flag on a PR."
-  [model {:keys [pr-id reason]}]
-  (-> model
-      (update-pr-by-id pr-id #(dissoc % :pr/monitor-active?))
-      (assoc :flash-message (msg/t :flash/monitor-stopped
-                                   {:pr-id pr-id
-                                    :reason-suffix (if reason
-                                                     (msg/t :flash/reason-suffix {:reason reason})
-                                                     "")}))
-      with-timestamp))
-
-(defn handle-pr-monitor-fix-started
-  "Flash that a fix cycle has begun for a PR."
-  [model {:keys [pr-id attempt]}]
-  (-> model
-      (assoc :flash-message (msg/t :flash/fix-started
-                                   {:pr-id pr-id
-                                    :attempt-suffix (if attempt
-                                                      (msg/t :flash/attempt-suffix
-                                                             {:attempt attempt})
-                                                      "")}))
-      with-timestamp))
-
-(defn handle-pr-monitor-fix-pushed
-  "Flash that a fix commit was pushed for a PR."
-  [model {:keys [pr-id sha]}]
-  (let [short-sha (when sha (subs (str sha) 0 (min 7 (count (str sha)))))]
-    (-> model
-        (assoc :flash-message (msg/t :flash/fix-pushed
-                                     {:pr-id pr-id
-                                      :sha-suffix (if short-sha
-                                                    (msg/t :flash/sha-suffix {:sha short-sha})
-                                                    "")}))
-        with-timestamp)))
-
-(defn handle-pr-monitor-budget-warning
-  "Set budget-warning flag on a PR."
-  [model {:keys [pr-id remaining total]}]
-  (-> model
-      (update-pr-by-id pr-id #(assoc % :pr/monitor-budget-warning? true))
-      (assoc :flash-message (msg/t :flash/budget-warning
-                                   {:pr-id pr-id :remaining remaining :total total}))
-      with-timestamp))
-
-(defn handle-pr-monitor-budget-exhausted
-  "Set budget-exhausted flag on a PR and clear active-monitor."
-  [model {:keys [pr-id]}]
-  (-> model
-      (update-pr-by-id pr-id #(-> %
-                                   (assoc :pr/monitor-budget-exhausted? true)
-                                   (dissoc :pr/monitor-active?)))
-      (assoc :flash-message (msg/t :flash/budget-exhausted {:pr-id pr-id}))
-      with-timestamp))
-
-(defn handle-pr-monitor-escalated
-  "Set escalated flag on a PR and add an attention item."
-  [model {:keys [pr-id reason]}]
-  (let [attn-item {:attention/id          (random-uuid)
-                   :attention/severity    :critical
-                   :attention/summary     (msg/t :flash/pr-escalated-summary
-                                                 {:pr-id pr-id
-                                                  :reason-suffix (if reason
-                                                                   (msg/t :flash/reason-em-suffix
-                                                                          {:reason reason})
-                                                                   "")})
-                   :attention/source-type :pr-monitor
-                   :attention/source-id   pr-id
-                   :attention/created-at  (java.util.Date.)}]
-    (-> model
-        (update-pr-by-id pr-id #(assoc % :pr/monitor-escalated? true))
-        (update :attention-items (fnil conj []) attn-item)
-        (assoc :flash-message (msg/t :flash/pr-escalated {:pr-id pr-id}))
-        with-timestamp)))
-
-;------------------------------------------------------------------------------ Layer 5b
-;; Control-plane event handlers — N5-delta §3
-
-(defn handle-control-plane-agent-discovered
-  "Upsert an agent session record."
-  [model {:keys [session-id agent-data]}]
-  (let [session (assoc (or agent-data {}) :session/id session-id)
-        sessions (get model :agent-sessions [])
-        idx (some (fn [[i s]] (when (= session-id (:session/id s)) i))
-                  (map-indexed vector sessions))]
-    (-> model
-        (assoc :agent-sessions
-               (if idx
-                 (assoc sessions idx (merge (get sessions idx) session))
-                 (conj sessions session)))
-        with-timestamp)))
-
-(defn handle-control-plane-status-changed
-  "Update status on an existing agent session."
-  [model {:keys [session-id status]}]
-  (-> model
-      (update :agent-sessions
-              (fn [sessions]
-                (mapv (fn [s]
-                        (if (= session-id (:session/id s))
-                          (assoc s :session/status status)
-                          s))
-                      (or sessions []))))
-      with-timestamp))
-
-(defn handle-control-plane-decision-submitted
-  "Add a decision-pending attention item."
-  [model {:keys [decision-id data]}]
-  (let [attn-item {:attention/id          (random-uuid)
-                   :attention/severity    :warning
-                   :attention/summary     (msg/t :flash/decision-pending {:decision-id decision-id})
-                   :attention/source-type :control-plane
-                   :attention/source-id   decision-id
-                   :attention/created-at  (java.util.Date.)
-                   :attention/data        data}]
-    (-> model
-        (update :attention-items (fnil conj []) attn-item)
-        with-timestamp)))
-
-(defn handle-control-plane-decision-resolved
-  "Remove the attention item for a resolved decision."
-  [model {:keys [decision-id]}]
-  (-> model
-      (update :attention-items
-              (fn [items]
-                (into [] (remove #(= decision-id (:attention/source-id %)))
-                      (or items []))))
-      with-timestamp))
-
-;------------------------------------------------------------------------------ Layer 5c
-;; Subscription health handler
-
-(defn handle-subscription-status-changed
-  "Update subscription status and last-event timestamp in model."
-  [model {:keys [status last-event-at]}]
-  (assoc model
-         :subscription/status       (or status :connected)
-         :subscription/last-event-at last-event-at))
+(defn ^{:stratum 3} handle-agent-failed [model {:keys [workflow-id agent]}]
+  (let [agent-kw (or agent :unknown)]
+    (-> (handle-agent-status model {:workflow-id workflow-id :agent agent-kw
+                                    :status :failed :message nil})
+        (assoc :flash-message (msg/t :flash/agent-failed {:agent (name agent-kw)})))))

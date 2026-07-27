@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.spec-parser.anomaly.parse-content-test
   "Coverage for `core/parse-content` (anomaly-returning) and its
    boundary escalation through `parse-spec-file`.
@@ -31,28 +30,28 @@
             [ai.miniforge.anomaly.interface :as anomaly]
             [ai.miniforge.spec-parser.core :as core]))
 
-;------------------------------------------------------------------------------ Anomaly-returning happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest parse-content-known-format
+;------------------------------------------------------------------------------ Anomaly-returning happy path
+(deftest ^{:stratum 0} parse-content-known-format
   (testing "known format dispatches to its parser"
     (is (= {:a 1} (core/parse-content :edn "{:a 1}")))))
 
 ;------------------------------------------------------------------------------ Anomaly-returning failure paths
-
-(deftest parse-content-unknown-format-returns-fault
+(deftest ^{:stratum 0} parse-content-unknown-format-returns-fault
   (testing "unknown format yields :fault anomaly (registry-level programmer error)"
     (let [result (core/parse-content :toml "[x]")]
       (is (anomaly/anomaly? result))
       (is (= :fault (:anomaly/type result)))
       (is (contains? (set (get-in result [:anomaly/data :available])) :edn)))))
 
-(deftest parse-content-yaml-returns-unsupported
+(deftest ^{:stratum 0} parse-content-yaml-returns-unsupported
   (testing "YAML dispatches to parse-yaml which returns :unsupported anomaly"
     (let [result (core/parse-content :yaml "title: T\n")]
       (is (anomaly/anomaly? result))
       (is (= :unsupported (:anomaly/type result))))))
 
-(deftest parse-content-malformed-edn-returns-anomaly
+(deftest ^{:stratum 0} parse-content-malformed-edn-returns-anomaly
   (testing "format-level dispatch surfaces parser anomalies (not wrapped)"
     (let [result (core/parse-content :edn "{:a 1")]
       (is (anomaly/anomaly? result))
@@ -64,8 +63,7 @@
 ;; (every keyword `detect-format` emits has a registered parser), but
 ;; `parse-yaml`'s :unsupported anomaly *is* reachable: a `.yaml` file
 ;; on disk routes through detect-format → parse-content → parse-yaml.
-
-(deftest parse-spec-file-escalates-yaml-unsupported
+(deftest ^{:stratum 0} parse-spec-file-escalates-yaml-unsupported
   (testing "yaml content surfaces as ex-info from parse-spec-file"
     (let [tmp (fs/create-temp-file {:suffix ".yaml"})]
       (try

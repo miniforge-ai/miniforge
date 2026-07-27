@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval.plan
   "N13 §2.5 Comment Response Agent — Layer 1: Domain (pure planning).
 
@@ -29,7 +28,9 @@
    [ai.miniforge.pr-lifecycle.policy-eval.payload :as payload]
    [clojure.string :as str]))
 
-(defn- multi-line?
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} multi-line?
   "True when the suggested-fix spans more than one line. v0 skips
    these because applying a multi-line replacement requires knowing
    the original span, which the comment doesn't carry directly."
@@ -37,7 +38,7 @@
   (and (string? suggested-fix)
        (str/includes? suggested-fix "\n")))
 
-(defn- plan-decision
+(defn- ^{:stratum 0} plan-decision
   "Factory: build a `classify-fix` result map. Single source of
    truth for the `{:action :reason :payload}` shape — avoids hand-
    constructing the same map at every cond branch in `classify-fix`."
@@ -46,7 +47,9 @@
    :reason  reason
    :payload payload})
 
-(defn classify-fix
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} classify-fix
   "Pure: decide what to do with a single policy-eval comment.
    Returns `{:action :apply | :escalate | :skip
              :reason  <keyword>
@@ -69,7 +72,9 @@
       :else
       (plan-decision :apply :ok p))))
 
-(defn plan-fixes
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} plan-fixes
   "Pure: walk a vector of comments, classify each, and partition into
    `{:to-apply [...] :to-escalate [...] :to-skip [...]}`. Each entry
    carries the original comment + its classification."

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.evidence-test
   "Unit tests for evidence bundle CLI commands."
   (:require
@@ -25,11 +24,12 @@
    [ai.miniforge.cli.main.commands.evidence :as sut]
    [ai.miniforge.cli.main.commands.shared :as shared]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Layer 0: Fixtures & factories
+(def ^{:stratum 0} ^:dynamic *tmp-dir* nil)
 
-(def ^:dynamic *tmp-dir* nil)
-
-(defn tmp-dir-fixture [f]
+(defn ^{:stratum 0} tmp-dir-fixture [f]
   (let [dir (str (fs/create-temp-dir {:prefix "evidence-test-"}))]
     (binding [*tmp-dir* dir]
       (try
@@ -37,9 +37,7 @@
         (finally
           (fs/delete-tree dir))))))
 
-(use-fixtures :each tmp-dir-fixture)
-
-(defn- make-artifact
+(defn- ^{:stratum 0} make-artifact
   "Factory for a single bundle artifact entry. Defaults to a code artifact;
    override `:artifact/type` or `:artifact/id` to vary per test."
   [& {:as overrides}]
@@ -47,26 +45,26 @@
           :artifact/id   "art-1"}
          overrides))
 
-(defn- make-phase
+(defn- ^{:stratum 0} make-phase
   "Factory for a phase entry under `:evidence/plan` or `:evidence/implement`."
   [phase-name & {:as overrides}]
   (merge {:phase/name phase-name}
          overrides))
 
-(defn- make-outcome
+(defn- ^{:stratum 0} make-outcome
   "Factory for an `:evidence/outcome` value."
   [& {:as overrides}]
   (merge {:outcome/success false}
          overrides))
 
-(defn- make-dependency-health
+(defn- ^{:stratum 0} make-dependency-health
   "Factory for a single `:evidence/dependency-health` entry."
   [& {:as overrides}]
   (merge {:dependency/id     :anthropic
           :dependency/status :degraded}
          overrides))
 
-(defn- make-failure-attribution
+(defn- ^{:stratum 0} make-failure-attribution
   "Factory for an `:evidence/failure-attribution` map."
   [& {:as overrides}]
   (merge {:failure/source   :external-provider
@@ -75,7 +73,31 @@
           :dependency/class :rate-limit}
          overrides))
 
-(defn- make-bundle
+(defn- ^{:stratum 0} make-list-bundle
+  "Factory for the minimal bundle shape returned by the optional provider in list output."
+  [& {:as overrides}]
+  (merge {:bundle/id          "b-1"
+          :bundle/workflow-id "wf-1"
+          :bundle/status      "complete"}
+         overrides))
+
+(deftest ^{:stratum 0} evidence-show-cmd-missing-id-test
+  (testing "show command exits with error when no id provided"
+    (let [exited? (atom false)]
+      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
+        (with-out-str (sut/evidence-show-cmd {}))
+        (is @exited?)))))
+
+(deftest ^{:stratum 0} evidence-export-cmd-missing-id-test
+  (testing "export command exits with error when no id provided"
+    (let [exited? (atom false)]
+      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
+        (with-out-str (sut/evidence-export-cmd {}))
+        (is @exited?)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} make-bundle
   "Factory for a minimal legacy evidence bundle. Pass overrides as kwargs."
   [& {:as overrides}]
   (merge {:bundle/id          "bundle-1"
@@ -86,15 +108,7 @@
           :bundle/phases      [:plan :implement]}
          overrides))
 
-(defn- make-list-bundle
-  "Factory for the minimal bundle shape returned by the optional provider in list output."
-  [& {:as overrides}]
-  (merge {:bundle/id          "b-1"
-          :bundle/workflow-id "wf-1"
-          :bundle/status      "complete"}
-         overrides))
-
-(defn- make-canonical-bundle
+(defn- ^{:stratum 1} make-canonical-bundle
   "Factory for a canonical-form evidence bundle including dependency-health
    and failure-attribution. Pass overrides as kwargs."
   [& {:as overrides}]
@@ -109,29 +123,21 @@
          overrides))
 
 ;------------------------------------------------------------------------------ Layer 1: Tests
-
-(deftest evidence-list-cmd-no-component-empty-dir-test
+(deftest ^{:stratum 1} evidence-list-cmd-no-component-empty-dir-test
   (testing "list command shows 'no bundles' when dir is empty"
     (with-redefs [shared/call-optional-provider (constantly nil)
                   app-config/home-dir (constantly *tmp-dir*)]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
         (is (re-find #"(?i)no evidence" output))))))
 
-(deftest evidence-list-cmd-component-results-test
+(deftest ^{:stratum 1} evidence-list-cmd-component-results-test
   (testing "list command displays component results when available"
     (with-redefs [shared/call-optional-provider
                   (constantly [(make-list-bundle)])]
       (let [output (with-out-str (sut/evidence-list-cmd {}))]
         (is (.contains output "b-1"))))))
 
-(deftest evidence-show-cmd-missing-id-test
-  (testing "show command exits with error when no id provided"
-    (let [exited? (atom false)]
-      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
-        (with-out-str (sut/evidence-show-cmd {}))
-        (is @exited?)))))
-
-(deftest evidence-show-cmd-not-found-test
+(deftest ^{:stratum 1} evidence-show-cmd-not-found-test
   (testing "show command reports not found for unknown bundle"
     (let [exited? (atom false)]
       (with-redefs [shared/call-optional-provider (constantly nil)
@@ -140,7 +146,20 @@
         (with-out-str (sut/evidence-show-cmd {:id "missing"}))
         (is @exited?)))))
 
-(deftest evidence-show-cmd-with-bundle-test
+(deftest ^{:stratum 1} load-bundle-from-file-test
+  (testing "loads valid EDN file"
+    (let [f (java.io.File. (str *tmp-dir* "/test.edn"))]
+      (spit f (pr-str {:bundle/id "b-1"}))
+      (is (= {:bundle/id "b-1"} (sut/load-bundle-from-file f)))))
+
+  (testing "returns nil for non-EDN file"
+    (let [f (java.io.File. (str *tmp-dir* "/test.json"))]
+      (spit f "{}")
+      (is (nil? (sut/load-bundle-from-file f))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} evidence-show-cmd-with-bundle-test
   (testing "show command displays bundle details from filesystem"
     (let [evidence-path (str *tmp-dir* "/evidence")]
       (fs/create-dirs evidence-path)
@@ -150,7 +169,7 @@
         (let [output (with-out-str (sut/evidence-show-cmd {:id "test-bundle"}))]
           (is (.contains output "wf-1")))))))
 
-(deftest evidence-show-cmd-with-canonical-bundle-test
+(deftest ^{:stratum 2} evidence-show-cmd-with-canonical-bundle-test
   (testing "show command normalizes canonical evidence bundle fields"
     (let [evidence-path (str *tmp-dir* "/evidence")]
       (fs/create-dirs evidence-path)
@@ -163,20 +182,4 @@
           (is (.contains output "external-provider / anthropic / rate-limit"))
           (is (.contains output "Dependencies: 1")))))))
 
-(deftest evidence-export-cmd-missing-id-test
-  (testing "export command exits with error when no id provided"
-    (let [exited? (atom false)]
-      (with-redefs [shared/exit! (fn [_] (reset! exited? true))]
-        (with-out-str (sut/evidence-export-cmd {}))
-        (is @exited?)))))
-
-(deftest load-bundle-from-file-test
-  (testing "loads valid EDN file"
-    (let [f (java.io.File. (str *tmp-dir* "/test.edn"))]
-      (spit f (pr-str {:bundle/id "b-1"}))
-      (is (= {:bundle/id "b-1"} (sut/load-bundle-from-file f)))))
-
-  (testing "returns nil for non-EDN file"
-    (let [f (java.io.File. (str *tmp-dir* "/test.json"))]
-      (spit f "{}")
-      (is (nil? (sut/load-bundle-from-file f))))))
+(use-fixtures :each tmp-dir-fixture)

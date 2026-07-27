@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.boundary.interface.never-throws-test
   "Boundary helper invariant. With a known category, no runtime input
    may cause `execute` to escape with a thrown exception. Every
@@ -26,7 +25,9 @@
    [ai.miniforge.boundary.interface :as boundary]
    [ai.miniforge.response-chain.interface :as chain]))
 
-(deftest error-thrown-by-wrapped-fn-is-absorbed
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} error-thrown-by-wrapped-fn-is-absorbed
   (testing "even a JVM Error subclass becomes an anomaly step"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -35,7 +36,7 @@
       (is (false? (chain/succeeded? c)))
       (is (m/validate chain/Chain c)))))
 
-(deftest deeply-nested-throw-is-absorbed
+(deftest ^{:stratum 0} deeply-nested-throw-is-absorbed
   (testing "a throw triggered by a chain of helpers still becomes a step"
     (let [boom (fn [] (throw (RuntimeException. "deep")))
           mid  (fn [] (boom))
@@ -46,7 +47,7 @@
                                  top)]
       (is (false? (chain/succeeded? c))))))
 
-(deftest non-ifn-in-f-slot-becomes-anomaly-step
+(deftest ^{:stratum 0} non-ifn-in-f-slot-becomes-anomaly-step
   (testing "passing a non-IFn (string) as f doesn't escape — apply throws, boundary captures it"
     (let [c (boundary/execute :unknown
                               (chain/create-chain :flow)
@@ -56,7 +57,7 @@
       (is (m/validate chain/Chain c))
       (is (false? (chain/succeeded? c))))))
 
-(deftest already-failed-chain-stays-failed
+(deftest ^{:stratum 0} already-failed-chain-stays-failed
   (testing "execute on a chain that already has a failed step keeps the chain failed and well-formed"
     (let [c0 (chain/create-chain :flow)
           c1 (boundary/execute :unknown c0 :a (fn [] (throw (RuntimeException. "x"))))

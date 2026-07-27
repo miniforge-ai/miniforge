@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.artifact-cmds
   "Artifact commands: list, provenance.
 
@@ -31,12 +30,31 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- artifacts-dir []
+;; Helpers
+(defn- ^{:stratum 0} artifacts-dir []
   (app-config/artifacts-dir))
 
-(defn- scan-artifact-files []
+(defn- ^{:stratum 0} create-artifact-store []
+  (artifact/create-transit-store {:dir (app-config/home-dir)}))
+
+(defn ^{:stratum 0} format-file-size
+  "Format a byte count into a human-readable size string."
+  [bytes]
+  (cond
+    (< bytes shared/bytes-per-kb) (str bytes "B")
+    (< bytes shared/bytes-per-mb) (format "%.1fKB" (/ bytes (double shared/bytes-per-kb)))
+    :else                         (format "%.1fMB" (/ bytes (double shared/bytes-per-mb)))))
+
+;; Display helpers
+(defn- ^{:stratum 0} keyword->str
+  "Convert a value to string, rendering keywords as their name."
+  [v]
+  (if (keyword? v) (name v) (str v)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} scan-artifact-files []
   (let [dir (io/file (artifacts-dir))]
     (if (.exists dir)
       (->> (file-seq dir)
@@ -46,36 +64,17 @@
            vec)
       [])))
 
-(defn- create-artifact-store []
-  (artifact/create-transit-store {:dir (app-config/home-dir)}))
-
-(defn- list-component-artifacts []
+(defn- ^{:stratum 1} list-component-artifacts []
   (try
     (vec (artifact/query (create-artifact-store) {}))
     (catch Exception _ nil)))
 
-(defn- get-component-provenance [id]
+(defn- ^{:stratum 1} get-component-provenance [id]
   (try
     (artifact/get-provenance (create-artifact-store) id)
     (catch Exception _ nil)))
 
-(defn format-file-size
-  "Format a byte count into a human-readable size string."
-  [bytes]
-  (cond
-    (< bytes shared/bytes-per-kb) (str bytes "B")
-    (< bytes shared/bytes-per-mb) (format "%.1fKB" (/ bytes (double shared/bytes-per-kb)))
-    :else                         (format "%.1fMB" (/ bytes (double shared/bytes-per-mb)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Display helpers
-
-(defn- keyword->str
-  "Convert a value to string, rendering keywords as their name."
-  [v]
-  (if (keyword? v) (name v) (str v)))
-
-(def ^:private provenance-spec
+(def ^{:stratum 1} ^:private provenance-spec
   {:header   :artifact/provenance-header
    :fields   [[:artifact/workflow-id :artifact/provenance-workflow {:transform keyword->str}]
               [:artifact/phase       :artifact/provenance-phase    {:transform keyword->str}]
@@ -87,15 +86,15 @@
               {:key :artifact/files :header :artifact/provenance-files
                :entry :artifact/provenance-file-entry :entry-fn (fn [p] {:path p})}]})
 
-(defn- display-provenance
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} display-provenance
   "Render the full provenance block for an artifact."
   [id provenance]
   (display/render-detail (assoc provenance-spec :header-params {:id id}) provenance))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Command implementations
-
-(defn artifact-list-cmd
+(defn ^{:stratum 2} artifact-list-cmd
   "List artifacts produced by workflow runs.
 
    Uses the artifact component's list function if available,
@@ -128,7 +127,9 @@
           (println (messages/t :artifact/none))))))
   (println))
 
-(defn artifact-provenance-cmd
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} artifact-provenance-cmd
   "Show provenance chain for an artifact by ID.
 
    Provenance includes: workflow run, phase that produced it, agent,

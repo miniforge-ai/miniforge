@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.network-health-test
   "Tests for `ai.miniforge.llm.network-health` — the URL-driven
    connectivity probe primitive that PR-B will schedule alongside the
@@ -25,9 +24,10 @@
    [ai.miniforge.llm.network-health :as nh]
    [ai.miniforge.llm.protocols.impl.llm-client :as impl]))
 
-;------------------------------------------------------------------------------ Factories
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- stub-http-client
+;------------------------------------------------------------------------------ Factories
+(defn- ^{:stratum 0} stub-http-client
   "Build an http-client stub matching `org.httpkit.client/request`'s
    shape (called with a request-map, returns a deref-able). The stub
    `response` is what the caller's `@(http-client ...)` returns.
@@ -40,7 +40,7 @@
       (swap! capture assoc :last-request request-map))
     (delay response)))
 
-(defn- throwing-http-client
+(defn- ^{:stratum 0} throwing-http-client
   "Build an http-client stub that throws `ex` synchronously (mirroring
    http-kit's documented dual-mode behavior where connection failures
    can surface as a *thrown* exception rather than an `:error` map)."
@@ -48,7 +48,7 @@
   (fn [_request-map]
     (throw ex)))
 
-(defn- throwing-on-deref-http-client
+(defn- ^{:stratum 0} throwing-on-deref-http-client
   "Build an http-client stub that returns a deref-able whose `@` throws.
    http-kit can also surface failures this way for callers that drop
    into Java-thread land."
@@ -58,8 +58,7 @@
       (deref [_] (throw ex)))))
 
 ;------------------------------------------------------------------------------ Probe-endpoint resolution (lives in llm-client/backends)
-
-(deftest probe-endpoint-for-test
+(deftest ^{:stratum 0} probe-endpoint-for-test
   ;; Co-located with the rest of each backend's config in
   ;; `llm-client/backends` — comment review on PR #1051 moved the
   ;; lookup out of network-health so the probe primitive stays
@@ -80,9 +79,10 @@
     (is (= "https://1.1.1.1/" (impl/probe-endpoint-for nil))
         "nil backend key still resolves to the generic fallback")))
 
-;------------------------------------------------------------------------------ network-healthy? (URL-driven)
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest network-healthy?-treats-any-http-response-as-up-test
+;------------------------------------------------------------------------------ network-healthy? (URL-driven)
+(deftest ^{:stratum 1} network-healthy?-treats-any-http-response-as-up-test
   ;; Connectivity is about TCP/TLS reach + an HTTP exchange; any status
   ;; code proves the network completed a round trip. 4xx is the common
   ;; case for an unauthenticated HEAD on api.anthropic.com (returns 405
@@ -112,7 +112,7 @@
             {:http-client (stub-http-client {:status 301 :body ""
                                              :headers {"Location" "https://elsewhere"}})})))))
 
-(deftest network-healthy?-treats-connection-failure-as-down-test
+(deftest ^{:stratum 1} network-healthy?-treats-connection-failure-as-down-test
   (let [test-url "https://api.example.com/"]
     (testing ":error key (connection refused, DNS failure, etc.) → false"
       (is (false? (nh/network-healthy?
@@ -145,7 +145,7 @@
                     test-url
                     {:http-client (stub-http-client "not-a-map")}))))))
 
-(deftest network-healthy?-treats-thrown-exception-as-down-test
+(deftest ^{:stratum 1} network-healthy?-treats-thrown-exception-as-down-test
   ;; Regression for PR #1051 comment review: http-kit can surface
   ;; connection failures as a *thrown* exception rather than an
   ;; `:error` map. The probe must catch both shapes — otherwise it
@@ -176,8 +176,7 @@
                                     (RuntimeException. "wat"))}))))))
 
 ;------------------------------------------------------------------------------ Request shape
-
-(deftest network-healthy?-sends-head-request-test
+(deftest ^{:stratum 1} network-healthy?-sends-head-request-test
   (testing "probe uses HEAD method against the URL it was given"
     (let [capture (atom {})]
       (nh/network-healthy?
@@ -188,7 +187,7 @@
              (get-in @capture [:last-request :url]))
           "URL is the one the caller passed in — no internal mapping"))))
 
-(deftest network-healthy?-default-timeout-test
+(deftest ^{:stratum 1} network-healthy?-default-timeout-test
   (testing "default-probe-timeout-ms is propagated to the http-client"
     (let [capture (atom {})]
       (nh/network-healthy?
@@ -197,7 +196,7 @@
       (is (= nh/default-probe-timeout-ms
              (get-in @capture [:last-request :timeout]))))))
 
-(deftest network-healthy?-custom-timeout-test
+(deftest ^{:stratum 1} network-healthy?-custom-timeout-test
   (testing ":timeout-ms in opts overrides the default"
     (let [capture (atom {})]
       (nh/network-healthy?

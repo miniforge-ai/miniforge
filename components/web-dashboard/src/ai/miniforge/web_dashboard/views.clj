@@ -11,7 +11,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views
   "Production-ready server-side rendered views for web dashboard.
 
@@ -32,24 +31,24 @@
    [ai.miniforge.web-dashboard.views.control-plane :as control-plane]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Layout and shared utilities
 
-(def ^:private stylesheet-path
+;; Layout and shared utilities
+(def ^{:stratum 0} ^:private stylesheet-path
   "/css/app.css")
 
-(def ^:private htmx-script-path
+(def ^{:stratum 0} ^:private htmx-script-path
   "/js/htmx.min.js")
 
-(def ^:private htmx-ws-script-path
+(def ^{:stratum 0} ^:private htmx-ws-script-path
   "/js/htmx-ws.js")
 
-(def ^:private i18n-script-path
+(def ^{:stratum 0} ^:private i18n-script-path
   "/js/i18n.js")
 
-(def ^:private app-script-path
+(def ^{:stratum 0} ^:private app-script-path
   "/js/app.js")
 
-(def ^:private filter-script-paths
+(def ^{:stratum 0} ^:private filter-script-paths
   ["/js/filters/runtime.js"
    "/js/filters/state.js"
    "/js/filters/persistence.js"
@@ -57,7 +56,7 @@
    "/js/filters/ui.js"
    "/js/filters/init.js"])
 
-(defn- messages-hydration-script
+(defn- ^{:stratum 0} messages-hydration-script
   "Serialize the loaded message catalog into an inline <script> block so
    the browser-side translator has the same strings the server uses.
 
@@ -70,7 +69,7 @@
         safe (str/replace payload "</" "<\\/")]
     [:script (hutil/raw-string (str "window.MINIFORGE_MESSAGES = " safe ";"))]))
 
-(def ^:private sidebar-nav-items
+(def ^{:stratum 0} ^:private sidebar-nav-items
   [{:pane :dashboard     :href "/"              :label-key :layout/nav-dashboard}
    {:pane :fleet         :href "/fleet"         :label-key :layout/nav-pr-fleet}
    {:pane :task-status   :href "/dag"           :label-key :layout/nav-task-status}
@@ -78,7 +77,7 @@
    {:pane :workflows     :href "/workflows"     :label-key :layout/nav-workflows}
    {:pane :control-plane :href "/control-plane" :label-key :layout/nav-control-plane}])
 
-(defn title->pane
+(defn ^{:stratum 0} title->pane
   "Convert page title to pane keyword for filter context."
   [title]
   (case title
@@ -89,7 +88,124 @@
     "Dashboard" :dashboard
     :task-status))
 
-(defn- page-head
+(defn- ^{:stratum 0} event-item
+  [{:keys [icon text]}]
+  [:div.event-item
+   [:span.event-icon icon]
+   [:span.event-text text]])
+
+(defn- ^{:stratum 0} banner-left
+  []
+  [:div.banner-left
+   [:div.logo-container
+    [:img.banner-logo {:src "/img/miniforge_logo.png"
+                       :alt "Miniforge"}]
+    [:div.logo-tagline (messages/t :layout/logo-tagline)]]])
+
+(defn- ^{:stratum 0} share-button
+  []
+  [:button.btn.btn-sm.btn-ghost
+   {:onclick "window.miniforge.filters && window.miniforge.filters.shareCurrentView()"
+    :title (messages/t :layout/share-title)}
+   (messages/t :layout/share-label)])
+
+(def ^{:stratum 0} ^:private theme-options
+  [["warm_light"    "Warm Light"]
+   ["cool_light"    "Cool Light"]
+   ["royal_light"   "Royal Light"]
+   ["aurora_light"  "Aurora Light"]
+   ["warm_dark"     "Warm Dark"]
+   ["cool_dark"     "Cool Dark"]
+   ["royal_dark"    "Royal Dark"]
+   ["aurora_dark"   "Aurora Dark"]
+   ["high-contrast" "High Contrast"]])
+
+(defn- ^{:stratum 0} refresh-button
+  []
+  [:button.btn.btn-sm.btn-ghost
+   {:onclick "location.reload()"}
+   (messages/t :layout/refresh-label)])
+
+(defn- ^{:stratum 0} clear-filters-button
+  []
+  [:button.btn.btn-sm.btn-ghost
+   {:onclick "window.miniforge.filters && window.miniforge.filters.clearFilters('global')"
+    :title (messages/t :layout/clear-filters-title)}
+   (messages/t :layout/clear-label)])
+
+(defn- ^{:stratum 0} add-filter-button
+  []
+  [:button.btn.btn-sm.btn-ghost.filter-add
+   {:hx-get "/api/filter-fields?scope=global"
+    :hx-target "#filter-modal-container"
+    :hx-swap "innerHTML"
+    :title (messages/t :layout/add-filter-title)}
+   (messages/t :action/filter)])
+
+(defn- ^{:stratum 0} save-view-button
+  []
+  [:button.btn.btn-sm.btn-ghost
+   {:onclick (messages/t :layout/save-view-onclick)
+    :title (messages/t :layout/save-view-title)}
+   (messages/t :layout/save-view-label)])
+
+(defn- ^{:stratum 0} nav-item
+  [current-pane {:keys [pane href label-key]}]
+  (let [active-class (when (= current-pane pane) "active")
+        label (messages/t label-key)]
+    [:a.nav-item {:href href
+                  :class active-class}
+     [:span.icon "▸"] label]))
+
+(defn- ^{:stratum 0} page-main
+  [title body]
+  [:main.main
+   [:div.page-header
+    [:h1.page-title title]]
+   (into [:div.content] body)])
+
+(defn- ^{:stratum 0} filter-modal-container
+  []
+  [:div#filter-modal-container])
+
+;; Public API - Re-exports from subdirectories
+;; Dashboard views
+(def ^{:stratum 0} stats-fragment dashboard/stats-fragment)
+
+(def ^{:stratum 0} risk-analysis-fragment dashboard/risk-analysis-fragment)
+
+(def ^{:stratum 0} activity-fragment dashboard/activity-fragment)
+
+(def ^{:stratum 0} fleet-grid-fragment dashboard/fleet-grid-fragment)
+
+;; Fleet views
+(def ^{:stratum 0} train-list-fragment fleet/train-list-fragment)
+
+;; DAG views
+(def ^{:stratum 0} filter-modal-fragment dag/filter-modal-fragment)
+
+;; Evidence views
+(def ^{:stratum 0} evidence-list-fragment evidence/evidence-list-fragment)
+
+;; Workflow views
+(def ^{:stratum 0} workflow-list-fragment workflows/workflow-list-fragment)
+
+(def ^{:stratum 0} workflow-summary-fragment dashboard/workflow-summary-fragment)
+
+(def ^{:stratum 0} workflow-events-fragment workflows/workflow-events-fragment)
+
+(def ^{:stratum 0} workflow-detail-panel workflows/workflow-detail-panel)
+
+(def ^{:stratum 0} archived-workflow-list-fragment archived/archived-workflow-list-fragment)
+
+;; Control Plane views
+(def ^{:stratum 0} agents-grid-fragment control-plane/agents-grid-fragment)
+
+(def ^{:stratum 0} decision-queue-fragment control-plane/decision-queue-fragment)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} page-head
   [title]
   [:head
    [:meta {:charset "utf-8"}]
@@ -101,46 +217,14 @@
    [:script {:src htmx-script-path}]
    [:script {:src htmx-ws-script-path}]])
 
-(defn- event-item
-  [{:keys [icon text]}]
-  [:div.event-item
-   [:span.event-icon icon]
-   [:span.event-text text]])
-
-(defn- event-banner
+(defn- ^{:stratum 1} event-banner
   []
   (let [event-items [{:icon "⚡" :text (messages/t :layout/event-build-passing)}
                      {:icon "✓" :text (messages/t :layout/event-prs-merged)}]]
     (into [:div.event-scroll {:id "event-banner"}]
           (mapv event-item event-items))))
 
-(defn- banner-left
-  []
-  [:div.banner-left
-   [:div.logo-container
-    [:img.banner-logo {:src "/img/miniforge_logo.png"
-                       :alt "Miniforge"}]
-    [:div.logo-tagline (messages/t :layout/logo-tagline)]]])
-
-(defn- share-button
-  []
-  [:button.btn.btn-sm.btn-ghost
-   {:onclick "window.miniforge.filters && window.miniforge.filters.shareCurrentView()"
-    :title (messages/t :layout/share-title)}
-   (messages/t :layout/share-label)])
-
-(def ^:private theme-options
-  [["warm_light"    "Warm Light"]
-   ["cool_light"    "Cool Light"]
-   ["royal_light"   "Royal Light"]
-   ["aurora_light"  "Aurora Light"]
-   ["warm_dark"     "Warm Dark"]
-   ["cool_dark"     "Cool Dark"]
-   ["royal_dark"    "Royal Dark"]
-   ["aurora_dark"   "Aurora Dark"]
-   ["high-contrast" "High Contrast"]])
-
-(defn- theme-picker
+(defn- ^{:stratum 1} theme-picker
   []
   [:div.theme-picker
    [:label {:for "theme-select"} (messages/t :layout/theme-label)]
@@ -150,54 +234,7 @@
     (for [[value label] theme-options]
       [:option {:value value} label])]])
 
-(defn- refresh-button
-  []
-  [:button.btn.btn-sm.btn-ghost
-   {:onclick "location.reload()"}
-   (messages/t :layout/refresh-label)])
-
-(defn- banner-right
-  []
-  [:div.banner-right
-   [:div.ws-status
-    [:span#ws-indicator.status-dot.disconnected]
-    [:span#ws-text.ws-text (messages/t :layout/ws-connected)]]
-   (share-button)
-   (theme-picker)
-   (refresh-button)])
-
-(defn- top-banner
-  []
-  [:header.top-banner
-   [:div.banner-content
-    (banner-left)
-    [:div.banner-center (event-banner)]
-    (banner-right)]])
-
-(defn- clear-filters-button
-  []
-  [:button.btn.btn-sm.btn-ghost
-   {:onclick "window.miniforge.filters && window.miniforge.filters.clearFilters('global')"
-    :title (messages/t :layout/clear-filters-title)}
-   (messages/t :layout/clear-label)])
-
-(defn- add-filter-button
-  []
-  [:button.btn.btn-sm.btn-ghost.filter-add
-   {:hx-get "/api/filter-fields?scope=global"
-    :hx-target "#filter-modal-container"
-    :hx-swap "innerHTML"
-    :title (messages/t :layout/add-filter-title)}
-   (messages/t :action/filter)])
-
-(defn- save-view-button
-  []
-  [:button.btn.btn-sm.btn-ghost
-   {:onclick (messages/t :layout/save-view-onclick)
-    :title (messages/t :layout/save-view-title)}
-   (messages/t :layout/save-view-label)])
-
-(defn- global-filter-bar
+(defn- ^{:stratum 1} global-filter-bar
   []
   [:div.global-filter-bar
    [:span.global-filter-bar-label (messages/t :layout/global-filters-label)]
@@ -207,44 +244,49 @@
     (add-filter-button)
     (save-view-button)]])
 
-(defn- nav-item
-  [current-pane {:keys [pane href label-key]}]
-  (let [active-class (when (= current-pane pane) "active")
-        label (messages/t label-key)]
-    [:a.nav-item {:href href
-                  :class active-class}
-     [:span.icon "▸"] label]))
-
-(defn- sidebar-nav
+(defn- ^{:stratum 1} sidebar-nav
   [current-pane]
   [:aside.sidebar
    (into [:nav.nav]
          (mapv #(nav-item current-pane %) sidebar-nav-items))])
 
-(defn- page-main
-  [title body]
-  [:main.main
-   [:div.page-header
-    [:h1.page-title title]]
-   (into [:div.content] body)])
+(defn- ^{:stratum 1} footer-scripts
+  []
+  (into [[:script {:src app-script-path}]]
+        (mapv (fn [path] [:script {:src path}]) filter-script-paths)))
 
-(defn- dashboard-shell
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} banner-right
+  []
+  [:div.banner-right
+   [:div.ws-status
+    [:span#ws-indicator.status-dot.disconnected]
+    [:span#ws-text.ws-text (messages/t :layout/ws-connected)]]
+   (share-button)
+   (theme-picker)
+   (refresh-button)])
+
+(defn- ^{:stratum 2} dashboard-shell
   [title body]
   (let [current-pane (title->pane title)]
     [:div.dashboard
      (sidebar-nav current-pane)
      (page-main title body)]))
 
-(defn- filter-modal-container
-  []
-  [:div#filter-modal-container])
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- footer-scripts
+(defn- ^{:stratum 3} top-banner
   []
-  (into [[:script {:src app-script-path}]]
-        (mapv (fn [path] [:script {:src path}]) filter-script-paths)))
+  [:header.top-banner
+   [:div.banner-content
+    (banner-left)
+    [:div.banner-center (event-banner)]
+    (banner-right)]])
 
-(defn- page-body
+;------------------------------------------------------------------------------ Layer 4
+
+(defn- ^{:stratum 4} page-body
   [title body]
   (let [current-pane-name (name (title->pane title))]
     (into [:body {:data-current-pane current-pane-name}
@@ -254,55 +296,38 @@
            (filter-modal-container)]
           (footer-scripts))))
 
-(defn layout
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} layout
   "Main page layout with htmx and WebSocket."
   [title & body]
   (page/html5
    (page-head title)
    (page-body title body)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Public API - Re-exports from subdirectories
+;------------------------------------------------------------------------------ Layer 6
 
-;; Dashboard views
-(def stats-fragment dashboard/stats-fragment)
-(def risk-analysis-fragment dashboard/risk-analysis-fragment)
-(def activity-fragment dashboard/activity-fragment)
-(def fleet-grid-fragment dashboard/fleet-grid-fragment)
-(defn dashboard-view [state]
+(defn ^{:stratum 6} dashboard-view [state]
   (dashboard/dashboard-view layout state))
 
-;; Fleet views
-(def train-list-fragment fleet/train-list-fragment)
-(defn fleet-view [fleet-state]
+(defn ^{:stratum 6} fleet-view [fleet-state]
   (fleet/fleet-view layout fleet-state))
-(defn train-detail-view [train]
+
+(defn ^{:stratum 6} train-detail-view [train]
   (fleet/train-detail-view layout train))
 
-;; DAG views
-(def filter-modal-fragment dag/filter-modal-fragment)
-(defn dag-kanban-view [state]
+(defn ^{:stratum 6} dag-kanban-view [state]
   (dag/dag-kanban-view layout state))
 
-;; Evidence views
-(def evidence-list-fragment evidence/evidence-list-fragment)
-(defn evidence-view [state]
+(defn ^{:stratum 6} evidence-view [state]
   (evidence/evidence-view layout state))
 
-;; Workflow views
-(def workflow-list-fragment workflows/workflow-list-fragment)
-(def workflow-summary-fragment dashboard/workflow-summary-fragment)
-(def workflow-events-fragment workflows/workflow-events-fragment)
-(def workflow-detail-panel workflows/workflow-detail-panel)
-(def archived-workflow-list-fragment archived/archived-workflow-list-fragment)
-(defn workflows-view [wfs]
+(defn ^{:stratum 6} workflows-view [wfs]
   (workflows/workflows-view layout wfs))
-(defn workflow-detail-view [workflow events]
+
+(defn ^{:stratum 6} workflow-detail-view [workflow events]
   (workflows/workflow-detail-view layout workflow events))
 
-;; Control Plane views
-(def agents-grid-fragment control-plane/agents-grid-fragment)
-(def decision-queue-fragment control-plane/decision-queue-fragment)
-(defn control-plane-view [agents decisions stats]
+(defn ^{:stratum 6} control-plane-view [agents decisions stats]
   (layout "Control Plane"
           (control-plane/control-plane-content agents decisions stats)))

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.controller
   "PR lifecycle controller - orchestrates task→PR→merge workflow.
 
@@ -38,15 +37,15 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Controller state
 
-(def ^:private lifecycle-loop-sleep-ms
+;; Controller state
+(def ^{:stratum 0} ^:private lifecycle-loop-sleep-ms
   1000)
 
-(def ^:private lifecycle-failed-status
+(def ^{:stratum 0} ^:private lifecycle-failed-status
   :failed)
 
-(defn iter-budget-result
+(defn ^{:stratum 0} iter-budget-result
   "Anomaly-returning iter-budget check.
 
    Returns `:ok` when `current` < `max-iters`, or a `:conflict`
@@ -62,7 +61,7 @@
                      {:task-id task-id :iterations current})
     :ok))
 
-(defn pr-creation-result
+(defn ^{:stratum 0} pr-creation-result
   "Anomaly-returning PR-creation check.
 
    Returns `:ok` when `pr-result` is a successful DAG result, or a
@@ -78,47 +77,31 @@
                      {:error (:error pr-result)})
     :ok))
 
-(defn- remove-nil-values
+(defn- ^{:stratum 0} remove-nil-values
   "Drop entries whose values are nil."
   [m]
   (into {} (remove (comp nil? val)) m))
 
-(defn- format-acceptance-criteria
+(defn- ^{:stratum 0} format-acceptance-criteria
   [criteria]
   (->> criteria
        (map #(messages/t :controller/criterion-line {:criterion %}))
        (str/join "\n")))
 
-(defn- task-id-fragment
+(defn- ^{:stratum 0} task-id-fragment
   [task-id]
   (let [task-id-string (str task-id)
         fragment-length (min 8 (count task-id-string))]
     (subs task-id-string 0 fragment-length)))
 
-(defn- build-commit-message
+(defn- ^{:stratum 0} build-commit-message
   [task task-id]
   (let [title (get task :task/title (messages/t :controller/default-commit-title))]
     (messages/t :controller/commit-message
                 {:title title
                  :task-id task-id})))
 
-(defn- build-pr-title
-  [task task-id]
-  (get task :task/title
-       (messages/t :controller/default-pr-title
-                   {:task-fragment (task-id-fragment task-id)})))
-
-(defn- build-pr-body
-  [task]
-  (let [description (get task :task/description
-                         (messages/t :controller/default-task-description))
-        criteria (format-acceptance-criteria
-                  (get task :task/acceptance-criteria []))]
-    (messages/t :controller/pr-body-template
-                {:description description
-                 :criteria criteria})))
-
-(defn- controller-config-map
+(defn- ^{:stratum 0} controller-config-map
   [worktree-path merge-policy controller-defaults]
   {:worktree-path worktree-path
    :merge-policy merge-policy
@@ -128,7 +111,7 @@
    :auto-resolve-comments (:auto-resolve-comments controller-defaults)
    :branch-name-prefix (:branch-name-prefix controller-defaults)})
 
-(defn- invalid-transition-anomaly
+(defn- ^{:stratum 0} invalid-transition-anomaly
   "Create an anomaly describing an invalid controller status transition."
   [current-status new-status transition-result]
   (anomaly/anomaly :conflict
@@ -139,17 +122,44 @@
                     :message (controller-fsm/transition-error-message transition-result)
                     :valid-targets (controller-fsm/valid-targets current-status)}))
 
-(defn- result-status
+(defn- ^{:stratum 0} result-status
   "Return a normalized status keyword for result payloads."
   [result]
   (if (schema/succeeded? result) :succeeded :failed))
 
-(defn- fix-completion-data
+(defn ^{:stratum 0} add-history!
+  "Add an event to controller history."
+  [controller event-type data]
+  (swap! controller update :history conj
+         {:type event-type
+          :data data
+          :timestamp (java.util.Date.)})
+  nil)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} build-pr-title
+  [task task-id]
+  (get task :task/title
+       (messages/t :controller/default-pr-title
+                   {:task-fragment (task-id-fragment task-id)})))
+
+(defn- ^{:stratum 1} build-pr-body
+  [task]
+  (let [description (get task :task/description
+                         (messages/t :controller/default-task-description))
+        criteria (format-acceptance-criteria
+                  (get task :task/acceptance-criteria []))]
+    (messages/t :controller/pr-body-template
+                {:description description
+                 :criteria criteria})))
+
+(defn- ^{:stratum 1} fix-completion-data
   "Create history payload for a completed fix attempt."
   [fix-result]
   {:result-status (result-status fix-result)})
 
-(defn- transition-status
+(defn- ^{:stratum 1} transition-status
   "Validate and apply a status transition to the current controller snapshot."
   [controller-state new-status]
   (let [current-status (:status controller-state)
@@ -160,7 +170,7 @@
              :updated-at (java.util.Date.))
       (invalid-transition-anomaly current-status new-status transition-result))))
 
-(defn create-controller
+(defn ^{:stratum 1} create-controller
   "Create a PR lifecycle controller for a task.
 
    Arguments:
@@ -223,88 +233,7 @@
            :created-at created-at
            :updated-at created-at})))
 
-(defn update-status!
-  "Update controller status using the formal PR lifecycle FSM."
-  [controller new-status]
-  (loop []
-    (let [current-state @controller
-          updated-state (transition-status current-state new-status)]
-      (if (anomaly/anomaly? updated-state)
-        updated-state
-        (if (compare-and-set! controller current-state updated-state)
-        (:status updated-state)
-          (recur))))))
-
-(defn add-history!
-  "Add an event to controller history."
-  [controller event-type data]
-  (swap! controller update :history conj
-         {:type event-type
-          :data data
-          :timestamp (java.util.Date.)})
-  nil)
-
-;------------------------------------------------------------------------------ Layer 1
-;; PR creation steps
-
-(defn fail-controller!
-  "Mark controller as failed and return a DAG error."
-  [controller error-key error-msg]
-  (update-status! controller lifecycle-failed-status)
-  (dag/err error-key error-msg))
-
-(defn create-and-checkout-branch!
-  "Create and checkout a new branch for the task.
-   Returns the branch result or a DAG error."
-  [controller worktree-path branch-name]
-  (let [branch-result (release/create-branch! worktree-path branch-name)]
-    (if (schema/succeeded? branch-result)
-      branch-result
-      (do
-        (add-history! controller :pr-creation-failed {:error (:error branch-result)})
-        (fail-controller! controller :branch-creation-failed (:error branch-result))))))
-
-(defn apply-code-to-files!
-  "Apply the code artifact to the worktree.
-   Returns the apply result or a DAG error."
-  [controller worktree-path code-artifact logger]
-  (let [apply-result (fix/apply-fix-to-worktree worktree-path code-artifact logger)]
-    (if (dag/err? apply-result)
-      (fail-controller! controller :artifact-apply-failed (:error apply-result))
-      apply-result)))
-
-(defn commit-changes!
-  "Stage and commit all changes with the given task info.
-   Returns the commit result or a DAG error."
-  [controller worktree-path task task-id]
-  (let [commit-msg (build-commit-message task task-id)
-        commit-result (release/commit-changes! worktree-path commit-msg)]
-    (if (schema/succeeded? commit-result)
-      commit-result
-      (fail-controller! controller :commit-failed (:error commit-result)))))
-
-(defn push-and-create-pr!
-  "Push the branch and open a GitHub PR.
-   Returns the PR info map or a DAG error."
-  [controller worktree-path branch-name base-branch task task-id commit-result]
-  (let [push-result (release/push-branch! worktree-path branch-name)]
-    (if-not (schema/succeeded? push-result)
-      (fail-controller! controller :push-failed (:error push-result))
-      (let [pr-title (build-pr-title task task-id)
-            pr-body (build-pr-body task)
-            pr-result (release/create-pr! worktree-path
-                                          {:title pr-title
-                                           :body pr-body
-                                           :base-branch base-branch})]
-        (if-not (schema/succeeded? pr-result)
-          (fail-controller! controller :pr-creation-failed (:error pr-result))
-          {:pr/id       (:pr-number pr-result)
-           :pr/url      (:pr-url pr-result)
-           :pr/branch   branch-name
-           :pr/base-sha nil
-           :pr/head-sha (:commit-sha commit-result)})))))
-
-(defn finalize-pr-creation!
+(defn ^{:stratum 1} finalize-pr-creation!
   "Record PR info on the controller, publish the event, and log success."
   [controller pr-info dag-id run-id task-id event-bus logger]
   (swap! controller assoc :pr pr-info)
@@ -323,53 +252,31 @@
                :data {:pr-url (:pr/url pr-info)}}))
   (dag/ok pr-info))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PR creation orchestrator
+;------------------------------------------------------------------------------ Layer 2
 
-(defn create-pr!
-  "Create a PR for the task.
+(defn ^{:stratum 2} update-status!
+  "Update controller status using the formal PR lifecycle FSM."
+  [controller new-status]
+  (loop []
+    (let [current-state @controller
+          updated-state (transition-status current-state new-status)]
+      (if (anomaly/anomaly? updated-state)
+        updated-state
+        (if (compare-and-set! controller current-state updated-state)
+        (:status updated-state)
+          (recur))))))
 
-   Arguments:
-   - controller: Controller state atom
-   - code-artifact: Code artifact to commit
+;------------------------------------------------------------------------------ Layer 3
 
-   Returns result with PR info."
-  [controller code-artifact]
-  (let [{dag-id :dag/id run-id :run/id task-id :task/id
-         :keys [task config event-bus logger]} @controller
-        {:keys [worktree-path branch-name-prefix]} config
-        branch-name (str branch-name-prefix (task-id-fragment task-id))]
+;; PR creation steps
+(defn ^{:stratum 3} fail-controller!
+  "Mark controller as failed and return a DAG error."
+  [controller error-key error-msg]
+  (update-status! controller lifecycle-failed-status)
+  (dag/err error-key error-msg))
 
-    (update-status! controller :creating-pr)
-    (add-history! controller :pr-creation-started {:branch branch-name})
-
-    (when logger
-      (log/info logger :pr-lifecycle :controller/creating-pr
-                {:message (messages/t :controller/creating-pr)
-                 :data {:task-id task-id :branch branch-name}}))
-
-    (let [branch-result (create-and-checkout-branch! controller worktree-path branch-name)]
-      (if (dag/err? branch-result)
-        branch-result
-        (let [apply-result (apply-code-to-files! controller worktree-path code-artifact logger)]
-          (if (dag/err? apply-result)
-            apply-result
-            (let [commit-result (commit-changes! controller worktree-path task task-id)]
-              (if (dag/err? commit-result)
-                commit-result
-                (let [pr-info (push-and-create-pr! controller worktree-path branch-name
-                                                   (:base-branch branch-result)
-                                                   task task-id commit-result)]
-                  (if (dag/err? pr-info)
-                    pr-info
-                    (finalize-pr-creation! controller pr-info
-                                           dag-id run-id task-id
-                                           event-bus logger)))))))))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Monitoring
-
-(defn start-ci-monitoring!
+(defn ^{:stratum 3} start-ci-monitoring!
   "Start CI monitoring for the PR."
   [controller]
   (let [{dag-id :dag/id run-id :run/id task-id :task/id
@@ -386,7 +293,7 @@
       (swap! controller assoc :ci-monitor monitor)
       monitor)))
 
-(defn start-review-monitoring!
+(defn ^{:stratum 3} start-review-monitoring!
   "Start review monitoring for the PR."
   [controller]
   (let [{dag-id :dag/id run-id :run/id task-id :task/id
@@ -404,10 +311,8 @@
       (swap! controller assoc :review-monitor monitor)
       monitor)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Fix handling
-
-(defn handle-ci-failure!
+(defn ^{:stratum 3} handle-ci-failure!
   "Handle a CI failure by running the fix loop."
   [controller ci-logs]
   (let [{task-id :task/id :keys [task pr config event-bus logger generate-fn]} @controller
@@ -443,7 +348,7 @@
           (add-history! controller :ci-fix-completed (fix-completion-data fix-result))
           fix-result)))))
 
-(defn handle-review-feedback!
+(defn ^{:stratum 3} handle-review-feedback!
   "Handle review feedback by running the fix loop."
   [controller review-comments]
   (let [{task-id :task/id :keys [task pr config event-bus logger generate-fn]} @controller
@@ -476,10 +381,8 @@
           (add-history! controller :review-fix-completed (fix-completion-data fix-result))
           fix-result)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Merge
-
-(defn attempt-merge!
+(defn ^{:stratum 3} attempt-merge!
   "Attempt to merge the PR."
   [controller]
   (let [{dag-id :dag/id run-id :run/id task-id :task/id
@@ -519,10 +422,106 @@
         (add-history! controller :merge-blocked {:reason (:error merge-result)}))
       merge-result)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Main control loop
+;------------------------------------------------------------------------------ Layer 4
 
-(defn run-lifecycle!
+(defn ^{:stratum 4} create-and-checkout-branch!
+  "Create and checkout a new branch for the task.
+   Returns the branch result or a DAG error."
+  [controller worktree-path branch-name]
+  (let [branch-result (release/create-branch! worktree-path branch-name)]
+    (if (schema/succeeded? branch-result)
+      branch-result
+      (do
+        (add-history! controller :pr-creation-failed {:error (:error branch-result)})
+        (fail-controller! controller :branch-creation-failed (:error branch-result))))))
+
+(defn ^{:stratum 4} apply-code-to-files!
+  "Apply the code artifact to the worktree.
+   Returns the apply result or a DAG error."
+  [controller worktree-path code-artifact logger]
+  (let [apply-result (fix/apply-fix-to-worktree worktree-path code-artifact logger)]
+    (if (dag/err? apply-result)
+      (fail-controller! controller :artifact-apply-failed (:error apply-result))
+      apply-result)))
+
+(defn ^{:stratum 4} commit-changes!
+  "Stage and commit all changes with the given task info.
+   Returns the commit result or a DAG error."
+  [controller worktree-path task task-id]
+  (let [commit-msg (build-commit-message task task-id)
+        commit-result (release/commit-changes! worktree-path commit-msg)]
+    (if (schema/succeeded? commit-result)
+      commit-result
+      (fail-controller! controller :commit-failed (:error commit-result)))))
+
+(defn ^{:stratum 4} push-and-create-pr!
+  "Push the branch and open a GitHub PR.
+   Returns the PR info map or a DAG error."
+  [controller worktree-path branch-name base-branch task task-id commit-result]
+  (let [push-result (release/push-branch! worktree-path branch-name)]
+    (if-not (schema/succeeded? push-result)
+      (fail-controller! controller :push-failed (:error push-result))
+      (let [pr-title (build-pr-title task task-id)
+            pr-body (build-pr-body task)
+            pr-result (release/create-pr! worktree-path
+                                          {:title pr-title
+                                           :body pr-body
+                                           :base-branch base-branch})]
+        (if-not (schema/succeeded? pr-result)
+          (fail-controller! controller :pr-creation-failed (:error pr-result))
+          {:pr/id       (:pr-number pr-result)
+           :pr/url      (:pr-url pr-result)
+           :pr/branch   branch-name
+           :pr/base-sha nil
+           :pr/head-sha (:commit-sha commit-result)})))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+;; PR creation orchestrator
+(defn ^{:stratum 5} create-pr!
+  "Create a PR for the task.
+
+   Arguments:
+   - controller: Controller state atom
+   - code-artifact: Code artifact to commit
+
+   Returns result with PR info."
+  [controller code-artifact]
+  (let [{dag-id :dag/id run-id :run/id task-id :task/id
+         :keys [task config event-bus logger]} @controller
+        {:keys [worktree-path branch-name-prefix]} config
+        branch-name (str branch-name-prefix (task-id-fragment task-id))]
+
+    (update-status! controller :creating-pr)
+    (add-history! controller :pr-creation-started {:branch branch-name})
+
+    (when logger
+      (log/info logger :pr-lifecycle :controller/creating-pr
+                {:message (messages/t :controller/creating-pr)
+                 :data {:task-id task-id :branch branch-name}}))
+
+    (let [branch-result (create-and-checkout-branch! controller worktree-path branch-name)]
+      (if (dag/err? branch-result)
+        branch-result
+        (let [apply-result (apply-code-to-files! controller worktree-path code-artifact logger)]
+          (if (dag/err? apply-result)
+            apply-result
+            (let [commit-result (commit-changes! controller worktree-path task task-id)]
+              (if (dag/err? commit-result)
+                commit-result
+                (let [pr-info (push-and-create-pr! controller worktree-path branch-name
+                                                   (:base-branch branch-result)
+                                                   task task-id commit-result)]
+                  (if (dag/err? pr-info)
+                    pr-info
+                    (finalize-pr-creation! controller pr-info
+                                           dag-id run-id task-id
+                                           event-bus logger)))))))))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+;; Main control loop
+(defn ^{:stratum 6} run-lifecycle!
   "Run the full PR lifecycle for a task.
 
    This is the main entry point that orchestrates:

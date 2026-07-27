@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.dag-primitives.unwrap-throwing-compat-test
   "Backward-compat coverage for the deprecated throwing `unwrap`.
 
@@ -25,11 +24,13 @@
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.dag-primitives.interface :as dp]))
 
-(deftest unwrap-still-returns-data-on-ok
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} unwrap-still-returns-data-on-ok
   (testing "deprecated thrower returns ok data unchanged"
     (is (= 42 (dp/unwrap (dp/ok 42))))))
 
-(deftest unwrap-still-throws-on-err
+(deftest ^{:stratum 0} unwrap-still-throws-on-err
   (testing "deprecated thrower throws ExceptionInfo on err input"
     (is (thrown? clojure.lang.ExceptionInfo
                  (dp/unwrap (dp/err :cycle "boom"))))))

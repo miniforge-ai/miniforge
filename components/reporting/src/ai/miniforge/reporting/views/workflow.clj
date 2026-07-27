@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.reporting.views.workflow
   "Workflow rendering - list and detail views.
 
@@ -24,9 +23,9 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Workflow list rendering
 
-(defn render-workflow-list
+;; Workflow list rendering
+(defn ^{:stratum 0} render-workflow-list
   "Render workflow list as table.
 
    Args:
@@ -53,10 +52,8 @@
                     workflows)]
       (fmt/format-table headers rows))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Workflow detail rendering
-
-(defn render-workflow-detail
+(defn ^{:stratum 0} render-workflow-detail
   "Render detailed workflow view.
 
    Args:

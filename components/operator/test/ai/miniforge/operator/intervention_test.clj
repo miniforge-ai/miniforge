@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.intervention-test
   "Tests for bounded intervention lifecycle helpers."
   (:require
@@ -24,9 +23,9 @@
    [ai.miniforge.operator.interface :as op]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- intervention-request
+;; Helpers
+(defn- ^{:stratum 0} intervention-request
   [intervention-type target-id & {:as extra}]
   (merge {:intervention/type intervention-type
           :intervention/target-id target-id
@@ -35,9 +34,9 @@
          extra))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Unit tests
 
-(deftest create-intervention-defaults-target-type-and-state
+;; Unit tests
+(deftest ^{:stratum 1} create-intervention-defaults-target-type-and-state
   (testing "given a retry intervention → workflow target type and proposed state are inferred"
     (let [request (op/create-intervention
                    (intervention-request :retry (random-uuid)))]
@@ -47,14 +46,14 @@
       (is (inst? (:intervention/requested-at request)))
       (is (inst? (:intervention/updated-at request))))))
 
-(deftest risky-interventions-default-to-approval-required
+(deftest ^{:stratum 1} risky-interventions-default-to-approval-required
   (testing "given a cancel intervention → approval is required by default"
     (let [request (op/create-intervention
                    (intervention-request :cancel (random-uuid)))]
       (is (true? (op/approval-required? :cancel)))
       (is (true? (:intervention/approval-required? request))))))
 
-(deftest intervention-lifecycle-reaches-verified
+(deftest ^{:stratum 1} intervention-lifecycle-reaches-verified
   (testing "given an intervention through approve, dispatch, apply, verify → it ends in verified"
     (let [created (op/create-intervention
                    (intervention-request :pause (random-uuid)))
@@ -68,7 +67,7 @@
       (is (= :verified (:intervention/state verified)))
       (is (= {:visible-state :paused-by-supervisor} (:intervention/outcome verified))))))
 
-(deftest intervention-can-enter-pending-human
+(deftest ^{:stratum 1} intervention-can-enter-pending-human
   (testing "given a risky intervention → the lifecycle supports an explicit pending-human step"
     (let [created (op/create-intervention
                    (intervention-request :request-human-review (random-uuid)))
@@ -77,7 +76,7 @@
       (is (= :pending-human (:intervention/state pending)))
       (is (= :approved (:intervention/state approved))))))
 
-(deftest invalid-intervention-operations-return-errors
+(deftest ^{:stratum 1} invalid-intervention-operations-return-errors
   (testing "given a terminal intervention → further transitions are rejected"
     (let [created (op/create-intervention
                    (intervention-request :waive (random-uuid)))

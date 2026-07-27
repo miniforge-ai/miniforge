@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.views.archived
   "Archived workflow list and detail views."
   (:require
@@ -24,9 +23,9 @@
    [ai.miniforge.web-dashboard.messages :as msg]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure helpers
 
-(defn format-date
+;; Pure helpers
+(defn ^{:stratum 0} format-date
   "Format timestamp as full date+time for historical entries."
   [ts]
   (let [date (cond
@@ -40,7 +39,7 @@
       (.format (java.text.SimpleDateFormat. "yyyy-MM-dd HH:mm") date)
       (msg/t :time/none))))
 
-(defn format-file-size
+(defn ^{:stratum 0} format-file-size
   "Format bytes to human-readable size."
   [bytes]
   (cond
@@ -49,7 +48,7 @@
     (< bytes (* 1024 1024))   (msg/t :archived/size-kb {:size (quot bytes 1024)})
     :else                     (msg/t :archived/size-mb {:size (format "%.1f" (/ bytes 1024.0 1024.0))})))
 
-(defn status-label
+(defn ^{:stratum 0} status-label
   [status]
   (case status
     :running   (msg/t :workflow.status/running)
@@ -59,9 +58,9 @@
     (msg/t :workflow.status/unknown)))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Fragments
 
-(defn archived-workflow-list-fragment
+;; Fragments
+(defn ^{:stratum 1} archived-workflow-list-fragment
   "Archived workflow list fragment — expandable cards with on-demand event loading."
   [archived-workflows loading?]
   (html

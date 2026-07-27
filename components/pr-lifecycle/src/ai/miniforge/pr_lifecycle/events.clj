@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.events
   "PR lifecycle events.
 
@@ -26,9 +25,9 @@
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Event types
 
-(def event-types
+;; Event types
+(def ^{:stratum 0} event-types
   "Valid PR lifecycle event types."
   #{:pr/opened           ; PR successfully created
     :pr/ci-passed        ; CI checks passed
@@ -40,12 +39,10 @@
     :pr/closed           ; PR closed without merge
     :pr/rebase-needed    ; Base branch moved, rebase required
     :pr/conflict         ; Merge conflict detected
-    :pr/fix-pushed})     ; Fix commit pushed
+    :pr/fix-pushed})  ; Fix commit pushed
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Event constructors
-
-(defn create-event
+(defn ^{:stratum 0} create-event
   "Create a PR lifecycle event.
 
    Arguments:
@@ -71,126 +68,8 @@
     :event/timestamp (java.util.Date.)}
    data))
 
-(defn pr-opened
-  [dag-id run-id task-id pr-id pr-url branch sha]
-  (create-event :pr/opened
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/url pr-url
-                 :pr/branch branch
-                 :pr/sha sha}))
-
-(defn ci-passed
-  [dag-id run-id task-id pr-id sha]
-  (create-event :pr/ci-passed
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/sha sha}))
-
-(defn ci-failed
-  [dag-id run-id task-id pr-id sha logs]
-  (create-event :pr/ci-failed
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/sha sha
-                 :ci/logs logs}))
-
-(defn review-approved
-  [dag-id run-id task-id pr-id approvers]
-  (create-event :pr/review-approved
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :review/approvers approvers}))
-
-(defn review-changes-requested
-  [dag-id run-id task-id pr-id comments]
-  (create-event :pr/review-changes-requested
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :review/comments comments}))
-
-(defn comment-actionable
-  [dag-id run-id task-id pr-id comment-data]
-  (create-event :pr/comment-actionable
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :comment comment-data}))
-
-(defn merged
-  "Create a merged event.
-
-   `labels` is an optional set of strings — the GitHub-native label
-   names attached to the PR at merge time. Carrying them here lets
-   downstream watchers (e.g. the pr-label-actions M2 brick) match
-   without re-querying GitHub. The 5-arity preserves backward
-   compatibility for callers that don't have label data on hand;
-   they default to an empty set."
-  ([dag-id run-id task-id pr-id merge-sha]
-   (merged dag-id run-id task-id pr-id merge-sha #{}))
-  ([dag-id run-id task-id pr-id merge-sha labels]
-   (create-event :pr/merged
-                 {:dag/id dag-id
-                  :run/id run-id
-                  :task/id task-id
-                  :pr/id pr-id
-                  :pr/merge-sha merge-sha
-                  :pr/labels (set labels)})))
-
-(defn closed
-  "Create a closed (without merge) event."
-  [dag-id run-id task-id pr-id reason]
-  (create-event :pr/closed
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :close/reason reason}))
-
-(defn rebase-needed
-  [dag-id run-id task-id pr-id base-sha]
-  (create-event :pr/rebase-needed
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/base-sha base-sha}))
-
-(defn conflict
-  "Create a conflict detected event."
-  [dag-id run-id task-id pr-id conflicting-files]
-  (create-event :pr/conflict
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :conflict/files conflicting-files}))
-
-(defn fix-pushed
-  [dag-id run-id task-id pr-id sha fix-type]
-  (create-event :pr/fix-pushed
-                {:dag/id dag-id
-                 :run/id run-id
-                 :task/id task-id
-                 :pr/id pr-id
-                 :pr/sha sha
-                 :fix/type fix-type})) ; :ci-fix :review-fix :conflict-fix
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Event channel/bus
-
-(defn create-event-bus
+(defn ^{:stratum 0} create-event-bus
   "Create an event bus for publishing and subscribing to events.
 
    Returns an atom containing:
@@ -202,7 +81,7 @@
          :subscribers {}
          :filters {}}))
 
-(defn publish!
+(defn ^{:stratum 0} publish!
   "Publish an event to the event bus.
    Notifies all subscribers whose filters match."
   [event-bus event logger]
@@ -230,7 +109,7 @@
                          :subscriber-count (count subscribers)}}))
     event))
 
-(defn subscribe!
+(defn ^{:stratum 0} subscribe!
   "Subscribe to events on the event bus.
 
    Arguments:
@@ -250,7 +129,7 @@
                 (assoc-in [:filters subscriber-id] filter-fn))))
    subscriber-id))
 
-(defn unsubscribe!
+(defn ^{:stratum 0} unsubscribe!
   "Unsubscribe from events."
   [event-bus subscriber-id]
   (swap! event-bus
@@ -260,26 +139,144 @@
                (update :filters dissoc subscriber-id))))
   nil)
 
-(defn events-for-task
+(defn ^{:stratum 0} events-for-task
   "Get all events for a specific task."
   [event-bus task-id]
   (->> (:events @event-bus)
        (filter #(= task-id (:task/id %)))
        vec))
 
-(defn events-for-pr
+(defn ^{:stratum 0} events-for-pr
   "Get all events for a specific PR."
   [event-bus pr-id]
   (->> (:events @event-bus)
        (filter #(= pr-id (:pr/id %)))
        vec))
 
-(defn latest-event
+(defn ^{:stratum 0} latest-event
   "Get the most recent event matching a predicate."
   [event-bus pred]
   (->> (:events @event-bus)
        (filter pred)
        last))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} pr-opened
+  [dag-id run-id task-id pr-id pr-url branch sha]
+  (create-event :pr/opened
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :pr/url pr-url
+                 :pr/branch branch
+                 :pr/sha sha}))
+
+(defn ^{:stratum 1} ci-passed
+  [dag-id run-id task-id pr-id sha]
+  (create-event :pr/ci-passed
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :pr/sha sha}))
+
+(defn ^{:stratum 1} ci-failed
+  [dag-id run-id task-id pr-id sha logs]
+  (create-event :pr/ci-failed
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :pr/sha sha
+                 :ci/logs logs}))
+
+(defn ^{:stratum 1} review-approved
+  [dag-id run-id task-id pr-id approvers]
+  (create-event :pr/review-approved
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :review/approvers approvers}))
+
+(defn ^{:stratum 1} review-changes-requested
+  [dag-id run-id task-id pr-id comments]
+  (create-event :pr/review-changes-requested
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :review/comments comments}))
+
+(defn ^{:stratum 1} comment-actionable
+  [dag-id run-id task-id pr-id comment-data]
+  (create-event :pr/comment-actionable
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :comment comment-data}))
+
+(defn ^{:stratum 1} merged
+  "Create a merged event.
+
+   `labels` is an optional set of strings — the GitHub-native label
+   names attached to the PR at merge time. Carrying them here lets
+   downstream watchers (e.g. the pr-label-actions M2 brick) match
+   without re-querying GitHub. The 5-arity preserves backward
+   compatibility for callers that don't have label data on hand;
+   they default to an empty set."
+  ([dag-id run-id task-id pr-id merge-sha]
+   (merged dag-id run-id task-id pr-id merge-sha #{}))
+  ([dag-id run-id task-id pr-id merge-sha labels]
+   (create-event :pr/merged
+                 {:dag/id dag-id
+                  :run/id run-id
+                  :task/id task-id
+                  :pr/id pr-id
+                  :pr/merge-sha merge-sha
+                  :pr/labels (set labels)})))
+
+(defn ^{:stratum 1} closed
+  "Create a closed (without merge) event."
+  [dag-id run-id task-id pr-id reason]
+  (create-event :pr/closed
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :close/reason reason}))
+
+(defn ^{:stratum 1} rebase-needed
+  [dag-id run-id task-id pr-id base-sha]
+  (create-event :pr/rebase-needed
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :pr/base-sha base-sha}))
+
+(defn ^{:stratum 1} conflict
+  "Create a conflict detected event."
+  [dag-id run-id task-id pr-id conflicting-files]
+  (create-event :pr/conflict
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :conflict/files conflicting-files}))
+
+(defn ^{:stratum 1} fix-pushed
+  [dag-id run-id task-id pr-id sha fix-type]
+  (create-event :pr/fix-pushed
+                {:dag/id dag-id
+                 :run/id run-id
+                 :task/id task-id
+                 :pr/id pr-id
+                 :pr/sha sha
+                 :fix/type fix-type}))  ; :ci-fix :review-fix :conflict-fix
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

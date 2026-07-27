@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.views.evidence
   "Evidence viewer -- N5 Section 3.2.3.
 
@@ -32,9 +31,9 @@
    [ai.miniforge.tui-views.palette :as palette]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Evidence tree construction
 
-(defn build-evidence-tree
+;; Evidence tree construction
+(defn ^{:stratum 0} build-evidence-tree
   "Build a tree node list from model evidence data."
   [model]
   (let [detail (:detail model)
@@ -73,9 +72,9 @@
          :depth 1 :expandable? false}]))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Rendering
 
-(defn render
+;; Rendering
+(defn ^{:stratum 1} render
   "Render the evidence viewer.
    model: full app model
    [cols rows]: available screen area"

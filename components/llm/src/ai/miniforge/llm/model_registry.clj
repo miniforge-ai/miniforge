@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.llm.model-registry
   "Model registry with capability profiles for intelligent model selection.
    Layer 0: Model capability definitions (resource-backed data)
@@ -27,17 +26,17 @@
    [clojure.java.io :as io]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Model capability definitions
 
-(def capability-levels
+;; Model capability definitions
+(def ^{:stratum 0} capability-levels
   "Capability levels from lowest to highest"
   [:poor :fair :good :excellent :exceptional])
 
-(def speed-levels
+(def ^{:stratum 0} speed-levels
   "Speed capability levels from slowest to fastest"
   [:slow :moderate :balanced :fast :very-fast])
 
-(defn- load-model-catalog
+(defn- ^{:stratum 0} load-model-catalog
   "Load the model catalog from EDN resources."
   []
   (if-let [resource (io/resource "llm/model-catalog.edn")]
@@ -45,23 +44,32 @@
     (response/throw-anomaly! :anomalies/not-found
                             "Missing llm/model-catalog.edn resource")))
 
-(def ^:private model-catalog
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private model-catalog
   "Resource-backed model catalog and task-type recommendations."
   (delay (load-model-catalog)))
 
-(def model-registry
+;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} model-registry
   "Comprehensive registry of all supported models with their capabilities."
   (:models @model-catalog))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Query functions
+;; Recommendation logic
+(def ^{:stratum 2} task-type-recommendations
+  "Recommended models for each task type, organized by tier."
+  (:task-type-recommendations @model-catalog))
 
-(defn get-model
+;------------------------------------------------------------------------------ Layer 3
+
+;; Query functions
+(defn ^{:stratum 3} get-model
   "Get a model's full profile by keyword."
   [model-key]
   (get model-registry model-key))
 
-(defn context-window-for-model-id
+(defn ^{:stratum 3} context-window-for-model-id
   "Context window (max input tokens) for a backend model-id string
    (e.g. \"claude-opus-4-6\"), or nil when the model-id is not in the
    catalog. Looks up by the entry's :model-id rather than the catalog key,
@@ -73,7 +81,7 @@
             (get-in v [:capabilities :context-window])))
         model-registry))
 
-(defn get-models-by-capability
+(defn ^{:stratum 3} get-models-by-capability
   "Get models meeting or exceeding a capability level.
    Example: (get-models-by-capability :reasoning :excellent)
    Returns: [:opus-4.6 :sonnet-4.6 :gpt-5.3-codex ...]"
@@ -89,7 +97,7 @@
            (map first)
            (into [])))))
 
-(defn get-models-by-speed
+(defn ^{:stratum 3} get-models-by-speed
   "Get models meeting or exceeding a speed level.
    Example: (get-models-by-speed :fast)
    Returns: [:haiku-4.5 :gemini-2.5-flash-lite ...]"
@@ -105,7 +113,7 @@
            (map first)
            (into [])))))
 
-(defn get-models-by-use-case
+(defn ^{:stratum 3} get-models-by-use-case
   "Get models that support a specific use-case.
    Example: (get-models-by-use-case :code-implementation)
    Returns: [:sonnet-4.6 :gpt-5.2-codex ...]"
@@ -116,7 +124,7 @@
        (map first)
        (into [])))
 
-(defn get-models-by-provider
+(defn ^{:stratum 3} get-models-by-provider
   "Get all models from a specific provider."
   [provider]
   (->> model-registry
@@ -124,7 +132,7 @@
        (map first)
        (into [])))
 
-(defn get-local-models
+(defn ^{:stratum 3} get-local-models
   "Get all local models (for privacy-sensitive tasks)."
   []
   (->> model-registry
@@ -132,28 +140,23 @@
        (map first)
        (into [])))
 
-(defn supports-large-context?
-  "Check if model supports contexts larger than threshold (default 200k)."
-  ([model-key] (supports-large-context? model-key 200000))
-  ([model-key threshold]
-   (when-let [model (get-model model-key)]
-     (>= (get-in model [:capabilities :context-window]) threshold))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Recommendation logic
-
-(def task-type-recommendations
-  "Recommended models for each task type, organized by tier."
-  (:task-type-recommendations @model-catalog))
-
-(defn recommend-models-for-task-type
+(defn ^{:stratum 3} recommend-models-for-task-type
   "Get recommended models for a task type.
    Returns map with :tier-1, :tier-2, :tier-3-local, and :rationale."
   [task-type]
   (get task-type-recommendations task-type))
 
-(defn get-primary-recommendation
+(defn ^{:stratum 3} get-primary-recommendation
   "Get the primary recommended model for a task type.
    Returns the first model from tier-1."
   [task-type]
   (first (get-in task-type-recommendations [task-type :tier-1])))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} supports-large-context?
+  "Check if model supports contexts larger than threshold (default 200k)."
+  ([model-key] (supports-large-context? model-key 200000))
+  ([model-key threshold]
+   (when-let [model (get-model model-key)]
+     (>= (get-in model [:capabilities :context-window]) threshold))))

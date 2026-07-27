@@ -15,14 +15,13 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.orchestrator.protocol
   "Orchestrator protocols for pipeline execution.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Core orchestrator protocol
 
-(defprotocol Orchestrator
+;; Core orchestrator protocol
+(defprotocol ^{:stratum 0} Orchestrator
   "Protocol for workflow orchestration.
    Coordinates agents, tasks, and knowledge through the pipeline."
 
@@ -47,10 +46,8 @@
   (resume-workflow [this workflow-id]
     "Resume a paused workflow. Returns true if resumed."))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Task router protocol
-
-(defprotocol TaskRouter
+(defprotocol ^{:stratum 0} TaskRouter
   "Routes tasks to appropriate agents based on type and context."
 
   (route-task [this task context]
@@ -60,10 +57,8 @@
   (can-handle? [this task agent-role]
     "Check if an agent role can handle a task type."))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Budget manager protocol
-
-(defprotocol BudgetManager
+(defprotocol ^{:stratum 0} BudgetManager
   "Tracks and enforces resource budgets."
 
   (track-usage [this workflow-id usage]
@@ -77,10 +72,8 @@
     "Set budget limits for a workflow.
      budget: {:max-tokens int :max-cost-usd double :timeout-ms int}"))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Knowledge coordinator protocol
-
-(defprotocol KnowledgeCoordinator
+(defprotocol ^{:stratum 0} KnowledgeCoordinator
   "Coordinates knowledge injection and learning capture."
 
   (inject-for-agent [this agent-role task context]

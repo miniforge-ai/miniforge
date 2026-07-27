@@ -6,6 +6,15 @@
        :auto-add false}
  :tag-patterns {:stable "stable/*"
                 :release "v[0-9]*"}
+ ;; Polylith's built-in clojure.test runner aborts a project's entire brick
+ ;; list as soon as one test namespace reports an error or failure. This
+ ;; runner behaves identically but runs every namespace in the project to
+ ;; completion first. Scope: per-project only — it does not protect against
+ ;; the outer per-project loop in Polylith's own orchestrator, which can
+ ;; still abort remaining PROJECTS (miniforge-core, miniforge-tui, ...) in
+ ;; the same `poly test` invocation; that's a separate, not-yet-fixed gap.
+ ;; See tools/poly-test-runner/src/ai/miniforge/poly_test_runner/core.clj.
+ :test {:create-test-runner ai.miniforge.poly-test-runner.core/create}
  :projects {"development"    {:alias "dev"}
             "data-foundry"   {:alias "df"}
             "miniforge-core" {:alias "core"

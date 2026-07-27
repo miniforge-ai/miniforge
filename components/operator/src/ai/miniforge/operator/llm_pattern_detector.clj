@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.llm-pattern-detector
   "LLM-powered pattern detector for the operator meta-loop.
 
@@ -35,11 +34,10 @@
    [ai.miniforge.operator.protocol :as proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
 ;; Prompt construction
-
 ;; System prompt sourced from defaults — override via config :system-prompt
-
-(defn summarize-signal
+(defn ^{:stratum 0} summarize-signal
   "Create a compact string summary of a single signal."
   [sig]
   (let [type-str (name (:signal/type sig))
@@ -54,7 +52,19 @@
          (when (:workflow-id data) (str "wf=" (:workflow-id data) " "))
          "ts=" ts)))
 
-(defn build-detect-prompt
+;; Response parsing
+(defn ^{:stratum 0} parse-pattern-type
+  "Parse a pattern type string to keyword, returning nil for unknown types."
+  [type-str]
+  (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
+    (when (contains? #{:repeated-failure :performance-degradation
+                       :resource-waste :anti-pattern :improvement-opportunity}
+                     kw)
+      kw)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-detect-prompt
   "Build prompt for pattern detection from a sequence of signals.
 
    Keeps total input under ~1000 tokens by limiting signal count and summary length."
@@ -76,19 +86,7 @@
          signal-lines
          "\n\nAnalyze these signals and return detected patterns as JSON.")))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Response parsing
-
-(defn parse-pattern-type
-  "Parse a pattern type string to keyword, returning nil for unknown types."
-  [type-str]
-  (let [kw (keyword (str/lower-case (str/trim (str type-str))))]
-    (when (contains? #{:repeated-failure :performance-degradation
-                       :resource-waste :anti-pattern :improvement-opportunity}
-                     kw)
-      kw)))
-
-(defn parse-pattern
+(defn ^{:stratum 1} parse-pattern
   "Parse a single pattern map from LLM JSON output into a canonical pattern map."
   [raw]
   (let [pattern-type (parse-pattern-type (:type raw))]
@@ -105,7 +103,9 @@
        :pattern/rationale   (get raw :rationale "No rationale provided")
        :pattern/source      :llm})))
 
-(defn parse-detect-response
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} parse-detect-response
   "Parse LLM JSON response into a sequence of pattern maps.
 
    Returns empty sequence on parse failure (fail-open)."
@@ -122,10 +122,10 @@
     (catch Exception _e
       [])))
 
-;------------------------------------------------------------------------------ Layer 2
-;; LLMPatternDetector record
+;------------------------------------------------------------------------------ Layer 3
 
-(defrecord LLMPatternDetector [llm-client config]
+;; LLMPatternDetector record
+(defrecord ^{:stratum 3} LLMPatternDetector [llm-client config]
   proto/PatternDetector
 
   (detect [_this signals]
@@ -153,10 +153,10 @@
       :anti-pattern
       :improvement-opportunity}))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Constructor
+;------------------------------------------------------------------------------ Layer 4
 
-(defn create-llm-pattern-detector
+;; Constructor
+(defn ^{:stratum 4} create-llm-pattern-detector
   "Create an LLM-powered pattern detector.
 
    Arguments:

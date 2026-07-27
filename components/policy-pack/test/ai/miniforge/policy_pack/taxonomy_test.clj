@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.taxonomy-test
   "Unit tests for the taxonomy artifact — schemas, loading, validation, and lookups.
 
@@ -30,11 +29,12 @@
    [ai.miniforge.policy-pack.taxonomy :as sut]
    [ai.miniforge.policy-pack.mdc-compiler :as mdc-compiler]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Test fixtures
 ;; ============================================================================
-
-(def minimal-taxonomy
+(def ^{:stratum 0} minimal-taxonomy
   {:taxonomy/id      :test/minimal
    :taxonomy/version "1.0.0"
    :taxonomy/title   "Minimal Test Taxonomy"
@@ -51,10 +51,9 @@
    [{:alias/name :alpha :alias/target :test.cat/alpha}]})
 
 ;; ============================================================================
-;; Layer 0 — Schema validation tests
+;; Schema validation tests
 ;; ============================================================================
-
-(deftest taxonomy-category-schema-test
+(deftest ^{:stratum 0} taxonomy-category-schema-test
   (testing "valid category passes schema"
     (is (true? (sut/valid-taxonomy?
                 {:taxonomy/id :t :taxonomy/version "1" :taxonomy/title "T"
@@ -67,7 +66,7 @@
                    :taxonomy/categories [{:category/id :c}]})]
       (is (false? (:valid? result))))))
 
-(deftest taxonomy-ref-schema-test
+(deftest ^{:stratum 0} taxonomy-ref-schema-test
   (testing "valid TaxonomyRef"
     (is (true? (malli.core/validate sut/TaxonomyRef
                                     {:taxonomy/id :miniforge/dewey
@@ -77,63 +76,10 @@
     (is (false? (malli.core/validate sut/TaxonomyRef
                                      {:taxonomy/id :miniforge/dewey})))))
 
-(deftest full-taxonomy-schema-test
-  (testing "minimal taxonomy passes validation"
-    (is (true? (sut/valid-taxonomy? minimal-taxonomy))))
-
-  (testing "taxonomy with optional description passes"
-    (is (true? (sut/valid-taxonomy?
-                (assoc minimal-taxonomy :taxonomy/description "A test taxonomy")))))
-
-  (testing "taxonomy missing id fails"
-    (is (false? (sut/valid-taxonomy? (dissoc minimal-taxonomy :taxonomy/id)))))
-
-  (testing "taxonomy missing categories fails"
-    (is (false? (sut/valid-taxonomy? (dissoc minimal-taxonomy :taxonomy/categories))))))
-
 ;; ============================================================================
-;; Layer 1 — Lookup helper tests
+;; Classpath loading tests
 ;; ============================================================================
-
-(deftest category-by-id-test
-  (testing "finds category by keyword ID"
-    (let [cat (sut/category-by-id minimal-taxonomy :test.cat/alpha)]
-      (is (= :test.cat/alpha (:category/id cat)))
-      (is (= "Alpha Category" (:category/title cat)))))
-
-  (testing "returns nil for unknown category"
-    (is (nil? (sut/category-by-id minimal-taxonomy :test.cat/unknown)))))
-
-(deftest resolve-alias-test
-  (testing "resolves known alias to target"
-    (is (= :test.cat/alpha (sut/resolve-alias minimal-taxonomy :alpha))))
-
-  (testing "returns input unchanged for unknown alias"
-    (is (= :test.cat/beta (sut/resolve-alias minimal-taxonomy :test.cat/beta)))))
-
-(deftest category-title-test
-  (testing "returns title for direct category ID"
-    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :test.cat/alpha))))
-
-  (testing "returns title via alias resolution"
-    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :alpha))))
-
-  (testing "returns nil for unknown category"
-    (is (nil? (sut/category-title minimal-taxonomy :unknown)))))
-
-(deftest category-order-test
-  (testing "returns order for known category"
-    (is (= 0 (sut/category-order minimal-taxonomy :test.cat/alpha)))
-    (is (= 100 (sut/category-order minimal-taxonomy :test.cat/beta))))
-
-  (testing "returns MAX_VALUE for unknown category"
-    (is (= Integer/MAX_VALUE (sut/category-order minimal-taxonomy :unknown)))))
-
-;; ============================================================================
-;; Layer 1 — Classpath loading tests
-;; ============================================================================
-
-(deftest load-canonical-taxonomy-from-classpath-test
+(deftest ^{:stratum 0} load-canonical-taxonomy-from-classpath-test
   (testing "loads bundled miniforge taxonomy from classpath"
     (let [result (sut/load-taxonomy-from-classpath
                   "policy_pack/taxonomies/miniforge-dewey-1.0.0.edn")]
@@ -146,10 +92,9 @@
           (is (= 10 (count (:taxonomy/aliases taxonomy)))))))))
 
 ;; ============================================================================
-;; Layer 2 — Canonical taxonomy export tests
+;; Canonical taxonomy export tests
 ;; ============================================================================
-
-(deftest export-canonical-taxonomy-test
+(deftest ^{:stratum 0} export-canonical-taxonomy-test
   (testing "exported taxonomy is valid"
     (let [taxonomy (mdc-compiler/export-canonical-taxonomy)]
       (is (true? (sut/valid-taxonomy? taxonomy)))))
@@ -194,8 +139,7 @@
 ;; ============================================================================
 ;; Regression — compile-standards-pack still includes taxonomy-ref
 ;; ============================================================================
-
-(deftest compiled-pack-has-taxonomy-ref-test
+(deftest ^{:stratum 0} compiled-pack-has-taxonomy-ref-test
   (testing "compile-standards-pack produces pack with taxonomy-ref"
     (let [result (mdc-compiler/compile-standards-pack ".standards")]
       (when (:success? result)
@@ -204,3 +148,56 @@
           (is (some? ref) "Pack should have :pack/taxonomy-ref")
           (is (= :miniforge/dewey (:taxonomy/id ref)))
           (is (= "1.0.0" (:taxonomy/min-version ref))))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} full-taxonomy-schema-test
+  (testing "minimal taxonomy passes validation"
+    (is (true? (sut/valid-taxonomy? minimal-taxonomy))))
+
+  (testing "taxonomy with optional description passes"
+    (is (true? (sut/valid-taxonomy?
+                (assoc minimal-taxonomy :taxonomy/description "A test taxonomy")))))
+
+  (testing "taxonomy missing id fails"
+    (is (false? (sut/valid-taxonomy? (dissoc minimal-taxonomy :taxonomy/id)))))
+
+  (testing "taxonomy missing categories fails"
+    (is (false? (sut/valid-taxonomy? (dissoc minimal-taxonomy :taxonomy/categories))))))
+
+;; ============================================================================
+;; Lookup helper tests
+;; ============================================================================
+(deftest ^{:stratum 1} category-by-id-test
+  (testing "finds category by keyword ID"
+    (let [cat (sut/category-by-id minimal-taxonomy :test.cat/alpha)]
+      (is (= :test.cat/alpha (:category/id cat)))
+      (is (= "Alpha Category" (:category/title cat)))))
+
+  (testing "returns nil for unknown category"
+    (is (nil? (sut/category-by-id minimal-taxonomy :test.cat/unknown)))))
+
+(deftest ^{:stratum 1} resolve-alias-test
+  (testing "resolves known alias to target"
+    (is (= :test.cat/alpha (sut/resolve-alias minimal-taxonomy :alpha))))
+
+  (testing "returns input unchanged for unknown alias"
+    (is (= :test.cat/beta (sut/resolve-alias minimal-taxonomy :test.cat/beta)))))
+
+(deftest ^{:stratum 1} category-title-test
+  (testing "returns title for direct category ID"
+    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :test.cat/alpha))))
+
+  (testing "returns title via alias resolution"
+    (is (= "Alpha Category" (sut/category-title minimal-taxonomy :alpha))))
+
+  (testing "returns nil for unknown category"
+    (is (nil? (sut/category-title minimal-taxonomy :unknown)))))
+
+(deftest ^{:stratum 1} category-order-test
+  (testing "returns order for known category"
+    (is (= 0 (sut/category-order minimal-taxonomy :test.cat/alpha)))
+    (is (= 100 (sut/category-order minimal-taxonomy :test.cat/beta))))
+
+  (testing "returns MAX_VALUE for unknown category"
+    (is (= Integer/MAX_VALUE (sut/category-order minimal-taxonomy :unknown)))))

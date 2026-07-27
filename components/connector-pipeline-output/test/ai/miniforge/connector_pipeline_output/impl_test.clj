@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.connector-pipeline-output.impl-test
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.java.io :as io]
@@ -26,9 +25,68 @@
             [ai.miniforge.connector-pipeline-output.interface :as iface]
             [ai.miniforge.response.interface :as response]))
 
-(def ^:private test-dir "target/test-output")
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- clean-test-dir [f]
+(def ^{:stratum 0} ^:private test-dir "target/test-output")
+
+(deftest ^{:stratum 0} connect-requires-dir
+  (testing "connect returns anomaly data without :output/dir"
+    (let [result (impl/do-connect {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/incorrect (:anomaly/category result)))
+      (is (some? (:errors result))))))
+
+(deftest ^{:stratum 0} publish-missing-handle-returns-anomaly
+  (testing "publish returns anomaly data when the output handle is unknown"
+    (let [result (impl/do-publish "missing-output-handle" [{:id 1}] {})]
+      (is (response/anomaly-map? result))
+      (is (= :anomalies/not-found (:anomaly/category result)))
+      (is (= "missing-output-handle" (:handle result))))))
+
+(deftest ^{:stratum 0} schema-validation-test
+  (testing "valid config passes validation"
+    (let [result (schema/validate-config {:output/dir "output/"})]
+      (is (true? (:valid? result)))))
+
+  (testing "invalid config fails validation"
+    (let [result (schema/validate-config {})]
+      (is (false? (:valid? result)))
+      (is (some? (:errors result)))))
+
+  (testing "valid manifest passes validation"
+    (let [manifest {:manifest/version "1.0"
+                    :manifest/run-id "run-001"
+                    :manifest/format :edn
+                    :manifest/record-count 10
+                    :manifest/created-at "2026-03-25T00:00:00Z"
+                    :manifest/records-file "records.edn"}
+          result (schema/validate-manifest manifest)]
+      (is (true? (:valid? result)))))
+
+  (testing "invalid manifest fails validation"
+    (let [result (schema/validate-manifest {:manifest/version "2.0"})]
+      (is (false? (:valid? result))))))
+
+(deftest ^{:stratum 0} interface-exposes-schemas-test
+  (testing "interface exposes Malli schemas"
+    (is (some? iface/Manifest))
+    (is (some? iface/OutputConfig)))
+
+  (testing "interface exposes JSON Schema generators"
+    (let [manifest-js (iface/manifest-json-schema)
+          config-js (iface/config-json-schema)]
+      (is (= "object" (:type manifest-js)))
+      (is (= "object" (:type config-js)))
+      (is (contains? (:properties manifest-js) (keyword "manifest/version")))
+      (is (contains? (:properties config-js) (keyword "output/dir")))))
+
+  (testing "interface exposes validation helpers"
+    (is (true? (:valid? (iface/validate-config {:output/dir "x"}))))
+    (is (false? (:valid? (iface/validate-config {}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} clean-test-dir [f]
   (let [dir (io/file test-dir)]
     (when (.exists dir)
       (doseq [file (reverse (file-seq dir))]
@@ -38,16 +96,7 @@
       (doseq [file (reverse (file-seq dir))]
         (.delete file)))))
 
-(use-fixtures :each clean-test-dir)
-
-(deftest connect-requires-dir
-  (testing "connect returns anomaly data without :output/dir"
-    (let [result (impl/do-connect {})]
-      (is (response/anomaly-map? result))
-      (is (= :anomalies/incorrect (:anomaly/category result)))
-      (is (some? (:errors result))))))
-
-(deftest connect-rejects-unsupported-format
+(deftest ^{:stratum 1} connect-rejects-unsupported-format
   (testing "connect returns anomaly data on unsupported format"
     (let [result (impl/do-connect {:output/dir test-dir
                                    :output/format :xml})]
@@ -55,7 +104,7 @@
       (is (= :anomalies/incorrect (:anomaly/category result)))
       (is (some? (:errors result))))))
 
-(deftest connect-close-lifecycle
+(deftest ^{:stratum 1} connect-close-lifecycle
   (testing "connect and close work with defaults"
     (let [result (impl/do-connect {:output/dir test-dir})
           handle (:connection/handle result)]
@@ -64,14 +113,7 @@
       (let [close-result (impl/do-close handle)]
         (is (= :closed (:connector/status close-result)))))))
 
-(deftest publish-missing-handle-returns-anomaly
-  (testing "publish returns anomaly data when the output handle is unknown"
-    (let [result (impl/do-publish "missing-output-handle" [{:id 1}] {})]
-      (is (response/anomaly-map? result))
-      (is (= :anomalies/not-found (:anomaly/category result)))
-      (is (= "missing-output-handle" (:handle result))))))
-
-(deftest publish-edn-test
+(deftest ^{:stratum 1} publish-edn-test
   (testing "publish writes manifest.edn and records.edn"
     (let [run-id "test-run-001"
           config {:output/dir test-dir
@@ -102,7 +144,7 @@
 
       (impl/do-close handle))))
 
-(deftest publish-json-test
+(deftest ^{:stratum 1} publish-json-test
   (testing "publish writes manifest.edn and records.json"
     (let [run-id "test-run-json"
           config {:output/dir test-dir
@@ -127,7 +169,7 @@
 
       (impl/do-close handle))))
 
-(deftest publish-default-format-test
+(deftest ^{:stratum 1} publish-default-format-test
   (testing "defaults to EDN when no format specified"
     (let [run-id "test-default"
           config {:output/dir test-dir :output/run-id run-id}
@@ -137,7 +179,7 @@
       (is (= :edn (:manifest/format manifest)))
       (impl/do-close handle))))
 
-(deftest publish-auto-run-id-test
+(deftest ^{:stratum 1} publish-auto-run-id-test
   (testing "auto-generates run-id when not provided"
     (let [config {:output/dir test-dir}
           handle (:connection/handle (impl/do-connect config))
@@ -148,7 +190,7 @@
       (is (.exists (io/file (first run-dirs) "manifest.edn")))
       (impl/do-close handle))))
 
-(deftest publish-writes-json-schema-test
+(deftest ^{:stratum 1} publish-writes-json-schema-test
   (testing "publish writes manifest.schema.json alongside manifest"
     (let [run-id "test-json-schema"
           config {:output/dir test-dir :output/run-id run-id}
@@ -162,31 +204,7 @@
         (is (contains? (:properties json-schema) (keyword "manifest/version"))))
       (impl/do-close handle))))
 
-(deftest schema-validation-test
-  (testing "valid config passes validation"
-    (let [result (schema/validate-config {:output/dir "output/"})]
-      (is (true? (:valid? result)))))
-
-  (testing "invalid config fails validation"
-    (let [result (schema/validate-config {})]
-      (is (false? (:valid? result)))
-      (is (some? (:errors result)))))
-
-  (testing "valid manifest passes validation"
-    (let [manifest {:manifest/version "1.0"
-                    :manifest/run-id "run-001"
-                    :manifest/format :edn
-                    :manifest/record-count 10
-                    :manifest/created-at "2026-03-25T00:00:00Z"
-                    :manifest/records-file "records.edn"}
-          result (schema/validate-manifest manifest)]
-      (is (true? (:valid? result)))))
-
-  (testing "invalid manifest fails validation"
-    (let [result (schema/validate-manifest {:manifest/version "2.0"})]
-      (is (false? (:valid? result))))))
-
-(deftest publish-per-dataset-test
+(deftest ^{:stratum 1} publish-per-dataset-test
   (testing "publish writes separate files per dataset when datasets provided"
     (let [run-id "test-datasets"
           config {:output/dir test-dir :output/format :edn :output/run-id run-id}
@@ -222,7 +240,7 @@
 
       (impl/do-close handle))))
 
-(deftest publish-single-dataset-uses-combined-test
+(deftest ^{:stratum 1} publish-single-dataset-uses-combined-test
   (testing "single dataset falls back to combined output (no per-dataset files)"
     (let [run-id "test-single-ds"
           config {:output/dir test-dir :output/format :edn :output/run-id run-id}
@@ -237,19 +255,4 @@
         (is (nil? (:manifest/datasets manifest))))
       (impl/do-close handle))))
 
-(deftest interface-exposes-schemas-test
-  (testing "interface exposes Malli schemas"
-    (is (some? iface/Manifest))
-    (is (some? iface/OutputConfig)))
-
-  (testing "interface exposes JSON Schema generators"
-    (let [manifest-js (iface/manifest-json-schema)
-          config-js (iface/config-json-schema)]
-      (is (= "object" (:type manifest-js)))
-      (is (= "object" (:type config-js)))
-      (is (contains? (:properties manifest-js) (keyword "manifest/version")))
-      (is (contains? (:properties config-js) (keyword "output/dir")))))
-
-  (testing "interface exposes validation helpers"
-    (is (true? (:valid? (iface/validate-config {:output/dir "x"}))))
-    (is (false? (:valid? (iface/validate-config {}))))))
+(use-fixtures :each clean-test-dir)

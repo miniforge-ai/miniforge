@@ -15,32 +15,61 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.repair
   "Repair function registry for policy-pack violations.
 
    Repair functions can automatically fix certain violation types.
    They are registered by rule-id or violation pattern.
 
-   Layer 0: Repair registry
-   Layer 1: Built-in repair functions
-   Layer 2: Repair orchestration"
+   Layer 0: succeeded?, repair-registry atom, built-in repair fns
+     (whitespace-repair, trailing-newline-repair)
+   Layer 1: register-repair!, deregister-repair!, get-repair-fn, list-repairs
+     (over repair-registry)
+   Layer 2: attempt-repair (over get-repair-fn)
+   Layer 3: attempt-repairs (over attempt-repair)
+
+   4 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem."
   (:require [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Result predicates
 
-(defn succeeded?
+;; Result predicates
+(defn ^{:stratum 0} succeeded?
   "Check if a repair result indicates success."
   [result]
   (boolean (:success? result)))
 
 ;; Repair registry
-
 ;; Registry of repair functions keyed by rule-id pattern.
-(defonce repair-registry (atom {}))
+(defonce ^{:stratum 0} repair-registry (atom {}))
 
-(defn register-repair!
+;; Built-in repair functions
+(defn ^{:stratum 0} whitespace-repair
+  "Repair function for whitespace violations (trailing whitespace, mixed tabs/spaces)."
+  [_violation artifact _context]
+  (let [content (get artifact :content "")
+        fixed (-> content
+                  (str/replace #"[ \t]+\n" "\n")
+                  (str/replace #"\t" "  "))]
+    (if (= content fixed)
+      {:success? false :artifact artifact :fix-description "No whitespace issues found"}
+      {:success? true
+       :artifact (assoc artifact :content fixed)
+       :fix-description "Removed trailing whitespace and converted tabs to spaces"})))
+
+(defn ^{:stratum 0} trailing-newline-repair
+  "Ensure file ends with exactly one newline."
+  [_violation artifact _context]
+  (let [content (get artifact :content "")
+        fixed (str (clojure.string/trimr content) "\n")]
+    {:success? true
+     :artifact (assoc artifact :content fixed)
+     :fix-description "Ensured file ends with single newline"}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} register-repair!
   "Register a repair function for a rule-id or pattern.
 
    Arguments:
@@ -52,13 +81,13 @@
   (swap! repair-registry assoc rule-id-or-pattern repair-fn)
   rule-id-or-pattern)
 
-(defn deregister-repair!
+(defn ^{:stratum 1} deregister-repair!
   "Remove a repair function."
   [rule-id-or-pattern]
   (swap! repair-registry dissoc rule-id-or-pattern)
   nil)
 
-(defn get-repair-fn
+(defn ^{:stratum 1} get-repair-fn
   "Find a repair function for a given rule-id.
 
    Checks exact match first, then regex patterns.
@@ -72,40 +101,15 @@
                 v))
             @repair-registry)))
 
-(defn list-repairs
+(defn ^{:stratum 1} list-repairs
   "List all registered repair function keys."
   []
   (keys @repair-registry))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Built-in repair functions
-
-(defn whitespace-repair
-  "Repair function for whitespace violations (trailing whitespace, mixed tabs/spaces)."
-  [_violation artifact _context]
-  (let [content (get artifact :content "")
-        fixed (-> content
-                  (str/replace #"[ \t]+\n" "\n")
-                  (str/replace #"\t" "  "))]
-    (if (= content fixed)
-      {:success? false :artifact artifact :fix-description "No whitespace issues found"}
-      {:success? true
-       :artifact (assoc artifact :content fixed)
-       :fix-description "Removed trailing whitespace and converted tabs to spaces"})))
-
-(defn trailing-newline-repair
-  "Ensure file ends with exactly one newline."
-  [_violation artifact _context]
-  (let [content (get artifact :content "")
-        fixed (str (clojure.string/trimr content) "\n")]
-    {:success? true
-     :artifact (assoc artifact :content fixed)
-     :fix-description "Ensured file ends with single newline"}))
-
 ;------------------------------------------------------------------------------ Layer 2
-;; Repair orchestration
 
-(defn attempt-repair
+;; Repair orchestration
+(defn ^{:stratum 2} attempt-repair
   "Attempt to repair a single violation.
 
    Arguments:
@@ -123,7 +127,9 @@
          :artifact artifact
          :fix-description (str "Repair failed: " (ex-message e))}))))
 
-(defn attempt-repairs
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} attempt-repairs
   "Attempt to repair all violations in sequence.
 
    Applies repair functions in order. Each successful repair updates the artifact

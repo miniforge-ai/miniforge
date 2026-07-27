@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.web-dashboard.filter-specs
   "Filter specification loading and management."
   (:require
@@ -24,9 +23,9 @@
    [ai.miniforge.web-dashboard.filter-schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Derived field registry
 
-(def derived-fields
+;; Derived field registry
+(def ^{:stratum 0} derived-fields
   "Registry of derived field extractors.
    Maps derived-id -> extraction function."
   {:derived/entity-status
@@ -81,10 +80,8 @@
    (fn [item]
      (boolean (seq (:train/blocking-prs item))))})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Spec loading
-
-(defn load-filter-specs
+(defn ^{:stratum 0} load-filter-specs
   "Load filter specifications from EDN file.
 
    Arguments:
@@ -104,21 +101,25 @@
       (println "Error loading filter specs:" (ex-message e))
       [])))
 
+;------------------------------------------------------------------------------ Layer 1
+
 ;; Atom holding loaded filter specifications
-(defonce filter-specs-atom
+(defonce ^{:stratum 1} filter-specs-atom
   (atom (load-filter-specs "filters/default-filters.edn")))
 
-(defn get-filter-specs
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} get-filter-specs
   "Get currently loaded filter specifications."
   []
   @filter-specs-atom)
 
-(defn reload-filter-specs!
+(defn ^{:stratum 2} reload-filter-specs!
   "Reload filter specifications from file."
   []
   (reset! filter-specs-atom (load-filter-specs "filters/default-filters.edn")))
 
-(defn add-custom-filter-spec!
+(defn ^{:stratum 2} add-custom-filter-spec!
   "Add a custom filter specification at runtime.
 
    Arguments:
@@ -134,10 +135,10 @@
       (println "Invalid filter spec:" (schema/explain-filter-spec spec))
       false)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Spec queries
+;------------------------------------------------------------------------------ Layer 3
 
-(defn get-applicable-filters
+;; Spec queries
+(defn ^{:stratum 3} get-applicable-filters
   "Get all filters applicable to a pane, grouped by scope.
 
    For global filters: Returns ALL global filters (they apply everywhere).
@@ -153,7 +154,7 @@
                          (contains? (:filter/applicable-to %) pane))
                    specs)}))
 
-(defn get-filter-spec-by-id
+(defn ^{:stratum 3} get-filter-spec-by-id
   "Get a filter spec by its ID."
   [filter-id]
   (first (filter #(= filter-id (:filter/id %)) (get-filter-specs))))

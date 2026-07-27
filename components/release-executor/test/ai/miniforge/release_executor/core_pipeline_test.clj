@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.core-pipeline-test
   "Unit tests for release-executor core pipeline helpers, step functions,
    and execute-release-phase integration.
@@ -29,11 +28,12 @@
    [clojure.string :as str]
    [clojure.test :refer [deftest is testing]]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Test helpers
 ;; ============================================================================
-
-(defn create-failing-mock-executor
+(defn ^{:stratum 0} create-failing-mock-executor
   "Mock executor that always fails, used to reach a specific pipeline stage."
   []
   (reify
@@ -48,21 +48,21 @@
     (release-environment! [_ _] (dag/ok {:released? true}))
     (environment-status [_ _] (dag/ok {:status :running}))))
 
-(def test-release-meta
+(def ^{:stratum 0} test-release-meta
   {:release/branch-name "mf/test-change-abc12345"
    :release/commit-message "Test change"
    :release/pr-title "Test change"
    :release/pr-description "## Summary\nTest change"
    :release/pr-body "## Summary\nTest change"})
 
-(defn make-code-artifact
+(defn ^{:stratum 0} make-code-artifact
   "Create a minimal code artifact with files."
   [files]
   {:artifact/type :code
    :artifact/content {:code/id (random-uuid)
                       :code/files files}})
 
-(defn make-workflow-state
+(defn ^{:stratum 0} make-workflow-state
   "Create a workflow state with artifacts."
   [artifacts & {:keys [description]
                 :or {description "test task"}}]
@@ -72,45 +72,32 @@
 ;; ============================================================================
 ;; failed? and fail
 ;; ============================================================================
-
-(deftest failed?-returns-false-for-normal-state
+(deftest ^{:stratum 0} failed?-returns-false-for-normal-state
   (testing "state without :failure is not failed"
     (is (not (sut/failed? {:worktree-path "/tmp/foo"})))))
 
-(deftest failed?-returns-true-for-failed-state
+(deftest ^{:stratum 0} failed?-returns-true-for-failed-state
   (testing "state with :failure key is failed"
     (is (sut/failed? {:failure {:type :test :message "boom"}}))))
 
-(deftest fail-adds-failure-map
+(deftest ^{:stratum 0} fail-adds-failure-map
   (testing "fail sets :failure with type and message"
     (let [result (sut/fail {} :test-error "something broke")]
       (is (sut/failed? result))
       (is (= :test-error (get-in result [:failure :type])))
       (is (= "something broke" (get-in result [:failure :message]))))))
 
-(deftest fail-with-hint
+(deftest ^{:stratum 0} fail-with-hint
   (testing "fail can include a hint"
     (let [result (sut/fail {} :auth-error "not logged in" :hint "Run: gh auth login")]
       (is (= "Run: gh auth login" (get-in result [:failure :hint]))))))
 
-(deftest fail-without-hint-has-no-hint-key
+(deftest ^{:stratum 0} fail-without-hint-has-no-hint-key
   (testing "fail without hint omits :hint from failure map"
     (let [result (sut/fail {} :some-error "msg")]
       (is (not (contains? (:failure result) :hint))))))
 
-;; ============================================================================
-;; extract-code-artifacts
-;; ============================================================================
-
-(deftest extract-code-artifacts-from-artifact-type
-  (testing "extracts content from :artifact/type :code"
-    (let [artifacts [(make-code-artifact [{:path "a.clj" :action :create}])]
-          result (sut/extract-code-artifacts artifacts)]
-      (is (= 1 (count result)))
-      (is (= [{:path "a.clj" :action :create}]
-             (:code/files (first result)))))))
-
-(deftest extract-code-artifacts-from-type
+(deftest ^{:stratum 0} extract-code-artifacts-from-type
   (testing "extracts content from :type :code"
     (let [artifacts [{:type :code :content {:code/files [{:path "b.clj" :action :modify}]}}]
           result (sut/extract-code-artifacts artifacts)]
@@ -118,19 +105,11 @@
       (is (= [{:path "b.clj" :action :modify}]
              (:code/files (first result)))))))
 
-(deftest extract-code-artifacts-ignores-non-code
-  (testing "non-code artifacts are excluded"
-    (let [artifacts [{:artifact/type :review :artifact/content {:review/summary "ok"}}
-                     {:artifact/type :test :artifact/content {:test/results :passed}}
-                     (make-code-artifact [{:path "a.clj" :action :create}])]
-          result (sut/extract-code-artifacts artifacts)]
-      (is (= 1 (count result))))))
-
-(deftest extract-code-artifacts-empty-list
+(deftest ^{:stratum 0} extract-code-artifacts-empty-list
   (testing "empty artifact list returns empty seq"
     (is (empty? (sut/extract-code-artifacts [])))))
 
-(deftest extract-code-artifacts-nil-content-filtered
+(deftest ^{:stratum 0} extract-code-artifacts-nil-content-filtered
   (testing "artifacts with nil content are filtered out"
     (let [artifacts [{:artifact/type :code :artifact/content nil}]
           result (sut/extract-code-artifacts artifacts)]
@@ -139,8 +118,7 @@
 ;; ============================================================================
 ;; extract-workflow-data
 ;; ============================================================================
-
-(deftest extract-workflow-data-separates-reviews-and-tests
+(deftest ^{:stratum 0} extract-workflow-data-separates-reviews-and-tests
   (testing "returns a map with :review-artifacts and :test-artifacts"
     (let [artifacts [{:artifact/type :review :artifact/content {:review/summary "good"}}
                      {:artifact/type :test :artifact/content {:test/results :passed}}
@@ -151,7 +129,7 @@
       (is (= "good" (:review/summary (first (:review-artifacts result)))))
       (is (= :passed (:test/results (first (:test-artifacts result))))))))
 
-(deftest extract-workflow-data-empty-artifacts
+(deftest ^{:stratum 0} extract-workflow-data-empty-artifacts
   (testing "empty artifacts produce empty review and test lists"
     (let [result (sut/extract-workflow-data [])]
       (is (empty? (:review-artifacts result)))
@@ -160,34 +138,33 @@
 ;; ============================================================================
 ;; step-validate-inputs
 ;; ============================================================================
-
-(deftest step-validate-inputs-already-failed-passes-through
+(deftest ^{:stratum 0} step-validate-inputs-already-failed-passes-through
   (testing "already-failed state is returned unchanged"
     (let [state {:failure {:type :prior :message "earlier"}}]
       (is (= state (sut/step-validate-inputs state))))))
 
-(deftest step-validate-inputs-missing-worktree-path
+(deftest ^{:stratum 0} step-validate-inputs-missing-worktree-path
   (testing "fails when :worktree-path is absent"
     (let [state {:executor :some-executor :environment-id "env-1"}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
       (is (= :missing-worktree-path (get-in result [:failure :type]))))))
 
-(deftest step-validate-inputs-missing-executor
+(deftest ^{:stratum 0} step-validate-inputs-missing-executor
   (testing "fails when :executor is absent"
     (let [state {:worktree-path "/tmp/wt" :environment-id "env-1"}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
       (is (= :missing-executor (get-in result [:failure :type]))))))
 
-(deftest step-validate-inputs-missing-environment-id
+(deftest ^{:stratum 0} step-validate-inputs-missing-environment-id
   (testing "fails when :environment-id is absent"
     (let [state {:worktree-path "/tmp/wt" :executor :some-executor}
           result (sut/step-validate-inputs state)]
       (is (sut/failed? result))
       (is (= :missing-environment-id (get-in result [:failure :type]))))))
 
-(deftest step-validate-inputs-valid-state-passes
+(deftest ^{:stratum 0} step-validate-inputs-valid-state-passes
   (testing "state with worktree-path, executor, and environment-id passes"
     (let [state {:worktree-path "/tmp/wt"
                  :executor :some-executor
@@ -198,14 +175,13 @@
 ;; ============================================================================
 ;; step-check-gh-auth
 ;; ============================================================================
-
-(deftest step-check-gh-auth-skipped-when-not-creating-pr
+(deftest ^{:stratum 0} step-check-gh-auth-skipped-when-not-creating-pr
   (testing "gh auth check is skipped when create-pr? is false"
     (let [state {:create-pr? false}
           result (sut/step-check-gh-auth state)]
       (is (not (sut/failed? result))))))
 
-(deftest step-check-gh-auth-skipped-when-already-failed
+(deftest ^{:stratum 0} step-check-gh-auth-skipped-when-already-failed
   (testing "already-failed state passes through"
     (let [state {:failure {:type :prior :message "x"} :create-pr? true}]
       (is (sut/failed? (sut/step-check-gh-auth state))))))
@@ -213,19 +189,12 @@
 ;; ============================================================================
 ;; step-generate-metadata
 ;; ============================================================================
-
-(deftest step-generate-metadata-already-failed-passes-through
+(deftest ^{:stratum 0} step-generate-metadata-already-failed-passes-through
   (testing "already-failed state passes through"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-generate-metadata state))))))
 
-(deftest step-generate-metadata-uses-pre-provided-meta
-  (testing "pre-provided release-meta is used as-is"
-    (let [state {:release-meta test-release-meta}
-          result (sut/step-generate-metadata state)]
-      (is (= test-release-meta (:release-meta result))))))
-
-(deftest step-generate-metadata-generates-fallback
+(deftest ^{:stratum 0} step-generate-metadata-generates-fallback
   (testing "generates fallback metadata when no release-meta or releaser"
     (let [state {:code-artifacts [{:code/files [{:path "a.clj" :action :create}]}]
                  :task-description "Add feature X"
@@ -235,7 +204,7 @@
       (is (contains? (:release-meta result) :release/branch-name))
       (is (= "Add feature X" (:release/pr-title (:release-meta result)))))))
 
-(deftest step-generate-metadata-with-workflow-data
+(deftest ^{:stratum 0} step-generate-metadata-with-workflow-data
   (testing "workflow-data review artifacts appear in generated metadata"
     (let [state {:code-artifacts [{:code/files [{:path "a.clj" :action :create}]}]
                  :task-description "Fix"
@@ -251,8 +220,7 @@
 ;; ============================================================================
 ;; step-stage-dirty-files — passes through failure
 ;; ============================================================================
-
-(deftest step-stage-dirty-files-already-failed-passes-through
+(deftest ^{:stratum 0} step-stage-dirty-files-already-failed-passes-through
   (testing "already-failed state passes through"
     (let [state {:failure {:type :branch-create-failed :message "nope"}}]
       (is (= state (sut/step-stage-dirty-files state))))))
@@ -260,8 +228,7 @@
 ;; ============================================================================
 ;; step-validate-diff
 ;; ============================================================================
-
-(deftest step-validate-diff-already-failed-passes-through
+(deftest ^{:stratum 0} step-validate-diff-already-failed-passes-through
   (testing "already-failed state passes through"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-validate-diff state))))))
@@ -269,8 +236,7 @@
 ;; ============================================================================
 ;; pipeline->result
 ;; ============================================================================
-
-(deftest pipeline-result-on-failure
+(deftest ^{:stratum 0} pipeline-result-on-failure
   (testing "failure state produces phase-failure result"
     (let [state {:failure {:type :branch-create-failed
                            :message "could not create branch"
@@ -283,7 +249,7 @@
       (is (= :branch-create-failed (:type (first (:errors result)))))
       (is (= {:files-written 2} (:metrics result))))))
 
-(deftest pipeline-result-on-success
+(deftest ^{:stratum 0} pipeline-result-on-success
   (testing "success state produces phase-success result with metrics"
     (let [artifact {:artifact/id (random-uuid) :artifact/type :release}
           state {:release-artifact artifact
@@ -301,14 +267,14 @@
       (is (= "abc123" (get-in result [:metrics :commit-sha])))
       (is (= "mf/test" (get-in result [:metrics :branch]))))))
 
-(deftest pipeline-result-failure-without-metrics
+(deftest ^{:stratum 0} pipeline-result-failure-without-metrics
   (testing "failure without write-metrics uses empty map"
     (let [state {:failure {:type :no-files-to-stage :message "empty"}}
           result (sut/pipeline->result state)]
       (is (not (:success? result)))
       (is (= {} (:metrics result))))))
 
-(deftest pipeline-result-success-nil-pr-fields
+(deftest ^{:stratum 0} pipeline-result-success-nil-pr-fields
   (testing "success without PR fields has nil pr-number and pr-url"
     (let [state {:release-artifact {:artifact/type :release}
                  :write-metrics {}
@@ -319,47 +285,7 @@
       (is (nil? (get-in result [:metrics :pr-number])))
       (is (nil? (get-in result [:metrics :pr-url]))))))
 
-;; ============================================================================
-;; execute-release-phase — integration (short-circuit paths)
-;; ============================================================================
-
-(deftest execute-release-phase-missing-worktree-path
-  (testing "fails when :worktree-path is absent"
-    (let [workflow-state (make-workflow-state [])
-          context {:executor :some-executor :environment-id "env-1" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :missing-worktree-path (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-missing-executor
-  (testing "fails when :executor is absent"
-    (let [workflow-state (make-workflow-state [])
-          context {:worktree-path "/tmp/wt" :environment-id "env-1" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :missing-executor (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-missing-environment-id
-  (testing "fails when :environment-id is absent"
-    (let [workflow-state (make-workflow-state [])
-          context {:worktree-path "/tmp/wt" :executor :some-executor :create-pr? false}
-          result (sut/execute-release-phase workflow-state context {})]
-      (is (not (:success? result)))
-      (is (= :missing-environment-id (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-pre-provided-release-meta
-  (testing "pre-provided release-meta skips metadata generation"
-    ;; Fails at branch creation (mock executor returns exit 1), but metadata step passes
-    (let [workflow-state (make-workflow-state [])
-          exec (create-failing-mock-executor)
-          context {:worktree-path "/tmp/wt" :executor exec
-                   :environment-id "env-1" :create-pr? false}
-          result (sut/execute-release-phase workflow-state context
-                                           {:release-meta test-release-meta})]
-      ;; Error should NOT be metadata-related — pre-provided meta was used
-      (is (not= :metadata-generation-failed (:type (first (:errors result))))))))
-
-(deftest execute-release-phase-extracts-workflow-data
+(deftest ^{:stratum 0} execute-release-phase-extracts-workflow-data
   (testing "review and test artifacts are extracted from workflow state"
     ;; step-generate-metadata uses workflow-data before any executor call
     (let [state {:code-artifacts []
@@ -376,35 +302,34 @@
 ;; ============================================================================
 ;; step-commit / step-push / step-create-pr — pass through failure
 ;; ============================================================================
-
-(deftest step-commit-already-failed
+(deftest ^{:stratum 0} step-commit-already-failed
   (testing "already-failed state passes through commit"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-commit state))))))
 
-(deftest step-push-already-failed
+(deftest ^{:stratum 0} step-push-already-failed
   (testing "already-failed state passes through push"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-push state))))))
 
-(deftest step-push-skipped-when-not-creating-pr
+(deftest ^{:stratum 0} step-push-skipped-when-not-creating-pr
   (testing "push is skipped when create-pr? is false"
     (let [state {:create-pr? false :branch "mf/test"}
           result (sut/step-push state)]
       (is (not (sut/failed? result))))))
 
-(deftest step-create-pr-already-failed
+(deftest ^{:stratum 0} step-create-pr-already-failed
   (testing "already-failed state passes through PR creation"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-create-pr state))))))
 
-(deftest step-create-pr-skipped-when-not-creating-pr
+(deftest ^{:stratum 0} step-create-pr-skipped-when-not-creating-pr
   (testing "PR creation is skipped when create-pr? is false"
     (let [state {:create-pr? false}
           result (sut/step-create-pr state)]
       (is (not (sut/failed? result))))))
 
-(deftest step-create-pr-uses-rich-pr-body-test
+(deftest ^{:stratum 0} step-create-pr-uses-rich-pr-body-test
   (testing "PR creation uses :release/pr-body instead of the short description"
     (let [seen-payload (atom nil)]
       (with-redefs [sandbox/create-pr!
@@ -431,36 +356,20 @@
 ;; ============================================================================
 ;; step-build-artifact
 ;; ============================================================================
-
-(deftest step-build-artifact-already-failed
+(deftest ^{:stratum 0} step-build-artifact-already-failed
   (testing "already-failed state passes through artifact building"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-build-artifact state))))))
 
-(deftest step-build-artifact-produces-artifact
-  (testing "produces a release artifact from pipeline state"
-    (let [state {:worktree-path "/tmp/wt"
-                 :branch "mf/test"
-                 :base-branch "main"
-                 :commit-sha "abc123"
-                 :create-pr? false
-                 :release-meta test-release-meta
-                 :write-metrics {:files-written 2 :total-operations 2}
-                 :code-artifacts []}
-          result (sut/step-build-artifact state)]
-      (is (not (sut/failed? result)))
-      (is (some? (:release-artifact result))))))
-
 ;; ============================================================================
 ;; step-save-artifact
 ;; ============================================================================
-
-(deftest step-save-artifact-already-failed
+(deftest ^{:stratum 0} step-save-artifact-already-failed
   (testing "already-failed state passes through artifact saving"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-save-artifact state))))))
 
-(deftest step-save-artifact-without-store
+(deftest ^{:stratum 0} step-save-artifact-without-store
   (testing "gracefully handles nil artifact store"
     (let [state {:release-artifact {:artifact/type :release}}]
       (is (not (sut/failed? (sut/step-save-artifact state)))))))
@@ -468,8 +377,7 @@
 ;; ============================================================================
 ;; step-create-branch — passes through failure
 ;; ============================================================================
-
-(deftest step-create-branch-already-failed
+(deftest ^{:stratum 0} step-create-branch-already-failed
   (testing "already-failed state passes through branch creation"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-create-branch state))))))
@@ -477,8 +385,7 @@
 ;; ============================================================================
 ;; PR doc generation tests
 ;; ============================================================================
-
-(deftest pr-doc-filename-test
+(deftest ^{:stratum 0} pr-doc-filename-test
   (testing "generates date-prefixed slugified filename"
     (let [filename (#'sut/pr-doc-filename "feat: add auth middleware")]
       (is (str/starts-with? filename "2026-"))
@@ -490,7 +397,7 @@
       (is (str/ends-with? filename ".md"))
       (is (str/includes? filename "untitled")))))
 
-(deftest render-pr-doc-test
+(deftest ^{:stratum 0} render-pr-doc-test
   (testing "renders markdown with YAML attribution header"
     (let [doc (#'sut/render-pr-doc
                {:release/pr-title "feat: add auth"
@@ -518,7 +425,7 @@
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-write-pr-doc state))))))
 
-(deftest step-write-pr-doc-writes-relative-path-test
+(deftest ^{:stratum 0} step-write-pr-doc-writes-relative-path-test
   (testing "write-file! receives a relative docs/pull-requests path, never absolute"
     (let [seen-path (atom :unset)]
       (with-redefs [sandbox/write-file! (fn [_exec _env path _content]
@@ -544,8 +451,7 @@
 ;; ============================================================================
 ;; format-files-changed
 ;; ============================================================================
-
-(deftest format-files-changed-test
+(deftest ^{:stratum 0} format-files-changed-test
   (testing "formats code artifact files as markdown bullet list"
     (let [artifacts [{:code/files [{:path "src/foo.clj" :action :create}
                                    {:path "src/bar.clj" :action :modify}]}]
@@ -567,8 +473,7 @@
 ;; ============================================================================
 ;; format-test-results
 ;; ============================================================================
-
-(deftest format-test-results-test
+(deftest ^{:stratum 0} format-test-results-test
   (testing "formats test artifact with result, counts, and summary"
     (let [artifacts [{:test/results :passed
                       :test/total 10
@@ -604,8 +509,7 @@
 ;; ============================================================================
 ;; format-review-decision
 ;; ============================================================================
-
-(deftest format-review-decision-test
+(deftest ^{:stratum 0} format-review-decision-test
   (testing "formats review decision and summary"
     (let [artifacts [{:review/decision :approved
                       :review/summary "Clean code, well-structured."}]
@@ -633,8 +537,7 @@
 ;; ============================================================================
 ;; render-pr-doc-full
 ;; ============================================================================
-
-(deftest render-pr-doc-full-test
+(deftest ^{:stratum 0} render-pr-doc-full-test
   (testing "renders comprehensive doc with all sections"
     (let [doc (#'sut/render-pr-doc-full
                {:release/pr-title "feat: add auth"
@@ -694,19 +597,18 @@
 ;; ============================================================================
 ;; step-generate-pr-doc
 ;; ============================================================================
-
-(deftest step-generate-pr-doc-already-failed
+(deftest ^{:stratum 0} step-generate-pr-doc-already-failed
   (testing "already-failed state passes through"
     (let [state {:failure {:type :prior :message "x"}}]
       (is (= state (sut/step-generate-pr-doc state))))))
 
-(deftest step-generate-pr-doc-skipped-when-not-creating-pr
+(deftest ^{:stratum 0} step-generate-pr-doc-skipped-when-not-creating-pr
   (testing "skipped when create-pr? is false"
     (let [state {:create-pr? false}
           result (sut/step-generate-pr-doc state)]
       (is (not (sut/failed? result))))))
 
-(deftest step-generate-pr-doc-writes-relative-path-test
+(deftest ^{:stratum 0} step-generate-pr-doc-writes-relative-path-test
   ;; The 2026-06-15 rn-03 dogfood logged `pr-doc-generation-failed - Path
   ;; traversal rejected: sandbox path must be relative` on every release: the
   ;; step passed an ABSOLUTE `worktree-path/docs/...` to sandbox/write-file!,
@@ -746,8 +648,7 @@
 ;; conflated. These tests pin them apart: the fallback renderer produces a
 ;; reviewer-facing body, omits empty sections instead of padding them, and
 ;; never includes the HTML copyright header.
-
-(deftest render-pr-body-fallback-omits-html-copyright-header-test
+(deftest ^{:stratum 0} render-pr-body-fallback-omits-html-copyright-header-test
   (testing "the body fallback must not start with HTML comments — those belong in the docs file, not in the GitHub PR description"
     (let [body (#'sut/render-pr-body-fallback
                 {:release/pr-title "fix: X" :release/pr-description "Fixed X."}
@@ -760,7 +661,7 @@
       (is (not (str/includes? body "Copyright 2025-2026"))
           "no copyright line in PR body — it's a docs-file marker"))))
 
-(deftest render-pr-body-fallback-omits-placeholder-sections-test
+(deftest ^{:stratum 0} render-pr-body-fallback-omits-placeholder-sections-test
   (testing "no `_No X available._` strings in the PR body when the source data is absent"
     ;; Reviewers reading the GitHub PR shouldn't see "No test artifacts available."
     ;; — that placeholder pads the docs file (committed to repo for browsing)
@@ -778,7 +679,7 @@
       (is (str/includes? body "## Summary"))
       (is (str/includes? body "## Files Changed")))))
 
-(deftest render-pr-body-fallback-includes-sections-when-data-present-test
+(deftest ^{:stratum 0} render-pr-body-fallback-includes-sections-when-data-present-test
   (testing "Test Results and Review sections render when their data is present"
     (let [body (#'sut/render-pr-body-fallback
                 {:release/pr-title "feat: Y" :release/pr-description "Added Y."}
@@ -789,7 +690,7 @@
       (is (str/includes? body "## Review"))
       (is (str/includes? body "LGTM")))))
 
-(deftest render-pr-body-fallback-does-not-duplicate-summary-when-pr-description-already-structured-test
+(deftest ^{:stratum 0} render-pr-body-fallback-does-not-duplicate-summary-when-pr-description-already-structured-test
   (testing "when :release/pr-description already starts with ## Summary, fallback must not wrap it under another ## Summary"
     ;; The updated releaser prompt requires structured pr-description
     ;; with `## Summary / ## Why / ...`. The fallback must detect this
@@ -808,7 +709,7 @@
       (is (str/includes? body "## Why")
           "The structured pr-description's own sections (e.g. `## Why`) must survive into the body verbatim"))))
 
-(deftest render-pr-body-fallback-treats-blank-pr-description-as-absent-test
+(deftest ^{:stratum 0} render-pr-body-fallback-treats-blank-pr-description-as-absent-test
   (testing "an empty-string :release/pr-description falls back to pr-title for the Summary, not a blank Summary"
     (let [body (#'sut/render-pr-body-fallback
                 {:release/pr-title "fix: only" :release/pr-description ""}
@@ -817,7 +718,7 @@
       (is (str/includes? body "fix: only")
           "blank pr-description must be treated as absent — Summary falls back to pr-title"))))
 
-(deftest render-pr-body-fallback-omits-section-when-formatter-returns-blank-test
+(deftest ^{:stratum 0} render-pr-body-fallback-omits-section-when-formatter-returns-blank-test
   (testing "section is omitted when its formatted markdown is blank, even though artifacts exist"
     ;; format-review-decision / format-test-results return \"\" when artifacts
     ;; exist but lack their canonical fields. The empty string is truthy,
@@ -839,24 +740,103 @@
 ;;
 ;; The 2026-05-19 regression overwrote good agent bodies with the docs file.
 ;; This predicate must say "needs update" only for genuinely degraded bodies.
-
-(deftest pr-body-needs-update?-true-when-body-missing-test
+(deftest ^{:stratum 0} pr-body-needs-update?-true-when-body-missing-test
   (is (true? (#'sut/pr-body-needs-update?
               {:release/pr-title "feat: X" :release/pr-body nil}))))
 
-(deftest pr-body-needs-update?-true-when-body-blank-test
+(deftest ^{:stratum 0} pr-body-needs-update?-true-when-body-blank-test
   (is (true? (#'sut/pr-body-needs-update?
               {:release/pr-title "feat: X" :release/pr-body "   \n  "}))))
 
-(deftest pr-body-needs-update?-true-when-body-equals-title-test
+(deftest ^{:stratum 0} pr-body-needs-update?-true-when-body-equals-title-test
   (testing "PR body that's just the title is degraded agent output — replace with structured fallback"
     (is (true? (#'sut/pr-body-needs-update?
                 {:release/pr-title "feat: X" :release/pr-body "feat: X"})))))
 
-(deftest pr-body-needs-update?-false-when-body-has-real-content-test
+(deftest ^{:stratum 0} pr-body-needs-update?-false-when-body-has-real-content-test
   (testing "a real PR body MUST NOT be overwritten — this is the regression pin"
     ;; The 2026-05-19 step-update-pr-body clobbered good agent bodies with
     ;; the docs-file content. The new policy: leave any non-degraded body alone.
     (is (false? (#'sut/pr-body-needs-update?
                  {:release/pr-title "feat: X"
                   :release/pr-body  "## Summary\n\n- did the thing\n- and the other thing\n\n## Why\n\nBecause Y."})))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; ============================================================================
+;; extract-code-artifacts
+;; ============================================================================
+(deftest ^{:stratum 1} extract-code-artifacts-from-artifact-type
+  (testing "extracts content from :artifact/type :code"
+    (let [artifacts [(make-code-artifact [{:path "a.clj" :action :create}])]
+          result (sut/extract-code-artifacts artifacts)]
+      (is (= 1 (count result)))
+      (is (= [{:path "a.clj" :action :create}]
+             (:code/files (first result)))))))
+
+(deftest ^{:stratum 1} extract-code-artifacts-ignores-non-code
+  (testing "non-code artifacts are excluded"
+    (let [artifacts [{:artifact/type :review :artifact/content {:review/summary "ok"}}
+                     {:artifact/type :test :artifact/content {:test/results :passed}}
+                     (make-code-artifact [{:path "a.clj" :action :create}])]
+          result (sut/extract-code-artifacts artifacts)]
+      (is (= 1 (count result))))))
+
+(deftest ^{:stratum 1} step-generate-metadata-uses-pre-provided-meta
+  (testing "pre-provided release-meta is used as-is"
+    (let [state {:release-meta test-release-meta}
+          result (sut/step-generate-metadata state)]
+      (is (= test-release-meta (:release-meta result))))))
+
+;; ============================================================================
+;; execute-release-phase — integration (short-circuit paths)
+;; ============================================================================
+(deftest ^{:stratum 1} execute-release-phase-missing-worktree-path
+  (testing "fails when :worktree-path is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:executor :some-executor :environment-id "env-1" :create-pr? false}
+          result (sut/execute-release-phase workflow-state context {})]
+      (is (not (:success? result)))
+      (is (= :missing-worktree-path (:type (first (:errors result))))))))
+
+(deftest ^{:stratum 1} execute-release-phase-missing-executor
+  (testing "fails when :executor is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:worktree-path "/tmp/wt" :environment-id "env-1" :create-pr? false}
+          result (sut/execute-release-phase workflow-state context {})]
+      (is (not (:success? result)))
+      (is (= :missing-executor (:type (first (:errors result))))))))
+
+(deftest ^{:stratum 1} execute-release-phase-missing-environment-id
+  (testing "fails when :environment-id is absent"
+    (let [workflow-state (make-workflow-state [])
+          context {:worktree-path "/tmp/wt" :executor :some-executor :create-pr? false}
+          result (sut/execute-release-phase workflow-state context {})]
+      (is (not (:success? result)))
+      (is (= :missing-environment-id (:type (first (:errors result))))))))
+
+(deftest ^{:stratum 1} execute-release-phase-pre-provided-release-meta
+  (testing "pre-provided release-meta skips metadata generation"
+    ;; Fails at branch creation (mock executor returns exit 1), but metadata step passes
+    (let [workflow-state (make-workflow-state [])
+          exec (create-failing-mock-executor)
+          context {:worktree-path "/tmp/wt" :executor exec
+                   :environment-id "env-1" :create-pr? false}
+          result (sut/execute-release-phase workflow-state context
+                                           {:release-meta test-release-meta})]
+      ;; Error should NOT be metadata-related — pre-provided meta was used
+      (is (not= :metadata-generation-failed (:type (first (:errors result))))))))
+
+(deftest ^{:stratum 1} step-build-artifact-produces-artifact
+  (testing "produces a release artifact from pipeline state"
+    (let [state {:worktree-path "/tmp/wt"
+                 :branch "mf/test"
+                 :base-branch "main"
+                 :commit-sha "abc123"
+                 :create-pr? false
+                 :release-meta test-release-meta
+                 :write-metrics {:files-written 2 :total-operations 2}
+                 :code-artifacts []}
+          result (sut/step-build-artifact state)]
+      (is (not (sut/failed? result)))
+      (is (some? (:release-artifact result))))))
