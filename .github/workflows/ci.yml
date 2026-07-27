@@ -2,7 +2,7 @@ name: CI
 
 # This workflow runs linting, tests, and builds on every push and PR, plus a
 # PR-only size check (pr-budget) that rejects a whole PR's cumulative diff
-# past 200 reportable lines -- the PR-level counterpart to the commit-time
+# past 600 reportable lines -- the PR-level counterpart to the commit-time
 # `commit-budget` gate.
 # All output is captured in log files and uploaded as artifacts for debugging.
 # Logs are retained for 7 days and can be downloaded from the Actions UI.
