@@ -191,9 +191,9 @@
    `:anomalies/dag-unschedulable` anomaly from `traverse-levels` when the
    graph can't be fully traversed."
   [tasks]
-  (let [result (-> tasks
-                   ((juxt #(map (comp normalize-task-id :task/id) %) build-deps-map))
-                   ((fn [[ids deps]] (traverse-levels ids deps))))]
+  (let [ids (map (comp normalize-task-id :task/id) tasks)
+        deps-map (build-deps-map tasks)
+        result (traverse-levels ids deps-map)]
     (if (anomaly/anomaly? result)
       result
       (:max-width result))))
