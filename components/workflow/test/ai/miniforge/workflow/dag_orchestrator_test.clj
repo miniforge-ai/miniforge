@@ -628,6 +628,28 @@
       (is (= (:duration-ms sum) (:total-duration agg))
           ":duration-ms also rolls up from both shapes"))))
 
+;------------------------------------------------------------------------------ estimate-parallel-speedup and maybe-parallelize-plan — cycle/dangling-dep propagation
+
+(def ^{:stratum 2} ^:private cyclic-plan
+  "Plan with a 2-task cycle: A depends on B, B depends on A."
+  {:plan/id (random-uuid)
+   :plan/tasks [{:task/id id-a :task/description "A" :task/type :implement
+                 :task/dependencies [id-b]}
+                {:task/id id-b :task/description "B" :task/type :implement
+                 :task/dependencies [id-a]}]})
+
+(deftest ^{:stratum 2} estimate-parallel-speedup-cyclic-terminates-test
+  (testing "estimate-parallel-speedup via re-export returns non-parallelizable for a cyclic plan"
+    (let [result (dag-orch/estimate-parallel-speedup cyclic-plan)]
+      (is (= false (:parallelizable? result))
+          "A cyclic plan must not be reported as parallelizable through the re-export"))))
+
+(deftest ^{:stratum 2} maybe-parallelize-plan-cyclic-terminates-test
+  (testing "maybe-parallelize-plan returns nil (falls back to sequential) for a cyclic plan"
+    (let [result (dag-orch/maybe-parallelize-plan cyclic-plan {})]
+      (is (nil? result)
+          "A cyclic plan must not trigger parallel execution — maybe-parallelize-plan must return nil"))))
+
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
   (clojure.test/run-tests 'ai.miniforge.workflow.dag-orchestrator-test)
