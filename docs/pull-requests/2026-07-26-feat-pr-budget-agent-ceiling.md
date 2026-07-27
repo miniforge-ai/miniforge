@@ -9,8 +9,10 @@
 ## Overview
 
 Follow-up to [#1539](https://github.com/miniforge-ai/miniforge/pull/1539)
-(same-day). `bb pr-budget`'s default ceiling moves from 200 (a plain
-alias of `commit-budget/default-budget`) to its own, independent 600.
+(same-day). `bb pr-budget`'s default ceiling (reportable lines, after
+blank/comment/generated-path exclusion — not raw diff lines) moves
+from 200 (a plain alias of `commit-budget/default-budget`) to its own,
+independent 600.
 
 ## Motivation
 
@@ -59,9 +61,9 @@ whatever is optimal for the agent context... I'm pretty sure it's not
 ## Testing Plan
 
 - Re-ran the same 3 manual scenarios from #1539 against the new
-  default: small PR (4 lines) passes clean, a Wave 1 mechanical-fix PR
-  (1618 lines) is correctly rejected at the new 600 ceiling, override
-  still works.
+  default: small PR (4 reportable lines) passes clean, a Wave 1
+  mechanical-fix PR (1618 reportable lines) is correctly rejected at
+  the new 600 ceiling, override still works.
 - `clj-kondo --lint tasks/pr_budget.clj`: 0 errors, 0 warnings.
 - `markdownlint agents.md`: 0 errors.
 - Validated `.github/workflows/ci.yml` is well-formed YAML.
