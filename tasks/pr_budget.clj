@@ -38,7 +38,7 @@
    (comment/blank stripping, generated-path exclusions) so a file that
    doesn't count against a commit doesn't count against its PR either.
 
-   Default: 600 lines -- deliberately NOT the same 200 as
+   Default: 600 reportable lines -- deliberately NOT the same 200 as
    `commit-budget`. The 200-line commit ceiling is Smartbear 2010 /
    Cisco 2018 human review-throughput research; there is no equivalent
    published data for LLM-driven review, and this codebase is

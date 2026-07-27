@@ -85,10 +85,10 @@ See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
 - **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer
 - **Simple Made Easy** — values over state; data over syntax; no speculative complexity
 - **PR Discipline** — one stratum per PR, commits <200 lines / whole
-  PRs <600 lines (both enforced in CI — `bb commit-budget` per commit,
-  `bb pr-budget` for the whole PR; see `## PR Size and Review
-  Discipline` below for why the two numbers differ), branch from
-  main, never bypass hooks
+  PRs <600 lines (`bb commit-budget` enforces the commit-level number
+  at commit time via the pre-commit hook; `bb pr-budget` enforces the
+  PR-level number in CI; see `## PR Size and Review Discipline` below
+  for why the two numbers differ), branch from main, never bypass hooks
 - **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs
 - **Adversarial Review Before Push** — before opening or pushing to any
   PR, review your own diff adversarially: read every changed file
