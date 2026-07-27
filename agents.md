@@ -84,9 +84,11 @@ See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
 
 - **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer
 - **Simple Made Easy** — values over state; data over syntax; no speculative complexity
-- **PR Discipline** — one stratum per PR, <200 lines (enforced in CI by
-  `bb pr-budget`, mirroring the commit-time `bb commit-budget` gate),
-  branch from main, never bypass hooks
+- **PR Discipline** — one stratum per PR, commits <200 lines / whole
+  PRs <600 lines (both enforced in CI — `bb commit-budget` per commit,
+  `bb pr-budget` for the whole PR; see `## PR Size and Review
+  Discipline` below for why the two numbers differ), branch from
+  main, never bypass hooks
 - **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs
 - **Adversarial Review Before Push** — before opening or pushing to any
   PR, review your own diff adversarially: read every changed file
@@ -104,7 +106,7 @@ See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
 Two related, previously-missing gates, added 2026-07-26:
 
 - **`bb pr-budget`** (CI, `pull_request` events only): rejects a PR
-  whose whole merge-base..head diff exceeds 200 reportable lines
+  whose whole merge-base..head diff exceeds 600 reportable lines
   (same blank/comment/generated-path exclusions as `bb commit-budget`).
   This is distinct from `commit-budget`, which only ever looked at one
   commit's staged diff — a PR made of a single large commit (or several
@@ -113,6 +115,15 @@ Two related, previously-missing gates, added 2026-07-26:
   <rationale>` line in the PR description, visible to every reviewer
   on the PR (unlike the commit-level env-var override, visible only in
   local shell history / CI logs).
+  **Why 600, not 200:** the commit-level 200 is Smartbear 2010 / Cisco
+  2018 human review-throughput research; there's no equivalent
+  published number for LLM-driven review, and this codebase is
+  overwhelmingly agent-written and agent-reviewed. 600 is 3x the
+  commit ceiling (a PR bundling a small, coherent handful of
+  commit-sized steps, not a monolith) — an order of magnitude above the
+  human number, two orders of magnitude below the ~10-12k raw lines
+  where Copilot's own review actually broke down (below). Treat 600 as
+  calibrated-not-fixed, the same as the commit-level 200.
 - **Adversarial self-review before every push**, not just for PRs that
   trip the size gate. Read the actual diff like a skeptical reviewer,
   not the tool's own "this should be safe" framing.
@@ -124,18 +135,22 @@ Two related, previously-missing gates, added 2026-07-26:
 `MINIFORGE_COMMIT_BUDGET_OVERRIDE`'d commit — legal under the
 commit-only gate that existed at the time. GitHub Copilot's automated
 review silently declined to post any comments at all on the largest of
-these (past its own undocumented size ceiling), so the only real
+these (confirmed empirically: engaged fully at 9,906 raw changed
+lines, declined outright at 12,592 — somewhere in between is a real
+wall for automated coverage, undocumented by GitHub), so the only real
 review those PRs got was a dedicated adversarial pass run by hand,
-*after* several had already merged. That pass found real defects
-(a comment-attachment bug, an undisclosed behavior change buried
-inside a PR whose description claimed "mechanical, no logic changes,"
-several stale/contradictory comments) that plain CI (lint + tests
-green) had not and could not catch. `pr-budget` exists so a PR that
-size can't reach merge without either being split up or explicitly
-flagging its own size with a reviewable rationale; the adversarial-review
-principle exists because passing CI was never sufficient evidence of
-correctness for a mechanical diff this large, and treating it as
-sufficient is what let the gap open in the first place.
+*after* several had already merged, itself costing 170-210k tokens per
+PR and still needing follow-up rounds to converge. That pass found
+real defects (a comment-attachment bug, an undisclosed behavior change
+buried inside a PR whose description claimed "mechanical, no logic
+changes," several stale/contradictory comments) that plain CI (lint +
+tests green) had not and could not catch. `pr-budget` exists so a PR
+that size can't reach merge without either being split up or
+explicitly flagging its own size with a reviewable rationale; the
+adversarial-review principle exists because passing CI was never
+sufficient evidence of correctness for a mechanical diff this large,
+and treating it as sufficient is what let the gap open in the first
+place.
 
 ## Writing Spec Task Descriptions (`work/*.spec.edn`)
 

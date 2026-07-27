@@ -38,8 +38,25 @@
    (comment/blank stripping, generated-path exclusions) so a file that
    doesn't count against a commit doesn't count against its PR either.
 
-   Default: 200 lines, same bound as `commit-budget` (Smartbear 2010 /
-   Cisco 2018 review-throughput research this repo already leans on).
+   Default: 600 lines -- deliberately NOT the same 200 as
+   `commit-budget`. The 200-line commit ceiling is Smartbear 2010 /
+   Cisco 2018 human review-throughput research; there is no equivalent
+   published data for LLM-driven review, and this codebase is
+   overwhelmingly agent-written and agent-reviewed, not human-authored
+   commit-by-commit. 600 is a reasoned estimate, not a citation: three
+   times the commit ceiling (a PR bundling a small, coherent handful of
+   commit-sized steps, not a monolith), an order of magnitude above the
+   human number (agents don't suffer literal per-line reading fatigue
+   the way human reviewers do), and two orders of magnitude below what
+   actually broke down -- during the stratum-lint Wave 1 program,
+   GitHub Copilot's automated review engaged fully at 9,906 raw changed
+   lines but silently declined to comment at all at 12,592, and a
+   dedicated adversarial review pass at that same scale cost 170-210k
+   tokens and still needed follow-up rounds to reach a clean state.
+   Expect this number to move as real data accumulates against it, the
+   same way `commit-budget`'s 200 is treated as calibrated, not fixed
+   forever.
+
    Override: add a line matching `MINIFORGE_PR_BUDGET_OVERRIDE: <rationale>`
    to the PR description. Unlike the commit-level env-var override
    (which only the person committing can see), this is visible to
@@ -52,9 +69,11 @@
 
 ;; pure helpers (no in-namespace deps)
 (def ^{:stratum 0} default-budget
-  "Same ceiling as `commit-budget/default-budget` — one number, one
-   rationale, applied at both the commit and the PR level."
-  cb/default-budget)
+  "PR-level ceiling — deliberately NOT `commit-budget/default-budget`.
+   See the namespace docstring for the full reasoning; short version:
+   this repo's PRs are agent-authored and agent-reviewed, not the
+   human-commit-by-commit case the 200-line number was calibrated for."
+  600)
 
 (def ^{:stratum 0} override-marker-re
   "Matches `MINIFORGE_PR_BUDGET_OVERRIDE: <rationale>` (or `=`) anywhere
@@ -141,10 +160,12 @@
           (cb/print-report! annotated total)
           (println "")
           (println "Why this exists:")
-          (println "  Reviewer defect-detection drops sharply past ~200 LOC, and")
           (println "  GitHub Copilot's automated review silently declines to comment")
-          (println "  at all on PRs past its own size threshold -- past that point a")
+          (println "  at all on PRs past its own size threshold (empirically somewhere")
+          (println "  between 9,906 and 12,592 raw changed lines) -- past that point a")
           (println "  gargantuan PR gets effectively zero automated review coverage.")
+          (println "  Even a dedicated adversarial review pass at that scale costs")
+          (println "  170-210k tokens and still needs follow-up rounds to converge.")
           (println "")
           (println "How to proceed:")
           (println "  • Split the change into several smaller PRs -- e.g. one")
