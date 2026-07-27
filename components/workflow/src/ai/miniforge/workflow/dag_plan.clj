@@ -26,6 +26,7 @@
    converting a plan's tasks into validated DAG tasks (dependency
    normalization, phantom-dep dropping, stratum auto-wiring)."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -73,27 +74,6 @@
      :metrics {}}))
 
 ;--- Layer 0: Level Traversal
-(defn ^{:stratum 0} build-deps-map [tasks]
-  (->> tasks
-       (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
-       (into {})))
-
-(defn ^{:stratum 0} traverse-levels [task-ids deps-map]
-  (loop [remaining (set task-ids)
-         completed #{}
-         level-count 0
-         max-width 0]
-    (if (empty? remaining)
-      {:levels level-count :max-width max-width}
-      (let [ready (->> remaining
-                       (filter #(every? completed (get deps-map % #{}))))
-            width (count ready)]
-        (recur (apply disj remaining ready)
-               (into completed ready)
-               (inc level-count)
-               (max max-width width))))))
-
-;--- Layer 0: Plan to DAG Conversion
 (defn ^{:stratum 0} normalize-task-id
   "Preserve task IDs in their domain-native form.
    UUID strings are parsed to UUIDs so mixed string/UUID inputs still align."
@@ -104,6 +84,47 @@
     (keyword? x) x
     :else x))
 
+(defn ^{:stratum 0} build-deps-map [tasks]
+  (->> tasks
+       (map (fn [t] [(:task/id t) (set (:task/dependencies t []))]))
+       (into {})))
+
+(defn ^{:stratum 0} traverse-levels
+  "BFS the dependency graph in ready-batches (\"levels\"), tracking the
+   widest batch for parallelism estimation.
+
+   A task id whose dependency never becomes `completed` — because it
+   participates in a cycle, or because it names an id absent from
+   `task-ids` entirely — would leave `ready` empty forever and spin the
+   loop with no progress. Detect that stall directly (empty `ready`
+   while `remaining` is non-empty) and return an anomaly instead,
+   following the `:anomalies/dag-non-forest` convention in
+   `ai.miniforge.dag-executor.branch-registry` for plan-shape defects
+   the runtime can't reconcile."
+  [task-ids deps-map]
+  (loop [remaining (set task-ids)
+         completed #{}
+         level-count 0
+         max-width 0]
+    (if (empty? remaining)
+      {:levels level-count :max-width max-width}
+      (let [ready (->> remaining
+                       (filter #(every? completed (get deps-map % #{}))))
+            width (count ready)]
+        (if (zero? width)
+          (anomaly/sub-anomaly
+           :conflict :anomalies/dag-unschedulable
+           "Plan has unschedulable tasks: a dependency cycle, or a task dependency id absent from the plan's own task ids"
+           ;; sort-by str so heterogeneous task-id types (UUID/keyword/
+           ;; string) still produce a total order — `sort` would throw
+           ;; on a mixed set.
+           {:unresolved-task-ids (vec (sort-by str remaining))})
+          (recur (apply disj remaining ready)
+                 (into completed ready)
+                 (inc level-count)
+                 (max max-width width)))))))
+
+;--- Layer 0: Plan to DAG Conversion
 (defn ^{:stratum 0} validate-deps
   "Filter deps to only those referencing actual task IDs. Warns on phantoms."
   [task-id raw-deps valid-task-ids logger]
@@ -157,23 +178,6 @@
    :error error
    :metrics (or metrics zero-metrics)})
 
-(defn ^{:stratum 1} compute-max-level-width [tasks]
-  (-> tasks
-      ((juxt #(map :task/id %) build-deps-map))
-      ((fn [[ids deps]] (traverse-levels ids deps)))
-      :max-width))
-
-(defn ^{:stratum 1} estimate-parallel-speedup [plan]
-  (let [tasks (:plan/tasks plan [])
-        task-count (count tasks)
-        deps-map (build-deps-map tasks)
-        {:keys [levels max-width]} (traverse-levels (map :task/id tasks) deps-map)]
-    {:parallelizable? (> max-width 1)
-     :task-count task-count
-     :max-parallel max-width
-     :levels levels
-     :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))
-
 (defn ^{:stratum 1} plan-task->dag-task
   "Convert a single plan task to a DAG task with validated deps."
   [t valid-task-ids plan-id workflow-id context]
@@ -193,13 +197,52 @@
       (:task/exclusive-files t) (assoc :task/exclusive-files (:task/exclusive-files t))
       (:task/stratum t)         (assoc :task/stratum (:task/stratum t)))))
 
-;------------------------------------------------------------------------------ Layer 2
+(defn ^{:stratum 1} compute-max-level-width
+  "Widest ready-batch across the plan's dependency graph, or the
+   `:anomalies/dag-unschedulable` anomaly from `traverse-levels` when the
+   graph can't be fully traversed.
 
-;--- Layer 2: Plan Analysis
-(defn ^{:stratum 2} parallelizable-plan? [plan]
-  (let [tasks (:plan/tasks plan [])]
-    (when (> (count tasks) 1)
-      (> (compute-max-level-width tasks) 1))))
+   Normalizes :task/id / :task/dependencies before building the deps map
+   the same way `plan->dag-tasks` does — a plan whose tasks mix
+   string/UUID id representations must resolve identically here as it
+   will once `plan->dag-tasks` normalizes it, or `traverse-levels` sees a
+   dependency id that never matches a `completed` entry and misreports a
+   perfectly schedulable plan as unschedulable."
+  [tasks]
+  (let [norm-task (fn [t] (-> t
+                              (update :task/id normalize-task-id)
+                              (update :task/dependencies (fn [d] (map normalize-task-id (or d []))))))
+        norm-tasks (map norm-task tasks)
+        result (-> norm-tasks
+                   ((juxt #(map :task/id %) build-deps-map))
+                   ((fn [[ids deps]] (traverse-levels ids deps))))]
+    (if (anomaly/anomaly? result)
+      result
+      (:max-width result))))
+
+(defn ^{:stratum 1} estimate-parallel-speedup [plan]
+  (let [norm-task (fn [t] (-> t
+                              (update :task/id normalize-task-id)
+                              (update :task/dependencies (fn [d] (map normalize-task-id (or d []))))))
+        tasks (map norm-task (:plan/tasks plan []))
+        task-count (count tasks)
+        deps-map (build-deps-map tasks)
+        result (traverse-levels (map :task/id tasks) deps-map)]
+    (if (anomaly/anomaly? result)
+      {:parallelizable? false
+       :task-count task-count
+       :max-parallel 0
+       :levels 0
+       :estimated-speedup 1.0
+       :anomaly result}
+      (let [{:keys [levels max-width]} result]
+        {:parallelizable? (> max-width 1)
+         :task-count task-count
+         :max-parallel max-width
+         :levels levels
+         :estimated-speedup (if (pos? levels) (float (/ task-count levels)) 1.0)}))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} plan->dag-tasks [plan context]
   (let [tasks (:plan/tasks plan [])
@@ -209,3 +252,11 @@
         dag-tasks (mapv #(plan-task->dag-task % valid-task-ids (:plan/id plan) (:workflow-id context) ctx)
                         tasks)]
     (wire-stratum-deps dag-tasks)))
+
+;--- Layer 2: Plan Analysis
+(defn ^{:stratum 2} parallelizable-plan? [plan]
+  (let [tasks (:plan/tasks plan [])]
+    (when (> (count tasks) 1)
+      (let [width (compute-max-level-width tasks)]
+        (when-not (anomaly/anomaly? width)
+          (> width 1))))))
