@@ -73,9 +73,8 @@
                  :listener/identity {:principal "advisor"}
                  :listener/callback (fn [event] (swap! received conj event))})]
       (es/publish! stream (es/agent-started stream wf-id :implementer))
-      ;; @received also carries this listener's own :listener/attached event
-      ;; (itself :internal-privacy, delivered because :advise qualifies).
       (is (some #(= :agent/started (:event/type %)) @received)))))
+
 
 (deftest ^{:stratum 0} register-and-deregister-listener-test
   (testing "register-listener! returns a UUID and listener appears in list"

@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface.control
   "Control-action API for the event stream."
   (:require
    [ai.miniforge.event-stream.control :as control]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Control actions
 
-(def create-control-action
+;; Control actions
+(def ^{:stratum 0} create-control-action
   "Build a structured control-action map from an action-type keyword
    (:pause, :resume, :retry, :rollback, :cancel, :quarantine,
    :adjust-budget, :emergency-stop, :gate-override, ...), a target map
@@ -35,11 +34,11 @@
    :action/justification and :action/parameters."
   control/create-control-action)
 
-(def default-roles
+(def ^{:stratum 0} default-roles
   "Default RBAC role definitions for structured control actions."
   control/default-roles)
 
-(def authorize-action
+(def ^{:stratum 0} authorize-action
   "Check RBAC authorization for a control action against role
    definitions. Returns {:authorized? true :reason string} when the
    role permits the action on the target category, else {:authorized?
@@ -47,7 +46,7 @@
    type / forbidden action)."
   control/authorize-action)
 
-(def execute-control-action!
+(def ^{:stratum 0} execute-control-action!
   "Authorize then execute a control action. Emits
    :control-action/requested before and :control-action/executed after.
    On RBAC denial returns {:status :denied :reason string :anomaly map}
@@ -56,12 +55,12 @@
    response/failure on a thrown exception."
   control/execute-control-action!)
 
-(def requires-approval?
+(def ^{:stratum 0} requires-approval?
   "Return true when the given action-type keyword requires multi-party
    approval (:gate-override or :budget-escalation), else false."
   control/requires-approval?)
 
-(def execute-control-action-with-approval!
+(def ^{:stratum 0} execute-control-action-with-approval!
   "Execute a control action, gating on approval first. When the action
    type requires approval, creates an approval request, emits
    :approval/requested, and returns {:status :awaiting-approval

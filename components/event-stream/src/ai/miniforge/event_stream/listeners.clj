@@ -46,23 +46,29 @@
 (def ^{:stratum 0} privacy->min-capability
   "Map from event privacy level to minimum listener capability required.
    :public events -> any listener (:observe)
-   :internal events -> :advise or higher
+   :internal events -> :observe (same as :public; tiered gating not yet
+   implemented, see work/n08-oci-governance.spec.edn)
    :confidential events -> :control only"
   {:public       :observe
    :internal     :advise
    :confidential :control})
 
 (defn ^{:stratum 0} matches-workflow?
-  "Check if event matches the workflow ID filter (nil/empty = match all)."
-  [wf-ids event]
-  (or (empty? wf-ids)
-      (contains? (set wf-ids) (:workflow/id event))))
+  "Check if event matches the workflow ID filter (nil/empty = match all).
+   `wf-id-set` must already be a set — callers on a hot path (e.g.
+   `register-listener!`'s per-event filter closure) build it once at
+   registration time rather than re-`set`ting a raw collection on
+   every call."
+  [wf-id-set event]
+  (or (empty? wf-id-set)
+      (contains? wf-id-set (:workflow/id event))))
 
 (defn ^{:stratum 0} matches-event-type?
-  "Check if event matches the event type filter (nil/empty = match all)."
-  [event-types event]
-  (or (empty? event-types)
-      (contains? (set event-types) (:event/type event))))
+  "Check if event matches the event type filter (nil/empty = match all).
+   `event-type-set` must already be a set — see `matches-workflow?`."
+  [event-type-set event]
+  (or (empty? event-type-set)
+      (contains? event-type-set (:event/type event))))
 
 (defn ^{:stratum 0} deregister-listener!
   "Deregister a listener and remove its subscription.
@@ -140,11 +146,11 @@
     ;; Build filter function from listener filters + capability enforcement
     (let [user-filter-fn (cond
                            (nil? filters) (constantly true)
-                           :else (let [wf-ids (:workflow-ids filters)
-                                       event-types (:event-types filters)]
+                           :else (let [wf-id-set (set (:workflow-ids filters))
+                                       event-type-set (set (:event-types filters))]
                                    (fn [event]
-                                     (and (matches-workflow? wf-ids event)
-                                          (matches-event-type? event-types event)))))
+                                     (and (matches-workflow? wf-id-set event)
+                                          (matches-event-type? event-type-set event)))))
           ;; Capability-based filter: listeners only receive events they're authorized for
           filter-fn (fn [event]
                       (and (capability-sufficient? capability

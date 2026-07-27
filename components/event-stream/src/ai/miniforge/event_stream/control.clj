@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.control
   "Structured control actions with RBAC for N8 OCI compliance.
 
@@ -30,43 +29,41 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Control state management
 
-(defn create-control-state
+;; Control state management
+(defn ^{:stratum 0} create-control-state
   "Create a canonical control-state atom for workflow execution.
    Used by both CLI dashboard poller and TUI to drive pause/resume/cancel."
   []
   (atom {:paused false :stopped false :adjustments {}}))
 
-(defn pause!
+(defn ^{:stratum 0} pause!
   "Pause workflow execution."
   [control-state]
   (swap! control-state assoc :paused true))
 
-(defn resume!
+(defn ^{:stratum 0} resume!
   "Resume paused workflow execution."
   [control-state]
   (swap! control-state assoc :paused false))
 
-(defn cancel!
+(defn ^{:stratum 0} cancel!
   "Cancel workflow execution."
   [control-state]
   (swap! control-state assoc :stopped true))
 
-(defn paused?
+(defn ^{:stratum 0} paused?
   "Check if workflow is paused."
   [control-state]
   (:paused @control-state))
 
-(defn cancelled?
+(defn ^{:stratum 0} cancelled?
   "Check if workflow is cancelled."
   [control-state]
   (:stopped @control-state))
 
-;------------------------------------------------------------------------------ Layer 1a
 ;; RBAC role definitions
-
-(def default-roles
+(def ^{:stratum 0} default-roles
   "Default RBAC roles mapping role -> target-category -> permitted actions."
   {:operator {:workflows #{:pause :resume :retry :cancel}
               :agents #{:quarantine :adjust-budget}
@@ -77,14 +74,12 @@
            :fleet #{:emergency-stop :drain}
            :approvals #{:gate-override :budget-escalation}}})
 
-(def target-categories
+(def ^{:stratum 0} target-categories
   "Valid target types for control actions."
   #{:workflow :agent :fleet})
 
-;------------------------------------------------------------------------------ Layer 1b
 ;; Control action creation
-
-(defn create-control-action
+(defn ^{:stratum 0} create-control-action
   "Create a structured control action.
 
    Arguments:
@@ -105,28 +100,33 @@
     (:justification opts) (assoc :action/justification (:justification opts))
     (:parameters opts) (assoc :action/parameters (:parameters opts))))
 
-;------------------------------------------------------------------------------ Layer 1c
 ;; RBAC authorization
-
-(def target-type->category
+(def ^{:stratum 0} target-type->category
   "Map from target type to RBAC category keyword."
   {:workflow :workflows
    :agent    :agents
    :fleet    :fleet})
 
-(defn authorization-granted
+(defn ^{:stratum 0} authorization-granted
   "Build a granted authorization result."
   [reason]
   {:authorized? true :reason reason})
 
-(defn authorization-denied
+(defn ^{:stratum 0} authorization-denied
   "Build a denied authorization result with anomaly."
   [anomaly-category message context]
   {:authorized? false
    :reason message
    :anomaly (response/make-anomaly anomaly-category message context)})
 
-(defn authorize-action
+;; Approval-aware control action execution
+(def ^{:stratum 0} actions-requiring-approval
+  "Action types that require multi-party approval before execution."
+  #{:gate-override :budget-escalation})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} authorize-action
   "Check RBAC authorization for a control action.
 
    Arguments:
@@ -164,10 +164,15 @@
                              :action-type action-type
                              :target-type target-type}))))
 
-;------------------------------------------------------------------------------ Layer 2a
-;; Control action execution
+(defn ^{:stratum 1} requires-approval?
+  "Check if a control action type requires multi-party approval."
+  [action-type]
+  (contains? actions-requiring-approval action-type))
 
-(defn execute-control-action!
+;------------------------------------------------------------------------------ Layer 2
+
+;; Control action execution
+(defn ^{:stratum 2} execute-control-action!
   "Execute a control action with RBAC authorization.
 
    Calls authorize-action before executing. Returns authorization failure
@@ -217,19 +222,9 @@
                           stream workflow-id action-id result))
           result)))))
 
-;------------------------------------------------------------------------------ Layer 2b
-;; Approval-aware control action execution
+;------------------------------------------------------------------------------ Layer 3
 
-(def actions-requiring-approval
-  "Action types that require multi-party approval before execution."
-  #{:gate-override :budget-escalation})
-
-(defn requires-approval?
-  "Check if a control action type requires multi-party approval."
-  [action-type]
-  (contains? actions-requiring-approval action-type))
-
-(defn execute-control-action-with-approval!
+(defn ^{:stratum 3} execute-control-action-with-approval!
   "Execute a control action, checking approval requirements first.
 
    If the action type requires approval (:gate-override, :budget-escalation),

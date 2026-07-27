@@ -23,6 +23,7 @@
         ai.miniforge/gate {:local/root "../gate"}          ; Gate interceptors
         ai.miniforge/dag-executor {:local/root "../dag-executor"}  ; Execution environment acquisition
         ai.miniforge/pr-lifecycle {:local/root "../pr-lifecycle"}  ; PR observe phase
+        ai.miniforge/pr-train {:local/root "../pr-train"}          ; PR train merge coordination
         babashka/fs {:mvn/version "0.5.34"}
         babashka/process {:mvn/version "0.5.22"}
         metosin/malli {:mvn/version "0.16.1"}              ; Schema validation

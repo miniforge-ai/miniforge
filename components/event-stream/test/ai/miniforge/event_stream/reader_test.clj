@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.reader-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -23,7 +22,9 @@
    [cheshire.core :as json]
    [ai.miniforge.event-stream.reader :as reader]))
 
-(defn- with-temp-dir [body-fn]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} with-temp-dir [body-fn]
   (let [dir (doto (io/file (System/getProperty "java.io.tmpdir")
                            (str "mf-reader-test-" (random-uuid)))
               .mkdirs)]
@@ -33,41 +34,45 @@
         (doseq [^java.io.File f (reverse (file-seq dir))]
           (.delete f))))))
 
-(defn- write-event! [^java.io.File dir filename event-map]
+(defn- ^{:stratum 0} write-event! [^java.io.File dir filename event-map]
   (spit (io/file dir filename) (json/generate-string event-map)))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; strip-transit-prefix
-
-(deftest strip-transit-prefix-keyword-keys-test
+(deftest ^{:stratum 0} strip-transit-prefix-keyword-keys-test
   (testing "string keys starting with ~: become keywords"
     (is (= {:event/type :workflow/started}
            (reader/strip-transit-prefix
              {"~:event/type" "~:workflow/started"})))))
 
-(deftest strip-transit-prefix-nested-walk-test
+(deftest ^{:stratum 0} strip-transit-prefix-nested-walk-test
   (testing "walks into nested maps and vectors"
     (is (= {:a [:b {:c :d}]}
            (reader/strip-transit-prefix
              {"~:a" ["~:b" {"~:c" "~:d"}]})))))
 
-(deftest strip-transit-prefix-uuid-instant-test
+(deftest ^{:stratum 0} strip-transit-prefix-uuid-instant-test
   (testing "~u and ~t prefixes strip the 2-char prefix"
     (is (= "some-uuid" (reader/strip-transit-prefix "~usome-uuid")))
     (is (= "2026-04-21T00:00:00Z"
            (reader/strip-transit-prefix "~t2026-04-21T00:00:00Z")))))
 
-(deftest strip-transit-prefix-non-tagged-strings-test
+(deftest ^{:stratum 0} strip-transit-prefix-non-tagged-strings-test
   (testing "plain strings and primitives pass through"
     (is (= "hello" (reader/strip-transit-prefix "hello")))
     (is (= 42 (reader/strip-transit-prefix 42)))
     (is (nil? (reader/strip-transit-prefix nil)))
     (is (true? (reader/strip-transit-prefix true)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; read-workflow-events — the resume-blocking bug
+(deftest ^{:stratum 0} read-workflow-events-missing-dir-returns-nil-test
+  (testing "non-existent directory → nil (no throw)"
+    (is (nil? (reader/read-workflow-events
+                (io/file (System/getProperty "java.io.tmpdir")
+                         (str "mf-reader-test-missing-" (random-uuid))))))))
 
-(deftest read-workflow-events-sorts-by-filename-test
+;------------------------------------------------------------------------------ Layer 1
+
+;; read-workflow-events — the resume-blocking bug
+(deftest ^{:stratum 1} read-workflow-events-sorts-by-filename-test
   (with-temp-dir
     (fn [dir]
       (write-event! dir "20260420T000002Z-eventB.json"
@@ -88,7 +93,7 @@
           (is (= :workflow/phase-completed (:event/type (last events))))
           (is (= :plan (:workflow/phase (second events)))))))))
 
-(deftest read-workflow-events-ignores-non-json-test
+(deftest ^{:stratum 1} read-workflow-events-ignores-non-json-test
   (with-temp-dir
     (fn [dir]
       (write-event! dir "good.json"
@@ -99,7 +104,7 @@
         (let [events (reader/read-workflow-events dir)]
           (is (= 1 (count events))))))))
 
-(deftest read-workflow-events-tolerates-corrupt-json-test
+(deftest ^{:stratum 1} read-workflow-events-tolerates-corrupt-json-test
   (with-temp-dir
     (fn [dir]
       (write-event! dir "20260420T000001Z-good.json"
@@ -114,13 +119,7 @@
           (is (= :workflow/started (:event/type (first events))))
           (is (= :workflow/completed (:event/type (last events)))))))))
 
-(deftest read-workflow-events-missing-dir-returns-nil-test
-  (testing "non-existent directory → nil (no throw)"
-    (is (nil? (reader/read-workflow-events
-                (io/file (System/getProperty "java.io.tmpdir")
-                         (str "mf-reader-test-missing-" (random-uuid))))))))
-
-(deftest read-workflow-events-by-id-composes-path-test
+(deftest ^{:stratum 1} read-workflow-events-by-id-composes-path-test
   (with-temp-dir
     (fn [base-dir]
       (let [wf-id (str (random-uuid))

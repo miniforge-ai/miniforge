@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.interface
   "Canonical public boundary for the event-stream component.
    Public API groups live under ai.miniforge.event-stream.interface.* namespaces,
@@ -35,34 +34,40 @@
    [ai.miniforge.event-stream.sinks :as sinks]
    [ai.miniforge.event-stream.timeline :as timeline]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Stream lifecycle and control state
-
-(def create-control-state
+(def ^{:stratum 0} create-control-state
   "Create a control-state atom for driving workflow pause/resume/cancel
    from the CLI poller or TUI. Returns an atom holding
    {:paused false :stopped false :adjustments {}}."
   control-state/create-control-state)
-(def pause!
+
+(def ^{:stratum 0} pause!
   "Set the control-state atom's :paused flag true. Returns the new
    state map."
   control-state/pause!)
-(def resume!
+
+(def ^{:stratum 0} resume!
   "Clear the control-state atom's :paused flag (set false). Returns the
    new state map."
   control-state/resume!)
-(def cancel!
+
+(def ^{:stratum 0} cancel!
   "Set the control-state atom's :stopped flag true. Returns the new
    state map."
   control-state/cancel!)
-(def paused?
+
+(def ^{:stratum 0} paused?
   "Return the boolean :paused flag from a control-state atom."
   control-state/paused?)
-(def cancelled?
+
+(def ^{:stratum 0} cancelled?
   "Return the boolean :stopped flag from a control-state atom."
   control-state/cancelled?)
 
-(def create-event-stream
+(def ^{:stratum 0} create-event-stream
   "Create an event stream. Returns an atom holding the stream state
    (events vector, subscribers, filters, sinks, sequence numbers,
    quiesce fence, in-flight counter, optional snowflake generator).
@@ -70,7 +75,8 @@
    (builds sinks from config), :snowflake-generator (BD-2b event-id
    generator for lexically-sortable ids)."
   stream/create-event-stream)
-(def create-envelope
+
+(def ^{:stratum 0} create-envelope
   "Build an event envelope map with an atomically-assigned per-workflow
    sequence number. Returns a map carrying :event/type, :event/id (a
    uuid? — snowflake-encoded when the stream has a generator, else
@@ -79,7 +85,8 @@
    (:org/id, :workspace/id, :repo/id, :auth/context, :event/parent-id,
    :agent/id, :agent/instance-id)."
   stream/create-envelope)
-(def publish!
+
+(def ^{:stratum 0} publish!
   "Publish an event to the stream: fan out to sinks, append to the
    in-memory log, fan out to matching subscribers, log. Returns the
    published event map. If the event's workflow has been quiesced
@@ -87,20 +94,24 @@
    :workflow-quiesced :workflow-id ... :event-type ...} map without
    running sinks or subscribers."
   stream/publish!)
-(def subscribe!
+
+(def ^{:stratum 0} subscribe!
   "Register a callback for events. 3-arg form subscribes to all events;
    4-arg form takes a filter-fn (fn [event] -> bool) so only matching
    events are delivered. Returns the subscriber-id passed in."
   stream/subscribe!)
-(def unsubscribe!
+
+(def ^{:stratum 0} unsubscribe!
   "Remove a subscriber (and its filter) by id. Returns nil."
   stream/unsubscribe!)
-(def get-events
+
+(def ^{:stratum 0} get-events
   "Query the in-memory event log. Returns a vector of event maps.
    Optional opts map filters/pages: :workflow-id, :event-type, :offset,
    :limit."
   stream/get-events)
-(def get-latest-status
+
+(def ^{:stratum 0} get-latest-status
   "Return the most recent :agent/status event map for a workflow (and
    optionally a specific agent-id), or nil when none exist."
   stream/get-latest-status)
@@ -108,7 +119,7 @@
 ;; BD-2b: canonical on-disk paths. Exposed so callers outside this
 ;; component (cli workflow runner, sub-3 cleanup) agree with the file
 ;; sink on where a workflow's events + manifest live.
-(def workflow-dir
+(def ^{:stratum 0} workflow-dir
   "Return the per-workflow events directory as a java.io.File. As of
    BD-2b sub-3b this is `{base-dir}/live/{workflow-id}/` (an alias for
    the live-workflow-dir). The file sink and the manifest module both
@@ -117,7 +128,7 @@
    ~/.miniforge/events; (base-dir workflow-id)."
   sinks/workflow-dir)
 
-(def default-events-dir
+(def ^{:stratum 0} default-events-dir
   "The default events root (`~/.miniforge/events`) as a java.io.File —
    the base every other path fn in this family defaults to. Exposed so
    callers that must resolve the root themselves (the operator
@@ -125,14 +136,14 @@
    convention the file sink writes under instead of rebuilding it."
   sinks/default-events-dir)
 
-(def operator-dir
+(def ^{:stratum 0} operator-dir
   "The cross-workflow operator events directory (`{base-dir}/operator/`).
    Writer side: [[operator-event-file-path]] via the file sink; read
    side: the operator-event consumer (Phase D D-2). Arities: () defaults
    base-dir to ~/.miniforge/events; (base-dir)."
   sinks/operator-dir)
 
-(def serialize-event
+(def ^{:stratum 0} serialize-event
   "Serialize an event map to the canonical Transit-JSON wire string —
    the exact encoding the file sink writes to disk (verbose mode: no
    cache codes; UUIDs/instants as `~u...`/`~t...` tag-strings the Rust
@@ -142,7 +153,7 @@
    Pure: no IO."
   sinks/event->transit-json)
 
-(def digest-content
+(def ^{:stratum 0} digest-content
   "Produce a bounded, reproducible digest map from arbitrary content
    (string, byte array, or any value coerced via str). Returns
    {:digest/preview (Unicode-safe UTF-8 prefix capped at
@@ -151,7 +162,7 @@
   digest/digest-content)
 
 ;; BD-2a shutdown-ordering primitives.
-(def quiesce!
+(def ^{:stratum 0} quiesce!
   "Fence future publishes for a workflow (when :workflow-id is given)
    and wait for in-flight publishes to settle. After return, publish!
    for that workflow returns a rejection map. Without :workflow-id, adds
@@ -160,7 +171,8 @@
    :pending-publishers N}. Opts: :workflow-id, :timeout-ms (default
    5000)."
   stream/quiesce!)
-(def drain!
+
+(def ^{:stratum 0} drain!
   "Wait for every event published before this call to reach all sinks,
    including each sink's optional drain hook. Returns a map: {:ok? true
    :drained-count N}, {:ok? false :reason :timeout :pending-count N}, or
@@ -170,7 +182,7 @@
   stream/drain!)
 
 ;; Phase heartbeat scheduler — start/stop liveness signalling for long-running phases.
-(def start-heartbeat!
+(def ^{:stratum 0} start-heartbeat!
   "Start periodic :workflow/phase-heartbeat emission for a phase on a
    daemon scheduled executor. Returns an opaque stop handle map
    (:heartbeat/executor, :heartbeat/future, :heartbeat/phase-id,
@@ -179,7 +191,7 @@
    is not a positive integer. opts: {:interval-ms long} (default 30s)."
   heartbeat/start-heartbeat!)
 
-(def stop-heartbeat!
+(def ^{:stratum 0} stop-heartbeat!
   "Stop a heartbeat scheduler returned by start-heartbeat!. Nil-safe.
    Cancels the periodic ScheduledFuture (does not interrupt an in-flight
    tick unless opts :may-interrupt? is true) then shuts down the backing
@@ -188,226 +200,268 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
-
-(def workflow-started
+(def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry
    :routing/trigger-event-id so the automation-edge-correlator links the
    handler workflow back to its routing trigger."
   events/workflow-started)
-(def phase-started
+
+(def ^{:stratum 0} phase-started
   "Build and return a :workflow/phase-started event envelope map for the
    given phase keyword; optional context is attached as :phase/context."
   events/phase-started)
-(def phase-completed
+
+(def ^{:stratum 0} phase-completed
   "Build and return a :workflow/phase-completed event envelope map.
    Records :phase/outcome (default :success) and, when present on the
    result, duration, artifacts, error, transition-request, redirect-to,
    tokens, cost, meta, and termination-reason."
   events/phase-completed)
-(def workspace-persisted
+
+(def ^{:stratum 0} workspace-persisted
   "Build and return a :workspace/persisted event envelope map recording
    that a phase's worktree was archived to a checkpoint (phase, env-id,
    branch, commit-sha, bundle-path, persist-tier)."
   events/workspace-persisted)
-(def agent-chunk
+
+(def ^{:stratum 0} agent-chunk
   "Build and return an :agent/chunk event envelope map carrying a
    streamed text delta for an agent; sets :chunk/done? when the optional
    done? flag is truthy."
   events/agent-chunk)
-(def agent-status
+
+(def ^{:stratum 0} agent-status
   "Build and return an :agent/status event envelope map carrying a
    status-type keyword and human message for an agent."
   events/agent-status)
-(def agent-tool-call
+
+(def ^{:stratum 0} agent-tool-call
   "Build and return an :agent/tool-call event envelope map carrying the
    tool name(s) an agent invoked (:tool/name, :tool/names, :tool/call-id,
    :tool/args-preview). Legacy event kept for existing consumers."
   events/agent-tool-call)
-(def agent-tool-call-started
+
+(def ^{:stratum 0} agent-tool-call-started
   "Build and return an :agent/tool-call-started event envelope map
    marking the start of a tool call (:tool/name, :tool/names,
    :tool/args-digest, :tool/call-id); opens the latency span closed by
    tool-call-completed."
   events/agent-tool-call-started)
-(def tool-call-completed
+
+(def ^{:stratum 0} tool-call-completed
   "Build and return a :tool/call-completed event envelope map closing
    the latency span opened by agent-tool-call-started (:tool/call-id,
    :tool/result-digest, :tool/duration-ms, :tool/success?, :tool/error)."
   events/tool-call-completed)
-(def phase-heartbeat
+
+(def ^{:stratum 0} phase-heartbeat
   "Build and return a :workflow/phase-heartbeat event envelope map for
    long-running phase liveness (:phase/active-since,
    :phase/events-emitted, :phase/last-event-at,
    :phase/gap-since-last-event-ms)."
   events/phase-heartbeat)
-(def workflow-completed
+
+(def ^{:stratum 0} workflow-completed
   "Build and return a :workflow/completed event envelope map carrying a
    status keyword and optional duration plus opts (tokens, cost,
    pr-info, pr-infos, evidence-bundle-id)."
   events/workflow-completed)
-(def workflow-failed
+
+(def ^{:stratum 0} workflow-failed
   "Build and return a :workflow/failed event envelope map. Normalizes
    the error (Throwable, anomaly map, or plain map) into
    :workflow/failure-reason, :workflow/error-details,
    :workflow/anomaly-code, and :workflow/retryable?; optional
    :failure/class."
   events/workflow-failed)
-(def llm-request
+
+(def ^{:stratum 0} llm-request
   "Build and return an :llm/request event envelope map for an LLM call
    (model, optional prompt-tokens); assigns a fresh :llm/request-id."
   events/llm-request)
-(def llm-response
+
+(def ^{:stratum 0} llm-response
   "Build and return an :llm/response event envelope map for an LLM
    response correlated by request-id; optional metrics add
    completion/total tokens, duration, and cost."
   events/llm-response)
-(def agent-started
+
+(def ^{:stratum 0} agent-started
   "Build and return an :agent/started event envelope map; optional
    context is attached as :agent/context."
   events/agent-started)
-(def agent-completed
+
+(def ^{:stratum 0} agent-completed
   "Build and return an :agent/completed event envelope map; optional
    result is attached as :agent/result."
   events/agent-completed)
-(def agent-failed
+
+(def ^{:stratum 0} agent-failed
   "Build and return an :agent/failed event envelope map; optional error
    becomes :agent/error and optional :failure/class is carried through."
   events/agent-failed)
-(def gate-started
+
+(def ^{:stratum 0} gate-started
   "Build and return a :gate/started event envelope map; optional
    artifact-summary is attached as :gate/artifact-summary."
   events/gate-started)
-(def gate-passed
+
+(def ^{:stratum 0} gate-passed
   "Build and return a :gate/passed event envelope map; optional
    duration-ms is attached as :gate/duration-ms."
   events/gate-passed)
-(def gate-failed
+
+(def ^{:stratum 0} gate-failed
   "Build and return a :gate/failed event envelope map; optional
    violations become :gate/violations and optional :failure/class is
    carried through."
   events/gate-failed)
-(def gate-rule-applied
+
+(def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status
    (:passed, :failed, :skipped-by-phase, :not-applicable). Optional
    extra carries :severity, :enforcement, and a NON-SENSITIVE
    :violation summary."
   events/gate-rule-applied)
-(def tool-invoked
+
+(def ^{:stratum 0} tool-invoked
   "Build and return a :tool/invoked event envelope map for a tool an
    agent invoked; optional params-summary is attached as
    :tool/params-summary."
   events/tool-invoked)
-(def tool-completed
+
+(def ^{:stratum 0} tool-completed
   "Build and return a :tool/completed event envelope map; optional
    result-summary is attached as :tool/result-summary."
   events/tool-completed)
-(def milestone-reached
+
+(def ^{:stratum 0} milestone-reached
   "Build and return a :workflow/milestone-reached event envelope map for
    a milestone-id; optional description overrides the default message."
   events/milestone-reached)
-(def milestone-started
+
+(def ^{:stratum 0} milestone-started
   "Build and return a :phase/milestone-started event envelope map for a
    milestone-id; optional description overrides the default message."
   events/milestone-started)
-(def milestone-completed
+
+(def ^{:stratum 0} milestone-completed
   "Build and return a :phase/milestone-completed event envelope map for
    a milestone-id; optional description overrides the default message."
   events/milestone-completed)
-(def milestone-failed
+
+(def ^{:stratum 0} milestone-failed
   "Build and return a :phase/milestone-failed event envelope map for a
    milestone-id; optional reason overrides the default message."
   events/milestone-failed)
-(def task-state-changed
+
+(def ^{:stratum 0} task-state-changed
   "Build and return a :task/state-changed event envelope map recording a
    DAG task transitioning from-state to-state (:dag/id, :task/id,
    :task/from-state, :task/to-state); optional context as :task/context."
   events/task-state-changed)
-(def task-frontier-entered
+
+(def ^{:stratum 0} task-frontier-entered
   "Build and return a :task/frontier-entered event envelope map for a
    DAG task entering the ready frontier; optional frontier-size as
    :task/frontier-size."
   events/task-frontier-entered)
-(def task-skip-propagated
+
+(def ^{:stratum 0} task-skip-propagated
   "Build and return a :task/skip-propagated event envelope map for a DAG
    task skipped by upstream propagation; optional cause-task as
    :task/cause-task."
   events/task-skip-propagated)
-(def inter-agent-message-sent
+
+(def ^{:stratum 0} inter-agent-message-sent
   "Build and return an :agent/message-sent event envelope map for a
    message from one agent to another (:from-agent/id, :to-agent/id);
    optional message-type as :message/type."
   events/inter-agent-message-sent)
-(def inter-agent-message-received
+
+(def ^{:stratum 0} inter-agent-message-received
   "Build and return an :agent/message-received event envelope map for a
    message received by an agent (:from-agent/id, :to-agent/id); optional
    message-type as :message/type."
   events/inter-agent-message-received)
-(def listener-attached
+
+(def ^{:stratum 0} listener-attached
   "Build and return a :listener/attached event envelope map for a
    listener id; optional listener-type and capability as :listener/type
    / :listener/capability."
   events/listener-attached)
-(def listener-detached
+
+(def ^{:stratum 0} listener-detached
   "Build and return a :listener/detached event envelope map for a
    listener id; optional reason as :listener/reason."
   events/listener-detached)
-(def annotation-created
+
+(def ^{:stratum 0} annotation-created
   "Build and return an :annotation/created event envelope map for an
    advisory annotation from a listener (:listener/id,
    :annotation/type); optional content as :annotation/content."
   events/annotation-created)
-(def control-action-requested
+
+(def ^{:stratum 0} control-action-requested
   "Build and return a :control-action/requested event envelope map
    (:action/id, :action/type); optional requester as :action/requester."
   events/control-action-requested)
-(def control-action-executed
+
+(def ^{:stratum 0} control-action-executed
   "Build and return a :control-action/executed event envelope map for an
    action id; optional result as :action/result."
   events/control-action-executed)
-(def chain-started
+
+(def ^{:stratum 0} chain-started
   "Build and return a :chain/started event envelope map (chains are not
    workflow-scoped, so :workflow/id is nil) carrying :chain/id and
    :chain/step-count."
   events/chain-started)
-(def chain-step-started
+
+(def ^{:stratum 0} chain-step-started
   "Build and return a :chain/step-started event envelope map carrying
    :chain/id, :step/id, :step/index, and :step/workflow-id."
   events/chain-step-started)
-(def chain-step-completed
+
+(def ^{:stratum 0} chain-step-completed
   "Build and return a :chain/step-completed event envelope map carrying
    :chain/id, :step/id, and :step/index."
   events/chain-step-completed)
-(def chain-step-failed
+
+(def ^{:stratum 0} chain-step-failed
   "Build and return a :chain/step-failed event envelope map carrying
    :chain/id, :step/id, :step/index, and :chain/error; optional
    :failure/class."
   events/chain-step-failed)
-(def chain-completed
+
+(def ^{:stratum 0} chain-completed
   "Build and return a :chain/completed event envelope map carrying
    :chain/id, :chain/duration-ms, and :chain/step-count."
   events/chain-completed)
-(def chain-failed
+
+(def ^{:stratum 0} chain-failed
   "Build and return a :chain/failed event envelope map carrying
    :chain/id, :chain/failed-step, and :chain/error; optional
    :failure/class."
   events/chain-failed)
 
 ;; OCI container events
-(def container-started
+(def ^{:stratum 0} container-started
   "Build and return an :oci/container-started event envelope map for a
    container id; optional opts add :oci/image-digest and
    :oci/trust-level."
   events/container-started)
-(def container-completed
+
+(def ^{:stratum 0} container-completed
   "Build and return an :oci/container-completed event envelope map
    carrying :oci/container-id and :oci/exit-code; optional duration-ms
    as :oci/duration-ms."
   events/container-completed)
 
 ;; Tool supervision events
-(def tool-use-evaluated
+(def ^{:stratum 0} tool-use-evaluated
   "Build and return a :supervision/tool-use-evaluated event envelope map
    capturing a supervisor's decision on a tool-use request (:tool/name,
    :supervision/decision); optional opts add :supervision/reasoning,
@@ -415,59 +469,67 @@
   events/tool-use-evaluated)
 
 ;; Meta-loop supervision events
-(def meta-loop-halt-requested
+(def ^{:stratum 0} meta-loop-halt-requested
   "Build and return a :meta-loop/halt-requested event envelope map recording a
    meta-agent's REFUSE: :halt/halting-agent and :halt/reason-code (RefusalReason);
    optional opts add :halt/detail and :workflow/phase."
   events/meta-loop-halt-requested)
 
 ;; Control plane events
-(def cp-agent-registered
+(def ^{:stratum 0} cp-agent-registered
   "Build and return a :control-plane/agent-registered event envelope map
    for an external agent registering with the control plane (:cp/agent-id,
    :cp/vendor); optional opts add name, external-id, capabilities,
    metadata, tags, heartbeat-interval-ms."
   events/cp-agent-registered)
-(def cp-agent-heartbeat
+
+(def ^{:stratum 0} cp-agent-heartbeat
   "Build and return a :control-plane/agent-heartbeat event envelope map
    (:cp/agent-id, :cp/status); optional opts add :cp/task and
    :cp/metrics."
   events/cp-agent-heartbeat)
-(def cp-agent-state-changed
+
+(def ^{:stratum 0} cp-agent-state-changed
   "Build and return a :control-plane/agent-state-changed event envelope
    map recording an agent's normalized state transition (:cp/agent-id,
    :cp/from-status, :cp/to-status)."
   events/cp-agent-state-changed)
-(def cp-decision-created
+
+(def ^{:stratum 0} cp-decision-created
   "Build and return a :control-plane/decision-created event envelope map
    for an agent's decision request (:cp/agent-id, :cp/decision-id,
    :cp/summary); optional priority-or-opts add priority, type, context,
    options, deadline."
   events/cp-decision-created)
-(def cp-decision-resolved
+
+(def ^{:stratum 0} cp-decision-resolved
   "Build and return a :control-plane/decision-resolved event envelope
    map for a human-resolved decision (:cp/decision-id, :cp/resolution);
    optional comment as :cp/comment."
   events/cp-decision-resolved)
-(def intervention-requested
+
+(def ^{:stratum 0} intervention-requested
   "Build and return a :supervisory/intervention-requested event envelope
    map, merging the intervention map into the envelope."
   events/intervention-requested)
-(def intervention-state-changed
+
+(def ^{:stratum 0} intervention-state-changed
   "Build and return a :supervisory/intervention-state-changed event
    envelope map for an InterventionRequest lifecycle change
    (:intervention/id, :intervention/state); optional opts carry the
    many :intervention/* detail fields (from-state, type, target-type,
    target-id, requested-by, justification, outcome, ...)."
   events/intervention-state-changed)
-(def intervention-request-event
+
+(def ^{:stratum 0} intervention-request-event
   "Build the :supervisory/intervention-requested event an operator
    surface writes into the operator directory, or an :invalid-input
    anomaly when a required field is missing. Required:
    :intervention/type, :intervention/target-type, :intervention/target-id,
    :intervention/requested-by, :intervention/request-source. Pure."
   operator-requests/intervention-request-event)
-(def request-intervention!
+
+(def ^{:stratum 0} request-intervention!
   "Write an intervention request atomically into
    `{events-dir}/operator/` for the operator-event consumer (Phase D
    decision 1 — the one control channel). Takes the keys of
@@ -476,13 +538,14 @@
   operator-requests/request-intervention!)
 
 ;; PR scoring (N5-delta-2 §4.1)
-(def pr-created
+(def ^{:stratum 0} pr-created
   "Build and return a :pr/created event envelope map for a
    workflow-owned PR (:pr/repo, :pr/number, :pr/url, :pr/branch);
    optional title, author, merge-order. Lets consumers attach a PR to
    its owning workflow run."
   events/pr-created)
-(def pr-scored
+
+(def ^{:stratum 0} pr-scored
   "Build and return a :pr/scored event envelope map carrying PR scoring
    results (:pr/readiness, :pr/risk, :pr/policy, :pr/recommendation —
    any subset). Not inherently workflow-scoped; opts :workflow/id scopes
@@ -490,19 +553,21 @@
   events/pr-scored)
 
 ;; Routing trigger events (N5-delta-4 §4.2)
-(def pr-monitor-review-comments-arrived
+(def ^{:stratum 0} pr-monitor-review-comments-arrived
   "Build and return a :pr-monitor/review-comments-arrived event envelope
    map (:workflow/id nil — PR-scoped) for new review comments on an owned
    PR (:pr/repo, :pr/number, :comments/count); optional agent-session-id
    as :comments/agent-session-id."
   events/pr-monitor-review-comments-arrived)
-(def pr-monitor-ci-failed
+
+(def ^{:stratum 0} pr-monitor-ci-failed
   "Build and return a :pr-monitor/ci-failed event envelope map
    (:workflow/id nil) for a CI status reaching a non-success terminal
    state on an owned PR (:pr/repo, :pr/number, :ci/check-name,
    :ci/conclusion). :ci/conclusion is an open keyword."
   events/pr-monitor-ci-failed)
-(def standards-review-posted
+
+(def ^{:stratum 0} standards-review-posted
   "Build and return a :standards-review/posted event envelope map
    (:workflow/id nil) for a standards-review comment on a PR (:pr/repo,
    :pr/number, :review/severity). :review/severity is an open keyword;
@@ -510,7 +575,7 @@
   events/standards-review-posted)
 
 ;; Zettelkasten lifecycle (miniforge-fleet Phase E.3)
-(def zettel-promoted
+(def ^{:stratum 0} zettel-promoted
   "Build and return a :zettel/promoted event envelope map emitted when a
    zettel revision transitions to :trusted and becomes eligible to ride
    the Fleet event log. Carries the zettel's revision-keyed identity and
@@ -523,8 +588,7 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Listener, control, approval, and callback APIs
-
-(def register-listener!
+(def ^{:stratum 0} register-listener!
   "Register a listener on the stream with a capability level (:observe,
    :advise, or :control), wrapping its callback with capability-based
    and user filters and emitting :listener/attached. Returns the new
@@ -533,16 +597,19 @@
    :listener/capability, :listener/identity, :listener/filters,
    :listener/callback, :listener/options."
   listeners/register-listener!)
-(def deregister-listener!
+
+(def ^{:stratum 0} deregister-listener!
   "Unsubscribe a listener by id, drop its metadata, and emit
    :listener/detached. Returns true when the listener existed, or nil
    when no listener matched the id."
   listeners/deregister-listener!)
-(def list-listeners
+
+(def ^{:stratum 0} list-listeners
   "Return a sequence of registered listener metadata maps for the
    stream (empty when none registered)."
   listeners/list-listeners)
-(def submit-annotation!
+
+(def ^{:stratum 0} submit-annotation!
   "Submit an advisory annotation from a listener; requires :advise or
    :control capability. Emits and returns the :annotation/created event
    map. Throws an :anomalies/not-found anomaly when the listener is
@@ -551,7 +618,7 @@
    :annotation/workflow-id."
   listeners/submit-annotation!)
 
-(def create-control-action
+(def ^{:stratum 0} create-control-action
   "Build a structured control-action map from an action-type keyword
    (:pause, :resume, :retry, :rollback, :cancel, :quarantine,
    :adjust-budget, :emergency-stop, :gate-override, ...), a target map
@@ -561,17 +628,20 @@
    :action/status :pending, :action/created-at, plus optional
    :action/justification and :action/parameters."
   control/create-control-action)
-(def default-roles
+
+(def ^{:stratum 0} default-roles
   "Default RBAC role definitions for structured control actions."
   control/default-roles)
-(def authorize-action
+
+(def ^{:stratum 0} authorize-action
   "Check RBAC authorization for a control action against role
    definitions. Returns {:authorized? true :reason string} when the
    role permits the action on the target category, else {:authorized?
    false :reason string :anomaly map} (unknown role / unknown target
    type / forbidden action)."
   control/authorize-action)
-(def execute-control-action!
+
+(def ^{:stratum 0} execute-control-action!
   "Authorize then execute a control action. Emits
    :control-action/requested before and :control-action/executed after.
    On RBAC denial returns {:status :denied :reason string :anomaly map}
@@ -579,11 +649,13 @@
    returns its result wrapped via response/success, or
    response/failure on a thrown exception."
   control/execute-control-action!)
-(def requires-approval?
+
+(def ^{:stratum 0} requires-approval?
   "Return true when the given action-type keyword requires multi-party
    approval (:gate-override or :budget-escalation), else false."
   control/requires-approval?)
-(def execute-control-action-with-approval!
+
+(def ^{:stratum 0} execute-control-action-with-approval!
   "Execute a control action, gating on approval first. When the action
    type requires approval, creates an approval request, emits
    :approval/requested, and returns {:status :awaiting-approval
@@ -593,16 +665,18 @@
    :approval-manager."
   control/execute-control-action-with-approval!)
 
-(def approval-succeeded?
+(def ^{:stratum 0} approval-succeeded?
   "Return true when a builder response (from response/success)
    succeeded, else false. Use to test submit-approval / cancel-approval
    results."
   approval/approval-succeeded?)
-(def approval-failed?
+
+(def ^{:stratum 0} approval-failed?
   "Return true when a builder response (from response/failure) failed,
    else false. Use to test submit-approval / cancel-approval results."
   approval/approval-failed?)
-(def create-approval-request
+
+(def ^{:stratum 0} create-approval-request
   "Create a new approval-request map requiring quorum-based signing.
    Args: action-id (UUID), required-signers (vector of strings), quorum
    (count), and optional opts (:expires-in-hours default 24,
@@ -611,7 +685,8 @@
    :approval/quorum, :approval/signatures [], :approval/created-at,
    :approval/expires-at, plus :approval/metadata when supplied."
   approval/create-approval-request)
-(def submit-approval
+
+(def ^{:stratum 0} submit-approval
   "Submit an :approve or :reject decision from a signer for an approval
    request. On success returns a builder success wrapping the updated
    request (status transitions to :approved on quorum, :rejected
@@ -619,39 +694,46 @@
    failure (anomaly) when not pending, expired, signer unauthorized,
    already signed, or the decision is invalid. Optional opts: :reason."
   approval/submit-approval)
-(def check-approval-status
+
+(def ^{:stratum 0} check-approval-status
   "Return the effective status keyword of an approval request, mapping
    a pending-but-expired request to :expired. One of :pending,
    :approved, :rejected, :expired, or :cancelled."
   approval/check-approval-status)
-(def cancel-approval
+
+(def ^{:stratum 0} cancel-approval
   "Cancel a pending approval request, recording canceller and reason.
    Returns a builder success wrapping the updated request (status
    :cancelled), or a builder failure when the request is not pending."
   approval/cancel-approval)
-(def create-approval-manager
+
+(def ^{:stratum 0} create-approval-manager
   "Create an atom-backed approval manager. Returns an atom holding
    {:approvals {}} keyed by approval id."
   approval/create-approval-manager)
-(def store-approval!
+
+(def ^{:stratum 0} store-approval!
   "Store an approval request in the manager atom under its :approval/id.
    Returns the stored approval map."
   approval/store-approval!)
-(def get-approval
+
+(def ^{:stratum 0} get-approval
   "Look up an approval request in the manager atom by id. Returns the
    approval map, or nil when absent."
   approval/get-approval)
-(def update-approval!
+
+(def ^{:stratum 0} update-approval!
   "Replace an approval request in the manager atom (keyed by its
    :approval/id). Returns the updated approval map."
   approval/update-approval!)
-(def list-approvals
+
+(def ^{:stratum 0} list-approvals
   "List approval requests held by the manager atom. Returns a vector of
    approval maps. Optional opts :status filters by effective status
    (via check-approval-status)."
   approval/list-approvals)
 
-(def create-streaming-callback
+(def ^{:stratum 0} create-streaming-callback
   "Callback invoked by the LLM client for each parsed stream event.
    Returns a stateful callback fn of one parsed-event map. On tool-use
    events emits both :agent/tool-call (legacy) and
@@ -665,47 +747,53 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Reliability metric event constructors (N3 §3.17)
-
-(def sli-computed
+(def ^{:stratum 0} sli-computed
   "Build and return a :reliability/sli-computed event envelope map
    (:workflow/id nil) for an SLI value computed over a rolling window
    (:sli/name, :sli/value, :sli/window); optional opts add :sli/tier and
    :sli/dimensions."
   events/sli-computed)
-(def slo-breach
+
+(def ^{:stratum 0} slo-breach
   "Build and return a :reliability/slo-breach event envelope map
    (:workflow/id nil) for a missed SLO target (:slo/sli-name,
    :slo/target, :slo/actual, :slo/tier, :slo/window)."
   events/slo-breach)
-(def error-budget-update
+
+(def ^{:stratum 0} error-budget-update
   "Build and return a :reliability/error-budget-update event envelope
    map (:workflow/id nil) for recomputed error budget state
    (:budget/tier, :budget/sli, :budget/remaining, :budget/burn-rate,
    :budget/window)."
   events/error-budget-update)
-(def dependency-health-updated
+
+(def ^{:stratum 0} dependency-health-updated
   "Build and return a :dependency/health-updated event envelope map
    (:workflow/id nil) for a changed dependency health projection,
    merging the dependency map; optional previous-status as
    :dependency/previous-status."
   events/dependency-health-updated)
-(def dependency-recovered
+
+(def ^{:stratum 0} dependency-recovered
   "Build and return a :dependency/recovered event envelope map
    (:workflow/id nil) for a dependency returning to healthy, merging the
    dependency map; optional previous-status as
    :dependency/previous-status."
   events/dependency-recovered)
-(def degradation-mode-changed
+
+(def ^{:stratum 0} degradation-mode-changed
   "Build and return a :reliability/degradation-mode-changed event
    envelope map (:workflow/id nil) for a degradation-mode transition
    (:degradation/from, :degradation/to, :degradation/trigger)."
   events/degradation-mode-changed)
-(def safe-mode-entered
+
+(def ^{:stratum 0} safe-mode-entered
   "Build and return a :safe-mode/entered event envelope map (:workflow/id
    nil) recording safe-mode activation (:safe-mode/trigger); optional
    details as :safe-mode/trigger-details."
   events/safe-mode-entered)
-(def safe-mode-exited
+
+(def ^{:stratum 0} safe-mode-exited
   "Build and return a :safe-mode/exited event envelope map (:workflow/id
    nil) recording safe-mode deactivation (:safe-mode/exited-by,
    :safe-mode/justification, :safe-mode/duration-ms,
@@ -713,7 +801,7 @@
   events/safe-mode-exited)
 
 ;; Repository intelligence event constructors (RN-19/20)
-(def repo-index-quality-measured
+(def ^{:stratum 0} repo-index-quality-measured
   "Build and return a :repo-index/quality-measured event envelope map
    (:workflow/id nil) emitted by the index quality tracker (RN-19) when
    it samples the composite quality score for a named index
@@ -721,7 +809,7 @@
    optional opts add :index/measured-at."
   events/repo-index-quality-measured)
 
-(def repo-index-coverage-changed
+(def ^{:stratum 0} repo-index-coverage-changed
   "Build and return a :repo-index/coverage-changed event envelope map
    (:workflow/id nil) emitted by the index quality tracker (RN-20) when
    coverage for a named index changes beyond the configured threshold
@@ -731,13 +819,13 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Meta-loop event constructors
-
-(def meta-loop-cycle-completed
+(def ^{:stratum 0} meta-loop-cycle-completed
   "Build and return a :meta-loop/cycle-completed event envelope map
    (:workflow/id nil), merging the summary map (signals, diagnoses,
    proposals counts)."
   events/meta-loop-cycle-completed)
-(def meta-loop-cycle-failed
+
+(def ^{:stratum 0} meta-loop-cycle-failed
   "Build and return a :meta-loop/cycle-failed event envelope map
    (:workflow/id nil) for an unhandled meta-loop exception
    (:meta-loop/error, :meta-loop/error-class)."
@@ -745,29 +833,31 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Observer / knowledge failure event constructors
-
-(def observer-signal-failed
+(def ^{:stratum 0} observer-signal-failed
   "Build and return an :observer/signal-failed event envelope map for a
    failure forwarding a signal to the meta-loop (:observer/error)."
   events/observer-signal-failed)
-(def knowledge-synthesis-failed
+
+(def ^{:stratum 0} knowledge-synthesis-failed
   "Build and return a :knowledge/synthesis-failed event envelope map
    (:workflow/id nil) for a pattern-synthesis failure (:knowledge/error)."
   events/knowledge-synthesis-failed)
-(def knowledge-promotion-failed
+
+(def ^{:stratum 0} knowledge-promotion-failed
   "Build and return a :knowledge/promotion-failed event envelope map
    (:workflow/id nil) for a learning-promotion failure
    (:knowledge/error)."
   events/knowledge-promotion-failed)
 
 ;; Agent stream-stall and session events (GROUP 1+4, GROUP 2)
-(def agent-stream-stalled
+(def ^{:stratum 0} agent-stream-stalled
   "Build and return an :agent/stream-stalled event envelope map
    indicating the agent output stream has gone silent past the gap
    threshold (:workflow/phase, :stream/gap-duration-ms, :agent/backend).
    Consumed by the self-healing supervisor."
   events/agent-stream-stalled)
-(def agent-session-captured
+
+(def ^{:stratum 0} agent-session-captured
   "Build and return an :agent/session-captured event envelope map
    recording the backend session id from the initial handshake
    (:workflow/phase, :agent/backend, :agent/session-id). Must be emitted
@@ -776,15 +866,14 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event-stream reader — replay events from the file-sink layout
-
-(def strip-transit-prefix
+(def ^{:stratum 0} strip-transit-prefix
   "Turn a raw transit-JSON parse back into idiomatic Clojure data,
    walking maps and vectors recursively: strings prefixed with `~:`
    become keywords; `~u` / `~t` (UUID / instant) prefixes become the
    stripped string form. Returns the de-prefixed value."
   reader/strip-transit-prefix)
 
-(def read-event-file
+(def ^{:stratum 0} read-event-file
   "Parse one transit-JSON event file into an event map (prefixes
    stripped: `:event/type` back to a keyword, UUID/instant values as
    plain strings). Returns the parsed map, or nil when the file cannot
@@ -792,7 +881,7 @@
    branch on the nil themselves."
   reader/read-event-file)
 
-(def read-workflow-events
+(def ^{:stratum 0} read-workflow-events
   "Read every `.json` event file under a workflow directory, sorted by
    timestamp-prefixed filename, parsed as transit-JSON and de-prefixed.
    Arg `dir` is a java.io.File or String path. Returns a vector of
@@ -800,7 +889,7 @@
    Unparseable files are silently dropped."
   reader/read-workflow-events)
 
-(def read-workflow-events-by-id
+(def ^{:stratum 0} read-workflow-events-by-id
   "Read events for a workflow id under a base events dir, probing the
    archived → live → legacy layouts and reading the first that exists.
    Args: base-dir, workflow-id (UUID, keyword, or string). Returns a
@@ -810,8 +899,7 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event timeline renderer
-
-(def render-timeline
+(def ^{:stratum 0} render-timeline
   "Transform a seq of parsed event maps (as from read-workflow-events)
    into a human-readable multi-line timeline string, one line per event
    (HH:mm:ss  <phase>  <detail>) with inserted gap lines between events

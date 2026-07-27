@@ -86,6 +86,31 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+;; applicable-gates tests
+(deftest ^{:stratum 1} applicable-gates-test
+  (testing "gate with no :gate/applies-to config applies to all artifact types"
+    (let [gate (gates/policy-gate :security {:policies [:no-secrets]})]
+      (is (= [gate] (gates/applicable-gates [gate] valid-code-artifact)))
+      (is (= [gate] (gates/applicable-gates [gate] non-code-artifact)))))
+
+  (testing "gate with :gate/applies-to is filtered to matching artifact types"
+    (let [code-only-gate (gates/policy-gate :security
+                                            {:policies [:no-secrets]
+                                             :gate/applies-to #{:code}})]
+      (is (= [code-only-gate] (gates/applicable-gates [code-only-gate] valid-code-artifact)))
+      (is (empty? (gates/applicable-gates [code-only-gate] non-code-artifact)))))
+
+  (testing "mixed gates: only applicable ones are kept per artifact type"
+    (let [unrestricted (gates/syntax-gate)
+          code-only (gates/policy-gate :security
+                                       {:policies [:no-secrets]
+                                        :gate/applies-to #{:code}})
+          spec-only (gates/lint-gate :spec-lint {:gate/applies-to #{:spec}})]
+      (is (= [unrestricted code-only]
+             (gates/applicable-gates [unrestricted code-only spec-only] valid-code-artifact)))
+      (is (= [unrestricted spec-only]
+             (gates/applicable-gates [unrestricted code-only spec-only] non-code-artifact))))))
+
 ;; Gate protocol tests
 (deftest ^{:stratum 1} syntax-gate-test
   (let [gate (gates/syntax-gate)]
