@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.config
   "Enhanced configuration management for Miniforge CLI.
 
@@ -31,16 +30,70 @@
    [ai.miniforge.cli.resource-config :as resource-config]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Configuration paths and utilities
 
-(def default-user-config-path
+;; Configuration paths and utilities
+(def ^{:stratum 0} default-user-config-path
   (app-config/config-path))
 
-(def default-config-resource
+(def ^{:stratum 0} default-config-resource
   "Classpath resource path for the fallback user config."
   "config/cli/user-defaults.edn")
 
-(def default-config
+(defn ^{:stratum 0} style
+  "Apply terminal styling using ANSI escape codes."
+  [text color]
+  (let [colors {:red "31" :green "32" :yellow "33" :cyan "36"}]
+    (str "\033[" (get colors color "37") "m" text "\033[0m")))
+
+(defn ^{:stratum 0} write-config-file
+  "Write config to file with pretty printing."
+  [path config]
+  (fs/create-dirs (fs/parent path))
+  (spit path (with-out-str (pprint/pprint config))))
+
+;; Config display and manipulation
+(defn ^{:stratum 0} format-config-value
+  "Format a config value for display."
+  [v]
+  (cond
+    (keyword? v) (name v)
+    (string? v) v
+    :else (pr-str v)))
+
+(defn ^{:stratum 0} parse-config-key
+  "Parse config key path (e.g., 'llm.backend' -> [:llm :backend])."
+  [key-str]
+  (when key-str
+    (mapv keyword (str/split key-str #"\."))))
+
+(defn ^{:stratum 0} parse-config-value
+  "Parse config value from string."
+  [value-str]
+  (try
+    (read-string value-str)
+    (catch Exception _
+      value-str)))
+
+(defn ^{:stratum 0} get-llm-backend
+  "Get LLM backend from config, with workflow override support."
+  [config workflow-override]
+  (or workflow-override
+      (get-in config [:llm :backend])
+      :opencode))
+
+(defn ^{:stratum 0} get-llm-timeout
+  "Get LLM timeout from config."
+  [config]
+  (get-in config [:llm :timeout-ms] 300000))
+
+(defn ^{:stratum 0} get-llm-line-timeout
+  "Get LLM line timeout from config."
+  [config]
+  (get-in config [:llm :line-timeout-ms] 60000))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} default-config
   ;; Static defaults load from EDN; :artifacts :dir is resolved from the
   ;; runtime home dir so MINIFORGE_HOME overrides keep working. Merge (not
   ;; assoc) so any :artifacts keys from the loaded EDN survive while the
@@ -48,25 +101,17 @@
   (update (resource-config/merged-resource-config default-config-resource)
           :artifacts merge {:dir (app-config/artifacts-dir)}))
 
-(defn style
-  "Apply terminal styling using ANSI escape codes."
-  [text color]
-  (let [colors {:red "31" :green "32" :yellow "33" :cyan "36"}]
-    (str "\033[" (get colors color "37") "m" text "\033[0m")))
-
-(defn print-success [msg]
+(defn ^{:stratum 1} print-success [msg]
   (println (style msg :green)))
 
-(defn print-error [msg]
+(defn ^{:stratum 1} print-error [msg]
   (println (style (messages/t :config/error-prefix {:message msg}) :red)))
 
-(defn print-info [msg]
+(defn ^{:stratum 1} print-info [msg]
   (println (style msg :cyan)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Config file operations
-
-(defn read-config-file
+(defn ^{:stratum 1} read-config-file
   "Read config file, returns nil if doesn't exist."
   [path]
   (when (fs/exists? path)
@@ -76,56 +121,7 @@
         (println (style (messages/t :config/warning-read-failed {:message (.getMessage e)}) :yellow))
         nil))))
 
-(defn write-config-file
-  "Write config to file with pretty printing."
-  [path config]
-  (fs/create-dirs (fs/parent path))
-  (spit path (with-out-str (pprint/pprint config))))
-
-(defn load-merged-config
-  "Load config with env var overrides."
-  [path]
-  (let [file-config (or (read-config-file path) {})
-        merged (merge-with (fn [v1 v2]
-                            (if (map? v1)
-                              (merge v1 v2)
-                              v2))
-                          default-config
-                          file-config)]
-    ;; Apply env var overrides
-    (cond-> merged
-      (System/getenv "MINIFORGE_LLM_BACKEND")
-      (assoc-in [:llm :backend] (keyword (System/getenv "MINIFORGE_LLM_BACKEND")))
-
-      (System/getenv "MINIFORGE_LLM_MODEL")
-      (assoc-in [:llm :model] (System/getenv "MINIFORGE_LLM_MODEL")))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Config display and manipulation
-
-(defn format-config-value
-  "Format a config value for display."
-  [v]
-  (cond
-    (keyword? v) (name v)
-    (string? v) v
-    :else (pr-str v)))
-
-(defn parse-config-key
-  "Parse config key path (e.g., 'llm.backend' -> [:llm :backend])."
-  [key-str]
-  (when key-str
-    (mapv keyword (str/split key-str #"\."))))
-
-(defn parse-config-value
-  "Parse config value from string."
-  [value-str]
-  (try
-    (read-string value-str)
-    (catch Exception _
-      value-str)))
-
-(defn display-config
+(defn ^{:stratum 1} display-config
   "Display configuration in human-readable format."
   [config config-path]
   (println)
@@ -171,34 +167,27 @@
   (println (messages/t :config/env-model))
   (println))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Command implementations
+;------------------------------------------------------------------------------ Layer 2
 
-(defn cmd-list
-  "List all configuration values."
-  [opts]
-  (let [config-path (or (:config opts) default-user-config-path)
-        config (load-merged-config config-path)]
-    (display-config config config-path)))
+(defn ^{:stratum 2} load-merged-config
+  "Load config with env var overrides."
+  [path]
+  (let [file-config (or (read-config-file path) {})
+        merged (merge-with (fn [v1 v2]
+                            (if (map? v1)
+                              (merge v1 v2)
+                              v2))
+                          default-config
+                          file-config)]
+    ;; Apply env var overrides
+    (cond-> merged
+      (System/getenv "MINIFORGE_LLM_BACKEND")
+      (assoc-in [:llm :backend] (keyword (System/getenv "MINIFORGE_LLM_BACKEND")))
 
-(defn cmd-get
-  "Get a specific configuration value."
-  [opts]
-  (let [key-str (:key opts)
-        config-path (or (:config opts) default-user-config-path)]
-    (if-not key-str
-      (do
-        (print-error (messages/t :config/get-missing-key))
-        (println (messages/t :config/get-usage {:command (app-config/command-string "config get <key>")}))
-        (println (messages/t :config/get-example {:command (app-config/command-string "config get llm.backend")})))
-      (let [config (load-merged-config config-path)
-            key-path (parse-config-key key-str)
-            value (get-in config key-path)]
-        (if value
-          (println (pr-str value))
-          (print-error (messages/t :config/get-not-found {:key key-str})))))))
+      (System/getenv "MINIFORGE_LLM_MODEL")
+      (assoc-in [:llm :model] (System/getenv "MINIFORGE_LLM_MODEL")))))
 
-(defn cmd-set
+(defn ^{:stratum 2} cmd-set
   "Set a configuration value."
   [opts]
   (let [key-str (:key opts)
@@ -219,7 +208,7 @@
         (println (messages/t :config/set-saved {:path config-path}))
         (println)))))
 
-(defn cmd-init
+(defn ^{:stratum 2} cmd-init
   "Initialize user config file."
   [opts]
   (let [config-path (or (:config opts) default-user-config-path)]
@@ -236,7 +225,7 @@
         (println (messages/t :config/init-view-hint {:command (app-config/command-string "config list")}))
         (println)))))
 
-(defn cmd-edit
+(defn ^{:stratum 2} cmd-edit
   "Open config file in $EDITOR."
   [opts]
   (let [config-path (or (:config opts) default-user-config-path)
@@ -251,7 +240,7 @@
       (catch Exception e
         (print-error (messages/t :config/edit-failed {:message (.getMessage e)}))))))
 
-(defn cmd-reset
+(defn ^{:stratum 2} cmd-reset
   "Reset config to defaults."
   [opts]
   (let [config-path (or (:config opts) default-user-config-path)]
@@ -268,14 +257,7 @@
           (println))
         (println (messages/t :config/reset-cancelled))))))
 
-(defn cmd-backends
-  "List available backends with status."
-  [opts]
-  (let [config-path (or (:config opts) default-user-config-path)
-        config (load-merged-config config-path)]
-    (backends/print-backends config)))
-
-(defn cmd-backend
+(defn ^{:stratum 2} cmd-backend
   "Set the LLM backend (shorthand for 'config set llm.backend')."
   [opts]
   (let [backend-str (:backend opts)
@@ -311,7 +293,7 @@
           ;; Backend not available, show helpful error
           (backends/print-backend-error backend-kw))))))
 
-(defn cmd-validate
+(defn ^{:stratum 2} cmd-validate
   "Validate configuration file."
   [opts]
   (let [config-path (or (:config opts) default-user-config-path)]
@@ -344,29 +326,45 @@
             (println)
             (println (messages/t :config/validate-reset-hint {:command (app-config/command-string "config reset")}))))))))
 
-;------------------------------------------------------------------------------ Compatibility functions for workflow-runner
+;------------------------------------------------------------------------------ Layer 3
 
-(defn load-config
+;; Command implementations
+(defn ^{:stratum 3} cmd-list
+  "List all configuration values."
+  [opts]
+  (let [config-path (or (:config opts) default-user-config-path)
+        config (load-merged-config config-path)]
+    (display-config config config-path)))
+
+(defn ^{:stratum 3} cmd-get
+  "Get a specific configuration value."
+  [opts]
+  (let [key-str (:key opts)
+        config-path (or (:config opts) default-user-config-path)]
+    (if-not key-str
+      (do
+        (print-error (messages/t :config/get-missing-key))
+        (println (messages/t :config/get-usage {:command (app-config/command-string "config get <key>")}))
+        (println (messages/t :config/get-example {:command (app-config/command-string "config get llm.backend")})))
+      (let [config (load-merged-config config-path)
+            key-path (parse-config-key key-str)
+            value (get-in config key-path)]
+        (if value
+          (println (pr-str value))
+          (print-error (messages/t :config/get-not-found {:key key-str})))))))
+
+(defn ^{:stratum 3} cmd-backends
+  "List available backends with status."
+  [opts]
+  (let [config-path (or (:config opts) default-user-config-path)
+        config (load-merged-config config-path)]
+    (backends/print-backends config)))
+
+;------------------------------------------------------------------------------ Compatibility functions for workflow-runner
+(defn ^{:stratum 3} load-config
   "Load configuration with environment variable overrides.
    Compatible with old workflow-runner code."
   ([] (load-merged-config default-user-config-path))
   ([opts]
    (let [config-path (or (:config-file opts) default-user-config-path)]
      (load-merged-config config-path))))
-
-(defn get-llm-backend
-  "Get LLM backend from config, with workflow override support."
-  [config workflow-override]
-  (or workflow-override
-      (get-in config [:llm :backend])
-      :opencode))
-
-(defn get-llm-timeout
-  "Get LLM timeout from config."
-  [config]
-  (get-in config [:llm :timeout-ms] 300000))
-
-(defn get-llm-line-timeout
-  "Get LLM line timeout from config."
-  [config]
-  (get-in config [:llm :line-timeout-ms] 60000))

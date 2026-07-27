@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.control-test
   (:require
    [clojure.test :refer [deftest testing is]]
@@ -24,34 +23,34 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Control state primitive tests
 
-(deftest create-control-state-test
+;; Control state primitive tests
+(deftest ^{:stratum 0} create-control-state-test
   (testing "returns atom with expected shape"
     (let [cs (control/create-control-state)]
       (is (instance? clojure.lang.Atom cs))
       (is (= {:paused false :stopped false :adjustments {}} @cs)))))
 
-(deftest pause!-test
+(deftest ^{:stratum 0} pause!-test
   (testing "sets :paused to true"
     (let [cs (control/create-control-state)]
       (control/pause! cs)
       (is (true? (:paused @cs))))))
 
-(deftest resume!-test
+(deftest ^{:stratum 0} resume!-test
   (testing "sets :paused to false"
     (let [cs (control/create-control-state)]
       (control/pause! cs)
       (control/resume! cs)
       (is (false? (:paused @cs))))))
 
-(deftest cancel!-test
+(deftest ^{:stratum 0} cancel!-test
   (testing "sets :stopped to true"
     (let [cs (control/create-control-state)]
       (control/cancel! cs)
       (is (true? (:stopped @cs))))))
 
-(deftest paused?-test
+(deftest ^{:stratum 0} paused?-test
   (testing "returns correct value"
     (let [cs (control/create-control-state)]
       (is (false? (control/paused? cs)))
@@ -60,14 +59,14 @@
       (control/resume! cs)
       (is (false? (control/paused? cs))))))
 
-(deftest cancelled?-test
+(deftest ^{:stratum 0} cancelled?-test
   (testing "returns correct value"
     (let [cs (control/create-control-state)]
       (is (false? (control/cancelled? cs)))
       (control/cancel! cs)
       (is (true? (control/cancelled? cs))))))
 
-(deftest control-state-interface-delegation-test
+(deftest ^{:stratum 0} control-state-interface-delegation-test
   (testing "interface delegates to control functions"
     (let [cs (es/create-control-state)]
       (is (false? (es/paused? cs)))
@@ -79,10 +78,8 @@
       (es/cancel! cs)
       (is (true? (es/cancelled? cs))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; RBAC and control action tests
-
-(deftest create-control-action-test
+(deftest ^{:stratum 0} create-control-action-test
   (testing "creates action with required fields"
     (let [action (es/create-control-action
                   :pause
@@ -104,7 +101,7 @@
       (is (= "Deployment failed" (:action/justification action)))
       (is (= {:to-commit "abc123"} (:action/parameters action))))))
 
-(deftest authorize-action-test
+(deftest ^{:stratum 0} authorize-action-test
   (testing "operator can pause workflow"
     (let [action (es/create-control-action
                   :pause
@@ -170,7 +167,7 @@
       (is (false? (:authorized? result)))
       (is (response/anomaly-map? (:anomaly result))))))
 
-(deftest execute-control-action-test
+(deftest ^{:stratum 0} execute-control-action-test
   (testing "successful execution emits events and returns success"
     (let [stream (es/create-event-stream {:sinks []})
           events (atom [])
@@ -203,7 +200,7 @@
       (is (false? (:success result)))
       (is (string? (get-in result [:error :message]))))))
 
-(deftest default-roles-test
+(deftest ^{:stratum 0} default-roles-test
   (testing "operator has expected workflow permissions"
     (is (= #{:pause :resume :retry :cancel}
            (get-in control/default-roles [:operator :workflows]))))

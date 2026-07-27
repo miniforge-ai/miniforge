@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.digest
   "Content-digest utility for event payload summaries.
 
@@ -30,32 +29,30 @@
    [java.security MessageDigest]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:const max-preview-bytes
+;; Constants
+(def ^{:stratum 0} ^:const max-preview-bytes
   "Maximum UTF-8 byte length retained in :digest/preview."
   1024)
 
-(def ^:const sha256-hex-length
+(def ^{:stratum 0} ^:const sha256-hex-length
   "Length of a SHA-256 digest rendered as lowercase hexadecimal."
   64)
 
-(def ^:private byte-hex-format
+(def ^{:stratum 0} ^:private byte-hex-format
   "Format string for rendering a byte as two lowercase hexadecimal chars."
   "%02x")
 
-(def ^:private unsigned-byte-mask
+(def ^{:stratum 0} ^:private unsigned-byte-mask
   "Mask used to render signed JVM bytes as unsigned byte values."
   0xff)
 
-(def ^:private sha256-algorithm
+(def ^{:stratum 0} ^:private sha256-algorithm
   "JCA algorithm name for SHA-256 digests."
   "SHA-256")
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Internal helpers
-
-(defn- ->bytes
+(defn- ^{:stratum 0} ->bytes
   "Coerce `content` to a byte array deterministically.
 
    - `byte[]`  — returned as-is
@@ -67,20 +64,7 @@
     (string? content) (.getBytes ^String content StandardCharsets/UTF_8)
     :else             (.getBytes ^String (str content) StandardCharsets/UTF_8)))
 
-(defn- bytes->hex
-  "Convert a byte array to a lowercase hexadecimal string."
-  [^bytes ba]
-  (apply str (map #(format byte-hex-format
-                           (bit-and (int %) unsigned-byte-mask))
-                  ba)))
-
-(defn- sha256-hex
-  "Return the SHA-256 digest of `ba` as a lowercase hex string."
-  [^bytes ba]
-  (let [^MessageDigest md (MessageDigest/getInstance sha256-algorithm)]
-    (bytes->hex (.digest md ba))))
-
-(defn- utf8-preview
+(defn- ^{:stratum 0} utf8-preview
   "Return the longest Unicode-safe prefix whose UTF-8 byte count fits
    within `max-bytes`."
   [^String s max-bytes]
@@ -103,9 +87,26 @@
                      out))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Public API
 
-(defn digest-content
+(defn- ^{:stratum 1} bytes->hex
+  "Convert a byte array to a lowercase hexadecimal string."
+  [^bytes ba]
+  (apply str (map #(format byte-hex-format
+                           (bit-and (int %) unsigned-byte-mask))
+                  ba)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} sha256-hex
+  "Return the SHA-256 digest of `ba` as a lowercase hex string."
+  [^bytes ba]
+  (let [^MessageDigest md (MessageDigest/getInstance sha256-algorithm)]
+    (bytes->hex (.digest md ba))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Public API
+(defn ^{:stratum 3} digest-content
   "Produce a bounded digest map from arbitrary content.
 
    Accepts strings, byte arrays, or any value (coerced via `str`).

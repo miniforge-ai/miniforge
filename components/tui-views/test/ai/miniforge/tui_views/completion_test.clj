@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.completion-test
   (:require
    [clojure.test :refer [deftest is testing]]
@@ -26,11 +25,12 @@
    [ai.miniforge.tui-views.update.completion :as completion]
    [ai.miniforge.tui-views.test-util :as util]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: command/complete-command-name
 ;; ---------------------------------------------------------------------------
-
-(deftest complete-command-name-test
+(deftest ^{:stratum 0} complete-command-name-test
   (testing "Empty partial returns all commands"
     (let [results (command/complete-command-name "")]
       (is (pos? (count results)))
@@ -54,8 +54,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: command/compute-completions
 ;; ---------------------------------------------------------------------------
-
-(deftest compute-completions-test
+(deftest ^{:stratum 0} compute-completions-test
   (testing ":theme with no arg shows all themes"
     (let [result (command/compute-completions (model/init-model) ":theme ")]
       (is (some? result))
@@ -94,8 +93,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: completion/dismiss
 ;; ---------------------------------------------------------------------------
-
-(deftest dismiss-test
+(deftest ^{:stratum 0} dismiss-test
   (testing "dismiss clears completion state"
     (let [m (-> (model/init-model)
                 (assoc :completing? true
@@ -109,8 +107,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: completion/next-completion, prev-completion
 ;; ---------------------------------------------------------------------------
-
-(deftest next-prev-completion-test
+(deftest ^{:stratum 0} next-prev-completion-test
   (testing "next-completion advances index"
     (let [m (-> (model/init-model)
                 (assoc :completing? true
@@ -146,8 +143,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: completion/accept
 ;; ---------------------------------------------------------------------------
-
-(deftest accept-test
+(deftest ^{:stratum 0} accept-test
   (testing "accept fills command name and adds space"
     (let [m (-> (model/init-model)
                 (assoc :mode :command
@@ -183,8 +179,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: completion/handle-tab
 ;; ---------------------------------------------------------------------------
-
-(deftest handle-tab-test
+(deftest ^{:stratum 0} handle-tab-test
   (testing "Tab with partial command opens completion popup"
     (let [m (-> (model/init-model)
                 (assoc :mode :command
@@ -237,8 +232,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Unit tests: completion/handle-shift-tab
 ;; ---------------------------------------------------------------------------
-
-(deftest handle-shift-tab-test
+(deftest ^{:stratum 0} handle-shift-tab-test
   (testing "Shift+Tab with partial command opens completion popup at last item"
     (let [m (-> (model/init-model)
                 (assoc :mode :command
@@ -265,7 +259,7 @@
           result (completion/handle-shift-tab m)]
       (is (= 2 (:completion-idx result))))))
 
-(deftest browse-accept-test
+(deftest ^{:stratum 0} browse-accept-test
   (testing "Accepting 'browse' on :add-repo expands into repo choices instead of literal browse arg"
     (with-redefs [pr-sync/get-configured-repos (fn [] ["acme/local"])]
       (let [m (-> (model/init-model)
@@ -283,8 +277,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Integration tests: Tab completion through update-model
 ;; ---------------------------------------------------------------------------
-
-(deftest tab-completion-integration-test
+(deftest ^{:stratum 0} tab-completion-integration-test
   (testing "Full Tab completion flow: type, tab, select, accept"
     (let [m (util/apply-updates (util/fresh-model)
               [;; Enter command mode

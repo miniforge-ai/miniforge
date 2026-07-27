@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.spec-parser
   "CLI entry point for spec parsing.
 
@@ -25,10 +24,11 @@
   (:require
    [ai.miniforge.spec-parser.interface :as spec-parser]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Public API
 ;; Thin delegation to spec-parser component
-
-(defn parse-spec-file
+(defn ^{:stratum 0} parse-spec-file
   "Parse a workflow specification file and normalize to canonical :spec/* format.
 
    Supported formats:
@@ -41,7 +41,7 @@
   [path]
   (spec-parser/parse-spec-file path))
 
-(defn validate-spec
+(defn ^{:stratum 0} validate-spec
   "Validate a normalized spec against the Malli SpecPayload schema.
 
    Returns:

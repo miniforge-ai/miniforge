@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.policy
   "Policy pack commands: list, show, install.
 
@@ -33,23 +32,30 @@
    [ai.miniforge.cli.messages :as messages]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Helpers
 
-(defn- packs-dir []
+;; Helpers
+(defn- ^{:stratum 0} packs-dir []
   (str (app-config/home-dir) "/packs"))
 
-(defn- load-pack-from-resource [pack-id]
+(defn- ^{:stratum 0} load-pack-from-resource [pack-id]
   (let [resource-path (str "policy_pack/packs/" pack-id ".pack.edn")]
     (when-let [url (io/resource resource-path)]
       (try (edn/read-string (slurp url))
            (catch Exception _ nil)))))
 
-(defn- load-pack-from-path [pack-path]
+(defn- ^{:stratum 0} load-pack-from-path [pack-path]
   (when (fs/exists? pack-path)
     (try (edn/read-string (slurp (str pack-path)))
          (catch Exception _ nil))))
 
-(defn- installed-pack-files []
+(defn- ^{:stratum 0} builtin-pack-ids
+  "Known built-in pack IDs to probe on the classpath."
+  []
+  ["foundations-1.0.0" "miniforge-standards"])
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} installed-pack-files []
   (let [dir (io/file (packs-dir))]
     (if (.exists dir)
       (->> (.listFiles dir)
@@ -58,27 +64,53 @@
            vec)
       [])))
 
-(defn- builtin-pack-ids
-  "Known built-in pack IDs to probe on the classpath."
-  []
-  ["foundations-1.0.0" "miniforge-standards"])
-
-(defn- component-packs []
+(defn- ^{:stratum 1} component-packs []
   (try
     (:loaded (policy-pack/load-all-packs (packs-dir)))
     (catch Exception _ nil)))
 
-(defn- load-installed-pack [pack-id]
+(defn- ^{:stratum 1} load-installed-pack [pack-id]
   (let [result (try
                  (policy-pack/load-pack (str (packs-dir) "/" pack-id ".pack.edn"))
                  (catch Exception _ nil))]
     (when (:success? result)
       (:pack result))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Command implementations
+(defn ^{:stratum 1} policy-install-cmd
+  "Install a policy pack from a local .pack.edn file.
 
-(defn policy-list-cmd
+   Copies the pack into ~/.miniforge/packs/ so it is picked up
+   by `scan` and `policy list`."
+  [opts]
+  (let [{:keys [path]} opts]
+    (if-not path
+      (shared/usage-error! :policy/install-usage "policy install <path>")
+      (if-not (fs/exists? path)
+        (do (display/print-error (messages/t :policy/install-not-found {:path path}))
+            (shared/exit! 1))
+        (let [pack (try (edn/read-string (slurp (str path)))
+                        (catch Exception _e nil))]
+          (if-not pack
+            (do (display/print-error (messages/t :policy/install-invalid {:path path}))
+                (shared/exit! 1))
+            (let [dest-dir  (packs-dir)
+                  file-name (fs/file-name path)
+                  ;; Ensure .pack.edn suffix
+                  dest-name (if (str/ends-with? (str file-name) ".pack.edn")
+                              (str file-name)
+                              (str file-name ".pack.edn"))
+                  dest-path (str dest-dir "/" dest-name)]
+              (fs/create-dirs dest-dir)
+              (fs/copy path dest-path {:replace-existing true})
+              (display/print-success (messages/t :policy/install-success {:name dest-name}))
+              (println (messages/t :policy/install-location {:path dest-path}))
+              (when-let [id (:pack/id pack)]
+                (println (messages/t :policy/install-pack-id {:id id}))))))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Command implementations
+(defn ^{:stratum 2} policy-list-cmd
   "List all available policy packs.
 
    Shows installed packs from ~/.miniforge/packs/ and built-in classpath packs."
@@ -121,7 +153,7 @@
               (println (messages/t :policy/builtin-entry {:id id}))))))))
   (println))
 
-(defn policy-show-cmd
+(defn ^{:stratum 2} policy-show-cmd
   "Show rules and metadata for a policy pack.
 
    Checks installed packs, then classpath resources."
@@ -159,37 +191,6 @@
                                                 :foreground :yellow))
                                 (when desc (str "\n    " desc)))))))
             (println)))))))
-
-(defn policy-install-cmd
-  "Install a policy pack from a local .pack.edn file.
-
-   Copies the pack into ~/.miniforge/packs/ so it is picked up
-   by `scan` and `policy list`."
-  [opts]
-  (let [{:keys [path]} opts]
-    (if-not path
-      (shared/usage-error! :policy/install-usage "policy install <path>")
-      (if-not (fs/exists? path)
-        (do (display/print-error (messages/t :policy/install-not-found {:path path}))
-            (shared/exit! 1))
-        (let [pack (try (edn/read-string (slurp (str path)))
-                        (catch Exception _e nil))]
-          (if-not pack
-            (do (display/print-error (messages/t :policy/install-invalid {:path path}))
-                (shared/exit! 1))
-            (let [dest-dir  (packs-dir)
-                  file-name (fs/file-name path)
-                  ;; Ensure .pack.edn suffix
-                  dest-name (if (str/ends-with? (str file-name) ".pack.edn")
-                              (str file-name)
-                              (str file-name ".pack.edn"))
-                  dest-path (str dest-dir "/" dest-name)]
-              (fs/create-dirs dest-dir)
-              (fs/copy path dest-path {:replace-existing true})
-              (display/print-success (messages/t :policy/install-success {:name dest-name}))
-              (println (messages/t :policy/install-location {:path dest-path}))
-              (when-let [id (:pack/id pack)]
-                (println (messages/t :policy/install-pack-id {:id id}))))))))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

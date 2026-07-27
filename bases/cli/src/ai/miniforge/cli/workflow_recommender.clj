@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-recommender
   "LLM-based workflow recommendation system.
 
@@ -34,10 +33,10 @@
    [ai.miniforge.workflow.interface :as workflow]
    [ai.miniforge.response.interface :as response]))
 
-;;------------------------------------------------------------------------------ Layer 0
-;; Prompt templates
+;------------------------------------------------------------------------------ Layer 0
 
-(defn build-workflow-summary
+;; Prompt templates
+(defn ^{:stratum 0} build-workflow-summary
   "Build a concise summary of a workflow for LLM prompt.
 
    Arguments:
@@ -58,17 +57,7 @@
          (when (:has-testing chars)
            (str "\n  " (:has-testing summary-labels))))))
 
-(defn build-workflow-summaries
-  "Build summaries for all available workflows.
-
-   Arguments:
-     workflows - Sequence of workflow definition maps
-
-   Returns: String with workflow summaries"
-  [workflows]
-  (str/join "\n\n" (map build-workflow-summary workflows)))
-
-(defn extract-spec-summary
+(defn ^{:stratum 0} extract-spec-summary
   "Extract key information from spec for LLM analysis.
 
    Arguments:
@@ -87,7 +76,83 @@
          (when constraints (str "Constraints: " (pr-str constraints) "\n\n"))
          (when workflow-type (str "Preferred workflow: " workflow-type)))))
 
-(defn build-recommendation-prompt
+;; LLM interaction
+(defn ^{:stratum 0} parse-llm-response
+  "Parse JSON response from LLM.
+
+   Arguments:
+     response-text - String response from LLM
+
+   Returns: Parsed map or nil"
+  [response-text]
+  (try
+    ;; Try to extract JSON from response (may have markdown code blocks)
+    ;; Use (?s) flag so . matches newlines — LLM JSON typically spans multiple lines
+    (let [json-text (if (str/includes? response-text "```")
+                      (second (re-find #"(?s)```(?:json)?\s*(\{.*?\})\s*```" response-text))
+                      response-text)
+          parsed (json/parse-string (or json-text response-text) true)]
+      ;; Convert workflow string to keyword
+      (update parsed :workflow keyword))
+    (catch Exception e
+      (println (messages/t :recommender/parse-warning {:error (ex-message e)}))
+      nil)))
+
+(defn ^{:stratum 0} call-llm-for-recommendation
+  "Call LLM to get workflow recommendation.
+
+   Arguments:
+     llm-client - LLM client (from ai.miniforge.llm.interface)
+     prompt - String prompt
+
+   Returns: LLM response map or nil"
+  [llm-client prompt]
+  (when llm-client
+    (try
+      (let [result (llm/complete llm-client {:prompt prompt :max-tokens 500})]
+        (when (:success result)
+          (:content result)))
+      (catch Exception e
+        (println (messages/t :recommender/llm-failed-warning {:error (ex-message e)}))
+        nil))))
+
+;; Fallback recommendations
+(defn ^{:stratum 0} recommend-by-task-type
+  "Fallback recommendation based on task type.
+
+   Arguments:
+     spec - Task specification map
+     available-workflows - Sequence of workflows
+
+   Returns: Workflow recommendation map"
+  [spec available-workflows]
+  (let [task-type (get spec :spec/workflow-type :simple)
+        matching-workflows (filter #(some #{task-type} (:workflow/task-types %)) available-workflows)]
+    (if (seq matching-workflows)
+      {:workflow (:workflow/id (first matching-workflows))
+       :confidence 0.5
+       :reasoning (messages/t :recommender/fallback-task-type {:task-type task-type})
+       :source :fallback}
+      {:workflow (selection-config/resolve-selection-profile :default available-workflows)
+       :confidence 0.3
+       :reasoning (messages/t :recommender/fallback-default)
+       :source :fallback})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-workflow-summaries
+  "Build summaries for all available workflows.
+
+   Arguments:
+     workflows - Sequence of workflow definition maps
+
+   Returns: String with workflow summaries"
+  [workflows]
+  (str/join "\n\n" (map build-workflow-summary workflows)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} build-recommendation-prompt
   "Build LLM prompt for workflow recommendation.
 
    Arguments:
@@ -114,52 +179,10 @@
          "\n\n"
          (:json-instruction prompt-config))))
 
-;;------------------------------------------------------------------------------ Layer 1
-;; LLM interaction
+;------------------------------------------------------------------------------ Layer 3
 
-(defn parse-llm-response
-  "Parse JSON response from LLM.
-
-   Arguments:
-     response-text - String response from LLM
-
-   Returns: Parsed map or nil"
-  [response-text]
-  (try
-    ;; Try to extract JSON from response (may have markdown code blocks)
-    ;; Use (?s) flag so . matches newlines — LLM JSON typically spans multiple lines
-    (let [json-text (if (str/includes? response-text "```")
-                      (second (re-find #"(?s)```(?:json)?\s*(\{.*?\})\s*```" response-text))
-                      response-text)
-          parsed (json/parse-string (or json-text response-text) true)]
-      ;; Convert workflow string to keyword
-      (update parsed :workflow keyword))
-    (catch Exception e
-      (println (messages/t :recommender/parse-warning {:error (ex-message e)}))
-      nil)))
-
-(defn call-llm-for-recommendation
-  "Call LLM to get workflow recommendation.
-
-   Arguments:
-     llm-client - LLM client (from ai.miniforge.llm.interface)
-     prompt - String prompt
-
-   Returns: LLM response map or nil"
-  [llm-client prompt]
-  (when llm-client
-    (try
-      (let [result (llm/complete llm-client {:prompt prompt :max-tokens 500})]
-        (when (:success result)
-          (:content result)))
-      (catch Exception e
-        (println (messages/t :recommender/llm-failed-warning {:error (ex-message e)}))
-        nil))))
-
-;;------------------------------------------------------------------------------ Layer 2
 ;; Recommendation logic
-
-(defn recommend-workflow
+(defn ^{:stratum 3} recommend-workflow
   "Recommend a workflow using LLM semantic analysis.
 
    Arguments:
@@ -201,31 +224,9 @@
       (catch Exception e
         (response/from-exception e)))))
 
-;;------------------------------------------------------------------------------ Layer 3
-;; Fallback recommendations
+;------------------------------------------------------------------------------ Layer 4
 
-(defn recommend-by-task-type
-  "Fallback recommendation based on task type.
-
-   Arguments:
-     spec - Task specification map
-     available-workflows - Sequence of workflows
-
-   Returns: Workflow recommendation map"
-  [spec available-workflows]
-  (let [task-type (get spec :spec/workflow-type :simple)
-        matching-workflows (filter #(some #{task-type} (:workflow/task-types %)) available-workflows)]
-    (if (seq matching-workflows)
-      {:workflow (:workflow/id (first matching-workflows))
-       :confidence 0.5
-       :reasoning (messages/t :recommender/fallback-task-type {:task-type task-type})
-       :source :fallback}
-      {:workflow (selection-config/resolve-selection-profile :default available-workflows)
-       :confidence 0.3
-       :reasoning (messages/t :recommender/fallback-default)
-       :source :fallback})))
-
-(defn recommend-workflow-with-fallback
+(defn ^{:stratum 4} recommend-workflow-with-fallback
   "Recommend workflow with LLM, falling back to rule-based if needed.
 
    Arguments:

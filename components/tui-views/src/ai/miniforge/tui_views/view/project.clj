@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.view.project
   "Data projection functions for the view-spec interpreter.
 
@@ -31,7 +30,10 @@
 
    Layer 0: Re-exports from sub-namespaces for backward compatibility.
    Layer 1: Model projections (workflow rows, PR rows, artifacts, kanban, repos).
-   Layer 2: Projection and context registries."
+   Layer 2: Context functions and monitor-zone projections.
+   Layer 3: Projection registry (keyword -> projection fn).
+   Layer 4: get-projection lookup.
+   (Over the 3-layer budget; Wave 2 namespace-split candidate.)"
   (:require
    [clojure.string :as str]
    [ai.miniforge.config.interface :as config]
@@ -43,83 +45,138 @@
    [ai.miniforge.tui-views.view.project.trees :as trees]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Config — loaded once at namespace init
 
-(def ^:private size-display-config
+;; Config — loaded once at namespace init
+(def ^{:stratum 0} ^:private size-display-config
   "Change-size color thresholds from governance/risk.edn."
   (get-in (config/load-governance-config :risk) [:change-size :display]
           {:red 1000 :yellow 500 :green 200}))
 
 ;; Re-exports — external code refers to these via project/<fn>
-
 ;; helpers re-exports
-(def memoize-by              helpers/memoize-by)
-(def safe-format-time        helpers/safe-format-time)
-(def status-char             helpers/status-char)
-(def format-progress-bar     helpers/format-progress-bar)
-(def readiness-bar           helpers/readiness-bar)
-(def readiness-blockers-summary helpers/readiness-blockers-summary)
-(def risk-label              helpers/risk-label)
-(def readiness-state         helpers/readiness-state)
-(def readiness-blockers      helpers/readiness-blockers)
-(def readiness-factors       helpers/readiness-factors)
-(def derive-readiness        helpers/derive-readiness)
-(def derive-risk             helpers/derive-risk)
-(def group-workflows-with-headers helpers/group-workflows-with-headers)
-(def readiness-indicator     helpers/readiness-indicator)
-(def recommend               helpers/recommend)
-(def labels                  helpers/labels)
-(def recommend-action        helpers/recommend-action)
-(def extract-pr-signals      helpers/extract-pr-signals)
-(def derive-recommendation   helpers/derive-recommendation)
-(def resolve-enrichment      helpers/resolve-enrichment)
-(def policy-label            helpers/policy-label)
-(def find-workflow-by-id     helpers/find-workflow-by-id)
-(def workflow-matches-branch? helpers/workflow-matches-branch?)
-(def find-linked-workflow    helpers/find-linked-workflow)
-(def pr-state-label          helpers/pr-state-label)
+(def ^{:stratum 0} memoize-by              helpers/memoize-by)
+
+(def ^{:stratum 0} safe-format-time        helpers/safe-format-time)
+
+(def ^{:stratum 0} status-char             helpers/status-char)
+
+(def ^{:stratum 0} format-progress-bar     helpers/format-progress-bar)
+
+(def ^{:stratum 0} readiness-bar           helpers/readiness-bar)
+
+(def ^{:stratum 0} readiness-blockers-summary helpers/readiness-blockers-summary)
+
+(def ^{:stratum 0} risk-label              helpers/risk-label)
+
+(def ^{:stratum 0} readiness-state         helpers/readiness-state)
+
+(def ^{:stratum 0} readiness-blockers      helpers/readiness-blockers)
+
+(def ^{:stratum 0} readiness-factors       helpers/readiness-factors)
+
+(def ^{:stratum 0} derive-readiness        helpers/derive-readiness)
+
+(def ^{:stratum 0} derive-risk             helpers/derive-risk)
+
+(def ^{:stratum 0} group-workflows-with-headers helpers/group-workflows-with-headers)
+
+(def ^{:stratum 0} readiness-indicator     helpers/readiness-indicator)
+
+(def ^{:stratum 0} recommend               helpers/recommend)
+
+(def ^{:stratum 0} labels                  helpers/labels)
+
+(def ^{:stratum 0} recommend-action        helpers/recommend-action)
+
+(def ^{:stratum 0} extract-pr-signals      helpers/extract-pr-signals)
+
+(def ^{:stratum 0} derive-recommendation   helpers/derive-recommendation)
+
+(def ^{:stratum 0} resolve-enrichment      helpers/resolve-enrichment)
+
+(def ^{:stratum 0} policy-label            helpers/policy-label)
+
+(def ^{:stratum 0} find-workflow-by-id     helpers/find-workflow-by-id)
+
+(def ^{:stratum 0} workflow-matches-branch? helpers/workflow-matches-branch?)
+
+(def ^{:stratum 0} find-linked-workflow    helpers/find-linked-workflow)
+
+(def ^{:stratum 0} pr-state-label          helpers/pr-state-label)
 
 ;; trees re-exports
-(def tree-node               trees/tree-node)
-(def status-pass             trees/status-pass)
-(def status-fail             trees/status-fail)
-(def status-warning          trees/status-warning)
-(def status-info             trees/status-info)
-(def readiness-state-color   trees/readiness-state-color)
-(def risk-level-color        trees/risk-level-color)
-(def recommend-action-color  trees/recommend-action-color)
-(def factor-label            trees/factor-label)
-(def ci-check-node           trees/ci-check-node)
-(def ci-section-nodes        trees/ci-section-nodes)
-(def behind-main-node        trees/behind-main-node)
-(def review-node             trees/review-node)
-(def gates-section-nodes     trees/gates-section-nodes)
-(def risk-factor-label       trees/risk-factor-label)
-(def risk-factor-detail-nodes trees/risk-factor-detail-nodes)
-(def severity-prefix         trees/severity-prefix)
-(def severity-color          trees/severity-color)
-(def packs-applied-nodes     trees/packs-applied-nodes)
-(def severity-summary-nodes  trees/severity-summary-nodes)
-(def violation-nodes         trees/violation-nodes)
-(def policy-tree             trees/policy-tree)
-(def gates-tree              trees/gates-tree)
-(def intent-nodes            trees/intent-nodes)
-(def phase-nodes             trees/phase-nodes)
-(def validation-nodes        trees/validation-nodes)
-(def policy-evidence-nodes   trees/policy-evidence-nodes)
-(def resolve-detail-enrichment trees/resolve-detail-enrichment)
-(def project-readiness-tree  trees/project-readiness-tree)
-(def project-risk-tree       trees/project-risk-tree)
-(def project-gate-list       trees/project-gate-list)
-(def project-pr-summary      trees/project-pr-summary)
-(def project-evidence-tree   trees/project-evidence-tree)
-(def project-phase-tree      trees/project-phase-tree)
-(def project-chat-messages   trees/project-chat-messages)
+(def ^{:stratum 0} tree-node               trees/tree-node)
 
-;------------------------------------------------------------------------------ Layer 1
+(def ^{:stratum 0} status-pass             trees/status-pass)
+
+(def ^{:stratum 0} status-fail             trees/status-fail)
+
+(def ^{:stratum 0} status-warning          trees/status-warning)
+
+(def ^{:stratum 0} status-info             trees/status-info)
+
+(def ^{:stratum 0} readiness-state-color   trees/readiness-state-color)
+
+(def ^{:stratum 0} risk-level-color        trees/risk-level-color)
+
+(def ^{:stratum 0} recommend-action-color  trees/recommend-action-color)
+
+(def ^{:stratum 0} factor-label            trees/factor-label)
+
+(def ^{:stratum 0} ci-check-node           trees/ci-check-node)
+
+(def ^{:stratum 0} ci-section-nodes        trees/ci-section-nodes)
+
+(def ^{:stratum 0} behind-main-node        trees/behind-main-node)
+
+(def ^{:stratum 0} review-node             trees/review-node)
+
+(def ^{:stratum 0} gates-section-nodes     trees/gates-section-nodes)
+
+(def ^{:stratum 0} risk-factor-label       trees/risk-factor-label)
+
+(def ^{:stratum 0} risk-factor-detail-nodes trees/risk-factor-detail-nodes)
+
+(def ^{:stratum 0} severity-prefix         trees/severity-prefix)
+
+(def ^{:stratum 0} severity-color          trees/severity-color)
+
+(def ^{:stratum 0} packs-applied-nodes     trees/packs-applied-nodes)
+
+(def ^{:stratum 0} severity-summary-nodes  trees/severity-summary-nodes)
+
+(def ^{:stratum 0} violation-nodes         trees/violation-nodes)
+
+(def ^{:stratum 0} policy-tree             trees/policy-tree)
+
+(def ^{:stratum 0} gates-tree              trees/gates-tree)
+
+(def ^{:stratum 0} intent-nodes            trees/intent-nodes)
+
+(def ^{:stratum 0} phase-nodes             trees/phase-nodes)
+
+(def ^{:stratum 0} validation-nodes        trees/validation-nodes)
+
+(def ^{:stratum 0} policy-evidence-nodes   trees/policy-evidence-nodes)
+
+(def ^{:stratum 0} resolve-detail-enrichment trees/resolve-detail-enrichment)
+
+(def ^{:stratum 0} project-readiness-tree  trees/project-readiness-tree)
+
+(def ^{:stratum 0} project-risk-tree       trees/project-risk-tree)
+
+(def ^{:stratum 0} project-gate-list       trees/project-gate-list)
+
+(def ^{:stratum 0} project-pr-summary      trees/project-pr-summary)
+
+(def ^{:stratum 0} project-evidence-tree   trees/project-evidence-tree)
+
+(def ^{:stratum 0} project-phase-tree      trees/project-phase-tree)
+
+(def ^{:stratum 0} project-chat-messages   trees/project-chat-messages)
+
 ;; Model projections: workflow rows, PR rows, artifacts, kanban, repos
-
-(defn- compute-workflow-rows
+(defn- ^{:stratum 0} compute-workflow-rows
   "Expensive: filter, group, and format workflow data into table rows with headers.
    Returns the grouped row vector (without selection metadata)."
   [model]
@@ -130,12 +187,7 @@
         [rows _] (helpers/group-workflows-with-headers filtered nil)]
     rows))
 
-(def ^:private compute-workflow-rows-memo
-  "Memoized workflow row computation. Only recomputes when workflows or filter changes."
-  (helpers/memoize-by compute-workflow-rows
-              (fn [m] [(:workflows m) (:filtered-indices m)])))
-
-(defn- map-selected-to-visual
+(defn- ^{:stratum 0} map-selected-to-visual
   "Cheap: map a logical selected-idx to the visual row index in grouped rows
    (skipping header rows). O(n) scan but n is small (number of rows on screen)."
   [rows selected-idx]
@@ -150,16 +202,248 @@
               row-idx
               (recur (rest entries) (inc wf-idx) (inc row-idx)))))))))
 
-(defn project-workflows
-  "Project workflow list for the table widget.
-   Data rows are memoized — only recomputed when workflows/filter change.
-   Selection mapping is cheap and computed fresh."
+(defn ^{:stratum 0} project-train-prs
+  "Project train PRs for the table widget."
   [model]
-  (let [rows (compute-workflow-rows-memo model)
-        mapped (map-selected-to-visual rows (:selected-idx model))]
-    (with-meta rows {:mapped-selected mapped})))
+  (let [train (get-in model [:detail :selected-train])
+        prs (:train/prs train [])]
+    (mapv (fn [pr]
+            {:order (str (:pr/merge-order pr))
+             :repo (get pr :pr/repo "")
+             :pr (str "#" (:pr/number pr))
+             :title (get pr :pr/title "")
+             :status (some-> (:pr/status pr) name)
+             :ci (some-> (:pr/ci-status pr) name)})
+          prs)))
 
-(defn project-pr-row
+(defn ^{:stratum 0} project-artifacts
+  "Project artifacts for the table widget."
+  [model]
+  (let [artifacts (get-in model [:detail :artifacts] [])]
+    (mapv (fn [a]
+            {:_id [:artifact (.indexOf ^java.util.List artifacts a)]
+             :type (some-> (:type a) name)
+             :name (or (:name a) (:path a) (msg/t :artifact/unnamed))
+             :phase (some-> (:phase a) name)
+             :size (get a :size "-")
+             :status (some-> (:status a) name)
+             :time (or (helpers/safe-format-time (:created-at a)) "")})
+          artifacts)))
+
+(defn ^{:stratum 0} project-kanban-columns
+  "Project workflows into kanban columns."
+  [model]
+  (let [all-wfs (vec (remove #(= :archived (:status %)) (get model :workflows [])))
+        blocked   (filterv #(= :blocked (:status %)) all-wfs)
+        ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
+        active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)
+        in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
+        merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
+        done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
+    [{:title (msg/t :kanban/blocked) :color palette/status-fail
+      :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
+     {:title (msg/t :kanban/ready) :color palette/status-warning
+      :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
+     {:title (msg/t :kanban/active) :color palette/status-info
+      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
+     {:title (msg/t :kanban/in-review) :color :magenta
+      :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
+     {:title (msg/t :kanban/merging) :color :blue
+      :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
+     {:title (msg/t :kanban/done) :color palette/status-pass
+      :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
+
+(defn ^{:stratum 0} project-agent-output
+  "Project agent output as tree nodes for the agent output panel.
+   Splits and cleans raw agent content for readable display.
+   Uses :_panel-cols (injected by interpreter) for word-wrapping."
+  [model]
+  (let [detail (:detail model)
+        agent (:current-agent detail)
+        output (get detail :agent-output "")
+        panel-cols (get model :_panel-cols 80)
+        wrap-width (max 20 (- panel-cols 4))]
+    (if (empty? output)
+      [(trees/tree-node (msg/t :agent/no-output) 0 false trees/status-info)]
+      (let [agent-name (when agent (name (get agent :agent :agent)))
+            header (when agent-name
+                     [(trees/tree-node (str "[" agent-name "]") 0 false trees/status-warning)])
+            lines (trees/clean-agent-content output)]
+        (into (or header [])
+              (mapcat (fn [line]
+                        (mapv #(trees/tree-node % 0)
+                              (helpers/wrap-text line wrap-width)))
+                      lines))))))
+
+(defn- ^{:stratum 0} browse-loading-message []
+  ;; resolve the catalog vector at call time (not namespace load) to keep
+  ;; require free of catalog I/O
+  (let [sayings (msg/t :repo/browse-sayings)
+        idx (mod (quot (System/currentTimeMillis) 2000)
+                 (count sayings))]
+    (nth sayings idx)))
+
+;; Monitor zone projections — supervisory data → tree-node vectors
+(defn- ^{:stratum 0} severity->color
+  "Map attention severity to a palette color."
+  [severity]
+  (case severity
+    :critical trees/status-fail
+    :warning  trees/status-warning
+    :info     trees/status-info
+    nil))
+
+(defn- ^{:stratum 0} status->glyph-color
+  "Map workflow status to [glyph color-or-nil]."
+  [status]
+  (case status
+    (:running)             ["●" trees/status-info]
+    (:completed :success)  ["✓" trees/status-pass]
+    :failed                ["✗" trees/status-fail]
+    :pending               ["○" nil]
+    ["?" nil]))
+
+(defn ^{:stratum 0} project-monitor-pr-train
+  "Project PR train and fleet summary as tree nodes."
+  [model]
+  (let [{:keys [train-active? train-merged train-total
+                fleet-open fleet-ready fleet-monitored]}
+        (supervisory/pr-train-strip model)]
+    [(trees/tree-node
+      (if train-active?
+        (msg/t :monitor/train-active {:merged train-merged :total train-total})
+        (msg/t :monitor/train-none))
+      0 false (when train-active? trees/status-info))
+     (trees/tree-node (msg/t :monitor/fleet-open {:count fleet-open}) 0)
+     (trees/tree-node (msg/t :monitor/fleet-ready {:count fleet-ready}) 1 false
+                      (when (pos? fleet-ready) trees/status-pass))
+     (trees/tree-node (msg/t :monitor/fleet-monitored {:count fleet-monitored}) 1 false
+                      (when (pos? fleet-monitored) trees/status-info))]))
+
+(defn ^{:stratum 0} project-monitor-policy-health
+  "Project policy health summary as tree nodes."
+  [model]
+  (let [{:keys [pass-rate total-evaluations passing-evaluations
+                violations-by-category governance-counts]}
+        (supervisory/policy-health model)
+        rate-pct    (format "%.1f%%" (* 100.0 (or pass-rate 1.0)))
+        rate-color  (cond
+                      (>= (or pass-rate 1.0) 0.95) trees/status-pass
+                      (>= (or pass-rate 1.0) 0.80) trees/status-warning
+                      :else                         trees/status-fail)
+        viols       (sort-by (comp - val) violations-by-category)
+        {:keys [not-evaluated policy-passing policy-failing waived escalated]}
+        governance-counts]
+    (vec (concat
+          [(trees/tree-node (msg/t :policy/pass-rate {:pct rate-pct}) 0 false rate-color)
+           (trees/tree-node (msg/t :policy/evaluations
+                                   {:total total-evaluations
+                                    :passing passing-evaluations}) 0)]
+          (when (seq viols)
+            (into [(trees/tree-node (msg/t :policy/violations-header) 0)]
+                  (mapv (fn [[cat cnt]]
+                          (trees/tree-node (str "  " cat ": " cnt) 1 false trees/status-fail))
+                        viols)))
+          (when (some pos? [policy-passing policy-failing waived escalated not-evaluated])
+            (into [(trees/tree-node (msg/t :policy/states-header) 0)]
+                  (filter some?
+                          [(when (pos? policy-passing)
+                             (trees/tree-node (msg/t :policy/state-passing {:count policy-passing}) 1 false trees/status-pass))
+                           (when (pos? policy-failing)
+                             (trees/tree-node (msg/t :policy/state-failing {:count policy-failing}) 1 false trees/status-fail))
+                           (when (pos? waived)
+                             (trees/tree-node (msg/t :policy/state-waived {:count waived}) 1 false trees/status-warning))
+                           (when (pos? escalated)
+                             (trees/tree-node (msg/t :policy/state-escalated {:count escalated}) 1 false trees/status-fail))
+                           (when (pos? not-evaluated)
+                             (trees/tree-node (msg/t :policy/state-pending {:count not-evaluated}) 1))])))))))
+
+;; Context functions (for tab-bar / title-bar text)
+(defn ^{:stratum 0} ctx-workflow-count [model]
+  (let [wfs (:workflows model)
+        ts (:last-updated model)]
+    (str "[" (count wfs) "]"
+         (when ts
+           (str " " (helpers/safe-format-time ts))))))
+
+(defn ^{:stratum 0} ctx-pr-fleet-summary [model]
+  (let [prs (:pr-items model [])
+        filter-state (get model :pr-filter-state :open)
+        repo-count (count (distinct (map :pr/repo prs)))
+        merge-ready (count (filter (fn [pr]
+                                     (let [r (or (:pr/readiness pr) (helpers/derive-readiness pr))]
+                                       (:readiness/ready? r)))
+                                   prs))]
+    (msg/t :fleet/summary {:filter (str/upper-case (name filter-state))
+                           :repos repo-count
+                           :prs (count prs)
+                           :ready merge-ready})))
+
+(defn ^{:stratum 0} ctx-pr-detail-title [model]
+  (let [pr-data (get-in model [:detail :selected-pr])]
+    (msg/t :pr/detail-title
+           {:repo (if (:pr/repo pr-data) (str (:pr/repo pr-data) " ") "")
+            :number (:pr/number pr-data "?")
+            :title (:pr/title pr-data "")})))
+
+(defn ^{:stratum 0} ctx-train-title [model]
+  (let [train (get-in model [:detail :selected-train])
+        name (get train :train/name (msg/t :train/default-name))
+        progress (:train/progress train)]
+    (msg/t :train/title
+           {:name name
+            :progress (if progress
+                        (str " (" (:merged progress 0) "/" (:total progress 0) ")")
+                        "")})))
+
+(defn ^{:stratum 0} ctx-evidence-title [model]
+  (let [wf-id (get-in model [:detail :workflow-id])
+        wf-name (some #(when (= (:id %) wf-id) (:name %))
+                      (:workflows model))]
+    (or wf-name (msg/t :evidence/title))))
+
+(defn ^{:stratum 0} ctx-artifact-title [model]
+  (let [wf-id (get-in model [:detail :workflow-id])
+        wf-name (some #(when (= (:id %) wf-id) (:name %))
+                      (:workflows model))]
+    (or wf-name (msg/t :artifact/title))))
+
+(defn ^{:stratum 0} ctx-artifact-box-title [model]
+  (let [artifacts (get-in model [:detail :artifacts] [])]
+    (msg/t :artifact/box-title {:count (count artifacts)})))
+
+(defn ^{:stratum 0} ctx-workflow-detail-title [model]
+  (let [wf-id (get-in model [:detail :workflow-id])
+        wf (some #(when (= (:id %) wf-id) %) (:workflows model []))
+        phase (get-in model [:detail :current-phase])]
+    (msg/t :workflow/detail-title
+           {:name (or (:name wf) (some-> wf-id str (subs 0 8)) (msg/t :workflow/default-name))
+            :phase (if phase (str " │ " (name phase)) "")})))
+
+(defn ^{:stratum 0} ctx-repo-manager-title [model]
+  (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)
+        repos (get model :fleet-repos [])]
+    (msg/t :repo/manager-title {:count (count repos) :index (inc idx)})))
+
+(defn ^{:stratum 0} ctx-monitor-summary [model]
+  (let [attn-count (count (supervisory/attention model))
+        sub-status (get model :subscription/status :connected)]
+    (msg/t :monitor/summary
+           {:count attn-count
+            :status (case sub-status
+                      :connected    (msg/t :monitor/sub-live)
+                      :stale        (msg/t :monitor/sub-stale)
+                      :disconnected (msg/t :monitor/sub-disconnected)
+                      (name sub-status))})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private compute-workflow-rows-memo
+  "Memoized workflow row computation. Only recomputes when workflows or filter changes."
+  (helpers/memoize-by compute-workflow-rows
+              (fn [m] [(:workflows m) (:filtered-indices m)])))
+
+(defn ^{:stratum 1} project-pr-row
   "Project a single PR into a table row map.
    Includes :<key>-fg entries for per-cell status coloring.
    agent-risk-map is {[repo num] {:level kw :reason str}} from fleet triage."
@@ -208,99 +492,7 @@
      :recommend (:label recommend)
      :recommend-fg (trees/recommend-action-color (:action recommend))}))
 
-(defn project-pr-items
-  "Project PR items for the fleet table widget.
-   Respects :filtered-indices from search/filter modes."
-  [model]
-  (let [prs (:pr-items model [])
-        agent-risk (get model :agent-risk {})
-        filtered (if-let [fi (:filtered-indices model)]
-                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
-                   prs)]
-    (mapv #(project-pr-row % agent-risk) filtered)))
-
-(defn project-train-prs
-  "Project train PRs for the table widget."
-  [model]
-  (let [train (get-in model [:detail :selected-train])
-        prs (:train/prs train [])]
-    (mapv (fn [pr]
-            {:order (str (:pr/merge-order pr))
-             :repo (get pr :pr/repo "")
-             :pr (str "#" (:pr/number pr))
-             :title (get pr :pr/title "")
-             :status (some-> (:pr/status pr) name)
-             :ci (some-> (:pr/ci-status pr) name)})
-          prs)))
-
-(defn project-artifacts
-  "Project artifacts for the table widget."
-  [model]
-  (let [artifacts (get-in model [:detail :artifacts] [])]
-    (mapv (fn [a]
-            {:_id [:artifact (.indexOf ^java.util.List artifacts a)]
-             :type (some-> (:type a) name)
-             :name (or (:name a) (:path a) (msg/t :artifact/unnamed))
-             :phase (some-> (:phase a) name)
-             :size (get a :size "-")
-             :status (some-> (:status a) name)
-             :time (or (helpers/safe-format-time (:created-at a)) "")})
-          artifacts)))
-
-(defn project-kanban-columns
-  "Project workflows into kanban columns."
-  [model]
-  (let [all-wfs (vec (remove #(= :archived (:status %)) (get model :workflows [])))
-        blocked   (filterv #(= :blocked (:status %)) all-wfs)
-        ready     (filterv #(#{:ready :pending} (:status %)) all-wfs)
-        active    (filterv #(#{:running :implementing :pr-opening :responding} (:status %)) all-wfs)
-        in-review (filterv #(#{:ci-running :review-pending} (:status %)) all-wfs)
-        merging   (filterv #(#{:ready-to-merge :merging} (:status %)) all-wfs)
-        done      (filterv #(#{:merged :success :completed :failed :skipped} (:status %)) all-wfs)]
-    [{:title (msg/t :kanban/blocked) :color palette/status-fail
-      :cards (mapv (fn [wf] {:label (:name wf) :status :blocked}) blocked)}
-     {:title (msg/t :kanban/ready) :color palette/status-warning
-      :cards (mapv (fn [wf] {:label (:name wf) :status :ready}) ready)}
-     {:title (msg/t :kanban/active) :color palette/status-info
-      :cards (mapv (fn [wf] {:label (:name wf) :status :running}) active)}
-     {:title (msg/t :kanban/in-review) :color :magenta
-      :cards (mapv (fn [wf] {:label (:name wf) :status :review}) in-review)}
-     {:title (msg/t :kanban/merging) :color :blue
-      :cards (mapv (fn [wf] {:label (:name wf) :status :merging}) merging)}
-     {:title (msg/t :kanban/done) :color palette/status-pass
-      :cards (mapv (fn [wf] {:label (:name wf) :status (get wf :status :success)}) done)}]))
-
-(defn project-agent-output
-  "Project agent output as tree nodes for the agent output panel.
-   Splits and cleans raw agent content for readable display.
-   Uses :_panel-cols (injected by interpreter) for word-wrapping."
-  [model]
-  (let [detail (:detail model)
-        agent (:current-agent detail)
-        output (get detail :agent-output "")
-        panel-cols (get model :_panel-cols 80)
-        wrap-width (max 20 (- panel-cols 4))]
-    (if (empty? output)
-      [(trees/tree-node (msg/t :agent/no-output) 0 false trees/status-info)]
-      (let [agent-name (when agent (name (get agent :agent :agent)))
-            header (when agent-name
-                     [(trees/tree-node (str "[" agent-name "]") 0 false trees/status-warning)])
-            lines (trees/clean-agent-content output)]
-        (into (or header [])
-              (mapcat (fn [line]
-                        (mapv #(trees/tree-node % 0)
-                              (helpers/wrap-text line wrap-width)))
-                      lines))))))
-
-(defn- browse-loading-message []
-  ;; resolve the catalog vector at call time (not namespace load) to keep
-  ;; require free of catalog I/O
-  (let [sayings (msg/t :repo/browse-sayings)
-        idx (mod (quot (System/currentTimeMillis) 2000)
-                 (count sayings))]
-    (nth sayings idx)))
-
-(defn project-repo-list
+(defn ^{:stratum 1} project-repo-list
   "Project repo manager data for the table widget."
   [model]
   (let [source (get model :repo-manager-source :fleet)
@@ -335,29 +527,7 @@
                :status (msg/t :repo/status-active)})
             fleet-vec))))
 
-;------------------------------------------------------------------------------ Layer 1b
-;; Monitor zone projections — supervisory data → tree-node vectors
-
-(defn- severity->color
-  "Map attention severity to a palette color."
-  [severity]
-  (case severity
-    :critical trees/status-fail
-    :warning  trees/status-warning
-    :info     trees/status-info
-    nil))
-
-(defn- status->glyph-color
-  "Map workflow status to [glyph color-or-nil]."
-  [status]
-  (case status
-    (:running)             ["●" trees/status-info]
-    (:completed :success)  ["✓" trees/status-pass]
-    :failed                ["✗" trees/status-fail]
-    :pending               ["○" nil]
-    ["?" nil]))
-
-(defn project-monitor-attention
+(defn ^{:stratum 1} project-monitor-attention
   "Project attention items as tree nodes for the attention zone."
   [model]
   (let [items (supervisory/attention model)]
@@ -374,7 +544,7 @@
                0 false (severity->color (:attention/severity item))))
             items))))
 
-(defn project-monitor-ticker
+(defn ^{:stratum 1} project-monitor-ticker
   "Project workflow ticker rows as tree nodes for the workflows zone."
   [model]
   (let [rows (supervisory/workflow-ticker model)]
@@ -394,65 +564,62 @@
                          [main-node])))
                    rows)))))
 
-(defn project-monitor-pr-train
-  "Project PR train and fleet summary as tree nodes."
-  [model]
-  (let [{:keys [train-active? train-merged train-total
-                fleet-open fleet-ready fleet-monitored]}
-        (supervisory/pr-train-strip model)]
-    [(trees/tree-node
-      (if train-active?
-        (msg/t :monitor/train-active {:merged train-merged :total train-total})
-        (msg/t :monitor/train-none))
-      0 false (when train-active? trees/status-info))
-     (trees/tree-node (msg/t :monitor/fleet-open {:count fleet-open}) 0)
-     (trees/tree-node (msg/t :monitor/fleet-ready {:count fleet-ready}) 1 false
-                      (when (pos? fleet-ready) trees/status-pass))
-     (trees/tree-node (msg/t :monitor/fleet-monitored {:count fleet-monitored}) 1 false
-                      (when (pos? fleet-monitored) trees/status-info))]))
-
-(defn project-monitor-policy-health
-  "Project policy health summary as tree nodes."
-  [model]
-  (let [{:keys [pass-rate total-evaluations passing-evaluations
-                violations-by-category governance-counts]}
-        (supervisory/policy-health model)
-        rate-pct    (format "%.1f%%" (* 100.0 (or pass-rate 1.0)))
-        rate-color  (cond
-                      (>= (or pass-rate 1.0) 0.95) trees/status-pass
-                      (>= (or pass-rate 1.0) 0.80) trees/status-warning
-                      :else                         trees/status-fail)
-        viols       (sort-by (comp - val) violations-by-category)
-        {:keys [not-evaluated policy-passing policy-failing waived escalated]}
-        governance-counts]
-    (vec (concat
-          [(trees/tree-node (msg/t :policy/pass-rate {:pct rate-pct}) 0 false rate-color)
-           (trees/tree-node (msg/t :policy/evaluations
-                                   {:total total-evaluations
-                                    :passing passing-evaluations}) 0)]
-          (when (seq viols)
-            (into [(trees/tree-node (msg/t :policy/violations-header) 0)]
-                  (mapv (fn [[cat cnt]]
-                          (trees/tree-node (str "  " cat ": " cnt) 1 false trees/status-fail))
-                        viols)))
-          (when (some pos? [policy-passing policy-failing waived escalated not-evaluated])
-            (into [(trees/tree-node (msg/t :policy/states-header) 0)]
-                  (filter some?
-                          [(when (pos? policy-passing)
-                             (trees/tree-node (msg/t :policy/state-passing {:count policy-passing}) 1 false trees/status-pass))
-                           (when (pos? policy-failing)
-                             (trees/tree-node (msg/t :policy/state-failing {:count policy-failing}) 1 false trees/status-fail))
-                           (when (pos? waived)
-                             (trees/tree-node (msg/t :policy/state-waived {:count waived}) 1 false trees/status-warning))
-                           (when (pos? escalated)
-                             (trees/tree-node (msg/t :policy/state-escalated {:count escalated}) 1 false trees/status-fail))
-                           (when (pos? not-evaluated)
-                             (trees/tree-node (msg/t :policy/state-pending {:count not-evaluated}) 1))])))))))
+(def ^{:stratum 1} contexts
+  "Registry of context functions: keyword -> (model -> string).
+   Memoized by input signals — only recompute when relevant data changes."
+  {:ctx/workflow-count         (helpers/memoize-by ctx-workflow-count
+                                 (fn [m] [(:workflows m) (:last-updated m)]))
+   :ctx/pr-fleet-summary       (helpers/memoize-by ctx-pr-fleet-summary
+                                 (fn [m] [(:pr-items m) (:pr-filter-state m)]))
+   :ctx/pr-detail-title        (helpers/memoize-by ctx-pr-detail-title
+                                 (fn [m] (get-in m [:detail :selected-pr])))
+   :ctx/train-title            (helpers/memoize-by ctx-train-title
+                                 (fn [m] (get-in m [:detail :selected-train])))
+   :ctx/evidence-title         (helpers/memoize-by ctx-evidence-title
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/artifact-title         (helpers/memoize-by ctx-artifact-title
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/artifact-box-title     (helpers/memoize-by ctx-artifact-box-title
+                                 (fn [m] (get-in m [:detail :artifacts])))
+   :ctx/repo-manager-title     (helpers/memoize-by ctx-repo-manager-title
+                                 (fn [m] (:fleet-repos m)))
+   :ctx/workflow-detail-title  (helpers/memoize-by ctx-workflow-detail-title
+                                 (fn [m] [(:detail m) (:workflows m)]))
+   :ctx/monitor-summary        (helpers/memoize-by ctx-monitor-summary
+                                 (fn [m] [(:workflows m) (:pr-items m) (:attention-items m)
+                                          (:subscription/status m)]))})
 
 ;------------------------------------------------------------------------------ Layer 2
-;; Projection registry
 
-(def projections
+(defn ^{:stratum 2} project-workflows
+  "Project workflow list for the table widget.
+   Data rows are memoized — only recomputed when workflows/filter change.
+   Selection mapping is cheap and computed fresh."
+  [model]
+  (let [rows (compute-workflow-rows-memo model)
+        mapped (map-selected-to-visual rows (:selected-idx model))]
+    (with-meta rows {:mapped-selected mapped})))
+
+(defn ^{:stratum 2} project-pr-items
+  "Project PR items for the fleet table widget.
+   Respects :filtered-indices from search/filter modes."
+  [model]
+  (let [prs (:pr-items model [])
+        agent-risk (get model :agent-risk {})
+        filtered (if-let [fi (:filtered-indices model)]
+                   (vec (keep-indexed (fn [i pr] (when (contains? fi i) pr)) prs))
+                   prs)]
+    (mapv #(project-pr-row % agent-risk) filtered)))
+
+(defn ^{:stratum 2} get-context
+  "Look up a context function by keyword. Returns a constant fn if not found."
+  [kw]
+  (get contexts kw (fn [_] "")))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Projection registry
+(def ^{:stratum 3} projections
   "Registry of data projection functions: keyword -> (model -> data).
    Projections are memoized by their input signals — they only recompute
    when the model keys they depend on actually change (re-frame style)."
@@ -508,120 +675,12 @@
    :project/monitor-policy-health (helpers/memoize-by project-monitor-policy-health
                                     (fn [m] [(:pr-items m) (:policy-evaluations m) (:waivers m)]))})
 
-(defn get-projection
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} get-projection
   "Look up a projection function by keyword. Returns identity fn if not found."
   [kw]
   (get projections kw (fn [_] [])))
-
-;------------------------------------------------------------------------------ Layer 2b
-;; Context functions (for tab-bar / title-bar text)
-
-(defn ctx-workflow-count [model]
-  (let [wfs (:workflows model)
-        ts (:last-updated model)]
-    (str "[" (count wfs) "]"
-         (when ts
-           (str " " (helpers/safe-format-time ts))))))
-
-(defn ctx-pr-fleet-summary [model]
-  (let [prs (:pr-items model [])
-        filter-state (get model :pr-filter-state :open)
-        repo-count (count (distinct (map :pr/repo prs)))
-        merge-ready (count (filter (fn [pr]
-                                     (let [r (or (:pr/readiness pr) (helpers/derive-readiness pr))]
-                                       (:readiness/ready? r)))
-                                   prs))]
-    (msg/t :fleet/summary {:filter (str/upper-case (name filter-state))
-                           :repos repo-count
-                           :prs (count prs)
-                           :ready merge-ready})))
-
-(defn ctx-pr-detail-title [model]
-  (let [pr-data (get-in model [:detail :selected-pr])]
-    (msg/t :pr/detail-title
-           {:repo (if (:pr/repo pr-data) (str (:pr/repo pr-data) " ") "")
-            :number (:pr/number pr-data "?")
-            :title (:pr/title pr-data "")})))
-
-(defn ctx-train-title [model]
-  (let [train (get-in model [:detail :selected-train])
-        name (get train :train/name (msg/t :train/default-name))
-        progress (:train/progress train)]
-    (msg/t :train/title
-           {:name name
-            :progress (if progress
-                        (str " (" (:merged progress 0) "/" (:total progress 0) ")")
-                        "")})))
-
-(defn ctx-evidence-title [model]
-  (let [wf-id (get-in model [:detail :workflow-id])
-        wf-name (some #(when (= (:id %) wf-id) (:name %))
-                      (:workflows model))]
-    (or wf-name (msg/t :evidence/title))))
-
-(defn ctx-artifact-title [model]
-  (let [wf-id (get-in model [:detail :workflow-id])
-        wf-name (some #(when (= (:id %) wf-id) (:name %))
-                      (:workflows model))]
-    (or wf-name (msg/t :artifact/title))))
-
-(defn ctx-artifact-box-title [model]
-  (let [artifacts (get-in model [:detail :artifacts] [])]
-    (msg/t :artifact/box-title {:count (count artifacts)})))
-
-(defn ctx-workflow-detail-title [model]
-  (let [wf-id (get-in model [:detail :workflow-id])
-        wf (some #(when (= (:id %) wf-id) %) (:workflows model []))
-        phase (get-in model [:detail :current-phase])]
-    (msg/t :workflow/detail-title
-           {:name (or (:name wf) (some-> wf-id str (subs 0 8)) (msg/t :workflow/default-name))
-            :phase (if phase (str " │ " (name phase)) "")})))
-
-(defn ctx-repo-manager-title [model]
-  (let [idx (.indexOf ^java.util.List model/top-level-views :repo-manager)
-        repos (get model :fleet-repos [])]
-    (msg/t :repo/manager-title {:count (count repos) :index (inc idx)})))
-
-(defn ctx-monitor-summary [model]
-  (let [attn-count (count (supervisory/attention model))
-        sub-status (get model :subscription/status :connected)]
-    (msg/t :monitor/summary
-           {:count attn-count
-            :status (case sub-status
-                      :connected    (msg/t :monitor/sub-live)
-                      :stale        (msg/t :monitor/sub-stale)
-                      :disconnected (msg/t :monitor/sub-disconnected)
-                      (name sub-status))})))
-
-(def contexts
-  "Registry of context functions: keyword -> (model -> string).
-   Memoized by input signals — only recompute when relevant data changes."
-  {:ctx/workflow-count         (helpers/memoize-by ctx-workflow-count
-                                 (fn [m] [(:workflows m) (:last-updated m)]))
-   :ctx/pr-fleet-summary       (helpers/memoize-by ctx-pr-fleet-summary
-                                 (fn [m] [(:pr-items m) (:pr-filter-state m)]))
-   :ctx/pr-detail-title        (helpers/memoize-by ctx-pr-detail-title
-                                 (fn [m] (get-in m [:detail :selected-pr])))
-   :ctx/train-title            (helpers/memoize-by ctx-train-title
-                                 (fn [m] (get-in m [:detail :selected-train])))
-   :ctx/evidence-title         (helpers/memoize-by ctx-evidence-title
-                                 (fn [m] [(:detail m) (:workflows m)]))
-   :ctx/artifact-title         (helpers/memoize-by ctx-artifact-title
-                                 (fn [m] [(:detail m) (:workflows m)]))
-   :ctx/artifact-box-title     (helpers/memoize-by ctx-artifact-box-title
-                                 (fn [m] (get-in m [:detail :artifacts])))
-   :ctx/repo-manager-title     (helpers/memoize-by ctx-repo-manager-title
-                                 (fn [m] (:fleet-repos m)))
-   :ctx/workflow-detail-title  (helpers/memoize-by ctx-workflow-detail-title
-                                 (fn [m] [(:detail m) (:workflows m)]))
-   :ctx/monitor-summary        (helpers/memoize-by ctx-monitor-summary
-                                 (fn [m] [(:workflows m) (:pr-items m) (:attention-items m)
-                                          (:subscription/status m)]))})
-
-(defn get-context
-  "Look up a context function by keyword. Returns a constant fn if not found."
-  [kw]
-  (get contexts kw (fn [_] "")))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

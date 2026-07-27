@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.update.command
   "Command mode routing.
 
@@ -32,9 +31,9 @@
    [ai.miniforge.pr-sync.interface :as pr-sync]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Command parsing
 
-(defn parse-command
+;; Command parsing
+(defn ^{:stratum 0} parse-command
   "Parse a command string into [cmd-name args-string].
    Strips leading ':' prefix."
   [cmd-str]
@@ -44,13 +43,11 @@
         parts (str/split trimmed #"\s+" 2)]
     [(first parts) (second parts)]))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Command handlers
-
-(defn cmd-quit [model _args]
+(defn ^{:stratum 0} cmd-quit [model _args]
   (assoc model :quit? true))
 
-(defn cmd-view [model args]
+(defn ^{:stratum 0} cmd-view [model args]
   (if (str/blank? args)
     (assoc model :flash-message
            (msg/t :cmd/views {:views (str/join ", " (map name model/views))}))
@@ -59,13 +56,13 @@
         (assoc model :view view-kw :selected-idx 0 :scroll-offset 0)
         (assoc model :flash-message (msg/t :cmd/unknown-view {:view args}))))))
 
-(defn cmd-refresh [model _args]
+(defn ^{:stratum 0} cmd-refresh [model _args]
   (assoc model :flash-message (msg/t :flash/refreshed) :last-updated (java.util.Date.)))
 
-(defn cmd-help [model _args]
+(defn ^{:stratum 0} cmd-help [model _args]
   (assoc model :help-visible? true))
 
-(defn cmd-theme [model args]
+(defn ^{:stratum 0} cmd-theme [model args]
   (let [available (keys engine/themes)
         names-str (str/join ", " (map name available))]
     (if (str/blank? args)
@@ -80,20 +77,10 @@
                  (msg/t :cmd/unknown-theme {:theme args
                                             :available names-str})))))))
 
-(def log-levels #{"debug" "info" "warn" "error"})
+(def ^{:stratum 0} log-levels #{"debug" "info" "warn" "error"})
 
-(defn cmd-log [model args]
-  (let [level-str (some-> args str/trim str/lower-case)]
-    (if (log-levels level-str)
-      (do (engine/set-log-level! (keyword level-str))
-          (assoc model :flash-message (msg/t :cmd/log-level {:level level-str})))
-      (assoc model :flash-message
-             (msg/t :cmd/log-levels {:levels (str/join ", " (sort log-levels))})))))
-
-;------------------------------------------------------------------------------ Layer 1b
 ;; Fleet management commands
-
-(defn with-fleet-repos
+(defn ^{:stratum 0} with-fleet-repos
   [model repos]
   (let [repos* (vec (or repos []))
         max-idx (max 0 (dec (count repos*)))
@@ -102,7 +89,148 @@
            :fleet-repos repos*
            :selected-idx (min idx max-idx))))
 
-(defn cmd-add-repo [model args]
+(defn ^{:stratum 0} cmd-sync [model _args]
+  (let [state (get model :pr-filter-state :open)]
+    (assoc model
+           :side-effect (effect/sync-prs state)
+           :flash-message (msg/t :flash/syncing-prs {:state (name state)}))))
+
+(def ^{:stratum 0} show-states
+  #{"open" "merged" "closed" "all"})
+
+(defn ^{:stratum 0} cmd-repos [model _args]
+  (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
+    (if (seq repos)
+      (assoc model :flash-message
+             (msg/t :cmd/fleet-repos {:count (count repos)
+                                      :repos (str/join ", " repos)}))
+      (assoc model :flash-message (msg/t :cmd/no-repos-configured)))))
+
+(defn ^{:stratum 0} cmd-discover [model args]
+  (let [owner (when-not (str/blank? args) (str/trim args))]
+    (assoc model
+           :side-effect (effect/discover-repos owner)
+           :flash-message (if owner
+                            (msg/t :flash/discovering-repos-from {:owner owner})
+                            (msg/t :flash/discovering-repos)))))
+
+;; PR selection helper
+(defn ^{:stratum 0} selected-prs
+  "Return pr-items whose [repo number] pair is in `ids`."
+  [model ids]
+  (->> (:pr-items model [])
+       (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
+       vec))
+
+;; Train commands
+(defn ^{:stratum 0} cmd-create-train [model args]
+  (if (str/blank? args)
+    (assoc model :flash-message (msg/t :cmd/create-train-usage))
+    (assoc model
+           :side-effect (effect/create-train (str/trim args))
+           :flash-message (msg/t :flash/creating-train {:name (str/trim args)}))))
+
+(defn ^{:stratum 0} cmd-merge-next [model _args]
+  (let [train-id (:active-train-id model)]
+    (if (nil? train-id)
+      (assoc model :flash-message (msg/t :flash/no-active-train))
+      (assoc model
+             :side-effect (effect/merge-next train-id)
+             :flash-message (msg/t :flash/merging-next)))))
+
+(defn ^{:stratum 0} cmd-train [model _args]
+  (let [train-id (:active-train-id model)]
+    (if (nil? train-id)
+      (assoc model :flash-message (msg/t :flash/no-active-train-hint))
+      (assoc model
+             :view :train-view
+             :selected-idx 0 :scroll-offset 0
+             :selected-ids #{} :visual-anchor nil))))
+
+;; Sort command
+(def ^{:stratum 0} sort-fields
+  {"name" :name "date" :started-at "status" :status "progress" :progress})
+
+;; Batch action handlers (destructive actions prompt for confirmation)
+(defn ^{:stratum 0} request-confirmation
+  "Set confirm state on model for destructive actions."
+  [model action label]
+  (let [ids (sel/effective-ids model)]
+    (if (seq ids)
+      (assoc model :confirm {:action action :label label :ids ids})
+      (assoc model :flash-message (msg/t :flash/nothing-to {:action (name action)})))))
+
+;; Workflow control commands (filesystem-backed pause/resume/cancel)
+(defn ^{:stratum 0} selected-workflow-id
+  "Return the single workflow ID from the current selection, or nil if
+   nothing is selected or the view doesn't contain workflows."
+  [model]
+  (let [ids (sel/effective-ids model)]
+    (when (= 1 (count ids))
+      (first ids))))
+
+(defn ^{:stratum 0} cmd-rerun [model _args]
+  (let [ids (sel/effective-ids model)]
+    (if (seq ids)
+      (-> model
+          (update :workflows
+                  (fn [wfs]
+                    (mapv (fn [wf]
+                            (if (and (contains? ids (:id wf))
+                                     (#{:failed :cancelled} (:status wf)))
+                              (assoc wf :status :pending :progress 0)
+                              wf))
+                          wfs)))
+          (assoc :flash-message (msg/t :flash/rerunning {:count (count ids)}))
+          sel/clear-selection)
+      (assoc model :flash-message (msg/t :flash/nothing-to-rerun)))))
+
+;; Confirmed action execution
+(defn ^{:stratum 0} set-status-where
+  "Map over workflows, setting :status to `new-status` where the workflow id
+   is in `ids` and `pred?` (if supplied) is truthy. Default pred: always true."
+  ([wfs ids new-status]
+   (set-status-where wfs ids new-status (constantly true)))
+  ([wfs ids new-status pred?]
+   (mapv (fn [wf]
+           (if (and (contains? ids (:id wf)) (pred? wf))
+             (assoc wf :status new-status)
+             wf))
+         wfs)))
+
+(defn ^{:stratum 0} confirm-delete
+  [model ids]
+  (-> model
+      (update :workflows (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
+      (assoc :flash-message (msg/t :flash/deleted-items {:count (count ids)})
+             :selected-idx 0)
+      sel/clear-selection))
+
+;; Completion data helpers
+(defn ^{:stratum 0} safe-configured-repos
+  []
+  (try
+    (pr-sync/get-configured-repos)
+    (catch Exception _ [])))
+
+(defn ^{:stratum 0} maybe-browse-side-effect
+  [model cmd-name]
+  (when (and (= cmd-name "add-repo")
+             (empty? (:browse-repos model))
+             (not (:browse-repos-loading? model)))
+    (effect/browse-repos {:provider :all})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} cmd-log [model args]
+  (let [level-str (some-> args str/trim str/lower-case)]
+    (if (log-levels level-str)
+      (do (engine/set-log-level! (keyword level-str))
+          (assoc model :flash-message (msg/t :cmd/log-level {:level level-str})))
+      (assoc model :flash-message
+             (msg/t :cmd/log-levels {:levels (str/join ", " (sort log-levels))})))))
+
+(defn ^{:stratum 1} cmd-add-repo [model args]
   (if (str/blank? args)
     (assoc model :flash-message (msg/t :cmd/add-repo-usage))
     (let [result (pr-sync/add-repo! (str/trim args))]
@@ -116,7 +244,7 @@
                      (msg/t :flash/repo-already-in-fleet {:repo (:repo result)}))))
         (assoc model :flash-message (msg/t :flash/error {:error (:error result)}))))))
 
-(defn cmd-remove-repo [model args]
+(defn ^{:stratum 1} cmd-remove-repo [model args]
   (if (str/blank? args)
     (assoc model :flash-message (msg/t :cmd/remove-repo-usage))
     (let [result (pr-sync/remove-repo! (str/trim args))]
@@ -130,16 +258,7 @@
                      (msg/t :flash/repo-not-in-fleet {:repo (:repo result)}))))
         (assoc model :flash-message (msg/t :flash/error {:error (:error result)}))))))
 
-(defn cmd-sync [model _args]
-  (let [state (get model :pr-filter-state :open)]
-    (assoc model
-           :side-effect (effect/sync-prs state)
-           :flash-message (msg/t :flash/syncing-prs {:state (name state)}))))
-
-(def show-states
-  #{"open" "merged" "closed" "all"})
-
-(defn cmd-show [model args]
+(defn ^{:stratum 1} cmd-show [model args]
   (let [state-str (some-> args str/trim str/lower-case)
         state (if (show-states state-str) (keyword state-str) :open)]
     (assoc model
@@ -147,33 +266,7 @@
            :side-effect (effect/sync-prs state)
            :flash-message (msg/t :flash/loading-prs {:state (name state)}))))
 
-(defn cmd-repos [model _args]
-  (let [repos (or (:fleet-repos model) (pr-sync/get-configured-repos))]
-    (if (seq repos)
-      (assoc model :flash-message
-             (msg/t :cmd/fleet-repos {:count (count repos)
-                                      :repos (str/join ", " repos)}))
-      (assoc model :flash-message (msg/t :cmd/no-repos-configured)))))
-
-(defn cmd-discover [model args]
-  (let [owner (when-not (str/blank? args) (str/trim args))]
-    (assoc model
-           :side-effect (effect/discover-repos owner)
-           :flash-message (if owner
-                            (msg/t :flash/discovering-repos-from {:owner owner})
-                            (msg/t :flash/discovering-repos)))))
-
-;------------------------------------------------------------------------------ Layer 1c
-;; PR selection helper
-
-(defn selected-prs
-  "Return pr-items whose [repo number] pair is in `ids`."
-  [model ids]
-  (->> (:pr-items model [])
-       (filter #(contains? ids [(:pr/repo %) (:pr/number %)]))
-       vec))
-
-(defn batch-pr-action
+(defn ^{:stratum 1} batch-pr-action
   "Select PRs by ids, apply effect-fn to them, flash a message, clear selection."
   [model ids verb effect-fn]
   (let [prs (selected-prs model ids)]
@@ -182,16 +275,7 @@
                :flash-message (msg/t :flash/batch-pr-action {:verb verb :count (count prs)}))
         sel/clear-selection)))
 
-;; Train commands
-
-(defn cmd-create-train [model args]
-  (if (str/blank? args)
-    (assoc model :flash-message (msg/t :cmd/create-train-usage))
-    (assoc model
-           :side-effect (effect/create-train (str/trim args))
-           :flash-message (msg/t :flash/creating-train {:name (str/trim args)}))))
-
-(defn cmd-add-to-train [model _args]
+(defn ^{:stratum 1} cmd-add-to-train [model _args]
   (let [ids (sel/effective-ids model)
         train-id (:active-train-id model)]
     (cond
@@ -207,30 +291,7 @@
                :side-effect (effect/add-to-train train-id prs)
                :flash-message (msg/t :flash/adding-to-train {:count (count prs)}))))))
 
-(defn cmd-merge-next [model _args]
-  (let [train-id (:active-train-id model)]
-    (if (nil? train-id)
-      (assoc model :flash-message (msg/t :flash/no-active-train))
-      (assoc model
-             :side-effect (effect/merge-next train-id)
-             :flash-message (msg/t :flash/merging-next)))))
-
-(defn cmd-train [model _args]
-  (let [train-id (:active-train-id model)]
-    (if (nil? train-id)
-      (assoc model :flash-message (msg/t :flash/no-active-train-hint))
-      (assoc model
-             :view :train-view
-             :selected-idx 0 :scroll-offset 0
-             :selected-ids #{} :visual-anchor nil))))
-
-;------------------------------------------------------------------------------ Layer 1d
-;; Sort command
-
-(def sort-fields
-  {"name" :name "date" :started-at "status" :status "progress" :progress})
-
-(defn cmd-sort [model args]
+(defn ^{:stratum 1} cmd-sort [model args]
   (let [field-str (some-> args str/trim str/lower-case)
         field-kw (get sort-fields field-str)]
     (if field-kw
@@ -248,18 +309,7 @@
       (assoc model :flash-message
              (msg/t :cmd/sort-by {:fields (str/join ", " (keys sort-fields))})))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Batch action handlers (destructive actions prompt for confirmation)
-
-(defn request-confirmation
-  "Set confirm state on model for destructive actions."
-  [model action label]
-  (let [ids (sel/effective-ids model)]
-    (if (seq ids)
-      (assoc model :confirm {:action action :label label :ids ids})
-      (assoc model :flash-message (msg/t :flash/nothing-to {:action (name action)})))))
-
-(defn cmd-archive [model args]
+(defn ^{:stratum 1} cmd-archive [model args]
   (if (= "all-done" (some-> args str/trim))
     ;; :archive all-done — archive all completed/failed workflows
     (let [done-ids (->> (:workflows model)
@@ -271,69 +321,27 @@
         (assoc model :flash-message (msg/t :flash/no-completed-workflows))))
     (request-confirmation model :archive (msg/t :confirm/archive))))
 
-(defn cmd-delete [model _args]
+(defn ^{:stratum 1} cmd-delete [model _args]
   (request-confirmation model :delete (msg/t :confirm/delete)))
 
-(defn cmd-cancel [model _args]
+(defn ^{:stratum 1} cmd-cancel [model _args]
   (request-confirmation model :cancel (msg/t :confirm/cancel)))
 
-;------------------------------------------------------------------------------ Layer 2b
-;; Workflow control commands (filesystem-backed pause/resume/cancel)
-
-(defn selected-workflow-id
-  "Return the single workflow ID from the current selection, or nil if
-   nothing is selected or the view doesn't contain workflows."
-  [model]
-  (let [ids (sel/effective-ids model)]
-    (when (= 1 (count ids))
-      (first ids))))
-
-(defn cmd-pause [model _args]
+(defn ^{:stratum 1} cmd-pause [model _args]
   (if-let [wf-id (selected-workflow-id model)]
     (assoc model
            :side-effect (effect/control-action :pause wf-id)
            :flash-message (msg/t :flash/pausing-workflow))
     (assoc model :flash-message (msg/t :flash/select-one-to-pause))))
 
-(defn cmd-resume [model _args]
+(defn ^{:stratum 1} cmd-resume [model _args]
   (if-let [wf-id (selected-workflow-id model)]
     (assoc model
            :side-effect (effect/control-action :resume wf-id)
            :flash-message (msg/t :flash/resuming-workflow))
     (assoc model :flash-message (msg/t :flash/select-one-to-resume))))
 
-(defn cmd-rerun [model _args]
-  (let [ids (sel/effective-ids model)]
-    (if (seq ids)
-      (-> model
-          (update :workflows
-                  (fn [wfs]
-                    (mapv (fn [wf]
-                            (if (and (contains? ids (:id wf))
-                                     (#{:failed :cancelled} (:status wf)))
-                              (assoc wf :status :pending :progress 0)
-                              wf))
-                          wfs)))
-          (assoc :flash-message (msg/t :flash/rerunning {:count (count ids)}))
-          sel/clear-selection)
-      (assoc model :flash-message (msg/t :flash/nothing-to-rerun)))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Confirmed action execution
-
-(defn set-status-where
-  "Map over workflows, setting :status to `new-status` where the workflow id
-   is in `ids` and `pred?` (if supplied) is truthy. Default pred: always true."
-  ([wfs ids new-status]
-   (set-status-where wfs ids new-status (constantly true)))
-  ([wfs ids new-status pred?]
-   (mapv (fn [wf]
-           (if (and (contains? ids (:id wf)) (pred? wf))
-             (assoc wf :status new-status)
-             wf))
-         wfs)))
-
-(defn confirm-set-status
+(defn ^{:stratum 1} confirm-set-status
   "Confirmed action helper: update matching workflows to `new-status`,
    flash `label`, and clear selection. Optionally accepts a `pred?`
    filter (default: all matched ids)."
@@ -345,15 +353,7 @@
        (assoc :flash-message (msg/t :flash/status-updated {:label label :count (count ids)}))
        sel/clear-selection)))
 
-(defn confirm-delete
-  [model ids]
-  (-> model
-      (update :workflows (fn [wfs] (vec (remove #(contains? ids (:id %)) wfs))))
-      (assoc :flash-message (msg/t :flash/deleted-items {:count (count ids)})
-             :selected-idx 0)
-      sel/clear-selection))
-
-(defn confirm-remove-repos
+(defn ^{:stratum 1} confirm-remove-repos
   [model ids]
   (let [targets (->> ids (filter string?) distinct vec)
         result (reduce
@@ -392,7 +392,23 @@
                              {:removed removed :failed failures})))
       (pos? removed) (assoc :side-effect (effect/sync-prs)))))
 
-(defn execute-confirmed-action
+(defn ^{:stratum 1} add-repo-completions
+  [model]
+  (let [local-repos (safe-configured-repos)
+        remote-repos (get model :browse-repos [])]
+    (->> (concat ["browse"] local-repos remote-repos)
+         (remove str/blank?)
+         distinct
+         sort
+         vec)))
+
+(defn ^{:stratum 1} remove-repo-completions
+  [_]
+  (safe-configured-repos))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} execute-confirmed-action
   "Execute the action stored in :confirm after user presses 'y'.
    Pure: (model) -> model'."
   [model]
@@ -417,40 +433,8 @@
       ;; Unknown action -- no-op
       model)))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Completion data helpers
-
-(defn safe-configured-repos
-  []
-  (try
-    (pr-sync/get-configured-repos)
-    (catch Exception _ [])))
-
-(defn add-repo-completions
-  [model]
-  (let [local-repos (safe-configured-repos)
-        remote-repos (get model :browse-repos [])]
-    (->> (concat ["browse"] local-repos remote-repos)
-         (remove str/blank?)
-         distinct
-         sort
-         vec)))
-
-(defn remove-repo-completions
-  [_]
-  (safe-configured-repos))
-
-(defn maybe-browse-side-effect
-  [model cmd-name]
-  (when (and (= cmd-name "add-repo")
-             (empty? (:browse-repos model))
-             (not (:browse-repos-loading? model)))
-    (effect/browse-repos {:provider :all})))
-
-;------------------------------------------------------------------------------ Layer 4
 ;; Command table and dispatch
-
-(def commands
+(def ^{:stratum 2} commands
   {"q"           {:handler cmd-quit        :help "Quit the TUI"}
    "quit"        {:handler cmd-quit        :help "Quit the TUI"}
    "view"        {:handler cmd-view        :help "Switch to view (e.g. :view evidence)"
@@ -499,7 +483,9 @@
                                    (request-confirmation m :decompose (msg/t :confirm/decompose)))))
                     :help "Decompose a large PR into sub-PRs"}})
 
-(defn execute-command
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} execute-command
   "Execute a command string. Returns updated model.
    Pure: (model, cmd-str) -> model'."
   [model cmd-str]
@@ -508,10 +494,8 @@
       (handler model args)
       (assoc model :flash-message (msg/t :cmd/unknown-command {:command cmd-name})))))
 
-;------------------------------------------------------------------------------ Layer 5
 ;; Tab-completion support
-
-(defn complete-command-name
+(defn ^{:stratum 3} complete-command-name
   "Return matching command names for a partial input.
    Excludes aliases (e.g. 'q' when 'quit' exists)."
   [partial]
@@ -521,7 +505,7 @@
          sort
          vec)))
 
-(defn compute-completions
+(defn ^{:stratum 3} compute-completions
   "Given a command buffer string, return completions for the current argument.
    Returns {:cmd cmd-name :completions [str ...] :partial str} or nil."
   [model cmd-buf]

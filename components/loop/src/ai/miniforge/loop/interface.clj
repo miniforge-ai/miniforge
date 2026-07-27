@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.interface
   "Public API for the loop component.
    Provides inner loop (generate -> validate -> repair) and outer loop (SDLC phases)
@@ -31,91 +30,99 @@
    [ai.miniforge.loop.interface.protocols.repair-strategy :as repair-proto]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema re-exports
 
-(def InnerLoopState
+;; Schema re-exports
+(def ^{:stratum 0} InnerLoopState
   "Malli schema (a `[:map ...]` vector) for the inner loop state machine,
    tracking the generate -> validate -> repair cycle. Use with malli.core
    (m/validate, m/explain)."
   schema/InnerLoopState)
-(def InnerLoopResult
+
+(def ^{:stratum 0} InnerLoopResult
   "Malli schema (a `[:map ...]` vector) for the result of running an inner
    loop to completion: :success, optional :artifact, :iterations, :metrics,
    :termination. Use with malli.core."
   schema/InnerLoopResult)
-(def GateResult
+
+(def ^{:stratum 0} GateResult
   "Malli schema (a `[:map ...]` vector) for the result of running a
    validation gate: :gate/id, :gate/type, :gate/passed?, optional
    :gate/errors, :gate/warnings, :gate/duration-ms. Use with malli.core."
   schema/GateResult)
-(def GateConfig
+
+(def ^{:stratum 0} GateConfig
   "Malli schema (a `[:map ...]` vector) for gate configuration: :gate/id,
    :gate/type, optional :gate/enabled?, :gate/config, :gate/applies-to.
    Use with malli.core."
   schema/GateConfig)
-(def RepairAttempt
+
+(def ^{:stratum 0} RepairAttempt
   "Malli schema (a `[:map ...]` vector) for a single repair attempt:
    :repair/id, :repair/strategy, :repair/iteration, :repair/errors,
    :repair/success?, optional duration and tokens. Use with malli.core."
   schema/RepairAttempt)
-(def LoopMetrics
+
+(def ^{:stratum 0} LoopMetrics
   "Malli schema (a `[:map ...]` vector) for loop execution metrics: optional
    :tokens, :cost-usd, :duration-ms, :generate-calls, :repair-calls.
    Use with malli.core."
   schema/LoopMetrics)
-(def LoopBudget
+
+(def ^{:stratum 0} LoopBudget
   "Malli schema (a `[:map ...]` vector) for loop execution budget
    constraints: optional :max-tokens, :max-cost-usd, :max-duration-ms,
    :max-iterations. Use with malli.core."
   schema/LoopBudget)
-(def OuterLoopState
+
+(def ^{:stratum 0} OuterLoopState
   "Malli schema (a `[:map ...]` vector) for the outer loop state machine,
    tracking the SDLC phases. Use with malli.core."
   schema/OuterLoopState)
 
 ;; Enum values
-(def inner-loop-states
+(def ^{:stratum 0} inner-loop-states
   "Vector of the possible inner-loop state-machine state keywords, in order:
    [:pending :generating :validating :repairing :complete :failed :escalated]."
   schema/inner-loop-states)
-(def outer-loop-phases
+
+(def ^{:stratum 0} outer-loop-phases
   "Vector of the outer-loop SDLC phase keywords, in order:
    [:spec :plan :design :implement :verify :review :release :observe]."
   schema/outer-loop-phases)
-(def gate-types
+
+(def ^{:stratum 0} gate-types
   "Vector of the supported validation-gate type keywords:
    [:syntax :lint :test :policy :custom]."
   schema/gate-types)
-(def repair-strategies
+
+(def ^{:stratum 0} repair-strategies
   "Vector of the available repair-strategy keywords:
    [:llm-fix :retry :escalate]."
   schema/repair-strategies)
-(def termination-reasons
+
+(def ^{:stratum 0} termination-reasons
   "Vector of the loop-termination reason keywords:
    [:gates-passed :max-iterations :budget-exhausted :timeout
     :unrecoverable-error :manual-stop]."
   schema/termination-reasons)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Protocol re-exports
-
-(def Gate
+(def ^{:stratum 0} Gate
   "Protocol for validation gates. Implement to provide a custom gate;
    methods: (check this artifact context), (gate-id this), (gate-type this),
    (repair this artifact violations context). check returns a gate-result map
    with :gate/passed? and :gate/errors."
   gate-proto/Gate)
-(def RepairStrategy
+
+(def ^{:stratum 0} RepairStrategy
   "Protocol for artifact repair strategies. Implement to provide a custom
    strategy; methods: (can-repair? this errors context) -> boolean, and
    (repair this artifact errors context) -> map with :success?, :artifact or
    :errors, :strategy, optional :tokens-used/:duration-ms."
   repair-proto/RepairStrategy)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Inner Loop API
-
-(defn create-inner-loop
+(defn ^{:stratum 0} create-inner-loop
   "Create a new inner loop state for a task.
 
    Arguments:
@@ -133,7 +140,7 @@
   ([task] (inner/create-inner-loop task {}))
   ([task context] (inner/create-inner-loop task context)))
 
-(defn run-inner-loop
+(defn ^{:stratum 0} run-inner-loop
   "Run the inner loop to completion.
 
    Arguments:
@@ -160,7 +167,7 @@
   [loop-state generate-fn gates strategies context]
   (inner/run-inner-loop loop-state generate-fn gates strategies context))
 
-(defn run-simple
+(defn ^{:stratum 0} run-simple
   "Simplified inner loop runner with default gates and strategies.
 
    Arguments:
@@ -183,8 +190,7 @@
   (inner/run-simple task generate-fn context))
 
 ;; Step-by-step control
-
-(defn generate-step
+(defn ^{:stratum 0} generate-step
   "Execute the generate step.
    Used for fine-grained control of the loop.
 
@@ -197,7 +203,7 @@
   [loop-state generate-fn context]
   (inner/generate-step loop-state generate-fn context))
 
-(defn validate-step
+(defn ^{:stratum 0} validate-step
   "Execute the validate step.
    Used for fine-grained control of the loop.
 
@@ -210,7 +216,7 @@
   [loop-state gates context]
   (inner/validate-step loop-state gates context))
 
-(defn repair-step
+(defn ^{:stratum 0} repair-step
   "Execute the repair step.
    Used for fine-grained control of the loop.
 
@@ -224,58 +230,53 @@
   (inner/repair-step loop-state strategies context))
 
 ;; Termination checks
-
-(defn should-terminate?
+(defn ^{:stratum 0} should-terminate?
   "Check if the loop should terminate.
    Returns {:terminate? bool :reason keyword} or nil."
   [loop-state]
   (inner/should-terminate? loop-state))
 
-(defn terminal-state?
+(defn ^{:stratum 0} terminal-state?
   "Check if a state is terminal (complete, failed, or escalated)."
   [state]
   (inner/terminal-state? state))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Escalation API
-
-(defn format-error-context
+(defn ^{:stratum 0} format-error-context
   "Format error context for user display."
   [errors iteration artifact]
   (escalation/format-error-context errors iteration artifact))
 
-(defn format-escalation-prompt
+(defn ^{:stratum 0} format-escalation-prompt
   "Format the escalation prompt for user."
   [loop-state]
   (escalation/format-escalation-prompt loop-state))
 
-(defn prompt-user
+(defn ^{:stratum 0} prompt-user
   "Prompt user for input via stdin."
   [prompt-text]
   (escalation/prompt-user prompt-text))
 
-(defn escalate-to-user
+(defn ^{:stratum 0} escalate-to-user
   "Escalate to user for guidance."
   [loop-state & {:keys [prompt-fn]}]
   (escalation/escalate-to-user loop-state :prompt-fn prompt-fn))
 
-(defn handle-escalation
+(defn ^{:stratum 0} handle-escalation
   "Handle escalation in inner loop.
    Context accepts :escalation-fn and optional :prompt-fn."
   [loop-state context]
   (escalation/handle-escalation loop-state context))
 
-(defn create-escalation-checkpoint
+(defn ^{:stratum 0} create-escalation-checkpoint
   "Create a canonical checkpoint for an inner-loop escalation."
   ([loop-state]
    (escalation/create-escalation-checkpoint loop-state))
   ([loop-state opts]
    (escalation/create-escalation-checkpoint loop-state opts)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Gates API
-
-(defn syntax-gate
+(defn ^{:stratum 0} syntax-gate
   "Create a syntax validation gate.
    Checks that code artifacts can be parsed without errors.
 
@@ -286,7 +287,7 @@
   ([id] (gates/syntax-gate id))
   ([id config] (gates/syntax-gate id config)))
 
-(defn lint-gate
+(defn ^{:stratum 0} lint-gate
   "Create a lint validation gate.
    Options:
    - :fail-on-warning? - If true, warnings cause failure (default false)
@@ -298,7 +299,7 @@
   ([id] (gates/lint-gate id))
   ([id config] (gates/lint-gate id config)))
 
-(defn test-gate
+(defn ^{:stratum 0} test-gate
   "Create a test validation gate.
    Options:
    - :test-fn - Function (fn [artifact context] -> {:passed? bool :errors [...]})"
@@ -306,7 +307,7 @@
   ([id] (gates/test-gate id))
   ([id config] (gates/test-gate id config)))
 
-(defn policy-gate
+(defn ^{:stratum 0} policy-gate
   "Create a policy validation gate.
    Options:
    - :policies - Vector of policy keywords to check
@@ -318,7 +319,7 @@
   ([id] (gates/policy-gate id))
   ([id config] (gates/policy-gate id config)))
 
-(defn custom-gate
+(defn ^{:stratum 0} custom-gate
   "Create a custom validation gate.
    Arguments:
    - id - Unique gate identifier
@@ -326,7 +327,7 @@
   ([id check-fn] (gates/custom-gate id check-fn))
   ([id type-kw check-fn] (gates/custom-gate id type-kw check-fn)))
 
-(defn default-gates
+(defn ^{:stratum 0} default-gates
   "Create a default set of gates for code artifacts.
    Options:
    - :lint-fail-on-warning? - Lint gate fails on warnings (default false)
@@ -334,24 +335,24 @@
   [& opts]
   (apply gates/default-gates opts))
 
-(defn minimal-gates
+(defn ^{:stratum 0} minimal-gates
   "Create a minimal set of gates (syntax only)."
   []
   (gates/minimal-gates))
 
-(defn strict-gates
+(defn ^{:stratum 0} strict-gates
   "Create a strict set of gates for production code.
    Includes all policies and fails on warnings."
   []
   (gates/strict-gates))
 
-(defn check-gate
+(defn ^{:stratum 0} check-gate
   "Run a single gate check on an artifact.
    Returns gate result map with :gate/id, :gate/type, :gate/passed?, etc."
   [gate artifact context]
   (gates/check gate artifact context))
 
-(defn run-gates
+(defn ^{:stratum 0} run-gates
   "Run multiple gates against an artifact.
    Options:
    - :fail-fast? - Stop on first failure (default false)
@@ -365,52 +366,49 @@
   (apply gates/run-gates gates artifact context opts))
 
 ;; Gate result helpers
-
-(defn pass-result
+(defn ^{:stratum 0} pass-result
   "Create a passing gate result."
   [gate-id gate-type & opts]
   (apply gates/pass-result gate-id gate-type opts))
 
-(defn fail-result
+(defn ^{:stratum 0} fail-result
   "Create a failing gate result."
   [gate-id gate-type errors & opts]
   (apply gates/fail-result gate-id gate-type errors opts))
 
-(defn make-error
+(defn ^{:stratum 0} make-error
   "Create a gate error map."
   [code message & opts]
   (apply gates/make-error code message opts))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Repair API
-
-(defn llm-fix-strategy
+(defn ^{:stratum 0} llm-fix-strategy
   "Create an LLM-based repair strategy.
    Options:
    - :max-tokens - Maximum tokens for repair attempt (default 4000)"
   ([] (repair/llm-fix-strategy))
   ([config] (repair/llm-fix-strategy config)))
 
-(defn retry-strategy
+(defn ^{:stratum 0} retry-strategy
   "Create a simple retry strategy.
    Options:
    - :delay-ms - Delay before retry in milliseconds (default 1000)"
   ([] (repair/retry-strategy))
   ([config] (repair/retry-strategy config)))
 
-(defn escalate-strategy
+(defn ^{:stratum 0} escalate-strategy
   "Create an escalation strategy.
    This strategy always signals escalation to the outer loop."
   ([] (repair/escalate-strategy))
   ([config] (repair/escalate-strategy config)))
 
-(defn default-strategies
+(defn ^{:stratum 0} default-strategies
   "Create a default ordered list of repair strategies.
    Order: LLM fix -> Retry -> Escalate"
   []
   (repair/default-strategies))
 
-(defn attempt-repair
+(defn ^{:stratum 0} attempt-repair
   "Attempt to repair an artifact using available strategies.
    Options:
    - :max-attempts - Maximum repair attempts (default 3)
@@ -424,21 +422,18 @@
   (apply repair/attempt-repair strategies artifact errors context opts))
 
 ;; Repair result helpers
-
-(defn repair-success
+(defn ^{:stratum 0} repair-success
   "Create a successful repair result."
   [strategy artifact & opts]
   (apply repair/repair-success strategy artifact opts))
 
-(defn repair-failure
+(defn ^{:stratum 0} repair-failure
   "Create a failed repair result."
   [strategy errors & opts]
   (apply repair/repair-failure strategy errors opts))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Outer Loop API (P1 - stubs)
-
-(defn create-outer-loop
+(defn ^{:stratum 0} create-outer-loop
   "Create a new outer loop state.
    NOTE: Outer loop is a P1 stub implementation.
 
@@ -448,42 +443,42 @@
   ([spec] (outer/create-outer-loop spec {}))
   ([spec context] (outer/create-outer-loop spec context)))
 
-(defn advance-phase
+(defn ^{:stratum 0} advance-phase
   "Advance to the next phase.
    NOTE: Stub implementation."
   [loop-state context]
   (outer/advance-phase loop-state context))
 
-(defn rollback-phase
+(defn ^{:stratum 0} rollback-phase
   "Rollback to a previous phase.
    NOTE: Stub implementation."
   [loop-state target-phase context]
   (outer/rollback-phase loop-state target-phase context))
 
-(defn get-current-phase
+(defn ^{:stratum 0} get-current-phase
   "Get the current phase of the outer loop."
   [loop-state]
   (outer/get-current-phase loop-state))
 
-(defn run-outer-loop
+(defn ^{:stratum 0} run-outer-loop
   "Run the outer loop through all phases.
    NOTE: Stub implementation."
   [loop-state context]
   (outer/run-outer-loop loop-state context))
 
 ;; Phase definitions
-
-(def phases
+(def ^{:stratum 0} phases
   "Vector of the ordered outer-loop phase keywords:
    [:spec :plan :design :implement :verify :review :release :observe]."
   outer/phases)
-(def phase-definitions
+
+(def ^{:stratum 0} phase-definitions
   "Map keyed by phase keyword to its metadata map (:phase/id,
    :phase/description, :phase/agent, :phase/artifacts, :phase/requires).
    Look up a single phase with get-phase-definition."
   outer/phase-definitions)
 
-(defn get-phase-definition
+(defn ^{:stratum 0} get-phase-definition
   "Get the definition for a phase."
   [phase]
   (outer/get-phase-definition phase))

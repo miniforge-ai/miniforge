@@ -15,28 +15,26 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.protocol-test
   (:require [clojure.test :refer [deftest is testing]]
             [ai.miniforge.operator.protocol :as sut]))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Closed-set enums declared by the protocol namespace
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest signal-types-stable-test
+;; Closed-set enums declared by the protocol namespace
+(deftest ^{:stratum 0} signal-types-stable-test
   (testing "signal-types declares the documented closed set of observation signals"
     (is (= #{:workflow-complete :workflow-failed :phase-rollback
              :repeated-failure :repair-pattern :human-override
              :budget-exceeded :quality-regression}
            sut/signal-types))))
 
-(deftest improvement-types-stable-test
+(deftest ^{:stratum 0} improvement-types-stable-test
   (testing "improvement-types declares the documented six improvement actions"
     (is (= #{:prompt-change :gate-adjustment :policy-update
              :rule-addition :budget-adjustment :workflow-modification}
            sut/improvement-types))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Protocol vars are present.
 ;;
 ;; defprotocol creates a Clojure *var* (the value here) bound to a map that
@@ -44,8 +42,7 @@
 ;; class side-effect, but the var is the canonical entry point for callers
 ;; using satisfies? / extend-protocol. We assert the var is defined and that
 ;; its protocol map declares the documented methods.
-
-(deftest protocols-defined-test
+(deftest ^{:stratum 0} protocols-defined-test
   (testing "All four documented protocols are defined as protocol vars
             and declare the documented methods on each."
     (is (map? sut/Operator))

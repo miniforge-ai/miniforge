@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-recommendation-config-test
   (:require
    [clojure.edn :as edn]
@@ -23,7 +22,9 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.workflow-recommendation-config :as cfg]))
 
-(defn- read-resource-section
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} read-resource-section
   [resource-path]
   (-> resource-path
       io/resource
@@ -31,7 +32,9 @@
       edn/read-string
       :workflow-recommendation/prompt))
 
-(deftest recommendation-prompt-config-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} recommendation-prompt-config-test
   (testing "software-factory prompt config loads from resources"
     (let [config (cfg/recommendation-prompt-config)
           prompt-resource (read-resource-section "config/workflow/recommendation-prompt.edn")]
@@ -42,7 +45,7 @@
       (is (= (get-in prompt-resource [:summary-labels :has-testing])
              (get-in config [:summary-labels :has-testing]))))))
 
-(deftest default-prompt-config-loads-from-resource-test
+(deftest ^{:stratum 1} default-prompt-config-loads-from-resource-test
   (testing "fallback recommendation prompt config is resource-backed"
     (let [default-config (cfg/default-prompt-config)
           default-resource (read-resource-section "config/workflow/recommendation-prompt-default.edn")]

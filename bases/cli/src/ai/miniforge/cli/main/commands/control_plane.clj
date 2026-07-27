@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.control-plane
   "Control Plane CLI commands.
 
@@ -34,18 +33,16 @@
    [ai.miniforge.cli.main.display :as display]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Color mappings (loaded from resource catalog)
 
-(defn- status->color [status]
+;; Color mappings (loaded from resource catalog)
+(defn- ^{:stratum 0} status->color [status]
   (get (messages/t :cp/status-colors) status :white))
 
-(defn- priority->color [priority]
+(defn- ^{:stratum 0} priority->color [priority]
   (get (messages/t :cp/priority-colors) priority :white))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Dashboard discovery
-
-(defn- discover-dashboard-url
+(defn- ^{:stratum 0} discover-dashboard-url
   "Read the dashboard port from discovery file.
    Returns base URL string or nil."
   []
@@ -57,10 +54,8 @@
           (str "http://localhost:" port))
         (catch Exception _ nil)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; HTTP client helpers
-
-(defn- http-get
+(defn- ^{:stratum 0} http-get
   "Simple HTTP GET. Returns parsed JSON body or nil."
   [url]
   (try
@@ -76,7 +71,7 @@
       (display/print-error (ex-message e))
       nil)))
 
-(defn- http-post
+(defn- ^{:stratum 0} http-post
   "Simple HTTP POST with JSON body. Returns parsed JSON body or nil."
   [url body]
   (try
@@ -97,7 +92,9 @@
       (display/print-error (ex-message e))
       nil)))
 
-(defn- with-dashboard
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} with-dashboard
   "Execute f with discovered dashboard base URL. Prints error if not found."
   [f]
   (if-let [base-url (discover-dashboard-url)]
@@ -108,9 +105,9 @@
       (println (messages/t :cp/dashboard-try-again)))))
 
 ;------------------------------------------------------------------------------ Layer 2
-;; CLI commands
 
-(defn status-cmd
+;; CLI commands
+(defn ^{:stratum 2} status-cmd
   "Show control plane agent summary."
   [_opts]
   (with-dashboard
@@ -146,7 +143,7 @@
                                         :vendor (get a :agent/vendor fallback)}))))))
             (println))))))
 
-(defn decisions-cmd
+(defn ^{:stratum 2} decisions-cmd
   "Show pending decisions."
   [_opts]
   (with-dashboard
@@ -179,7 +176,7 @@
                     (println))))))
           (println))))))
 
-(defn resolve-cmd
+(defn ^{:stratum 2} resolve-cmd
   "Resolve a pending decision."
   [opts]
   (let [decision-id (:decision-id opts)
@@ -200,7 +197,7 @@
                                       :foreground :green))
               (println (display/style (messages/t :cp/resolve-failed) :foreground :red)))))))))
 
-(defn terminate-cmd
+(defn ^{:stratum 2} terminate-cmd
   "Terminate an agent."
   [opts]
   (let [agent-id (:agent-id opts)]

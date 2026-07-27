@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.test-util
   "Test utilities for tui-views tests.
 
@@ -24,14 +23,15 @@
    [ai.miniforge.tui-views.model :as model]
    [ai.miniforge.tui-views.update :as update]))
 
-;; Setup helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn fresh-model
+;; Setup helpers
+(defn ^{:stratum 0} fresh-model
   "Create a fresh model for testing."
   []
   (model/init-model))
 
-(defn with-workflows
+(defn ^{:stratum 0} with-workflows
   "Add workflows to model for testing.
    workflows: vector of {:workflow-id :name} maps"
   [model workflows]
@@ -40,62 +40,60 @@
           model
           workflows))
 
-(defn apply-updates
+(defn ^{:stratum 0} apply-updates
   "Apply multiple update messages to a model.
    updates: vector of [msg-type payload] vectors"
   [model updates]
   (reduce update/update-model model updates))
 
 ;; Assertion helpers
-
-(defn view-is?
+(defn ^{:stratum 0} view-is?
   "Check if model's current view matches expected."
   [model expected-view]
   (= expected-view (:view model)))
 
-(defn selected-idx-is?
+(defn ^{:stratum 0} selected-idx-is?
   "Check if model's selected index matches expected."
   [model expected-idx]
   (= expected-idx (:selected-idx model)))
 
-(defn workflow-count-is?
+(defn ^{:stratum 0} workflow-count-is?
   "Check if model has expected number of workflows."
   [model expected-count]
   (= expected-count (count (:workflows model))))
 
-(defn workflow-has-status?
+(defn ^{:stratum 0} workflow-has-status?
   "Check if workflow at index has expected status."
   [model idx expected-status]
   (= expected-status (get-in model [:workflows idx :status])))
 
-(defn workflow-has-phase?
+(defn ^{:stratum 0} workflow-has-phase?
   "Check if workflow at index has expected phase."
   [model idx expected-phase]
   (= expected-phase (get-in model [:workflows idx :phase])))
 
-(defn mode-is?
+(defn ^{:stratum 0} mode-is?
   "Check if model's mode matches expected."
   [model expected-mode]
   (= expected-mode (:mode model)))
 
 ;; Selection assertion helpers
-
-(defn selection-count-is?
+(defn ^{:stratum 0} selection-count-is?
   "Check if model has expected number of selected items."
   [model expected-count]
   (= expected-count (count (:selected-ids model))))
 
-(defn has-selection?
+(defn ^{:stratum 0} has-selection?
   "Check if model has a specific ID selected."
   [model id]
   (contains? (:selected-ids model) id))
 
-(defn visual-mode?
+(defn ^{:stratum 0} visual-mode?
   "Check if visual mode is active."
   [model]
   (some? (:visual-anchor model)))
 
-(defn confirm-active?
+(defn ^{:stratum 0} confirm-active?
   "Check if a confirmation prompt is active."
   [model]
   (some? (:confirm model)))

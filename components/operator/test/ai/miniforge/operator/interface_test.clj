@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.interface-test
   "Tests for the operator (meta-agent) component."
   (:require
@@ -24,29 +23,30 @@
    [ai.miniforge.operator.interface :as op]
    [ai.miniforge.operator.protocol :as proto]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ============================================================================
 ;; Operator creation tests
 ;; ============================================================================
-
-(deftest create-operator-test
+(deftest ^{:stratum 0} create-operator-test
   (testing "create-operator returns an operator"
     (let [operator (op/create-operator)]
       (is (some? operator))
       (is (satisfies? proto/Operator operator)))))
 
-(deftest create-pattern-detector-test
+(deftest ^{:stratum 0} create-pattern-detector-test
   (testing "create-pattern-detector returns a detector"
     (let [detector (op/create-pattern-detector)]
       (is (some? detector))
       (is (satisfies? proto/PatternDetector detector)))))
 
-(deftest create-improvement-generator-test
+(deftest ^{:stratum 0} create-improvement-generator-test
   (testing "create-improvement-generator returns a generator"
     (let [generator (op/create-improvement-generator)]
       (is (some? generator))
       (is (satisfies? proto/ImprovementGenerator generator)))))
 
-(deftest create-governance-test
+(deftest ^{:stratum 0} create-governance-test
   (testing "create-governance returns a governance manager"
     (let [governance (op/create-governance)]
       (is (some? governance))
@@ -55,8 +55,7 @@
 ;; ============================================================================
 ;; Signal observation tests
 ;; ============================================================================
-
-(deftest observe-signal-test
+(deftest ^{:stratum 0} observe-signal-test
   (testing "observe-signal records a signal"
     (let [operator (op/create-operator)
           signal {:type :workflow-failed
@@ -66,7 +65,7 @@
       (is (some? (:signal/timestamp recorded)))
       (is (= :workflow-failed (:signal/type recorded))))))
 
-(deftest get-signals-test
+(deftest ^{:stratum 0} get-signals-test
   (testing "get-signals returns recorded signals"
     (let [operator (op/create-operator)]
       ;; Record some signals
@@ -89,8 +88,7 @@
 ;; ============================================================================
 ;; Pattern detection tests
 ;; ============================================================================
-
-(deftest detect-patterns-test
+(deftest ^{:stratum 0} detect-patterns-test
   (testing "detect-patterns finds patterns"
     (let [detector (op/create-pattern-detector)
           ;; Create signals that form a pattern (3+ repeated failures)
@@ -103,7 +101,7 @@
       (is (seq patterns))
       (is (some #(= :repeated-phase-failure (:pattern/type %)) patterns)))))
 
-(deftest analyze-patterns-test
+(deftest ^{:stratum 0} analyze-patterns-test
   (testing "analyze-patterns returns patterns and recommendations"
     (let [operator (op/create-operator)]
       ;; Create failure signals to trigger pattern detection
@@ -119,8 +117,7 @@
 ;; ============================================================================
 ;; Improvement management tests
 ;; ============================================================================
-
-(deftest propose-improvement-test
+(deftest ^{:stratum 0} propose-improvement-test
   (testing "propose-improvement creates a proposal"
     (let [operator (op/create-operator)
           improvement {:type :rule-addition
@@ -131,7 +128,7 @@
       (is (uuid? (:proposal-id result)))
       (is (= :proposed (:status result))))))
 
-(deftest get-proposals-test
+(deftest ^{:stratum 0} get-proposals-test
   (testing "get-proposals returns proposals"
     (let [operator (op/create-operator)]
       (op/propose-improvement operator {:type :rule-addition :target :test :rationale "Test"})
@@ -145,7 +142,7 @@
         (let [proposals (op/get-proposals operator {:type :rule-addition})]
           (is (= 1 (count proposals))))))))
 
-(deftest apply-improvement-test
+(deftest ^{:stratum 0} apply-improvement-test
   (testing "apply-improvement updates proposal status"
     (let [operator (op/create-operator)
           {:keys [proposal-id]} (op/propose-improvement operator
@@ -156,7 +153,7 @@
       (is (:success? result))
       (is (= :applied (get-in result [:applied :improvement/status]))))))
 
-(deftest apply-improvement-idempotency-test
+(deftest ^{:stratum 0} apply-improvement-idempotency-test
   (testing "apply-improvement returns nil when proposal is not in :proposed state"
     (let [operator (op/create-operator)
           {:keys [proposal-id]} (op/propose-improvement operator
@@ -171,7 +168,7 @@
         (let [proposals (op/get-proposals operator {:status :applied})]
           (is (= 1 (count proposals))))))))
 
-(deftest apply-improvement-guards-rejected-test
+(deftest ^{:stratum 0} apply-improvement-guards-rejected-test
   (testing "apply-improvement cannot override a human rejection"
     (let [operator (op/create-operator)
           {:keys [proposal-id]} (op/propose-improvement operator
@@ -183,7 +180,7 @@
       (let [proposals (op/get-proposals operator {:status :rejected})]
         (is (= 1 (count proposals)))))))
 
-(deftest reject-improvement-test
+(deftest ^{:stratum 0} reject-improvement-test
   (testing "reject-improvement updates proposal with reason"
     (let [operator (op/create-operator)
           {:keys [proposal-id]} (op/propose-improvement operator
@@ -194,7 +191,7 @@
       (is (= :rejected (:improvement/status rejected)))
       (is (= "Not applicable" (:improvement/rejection-reason rejected))))))
 
-(deftest reject-improvement-idempotency-test
+(deftest ^{:stratum 0} reject-improvement-idempotency-test
   (testing "reject-improvement returns nil when proposal is already :rejected"
     (let [operator (op/create-operator)
           {:keys [proposal-id]} (op/propose-improvement operator
@@ -209,8 +206,7 @@
 ;; ============================================================================
 ;; Governance tests
 ;; ============================================================================
-
-(deftest governance-requires-approval-test
+(deftest ^{:stratum 0} governance-requires-approval-test
   (testing "governance correctly identifies approval requirements"
     (let [governance (op/create-governance)]
 
@@ -229,7 +225,7 @@
                            :improvement/confidence 0.5}]
           (is (true? (op/requires-approval? governance improvement))))))))
 
-(deftest get-approval-policy-test
+(deftest ^{:stratum 0} get-approval-policy-test
   (testing "approval policies are defined for improvement types"
     (let [governance (op/create-governance)]
 
@@ -243,15 +239,14 @@
 ;; ============================================================================
 ;; Type definitions tests
 ;; ============================================================================
-
-(deftest signal-types-test
+(deftest ^{:stratum 0} signal-types-test
   (testing "signal types are defined"
     (is (set? op/signal-types))
     (is (contains? op/signal-types :workflow-complete))
     (is (contains? op/signal-types :workflow-failed))
     (is (contains? op/signal-types :phase-rollback))))
 
-(deftest improvement-types-test
+(deftest ^{:stratum 0} improvement-types-test
   (testing "improvement types are defined"
     (is (set? op/improvement-types))
     (is (contains? op/improvement-types :prompt-change))
@@ -261,8 +256,7 @@
 ;; ============================================================================
 ;; Knowledge store integration tests
 ;; ============================================================================
-
-(deftest apply-improvement-writes-rule-exactly-once-test
+(deftest ^{:stratum 0} apply-improvement-writes-rule-exactly-once-test
   (testing "apply-improvement writes exactly one rule to the knowledge store"
     (let [k-store  (knowledge/create-store)
           operator (op/create-operator {:knowledge-store k-store})

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.gate-anomaly-shape-test
   "Lock the canonical anomaly shape produced by `gates/fail-result`
    after the W2 anomaly convergence flip.
@@ -35,18 +34,24 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.loop.gates :as gates]))
 
-(def ^:private sample-errors
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:private sample-errors
   [(gates/make-error :syntax-error "Unexpected EOF")
    (gates/make-error :missing-require "core required but not imported")])
 
-(defn- failing-syntax-check
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} failing-syntax-check
   "Factory: a `fail-result` for the canonical `:syntax-check`/`:syntax`
    gate with the test's `sample-errors`. Centralises the fixture so the
    `gates/fail-result` arglist is bound in exactly one place."
   []
   (gates/fail-result :syntax-check :syntax sample-errors))
 
-(deftest fail-result-emits-canonical-gate-anomaly
+;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} fail-result-emits-canonical-gate-anomaly
   (testing ":gate/anomaly satisfies the canonical anomaly contract"
     (let [anom (:gate/anomaly (failing-syntax-check))]
       (is (anomaly/anomaly? anom)
@@ -70,7 +75,7 @@
           "flat :gate/errors on the gate result is independent of the embedded anomaly")
       (is (false? (:gate/passed? result))))))
 
-(deftest fail-result-no-top-level-domain-keys-on-anomaly
+(deftest ^{:stratum 2} fail-result-no-top-level-domain-keys-on-anomaly
   (testing "domain payload does NOT leak onto the anomaly's top level"
     (let [anom (:gate/anomaly (failing-syntax-check))]
       (is (nil? (:anomaly.gate/errors anom))

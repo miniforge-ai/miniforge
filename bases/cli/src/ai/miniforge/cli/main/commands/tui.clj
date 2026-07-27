@@ -15,16 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.tui
   "TUI command — launch standalone TUI monitor."
   (:require
    [ai.miniforge.cli.main.commands.monitoring :as monitoring]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; TUI command
 
-(defn tui-cmd
+;; TUI command
+(defn ^{:stratum 0} tui-cmd
   "Launch standalone TUI that monitors workflow event files.
    Tail-follows app event files for live workflow state."
   [opts]

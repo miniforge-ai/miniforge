@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.file-subscription
   "File-based event subscription for standalone TUI mode.
 
@@ -30,14 +29,14 @@
    [ai.miniforge.tui-views.subscription :as subscription]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Directory and file helpers
 
-(defn events-dir
+;; Directory and file helpers
+(defn ^{:stratum 0} events-dir
   "Returns ~/.miniforge/events/ as a java.io.File."
   []
   (io/file (config/miniforge-home) "events"))
 
-(defn scan-event-files
+(defn ^{:stratum 0} scan-event-files
   "Find *.edn files in dir, returns sorted list of java.io.File."
   [^java.io.File dir]
   (if (and dir (.exists dir) (.isDirectory dir))
@@ -47,7 +46,7 @@
          vec)
     []))
 
-(defn read-new-lines
+(defn ^{:stratum 0} read-new-lines
   "Read lines added since last position using RandomAccessFile.
    Updates position-atom with new file length. Returns vector of line strings."
   [^java.io.File file position-atom]
@@ -66,10 +65,8 @@
     (catch Exception _
       [])))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Parse and dispatch
-
-(defn parse-and-dispatch!
+(defn ^{:stratum 0} parse-and-dispatch!
   "Parse each line as EDN, translate via subscription/translate-event,
    dispatch non-nil results to dispatch-fn."
   [lines dispatch-fn]
@@ -79,10 +76,16 @@
         (when-let [msg (subscription/translate-event event)]
           (dispatch-fn msg))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; File tracking and polling
+(defn ^{:stratum 0} stop-subscription!
+  "Stop the file-subscription polling thread."
+  [running? ^Thread thread]
+  (reset! running? false)
+  (.interrupt thread))
 
-(defn track-file!
+;------------------------------------------------------------------------------ Layer 1
+
+;; File tracking and polling
+(defn ^{:stratum 1} track-file!
   "Track a new event file: register it in tracked map and hydrate
    all existing lines through dispatch-fn."
   [tracked dispatch-fn ^java.io.File f & [{:keys [hydrate?] :or {hydrate? true}}]]
@@ -93,7 +96,7 @@
       (let [lines (read-new-lines f pos)]
         (parse-and-dispatch! lines dispatch-fn)))))
 
-(defn poll-tracked-files!
+(defn ^{:stratum 1} poll-tracked-files!
   "Read new lines from all tracked files and dispatch them."
   [tracked dispatch-fn]
   (doseq [[_path {:keys [file position]}] @tracked]
@@ -101,7 +104,9 @@
       (when (seq lines)
         (parse-and-dispatch! lines dispatch-fn)))))
 
-(defn scan-for-new-files!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} scan-for-new-files!
   "Check for new .edn files in dir and start tracking them."
   [dir tracked dispatch-fn]
   (let [current-files (scan-event-files dir)
@@ -110,7 +115,9 @@
       (when-not (tracked-paths (.getAbsolutePath f))
         (track-file! tracked dispatch-fn f {:hydrate? true})))))
 
-(defn poll-loop
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} poll-loop
   "Polling loop body for the file-subscription daemon thread.
    Polls tracked files every poll-ms, scans for new files every scan-ms.
    Catches exceptions per-iteration so a single failure doesn't kill the thread."
@@ -128,16 +135,10 @@
         (catch InterruptedException _ (reset! running? false))
         (catch Exception _)))))
 
-(defn stop-subscription!
-  "Stop the file-subscription polling thread."
-  [running? ^Thread thread]
-  (reset! running? false)
-  (.interrupt thread))
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Main subscription entry point
-
-(defn subscribe-to-files!
+(defn ^{:stratum 4} subscribe-to-files!
   "Subscribe to workflow event files via tail-following.
 
    Scans ~/.miniforge/events/ for existing .edn files, hydrates initial

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.help
   "Per-subcommand `--help` rendering for the workflow-runner-facing CLI
    subcommands (`workflow run/list/execute/status/cancel` and
@@ -39,23 +38,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def help-flag-keys
+(def ^{:stratum 0} help-flag-keys
   "Keys reserved for the help flag itself. Stripped from the usage
    table so `--help` doesn't appear inside its own description block."
   #{:help})
 
-(defn help-requested?
+(defn ^{:stratum 0} help-requested?
   "Truthy when the parsed `opts` map carries the `--help` / `-h` flag."
   [opts]
   (boolean (:help opts)))
 
-(defn- without-help-flag
-  "Drop the help flag from a babashka.cli `:spec` map so it doesn't
-   appear inside the flag table its presence triggered."
-  [spec]
-  (into {} (remove (fn [[k _]] (contains? help-flag-keys k))) spec))
-
-(defn- usage-line
+(defn- ^{:stratum 0} usage-line
   "First-line usage banner for a subcommand."
   [subcommand positional]
   (let [binary (app-config/binary-name)
@@ -67,35 +60,7 @@
          (remove str/blank?)
          (str/join " "))))
 
-(defn- flag-table
-  "Auto-generate the flag table from a babashka.cli `:spec`. Returns
-   nil when the (filtered) spec has no entries."
-  [spec]
-  (let [filtered (without-help-flag spec)]
-    (when (seq filtered)
-      (cli/format-opts {:spec filtered}))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn usage-text
-  "Render the full localized usage block for a registry entry."
-  [{:keys [subcommand summary-key spec positional]}]
-  (let [usage   (messages/t :workflow-runner.help/usage-prefix
-                            {:line (usage-line subcommand positional)})
-        summary (messages/t summary-key)
-        table   (flag-table spec)]
-    (->> [(messages/t :workflow-runner.help/subcommand-heading
-                      {:subcommand subcommand})
-          summary
-          ""
-          usage
-          (when table
-            (messages/t :workflow-runner.help/options-heading))
-          table]
-         (remove nil?)
-         (str/join "\n"))))
-
-(defn group-usage-text
+(defn ^{:stratum 0} group-usage-text
   "Render the localized parent-level usage block for a subcommand group."
   [{:keys [group summary-key subcommands]}]
   (let [usage    (messages/t :workflow-runner.help/group-usage-prefix
@@ -118,19 +83,66 @@
           (str/join "\n" rows)]
          (str/join "\n"))))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
-(defn print-usage!
-  "Print the localized usage block for `entry` to stdout."
-  [entry]
-  (println (usage-text entry)))
+(defn- ^{:stratum 1} without-help-flag
+  "Drop the help flag from a babashka.cli `:spec` map so it doesn't
+   appear inside the flag table its presence triggered."
+  [spec]
+  (into {} (remove (fn [[k _]] (contains? help-flag-keys k))) spec))
 
-(defn print-group-usage!
+(defn ^{:stratum 1} print-group-usage!
   "Print the localized parent-level usage block for `group-entry`."
   [group-entry]
   (println (group-usage-text group-entry)))
 
-(defn handler-with-help
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} flag-table
+  "Auto-generate the flag table from a babashka.cli `:spec`. Returns
+   nil when the (filtered) spec has no entries."
+  [spec]
+  (let [filtered (without-help-flag spec)]
+    (when (seq filtered)
+      (cli/format-opts {:spec filtered}))))
+
+(defn ^{:stratum 2} group-handler
+  "Return a dispatch handler that prints the group-level usage block
+   for `group-entry` (e.g. `registry/workflow-group-help`)."
+  [group-entry]
+  (fn group-help-handler [_m]
+    (print-group-usage! group-entry)))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} usage-text
+  "Render the full localized usage block for a registry entry."
+  [{:keys [subcommand summary-key spec positional]}]
+  (let [usage   (messages/t :workflow-runner.help/usage-prefix
+                            {:line (usage-line subcommand positional)})
+        summary (messages/t summary-key)
+        table   (flag-table spec)]
+    (->> [(messages/t :workflow-runner.help/subcommand-heading
+                      {:subcommand subcommand})
+          summary
+          ""
+          usage
+          (when table
+            (messages/t :workflow-runner.help/options-heading))
+          table]
+         (remove nil?)
+         (str/join "\n"))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} print-usage!
+  "Print the localized usage block for `entry` to stdout."
+  [entry]
+  (println (usage-text entry)))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} handler-with-help
   "Wrap a dispatch handler `cmd-fn` so that `--help` / `-h` short-circuits
    to a localized usage block. `subcommand-key` is one of the keys in
    `registry/subcommands` (e.g. `:workflow-run`)."
@@ -145,10 +157,3 @@
         (if (help-requested? opts)
           (print-usage! entry)
           (cmd-fn m))))))
-
-(defn group-handler
-  "Return a dispatch handler that prints the group-level usage block
-   for `group-entry` (e.g. `registry/workflow-group-help`)."
-  [group-entry]
-  (fn group-help-handler [_m]
-    (print-group-usage! group-entry)))

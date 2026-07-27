@@ -15,15 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.loop.escalation-test
   (:require [clojure.test :as test :refer [deftest testing is]]
             [ai.miniforge.loop.escalation :as escalation]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(def mock-loop-state
+;; Test fixtures
+(def ^{:stratum 0} mock-loop-state
   {:loop/id (random-uuid)
    :loop/state :escalated
    :loop/iteration 5
@@ -36,10 +35,8 @@
                    :artifact/content "(defn broken [\n  incomplete"}
    :loop/termination {:reason :max-iterations}})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Prompt formatting tests
-
-(deftest format-error-context-test
+(deftest ^{:stratum 0} format-error-context-test
   (testing "formats errors and iteration count"
     (let [errors [{:code :syntax :message "Missing closing paren"}
                   {:code :lint :message "Unused var"}]
@@ -61,21 +58,8 @@
       (is (< (count result) (+ 300 (count "After 1 attempts"))))
       (is (re-find #"\.\.\.$" result)))))
 
-(deftest format-escalation-prompt-test
-  (testing "includes all necessary information"
-    (let [prompt (escalation/format-escalation-prompt mock-loop-state)]
-      (is (string? prompt))
-      (is (re-find #"AGENT ESCALATION" prompt))
-      (is (re-find #"After 5 attempts" prompt))
-      (is (re-find #"Parse error" prompt))
-      (is (re-find #"Options:" prompt))
-      (is (re-find #"Provide hints" prompt))
-      (is (re-find #"Abort" prompt)))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; User interaction tests
-
-(deftest prompt-user-test
+(deftest ^{:stratum 0} prompt-user-test
   (testing "abort input returns abort action"
     (with-redefs [escalation/read-user-input (fn [] "abort")]
       (let [result (escalation/prompt-user "test")]
@@ -98,7 +82,20 @@
         (is (= :hints (:type result)))
         (is (= "hint text" (:content result)))))))
 
-(deftest escalate-to-user-test
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} format-escalation-prompt-test
+  (testing "includes all necessary information"
+    (let [prompt (escalation/format-escalation-prompt mock-loop-state)]
+      (is (string? prompt))
+      (is (re-find #"AGENT ESCALATION" prompt))
+      (is (re-find #"After 5 attempts" prompt))
+      (is (re-find #"Parse error" prompt))
+      (is (re-find #"Options:" prompt))
+      (is (re-find #"Provide hints" prompt))
+      (is (re-find #"Abort" prompt)))))
+
+(deftest ^{:stratum 1} escalate-to-user-test
   (testing "returns continue action with hints"
     (let [mock-prompt (fn [_] {:type :hints :content "Try this fix"})
           result (escalation/escalate-to-user mock-loop-state :prompt-fn mock-prompt)]
@@ -118,10 +115,8 @@
           (is (map? result))
           (is (contains? result :action)))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Inner loop integration tests
-
-(deftest handle-escalation-test
+(deftest ^{:stratum 1} handle-escalation-test
   (testing "calls escalation function when provided"
     (let [mock-escalation (fn [_state & _opts] {:action :continue :hints "hint"})
           result (escalation/handle-escalation mock-loop-state
@@ -152,7 +147,7 @@
       (is (= :continue (:action result)))
       (is (= "custom" (:hints result))))))
 
-(deftest create-escalation-checkpoint-test
+(deftest ^{:stratum 1} create-escalation-checkpoint-test
   (testing "creates canonical checkpoint data from loop state"
     (let [checkpoint (escalation/create-escalation-checkpoint mock-loop-state)]
       (is (= :loop-escalation (get-in checkpoint [:source :kind])))

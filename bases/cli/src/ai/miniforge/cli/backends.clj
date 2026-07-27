@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.backends
   "Backend discovery and management for Miniforge CLI.
 
@@ -28,36 +27,21 @@
    [babashka.process :as process]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Backend specifications
 
-(def ^:private backend-config-resource
+;; Backend specifications
+(def ^{:stratum 0} ^:private backend-config-resource
   "Classpath resource path for backend metadata and defaults."
   "config/cli/backends.edn")
 
-(def ^:private backend-config
-  (resource-config/merged-resource-config
-   backend-config-resource
-   nil
-   {:backend/defaults {:current :codex}
-    :backend/specs {}}))
-
-(def backend-specs
-  (:backend/specs backend-config))
-
-(def ^:private backend-defaults
-  (:backend/defaults backend-config))
-
-(defn- availability-status
+(defn- ^{:stratum 0} availability-status
   "Build a standard backend availability status map."
   [available status message]
   {:available available
    :status status
    :message message})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Status checking
-
-(defn check-command-available?
+(defn ^{:stratum 0} check-command-available?
   "Check if a command is available on PATH."
   [cmd]
   (try
@@ -66,60 +50,8 @@
     (catch Exception _
       false)))
 
-(defn check-backend-status
-  "Check the status of a backend.
-
-   Returns map with:
-   - :available - boolean
-   - :status - :available, :not-installed
-   - :message - human-readable status message"
-  [backend-id]
-  (let [spec (get backend-specs backend-id)
-        {:keys [check-type command]} spec]
-    (case check-type
-      :builtin
-      (availability-status true :available (messages/t :backends/status-builtin))
-
-      :cli
-      (if (check-command-available? command)
-        (availability-status true :available
-                             (messages/t :backends/status-cli-found {:command command}))
-        (availability-status false :not-installed
-                             (messages/t :backends/status-cli-missing {:command command})))
-
-      ;; Unknown check type
-      (availability-status false :unknown (messages/t :backends/status-unknown)))))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Backend information
-
-(defn get-backend-info
-  "Get detailed information about a backend."
-  [backend-id]
-  (let [spec (get backend-specs backend-id)
-        status (check-backend-status backend-id)]
-    (merge spec status {:backend-id backend-id})))
-
-(defn list-backends
-  "List all available backends with their status.
-
-   Returns sequence of backend info maps, sorted by availability."
-  []
-  (let [backends (map get-backend-info (keys backend-specs))]
-    (sort-by (juxt (comp not :available) :provider) backends)))
-
-(defn get-current-backend
-  "Get the currently configured backend from config or env var."
-  [config]
-  (or (:backend (:llm config))
-      (when-let [env-backend (System/getenv "MINIFORGE_LLM_BACKEND")]
-        (keyword env-backend))
-      (get backend-defaults :current :codex)))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; Display helpers
-
-(defn status-icon
+(defn ^{:stratum 0} status-icon
   "Get status icon for backend."
   [status]
   (case status
@@ -127,7 +59,16 @@
     :not-installed "❌"
     "❓"))
 
-(defn format-backend-status
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private backend-config
+  (resource-config/merged-resource-config
+   backend-config-resource
+   nil
+   {:backend/defaults {:current :codex}
+    :backend/specs {}}))
+
+(defn ^{:stratum 1} format-backend-status
   "Format backend status for display."
   [backend-info current-backend]
   (let [{:keys [backend-id provider description status message models installation docs-url]} backend-info
@@ -154,19 +95,85 @@
                                  docs-url)
                          (messages/t :backends/docs-line {:docs-url docs-url}))]))))
 
-(defn print-backends
-  "Print all backends with their status."
-  [config]
-  (let [backends (list-backends)
-        current (get-current-backend config)]
-    (println)
-    (println (messages/t :backends/list-header))
-    (println)
-    (doseq [backend backends]
-      (println (format-backend-status backend current))
-      (println))))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn print-backend-error
+(def ^{:stratum 2} backend-specs
+  (:backend/specs backend-config))
+
+(def ^{:stratum 2} ^:private backend-defaults
+  (:backend/defaults backend-config))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} check-backend-status
+  "Check the status of a backend.
+
+   Returns map with:
+   - :available - boolean
+   - :status - :available, :not-installed
+   - :message - human-readable status message"
+  [backend-id]
+  (let [spec (get backend-specs backend-id)
+        {:keys [check-type command]} spec]
+    (case check-type
+      :builtin
+      (availability-status true :available (messages/t :backends/status-builtin))
+
+      :cli
+      (if (check-command-available? command)
+        (availability-status true :available
+                             (messages/t :backends/status-cli-found {:command command}))
+        (availability-status false :not-installed
+                             (messages/t :backends/status-cli-missing {:command command})))
+
+      ;; Unknown check type
+      (availability-status false :unknown (messages/t :backends/status-unknown)))))
+
+(defn ^{:stratum 3} get-current-backend
+  "Get the currently configured backend from config or env var."
+  [config]
+  (or (:backend (:llm config))
+      (when-let [env-backend (System/getenv "MINIFORGE_LLM_BACKEND")]
+        (keyword env-backend))
+      (get backend-defaults :current :codex)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Backend information
+(defn ^{:stratum 4} get-backend-info
+  "Get detailed information about a backend."
+  [backend-id]
+  (let [spec (get backend-specs backend-id)
+        status (check-backend-status backend-id)]
+    (merge spec status {:backend-id backend-id})))
+
+(defn ^{:stratum 4} validate-backend
+  "Validate that a backend can be used.
+   Returns {:valid? true/false :message string}."
+  [backend-id]
+  (if-not (contains? backend-specs backend-id)
+    {:valid? false
+     :message (messages/t :backends/validate-unknown
+                          {:backend (name backend-id)
+                           :command (app-config/command-string "config backends")})}
+    (let [status (check-backend-status backend-id)]
+      (if (:available status)
+        {:valid? true
+         :message (:message status)}
+        {:valid? false
+         :message (:message status)}))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} list-backends
+  "List all available backends with their status.
+
+   Returns sequence of backend info maps, sorted by availability."
+  []
+  (let [backends (map get-backend-info (keys backend-specs))]
+    (sort-by (juxt (comp not :available) :provider) backends)))
+
+(defn ^{:stratum 5} print-backend-error
   "Print helpful error message when backend is not available."
   [backend-id]
   (let [info (get-backend-info backend-id)
@@ -189,18 +196,16 @@
       (println (messages/t :backends/unknown-issue {:backend backend-name})))
     (println)))
 
-(defn validate-backend
-  "Validate that a backend can be used.
-   Returns {:valid? true/false :message string}."
-  [backend-id]
-  (if-not (contains? backend-specs backend-id)
-    {:valid? false
-     :message (messages/t :backends/validate-unknown
-                          {:backend (name backend-id)
-                           :command (app-config/command-string "config backends")})}
-    (let [status (check-backend-status backend-id)]
-      (if (:available status)
-        {:valid? true
-         :message (:message status)}
-        {:valid? false
-         :message (:message status)}))))
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} print-backends
+  "Print all backends with their status."
+  [config]
+  (let [backends (list-backends)
+        current (get-current-backend config)]
+    (println)
+    (println (messages/t :backends/list-header))
+    (println)
+    (doseq [backend backends]
+      (println (format-backend-status backend current))
+      (println))))

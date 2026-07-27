@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.operator.interface
   "Public API for the operator (meta-agent) component.
    Manages the meta-loop: observe signals, detect patterns, propose improvements."
@@ -26,64 +25,64 @@
    [ai.miniforge.operator.intervention :as intervention]
    [ai.miniforge.operator.protocol :as proto]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Protocol re-exports
-
-(def Operator
+(def ^{:stratum 0} Operator
   "Protocol satisfied by the meta-agent: observe signals, analyze patterns,
    propose/apply/reject improvements. Implement to provide an operator backend."
   proto/Operator)
 
-(def PatternDetector
+(def ^{:stratum 0} PatternDetector
   "Protocol satisfied by pattern detectors: turn a sequence of signals into a
    sequence of detected patterns. Implement to provide custom detection."
   proto/PatternDetector)
 
-(def ImprovementGenerator
+(def ^{:stratum 0} ImprovementGenerator
   "Protocol satisfied by improvement generators: turn detected patterns plus
    context into a sequence of improvement proposals."
   proto/ImprovementGenerator)
 
-(def Governance
+(def ^{:stratum 0} Governance
   "Protocol satisfied by governance backends: decide whether an improvement
    needs human approval, may auto-apply, and resolve per-type approval policy."
   proto/Governance)
 
 ;; Type definitions
-(def signal-types
+(def ^{:stratum 0} signal-types
   "Set of keywords naming the signal types the operator can observe
    (e.g. :workflow-complete, :workflow-failed, :phase-rollback)."
   proto/signal-types)
 
-(def improvement-types
+(def ^{:stratum 0} improvement-types
   "Set of keywords naming the improvement types the operator can propose
    (e.g. :prompt-change, :gate-adjustment, :policy-update)."
   proto/improvement-types)
 
-(def intervention-types
+(def ^{:stratum 0} intervention-types
   "Set of keywords naming the bounded v1 supervisory intervention vocabulary
    (e.g. :acknowledge, :retry, :cancel, :force-safe-mode)."
   intervention/intervention-types)
 
-(def intervention-target-types
+(def ^{:stratum 0} intervention-target-types
   "Set of keywords naming the recognized intervention target categories
    (e.g. :attention, :workflow, :policy-eval, :pr, :degradation, :supervision)."
   intervention/target-types)
 
-(def intervention-lifecycle-states
+(def ^{:stratum 0} intervention-lifecycle-states
   "Set of keywords naming all valid intervention lifecycle states, including
    the initial state, every transition endpoint, and the terminal states."
   intervention/lifecycle-states)
 
-(def intervention-terminal-states
+(def ^{:stratum 0} intervention-terminal-states
   "Set of keywords naming the terminal intervention lifecycle states:
    :rejected, :verified, :failed."
   intervention/terminal-states)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Operator creation
-
-(def create-operator
+(def ^{:stratum 0} create-operator
   "Create an operator (meta-agent).
 
    The operator observes workflow executions, detects patterns,
@@ -98,25 +97,24 @@
      (create-operator {:knowledge-store k-store})"
   core/create-operator)
 
-(def create-pattern-detector
+(def ^{:stratum 0} create-pattern-detector
   "Create a pattern detector.
    Detects patterns in workflow signals."
   core/create-pattern-detector)
 
-(def create-improvement-generator
+(def ^{:stratum 0} create-improvement-generator
   "Create an improvement generator.
    Generates improvement proposals from detected patterns."
   core/create-improvement-generator)
 
-(def create-governance
+(def ^{:stratum 0} create-governance
   "Create a governance manager.
    Controls improvement approval policies."
   core/create-governance)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Bounded supervisory interventions
-
-(def create-intervention
+(def ^{:stratum 0} create-intervention
   "Create a bounded InterventionRequest map.
 
    Canonical, anomaly-returning entry point: returns the constructed
@@ -124,88 +122,87 @@
    step of the validation cascade rejects the request."
   intervention/create-intervention)
 
-(def create-intervention!
+(def ^{:stratum 0} create-intervention!
   "Boundary variant of [[create-intervention]] that throws `ex-info`
    on validation failure. Prefer [[create-intervention]] in non-boundary
    code."
   intervention/create-intervention!)
 
-(def approval-required?
+(def ^{:stratum 0} approval-required?
   "Check whether an intervention type defaults to a pending-human step."
   intervention/approval-required?)
 
-(def valid-intervention-type?
+(def ^{:stratum 0} valid-intervention-type?
   "Check if an intervention type is part of the bounded vocabulary."
   intervention/valid-type?)
 
-(def valid-intervention-target-type?
+(def ^{:stratum 0} valid-intervention-target-type?
   "Check if an intervention target type is recognized."
   intervention/valid-target-type?)
 
-(def valid-intervention-state?
+(def ^{:stratum 0} valid-intervention-state?
   "Check if an intervention lifecycle state is valid."
   intervention/valid-state?)
 
-(def intervention-terminal-state?
+(def ^{:stratum 0} intervention-terminal-state?
   "Check if an intervention lifecycle state is terminal."
   intervention/terminal-state?)
 
-(def intervention-target-type
+(def ^{:stratum 0} intervention-target-type
   "Resolve the default target type for an intervention."
   intervention/intervention-target-type)
 
-(def valid-intervention-transition?
+(def ^{:stratum 0} valid-intervention-transition?
   "Check if an intervention lifecycle transition is valid."
   intervention/valid-transition?)
 
-(def next-intervention-state
+(def ^{:stratum 0} next-intervention-state
   "Resolve the next lifecycle state for an intervention transition."
   intervention/next-state)
 
-(def transition-intervention
+(def ^{:stratum 0} transition-intervention
   "Apply a lifecycle transition to an intervention."
   intervention/transition)
 
-(def start-intervention-approval
+(def ^{:stratum 0} start-intervention-approval
   "Move an intervention into :pending-human."
   intervention/start-approval)
 
-(def approve-intervention
+(def ^{:stratum 0} approve-intervention
   "Approve an intervention."
   intervention/approve)
 
-(def reject-intervention
+(def ^{:stratum 0} reject-intervention
   "Reject an intervention."
   intervention/reject)
 
-(def dispatch-intervention
+(def ^{:stratum 0} dispatch-intervention
   "Mark an intervention as dispatched."
   intervention/dispatch)
 
-(def apply-intervention-result
+(def ^{:stratum 0} apply-intervention-result
   "Mark an intervention as applied."
   intervention/apply-result)
 
-(def verify-intervention
+(def ^{:stratum 0} verify-intervention
   "Mark an intervention as verified."
   intervention/verify)
 
-(def fail-intervention
+(def ^{:stratum 0} fail-intervention
   "Mark an intervention as failed."
   intervention/fail)
 
-(def supported-target-types
+(def ^{:stratum 0} supported-target-types
   "Return the supported target types for an intervention type."
   intervention/supported-target-types)
 
-(def bounded-intervention-vocabulary?
+(def ^{:stratum 0} bounded-intervention-vocabulary?
   "Check if a set of intervention types is within the bounded vocabulary."
   intervention/bounded-vocabulary?)
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Operator-event consumer (Phase D D-2)
-
-(def consume-operator-events!
+(def ^{:stratum 0} consume-operator-events!
   "Run one consumption pass over `{events-dir}/operator/`: parse
    intervention-requested events, validate, route through the
    lifecycle (auto-approving operator-driven request sources), publish
@@ -217,36 +214,35 @@
    {:routed n :skipped n :anomalies n}."
   consumer/consume-pass!)
 
-(def start-operator-consumer!
+(def ^{:stratum 0} start-operator-consumer!
   "Start a fixed-delay background poller running the consumer pass.
    Options are those of [[consume-operator-events!]] plus :interval-ms
    (default 1000). Returns a handle for [[stop-operator-consumer!]]."
   consumer/start!)
 
-(def stop-operator-consumer!
+(def ^{:stratum 0} stop-operator-consumer!
   "Stop a poller started by [[start-operator-consumer!]]. Idempotent."
   consumer/stop!)
 
-(def auto-approve-request-sources
+(def ^{:stratum 0} auto-approve-request-sources
   "Request sources whose interventions are auto-approved (the human IS
    the approver): the operator surfaces, not delegated agents."
   consumer/auto-approve-request-sources)
 
 ;; ── Intervention application (Phase D D-3) ──────────────────────────────────
-
-(def register-live-runner!
+(def ^{:stratum 0} register-live-runner!
   "Register a live runner's control handles for a workflow id so
    interventions can act on it. `handles` must include
    {:control-state <atom>} and should include :event-stream so governed
    lifecycle events retain the workflow's sequence counter."
   application/register-runner!)
 
-(def register-degradation-manager!
+(def ^{:stratum 0} register-degradation-manager!
   "Register the process-scoped degradation manager used by safe-mode
    interventions."
   application/register-degradation-manager!)
 
-(def register-resume-launcher!
+(def ^{:stratum 0} register-resume-launcher!
   "Register the process-scoped resume launcher used by `:retry` /
    `:retry-from-phase` (Phase D D-3b). Takes a handles map carrying
    `:launch!` — `(fn [resume-plan] → {:resume/run-id …})` — and an
@@ -254,7 +250,7 @@
    retries fail `:no-resume-launcher`."
   application/register-resume-launcher!)
 
-(def register-policy-evaluator!
+(def ^{:stratum 0} register-policy-evaluator!
   "Register the process-scoped PR policy evaluator used by
    `:re-evaluate` (Phase D D-3b). Takes `(fn [request] → evaluation)`
    returning the `policy-pack/evaluate-external-pr` result shape. Pass
@@ -263,22 +259,22 @@
    receive."
   application/register-policy-evaluator!)
 
-(def deregister-live-runner!
+(def ^{:stratum 0} deregister-live-runner!
   "Remove a workflow id from the live-runner registry. Idempotent."
   application/deregister-runner!)
 
-(def live-intervention-target?
+(def ^{:stratum 0} live-intervention-target?
   "Ownership predicate for a process-scoped operator consumer. Returns
    true for process-global targets and for workflow targets registered
    to a live runner in this process."
   application/live-intervention-target?)
 
-(def live-intervention-stream
+(def ^{:stratum 0} live-intervention-stream
   "Return the registered workflow event stream for a workflow-targeted
    intervention, or nil when the operator stream should be used."
   application/live-intervention-stream)
 
-(def apply-intervention!
+(def ^{:stratum 0} apply-intervention!
   "The D-3 `:apply!` hook: apply one approved intervention to its
    mechanism — control-state flags on a live runner, no-effect verbs,
    safe-mode, and (D-3b) the resume launcher for `:retry` /
@@ -292,8 +288,7 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Signal observation
-
-(defn observe-signal
+(defn ^{:stratum 0} observe-signal
   "Record an observation signal.
 
    signal: {:type keyword :data map}
@@ -312,7 +307,7 @@
   [operator signal]
   (proto/observe-signal operator signal))
 
-(defn get-signals
+(defn ^{:stratum 0} get-signals
   "Query recorded signals.
 
    query:
@@ -326,8 +321,7 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Pattern analysis
-
-(defn analyze-patterns
+(defn ^{:stratum 0} analyze-patterns
   "Analyze signals for patterns.
 
    Arguments:
@@ -344,7 +338,7 @@
   [operator window-ms]
   (proto/analyze-patterns operator window-ms))
 
-(defn detect-patterns
+(defn ^{:stratum 0} detect-patterns
   "Detect patterns in a sequence of signals.
 
    Arguments:
@@ -355,7 +349,7 @@
   [detector signals]
   (proto/detect detector signals))
 
-(defn generate-improvements
+(defn ^{:stratum 0} generate-improvements
   "Generate improvement proposals from patterns.
 
    Arguments:
@@ -369,8 +363,7 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Improvement management
-
-(defn propose-improvement
+(defn ^{:stratum 0} propose-improvement
   "Propose a process improvement.
 
    improvement:
@@ -391,7 +384,7 @@
   [operator improvement]
   (proto/propose-improvement operator improvement))
 
-(defn get-proposals
+(defn ^{:stratum 0} get-proposals
   "Query improvement proposals.
 
    query:
@@ -402,7 +395,7 @@
   [operator query]
   (proto/get-proposals operator query))
 
-(defn apply-improvement
+(defn ^{:stratum 0} apply-improvement
   "Apply an approved improvement.
 
    Returns {:success? bool :applied improvement-map} when the proposal is in
@@ -412,7 +405,7 @@
   [operator proposal-id]
   (proto/apply-improvement operator proposal-id))
 
-(defn reject-improvement
+(defn ^{:stratum 0} reject-improvement
   "Reject an improvement proposal.
 
    Returns the updated proposal map (with :improvement/rejection-reason) when
@@ -424,18 +417,17 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Governance
-
-(defn requires-approval?
+(defn ^{:stratum 0} requires-approval?
   "Check if improvement requires human approval."
   [governance improvement]
   (proto/requires-approval? governance improvement))
 
-(defn can-auto-apply?
+(defn ^{:stratum 0} can-auto-apply?
   "Check if improvement can be applied automatically."
   [governance improvement]
   (proto/can-auto-apply? governance improvement))
 
-(defn get-approval-policy
+(defn ^{:stratum 0} get-approval-policy
   "Get the approval policy for an improvement type.
 
    Returns:

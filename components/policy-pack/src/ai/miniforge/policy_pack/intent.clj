@@ -15,14 +15,19 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.intent
   "Semantic intent validation — enforce match between declared intent
    and actual implementation behavior (N4 §4).
 
-   Layer 0: Intent type definitions and inference
-   Layer 1: Intent validation against resource counts
-   Layer 2: Terraform plan and Kubernetes diff parsing
+   Layer 0: intent-types, infer-intent, intent-constraints,
+     parse-terraform-plan-counts, parse-k8s-diff-counts
+   Layer 1: intent-violation (over intent-constraints)
+   Layer 2: intent-matches? (over intent-violation)
+   Layer 3: semantic-intent-check (over intent-matches? + the plan/diff
+     count parsers)
+
+   4 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem.
 
    Intent Types:
      :import   → Creates: 0, Updates: 0, Destroys: 0 (state-only)
@@ -36,13 +41,13 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Intent types and inference
 
-(def intent-types
+;; Intent types and inference
+(def ^{:stratum 0} intent-types
   "Valid intent type keywords."
   #{:import :create :update :destroy :refactor :migrate})
 
-(defn infer-intent
+(defn ^{:stratum 0} infer-intent
   "Infer the intent type from resource change counts.
 
    Arguments:
@@ -62,22 +67,12 @@
       (and (pos? creates)  (zero? updates) (pos? destroys))   :migrate
       :else                                                    :mixed)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Intent validation
-
-(def ^:private violation-message-fmt
+(def ^{:stratum 0} ^:private violation-message-fmt
   "Format string for intent violation messages."
   "Intent :%s does not allow %s, but found %d")
 
-(defn- intent-violation
-  "Build an intent violation map for a disallowed field."
-  [declared field-name actual]
-  {:field    field-name
-   :expected 0
-   :actual   actual
-   :message  (format violation-message-fmt (name declared) (name field-name) actual)})
-
-(def ^:private intent-constraints
+(def ^{:stratum 0} ^:private intent-constraints
   "For each declared intent, which change counts are allowed to be >0."
   {:import   {:creates false :updates false :destroys false}
    :create   {:creates true  :updates true  :destroys false}
@@ -86,58 +81,8 @@
    :refactor {:creates false :updates false :destroys false}
    :migrate  {:creates true  :updates false :destroys true}})
 
-(defn intent-matches?
-  "Validate that declared intent matches actual resource change counts.
-
-   Arguments:
-   - declared — Declared intent keyword (e.g. :import, :create)
-   - counts   — Map with :creates, :updates, :destroys
-
-   Returns:
-   - {:passed? true} if intent matches
-   - {:passed? false :violations [...]} with violation details"
-  [declared counts]
-  (let [constraints (get intent-constraints declared)
-        creates     (get counts :creates 0)
-        updates     (get counts :updates 0)
-        destroys    (get counts :destroys 0)]
-    (if (nil? constraints)
-      {:passed? true} ; unknown intent types pass by default
-      (let [violations
-            (cond-> []
-              (and (not (:creates constraints))  (pos? creates))
-              (conj (intent-violation declared :creates creates))
-
-              (and (not (:updates constraints))  (pos? updates))
-              (conj (intent-violation declared :updates updates))
-
-              (and (not (:destroys constraints)) (pos? destroys))
-              (conj (intent-violation declared :destroys destroys)))]
-        (if (empty? violations)
-          {:passed? true}
-          {:passed? false :violations violations})))))
-
-(defn semantic-intent-check
-  "Full semantic intent validation check function per N4 §4.
-
-   Arguments:
-   - declared-intent — Keyword from intent-types
-   - counts          — {:creates int :updates int :destroys int}
-
-   Returns:
-   - {:passed? bool :violations [...] :inferred-intent keyword :metadata {...}}"
-  [declared-intent counts]
-  (let [inferred (infer-intent counts)
-        result   (intent-matches? declared-intent counts)]
-    (assoc result
-           :inferred-intent inferred
-           :metadata {:declared declared-intent
-                      :counts   counts})))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Terraform plan parsing
-
-(defn parse-terraform-plan-counts
+(defn ^{:stratum 0} parse-terraform-plan-counts
   "Parse terraform plan output and return resource change counts.
    Delegates to detection/plan-resource-counts (added by PR #457).
 
@@ -149,10 +94,8 @@
   [plan-output]
   (detection/plan-resource-counts plan-output))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Kubernetes diff parsing
-
-(defn parse-k8s-diff-counts
+(defn ^{:stratum 0} parse-k8s-diff-counts
   "Parse kubectl diff output and return resource change counts.
 
    Detects:
@@ -189,6 +132,68 @@
 
         :else
         {:creates 0 :updates 0 :destroys 0}))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} intent-violation
+  "Build an intent violation map for a disallowed field."
+  [declared field-name actual]
+  {:field    field-name
+   :expected 0
+   :actual   actual
+   :message  (format violation-message-fmt (name declared) (name field-name) actual)})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} intent-matches?
+  "Validate that declared intent matches actual resource change counts.
+
+   Arguments:
+   - declared — Declared intent keyword (e.g. :import, :create)
+   - counts   — Map with :creates, :updates, :destroys
+
+   Returns:
+   - {:passed? true} if intent matches
+   - {:passed? false :violations [...]} with violation details"
+  [declared counts]
+  (let [constraints (get intent-constraints declared)
+        creates     (get counts :creates 0)
+        updates     (get counts :updates 0)
+        destroys    (get counts :destroys 0)]
+    (if (nil? constraints)
+      {:passed? true} ; unknown intent types pass by default
+      (let [violations
+            (cond-> []
+              (and (not (:creates constraints))  (pos? creates))
+              (conj (intent-violation declared :creates creates))
+
+              (and (not (:updates constraints))  (pos? updates))
+              (conj (intent-violation declared :updates updates))
+
+              (and (not (:destroys constraints)) (pos? destroys))
+              (conj (intent-violation declared :destroys destroys)))]
+        (if (empty? violations)
+          {:passed? true}
+          {:passed? false :violations violations})))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} semantic-intent-check
+  "Full semantic intent validation check function per N4 §4.
+
+   Arguments:
+   - declared-intent — Keyword from intent-types
+   - counts          — {:creates int :updates int :destroys int}
+
+   Returns:
+   - {:passed? bool :violations [...] :inferred-intent keyword :metadata {...}}"
+  [declared-intent counts]
+  (let [inferred (infer-intent counts)
+        result   (intent-matches? declared-intent counts)]
+    (assoc result
+           :inferred-intent inferred
+           :metadata {:declared declared-intent
+                      :counts   counts})))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

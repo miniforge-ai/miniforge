@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence.pr
   "PR-related persistence: policy-pack loading, PR enrichment, fleet repo
    discovery, and PR fetching.
@@ -23,8 +22,11 @@
    Extracted from persistence.clj to respect the 3-layer-max rule.
 
    Layer 0: PR enrichment (policy packs, readiness/risk)
-   Layer 1: PR loading (fleet repos, PR items)
-   Layer 2: Composite loaders (load-all-into-model)"
+   Layer 1: PR loading (fleet repos)
+   Layer 2: PR loading (fleet PR items)
+   Layer 3: PR loading into model (applies cache)
+   Layer 4: Composite loaders (load-all-into-model)
+   (Over the 3-layer budget; Wave 2 namespace-split candidate.)"
   (:require
    [ai.miniforge.config.interface :as config]
    [clojure.java.io :as io]
@@ -37,26 +39,14 @@
    [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; PR enrichment
 
-(defn packs-dir
+;; PR enrichment
+(defn ^{:stratum 0} packs-dir
   "Get the policy packs directory path."
   []
   (io/file (config/miniforge-home) "packs"))
 
-(defn load-policy-packs
-  "Load policy packs from ~/.miniforge/packs/.
-   Returns vector of PackManifest maps, or empty vec on error."
-  []
-  (try
-    (let [dir (packs-dir)]
-      (if (and (.exists dir) (.isDirectory dir))
-        (let [result (policy-pack/load-all-packs (.getPath dir))]
-          (get result :loaded []))
-        []))
-    (catch Exception _ [])))
-
-(defn enrich-pr-in-context
+(defn ^{:stratum 0} enrich-pr-in-context
   "Enrich a single PR with readiness and risk, using its repo-level
    train snapshot as context (so dependency and fanout factors are correct).
    Passes real change-size data from the PR to the risk assessment."
@@ -73,7 +63,53 @@
       ;; If enrichment fails, return PR unchanged (fallback to naive derivation)
       pr)))
 
-(defn enrich-prs
+;; PR loading
+(defn ^{:stratum 0} load-fleet-repos
+  "Load configured fleet repositories from config.
+   Returns vector of normalized repo slugs, or empty vec on error."
+  [& [{:keys [config-path]}]]
+  (try
+    (if config-path
+      (pr-sync/get-configured-repos config-path)
+      (pr-sync/get-configured-repos))
+    (catch Exception _ [])))
+
+(defn ^{:stratum 0} discover-repos
+  "Discover repos from a GitHub org/user and add to fleet config.
+   Returns result map from pr-sync/discover-repos!."
+  [owner]
+  (try
+    (pr-sync/discover-repos! {:owner owner})
+    (catch Exception e
+      {:success? false :error (.getMessage e)})))
+
+(defn ^{:stratum 0} browse-repos
+  "Browse repositories from providers (read-only).
+   Returns result map from pr-sync/list-org-repos."
+  [& [{:keys [owner limit provider] :or {limit 100 provider :github}}]]
+  (try
+    (pr-sync/list-org-repos (cond-> {}
+                              owner (assoc :owner owner)
+                              provider (assoc :provider provider)
+                              (integer? limit) (assoc :limit limit)))
+    (catch Exception e
+      {:success? false :owner owner :provider provider :error (.getMessage e)})))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} load-policy-packs
+  "Load policy packs from ~/.miniforge/packs/.
+   Returns vector of PackManifest maps, or empty vec on error."
+  []
+  (try
+    (let [dir (packs-dir)]
+      (if (and (.exists dir) (.isDirectory dir))
+        (let [result (policy-pack/load-all-packs (.getPath dir))]
+          (get result :loaded []))
+        []))
+    (catch Exception _ [])))
+
+(defn ^{:stratum 1} enrich-prs
   "Enrich a collection of PRs with readiness and risk from pr-train component.
    Groups PRs by repo and builds per-repo train snapshots so that dependency,
    fanout, and merge-order factors are computed correctly within each repo."
@@ -89,26 +125,15 @@
                            enriched)]
     (mapv (fn [pr] (get enriched-map [(:pr/repo pr) (:pr/number pr)] pr)) prs)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; PR loading
-
-(defn load-fleet-repos
-  "Load configured fleet repositories from config.
-   Returns vector of normalized repo slugs, or empty vec on error."
-  [& [{:keys [config-path]}]]
-  (try
-    (if config-path
-      (pr-sync/get-configured-repos config-path)
-      (pr-sync/get-configured-repos))
-    (catch Exception _ [])))
-
-(defn load-fleet-repos-into-model
+(defn ^{:stratum 1} load-fleet-repos-into-model
   "Load configured fleet repos and merge into model."
   [model & [opts]]
   (let [repos (load-fleet-repos opts)]
     (assoc model :fleet-repos (vec repos))))
 
-(defn load-pr-items
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} load-pr-items
   "Fetch PRs for all configured fleet repositories.
    Enriches each PR with readiness and risk from pr-train component.
    Returns {:prs [...] :error nil} on success, {:prs [] :error \"msg\"} on failure.
@@ -126,7 +151,9 @@
     (catch Exception e
       {:prs [] :error (.getMessage e)})))
 
-(defn load-pr-items-into-model
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} load-pr-items-into-model
   "Load PRs from configured repos and merge into model.
    Applies cached policy and risk analysis results to avoid re-running
    expensive evaluations on startup.
@@ -163,31 +190,10 @@
       :else
       (assoc model :flash-message (msg/t :flash/no-open-prs)))))
 
-(defn discover-repos
-  "Discover repos from a GitHub org/user and add to fleet config.
-   Returns result map from pr-sync/discover-repos!."
-  [owner]
-  (try
-    (pr-sync/discover-repos! {:owner owner})
-    (catch Exception e
-      {:success? false :error (.getMessage e)})))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn browse-repos
-  "Browse repositories from providers (read-only).
-   Returns result map from pr-sync/list-org-repos."
-  [& [{:keys [owner limit provider] :or {limit 100 provider :github}}]]
-  (try
-    (pr-sync/list-org-repos (cond-> {}
-                              owner (assoc :owner owner)
-                              provider (assoc :provider provider)
-                              (integer? limit) (assoc :limit limit)))
-    (catch Exception e
-      {:success? false :owner owner :provider provider :error (.getMessage e)})))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Composite loaders
-
-(defn load-all-into-model
+(defn ^{:stratum 4} load-all-into-model
   "Load both workflows and PRs into model on startup.
 
    Arguments:

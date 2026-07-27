@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.display-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.cli.messages :as messages]
    [ai.miniforge.cli.main.display :as sut]))
 
-(deftest print-error-uses-message-catalog-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} print-error-uses-message-catalog-test
   (testing "generic error output reads its prefix from the message catalog"
     (with-redefs [messages/t (fn [k params]
                                (case k

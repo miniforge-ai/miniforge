@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.fsm-test
   "Unit tests for the PR lifecycle controller FSM."
   (:require
@@ -25,17 +24,33 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test helpers
 
-(defn- transition-result
+;; Test helpers
+(defn- ^{:stratum 0} transition-result
   "Apply a controller FSM transition and return the result map."
   [from-status to-status]
   (sut/transition from-status to-status))
 
-;------------------------------------------------------------------------------ Layer 1
-;; FSM validation
+(deftest ^{:stratum 0} valid-transition-predicate-test
+  (testing "valid-transition? requires recognized statuses"
+    (is (true? (sut/valid-transition? :monitoring-ci :monitoring-ci)))
+    (is (true? (sut/valid-transition? :monitoring-ci :monitoring-review)))
+    (is (false? (sut/valid-transition? :bogus-status :bogus-status)))
+    (is (false? (sut/valid-transition? :bogus-status :creating-pr)))))
 
-(deftest valid-transition-happy-path-test
+(deftest ^{:stratum 0} valid-targets-test
+  (testing "valid targets reflect the configured transition graph"
+    (is (= #{:pending :creating-pr :monitoring-ci :failed}
+           (sut/valid-targets :pending)))
+    (is (= #{:ready-to-merge :monitoring-ci :merged :failed}
+           (sut/valid-targets :ready-to-merge)))
+    (is (= #{}
+           (sut/valid-targets :bogus-status)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; FSM validation
+(deftest ^{:stratum 1} valid-transition-happy-path-test
   (testing "happy path transitions succeed through merge"
     (let [creating-pr (transition-result :pending :creating-pr)
           monitoring-ci (transition-result :creating-pr :monitoring-ci)
@@ -55,7 +70,7 @@
       (is (schema/succeeded? merged))
       (is (= {:state :merged :event :merge} (:transition merged))))))
 
-(deftest valid-transition-fix-loop-test
+(deftest ^{:stratum 1} valid-transition-fix-loop-test
   (testing "fix loop transitions return to CI monitoring"
     (let [start-fixing (transition-result :monitoring-ci :fixing)
           restart-ci (transition-result :fixing :monitoring-ci)
@@ -67,7 +82,7 @@
       (is (schema/succeeded? restart-fixing))
       (is (= {:state :fixing :event :start-fixing} (:transition restart-fixing))))))
 
-(deftest invalid-status-and-transition-test
+(deftest ^{:stratum 1} invalid-status-and-transition-test
   (testing "invalid statuses and undefined transitions are rejected"
     (let [invalid-state-result (transition-result :bogus-status :creating-pr)
           invalid-target-result (transition-result :pending :bogus-status)
@@ -87,14 +102,14 @@
                           :to-status :pending})
              (sut/transition-error-message invalid-transition-result))))))
 
-(deftest terminal-state-rejected-test
+(deftest ^{:stratum 1} terminal-state-rejected-test
   (testing "terminal statuses reject further transitions"
     (is (= :terminal-state
            (sut/transition-error-code (transition-result :merged :monitoring-ci))))
     (is (= :terminal-state
            (sut/transition-error-code (transition-result :failed :creating-pr))))))
 
-(deftest same-state-transition-remains-idempotent-test
+(deftest ^{:stratum 1} same-state-transition-remains-idempotent-test
   (testing "same-state transitions are allowed as idempotent updates"
     (let [monitoring-ci (transition-result :monitoring-ci :monitoring-ci)
           merged (transition-result :merged :merged)]
@@ -102,19 +117,3 @@
       (is (= {:state :monitoring-ci :event nil} (:transition monitoring-ci)))
       (is (schema/succeeded? merged))
       (is (= {:state :merged :event nil} (:transition merged))))))
-
-(deftest valid-transition-predicate-test
-  (testing "valid-transition? requires recognized statuses"
-    (is (true? (sut/valid-transition? :monitoring-ci :monitoring-ci)))
-    (is (true? (sut/valid-transition? :monitoring-ci :monitoring-review)))
-    (is (false? (sut/valid-transition? :bogus-status :bogus-status)))
-    (is (false? (sut/valid-transition? :bogus-status :creating-pr)))))
-
-(deftest valid-targets-test
-  (testing "valid targets reflect the configured transition graph"
-    (is (= #{:pending :creating-pr :monitoring-ci :failed}
-           (sut/valid-targets :pending)))
-    (is (= #{:ready-to-merge :monitoring-ci :merged :failed}
-           (sut/valid-targets :ready-to-merge)))
-    (is (= #{}
-           (sut/valid-targets :bogus-status)))))

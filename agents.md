@@ -84,8 +84,58 @@ See `standards/miniforge/CLAUDE.md` for authoritative descriptions. Summary:
 
 - **Stratified Design** — dependencies flow downward only; no cycles; pure Domain layer
 - **Simple Made Easy** — values over state; data over syntax; no speculative complexity
-- **PR Discipline** — one stratum per PR, <400 lines, branch from main, never bypass hooks
+- **PR Discipline** — one stratum per PR, <200 lines (enforced in CI by
+  `bb pr-budget`, mirroring the commit-time `bb commit-budget` gate),
+  branch from main, never bypass hooks
 - **Specification-Driven** — N-series specs are implementation contracts; code conforms to specs
+- **Adversarial Review Before Push** — before opening or pushing to any
+  PR, review your own diff adversarially: read every changed file
+  assuming something is wrong until you've verified it isn't, not just
+  clj-kondo/tests passing. This applies doubly to mechanical/generated
+  diffs (codemods, autofixers, bulk renames) — a diff being "supposed
+  to be" behavior-neutral is a claim to verify, not a fact to assume.
+  GitHub Copilot's automated review silently declines to comment at
+  all past its own size threshold, so a large PR that skips this step
+  may receive zero real review. See `## PR Size and Review Discipline`
+  below for the incident that motivated this.
+
+## PR Size and Review Discipline
+
+Two related, previously-missing gates, added 2026-07-26:
+
+- **`bb pr-budget`** (CI, `pull_request` events only): rejects a PR
+  whose whole merge-base..head diff exceeds 200 reportable lines
+  (same blank/comment/generated-path exclusions as `bb commit-budget`).
+  This is distinct from `commit-budget`, which only ever looked at one
+  commit's staged diff — a PR made of a single large commit (or several
+  commits each individually under budget) sailed through unchecked
+  before this existed. Override via a `MINIFORGE_PR_BUDGET_OVERRIDE:
+  <rationale>` line in the PR description, visible to every reviewer
+  on the PR (unlike the commit-level env-var override, visible only in
+  local shell history / CI logs).
+- **Adversarial self-review before every push**, not just for PRs that
+  trip the size gate. Read the actual diff like a skeptical reviewer,
+  not the tool's own "this should be safe" framing.
+
+**Why both, together:** a mechanical stratum-lint autofix program
+(2026-07 Wave 1 remediation, tracked in
+`work/stratum-lint-baseline-2026-07-24.md`) shipped several PRs of
+74-98 changed files and 10,000+ changed lines each, each as one
+`MINIFORGE_COMMIT_BUDGET_OVERRIDE`'d commit — legal under the
+commit-only gate that existed at the time. GitHub Copilot's automated
+review silently declined to post any comments at all on the largest of
+these (past its own undocumented size ceiling), so the only real
+review those PRs got was a dedicated adversarial pass run by hand,
+*after* several had already merged. That pass found real defects
+(a comment-attachment bug, an undisclosed behavior change buried
+inside a PR whose description claimed "mechanical, no logic changes,"
+several stale/contradictory comments) that plain CI (lint + tests
+green) had not and could not catch. `pr-budget` exists so a PR that
+size can't reach merge without either being split up or explicitly
+flagging its own size with a reviewable rationale; the adversarial-review
+principle exists because passing CI was never sufficient evidence of
+correctness for a mechanical diff this large, and treating it as
+sufficient is what let the gap open in the first place.
 
 ## Writing Spec Task Descriptions (`work/*.spec.edn`)
 

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.transition
   "State transition helpers for the Elm model.
 
@@ -26,56 +25,44 @@
    Layer 0 — no dependencies on other tui-views namespaces.")
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Flash messages
 
-(defn flash
+;; Flash messages
+(defn ^{:stratum 0} flash
   "Set a flash message on the model."
   [model msg]
   (assoc model :flash-message msg))
 
-;------------------------------------------------------------------------------ Layer 0b
 ;; Selection and filter defaults
-
-(def selection-defaults
+(def ^{:stratum 0} selection-defaults
   "Default values for selection/scroll state."
   {:selected-idx 0 :scroll-offset 0 :selected-ids #{} :visual-anchor nil})
 
-(def filter-defaults
+(def ^{:stratum 0} filter-defaults
   "Default values for search/filter state."
   {:filtered-indices nil :search-matches [] :search-match-idx nil})
 
-(defn reset-selection
-  "Reset selection and scroll state. Optionally clear filter state too."
-  ([model]
-   (merge model selection-defaults))
-  ([model {:keys [clear-filter?]}]
-   (cond-> (merge model selection-defaults)
-     clear-filter? (merge filter-defaults))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Mode transitions
-
-(defn enter-command
+(defn ^{:stratum 0} enter-command
   "Enter command mode with ':' prompt."
   [model]
   (assoc model :mode :command :command-buf ":"))
 
-(defn enter-search
+(defn ^{:stratum 0} enter-search
   "Enter search mode with '/' prompt."
   [model]
   (assoc model :mode :search :command-buf "/" :search-results []))
 
-(defn enter-filter
+(defn ^{:stratum 0} enter-filter
   "Enter filter mode with '>' prompt."
   [model]
   (assoc model :mode :filter :command-buf ">"))
 
-(defn enter-normal
+(defn ^{:stratum 0} enter-normal
   "Return to normal mode, clearing command buffer and search results."
   [model]
   (assoc model :mode :normal :command-buf "" :search-results []))
 
-(defn enter-normal-clear-all
+(defn ^{:stratum 0} enter-normal-clear-all
   "Return to normal mode and clear all filter/search/selection state."
   [model]
   (merge model {:mode :normal :command-buf ""
@@ -83,10 +70,8 @@
                 :search-matches [] :search-match-idx nil
                 :selected-idx 0 :active-filter nil}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; View switches
-
-(def detail-defaults
+(def ^{:stratum 0} detail-defaults
   "Default values for workflow drill-down state. Mirrors model/init-model :detail."
   {:workflow-id    nil
    :phases         []
@@ -101,7 +86,17 @@
    :pr-risk        nil
    :selected-train nil})
 
-(defn switch-view
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} reset-selection
+  "Reset selection and scroll state. Optionally clear filter state too."
+  ([model]
+   (merge model selection-defaults))
+  ([model {:keys [clear-filter?]}]
+   (cond-> (merge model selection-defaults)
+     clear-filter? (merge filter-defaults))))
+
+(defn ^{:stratum 1} switch-view
   "Switch to a top-level view, resetting navigation and detail state."
   [model view-key]
   (-> model

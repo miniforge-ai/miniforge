@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval.reply
   "N13 §2.5 Comment Response Agent — Layer 3b: reply + resolve.
 
@@ -28,11 +27,15 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.github :as github]))
 
-(defn- short-sha
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} short-sha
   [sha]
   (subs sha 0 (min 10 (count sha))))
 
-(defn- fix-reply-message
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} fix-reply-message
   [commit-sha fix]
   (str "Auto-applied in `" (short-sha commit-sha) "`:\n\n"
        "```diff\n"
@@ -41,7 +44,9 @@
        "```\n\n"
        "<sub>Posted by `policy-eval-responder` per N13 §2.5</sub>"))
 
-(defn reply-and-resolve-one!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} reply-and-resolve-one!
   "Post the reply on `comment-id`, look up the thread id, resolve it.
    Returns DAG result with `{:reply-posted :resolved :thread-id?}`.
    Resolution is best-effort — if the thread lookup or resolve call
@@ -62,7 +67,9 @@
                      :thread-id tid
                      :reply-url (-> reply-r :data :url)})))))))
 
-(defn reply-and-resolve-fixed!
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} reply-and-resolve-fixed!
   "For each applied fix, post a reply on its comment thread + resolve.
    Returns a vector of per-fix DAG results."
   [worktree-path pr-number commit-sha applied-fixes]

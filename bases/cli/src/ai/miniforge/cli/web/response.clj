@@ -15,30 +15,31 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web.response
   "HTTP response constructors."
   (:require
    [ai.miniforge.response.interface :as anomaly]))
 
-(defn html [body]
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} html [body]
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
    :body (str body)})
 
-(defn not-found [msg]
+(defn ^{:stratum 0} not-found [msg]
   {:status 404 :body msg})
 
-(defn bad-request [msg]
+(defn ^{:stratum 0} bad-request [msg]
   {:status 400 :body msg})
 
-(defn from-anomaly
+(defn ^{:stratum 0} from-anomaly
   "Create an HTTP response from a canonical anomaly map.
    Uses the boundary translator — only call at HTTP edges."
   [anomaly-map]
   (anomaly/anomaly->http-response anomaly-map))
 
-(defn sse-headers []
+(defn ^{:stratum 0} sse-headers []
   {:status 200
    :headers {"Content-Type" "text/event-stream"
              "Cache-Control" "no-cache"

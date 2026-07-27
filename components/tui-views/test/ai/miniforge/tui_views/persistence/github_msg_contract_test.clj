@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.tui-views.persistence.github-msg-contract-test
   "Contract tests verifying the msg/pr-diff-fetched constructor
    and handle-fetch-pr-diff produce messages that conform to the
@@ -29,9 +28,10 @@
    [ai.miniforge.tui-views.interface :as iface]
    [ai.miniforge.tui-views.persistence.github :as github]))
 
-;; ---------------------------------------------------------------------------- msg/pr-diff-fetched contract
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest pr-diff-fetched-is-two-element-vector-test
+;; ---------------------------------------------------------------------------- msg/pr-diff-fetched contract
+(deftest ^{:stratum 0} pr-diff-fetched-is-two-element-vector-test
   (testing "all arities produce [keyword map]"
     ;; success case
     (let [m (msg/pr-diff-fetched ["r" 1] "diff" {:title "T"} nil)]
@@ -46,7 +46,7 @@
       (is (keyword? (first m)))
       (is (map? (second m))))))
 
-(deftest pr-diff-fetched-payload-keys-contract-test
+(deftest ^{:stratum 0} pr-diff-fetched-payload-keys-contract-test
   (testing "payload always has :pr-id, :diff, :detail; :error only when present"
     ;; No error
     (let [[_ p] (msg/pr-diff-fetched ["r" 1] "d" {:t 1} nil)]
@@ -61,21 +61,20 @@
       (is (contains? p :detail))
       (is (contains? p :error)))))
 
-(deftest pr-diff-fetched-error-false-string-test
+(deftest ^{:stratum 0} pr-diff-fetched-error-false-string-test
   (testing "empty string error is truthy, so :error key IS included"
     ;; Note: empty string is truthy in Clojure (only nil and false are falsy)
     (let [[_ p] (msg/pr-diff-fetched ["r" 1] nil nil "")]
       (is (contains? p :error))
       (is (= "" (:error p))))))
 
-(deftest pr-diff-fetched-error-false-value-test
+(deftest ^{:stratum 0} pr-diff-fetched-error-false-value-test
   (testing "false as error is falsy, so :error key is omitted"
     (let [[_ p] (msg/pr-diff-fetched ["r" 1] nil nil false)]
       (is (not (contains? p :error))))))
 
 ;; ---------------------------------------------------------------------------- handle-fetch-pr-diff output contract
-
-(deftest handle-fetch-pr-diff-output-is-msg-vector-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-output-is-msg-vector-test
   (testing "handle-fetch-pr-diff always returns [msg-type payload] vector"
     ;; Success
     (with-redefs [github/fetch-pr-diff-and-detail
@@ -92,7 +91,7 @@
         (is (= 2 (count result)))
         (is (= :msg/pr-diff-fetched (first result)))))))
 
-(deftest handle-fetch-pr-diff-pr-id-is-vector-pair-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-pr-id-is-vector-pair-test
   (testing ":pr-id is always [repo-string number-long]"
     (with-redefs [github/fetch-pr-diff-and-detail
                   (fn [_ _] {:diff nil :detail nil :repo "org/lib" :number 99})]
@@ -102,7 +101,7 @@
         (is (string? (first (:pr-id payload))))
         (is (integer? (second (:pr-id payload))))))))
 
-(deftest handle-fetch-pr-diff-pr-id-from-string-number-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-pr-id-from-string-number-test
   (testing ":pr-id number component is long even when input is string"
     (with-redefs [github/fetch-pr-diff-and-detail
                   (fn [_ _] {:diff nil :detail nil :repo "r" :number 42})]
@@ -110,7 +109,7 @@
         (is (= ["r" 42] (:pr-id payload)))
         (is (integer? (second (:pr-id payload))))))))
 
-(deftest handle-fetch-pr-diff-error-only-on-total-failure-test
+(deftest ^{:stratum 0} handle-fetch-pr-diff-error-only-on-total-failure-test
   (testing "error is set only when BOTH diff and detail are nil"
     ;; Both nil → error
     (with-redefs [github/fetch-pr-diff-and-detail

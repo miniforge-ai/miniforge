@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.resume
   "CLI adapter for workflow resume.
 
@@ -44,63 +43,30 @@
    [ai.miniforge.workflow-resume.interface :as wr]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Events dir (module-level for test redef-ability)
 
-(def events-dir
+;; Events dir (module-level for test redef-ability)
+(def ^{:stratum 0} events-dir
   (app-config/events-dir))
 
-(def load-workflow
+(def ^{:stratum 0} load-workflow
   "Workflow loader dependency, exposed as a var so tests can rebind the
    CLI boundary without dynamic namespace resolution."
   workflow/load-workflow)
 
-(def run-pipeline
+(def ^{:stratum 0} run-pipeline
   "Workflow runner dependency, exposed as a var so tests can rebind the
    CLI boundary without dynamic namespace resolution."
   workflow/run-pipeline)
 
-(defn- anomaly-category
+(defn- ^{:stratum 0} anomaly-category
   [a]
   (case (:anomaly/type a)
     :not-found :anomalies/not-found
     :invalid-input :anomalies/incorrect
     :anomalies/fault))
 
-(defn- throw-resume-anomaly!
-  [a]
-  (when (anomaly/anomaly? a)
-    (response/throw-anomaly! (anomaly-category a)
-                             (:anomaly/message a)
-                             (merge (:anomaly/data a)
-                                    (select-keys a [:anomaly/type
-                                                    :anomaly/subtype
-                                                    :anomaly/at])))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Thin delegations kept for compatibility with existing callers/tests
-
-(defn read-event-file
-  "Read events for a workflow. Thin wrapper — the actual replay lives
-   in `event-stream/reader`. Prefer calling the component directly in
-   new code."
-  [workflow-id]
-  (es/read-workflow-events-by-id events-dir workflow-id))
-
-(defn resolve-resume-workflow
-  "Resolve workflow identity for a resumed run, using the CLI's
-   default selection profile as fallback. Thin wrapper over the
-   component's `resolve-workflow-identity`."
-  [reconstructed]
-  (let [result (wr/resolve-workflow-identity
-                reconstructed
-                #(selection-config/resolve-selection-profile :default))]
-    (throw-resume-anomaly! result)
-    result))
-
-;------------------------------------------------------------------------------ Layer 1.5
 ;; Status semantics
-
-(def terminal-statuses
+(def ^{:stratum 0} terminal-statuses
   "Workflow execution statuses that mean the run has actually finished —
    either successfully or definitively failed. Anything outside this set
    (`:running`, `:pending`, `:paused`, nil) means the runner returned
@@ -108,12 +74,7 @@
    fast-fail blocker filed as work/workflow-resume-status-handling.spec.edn."
   #{:completed :completed-with-warnings :failed :aborted :cancelled})
 
-(defn terminal-status?
-  "True when `status` represents a finished workflow."
-  [status]
-  (contains? terminal-statuses status))
-
-(defn- resume-print-phase
+(defn- ^{:stratum 0} resume-print-phase
   "Pick the phase name to render in `Resuming from phase: X`. Prefer
    the FSM machine snapshot's recorded `:execution/current-phase` so
    the print reflects where the run actually parked — falling back to
@@ -124,10 +85,48 @@
         (some-> (:execution/current-phase machine-snapshot) name))
       (some-> (:phase (first remaining-pipeline)) name)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Public API — invoked by both `mf resume <id>` and `mf run --resume`
+;------------------------------------------------------------------------------ Layer 1
 
-(defn resume-workflow
+(defn- ^{:stratum 1} throw-resume-anomaly!
+  [a]
+  (when (anomaly/anomaly? a)
+    (response/throw-anomaly! (anomaly-category a)
+                             (:anomaly/message a)
+                             (merge (:anomaly/data a)
+                                    (select-keys a [:anomaly/type
+                                                    :anomaly/subtype
+                                                    :anomaly/at])))))
+
+;; Thin delegations kept for compatibility with existing callers/tests
+(defn ^{:stratum 1} read-event-file
+  "Read events for a workflow. Thin wrapper — the actual replay lives
+   in `event-stream/reader`. Prefer calling the component directly in
+   new code."
+  [workflow-id]
+  (es/read-workflow-events-by-id events-dir workflow-id))
+
+(defn ^{:stratum 1} terminal-status?
+  "True when `status` represents a finished workflow."
+  [status]
+  (contains? terminal-statuses status))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} resolve-resume-workflow
+  "Resolve workflow identity for a resumed run, using the CLI's
+   default selection profile as fallback. Thin wrapper over the
+   component's `resolve-workflow-identity`."
+  [reconstructed]
+  (let [result (wr/resolve-workflow-identity
+                reconstructed
+                #(selection-config/resolve-selection-profile :default))]
+    (throw-resume-anomaly! result)
+    result))
+
+;------------------------------------------------------------------------------ Layer 3
+
+;; Public API — invoked by both `mf resume <id>` and `mf run --resume`
+(defn ^{:stratum 3} resume-workflow
   "Resume a workflow from its last checkpoint.
 
    Reconstructs context via the workflow-resume component, trims the

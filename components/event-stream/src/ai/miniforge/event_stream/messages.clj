@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.messages
   "Component-level message catalog for event-stream.
    Delegates to the shared messages component."
   (:require [ai.miniforge.messages.interface :as messages]))
 
-(def t
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} t
   "Look up an event-stream message by key, with optional param substitution."
   (messages/create-translator "config/event-stream/messages/en-US.edn"
                               :event-stream/messages))

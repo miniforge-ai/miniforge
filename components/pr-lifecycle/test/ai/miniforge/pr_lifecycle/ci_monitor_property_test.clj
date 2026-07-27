@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.ci-monitor-property-test
   "Property-based tests for CI monitor status computation.
 
@@ -31,32 +30,66 @@
    [ai.miniforge.pr-lifecycle.ci-monitor :as ci]
    [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(def valid-states
+;------------------------------------------------------------------------------ Helpers
+(def ^{:stratum 0} valid-states
   "Realistic GitHub check states."
   ["COMPLETED" "QUEUED" "WAITING" "IN_PROGRESS" nil])
 
-(def valid-conclusions
+(def ^{:stratum 0} valid-conclusions
   "Realistic GitHub check conclusions."
   ["SUCCESS" "FAILURE" "NEUTRAL" "CANCELLED" "SKIPPED"
    "ACTION_REQUIRED" "TIMED_OUT" nil])
 
-(defn random-check
+;------------------------------------------------------------------------------ Property: All-success yields :success
+(deftest ^{:stratum 0} compute-ci-status-all-success-test
+  (testing "Property: all COMPLETED/SUCCESS checks always yield :success"
+    (doseq [n (range 1 20)]
+      (let [checks (vec (repeat n {:name "test" :state "COMPLETED" :conclusion "SUCCESS"}))
+            result (ci/compute-ci-status checks)]
+        (is (response/success? result)
+            (str n " SUCCESS checks should yield :success"))))))
+
+;------------------------------------------------------------------------------ Property: Empty yields :unknown
+(deftest ^{:stratum 0} compute-ci-status-empty-yields-unknown-test
+  (testing "Property: empty checks always yield :unknown"
+    ;; Run multiple times to ensure consistency
+    (dotimes [_ 10]
+      (is (= :unknown (:status (ci/compute-ci-status [])))))))
+
+;------------------------------------------------------------------------------ Property: Pending blocks success
+(deftest ^{:stratum 0} compute-ci-status-pending-blocks-success-test
+  (testing "Property: QUEUED check prevents :success status (unless failure present)"
+    (dotimes [_ 50]
+      (let [success-checks (vec (for [i (range (inc (rand-int 5)))]
+                                  {:name (str "pass-" i) :state "COMPLETED" :conclusion "SUCCESS"}))
+            pending-check {:name "queued" :state "QUEUED" :conclusion nil}
+            checks (conj success-checks pending-check)
+            result (ci/compute-ci-status checks)]
+        (is (= :pending (:status result))
+            "QUEUED check should block :success status")))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} random-check
   "Generate a random CI check map."
   [i]
   {:name (str "check-" i)
    :state (rand-nth valid-states)
    :conclusion (rand-nth valid-conclusions)})
 
-(defn random-checks
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} random-checks
   "Generate n random CI check maps."
   [n]
   (mapv random-check (range n)))
 
-;------------------------------------------------------------------------------ Property: Total invariant
+;------------------------------------------------------------------------------ Layer 3
 
-(deftest compute-ci-status-total-invariant-test
+;------------------------------------------------------------------------------ Property: Total invariant
+(deftest ^{:stratum 3} compute-ci-status-total-invariant-test
   (testing "Property: :total always equals input count for random checks"
     (dotimes [_ 100]
       (let [n (rand-int 20)
@@ -66,8 +99,7 @@
             (str "Total should be " n " for " n " checks"))))))
 
 ;------------------------------------------------------------------------------ Property: Status in ci-statuses
-
-(deftest compute-ci-status-recognized-status-test
+(deftest ^{:stratum 3} compute-ci-status-recognized-status-test
   (testing "Property: status is always a member of ci-statuses for random checks"
     (dotimes [_ 100]
       (let [checks (random-checks (rand-int 20))
@@ -76,8 +108,7 @@
             (str "Status " (:status result) " should be in ci-statuses"))))))
 
 ;------------------------------------------------------------------------------ Property: Result map shape
-
-(deftest compute-ci-status-result-shape-test
+(deftest ^{:stratum 3} compute-ci-status-result-shape-test
   (testing "Property: result always contains required keys"
     (dotimes [_ 50]
       (let [checks (random-checks (rand-int 15))
@@ -95,8 +126,7 @@
         (is (integer? (:total result)))))))
 
 ;------------------------------------------------------------------------------ Property: Failure precedence
-
-(deftest compute-ci-status-failure-precedence-test
+(deftest ^{:stratum 3} compute-ci-status-failure-precedence-test
   (testing "Property: if any check has FAILURE conclusion with COMPLETED state, status is :failure"
     (dotimes [_ 50]
       (let [base-checks (random-checks (rand-int 10))
@@ -106,40 +136,8 @@
         (is (= :failure (:status result))
             "Failure should always take precedence")))))
 
-;------------------------------------------------------------------------------ Property: All-success yields :success
-
-(deftest compute-ci-status-all-success-test
-  (testing "Property: all COMPLETED/SUCCESS checks always yield :success"
-    (doseq [n (range 1 20)]
-      (let [checks (vec (repeat n {:name "test" :state "COMPLETED" :conclusion "SUCCESS"}))
-            result (ci/compute-ci-status checks)]
-        (is (response/success? result)
-            (str n " SUCCESS checks should yield :success"))))))
-
-;------------------------------------------------------------------------------ Property: Empty yields :unknown
-
-(deftest compute-ci-status-empty-yields-unknown-test
-  (testing "Property: empty checks always yield :unknown"
-    ;; Run multiple times to ensure consistency
-    (dotimes [_ 10]
-      (is (= :unknown (:status (ci/compute-ci-status [])))))))
-
-;------------------------------------------------------------------------------ Property: Pending blocks success
-
-(deftest compute-ci-status-pending-blocks-success-test
-  (testing "Property: QUEUED check prevents :success status (unless failure present)"
-    (dotimes [_ 50]
-      (let [success-checks (vec (for [i (range (inc (rand-int 5)))]
-                                  {:name (str "pass-" i) :state "COMPLETED" :conclusion "SUCCESS"}))
-            pending-check {:name "queued" :state "QUEUED" :conclusion nil}
-            checks (conj success-checks pending-check)
-            result (ci/compute-ci-status checks)]
-        (is (= :pending (:status result))
-            "QUEUED check should block :success status")))))
-
 ;------------------------------------------------------------------------------ Property: Grouped counts are non-negative
-
-(deftest compute-ci-status-grouped-counts-non-negative-test
+(deftest ^{:stratum 3} compute-ci-status-grouped-counts-non-negative-test
   (testing "Property: all grouped count vectors have non-negative length"
     (dotimes [_ 50]
       (let [checks (random-checks (rand-int 15))
@@ -150,8 +148,7 @@
         (is (>= (count (:neutral result)) 0))))))
 
 ;------------------------------------------------------------------------------ Property: Deterministic
-
-(deftest compute-ci-status-deterministic-test
+(deftest ^{:stratum 3} compute-ci-status-deterministic-test
   (testing "Property: same input always produces same output"
     (dotimes [_ 20]
       (let [checks (random-checks (inc (rand-int 10)))

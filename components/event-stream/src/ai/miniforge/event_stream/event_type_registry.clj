@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.event-type-registry
   "Authoritative registry of all server-side event types and their browser coverage.
 
@@ -52,12 +51,14 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Registry — loaded from EDN resource
 
-(def ^:private registry-resource-path
+;; Registry — loaded from EDN resource
+(def ^{:stratum 0} ^:private registry-resource-path
   "config/event-stream/event-type-registry.edn")
 
-(def event-type-registry
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} event-type-registry
   "Complete mapping from constructor symbol name (as string) to serialised
    JSON event-type string, grouped by originating namespace.
 
@@ -74,37 +75,25 @@
       slurp
       edn/read-string))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Derived views
+;------------------------------------------------------------------------------ Layer 2
 
-(def browser-handled-events
+;; Derived views
+(def ^{:stratum 2} browser-handled-events
   "The 6 event types currently handled in `handleWorkflowEvent` in app.js.
    All strings confirmed correct — no mismatches."
   (->> event-type-registry
        (filter :browser?)
        (mapv :json-string)))
+
 ;; => ["workflow/started" "workflow/phase-started" "workflow/phase-completed"
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
-
-(def browser-unhandled-events
+(def ^{:stratum 2} browser-unhandled-events
   "Event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7."
   (->> event-type-registry
        (remove :browser?)
        (mapv :json-string)))
 
-(def naming-asymmetries
-  "13 constructors whose function name does not predict the namespace portion
-   of the serialised event-type string.  A developer reading only
-   `interface/events.clj` would guess the wrong browser case string.
-
-   Format: [constructor → json-string (note)]"
-  (->> event-type-registry
-       (filter :asymmetry?)
-       (mapv (fn [{:keys [constructor json-string asymmetry-note]}]
-               {:constructor    constructor
-                :json-string    json-string
-                :asymmetry-note asymmetry-note}))))
 ;; Asymmetries at a glance:
 ;;
 ;;   milestone-reached          → "workflow/milestone-reached"   (namespace: milestone → workflow)
@@ -118,11 +107,23 @@
 ;;   cp-agent-state-changed     → "control-plane/agent-state-changed" (prefix cp → control-plane)
 ;;   cp-decision-created        → "control-plane/decision-created"  (prefix cp → control-plane)
 ;;   cp-decision-resolved       → "control-plane/decision-resolved" (prefix cp → control-plane)
+(def ^{:stratum 2} naming-asymmetries
+  "13 constructors whose function name does not predict the namespace portion
+   of the serialised event-type string.  A developer reading only
+   `interface/events.clj` would guess the wrong browser case string.
 
-;------------------------------------------------------------------------------ Layer 0
+   Format: [constructor → json-string (note)]"
+  (->> event-type-registry
+       (filter :asymmetry?)
+       (mapv (fn [{:keys [constructor json-string asymmetry-note]}]
+               {:constructor    constructor
+                :json-string    json-string
+                :asymmetry-note asymmetry-note}))))
+
+;------------------------------------------------------------------------------ Layer 3
+
 ;; Audit summary (machine-readable)
-
-(def audit-summary
+(def ^{:stratum 3} audit-summary
   {:audit/date          "2026-05-24"
    :audit/source-server "components/event-stream/src/ai/miniforge/event_stream/interface/events.clj"
    :audit/source-browser "components/web-dashboard/resources/public/js/app.js"

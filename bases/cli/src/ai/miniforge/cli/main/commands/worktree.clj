@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.worktree
   "User-facing helpers for resolving and executing inside the correct worktree."
   (:require
@@ -26,24 +25,26 @@
    [ai.miniforge.cli.worktree :as worktree]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure helpers
 
-(defn command-args
+;; Pure helpers
+(defn ^{:stratum 0} command-args
   [m]
   (vec (get m :args [])))
 
-(defn command-target
+(defn ^{:stratum 0} command-target
   [opts]
   (get opts :path (System/getProperty "user.dir")))
 
-(defn resolve-root
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} resolve-root
   [opts]
   (worktree/worktree-root (command-target opts)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Execution
+;------------------------------------------------------------------------------ Layer 2
 
-(defn path-cmd
+;; Execution
+(defn ^{:stratum 2} path-cmd
   [opts]
   (let [root (resolve-root opts)
         target (command-target opts)]
@@ -54,7 +55,7 @@
          (messages/t :worktree/root-not-found {:path target}))
         (System/exit 1)))))
 
-(defn run-cmd
+(defn ^{:stratum 2} run-cmd
   [opts args]
   (let [root (resolve-root opts)
         target (command-target opts)
@@ -84,7 +85,9 @@
             exit (get @proc :exit 1)]
         (System/exit exit)))))
 
-(defn worktree-cmd
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} worktree-cmd
   [m]
   (let [opts (if (contains? m :opts) (:opts m) m)
         args (command-args m)

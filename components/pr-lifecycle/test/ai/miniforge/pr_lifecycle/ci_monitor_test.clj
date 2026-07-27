@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.ci-monitor-test
   "Unit tests for CI monitoring.
 
@@ -30,15 +29,16 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.response.interface :as response]))
 
-;------------------------------------------------------------------------------ Status Types
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest ci-statuses-test
+;------------------------------------------------------------------------------ Status Types
+(deftest ^{:stratum 0} ci-statuses-test
   (testing "All expected CI statuses are defined"
     (is (= 7 (count ci/ci-statuses)))
     (are [status] (contains? ci/ci-statuses status)
       :pending :success :failure :neutral :cancelled :timed-out :unknown)))
 
-(deftest terminal-statuses-test
+(deftest ^{:stratum 0} terminal-statuses-test
   (testing "Terminal statuses are a subset of CI statuses"
     (is (every? ci/ci-statuses ci/terminal-statuses)))
   (testing "Pending and unknown are not terminal"
@@ -46,8 +46,7 @@
     (is (not (contains? ci/terminal-statuses :unknown)))))
 
 ;------------------------------------------------------------------------------ Status Computation
-
-(deftest compute-ci-status-all-passing-test
+(deftest ^{:stratum 0} compute-ci-status-all-passing-test
   (testing "All checks passing yields :success"
     (let [checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
                   {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}
@@ -59,7 +58,7 @@
       (is (empty? (:pending result)))
       (is (= 3 (:total result))))))
 
-(deftest compute-ci-status-with-failure-test
+(deftest ^{:stratum 0} compute-ci-status-with-failure-test
   (testing "Any failure yields :failure even if others pass"
     (let [checks [{:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}
                   {:name "lint" :state "COMPLETED" :conclusion "FAILURE"}]
@@ -68,7 +67,7 @@
       (is (= 1 (count (:failed result))))
       (is (= 1 (count (:passed result)))))))
 
-(deftest compute-ci-status-pending-test
+(deftest ^{:stratum 0} compute-ci-status-pending-test
   (testing "Queued checks yield :pending status"
     (let [checks [{:name "tests" :state "QUEUED" :conclusion nil}
                   {:name "lint" :state "COMPLETED" :conclusion "SUCCESS"}]
@@ -82,34 +81,34 @@
       (is (response/success? result)
           "IN_PROGRESS maps to :in_progress (underscore), not :in-progress (hyphen), so it falls to :unknown"))))
 
-(deftest compute-ci-status-failure-takes-precedence-over-pending-test
+(deftest ^{:stratum 0} compute-ci-status-failure-takes-precedence-over-pending-test
   (testing "Failure takes precedence over pending"
     (let [checks [{:name "tests" :state "COMPLETED" :conclusion "FAILURE"}
                   {:name "lint" :state "IN_PROGRESS" :conclusion nil}]
           result (ci/compute-ci-status checks)]
       (is (= :failure (:status result))))))
 
-(deftest compute-ci-status-queued-test
+(deftest ^{:stratum 0} compute-ci-status-queued-test
   (testing "Queued checks count as pending"
     (let [checks [{:name "tests" :state "QUEUED" :conclusion nil}]
           result (ci/compute-ci-status checks)]
       (is (= :pending (:status result)))
       (is (= 1 (count (:pending result)))))))
 
-(deftest compute-ci-status-neutral-test
+(deftest ^{:stratum 0} compute-ci-status-neutral-test
   (testing "Only neutral checks yield :neutral"
     (let [checks [{:name "optional" :state "COMPLETED" :conclusion "NEUTRAL"}]
           result (ci/compute-ci-status checks)]
       (is (= :neutral (:status result)))
       (is (= 1 (count (:neutral result)))))))
 
-(deftest compute-ci-status-empty-checks-test
+(deftest ^{:stratum 0} compute-ci-status-empty-checks-test
   (testing "Empty checks yield :unknown"
     (let [result (ci/compute-ci-status [])]
       (is (= :unknown (:status result)))
       (is (= 0 (:total result))))))
 
-(deftest compute-ci-status-cancelled-test
+(deftest ^{:stratum 0} compute-ci-status-cancelled-test
   (testing "Cancelled checks are grouped correctly"
     (let [checks [{:name "tests" :state "COMPLETED" :conclusion "CANCELLED"}]
           result (ci/compute-ci-status checks)]
@@ -117,13 +116,13 @@
       ;; in the final output; it falls through to check other conditions
       (is (some? (:status result))))))
 
-(deftest compute-ci-status-action-required-test
+(deftest ^{:stratum 0} compute-ci-status-action-required-test
   (testing "Action required counts as failure"
     (let [checks [{:name "review" :state "COMPLETED" :conclusion "ACTION_REQUIRED"}]
           result (ci/compute-ci-status checks)]
       (is (= :failure (:status result))))))
 
-(deftest compute-ci-status-skipped-test
+(deftest ^{:stratum 0} compute-ci-status-skipped-test
   (testing "Skipped checks count as neutral"
     (let [checks [{:name "optional" :state "COMPLETED" :conclusion "SKIPPED"}
                   {:name "tests" :state "COMPLETED" :conclusion "SUCCESS"}]
@@ -131,21 +130,20 @@
       (is (response/success? result)
           "Success should take precedence over neutral"))))
 
-(deftest compute-ci-status-waiting-test
+(deftest ^{:stratum 0} compute-ci-status-waiting-test
   (testing "Waiting state counts as pending"
     (let [checks [{:name "deploy" :state "WAITING" :conclusion nil}]
           result (ci/compute-ci-status checks)]
       (is (= :pending (:status result))))))
 
-(deftest compute-ci-status-nil-state-test
+(deftest ^{:stratum 0} compute-ci-status-nil-state-test
   (testing "Nil state and conclusion handled gracefully"
     (let [checks [{:name "unknown" :state nil :conclusion nil}]
           result (ci/compute-ci-status checks)]
       (is (some? (:status result))))))
 
 ;------------------------------------------------------------------------------ Monitor Creation
-
-(deftest create-ci-monitor-test
+(deftest ^{:stratum 0} create-ci-monitor-test
   (testing "Monitor initializes with correct state"
     (let [dag-id (random-uuid)
           run-id (random-uuid)
@@ -161,7 +159,7 @@
       (is (nil? (:started-at @monitor)))
       (is (= 0 (:polls @monitor))))))
 
-(deftest create-ci-monitor-custom-options-test
+(deftest ^{:stratum 0} create-ci-monitor-custom-options-test
   (testing "Monitor respects custom options"
     (let [bus (atom {})
           monitor (ci/create-ci-monitor
@@ -173,7 +171,7 @@
       (is (= 60000 (:timeout-ms @monitor)))
       (is (= bus (:event-bus @monitor))))))
 
-(deftest create-ci-monitor-defaults-test
+(deftest ^{:stratum 0} create-ci-monitor-defaults-test
   (testing "Monitor uses sensible defaults"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 1 "/tmp")]
@@ -182,8 +180,7 @@
       (is (nil? (:event-bus @monitor))))))
 
 ;------------------------------------------------------------------------------ Stop Monitor
-
-(deftest stop-ci-monitor-test
+(deftest ^{:stratum 0} stop-ci-monitor-test
   (testing "stop-ci-monitor sets running? to false"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 1 "/tmp")]
@@ -193,8 +190,7 @@
       (is (false? (:running? @monitor))))))
 
 ;------------------------------------------------------------------------------ Mocked gh CLI: run-gh-command
-
-(deftest run-gh-command-success-test
+(deftest ^{:stratum 0} run-gh-command-success-test
   (testing "Successful gh command returns dag/ok with trimmed output"
     (with-redefs [babashka.process/shell
                   (fn [& _args]
@@ -203,7 +199,7 @@
         (is (dag/ok? result))
         (is (= "some output" (:output (:data result))))))))
 
-(deftest run-gh-command-failure-test
+(deftest ^{:stratum 0} run-gh-command-failure-test
   (testing "Failed gh command returns dag/err with error message"
     (with-redefs [babashka.process/shell
                   (fn [& _args]
@@ -212,7 +208,7 @@
         (is (dag/err? result))
         (is (= :gh-command-failed (get-in result [:error :code])))))))
 
-(deftest run-gh-command-exception-test
+(deftest ^{:stratum 0} run-gh-command-exception-test
   (testing "Exception during gh command returns dag/err"
     (with-redefs [babashka.process/shell
                   (fn [& _args]
@@ -222,8 +218,7 @@
         (is (= :gh-exception (get-in result [:error :code])))))))
 
 ;------------------------------------------------------------------------------ Mocked gh CLI: get-pr-checks
-
-(deftest get-pr-checks-success-test
+(deftest ^{:stratum 0} get-pr-checks-success-test
   (testing "get-pr-checks returns parsed checks on success"
     (with-redefs [ci/run-gh-command
                   (fn [_args _path]
@@ -232,7 +227,7 @@
         (is (dag/ok? result))
         (is (vector? (:checks (:data result))))))))
 
-(deftest get-pr-checks-unparseable-output-test
+(deftest ^{:stratum 0} get-pr-checks-unparseable-output-test
   (testing "get-pr-checks falls back to empty checks on parse error"
     (with-redefs [ci/run-gh-command
                   (fn [_args _path]
@@ -242,7 +237,7 @@
         (is (= [] (:checks (:data result))))
         (is (some? (:raw (:data result))))))))
 
-(deftest get-pr-checks-failure-propagates-test
+(deftest ^{:stratum 0} get-pr-checks-failure-propagates-test
   (testing "get-pr-checks propagates error when gh command fails"
     (with-redefs [ci/run-gh-command
                   (fn [_args _path]
@@ -251,7 +246,7 @@
         (is (dag/err? result))
         (is (= :gh-command-failed (get-in result [:error :code])))))))
 
-(deftest get-pr-checks-empty-json-array-test
+(deftest ^{:stratum 0} get-pr-checks-empty-json-array-test
   (testing "get-pr-checks handles empty JSON array (no checks configured)"
     (with-redefs [ci/run-gh-command
                   (fn [_args _path]
@@ -262,8 +257,7 @@
         (is (some? (:data result)))))))
 
 ;------------------------------------------------------------------------------ Mocked poll-ci-status
-
-(deftest poll-ci-status-success-all-passing-test
+(deftest ^{:stratum 0} poll-ci-status-success-all-passing-test
   (testing "poll-ci-status returns :success when all checks pass"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -277,7 +271,7 @@
         (is (= 2 (count (:passed (:checks result)))))
         (is (empty? (:failed (:checks result))))))))
 
-(deftest poll-ci-status-with-failures-test
+(deftest ^{:stratum 0} poll-ci-status-with-failures-test
   (testing "poll-ci-status returns :failure when any check fails"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -290,7 +284,7 @@
         (is (= :failure (:status result)))
         (is (= 1 (count (:failed (:checks result)))))))))
 
-(deftest poll-ci-status-pending-checks-test
+(deftest ^{:stratum 0} poll-ci-status-pending-checks-test
   (testing "poll-ci-status returns :pending when checks are still running"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -304,7 +298,7 @@
         (is (nil? (:event result))
             "No event should be generated for non-terminal status")))))
 
-(deftest poll-ci-status-no-checks-test
+(deftest ^{:stratum 0} poll-ci-status-no-checks-test
   (testing "poll-ci-status returns :unknown when no checks exist"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -317,7 +311,7 @@
         (is (nil? (:event result))
             "No event for :unknown status")))))
 
-(deftest poll-ci-status-gh-failure-returns-unknown-test
+(deftest ^{:stratum 0} poll-ci-status-gh-failure-returns-unknown-test
   (testing "poll-ci-status returns :unknown on gh command failure"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -329,7 +323,7 @@
         (is (= :unknown (:status result)))
         (is (some? (:error result)))))))
 
-(deftest poll-ci-status-increments-poll-count-test
+(deftest ^{:stratum 0} poll-ci-status-increments-poll-count-test
   (testing "Each poll increments the poll counter"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -342,7 +336,7 @@
         (ci/poll-ci-status monitor nil)
         (is (= 3 (:polls @monitor)))))))
 
-(deftest poll-ci-status-updates-last-poll-timestamp-test
+(deftest ^{:stratum 0} poll-ci-status-updates-last-poll-timestamp-test
   (testing "Poll sets last-poll timestamp"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -354,7 +348,7 @@
         (ci/poll-ci-status monitor nil)
         (is (inst? (:last-poll @monitor)))))))
 
-(deftest poll-ci-status-updates-monitor-status-test
+(deftest ^{:stratum 0} poll-ci-status-updates-monitor-status-test
   (testing "Poll updates the monitor atom's :status field"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -367,8 +361,7 @@
         (is (response/success? @monitor))))))
 
 ;------------------------------------------------------------------------------ Status Change Detection
-
-(deftest poll-ci-status-generates-ci-passed-event-test
+(deftest ^{:stratum 0} poll-ci-status-generates-ci-passed-event-test
   (testing "Transition to :success generates a :pr/ci-passed event"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -383,7 +376,7 @@
         (is (= :pr/ci-passed (:event/type (:event result))))
         (is (= 42 (:pr/id (:event result))))))))
 
-(deftest poll-ci-status-generates-ci-failed-event-test
+(deftest ^{:stratum 0} poll-ci-status-generates-ci-failed-event-test
   (testing "Transition to :failure generates a :pr/ci-failed event"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -399,7 +392,7 @@
         (is (string? (:ci/logs (:event result)))
             "Failed event should include log summary")))))
 
-(deftest poll-ci-status-no-event-for-pending-test
+(deftest ^{:stratum 0} poll-ci-status-no-event-for-pending-test
   (testing "No event generated when status remains :pending"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -416,7 +409,7 @@
           (is (= :pending (:status r2)))
           (is (nil? (:event r2))))))))
 
-(deftest poll-ci-status-no-event-for-unknown-on-error-test
+(deftest ^{:stratum 0} poll-ci-status-no-event-for-unknown-on-error-test
   (testing "No event generated when poll fails (:unknown is non-terminal)"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -429,7 +422,7 @@
         (is (nil? (:event result))
             ":unknown is non-terminal, no event should be emitted")))))
 
-(deftest poll-ci-status-neutral-generates-event-test
+(deftest ^{:stratum 0} poll-ci-status-neutral-generates-event-test
   (testing "Transition to :neutral (terminal) generates a ci-failed event"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -443,7 +436,7 @@
         (is (some? (:event result)))
         (is (= :pr/ci-failed (:event/type (:event result))))))))
 
-(deftest poll-ci-status-failed-event-includes-check-names-test
+(deftest ^{:stratum 0} poll-ci-status-failed-event-includes-check-names-test
   (testing "Failed event logs mention the names of failed checks"
     (with-redefs [ci/get-pr-checks
                   (fn [_path _pr]
@@ -462,13 +455,12 @@
             "Logs should mention all failed check names")))))
 
 ;------------------------------------------------------------------------------ Retry Logic on Transient Failures
-
-(deftest poll-ci-status-unknown-is-non-terminal-test
+(deftest ^{:stratum 0} poll-ci-status-unknown-is-non-terminal-test
   (testing ":unknown from transient failure is non-terminal, allowing retry"
     (is (not (contains? ci/terminal-statuses :unknown))
         ":unknown must not be terminal so monitor continues polling")))
 
-(deftest run-ci-monitor-retry-on-transient-failure-test
+(deftest ^{:stratum 0} run-ci-monitor-retry-on-transient-failure-test
   (testing "Monitor retries after transient failures and eventually succeeds"
     (let [call-count (atom 0)
           monitor (ci/create-ci-monitor
@@ -489,7 +481,7 @@
           (is (>= @call-count 3)
               "Should have polled at least 3 times (2 failures + 1 success)"))))))
 
-(deftest run-ci-monitor-retry-mixed-failures-then-real-failure-test
+(deftest ^{:stratum 0} run-ci-monitor-retry-mixed-failures-then-real-failure-test
   (testing "Monitor retries transient errors but stops at genuine CI failure"
     (let [call-count (atom 0)
           monitor (ci/create-ci-monitor
@@ -510,8 +502,7 @@
           (is (>= @call-count 3)))))))
 
 ;------------------------------------------------------------------------------ Timeout Handling
-
-(deftest run-ci-monitor-timeout-with-pending-checks-test
+(deftest ^{:stratum 0} run-ci-monitor-timeout-with-pending-checks-test
   (testing "Monitor times out when checks stay pending indefinitely"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -526,7 +517,7 @@
           (is (false? (:running? @monitor))
               "Monitor should be stopped after timeout"))))))
 
-(deftest run-ci-monitor-timeout-with-persistent-errors-test
+(deftest ^{:stratum 0} run-ci-monitor-timeout-with-persistent-errors-test
   (testing "Monitor times out when gh command keeps failing"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -539,7 +530,7 @@
           (is (= :timed-out (:status result)))
           (is (true? (:timeout result))))))))
 
-(deftest run-ci-monitor-timeout-sets-monitor-status-test
+(deftest ^{:stratum 0} run-ci-monitor-timeout-sets-monitor-status-test
   (testing "Timeout sets monitor atom status to :timed-out"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -552,8 +543,7 @@
         (is (= :timed-out (:status @monitor)))))))
 
 ;------------------------------------------------------------------------------ run-ci-monitor: Successful Completion
-
-(deftest run-ci-monitor-success-completes-immediately-test
+(deftest ^{:stratum 0} run-ci-monitor-success-completes-immediately-test
   (testing "Monitor completes immediately when first poll shows success"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -566,7 +556,7 @@
           (is (response/success? result))
           (is (false? (:running? @monitor))))))))
 
-(deftest run-ci-monitor-failure-completes-immediately-test
+(deftest ^{:stratum 0} run-ci-monitor-failure-completes-immediately-test
   (testing "Monitor completes immediately when first poll shows failure"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -580,8 +570,7 @@
           (is (false? (:running? @monitor))))))))
 
 ;------------------------------------------------------------------------------ run-ci-monitor: Callbacks
-
-(deftest run-ci-monitor-on-poll-callback-test
+(deftest ^{:stratum 0} run-ci-monitor-on-poll-callback-test
   (testing "on-poll callback is invoked for each poll cycle"
     (let [poll-results (atom [])
           call-count (atom 0)
@@ -602,7 +591,7 @@
         (is (response/success? (last @poll-results))
             "Last poll result should be the terminal one")))))
 
-(deftest run-ci-monitor-on-complete-callback-test
+(deftest ^{:stratum 0} run-ci-monitor-on-complete-callback-test
   (testing "on-complete callback is invoked with final result"
     (let [complete-result (atom nil)
           monitor (ci/create-ci-monitor
@@ -618,8 +607,7 @@
         (is (response/success? @complete-result))))))
 
 ;------------------------------------------------------------------------------ run-ci-monitor: Event Bus Integration
-
-(deftest run-ci-monitor-publishes-event-to-bus-test
+(deftest ^{:stratum 0} run-ci-monitor-publishes-event-to-bus-test
   (testing "Terminal status event is published to the event bus"
     (let [bus (events/create-event-bus)
           monitor (ci/create-ci-monitor
@@ -634,7 +622,7 @@
         (is (= 1 (count (:events @bus))))
         (is (= :pr/ci-passed (:event/type (first (:events @bus)))))))))
 
-(deftest run-ci-monitor-publishes-failure-event-to-bus-test
+(deftest ^{:stratum 0} run-ci-monitor-publishes-failure-event-to-bus-test
   (testing "CI failure event is published to the event bus"
     (let [bus (events/create-event-bus)
           monitor (ci/create-ci-monitor
@@ -649,7 +637,7 @@
         (is (= 1 (count (:events @bus))))
         (is (= :pr/ci-failed (:event/type (first (:events @bus)))))))))
 
-(deftest run-ci-monitor-no-event-published-on-timeout-test
+(deftest ^{:stratum 0} run-ci-monitor-no-event-published-on-timeout-test
   (testing "No terminal event is published when monitor times out"
     (let [bus (events/create-event-bus)
           monitor (ci/create-ci-monitor
@@ -665,8 +653,7 @@
             "No events should be published for non-terminal poll results")))))
 
 ;------------------------------------------------------------------------------ run-ci-monitor: Started-at & Running State
-
-(deftest run-ci-monitor-sets-started-at-test
+(deftest ^{:stratum 0} run-ci-monitor-sets-started-at-test
   (testing "run-ci-monitor sets :started-at timestamp"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -679,7 +666,7 @@
         (ci/run-ci-monitor monitor nil)
         (is (inst? (:started-at @monitor)))))))
 
-(deftest run-ci-monitor-running-false-after-completion-test
+(deftest ^{:stratum 0} run-ci-monitor-running-false-after-completion-test
   (testing "Monitor is not running after completion"
     (let [monitor (ci/create-ci-monitor
                     (random-uuid) (random-uuid) (random-uuid) 42 "/tmp/repo"
@@ -692,8 +679,7 @@
         (is (false? (:running? @monitor)))))))
 
 ;------------------------------------------------------------------------------ get-check-logs
-
-(deftest get-check-logs-returns-nil-logs-test
+(deftest ^{:stratum 0} get-check-logs-returns-nil-logs-test
   (testing "get-check-logs returns ok with nil logs (stub implementation)"
     (let [result (ci/get-check-logs "/tmp" 42 "tests")]
       (is (dag/ok? result))
@@ -701,8 +687,7 @@
       (is (= "tests" (:check-name (:data result)))))))
 
 ;------------------------------------------------------------------------------ get-pr-status
-
-(deftest get-pr-status-success-test
+(deftest ^{:stratum 0} get-pr-status-success-test
   (testing "get-pr-status returns raw output on success"
     (let [json-output "{\"state\":\"OPEN\",\"mergeable\":\"MERGEABLE\"}"]
       (with-redefs [ci/run-gh-command
@@ -712,7 +697,7 @@
           (is (dag/ok? result))
           (is (= json-output (:raw (:data result)))))))))
 
-(deftest get-pr-status-failure-test
+(deftest ^{:stratum 0} get-pr-status-failure-test
   (testing "get-pr-status propagates error on failure"
     (with-redefs [ci/run-gh-command
                   (fn [_args _path]

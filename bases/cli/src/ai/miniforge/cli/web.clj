@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.web
   "Fleet dashboard web server."
   (:require
@@ -27,17 +26,28 @@
    [ai.miniforge.cli.web.handlers :as handlers]
    [ai.miniforge.cli.web.sse :as sse]))
 
-(def ^:dynamic *port* 8787)
-(def server-atom (atom nil))
+;------------------------------------------------------------------------------ Layer 0
 
-(defn parse-repos-from-config []
+(def ^{:stratum 0} ^:dynamic *port* 8787)
+
+(def ^{:stratum 0} server-atom (atom nil))
+
+(defn ^{:stratum 0} parse-repos-from-config []
   (-> (app-config/config-path)
       java.io.File.
       (as-> f (when (.exists f) (slurp f)))
       (some-> edn/read-string (get-in [:fleet :repos]))
       (or [])))
 
-(defn handler [{:keys [uri request-method] :as req}]
+(def ^{:stratum 0} register-workflow-stream! sse/register!)
+
+(def ^{:stratum 0} unregister-workflow-stream! sse/unregister!)
+
+(def ^{:stratum 0} get-workflow-stream sse/get-stream)
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} handler [{:keys [uri request-method] :as req}]
   (let [repos (parse-repos-from-config)]
     (cond
       (and (= uri "/") (= request-method :get))
@@ -76,17 +86,15 @@
       :else
       (response/not-found "Not found"))))
 
-(def register-workflow-stream! sse/register!)
-(def unregister-workflow-stream! sse/unregister!)
-(def get-workflow-stream sse/get-stream)
-
-(defn stop-server! []
+(defn ^{:stratum 1} stop-server! []
   (when-let [server @server-atom]
     (server)
     (reset! server-atom nil)
     (println "Server stopped.")))
 
-(defn start-server! [& {:keys [port] :or {port *port*}}]
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} start-server! [& {:keys [port] :or {port *port*}}]
   (when @server-atom (stop-server!))
   (println (str "Starting fleet dashboard at http://localhost:" port))
   (reset! server-atom (http/run-server handler {:port port}))

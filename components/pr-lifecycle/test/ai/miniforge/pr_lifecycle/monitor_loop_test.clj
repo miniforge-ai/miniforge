@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.monitor-loop-test
   (:require
    [ai.miniforge.pr-lifecycle.events :as events]
@@ -23,7 +22,9 @@
    [ai.miniforge.pr-lifecycle.pr-poller :as poller]
    [clojure.test :refer [deftest is testing]]))
 
-(deftest actionable-comments-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} actionable-comments-test
   (testing "change requests and questions are routed, approvals are not"
     (let [classified {:change-requests [{:comment {:id 1}}]
                       :questions [{:comment {:id 2}}]
@@ -32,7 +33,7 @@
              (mapv #(get-in % [:comment :id])
                    (#'sut/actionable-comments classified)))))))
 
-(deftest time-budget-stop-result-test
+(deftest ^{:stratum 0} time-budget-stop-result-test
   (testing "time budget exhaustion yields a stopped cycle result"
     (let [result (#'sut/time-budget-stop-result 42)]
       (is (= 0 (:processed result)))
@@ -42,9 +43,8 @@
 ;; ---------------------------------------------------------------------------
 ;; Loop lifecycle event emission tests
 ;; ---------------------------------------------------------------------------
-
 ;; A minimal fake PR info that satisfies run-cycle's expectations.
-(def ^:private fake-pr
+(def ^{:stratum 0} ^:private fake-pr
   {:pr/number  99
    :pr/url     "https://github.com/example/repo/pull/99"
    :pr/title   "Test PR"
@@ -52,32 +52,12 @@
    :pr/sha     "abc123"
    :pr/updated-at "2026-06-15T00:00:00Z"})
 
-(defn- ok
+(defn- ^{:stratum 0} ok
   "Wrap data in a result map that dag/err? treats as success."
   [data]
   {:ok? true :data data})
 
-(defn- no-prs
-  "poll-open-prs stub that always returns an empty PR list."
-  [_worktree-path _author]
-  (ok {:prs []}))
-
-(defn- one-pr-then-empty
-  "Returns a poll-open-prs stub that yields [fake-pr] for n-iters calls, then empty."
-  [n-iters]
-  (let [call-count (atom 0)]
-    (fn [_worktree-path _author]
-      (if (< @call-count n-iters)
-        (do (swap! call-count inc)
-            (ok {:prs [fake-pr]}))
-        (ok {:prs []})))))
-
-(defn- no-new-comments
-  "poll-pr-for-new-comments stub: no new comments, empty watermarks."
-  [_worktree-path _pr-number _watermarks _logger]
-  (ok {:new-comments [] :watermarks {}}))
-
-(defn- make-test-monitor
+(defn- ^{:stratum 0} make-test-monitor
   "Build a monitor atom directly, bypassing classpath config and disk I/O.
    Caller supplies extra-config keys to merge; pass an :event-bus (via
    extra-config) when asserting on emissions — it defaults to nil otherwise."
@@ -105,7 +85,43 @@
                   :fixes-pushed       []
                   :questions-answered []}})))
 
-(defn- run-with-stubs
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} no-prs
+  "poll-open-prs stub that always returns an empty PR list."
+  [_worktree-path _author]
+  (ok {:prs []}))
+
+(defn- ^{:stratum 1} one-pr-then-empty
+  "Returns a poll-open-prs stub that yields [fake-pr] for n-iters calls, then empty."
+  [n-iters]
+  (let [call-count (atom 0)]
+    (fn [_worktree-path _author]
+      (if (< @call-count n-iters)
+        (do (swap! call-count inc)
+            (ok {:prs [fake-pr]}))
+        (ok {:prs []})))))
+
+(defn- ^{:stratum 1} no-new-comments
+  "poll-pr-for-new-comments stub: no new comments, empty watermarks."
+  [_worktree-path _pr-number _watermarks _logger]
+  (ok {:new-comments [] :watermarks {}}))
+
+;; ---------------------------------------------------------------------------
+;; (4) Manual stop reason (unit-level, no loop needed)
+(deftest ^{:stratum 1} manual-stop-reason-test
+  (testing "stop-monitor-loop sets :running? false and :stop-reason :manual-stop"
+    (let [monitor (make-test-monitor {})]
+      (swap! monitor assoc :running? true)
+      (sut/stop-monitor-loop monitor)
+      (is (false? (:running? @monitor))
+          ":running? must be false after stop")
+      (is (= :manual-stop (:stop-reason @monitor))
+          "stop reason must be :manual-stop"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} run-with-stubs
   "Run run-monitor-loop inside with-redefs that replace all I/O-touching poller
    functions.  poll-open-prs-fn controls which PRs each iteration sees."
   [monitor poll-open-prs-fn]
@@ -114,10 +130,11 @@
                 poller/save-watermarks!          (constantly nil)]
     (sut/run-monitor-loop monitor "bot")))
 
+;------------------------------------------------------------------------------ Layer 3
+
 ;; ---------------------------------------------------------------------------
 ;; (1) Loop start emission
-
-(deftest loop-started-event-emitted-test
+(deftest ^{:stratum 3} loop-started-event-emitted-test
   (testing "run-monitor-loop emits :pr-monitor/loop-started on entry before polling"
     (let [bus     (events/create-event-bus)
           monitor (make-test-monitor {:event-bus bus})]
@@ -135,8 +152,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; (2) Per-iteration heartbeat
-
-(deftest cycle-completed-heartbeat-test
+(deftest ^{:stratum 3} cycle-completed-heartbeat-test
   (testing "finalize-loop-iteration! emits :pr-monitor/cycle-completed per iteration"
     (let [n-iters 3
           bus     (events/create-event-bus)
@@ -158,8 +174,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; (3) Loop stop emission
-
-(deftest loop-stopped-event-emitted-test
+(deftest ^{:stratum 3} loop-stopped-event-emitted-test
   (testing "run-monitor-loop emits :pr-monitor/loop-stopped when no open PRs found"
     (let [bus     (events/create-event-bus)
           monitor (make-test-monitor {:event-bus bus})]
@@ -174,22 +189,8 @@
             "stop reason is :no-open-prs")))))
 
 ;; ---------------------------------------------------------------------------
-;; (4) Manual stop reason (unit-level, no loop needed)
-
-(deftest manual-stop-reason-test
-  (testing "stop-monitor-loop sets :running? false and :stop-reason :manual-stop"
-    (let [monitor (make-test-monitor {})]
-      (swap! monitor assoc :running? true)
-      (sut/stop-monitor-loop monitor)
-      (is (false? (:running? @monitor))
-          ":running? must be false after stop")
-      (is (= :manual-stop (:stop-reason @monitor))
-          "stop reason must be :manual-stop"))))
-
-;; ---------------------------------------------------------------------------
 ;; (5) Event ordering
-
-(deftest event-ordering-test
+(deftest ^{:stratum 3} event-ordering-test
   (testing "loop-started precedes any cycle-completed; loop-stopped is last"
     (let [n-iters 2
           bus     (events/create-event-bus)

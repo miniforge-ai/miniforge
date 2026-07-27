@@ -48,6 +48,7 @@
                            (let [[start end] time-range]
                              (filter
                               #(let [created (:evidence-bundle/created-at %)]
+<<<<<<< HEAD
                                  (and (or (nil? start) (.isAfter created start))
                                       (or (nil? end) (.isBefore created end))))
                               all-bundles))
@@ -119,6 +120,80 @@
                          (vals @bundles)))
           source-artifacts (get-source-artifacts artifact-store artifact-id)]
 
+=======
+                                 (and (or (nil? start) (and created (.isAfter created start)))
+                                      (or (nil? end) (and created (.isBefore created end)))))
+                              all-bundles))
+                           all-bundles)]
+
+    (vec
+     (keep
+      (fn [bundle]
+        (let [sem-val (:evidence/semantic-validation bundle)
+              declared (:semantic-validation/declared-intent sem-val)
+              actual (:semantic-validation/actual-behavior sem-val)
+              passed? (:semantic-validation/passed? sem-val)]
+
+          (when (and declared actual (not passed?))
+            {:workflow-id (:evidence-bundle/workflow-id bundle)
+             :declared-intent declared
+             :actual-behavior actual
+             :violation-details sem-val
+             :created-at (:evidence-bundle/created-at bundle)})))
+      filtered-bundles))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} get-source-artifacts
+  "Get all source artifacts for a given artifact."
+  [artifact-store artifact-id]
+  (when-let [artifact (get-artifact-with-provenance artifact-store artifact-id)]
+    (let [source-ids (get-in artifact [:artifact/provenance :provenance/source-artifacts] [])]
+      (keep #(get-artifact-with-provenance artifact-store %) source-ids))))
+
+(defn ^{:stratum 1} trace-artifact-chain-impl
+  "Trace complete artifact chain for a workflow.
+   Returns {:intent {...} :chain [...] :outcome {...}}"
+  [artifact-store bundles workflow-id]
+  (when-let [bundle (some #(when (= (:evidence-bundle/workflow-id %) workflow-id) %)
+                          (vals @bundles))]
+    (let [artifacts (get-workflow-artifacts artifact-store workflow-id)
+          ;; Group artifacts by phase
+          artifacts-by-phase (group-by
+                              #(get-in % [:artifact/provenance :provenance/phase])
+                              artifacts)
+          ;; Build chain in phase order
+          phase-order [:plan :design :implement :verify :review :release :observe]
+          chain (keep
+                 (fn [phase]
+                   (when-let [phase-artifacts (get artifacts-by-phase phase)]
+                     {:phase phase
+                      :agent (get-in (first phase-artifacts)
+                                     [:artifact/provenance :provenance/agent])
+                      :artifacts (mapv :artifact/id phase-artifacts)
+                      :timestamp (get-in (first phase-artifacts)
+                                         [:artifact/provenance :provenance/created-at])}))
+                 phase-order)]
+
+      {:intent (:evidence/intent bundle)
+       :chain chain
+       :outcome (:evidence/outcome bundle)})))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Provenance Tracing
+(defn ^{:stratum 2} query-provenance-impl
+  "Get full provenance for an artifact.
+   Returns {:artifact {...} :workflow-id :original-intent {...}}"
+  [artifact-store bundles artifact-id]
+  (when-let [artifact (get-artifact-with-provenance artifact-store artifact-id)]
+    (let [workflow-id (get-in artifact [:artifact/provenance :provenance/workflow-id])
+          bundle (when workflow-id
+                   (some #(when (= (:evidence-bundle/workflow-id %) workflow-id) %)
+                         (vals @bundles)))
+          source-artifacts (get-source-artifacts artifact-store artifact-id)]
+
+>>>>>>> origin/main
       {:artifact artifact
        :workflow-id workflow-id
        :original-intent (get bundle :evidence/intent)

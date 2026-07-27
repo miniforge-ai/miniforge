@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.publish-helpers-test
   "Stratum-by-stratum tests for the helpers `publish!` composes. The
    helpers are private (`defn-`) so tests reach them via `#'`-vars.
@@ -26,19 +25,31 @@
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.event-stream.core :as core]))
 
-(def ^:private workflow-quiesced?       #'core/workflow-quiesced?)
-(def ^:private rejection-result         #'core/rejection-result)
-(def ^:private rejection-if-quiesced    #'core/rejection-if-quiesced)
-(def ^:private try-acquire-in-flight!   #'core/try-acquire-in-flight!)
-(def ^:private with-in-flight           #'core/with-in-flight)
-(def ^:private quiesced-sentinel        #'core/quiesced-sentinel)
-(def ^:private record-event!            #'core/record-event!)
-(def ^:private deliver-to-sink!       #'core/deliver-to-sink!)
-(def ^:private deliver-to-sinks!      #'core/deliver-to-sinks!)
-(def ^:private deliver-to-subscriber! #'core/deliver-to-subscriber!)
-(def ^:private deliver-to-subscribers! #'core/deliver-to-subscribers!)
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- evt
+(def ^{:stratum 0} ^:private workflow-quiesced?       #'core/workflow-quiesced?)
+
+(def ^{:stratum 0} ^:private rejection-result         #'core/rejection-result)
+
+(def ^{:stratum 0} ^:private rejection-if-quiesced    #'core/rejection-if-quiesced)
+
+(def ^{:stratum 0} ^:private try-acquire-in-flight!   #'core/try-acquire-in-flight!)
+
+(def ^{:stratum 0} ^:private with-in-flight           #'core/with-in-flight)
+
+(def ^{:stratum 0} ^:private quiesced-sentinel        #'core/quiesced-sentinel)
+
+(def ^{:stratum 0} ^:private record-event!            #'core/record-event!)
+
+(def ^{:stratum 0} ^:private deliver-to-sink!       #'core/deliver-to-sink!)
+
+(def ^{:stratum 0} ^:private deliver-to-sinks!      #'core/deliver-to-sinks!)
+
+(def ^{:stratum 0} ^:private deliver-to-subscriber! #'core/deliver-to-subscriber!)
+
+(def ^{:stratum 0} ^:private deliver-to-subscribers! #'core/deliver-to-subscribers!)
+
+(defn- ^{:stratum 0} evt
   ([] (evt :test/event (random-uuid)))
   ([event-type wid]
    {:event/type event-type
@@ -47,9 +58,10 @@
     :event/sequence-number 0
     :message "test"}))
 
-;------------------------------------------------------------------------------ workflow-quiesced?
+;------------------------------------------------------------------------------ Layer 1
 
-(deftest workflow-quiesced?-tracks-quiesced-set
+;------------------------------------------------------------------------------ workflow-quiesced?
+(deftest ^{:stratum 1} workflow-quiesced?-tracks-quiesced-set
   (let [wid-a (random-uuid)
         wid-b (random-uuid)
         stream (atom {:quiesced-workflows #{wid-a}})]
@@ -59,8 +71,7 @@
         "missing :workflow/id is treated as not-quiesced — there's nothing to fence"))
 
 ;------------------------------------------------------------------------------ rejection-result
-
-(deftest rejection-result-shape-is-stable
+(deftest ^{:stratum 1} rejection-result-shape-is-stable
   (let [wid (random-uuid)
         result (rejection-result {:event/type :test/event :workflow/id wid} :workflow-quiesced)]
     (is (true? (:rejected? result)))
@@ -69,12 +80,11 @@
     (is (= :test/event (:event-type result)))))
 
 ;------------------------------------------------------------------------------ rejection-if-quiesced
-
-(deftest rejection-if-quiesced-returns-nil-when-not-fenced
+(deftest ^{:stratum 1} rejection-if-quiesced-returns-nil-when-not-fenced
   (let [stream (atom {:quiesced-workflows #{} :logger nil})]
     (is (nil? (rejection-if-quiesced stream (evt))))))
 
-(deftest rejection-if-quiesced-returns-result-when-fenced
+(deftest ^{:stratum 1} rejection-if-quiesced-returns-result-when-fenced
   (let [wid (random-uuid)
         stream (atom {:quiesced-workflows #{wid} :logger nil})
         result (rejection-if-quiesced stream (evt :test/event wid))]
@@ -82,8 +92,7 @@
     (is (= :workflow-quiesced (:reason result)))))
 
 ;------------------------------------------------------------------------------ try-acquire-in-flight!
-
-(deftest try-acquire-in-flight!-acquires-when-not-quiesced
+(deftest ^{:stratum 1} try-acquire-in-flight!-acquires-when-not-quiesced
   (let [wid    (random-uuid)
         stream (atom {:in-flight 0 :quiesced-workflows #{}})
         event  (evt :test/event wid)]
@@ -92,7 +101,7 @@
     (is (= 1 (:in-flight @stream))
         ":in-flight is incremented on acquire")))
 
-(deftest try-acquire-in-flight!-rejects-when-quiesced
+(deftest ^{:stratum 1} try-acquire-in-flight!-rejects-when-quiesced
   (let [wid    (random-uuid)
         stream (atom {:in-flight 0 :quiesced-workflows #{wid}})
         event  (evt :test/event wid)]
@@ -102,8 +111,7 @@
         ":in-flight is NOT incremented when fenced — the TOCTOU window is closed")))
 
 ;------------------------------------------------------------------------------ with-in-flight
-
-(deftest with-in-flight-increments-and-decrements-around-body
+(deftest ^{:stratum 1} with-in-flight-increments-and-decrements-around-body
   (let [stream   (atom {:in-flight 0})
         observed (atom nil)]
     (with-in-flight stream (evt)
@@ -113,18 +121,18 @@
     (is (= 1 @observed) "body sees the incremented counter")
     (is (= 0 (:in-flight @stream)) "post-call counter is decremented back to zero")))
 
-(deftest with-in-flight-decrements-on-body-exception
+(deftest ^{:stratum 1} with-in-flight-decrements-on-body-exception
   (let [stream (atom {:in-flight 0})]
     (is (thrown? Exception
                  (with-in-flight stream (evt) (fn [] (throw (RuntimeException. "boom"))))))
     (is (= 0 (:in-flight @stream))
         "decrement runs in finally so a body exception doesn't leak the slot")))
 
-(deftest with-in-flight-returns-body-value
+(deftest ^{:stratum 1} with-in-flight-returns-body-value
   (let [stream (atom {:in-flight 0})]
     (is (= :result (with-in-flight stream (evt) (constantly :result))))))
 
-(deftest with-in-flight-returns-quiesced-sentinel-when-fenced
+(deftest ^{:stratum 1} with-in-flight-returns-quiesced-sentinel-when-fenced
   ;; Pins the TOCTOU fix at the unit level: with-in-flight bypasses
   ;; body-fn and returns the sentinel when try-acquire-in-flight! finds
   ;; the workflow already fenced in its atomic swap!.
@@ -138,8 +146,7 @@
         ":in-flight must not be incremented when fenced")))
 
 ;------------------------------------------------------------------------------ record-event!
-
-(deftest record-event!-appends-to-events-vector
+(deftest ^{:stratum 1} record-event!-appends-to-events-vector
   (let [stream (atom {:events []})
         e1 (evt) e2 (evt)]
     (record-event! stream e1)
@@ -147,23 +154,21 @@
     (is (= [e1 e2] (:events @stream)))))
 
 ;------------------------------------------------------------------------------ deliver-to-sink!
-
-(deftest deliver-to-sink!-calls-the-sink
+(deftest ^{:stratum 1} deliver-to-sink!-calls-the-sink
   (let [calls (atom [])
         sink (fn [e] (swap! calls conj e))
         e (evt)]
     (deliver-to-sink! sink e nil)
     (is (= [e] @calls))))
 
-(deftest deliver-to-sink!-swallows-and-logs-exceptions
+(deftest ^{:stratum 1} deliver-to-sink!-swallows-and-logs-exceptions
   (let [throwing-sink (fn [_] (throw (RuntimeException. "sink failed")))]
     ;; Logger nil — must not throw on the swallow path.
     (is (nil? (deliver-to-sink! throwing-sink (evt) nil))
         "exception from sink must not propagate; nil return is fine")))
 
 ;------------------------------------------------------------------------------ deliver-to-sinks!
-
-(deftest deliver-to-sinks!-runs-all-sinks-even-when-one-throws
+(deftest ^{:stratum 1} deliver-to-sinks!-runs-all-sinks-even-when-one-throws
   (let [calls (atom [])
         good-sink (fn [e] (swap! calls conj [:good e]))
         bad-sink (fn [_] (throw (RuntimeException. "boom")))
@@ -176,8 +181,7 @@
     (is (= [:other e] (second @calls)))))
 
 ;------------------------------------------------------------------------------ deliver-to-subscriber!
-
-(deftest deliver-to-subscriber!-respects-filter
+(deftest ^{:stratum 1} deliver-to-subscriber!-respects-filter
   (let [calls (atom [])
         callback (fn [e] (swap! calls conj e))
         accept-fn (constantly true)
@@ -188,14 +192,13 @@
     (deliver-to-subscriber! :sub-1 callback accept-fn e nil)
     (is (= [e] @calls))))
 
-(deftest deliver-to-subscriber!-swallows-callback-exceptions
+(deftest ^{:stratum 1} deliver-to-subscriber!-swallows-callback-exceptions
   (let [throwing-cb (fn [_] (throw (RuntimeException. "cb failed")))]
     (is (nil? (deliver-to-subscriber! :sub-1 throwing-cb (constantly true) (evt) nil))
         "callback exception must not propagate")))
 
 ;------------------------------------------------------------------------------ deliver-to-subscribers!
-
-(deftest deliver-to-subscribers!-applies-filters-and-isolates-failures
+(deftest ^{:stratum 1} deliver-to-subscribers!-applies-filters-and-isolates-failures
   (let [calls (atom [])
         cb-a (fn [e] (swap! calls conj [:a e]))
         cb-b (fn [_] (throw (RuntimeException. "b boom")))

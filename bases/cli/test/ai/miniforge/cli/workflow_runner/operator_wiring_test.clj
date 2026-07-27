@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.operator-wiring-test
   (:require
    [ai.miniforge.agent.interface :as agent]
@@ -28,7 +27,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- with-clean-operator-state
+(defn- ^{:stratum 0} with-clean-operator-state
   [f]
   (let [context-state (var-get #'sut/meta-loop-ctx)
         consumer-state (var-get #'sut/operator-consumer-handle)
@@ -44,7 +43,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(deftest workflow-registration-starts-one-process-consumer
+(deftest ^{:stratum 1} workflow-registration-starts-one-process-consumer
   (with-clean-operator-state
     (fn []
       (let [starts (atom [])
@@ -83,7 +82,7 @@
           (is (identical? operator/live-intervention-stream
                           (:stream-for (first @starts)))))))))
 
-(deftest consumer-startup-failure-deregisters-the-runner
+(deftest ^{:stratum 1} consumer-startup-failure-deregisters-the-runner
   (testing "registration is rolled back before startup failure propagates"
     (with-clean-operator-state
       (fn []

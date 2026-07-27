@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.loader
   "Load policy packs from EDN files and directory structures.
 
@@ -45,9 +44,9 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File discovery and path utilities
 
-(defn find-rule-files
+;; File discovery and path utilities
+(defn ^{:stratum 0} find-rule-files
   "Find all rule .edn files in a rules/ directory, recursive."
   [rules-dir]
   (when (.exists (io/file rules-dir))
@@ -55,17 +54,15 @@
          (filter #(.isFile %))
          (filter #(str/ends-with? (.getName %) ".edn")))))
 
-(defn pack-file?
+(defn ^{:stratum 0} pack-file?
   "Check if a file is a pack file (pack.edn or *.pack.edn)."
   [file]
   (let [name (.getName file)]
     (or (= name "pack.edn")
         (str/ends-with? name ".pack.edn"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; EDN parsing and validation
-
-(defn safe-read-edn
+(defn ^{:stratum 0} safe-read-edn
   "Safely read EDN from a file.
    Returns {:success? bool :data any :error string}."
   [file]
@@ -76,7 +73,7 @@
     (catch Exception e
       (schema/failure :data (.getMessage e)))))
 
-(defn ensure-instant
+(defn ^{:stratum 0} ensure-instant
   "Convert various timestamp representations to Instant."
   [value]
   (cond
@@ -87,7 +84,7 @@
                         (java.time.Instant/now)))
     :else (java.time.Instant/now)))
 
-(defn normalize-rule
+(defn ^{:stratum 0} normalize-rule
   "Normalize a rule, ensuring required fields and types."
   [rule]
   (cond-> rule
@@ -103,7 +100,123 @@
     (get-in rule [:rule/applies-to :phases])
     (update-in [:rule/applies-to :phases] #(if (set? %) % (set %)))))
 
-(defn normalize-pack
+;; Overlay pack resolution (N4 §2.5)
+(defn- ^{:stratum 0} validate-no-rule-id-collisions
+  "Verify that overlay rules don't collide with inherited rule IDs."
+  [inherited-ids overlay-rules]
+  (let [overlay-ids  (set (map :rule/id overlay-rules))
+        collisions   (clojure.set/intersection inherited-ids overlay-ids)]
+    (when (seq collisions)
+      (mapv #(str "Rule ID collision in overlay: " %) collisions))))
+
+(defn- ^{:stratum 0} apply-overrides
+  "Apply :pack/overrides to a rule set.
+   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
+  [rules overrides]
+  (if (empty? overrides)
+    rules
+    (let [override-map (zipmap (map :rule/id overrides) overrides)]
+      (mapv (fn [rule]
+              (if-let [ov (get override-map (:rule/id rule))]
+                (cond-> rule
+                  (contains? ov :rule/severity) (assoc :rule/severity (:rule/severity ov))
+                  (contains? ov :rule/enabled?) (assoc :rule/enabled? (:rule/enabled? ov)))
+                rule))
+            rules))))
+
+(defn- ^{:stratum 0} validate-taxonomy-refs
+  "Validate that overlay and base pack taxonomy refs don't conflict."
+  [base-packs overlay-pack]
+  (let [refs (->> (conj base-packs overlay-pack)
+                  (keep :pack/taxonomy-ref)
+                  (map :taxonomy/id)
+                  distinct)]
+    (when (> (count refs) 1)
+      [(str "Conflicting taxonomy refs: " (pr-str refs))])))
+
+(defn- ^{:stratum 0} resolve-base-packs
+  "Look up each base pack from the store in declaration order."
+  [extends pack-store]
+  (mapv (fn [{:keys [pack-id]}]
+          (get pack-store pack-id))
+        extends))
+
+(defn- ^{:stratum 0} find-missing-base-packs
+  "Return error strings for any base pack refs that resolved to nil."
+  [extends base-packs]
+  (keep-indexed (fn [i bp]
+                  (when (nil? bp)
+                    (str "Base pack not found: "
+                         (:pack-id (nth extends i)))))
+                base-packs))
+
+;; Dependency validation
+(defn ^{:stratum 0} validate-pack-dependencies
+  "Validate pack dependencies before loading.
+
+   Per N4 §2.4.2, validates:
+   1. No circular dependencies
+   2. All dependencies available
+   3. Version constraints satisfied
+   4. Trust level constraints (when PR14 merged)
+   5. Dependency depth within limits
+
+   Arguments:
+   - packs - Vector of pack manifests to validate
+   - opts  - Options map:
+             :max-dependency-depth - Maximum depth (default: 5)
+             :check-trust?        - Enable trust validation (default: false)
+
+   Returns:
+   - {:valid? boolean
+      :violations [{:type keyword :message string ...}]
+      :warnings [{:type keyword :message string ...}]}
+
+   Example:
+     (validate-pack-dependencies [pack-a pack-b pack-c])
+     (validate-pack-dependencies [pack-a] {:max-dependency-depth 3})"
+  ([packs]
+   (validate-pack-dependencies packs {}))
+  ([packs opts]
+   (let [max-depth (get opts :max-dependency-depth 5)
+         check-trust? (get opts :check-trust? false)]
+     (dep-validation/validate-pack-dependencies
+      packs
+      {:max-depth max-depth
+       :check-trust? check-trust?}))))
+
+;; Pack writing
+(defn ^{:stratum 0} write-pack-to-file
+  "Write a pack manifest to a single EDN file.
+
+   Arguments:
+   - pack - PackManifest
+   - file-path - Output file path
+
+   Returns:
+   - {:success? bool :error string}"
+  [pack file-path]
+  (try
+    (let [content (with-out-str
+                    (pprint/pprint pack))]
+      (spit file-path content)
+      {:success? true :error nil})
+    (catch Exception e
+      (schema/failure nil (.getMessage e)))))
+
+;; Trust validation (N1 §2.10.2)
+(defn ^{:stratum 0} pack->trust-ref
+  "Convert a pack manifest to a trust reference for validation."
+  [pack]
+  (knowledge/make-pack-ref
+   (:pack/id pack)
+   (:pack/trust-level pack :untrusted)
+   (:pack/authority pack :authority/data)
+   :dependencies (mapv :pack-id (:pack/extends pack []))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} normalize-pack
   "Normalize a pack, ensuring required fields and types."
   [pack]
   (-> pack
@@ -116,10 +229,109 @@
       (update :pack/authority #(or % :authority/data))
       (update :pack/dependencies #(or % []))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Single file loader
+;; Directory structure loader
+(defn ^{:stratum 1} load-rule-file
+  "Load a single rule from an EDN file."
+  [file]
+  (let [{:keys [success? data error]} (safe-read-edn file)]
+    (if success?
+      (schema/success :rule (normalize-rule data) {:error nil})
+      (schema/failure :rule error))))
 
-(defn load-pack-from-file
+(defn- ^{:stratum 1} compose-resolved-pack
+  "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
+  [overlay-pack base-packs inherited-rules overlay-rules]
+  (let [combined-rules (into inherited-rules overlay-rules)
+        overrides      (:pack/overrides overlay-pack [])
+        final-rules    (apply-overrides combined-rules overrides)
+        base-tax-ref   (some :pack/taxonomy-ref (filterv some? base-packs))
+        final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
+        resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
+                         final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
+    (schema/success :pack resolved-pack {})))
+
+(defn ^{:stratum 1} discover-packs
+  "Discover all packs in a directory.
+
+   Looks for:
+   - *.pack.edn files
+   - Subdirectories containing pack.edn
+
+   Arguments:
+   - packs-dir - Directory containing packs
+
+   Returns:
+   - Vector of {:path string :type :file|:directory}"
+  [packs-dir]
+  (let [dir (io/file packs-dir)]
+    (when (.exists dir)
+      (let [;; Find *.pack.edn files
+            pack-files (->> (.listFiles dir)
+                            (filter #(.isFile %))
+                            (filter pack-file?)
+                            (map (fn [f]
+                                   {:path (.getPath f)
+                                    :type :file})))
+            ;; Find subdirectories with pack.edn
+            pack-dirs (->> (.listFiles dir)
+                           (filter #(.isDirectory %))
+                           (filter #(.exists (io/file % "pack.edn")))
+                           (map (fn [d]
+                                  {:path (.getPath d)
+                                   :type :directory})))]
+        (vec (concat pack-files pack-dirs))))))
+
+(defn ^{:stratum 1} validate-pack-trust
+  "Validate transitive trust rules for a pack.
+
+   Arguments:
+   - pack        - PackManifest to validate
+   - pack-store  - Map of pack-id -> PackManifest for dependency resolution
+
+   Returns:
+   - {:valid? true} if all trust rules pass
+   - {:valid? false :errors [...]} if any rule fails
+
+   Validates:
+   1. Instruction authority is not transitive
+   2. Trust level inheritance
+   3. Cross-trust references (no cycles, missing deps)
+   4. Tainted isolation
+
+   Example:
+     (validate-pack-trust pack {\"dep-pack\" dep-pack-manifest})"
+  [pack pack-store]
+  (let [pack-id (:pack/id pack)
+        pack-ref (pack->trust-ref pack)
+
+        ;; Build trust graph: pack + all dependencies
+        dep-refs (reduce
+                  (fn [acc dep]
+                    (let [dep-id (:pack-id dep)
+                          dep-pack (get pack-store dep-id)]
+                      (if dep-pack
+                        (assoc acc dep-id (pack->trust-ref dep-pack))
+                        acc)))
+                  {}
+                  (:pack/extends pack []))
+
+        trust-graph (assoc dep-refs pack-id pack-ref)]
+
+    ;; Validate all transitive trust rules
+    (try
+      (let [result (knowledge/validate-transitive-trust trust-graph)]
+        (if (:valid? result)
+          {:valid? true}
+          {:valid? false
+           :errors (:errors result)}))
+      (catch Exception e
+        {:valid? false
+         :errors [(str "Trust validation error: " (.getMessage e))]}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Single file loader
+(defn ^{:stratum 2} load-pack-from-file
   "Load a policy pack from a single EDN file.
 
    The file should contain a complete pack manifest with all rules inline.
@@ -145,18 +357,7 @@
           (schema/failure-with-errors :pack [{:file file-path :error error}])))
       (schema/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Directory structure loader
-
-(defn load-rule-file
-  "Load a single rule from an EDN file."
-  [file]
-  (let [{:keys [success? data error]} (safe-read-edn file)]
-    (if success?
-      (schema/success :rule (normalize-rule data) {:error nil})
-      (schema/failure :rule error))))
-
-(defn load-pack-from-directory
+(defn ^{:stratum 2} load-pack-from-directory
   "Load a policy pack from a directory structure.
 
    Expected structure:
@@ -225,105 +426,7 @@
               (schema/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
               (schema/failure-with-errors :pack (concat errors rule-errors)))))))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Auto-detect and load
-
-(defn load-pack
-  "Load a policy pack, auto-detecting format.
-
-   Supports:
-   - Single EDN file (pack.edn or *.pack.edn)
-   - Directory with pack.edn manifest
-
-   Arguments:
-   - path - File or directory path
-
-   Returns:
-   - {:success? bool :pack PackManifest :errors [...]}
-
-   Example:
-     (load-pack \"terraform-safety.pack.edn\")
-     (load-pack \"./packs/terraform-safety/\")"
-  [path]
-  (let [file (io/file path)]
-    (cond
-      (not (.exists file))
-      (schema/failure-with-errors :pack [{:path path :error "Path not found"}])
-
-      (.isFile file)
-      (load-pack-from-file path)
-
-      (.isDirectory file)
-      (load-pack-from-directory path)
-
-      :else
-      (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Overlay pack resolution (N4 §2.5)
-
-(defn- validate-no-rule-id-collisions
-  "Verify that overlay rules don't collide with inherited rule IDs."
-  [inherited-ids overlay-rules]
-  (let [overlay-ids  (set (map :rule/id overlay-rules))
-        collisions   (clojure.set/intersection inherited-ids overlay-ids)]
-    (when (seq collisions)
-      (mapv #(str "Rule ID collision in overlay: " %) collisions))))
-
-(defn- apply-overrides
-  "Apply :pack/overrides to a rule set.
-   Only :rule/severity and :rule/enabled? are overridable per N4 spec."
-  [rules overrides]
-  (if (empty? overrides)
-    rules
-    (let [override-map (zipmap (map :rule/id overrides) overrides)]
-      (mapv (fn [rule]
-              (if-let [ov (get override-map (:rule/id rule))]
-                (cond-> rule
-                  (contains? ov :rule/severity) (assoc :rule/severity (:rule/severity ov))
-                  (contains? ov :rule/enabled?) (assoc :rule/enabled? (:rule/enabled? ov)))
-                rule))
-            rules))))
-
-(defn- validate-taxonomy-refs
-  "Validate that overlay and base pack taxonomy refs don't conflict."
-  [base-packs overlay-pack]
-  (let [refs (->> (conj base-packs overlay-pack)
-                  (keep :pack/taxonomy-ref)
-                  (map :taxonomy/id)
-                  distinct)]
-    (when (> (count refs) 1)
-      [(str "Conflicting taxonomy refs: " (pr-str refs))])))
-
-(defn- resolve-base-packs
-  "Look up each base pack from the store in declaration order."
-  [extends pack-store]
-  (mapv (fn [{:keys [pack-id]}]
-          (get pack-store pack-id))
-        extends))
-
-(defn- find-missing-base-packs
-  "Return error strings for any base pack refs that resolved to nil."
-  [extends base-packs]
-  (keep-indexed (fn [i bp]
-                  (when (nil? bp)
-                    (str "Base pack not found: "
-                         (:pack-id (nth extends i)))))
-                base-packs))
-
-(defn- compose-resolved-pack
-  "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
-  [overlay-pack base-packs inherited-rules overlay-rules]
-  (let [combined-rules (into inherited-rules overlay-rules)
-        overrides      (:pack/overrides overlay-pack [])
-        final-rules    (apply-overrides combined-rules overrides)
-        base-tax-ref   (some :pack/taxonomy-ref (filterv some? base-packs))
-        final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
-        resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
-                         final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
-    (schema/success :pack resolved-pack {})))
-
-(defn resolve-overlay
+(defn ^{:stratum 2} resolve-overlay
   "Resolve an overlay pack by merging inherited rules from base packs.
 
    Resolution order (per N4 §2.5):
@@ -362,38 +465,43 @@
               (compose-resolved-pack overlay-pack base-packs
                                      inherited-rules overlay-rules))))))))
 
-(defn discover-packs
-  "Discover all packs in a directory.
+;------------------------------------------------------------------------------ Layer 3
 
-   Looks for:
-   - *.pack.edn files
-   - Subdirectories containing pack.edn
+;; Auto-detect and load
+(defn ^{:stratum 3} load-pack
+  "Load a policy pack, auto-detecting format.
+
+   Supports:
+   - Single EDN file (pack.edn or *.pack.edn)
+   - Directory with pack.edn manifest
 
    Arguments:
-   - packs-dir - Directory containing packs
+   - path - File or directory path
 
    Returns:
-   - Vector of {:path string :type :file|:directory}"
-  [packs-dir]
-  (let [dir (io/file packs-dir)]
-    (when (.exists dir)
-      (let [;; Find *.pack.edn files
-            pack-files (->> (.listFiles dir)
-                            (filter #(.isFile %))
-                            (filter pack-file?)
-                            (map (fn [f]
-                                   {:path (.getPath f)
-                                    :type :file})))
-            ;; Find subdirectories with pack.edn
-            pack-dirs (->> (.listFiles dir)
-                           (filter #(.isDirectory %))
-                           (filter #(.exists (io/file % "pack.edn")))
-                           (map (fn [d]
-                                  {:path (.getPath d)
-                                   :type :directory})))]
-        (vec (concat pack-files pack-dirs))))))
+   - {:success? bool :pack PackManifest :errors [...]}
 
-(defn load-all-packs
+   Example:
+     (load-pack \"terraform-safety.pack.edn\")
+     (load-pack \"./packs/terraform-safety/\")"
+  [path]
+  (let [file (io/file path)]
+    (cond
+      (not (.exists file))
+      (schema/failure-with-errors :pack [{:path path :error "Path not found"}])
+
+      (.isFile file)
+      (load-pack-from-file path)
+
+      (.isDirectory file)
+      (load-pack-from-directory path)
+
+      :else
+      (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} load-all-packs
   "Load all packs from a packs directory.
 
    Arguments:
@@ -435,124 +543,7 @@
        dep-validation-result
        (assoc :dependency-validation dep-validation-result)))))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Dependency validation
-
-(defn validate-pack-dependencies
-  "Validate pack dependencies before loading.
-
-   Per N4 §2.4.2, validates:
-   1. No circular dependencies
-   2. All dependencies available
-   3. Version constraints satisfied
-   4. Trust level constraints (when PR14 merged)
-   5. Dependency depth within limits
-
-   Arguments:
-   - packs - Vector of pack manifests to validate
-   - opts  - Options map:
-             :max-dependency-depth - Maximum depth (default: 5)
-             :check-trust?        - Enable trust validation (default: false)
-
-   Returns:
-   - {:valid? boolean
-      :violations [{:type keyword :message string ...}]
-      :warnings [{:type keyword :message string ...}]}
-
-   Example:
-     (validate-pack-dependencies [pack-a pack-b pack-c])
-     (validate-pack-dependencies [pack-a] {:max-dependency-depth 3})"
-  ([packs]
-   (validate-pack-dependencies packs {}))
-  ([packs opts]
-   (let [max-depth (get opts :max-dependency-depth 5)
-         check-trust? (get opts :check-trust? false)]
-     (dep-validation/validate-pack-dependencies
-      packs
-      {:max-depth max-depth
-       :check-trust? check-trust?}))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Pack writing
-
-(defn write-pack-to-file
-  "Write a pack manifest to a single EDN file.
-
-   Arguments:
-   - pack - PackManifest
-   - file-path - Output file path
-
-   Returns:
-   - {:success? bool :error string}"
-  [pack file-path]
-  (try
-    (let [content (with-out-str
-                    (pprint/pprint pack))]
-      (spit file-path content)
-      {:success? true :error nil})
-    (catch Exception e
-      (schema/failure nil (.getMessage e)))))
-
-;------------------------------------------------------------------------------ Layer 4
-;; Trust validation (N1 §2.10.2)
-
-(defn pack->trust-ref
-  "Convert a pack manifest to a trust reference for validation."
-  [pack]
-  (knowledge/make-pack-ref
-   (:pack/id pack)
-   (:pack/trust-level pack :untrusted)
-   (:pack/authority pack :authority/data)
-   :dependencies (mapv :pack-id (:pack/extends pack []))))
-
-(defn validate-pack-trust
-  "Validate transitive trust rules for a pack.
-
-   Arguments:
-   - pack        - PackManifest to validate
-   - pack-store  - Map of pack-id -> PackManifest for dependency resolution
-
-   Returns:
-   - {:valid? true} if all trust rules pass
-   - {:valid? false :errors [...]} if any rule fails
-
-   Validates:
-   1. Instruction authority is not transitive
-   2. Trust level inheritance
-   3. Cross-trust references (no cycles, missing deps)
-   4. Tainted isolation
-
-   Example:
-     (validate-pack-trust pack {\"dep-pack\" dep-pack-manifest})"
-  [pack pack-store]
-  (let [pack-id (:pack/id pack)
-        pack-ref (pack->trust-ref pack)
-
-        ;; Build trust graph: pack + all dependencies
-        dep-refs (reduce
-                  (fn [acc dep]
-                    (let [dep-id (:pack-id dep)
-                          dep-pack (get pack-store dep-id)]
-                      (if dep-pack
-                        (assoc acc dep-id (pack->trust-ref dep-pack))
-                        acc)))
-                  {}
-                  (:pack/extends pack []))
-
-        trust-graph (assoc dep-refs pack-id pack-ref)]
-
-    ;; Validate all transitive trust rules
-    (try
-      (let [result (knowledge/validate-transitive-trust trust-graph)]
-        (if (:valid? result)
-          {:valid? true}
-          {:valid? false
-           :errors (:errors result)}))
-      (catch Exception e
-        {:valid? false
-         :errors [(str "Trust validation error: " (.getMessage e))]}))))
-
-(defn load-pack-with-trust-validation
+(defn ^{:stratum 4} load-pack-with-trust-validation
   "Load a pack and validate trust rules.
 
    This is the recommended entry point for loading packs with trust enforcement.

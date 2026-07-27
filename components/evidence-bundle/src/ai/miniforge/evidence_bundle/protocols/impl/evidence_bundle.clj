@@ -98,8 +98,8 @@
        :time-range
        (let [[start end] v
              created (:evidence-bundle/created-at bundle)]
-         (and (or (nil? start) (.isAfter created start))
-              (or (nil? end) (.isBefore created end))))
+         (and (or (nil? start) (and created (.isAfter created start)))
+              (or (nil? end) (and created (.isBefore created end)))))
 
        :intent-type
        (= v (get-in bundle [:evidence/intent :intent/type]))
@@ -184,4 +184,8 @@
 (defn ^{:stratum 1} query-bundles-impl
   "Query bundles by criteria."
   [bundles criteria]
+<<<<<<< HEAD
   (filter #(matches-criteria? % criteria) (vals @bundles)))
+=======
+  (vec (filter #(matches-criteria? % criteria) (vals @bundles))))
+>>>>>>> origin/main

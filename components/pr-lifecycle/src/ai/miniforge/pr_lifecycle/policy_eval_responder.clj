@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.policy-eval-responder
   "N13 §2.5 Comment Response Agent — orchestrator.
 
@@ -58,27 +57,32 @@
    [ai.miniforge.pr-lifecycle.policy-eval.plan :as plan]
    [ai.miniforge.pr-lifecycle.policy-eval.reply :as reply]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;; ── re-exports ───────────────────────────────────────────────────────
 ;;
 ;; The public surface of the responder is what `pr-lifecycle/interface`
 ;; (and the test suite) reaches for. Keeping the names accessible at
 ;; the umbrella namespace lets callers stay decoupled from the internal
 ;; decomposition — they touch one ns, not five.
+(def ^{:stratum 0} policy-eval-author      payload/policy-eval-author)
 
-(def policy-eval-author      payload/policy-eval-author)
-(def policy-eval-comment?    payload/policy-eval-comment?)
-(def classify-fix            plan/classify-fix)
-(def plan-fixes              plan/plan-fixes)
-(def apply-single-line-replacement! fs/apply-single-line-replacement!)
-(def materialize-fix!        fs/materialize-fix!)
+(def ^{:stratum 0} policy-eval-comment?    payload/policy-eval-comment?)
+
+(def ^{:stratum 0} classify-fix            plan/classify-fix)
+
+(def ^{:stratum 0} plan-fixes              plan/plan-fixes)
+
+(def ^{:stratum 0} apply-single-line-replacement! fs/apply-single-line-replacement!)
+
+(def ^{:stratum 0} materialize-fix!        fs/materialize-fix!)
 
 ;; ── orchestrator ─────────────────────────────────────────────────────
 ;;
 ;; The whole point of decomposition is here: a top-to-bottom pipeline
 ;; with each strata's work landing in its own ns, and the orchestrator
 ;; doing only the assembly. No nested cond, no inline business rules.
-
-(defn- bucket-results
+(defn- ^{:stratum 0} bucket-results
   "Pure: partition `materialize-fix!` results into the three buckets
    the summary needs. `:already-applied` no-ops must NOT enter the
    commit path — they're returned in their own bucket so the caller
@@ -92,7 +96,7 @@
      :already-applied (mapv :data noop-ok)
      :failed-to-apply (mapv :error (filter (complement dag/ok?) results))}))
 
-(defn- summary
+(defn- ^{:stratum 0} summary
   "Build the DAG-ok summary map. `git-data` is nil when no commit
    was attempted (zero applied fixes); otherwise it carries
    `{:commit-sha :pushed?}`."
@@ -106,7 +110,9 @@
            :pushed?         (boolean (:pushed? git-data))
            :replies         (or replies [])}))
 
-(defn respond-to-policy-comments!
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} respond-to-policy-comments!
   "Top-level entry point. See namespace docstring for pipeline
    contract and bucket semantics.
 

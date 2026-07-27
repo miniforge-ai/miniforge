@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.capability-test
   "Tests for the policy-pack capability registry."
   (:require
@@ -23,14 +22,23 @@
    [ai.miniforge.policy-pack.capability :as sut]
    [clojure.test :refer [deftest is testing]]))
 
-(defn- stub-check
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} stub-check
   "A capability check that always reports a violation."
   [_artifact _context]
   {:type :capability :message "stub violation"})
 
-;------------------------------------------------------------------------------ register / get / list / available?
+(deftest ^{:stratum 0} unregistered-query-test
+  (testing "get-capability returns nil for an unregistered key"
+    (is (nil? (sut/get-capability ::never-registered))))
+  (testing "capability-available? is false for an unregistered key"
+    (is (not (sut/capability-available? ::never-registered)))))
 
-(deftest register-and-query-test
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ register / get / list / available?
+(deftest ^{:stratum 1} register-and-query-test
   (testing "register-capability! stores a valid entry and round-trips"
     (let [entry  {:meta {:tool :stub} :check stub-check}
           result (sut/register-capability! ::round-trip entry)]
@@ -44,15 +52,8 @@
     (is (set? (sut/list-capabilities)))
     (is (every? keyword? (sut/list-capabilities)))))
 
-(deftest unregistered-query-test
-  (testing "get-capability returns nil for an unregistered key"
-    (is (nil? (sut/get-capability ::never-registered))))
-  (testing "capability-available? is false for an unregistered key"
-    (is (not (sut/capability-available? ::never-registered)))))
-
 ;------------------------------------------------------------------------------ bad input -> anomaly (no throw)
-
-(deftest bad-input-returns-anomaly-test
+(deftest ^{:stratum 1} bad-input-returns-anomaly-test
   (testing "non-keyword key yields an :invalid-input anomaly, not a throw"
     (let [result (sut/register-capability! "not-a-keyword"
                                            {:meta {} :check stub-check})]

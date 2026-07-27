@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.pr-lifecycle.anomaly.pr-creation-result-test
   "Coverage for `controller/pr-creation-result` (anomaly-returning).
 
@@ -28,15 +27,15 @@
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.controller :as controller]))
 
-;------------------------------------------------------------------------------ Happy path
+;------------------------------------------------------------------------------ Layer 0
 
-(deftest pr-creation-result-returns-ok-on-success
+;------------------------------------------------------------------------------ Happy path
+(deftest ^{:stratum 0} pr-creation-result-returns-ok-on-success
   (testing "successful DAG result returns :ok"
     (is (= :ok (controller/pr-creation-result (dag/ok {:pr/id "PR-1"}))))))
 
 ;------------------------------------------------------------------------------ Failure path
-
-(deftest pr-creation-result-returns-anomaly-on-dag-err
+(deftest ^{:stratum 0} pr-creation-result-returns-anomaly-on-dag-err
   (testing "DAG err result returns :fault anomaly"
     (let [pr-result (dag/err :network "connection refused")
           result (controller/pr-creation-result pr-result)]
@@ -45,7 +44,7 @@
       (is (some? (:error (:anomaly/data result))))
       (is (= "PR creation failed" (:anomaly/message result))))))
 
-(deftest pr-creation-result-carries-error-detail
+(deftest ^{:stratum 0} pr-creation-result-carries-error-detail
   (testing ":anomaly/data carries the underlying DAG error"
     (let [pr-result (dag/err :auth "token expired")
           result (controller/pr-creation-result pr-result)]

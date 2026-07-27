@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.workflow-runner.runner-control-wiring-test
   "Phase D D-4: every CLI runner path joins the governed control path.
 
@@ -41,9 +40,9 @@
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Recording harness
 
-(defn- recorder
+;; Recording harness
+(defn- ^{:stratum 0} recorder
   "Redef map that records registration/release calls into `calls`."
   [calls]
   {:register (fn [workflow-id control-state event-stream]
@@ -56,11 +55,30 @@
               (swap! calls conj {:call :release :workflow-id workflow-id})
               nil)})
 
-(defn- calls-of
+(defn- ^{:stratum 0} calls-of
   [calls call-type]
   (filterv #(= call-type (:call %)) @calls))
 
-(defn- registered-and-released?
+(deftest ^{:stratum 0} governed-workflow-id-is-always-a-uuid
+  (testing "the operator channel routes by UUID, so a governed run must have one"
+    (let [gwid #'runner/governed-workflow-id]
+      ;; a UUID session-id is adopted as-is
+      (let [u (random-uuid)]
+        (is (= u (gwid u true))))
+      ;; a UUID *string* is parsed and adopted (same run, controllable)
+      (let [u (random-uuid)]
+        (is (= u (gwid (str u) true))))
+      ;; a non-UUID session-id is discarded for a fresh UUID rather than
+      ;; leaving the run uncontrollable
+      (is (uuid? (gwid "named-session" true)))
+      (is (not= "named-session" (gwid "named-session" true)))
+      ;; an absent session-id is the normal case: a fresh UUID
+      (is (uuid? (gwid nil true)))
+      (is (uuid? (gwid :a-keyword true))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} registered-and-released?
   "The same workflow id was registered once and released once."
   [calls]
   (let [registered (mapv :workflow-id (calls-of calls :register))
@@ -68,10 +86,10 @@
     (and (= 1 (count registered))
          (= registered released))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Chain runner
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest chain-runner-registers-and-releases-control
+;; Chain runner
+(deftest ^{:stratum 2} chain-runner-registers-and-releases-control
   (testing "run-chain! joins the governed control path"
     (let [calls (atom [])
           {:keys [register release]} (recorder calls)
@@ -98,7 +116,7 @@
           (is (identical? stream (:event-stream registration)))
           (is (some? (:control-state registration))))))))
 
-(deftest chain-runner-releases-control-when-the-chain-throws
+(deftest ^{:stratum 2} chain-runner-releases-control-when-the-chain-throws
   (testing "a failed chain still stops claiming interventions"
     (let [calls (atom [])
           {:keys [register release]} (recorder calls)
@@ -122,10 +140,8 @@
                               (runner/run-chain! :some-chain {:quiet true})))
         (is (registered-and-released? calls))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Plan executor
-
-(deftest plan-executor-registers-and-releases-control
+(deftest ^{:stratum 2} plan-executor-registers-and-releases-control
   (testing "execute-plan joins the governed control path"
     (let [calls (atom [])
           {:keys [register release]} (recorder calls)
@@ -146,7 +162,7 @@
           (is (identical? stream (:event-stream registration)))
           (is (some? (:control-state registration))))))))
 
-(deftest plan-executor-releases-control-when-the-plan-throws
+(deftest ^{:stratum 2} plan-executor-releases-control-when-the-plan-throws
   (testing "a failed plan still stops claiming interventions"
     (let [calls (atom [])
           {:keys [register release]} (recorder calls)
@@ -166,20 +182,3 @@
                               (plan-executor/execute-plan
                                {:plan/id "p1" :plan/tasks []} {:quiet true})))
         (is (registered-and-released? calls))))))
-
-(deftest governed-workflow-id-is-always-a-uuid
-  (testing "the operator channel routes by UUID, so a governed run must have one"
-    (let [gwid #'runner/governed-workflow-id]
-      ;; a UUID session-id is adopted as-is
-      (let [u (random-uuid)]
-        (is (= u (gwid u true))))
-      ;; a UUID *string* is parsed and adopted (same run, controllable)
-      (let [u (random-uuid)]
-        (is (= u (gwid (str u) true))))
-      ;; a non-UUID session-id is discarded for a fresh UUID rather than
-      ;; leaving the run uncontrollable
-      (is (uuid? (gwid "named-session" true)))
-      (is (not= "named-session" (gwid "named-session" true)))
-      ;; an absent session-id is the normal case: a fresh UUID
-      (is (uuid? (gwid nil true)))
-      (is (uuid? (gwid :a-keyword true))))))

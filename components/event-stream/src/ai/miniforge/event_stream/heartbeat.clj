@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.event-stream.heartbeat
   "Phase heartbeat scheduler."
   (:require
@@ -26,7 +25,9 @@
                          ThreadFactory TimeUnit]
    [java.util.concurrent.atomic AtomicLong]))
 
-(def ^:const default-interval-ms
+;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} ^:const default-interval-ms
   "Default interval between heartbeat events. Expressed as
    `seconds × ms-per-second` so a reader recovers the human unit
    without reading the docstring — per .standards/foundations/
@@ -34,28 +35,13 @@
    composition is part of the intent."
   (* 30 1000))
 
-(def ^:private heartbeat-thread-counter
+(def ^{:stratum 0} ^:private heartbeat-thread-counter
   "Monotonic counter for naming heartbeat threads. Gives each
    scheduler a unique suffix so jstack output disambiguates threads
    when the same phase id runs concurrently across workflows."
   (AtomicLong. 0))
 
-(defn- daemon-thread-factory [phase-id]
-  (let [n (.incrementAndGet ^AtomicLong heartbeat-thread-counter)]
-    (reify ThreadFactory
-      (newThread [_ runnable]
-        (doto (Thread. runnable (str "miniforge-phase-heartbeat-"
-                                     (name phase-id) "-" n))
-          (.setDaemon true))))))
-
-(defn- resolve-interval-ms [opts]
-  (let [interval-ms (or (:interval-ms opts) default-interval-ms)]
-    (when-not (pos-int? interval-ms)
-      (throw (ex-info "Heartbeat interval must be a positive integer"
-                      {:interval-ms interval-ms})))
-    interval-ms))
-
-(defn- make-heartbeat-task
+(defn- ^{:stratum 0} make-heartbeat-task
   "Return one scheduled heartbeat emission task."
   [event-stream workflow-id phase-id active-since seq-num last-tick]
   (fn []
@@ -82,7 +68,35 @@
                    :data {:phase-id phase-id
                           :error (ex-message e)}})))))
 
-(defn start-heartbeat!
+(defn ^{:stratum 0} stop-heartbeat!
+  ([handle]
+   (stop-heartbeat! handle {}))
+  ([handle {:keys [may-interrupt?] :or {may-interrupt? false}}]
+   (when-let [^ScheduledFuture fut (:heartbeat/future handle)]
+     (.cancel fut (boolean may-interrupt?)))
+   (when-let [^ScheduledExecutorService executor (:heartbeat/executor handle)]
+     (.shutdown executor))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} daemon-thread-factory [phase-id]
+  (let [n (.incrementAndGet ^AtomicLong heartbeat-thread-counter)]
+    (reify ThreadFactory
+      (newThread [_ runnable]
+        (doto (Thread. runnable (str "miniforge-phase-heartbeat-"
+                                     (name phase-id) "-" n))
+          (.setDaemon true))))))
+
+(defn- ^{:stratum 1} resolve-interval-ms [opts]
+  (let [interval-ms (or (:interval-ms opts) default-interval-ms)]
+    (when-not (pos-int? interval-ms)
+      (throw (ex-info "Heartbeat interval must be a positive integer"
+                      {:interval-ms interval-ms})))
+    interval-ms))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} start-heartbeat!
   ([event-stream workflow-id phase-id]
    (start-heartbeat! event-stream workflow-id phase-id {}))
   ([event-stream workflow-id phase-id opts]
@@ -126,12 +140,3 @@
         :heartbeat/phase-id   phase-id
         :heartbeat/last-tick  last-tick
         :heartbeat/seq-num    seq-num}))))
-
-(defn stop-heartbeat!
-  ([handle]
-   (stop-heartbeat! handle {}))
-  ([handle {:keys [may-interrupt?] :or {may-interrupt? false}}]
-   (when-let [^ScheduledFuture fut (:heartbeat/future handle)]
-     (.cancel fut (boolean may-interrupt?)))
-   (when-let [^ScheduledExecutorService executor (:heartbeat/executor handle)]
-     (.shutdown executor))))

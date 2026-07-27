@@ -15,32 +15,44 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.policy-pack.external
   "External PR evaluation workflow for read-only policy checking.
 
    Parses PR diffs into artifacts, selects applicable packs, and runs
    evaluation in read-only mode (no repair phase).
 
-   Layer 0: Diff parsing
-   Layer 1: Pack selection
-   Layer 2: Evaluation and reporting"
+   Layer 0: parse-diff-header, path-matches-glob?
+   Layer 1: parse-pr-diff, files-match-globs? (over Layer 0)
+   Layer 2: pack-applies? (over files-match-globs?)
+   Layer 3: select-applicable-packs (over pack-applies?)
+   Layer 4: evaluate-external-pr (over parse-pr-diff + select-applicable-packs)
+
+   5 real strata — over the rule 210 budget of 3; a genuine namespace split
+   (Wave 2), not a labeling problem."
   (:require
    [ai.miniforge.policy-pack.core :as core]
    [ai.miniforge.policy-pack.registry :as registry]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Diff parsing
 
-(defn parse-diff-header
+;; Diff parsing
+(defn ^{:stratum 0} parse-diff-header
   "Parse a diff header to extract the file path.
    Handles 'diff --git a/path b/path' format."
   [header-line]
   (when-let [[_ path] (re-find #"^diff --git a/.+ b/(.+)$" header-line)]
     path))
 
-(defn parse-pr-diff
+;; Pack selection
+(defn ^{:stratum 0} path-matches-glob?
+  "Test a single path against a single glob pattern."
+  [glob-fn glob path]
+  (try (glob-fn glob path) (catch Exception _ false)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} parse-pr-diff
   "Parse a unified diff into a vector of artifact maps.
 
    Arguments:
@@ -77,22 +89,16 @@
                     :artifact/diff diff-text})))
              segments)))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Pack selection
-
-(defn path-matches-glob?
-  "Test a single path against a single glob pattern."
-  [glob-fn glob path]
-  (try (glob-fn glob path) (catch Exception _ false)))
-
-(defn files-match-globs?
+(defn ^{:stratum 1} files-match-globs?
   "True if any path in `paths` matches any pattern in `globs`."
   [paths globs]
   (some (fn [path]
           (some #(path-matches-glob? registry/glob-matches? % path) globs))
         paths))
 
-(defn pack-applies?
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} pack-applies?
   "True if a pack applies to the given changed files.
    Packs with no :file-globs constraint apply to everything."
   [changed-files pack]
@@ -100,7 +106,9 @@
     (or (not (seq file-globs))
         (files-match-globs? changed-files file-globs))))
 
-(defn select-applicable-packs
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} select-applicable-packs
   "Select packs applicable to a PR based on metadata.
 
    Arguments:
@@ -112,10 +120,10 @@
   (let [changed-files (get pr-meta :changed-files [])]
     (filterv (partial pack-applies? changed-files) packs)))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Evaluation and reporting
+;------------------------------------------------------------------------------ Layer 4
 
-(defn evaluate-external-pr
+;; Evaluation and reporting
+(defn ^{:stratum 4} evaluate-external-pr
   "Evaluate an external PR against policy packs in read-only mode.
 
    Arguments:

@@ -15,14 +15,15 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.config-test
   "Tests for Aero configuration management."
   (:require [clojure.test :refer [deftest testing is]]
             [ai.miniforge.cli.config :as config]
             [clojure.java.io :as io]))
 
-(deftest load-config-test
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} load-config-test
   (testing "load-config loads configuration from resources"
     (let [cfg (config/load-config)]
       (is (map? cfg))
@@ -48,7 +49,7 @@
     (let [cfg (config/load-config {:config-file (io/file "/nonexistent/config.edn")})]
       (is (map? cfg)))))
 
-(deftest get-llm-backend-test
+(deftest ^{:stratum 0} get-llm-backend-test
   (testing "get-llm-backend returns workflow override when provided"
     (let [cfg {:llm {:backend :anthropic}}]
       (is (= :openai (config/get-llm-backend cfg :openai)))))
@@ -61,7 +62,7 @@
     (is (= :opencode (config/get-llm-backend {} nil)))
     (is (= :opencode (config/get-llm-backend {:llm {}} nil)))))
 
-(deftest get-llm-timeout-test
+(deftest ^{:stratum 0} get-llm-timeout-test
   (testing "get-llm-timeout returns config value"
     (let [cfg {:llm {:timeout-ms 600000}}]
       (is (= 600000 (config/get-llm-timeout cfg)))))
@@ -70,7 +71,7 @@
     (is (= 300000 (config/get-llm-timeout {})))
     (is (= 300000 (config/get-llm-timeout {:llm {}})))))
 
-(deftest get-llm-line-timeout-test
+(deftest ^{:stratum 0} get-llm-line-timeout-test
   (testing "get-llm-line-timeout returns config value"
     (let [cfg {:llm {:line-timeout-ms 120000}}]
       (is (= 120000 (config/get-llm-line-timeout cfg)))))
@@ -79,7 +80,7 @@
     (is (= 60000 (config/get-llm-line-timeout {})))
     (is (= 60000 (config/get-llm-line-timeout {:llm {}})))))
 
-(deftest config-structure-test
+(deftest ^{:stratum 0} config-structure-test
   (testing "config.edn has expected structure"
     (let [cfg (config/load-config)]
       (testing "llm config section"
@@ -101,7 +102,7 @@
       (testing "artifacts config section"
         (is (string? (get-in cfg [:artifacts :dir])))))))
 
-(deftest env-overrides-test
+(deftest ^{:stratum 0} env-overrides-test
   (testing "config respects environment variable overrides"
     ;; This test documents the behavior but doesn't test actual env vars
     ;; since that would require setting system properties

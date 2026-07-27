@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cli.main.commands.pr-monitor
   "PR monitor loop — work-list resume and fresh-monitor paths.
 
@@ -35,30 +34,32 @@
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants and shell primitives
 
-(def ^:private ms-per-second
+;; Constants and shell primitives
+(def ^{:stratum 0} ^:private ms-per-second
   "Milliseconds in one second.
    Converts poll-interval-s (config/worklist unit) to poll-interval-ms
    (pr-lifecycle internal unit). Extracted per rule 006 — used in three sites."
   1000)
 
-(def ^:private default-poll-interval-ms
+(def ^{:stratum 0} ^:private default-poll-interval-ms
   "Fallback used in run-monitor! when the monitor atom does not yet carry
    [:config :poll-interval-ms]. Mirrors the pr-lifecycle monitor default (60 s)."
   60000)
 
-(defn- sh! [& args]
+(defn- ^{:stratum 0} sh! [& args]
   (apply process/sh args))
 
-(defn- remote-origin-url
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} remote-origin-url
   "Return the git remote origin URL for `repo-path`, or nil on failure."
   [repo-path]
   (let [r (sh! "git" "-C" repo-path "remote" "get-url" "origin")]
     (when (zero? (:exit r))
       (str/trim (:out r)))))
 
-(defn- resolve-author
+(defn- ^{:stratum 1} resolve-author
   "Resolve the GitHub author login from `author-opt` flag, gh CLI, or `default-author`."
   [author-opt default-author]
   (or author-opt
@@ -68,7 +69,7 @@
             (when (seq login) login))))
       default-author))
 
-(defn- parse-poll-interval
+(defn- ^{:stratum 1} parse-poll-interval
   "Parse poll-interval string in seconds, with bounds checking.
    Returns milliseconds, or nil when the value is out-of-range or unparseable."
   [interval-str {:keys [min-poll-interval-s max-poll-interval-s]}]
@@ -85,7 +86,7 @@
         (display/print-error (messages/t :pr/monitor-interval-invalid {:value interval-str}))
         nil))))
 
-(defn- worklist-poll-ms
+(defn- ^{:stratum 1} worklist-poll-ms
   "Derive poll-interval in milliseconds from the PR entries in a worklist.
    Takes the minimum :pr/poll-interval (seconds) across all entries.
    Returns nil when no entries carry that key — caller uses monitor default."
@@ -94,10 +95,8 @@
            (apply min)
            (* ms-per-second)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Monitor session — compose Layer 0 with pr-lifecycle calls
-
-(defn- run-monitor!
+(defn- ^{:stratum 1} run-monitor!
   "Create a PR monitor from `mon-opts`, install a shutdown hook, run the loop.
    Single implementation shared by the fresh-monitor and resume paths."
   [mon-opts author]
@@ -117,7 +116,9 @@
       (let [evidence (pr-lifecycle/run-pr-monitor-loop monitor author)]
         (display/print-info (messages/t :pr/monitor-stopped {:evidence (pr-str evidence)}))))))
 
-(defn- resume-from-worklist!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} resume-from-worklist!
   "Load persisted worklist for `repo-path`, prune closed PRs, then run monitor.
 
    Scope note: the work-list is used as a resume GATE (only resume when a
@@ -174,12 +175,12 @@
                 (let [poll-ms  (worklist-poll-ms prs)
                       mon-opts (cond-> {:worktree-path repo-path :self-author author}
                                  poll-ms (assoc :poll-interval-ms poll-ms))]    ; H
-                  (run-monitor! mon-opts author))))))))))        ; H G F E D C B A defn
+                  (run-monitor! mon-opts author))))))))))  ; H G F E D C B A defn
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 3
+
 ;; Entry point
-
-(defn pr-monitor-cmd
+(defn ^{:stratum 3} pr-monitor-cmd
   "Start the PR monitor loop for autonomous comment resolution.
 
    With --author: creates a fresh monitor polling that author's open PRs.
