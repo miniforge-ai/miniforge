@@ -1,0 +1,55 @@
+name: PR Size
+
+# Split out from ci.yml so a body-only edit (e.g. adding a
+# MINIFORGE_PR_BUDGET_OVERRIDE line) re-triggers this check without also
+# re-running the expensive Build/Test/Test-Windows jobs in ci.yml. The
+# default `pull_request` trigger (opened/synchronize/reopened) does not fire
+# on `edited`; this workflow adds that type explicitly.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-size:
+    name: PR Size
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Need the merge-base between base and head, not just the
+          # shallow tip -- a depth-1 checkout wouldn't have it.
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Install Clojure
+        uses: DeLaGuardo/setup-clojure@12.5
+        with:
+          cli: latest
+          bb: latest
+
+      - name: Cache Clojure dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+          key: clojure-${{ runner.os }}-${{ hashFiles('deps.edn', '**/deps.edn') }}
+          restore-keys: |
+            clojure-${{ runner.os }}-
+
+      - name: Check PR size budget
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: bb pr-budget
