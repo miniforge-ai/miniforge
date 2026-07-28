@@ -1,0 +1,177 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1000" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .st{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ph{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .ag{fill:#fff2cc;stroke:#d6b656;stroke-width:1.5;} .gv{fill:#f8cecc;stroke:#b85450;stroke-width:1.5;}
+      .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11px;fill:#333;} .s{font-size:10px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .ok{stroke:#4a9a4a;stroke-width:1.6;fill:none;} .bad{stroke:#c0392b;stroke-width:1.5;fill:none;}
+    </style>
+  </defs>
+  <rect width="1920" height="1000" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Miniforge As-Built — A2. The Core Loop: Spec In, PR Out</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">work-spec kanban → workflow FSM → DAG → phase interceptors → agents → gates/evidence → release/PR · stage → namespace mapping</text>
+
+  <!-- INTAKE -->
+  <rect class="zone" x="20" y="62" width="300" height="420" rx="6"/>
+  <text class="zoneT" x="36" y="84">1 · TASK INTAKE — the work/ kanban</text>
+  <rect class="st" x="36" y="100" width="268" height="90" rx="8"/>
+  <text class="h" x="48" y="122">work/*.spec.edn</text>
+  <text class="s" x="48" y="140">human-authored spec: intent, tasks,</text>
+  <text class="s" x="48" y="154">constraints. Parsed by spec-parser +</text>
+  <text class="m" x="48" y="172">cli/spec_parser</text>
+  <rect class="rec" x="36" y="204" width="268" height="72" rx="8"/>
+  <text class="t" x="48" y="226">runner moves specs across</text>
+  <text class="m" x="48" y="244">work/in-progress|done|failed</text>
+  <text class="s" x="48" y="262">queue rendered by bb work:queue</text>
+  <rect class="note" x="36" y="290" width="268" height="70" rx="6"/>
+  <text class="h" x="48" y="312">daily driver</text>
+  <text class="m" x="48" y="330">bb dogfood &lt;spec&gt;</text>
+  <text class="s" x="48" y="348">(DOGFOODING.md, tasks/dogfood.clj)</text>
+  <path class="eB" d="M170,362 L170,392" marker-end="url(#aB)"/>
+  <rect class="st" x="36" y="394" width="268" height="70" rx="8"/>
+  <text class="h" x="48" y="416">2 · workflow selection</text>
+  <text class="m" x="48" y="434">cli/workflow_runner → workflow/runner</text>
+  <text class="s" x="48" y="452">EDN defs: canonical-sdlc-v2 · quick-fix-v2</text>
+
+  <!-- ORCHESTRATION -->
+  <rect class="zone" x="340" y="62" width="440" height="420" rx="6"/>
+  <text class="zoneT" x="356" y="84">3 · ORCHESTRATION — FSM + DAG</text>
+  <rect class="st" x="356" y="100" width="408" height="96" rx="8"/>
+  <text class="h" x="368" y="122">workflow FSM + execution</text>
+  <text class="m" x="368" y="140">workflow/fsm · workflow/execution</text>
+  <text class="s" x="368" y="158">orchestrator/core wraps with routing ·</text>
+  <text class="s" x="368" y="172">budget · knowledge · policy; operator = meta-loop</text>
+  <rect class="st" x="356" y="212" width="408" height="120" rx="8"/>
+  <text class="h" x="368" y="234">DAG orchestrator — parallel tasks</text>
+  <text class="m" x="368" y="252">workflow/dag_orchestrator → dag-executor</text>
+  <text class="s" x="368" y="270">each task = a FULL sub-pipeline (explore→plan→</text>
+  <text class="s" x="368" y="284">implement→verify) in an OCI capsule</text>
+  <text class="s" x="368" y="300">resumable: :pre-completed-ids + :dag/task-completed</text>
+  <text class="s" x="368" y="316">multi-parent git merges: merge_resolution</text>
+  <rect class="note" x="356" y="348" width="408" height="116" rx="6"/>
+  <text class="h" x="368" y="370">the 0-token plan path</text>
+  <text class="m" x="368" y="388">plan-from-spec-tasks (phase_software_factory/plan)</text>
+  <text class="t" x="368" y="408">when the spec already carries tasks, planning skips</text>
+  <text class="t" x="368" y="424">the LLM entirely and just validates DAG-readiness —</text>
+  <text class="t" x="368" y="440">specs are the cheap, deterministic entry</text>
+
+  <!-- PHASES -->
+  <rect class="zone" x="800" y="62" width="1100 " height="420" rx="6"/>
+  <text class="zoneT" x="816" y="84">4 · PHASE PIPELINE (Pedestal-style interceptors, loaded from config/phase/namespaces.edn) → 5 · AGENTS → 6 · GATES</text>
+
+  <rect class="ph" x="816" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="828" y="126">explore</text>
+  <text class="s" x="828" y="144">repo-index ·</text>
+  <text class="s" x="828" y="158">context-pack</text>
+  <rect class="ph" x="960" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="972" y="126">plan</text>
+  <text class="s" x="972" y="144">agent :planner</text>
+  <text class="s" x="972" y="158">gate [:plan-complete]</text>
+  <rect class="ph" x="1104" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="1116" y="126">implement</text>
+  <text class="s" x="1116" y="144">agent :implementer</text>
+  <text class="s" x="1116" y="158">gates [:syntax :lint]</text>
+  <rect class="ph" x="1248" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="1260" y="126">verify</text>
+  <text class="s" x="1260" y="144">shells test runner</text>
+  <text class="s" x="1260" y="158">gate [:tests-pass]</text>
+  <rect class="ph" x="1392" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="1404" y="126">review</text>
+  <text class="s" x="1404" y="144">agent :reviewer</text>
+  <rect class="ph" x="1536" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="1548" y="126">release</text>
+  <text class="s" x="1548" y="144">release-executor +</text>
+  <text class="s" x="1548" y="158">pr-lifecycle</text>
+  <rect class="ph" x="1680" y="104" width="128" height="70" rx="8"/>
+  <text class="h" x="1692" y="126">observe</text>
+  <text class="s" x="1692" y="144">workflow.observe-</text>
+  <text class="s" x="1692" y="158">phase</text>
+  <path class="eB" d="M944,139 L958,139" marker-end="url(#aB)"/>
+  <path class="eB" d="M1088,139 L1102,139" marker-end="url(#aB)"/>
+  <path class="eB" d="M1232,139 L1246,139" marker-end="url(#aB)"/>
+  <path class="eB" d="M1376,139 L1390,139" marker-end="url(#aB)"/>
+  <path class="eB" d="M1520,139 L1534,139" marker-end="url(#aB)"/>
+  <path class="eB" d="M1664,139 L1678,139" marker-end="url(#aB)"/>
+
+  <!-- agents row -->
+  <rect class="ag" x="816" y="210" width="500" height="110" rx="8"/>
+  <text class="h" x="828" y="232">agents (components/agent)</text>
+  <text class="m" x="828" y="252">planner · implementer · tester · reviewer · releaser · curator</text>
+  <text class="m" x="828" y="268">meta-evaluator · coordinator · budget · memory</text>
+  <text class="s" x="828" y="288">supervision: agent/stream_watchdog · agent/tool_supervisor ·</text>
+  <text class="s" x="828" y="302">self-healing · progress-detector</text>
+  <rect class="ag" x="1336" y="210" width="472" height="110" rx="8"/>
+  <text class="h" x="1348" y="232">llm (components/llm)</text>
+  <text class="m" x="1348" y="252">CLI backends (shell-out): claude · codex · cursor · opencode</text>
+  <text class="m" x="1348" y="268">HTTP: anthropic · openai · gemini · openai-compat · ollama</text>
+  <text class="s" x="1348" y="288">model registry/selector + cost tracking; CLI backends stream,</text>
+  <text class="s" x="1348" y="302">HTTP falls back to non-streaming</text>
+  <path class="eB" d="M1066,174 L1066,208" marker-end="url(#aB)"/>
+  <text class="s" x="1076" y="196" fill="#3a76b8">phases invoke agents</text>
+  <path class="eB" d="M1316,265 L1334,265" marker-end="url(#aB)"/>
+
+  <!-- gates row -->
+  <rect class="gv" x="816" y="336" width="500" height="96" rx="8"/>
+  <text class="h" x="828" y="358">gates + policy (phase transitions)</text>
+  <text class="m" x="828" y="378">policy · policy-pack · gate: syntax · lint · no-secrets ·</text>
+  <text class="m" x="828" y="394">tests-pass · coverage</text>
+  <text class="s" x="828" y="414">fail → validate-and-repair loop back into the phase</text>
+  <rect class="gv" x="1336" y="336" width="472" height="96" rx="8"/>
+  <text class="h" x="1348" y="358">evidence-bundle</text>
+  <text class="s" x="1348" y="378">provenance chains per phase/gate decision —</text>
+  <text class="s" x="1348" y="392">who/what/why for every transition</text>
+  <text class="s" x="1348" y="412">event-stream: append-only + fsync archive</text>
+  <path class="bad" d="M1316,376 C1328,376 1328,370 1328,180" marker-end="url(#aR)"/>
+  <text class="s" x="1322" y="252" fill="#c0392b" transform="rotate(-90 1322 252)">gate fail → repair</text>
+
+  <!-- OUTPUT -->
+  <rect class="zone" x="20" y="502" width="1880" height="240" rx="6"/>
+  <text class="zoneT" x="36" y="524">7 · OUTPUT — a PR, a moved spec, and durable residue</text>
+  <rect class="st" x="36" y="540" width="360 " height="90" rx="8"/>
+  <text class="h" x="48" y="562">GitHub PR</text>
+  <text class="m" x="48" y="580">release-executor/git + pr-lifecycle (gh)</text>
+  <text class="s" x="48" y="598">merge · review threads · CI monitor ·</text>
+  <text class="s" x="48" y="612">conflict resolution · pr-train batching</text>
+  <rect class="rec" x="416" y="540" width="300" height="90" rx="8"/>
+  <text class="h" x="428" y="562">work/done/&lt;spec&gt;.edn</text>
+  <text class="s" x="428" y="582">the kanban card moves; failures land</text>
+  <text class="s" x="428" y="596">in work/failed with the trail intact</text>
+  <rect class="rec" x="736" y="540" width="420" height="90" rx="8"/>
+  <text class="h" x="748" y="562">checkpoints + git bundles</text>
+  <text class="m" x="748" y="580">~/.miniforge/checkpoints/&lt;wf&gt;/&lt;task&gt;.bundle</text>
+  <text class="s" x="748" y="598">authoritative machine snapshot per workflow;</text>
+  <text class="s" x="748" y="612">bundles pushed to R2; bb harvest pulls them back as branches</text>
+  <rect class="rec" x="1176" y="540" width="330" height="90" rx="8"/>
+  <text class="h" x="1188" y="562">supervisory surface</text>
+  <text class="s" x="1188" y="582">event-stream → supervisory-state →</text>
+  <text class="s" x="1188" y="596">web-dashboard / TUI / (target: Rust console)</text>
+  <rect class="note" x="1526" y="540" width="360" height="90" rx="6"/>
+  <text class="h" x="1538" y="562">the loop is real</text>
+  <text class="t" x="1538" y="582">this pipeline ships miniforge's own PRs</text>
+  <text class="t" x="1538" y="598">daily (dogfooding); Heimdall GROUP-N PRs</text>
+  <text class="t" x="1538" y="612">in this repo are its output</text>
+
+  <rect class="note" x="36" y="650" width="1850" height="76" rx="6"/>
+  <text class="h" x="52" y="674">Ground truth for the wiring</text>
+  <text class="t" x="52" y="694">config/phase/namespaces.edn is the authoritative phase registry (loaded at startup by phase/loader); workspace.edn :necessary lists per-project bundles;</text>
+  <text class="t" x="52" y="712">workflow EDN defs (workflow-software-factory/resources/workflows/*.edn) are the process definitions the FSM executes. Code and docs agree on this path.</text>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="762" width="1880" height="70" rx="6"/>
+  <text class="zoneT" x="36" y="784">FLOW</text>
+  <line class="eB" x1="40" y1="808" x2="90" y2="808" marker-end="url(#aB)"/><text class="s" x="100" y="812">pipeline / invocation</text>
+  <line class="bad" x1="280" y1="808" x2="330" y2="808" marker-end="url(#aR)"/><text class="s" x="340" y="812">gate failure → validate-and-repair loop</text>
+  <rect class="ph" x="620" y="800" width="26" height="16" rx="3"/><text class="s" x="654" y="812">phase interceptor</text>
+  <rect class="ag" x="800" y="800" width="26" height="16" rx="3"/><text class="s" x="834" y="812">agent / LLM layer</text>
+  <rect class="gv" x="980" y="800" width="26" height="16" rx="3"/><text class="s" x="1014" y="812">governance (gates · policy · evidence)</text>
+  <rect class="st" x="1280" y="800" width="26" height="16" rx="3"/><text class="s" x="1314" y="812">orchestration / output</text>
+</svg>

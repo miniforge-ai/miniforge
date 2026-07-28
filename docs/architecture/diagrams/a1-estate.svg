@@ -1,0 +1,224 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .grp{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;} .grpG{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;}
+      .grpO{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;} .grpP{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;}
+      .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .part{stroke-dasharray:6 3;} .spec{stroke-dasharray:2 3;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11px;fill:#333;} .s{font-size:10px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.5;fill:none;}
+      .lgT{font-size:11px;fill:#333;}
+    </style>
+  </defs>
+  <rect width="1920" height="1080" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Miniforge As-Built — A1. The Polylith Estate</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">one workspace (ai.miniforge) · ~100 components · 4 bases · 5 projects · Alpha, ~45–50% of specs N1–N11 by its own accounting</text>
+
+  <!-- BASES -->
+  <rect class="zone" x="20" y="62" width="270" height="560" rx="6"/>
+  <text class="zoneT" x="36" y="84">BASES (entry points)</text>
+  <rect class="grp" x="36" y="100" width="238" height="120" rx="8"/>
+  <text class="h" x="48" y="122">cli — the `mf` CLI</text>
+  <text class="s" x="48" y="140">run · workflow · status · fleet · pr ·</text>
+  <text class="s" x="48" y="154">policy · evidence · artifact · etl ·</text>
+  <text class="s" x="48" y="168">config · doctor · version</text>
+  <text class="s" x="48" y="188">Babashka-first; BB-hostile paths</text>
+  <text class="s" x="48" y="202">defer to JVM</text>
+  <rect class="grp" x="36" y="234" width="238" height="66" rx="8"/>
+  <text class="h" x="48" y="256">etl</text>
+  <text class="s" x="48" y="274">Data Foundry runner · workbench ·</text>
+  <text class="s" x="48" y="288">registry</text>
+  <rect class="grp" x="36" y="314" width="238" height="66" rx="8"/>
+  <text class="h" x="48" y="336">mcp-context-server</text>
+  <text class="s" x="48" y="354">JSON-RPC 2.0 over stdio;</text>
+  <text class="s" x="48" y="368">context-cache tools</text>
+  <rect class="grp" x="36" y="394" width="238" height="66" rx="8"/>
+  <text class="h" x="48" y="416">lsp-mcp-bridge</text>
+  <text class="s" x="48" y="434">LSP ↔ MCP bridge for Claude Code</text>
+  <rect class="note" x="36" y="478" width="238" height="128" rx="6"/>
+  <text class="h" x="48" y="500">Runtime wiring caveat</text>
+  <text class="s" x="48" y="518">phase/workflow bricks load at runtime</text>
+  <text class="s" x="48" y="532">from classpath EDN (config/phase/</text>
+  <text class="s" x="48" y="546">namespaces.edn); workspace.edn</text>
+  <text class="s" x="48" y="560">force-bundles :necessary bricks per</text>
+  <text class="s" x="48" y="574">project — static dep analysis</text>
+  <text class="s" x="48" y="588">under-reports the graph</text>
+
+  <!-- SUBSYSTEMS -->
+  <rect class="zone" x="310" y="62" width="990" height="900" rx="6"/>
+  <text class="zoneT" x="326" y="84">COMPONENT SUBSYSTEMS (~100 components, grouped)</text>
+
+  <rect class="grpG" x="330" y="100" width="300" height="150" rx="8"/>
+  <text class="h" x="342" y="122">Workflow / orchestration core</text>
+  <text class="m" x="342" y="142">workflow (FSM+DAG+checkpoints)</text>
+  <text class="m" x="342" y="158">orchestrator · operator (meta-loop)</text>
+  <text class="m" x="342" y="174">dag-executor (OCI capsules)</text>
+  <text class="m" x="342" y="190">dag-primitives · loop · fsm</text>
+  <text class="m" x="342" y="206">phase (interceptor registry+loader)</text>
+  <text class="s" x="342" y="232">the engine — real, end-to-end</text>
+
+  <rect class="grpG" x="650" y="100" width="300" height="150" rx="8"/>
+  <text class="h" x="662" y="122">SDLC phases</text>
+  <text class="m" x="662" y="142">phase-software-factory:</text>
+  <text class="m" x="662" y="158">explore·plan·implement·verify·</text>
+  <text class="m" x="662" y="174">review·release (+observe)</text>
+  <text class="m" x="662" y="190">phase-deployment</text>
+  <text class="m" x="662" y="206">workflow-compliance-scanner</text>
+  <text class="s" x="662" y="232">each phase: agent + gates, EDN-declared</text>
+
+  <rect class="grpG" x="970" y="100" width="310" height="150" rx="8"/>
+  <text class="h" x="982" y="122">Agents + LLM</text>
+  <text class="m" x="982" y="142">agent: planner·implementer·tester·</text>
+  <text class="m" x="982" y="158">reviewer·releaser·curator·meta-eval</text>
+  <text class="m" x="982" y="174">llm: CLI backends (shell) + HTTP</text>
+  <text class="m" x="982" y="190">context-pack · knowledge · semantic-*</text>
+  <text class="m" x="982" y="206">tool-registry (mcp/external: future)</text>
+  <text class="s" x="982" y="232">watchdogs: stream, tool-supervisor</text>
+
+  <rect class="grpG" x="330" y="266" width="300" height="150" rx="8"/>
+  <text class="h" x="342" y="288">Governance / gates (~85%)</text>
+  <text class="m" x="342" y="308">policy · policy-pack · policy-calibration</text>
+  <text class="m" x="342" y="324">gate · gate-classification</text>
+  <text class="m" x="342" y="340">evidence-bundle (provenance chains)</text>
+  <text class="m" x="342" y="356">compliance-scanner · evaluation</text>
+  <text class="m" x="342" y="372">heuristic · improvement · self-healing</text>
+  <text class="s" x="342" y="398">failure-classifier · anomaly · diagnosis</text>
+
+  <rect class="grpG" x="650" y="266" width="300" height="150" rx="8"/>
+  <text class="h" x="662" y="288">Control plane (multi-vendor)</text>
+  <text class="m" x="662" y="308">control-plane (normalize+decisions)</text>
+  <text class="m" x="662" y="324">adapter-claude-code · adapter-miniforge</text>
+  <text class="m" x="662" y="340">supervisory-state (event accumulation)</text>
+  <text class="m" x="662" y="356">event-stream (append-only + archive)</text>
+  <text class="m" x="662" y="372">observer · automation-edge-correlator</text>
+  <text class="s" x="662" y="398">heartbeat watchdog · decision queue</text>
+
+  <rect class="grpG" x="970" y="266" width="310" height="150" rx="8"/>
+  <text class="h" x="982" y="288">PR / release</text>
+  <text class="m" x="982" y="308">pr-lifecycle (gh: merge·review·CI·</text>
+  <text class="m" x="982" y="324">conflicts) · release-executor (git)</text>
+  <text class="m" x="982" y="340">pr-train · pr-scoring · pr-sync</text>
+  <text class="m" x="982" y="356">pr-label-watcher</text>
+  <text class="s" x="982" y="382">real shell-outs to gh + git</text>
+
+  <rect class="grpG" x="330" y="432" width="300" height="150" rx="8"/>
+  <text class="h" x="342" y="454">Data Foundry (ETL)</text>
+  <text class="m" x="342" y="474">connector: github·gitlab·jira·edgar·</text>
+  <text class="m" x="342" y="490">excel·http·file·sarif·linter·auth·retry</text>
+  <text class="m" x="342" y="506">pipeline(-runner/-config/-pack/-store)</text>
+  <text class="m" x="342" y="522">dataset(-schema) · data-quality</text>
+  <text class="m" x="342" y="538">cursor-store (incremental EDN cursors)</text>
+  <text class="s" x="342" y="564">workflow-financial-etl</text>
+
+  <rect class="grpG" x="650" y="432" width="300" height="150" rx="8"/>
+  <text class="h" x="662" y="454">Foundations + bb-utils kernel</text>
+  <text class="m" x="662" y="474">messages (i18n) · logging · config</text>
+  <text class="m" x="662" y="490">schema · coerce · clock · content-hash</text>
+  <text class="m" x="662" y="506">bb-out·bb-proc·bb-paths·bb-r2·</text>
+  <text class="m" x="662" y="522">bb-config·bb-platform·bb-dev-tools…</text>
+  <text class="m" x="662" y="538">boundary · response(-chain) · patterns</text>
+  <text class="s" x="662" y="564">the shared kernel consumers embed</text>
+
+  <rect class="grpO" x="970" y="432" width="310" height="150" rx="8"/>
+  <text class="h" x="982" y="454">UI surfaces</text>
+  <text class="m" x="982" y="474">tui-engine · tui-views</text>
+  <text class="m" x="982" y="490">web-dashboard (HTTP + WebSocket)</text>
+  <text class="s" x="982" y="514">miniforge-tui project being replaced</text>
+  <text class="s" x="982" y="528">by the Rust console (miniforge-control)</text>
+  <text class="s" x="982" y="552">→ target suite, panel T1</text>
+
+  <rect class="grpO part" x="330" y="598" width="300" height="130" rx="8"/>
+  <text class="h" x="342" y="620">Workflow-def bundles — config-only</text>
+  <text class="m" x="342" y="640">workflow-software-factory</text>
+  <text class="m" x="342" y="656">workflow-deployment · workflow-chain-*</text>
+  <text class="m" x="342" y="672">workflow-security-compliance</text>
+  <text class="s" x="342" y="696">no src/ — EDN workflow defs + module</text>
+  <text class="s" x="342" y="710">loaders (scaffold by design)</text>
+
+  <rect class="grpO part" x="650" y="598" width="300" height="130" rx="8"/>
+  <text class="h" x="662" y="620">Thin / partially wired</text>
+  <text class="m" x="662" y="640">datalevin (interface-only; persistence</text>
+  <text class="m" x="662" y="656">is files + R2, not the DB)</text>
+  <text class="m" x="662" y="672">HTTP LLM streaming → non-streaming</text>
+  <text class="m" x="662" y="688">workbench-orchestration-adapter</text>
+  <text class="s" x="662" y="712">(no CLI wiring yet)</text>
+
+  <rect class="note" x="970" y="598" width="310" height="130" rx="6"/>
+  <text class="h" x="982" y="620">Three products, one brick set</text>
+  <text class="t" x="982" y="640">MiniForge Core — governed workflow kernel</text>
+  <text class="t" x="982" y="658">Miniforge — the software factory (SDLC)</text>
+  <text class="t" x="982" y="676">Data Foundry — ETL product</text>
+  <text class="s" x="982" y="700">agents.md "Product Layers"; the estate is</text>
+  <text class="s" x="982" y="714">one Polylith workspace serving all three</text>
+
+  <rect class="note" x="330" y="744" width="950" height="200" rx="6"/>
+  <text class="h" x="346" y="768">Spec completion, self-reported (ROADMAP + reviews) — the honesty strip</text>
+  <text class="t" x="346" y="792">N1 Context-Pack ~80% · N2 Workflow Engine ~85% · N3 Event Stream ~50% (many event types never emitted) · N5 CLI wiring ~45%</text>
+  <text class="t" x="346" y="812">N7 OPSV ~0% (infrastructure exists, workflow unimplemented) · N8 Observability Control ~10% (no RBAC/OTel/approval)</text>
+  <text class="t" x="346" y="832">N9 External PR ~35% · N10 Governed Tool Execution ~50% (no sandboxing/audit) · N11 Capsule ~50% ("governs nothing at 50%")</text>
+  <text class="t" x="346" y="856">Known doc drift: ROADMAP says 87 components / 187k LOC — tree holds ~100 component dirs; agents.md structure diagram omits the</text>
+  <text class="t" x="346" y="874">etl / mcp-context-server / lsp-mcp-bridge bases and the connector fleet; "4 providers" undersells ~10 backend keys in llm/backends.edn.</text>
+  <text class="s" x="346" y="900" font-style="italic">Full delta + contradiction register: panel T3.</text>
+
+  <!-- PROJECTS -->
+  <rect class="zone" x="1320" y="62" width="270" height="560" rx="6"/>
+  <text class="zoneT" x="1336" y="84">DEPLOYABLE PROJECTS</text>
+  <rect class="grpP" x="1336" y="100" width="238" height="64" rx="8"/>
+  <text class="h" x="1348" y="122">miniforge</text>
+  <text class="s" x="1348" y="140">the software-factory CLI (full bundle)</text>
+  <rect class="grpP" x="1336" y="178" width="238" height="64" rx="8"/>
+  <text class="h" x="1348" y="200">miniforge-core</text>
+  <text class="s" x="1348" y="218">engine-only kernel</text>
+  <rect class="grpP part" x="1336" y="256" width="238" height="64" rx="8"/>
+  <text class="h" x="1348" y="278">miniforge-tui</text>
+  <text class="s" x="1348" y="296">kept for compat → console replaces</text>
+  <rect class="grpP" x="1336" y="334" width="238" height="64" rx="8"/>
+  <text class="h" x="1348" y="356">data-foundry</text>
+  <text class="s" x="1348" y="374">ETL runner</text>
+  <rect class="grpP" x="1336" y="412" width="238" height="64" rx="8"/>
+  <text class="h" x="1348" y="434">bb-utils</text>
+  <text class="s" x="1348" y="452">aggregator of the bb-* helpers</text>
+
+  <!-- CONSUMERS -->
+  <rect class="zone" x="1610" y="62" width="290" height="560" rx="6"/>
+  <text class="zoneT" x="1626" y="84">CONSUMERS</text>
+  <rect class="rec" x="1626" y="100" width="258" height="140" rx="8"/>
+  <text class="h" x="1638" y="122">thesium-workflows / career</text>
+  <text class="s" x="1638" y="142">miniforge as git submodule; consumes:</text>
+  <text class="m" x="1638" y="160">bb-utils (:local/root, whole set)</text>
+  <text class="m" x="1638" y="176">messages (classpath paths)</text>
+  <text class="m" x="1638" y="192">bb-out · bb-dev-tools (Babashka)</text>
+  <text class="m" x="1638" y="208">llm + workflow runtime (JVM only)</text>
+  <text class="s" x="1638" y="228">bb-adapter-thesium-risk = adapter brick</text>
+  <rect class="rec" x="1626" y="256" width="258" height="100" rx="8"/>
+  <text class="h" x="1638" y="278">miniforge-control (Rust console)</text>
+  <text class="s" x="1638" y="298">consumes vendored contracts/:</text>
+  <text class="m" x="1638" y="316">supervisory-entities + operator-events</text>
+  <text class="m" x="1638" y="332">Transit golden fixtures (bb fixtures:*)</text>
+  <rect class="rec" x="1626" y="372" width="258" height="86" rx="8"/>
+  <text class="h" x="1638" y="394">Cowork plugins (miniforge-mcps)</text>
+  <text class="s" x="1638" y="414">standalone MCPs as .plugin artifacts;</text>
+  <text class="s" x="1638" y="428">github-app (FastMCP proxy). Brick-</text>
+  <text class="s" x="1638" y="442">dependent MCPs live in-repo as bases</text>
+
+  <path class="eB" d="M1300,180 L1318,160" marker-end="url(#aB)"/>
+  <path class="eB" d="M1590,140 L1608,150" marker-end="url(#aB)"/>
+  <path class="eB" d="M1590,300 L1608,300" marker-end="url(#aB)"/>
+
+  <!-- LEGEND -->
+  <rect class="zone" x="20" y="980" width="1880" height="80" rx="6"/>
+  <text class="zoneT" x="36" y="1002">LEGEND — both suites (A1–A3 as-built, T1–T3 target)</text>
+  <rect class="grpG" x="40" y="1016" width="26" height="16" rx="3"/><text class="lgT" x="74" y="1029">built, works end-to-end</text>
+  <rect class="grpO part" x="240" y="1016" width="26" height="16" rx="3"/><text class="lgT" x="274" y="1029">partial / thin / scaffold-by-design</text>
+  <rect x="500" y="1016" width="26" height="16" rx="3" fill="#f5f5f5" stroke="#8a8a82" stroke-dasharray="2 3"/><text class="lgT" x="534" y="1029">spec-only, no meaningful code</text>
+  <rect class="grp" x="760" y="1016" width="26" height="16" rx="3"/><text class="lgT" x="794" y="1029">entry point / base</text>
+  <rect class="grpP" x="930" y="1016" width="26" height="16" rx="3"/><text class="lgT" x="964" y="1029">deployable project</text>
+  <rect class="rec" x="1110" y="1016" width="26" height="16" rx="3"/><text class="lgT" x="1144" y="1029">external consumer / artifact</text>
+  <line class="eB" x1="1330" y1="1024" x2="1380" y2="1024" marker-end="url(#aB)"/><text class="lgT" x="1390" y="1028">dependency / data flow</text>
+</svg>

@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1040" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .hi{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .lp{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .gv{fill:#f8cecc;stroke:#b85450;stroke-width:1.5;} .fx{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;}
+      .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11px;fill:#333;} .s{font-size:10px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .eO{stroke:#d79b00;stroke-width:1.6;fill:none;}
+    </style>
+  </defs>
+  <rect width="1920" height="1040" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Miniforge Target — T2. Run Hierarchy, Loops, Governance</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">Spec → MiniforgeRun → WorkflowRun DAG → TaskNode/AgentSession · three nested loops · packs → gates → evidence · the intervention round-trip</text>
+
+  <!-- HIERARCHY -->
+  <rect class="zone" x="20" y="62" width="480" height="560" rx="6"/>
+  <text class="zoneT" x="36" y="84">RUN HIERARCHY (N5-delta-3)</text>
+  <rect class="hi" x="36" y="100" width="440" height="80" rx="8"/>
+  <text class="h" x="48" y="122">Spec — the supervisory root</text>
+  <text class="s" x="48" y="142">human intent + constraints; prose → LLM → EDN</text>
+  <text class="s" x="48" y="156">"How is N13 going?" is a question about a Spec</text>
+  <text class="m" x="48" y="172">:spec/* = intent (user-authored)</text>
+  <path class="eB" d="M256,180 L256,198" marker-end="url(#aB)"/>
+  <rect class="hi" x="36" y="200" width="440" height="64" rx="8"/>
+  <text class="h" x="48" y="222">MiniforgeRun — one execution of a spec</text>
+  <text class="s" x="48" y="242">budgeted, resumable, evidence-bearing</text>
+  <path class="eB" d="M256,264 L256,282" marker-end="url(#aB)"/>
+  <rect class="hi" x="36" y="284" width="440" height="72" rx="8"/>
+  <text class="h" x="48" y="306">WorkflowRun — ~40 in a DAG per run</text>
+  <text class="s" x="48" y="326">each a full process instance with its own FSM;</text>
+  <text class="m" x="48" y="344">:workflow/* = process · :task/* = decomposed work</text>
+  <path class="eB" d="M256,356 L256,374" marker-end="url(#aB)"/>
+  <rect class="hi" x="36" y="376" width="440" height="70" rx="8"/>
+  <text class="h" x="48" y="398">TaskNode + AgentSession (orchestrated leaf)</text>
+  <text class="s" x="48" y="418">the unit an agent actually executes; OCI capsule;</text>
+  <text class="s" x="48" y="432">sub-pipeline explore→plan→implement→verify</text>
+  <rect class="note" x="36" y="462" width="440" height="146 " rx="6"/>
+  <text class="h" x="48" y="484">Bare agents join the hierarchy</text>
+  <text class="s" x="48" y="504">non-miniforge sessions (Claude Code, codex) are first-class</text>
+  <text class="s" x="48" y="518">supervised entities, observed by Rust adapters tailing</text>
+  <text class="s" x="48" y="532">vendor telemetry:</text>
+  <text class="m" x="48" y="552">Discovered → Watching → Blocked → Idle →</text>
+  <text class="m" x="48" y="568">Completed / Failed → Unreachable</text>
+  <text class="s" x="48" y="590">the console supervises work it didn't launch</text>
+
+  <!-- LOOPS -->
+  <rect class="zone" x="520" y="62" width="640" height="560" rx="6"/>
+  <text class="zoneT" x="536" y="84">THREE NESTED LOOPS (product-vision · N5-delta-2)</text>
+  <rect class="lp" x="536" y="100" width="600" height="140" rx="8"/>
+  <text class="h" x="548" y="122">Loop 0 — inner (the agent's own loop)</text>
+  <text class="m" x="548" y="142">plan → implement → test → review → release</text>
+  <text class="s" x="548" y="162">validate-and-repair until gates pass; budget-bounded;</text>
+  <text class="s" x="548" y="176">semantic-intent checks ("IMPORT spec ⇒ 0 creates")</text>
+  <text class="s" x="548" y="196">runs inside the engine, no human in the loop</text>
+  <text class="s" x="548" y="216" font-style="italic">as-built today — panel A2 is this loop</text>
+  <rect class="lp" x="536" y="256" width="600" height="120" rx="8"/>
+  <text class="h" x="548" y="278">Loop 1 — outer (PR monitor)</text>
+  <text class="s" x="548" y="298">watches the open PR: resolves review feedback, pushes</text>
+  <text class="s" x="548" y="312">fixes, manages budget, escalates when stuck</text>
+  <text class="s" x="548" y="332">pr-lifecycle + pr-train as-built; the monitor loop is the</text>
+  <text class="s" x="548" y="346">designed autonomous version</text>
+  <rect class="lp" x="536" y="392" width="600" height="120" rx="8"/>
+  <text class="h" x="548" y="414">Loops 2/3 — meta (the human, from the console)</text>
+  <text class="s" x="548" y="434">observe everything; command when needed: pause · resume ·</text>
+  <text class="s" x="548" y="448">cancel · retry-from-phase · waive · force-safe-mode</text>
+  <text class="s" x="548" y="468">one operator, many runs — the control-room premise;</text>
+  <text class="s" x="548" y="482">commands flow ONLY through the intervention round-trip (right)</text>
+  <rect class="fx" x="536" y="528" width="600" height="80" rx="8"/>
+  <text class="h" x="548" y="550">FSM roster — 10 machines on one fsm component</text>
+  <text class="m" x="548" y="568">execution · supervision · degradation · pr-lifecycle · task ·</text>
+  <text class="m" x="548" y="582">dag-task · inner-loop · agent-lifecycle · heuristic · circuit-breaker</text>
+  <text class="s" x="548" y="600">+ 2 state-tracked: intervention lifecycle, supervisory WorkflowRun projection</text>
+
+  <!-- GOVERNANCE -->
+  <rect class="zone" x="1180" y="62" width="720" height="560" rx="6"/>
+  <text class="zoneT" x="1196" y="84">GOVERNANCE &amp; DURABILITY</text>
+  <rect class="gv" x="1196" y="100" width="688" height="120" rx="8"/>
+  <text class="h" x="1208" y="122">policy packs → gates → evidence bundles</text>
+  <text class="m" x="1208" y="142">per-rule :rule/enforcement — hard-halt · require-approval · warn · audit</text>
+  <text class="s" x="1208" y="162">gates check AND repair; evidence bundles carry provenance chains +</text>
+  <text class="s" x="1208" y="176">semantic-intent validation for every transition</text>
+  <text class="s" x="1208" y="196" font-style="italic">known gap: today's deployment gate fails OPEN on vocabulary mismatch — T3 #4</text>
+  <rect class="gv" x="1196" y="236" width="688" height="90" rx="8"/>
+  <text class="h" x="1208" y="258">trust model</text>
+  <text class="m" x="1208" y="278">:authority/data vs :authority/instruction · levels: tainted · untrusted · trusted</text>
+  <text class="s" x="1208" y="298">instructions and data are typed differently at the boundary — the same</text>
+  <text class="s" x="1208" y="312">injection discipline the tenancy architecture formalizes</text>
+  <rect class="rec" x="1196" y="342" width="688" height="120" rx="8"/>
+  <text class="h" x="1208" y="364">The intervention round-trip (normative)</text>
+  <text class="m" x="1208" y="384">every supervisory write MUST materialize as an InterventionRequest</text>
+  <text class="m" x="1208" y="400">before application</text>
+  <text class="s" x="1208" y="420">no side-channel commands: the operator's pause/waive/cancel is itself a</text>
+  <text class="s" x="1208" y="434">first-class, auditable entity with a lifecycle — commands leave receipts</text>
+  <text class="s" x="1208" y="452" font-style="italic">structurally preserved for the Fleet multi-operator case (deferred)</text>
+  <rect class="rec" x="1196" y="478" width="688" height="130" rx="8"/>
+  <text class="h" x="1208" y="500">Durability — "the event stream IS the product surface"</text>
+  <text class="m" x="1208" y="520">append-only event stream · evidence bundles · worktree-diff-as-artifact ·</text>
+  <text class="m" x="1208" y="536">operator append-only journal</text>
+  <text class="s" x="1208" y="556">everything the console shows is a projection over the stream; replay is</text>
+  <text class="s" x="1208" y="570">first-class (Rust state store: replay + snowflake ids)</text>
+  <text class="s" x="1208" y="590" font-style="italic">run-model repo (miniforge-run-specs) is EMPTY — the run model lives in the N-specs (see T3)</text>
+
+  <!-- bottom strip -->
+  <rect class="note" x="20" y="642" width="1880" height="90" rx="6"/>
+  <text class="h" x="36" y="666">How the planes meet the loops</text>
+  <text class="t" x="36" y="688">Loop 0 lives in Plane 1 (the engine). Loop 1 spans engine ↔ forge. Loops 2/3 live in Plane 2 (the console), commanding through the intervention</text>
+  <text class="t" x="36" y="706">round-trip. Fleet (Plane 3) coordinates many engines but never blocks them. The eval seam (Plane 5) judges outcomes across products — the same</text>
+  <text class="t" x="36" y="724">workbench snapshot that grades career grades miniforge governance itself.</text>
+
+  <rect class="zone" x="20" y="752" width="1880" height="66" rx="6"/>
+  <text class="zoneT" x="36" y="774">TYPES</text>
+  <rect class="hi" x="40" y="786" width="26" height="16" rx="3"/><text class="s" x="74" y="798">run-hierarchy entity</text>
+  <rect class="lp" x="230" y="786" width="26" height="16" rx="3"/><text class="s" x="264" y="798">loop</text>
+  <rect class="fx" x="340" y="786" width="26" height="16" rx="3"/><text class="s" x="374" y="798">state machine roster</text>
+  <rect class="gv" x="530" y="786" width="26" height="16" rx="3"/><text class="s" x="564" y="798">governance</text>
+  <rect class="rec" x="680" y="786" width="26" height="16" rx="3"/><text class="s" x="714" y="798">normative contract / durability</text>
+</svg>
