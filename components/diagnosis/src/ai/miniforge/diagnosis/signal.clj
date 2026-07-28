@@ -1,5 +1,4 @@
 ;; Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
-
 (ns ai.miniforge.diagnosis.signal
   "Signal extraction from observer metrics, reliability state, and training data.
 
@@ -11,20 +10,17 @@
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.diagnosis.messages :as msg]))
+   [ai.miniforge.diagnosis.messages :as msg]
+   [ai.miniforge.schema.interface :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Constants
 
-(def ^:private config
+;; Constants
+(def ^{:stratum 0} ^:private config
   (-> (io/resource "config/diagnosis/defaults.edn") slurp edn/read-string))
 
-(def ^:private severity-order {:critical 0 :high 1 :medium 2 :low 3})
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Signal extraction
-
-(defn- breach-to-signal
+(defn- ^{:stratum 0} breach-to-signal
   "Convert a single SLO breach check into a signal map."
   [{:keys [sli/name slo/target slo/actual slo/tier]}]
   {:signal/type :slo-breach
@@ -39,14 +35,7 @@
                            :target (format "%.2f" (double target))
                            :tier (clojure.core/name tier)})})
 
-(defn- extract-slo-breach-signals
-  "Extract signals from SLO breaches."
-  [slo-checks]
-  (->> slo-checks
-       (filter :breached?)
-       (mapv breach-to-signal)))
-
-(defn- failure-to-signal
+(defn- ^{:stratum 0} failure-to-signal
   "Convert a failure class frequency pair into a signal map."
   [min-count [cls cnt]]
   {:signal/type :recurring-failure
@@ -56,12 +45,51 @@
                           {:class (clojure.core/name cls)
                            :count (str cnt)})})
 
-(defn- meets-failure-threshold?
+(defn- ^{:stratum 0} meets-failure-threshold?
   "Returns true if the failure count meets the minimum threshold."
   [min-count [_ cnt]]
   (>= cnt min-count))
 
-(defn- extract-failure-pattern-signals
+(defn- ^{:stratum 0} avg-quality
+  "Compute the average quality score from a sequence of training examples."
+  [examples]
+  (let [scores (map #(get-in % [:training/labels :quality-score]) examples)
+        valid (filter some? scores)]
+    (if (seq valid)
+      (/ (reduce + valid) (count valid))
+      0.0)))
+
+(defn- ^{:stratum 0} exceeds-iteration-threshold?
+  "Returns true if the phase metric has iterations exceeding the threshold."
+  [threshold metric]
+  (and (:iterations metric) (> (:iterations metric) threshold)))
+
+(defn- ^{:stratum 0} phase-to-signal
+  "Convert a grouped phase entry into a high-iteration signal."
+  [[phase entries]]
+  (let [avg (double (/ (reduce + (map :iterations entries))
+                       (count entries)))]
+    {:signal/type :high-iteration-count
+     :signal/severity :medium
+     :signal/evidence {:phase phase
+                       :avg-iterations avg
+                       :count (count entries)}
+     :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
+     :signal/message (msg/t :signal/high-iteration
+                            {:phase (name phase)
+                             :avg (format "%.1f" avg)
+                             :count (str (count entries))})}))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} extract-slo-breach-signals
+  "Extract signals from SLO breaches."
+  [slo-checks]
+  (->> slo-checks
+       (filter :breached?)
+       (mapv breach-to-signal)))
+
+(defn- ^{:stratum 1} extract-failure-pattern-signals
   "Extract signals from recurring failure patterns."
   [failure-events min-count]
   (let [by-class (->> failure-events
@@ -72,16 +100,7 @@
          (filter #(meets-failure-threshold? min-count %))
          (mapv #(failure-to-signal min-count %)))))
 
-(defn- avg-quality
-  "Compute the average quality score from a sequence of training examples."
-  [examples]
-  (let [scores (map #(get-in % [:training/labels :quality-score]) examples)
-        valid (filter some? scores)]
-    (if (seq valid)
-      (/ (reduce + valid) (count valid))
-      0.0)))
-
-(defn- extract-quality-regression-signals
+(defn- ^{:stratum 1} extract-quality-regression-signals
   "Extract signals from declining training example quality."
   [training-examples min-examples]
   (when (>= (count training-examples) (* 2 min-examples))
@@ -103,28 +122,7 @@
                                  :q2 (format "%.2f" (double q2))
                                  :pct (format "%.0f" (* 100 regression))})}]))))
 
-(defn- exceeds-iteration-threshold?
-  "Returns true if the phase metric has iterations exceeding the threshold."
-  [threshold metric]
-  (and (:iterations metric) (> (:iterations metric) threshold)))
-
-(defn- phase-to-signal
-  "Convert a grouped phase entry into a high-iteration signal."
-  [[phase entries]]
-  (let [avg (double (/ (reduce + (map :iterations entries))
-                       (count entries)))]
-    {:signal/type :high-iteration-count
-     :signal/severity :medium
-     :signal/evidence {:phase phase
-                       :avg-iterations avg
-                       :count (count entries)}
-     :signal/affected-heuristic (keyword (str "agent-prompt/" (name phase)))
-     :signal/message (msg/t :signal/high-iteration
-                            {:phase (name phase)
-                             :avg (format "%.1f" avg)
-                             :count (str (count entries))})}))
-
-(defn- extract-high-iteration-signals
+(defn- ^{:stratum 1} extract-high-iteration-signals
   "Extract signals from phases requiring many inner loop iterations."
   [phase-metrics threshold]
   (->> phase-metrics
@@ -132,7 +130,9 @@
        (group-by :phase)
        (mapv phase-to-signal)))
 
-(defn extract-signals
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} extract-signals
   "Extract improvement signals from all available data sources.
 
    Arguments:
@@ -150,13 +150,17 @@
         min-failure-count  (get merged :min-failure-count 3)
         min-examples       (get merged :min-training-examples 10)
         iteration-threshold (get merged :iteration-threshold 3)]
-    (->> (concat
-          (extract-slo-breach-signals (or slo-checks []))
-          (extract-failure-pattern-signals (or failure-events []) min-failure-count)
-          (extract-quality-regression-signals (or training-examples []) min-examples)
-          (extract-high-iteration-signals (or phase-metrics []) iteration-threshold))
-         (sort-by #(get severity-order (:signal/severity %) 99))
-         vec)))
+    (let [signals (concat
+                   (extract-slo-breach-signals (or slo-checks []))
+                   (extract-failure-pattern-signals (or failure-events []) min-failure-count)
+                   (extract-quality-regression-signals (or training-examples []) min-examples)
+                   (extract-high-iteration-signals (or phase-metrics []) iteration-threshold))
+          sorted (shared/sort-by-severity :signal/severity signals)]
+      (when-not (vector? sorted)
+        ;; Extractors only emit canonical severities; an unknown value here
+        ;; is a programmer error, so throwing matches the anomaly contract.
+        (throw (ex-info "Unknown signal severity" {:anomaly sorted})))
+      sorted)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

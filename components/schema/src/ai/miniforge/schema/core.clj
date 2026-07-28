@@ -24,6 +24,7 @@
    Layer 3: more-severe and top-level composites depending on Layer 2
             (Task, Artifact, Workflow, MetaCoordinatorState)"
   (:require
+   [ai.miniforge.policy-clause.interface :as clause]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -52,30 +53,38 @@
   [:pending :running :paused :completed :failed :cancelled])
 
 (def ^{:stratum 0} severities
-  "Canonical severity levels, most to least severe. The single source of truth
-   for how-bad-is-it across the codebase: rule severity (policy-pack), runtime
-   violation/attention severity (supervisory, evidence-bundle), and any display
-   or rollup. A violation's severity is the severity of the rule it violates, so
-   one scale — not a per-producer vocabulary. Legacy `:major`/`:minor` map to
+  "Canonical severity levels, most to least severe. Defined by the
+   policy-clause component (Ariadne step 1a) and passed through here so
+   every schema consumer keeps one import site. A violation's severity
+   is the severity of the rule it violates, so one scale — not a
+   per-producer vocabulary. Legacy `:major`/`:minor` map to
    `:high`/`:low` via `normalize-severity`."
-  [:critical :high :medium :low :info])
+  clause/severities)
 
-(defn ^{:stratum 0} normalize-severity
+(def ^{:stratum 0} normalize-severity
   "Coerce a legacy severity keyword to the canonical enum: `:major` → `:high`,
-   `:minor` → `:low`; every canonical value (and anything else) is returned
-   unchanged. Lets a producer or reader tolerate a pre-migration value."
-  [severity]
-  (case severity
-    :major :high
-    :minor :low
-    severity))
+   `:minor` → `:low`; every canonical value is returned unchanged. Pass-through
+   to policy-clause."
+  clause/normalize-severity)
+
+(def ^{:stratum 0} severity-order
+  "Rank per severity, 0 = most severe. Pass-through to policy-clause so the order
+   table cannot drift from the enum."
+  clause/severity-order)
+
+(def ^{:stratum 0} compare-severity
+  "Compare two severities. Negative when `a` is more severe than `b`, positive
+   when less, 0 when equal. An unknown severity on either side returns an
+   `:invalid-input` anomaly (subtype `:anomalies.policy-clause/unknown-severity`)
+   — the pre-Ariadne sort-unknown-last default was a fail-open and is gone."
+  clause/compare-severity)
+
+(def ^{:stratum 0} more-severe
+  "Return the more severe of two severities, or an anomaly when either is
+   unknown (see `compare-severity`)."
+  clause/more-severe)
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} severity-order
-  "Rank per severity, 0 = most severe. Derived from `severities` so the order
-   table cannot drift from the enum."
-  (zipmap severities (range)))
 
 (def ^{:stratum 1} registry
   "Malli registry for base schema types."
@@ -118,13 +127,6 @@
    :common/pos-number [:double {:min 0.0}]})
 
 ;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} compare-severity
-  "Compare two severities. Negative when `a` is more severe than `b`, positive
-   when less, 0 when equal. Unknown severities sort last."
-  [a b]
-  (- (get severity-order a 99)
-     (get severity-order b 99)))
 
 (def ^{:stratum 2} Severity
   "Malli enum for a canonical severity level (see `severities`). Reuses the
@@ -221,11 +223,6 @@
    [:checked-at :common/timestamp]])
 
 ;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} more-severe
-  "Return the more severe of two severities."
-  [a b]
-  (if (neg? (compare-severity a b)) a b))
 
 (def ^{:stratum 3} Task
   "Schema for a unit of work assigned to an agent."

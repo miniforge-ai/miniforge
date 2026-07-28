@@ -13,6 +13,7 @@
         ai.miniforge/workflow-deployment {:local/root "../../components/workflow-deployment"}
         ai.miniforge/workflow-chain-deployment {:local/root "../../components/workflow-chain-deployment"}
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}

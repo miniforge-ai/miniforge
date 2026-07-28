@@ -11,6 +11,7 @@
    Layer 0: Technology detection and linter execution
    Layer 1: Gate registration"
   (:require
+   [ai.miniforge.policy-clause.interface :as clause]
    [ai.miniforge.connector-linter.interface :as linter]
    [ai.miniforge.gate.registry :as registry]
    [ai.miniforge.repo-analyzer.interface :as repo-analyzer]
@@ -41,14 +42,22 @@
       "."))
 
 (defn- ^{:stratum 0} violation->lint-error
-  "Convert a linter violation to a gate error map."
+  "Convert a linter violation to a gate error map. The violation carries a
+   POLICY severity (:rule/severity); the gate error map speaks the
+   mechanical scale, so it crosses via policy-clause — the one crossing
+   point between the two axes. Rule severities are schema-validated, so an
+   unknown value is a programmer error: the throw lands in check-gate's
+   exception-to-failed-gate seam (fail-closed)."
   [v]
-  {:type     :lint-error
-   :file     (get v :file)
-   :line     (get v :line 0)
-   :message  (get v :current "")
-   :rule-id  (get v :rule/id)
-   :severity (get v :rule/severity :high)})
+  (let [mech (clause/severity->mechanical (get v :rule/severity :high))]
+    (when-not (keyword? mech)
+      (throw (ex-info "Unknown rule severity on lint violation" {:anomaly mech})))
+    {:type     :lint-error
+     :file     (get v :file)
+     :line     (get v :line 0)
+     :message  (get v :current "")
+     :rule-id  (get v :rule/id)
+     :severity mech}))
 
 (defn ^{:stratum 0} repair-pre-verify-lint
   "Lint errors cannot be auto-repaired — return to agent."

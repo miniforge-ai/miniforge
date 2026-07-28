@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.supervisory-state.schema
   "Open Malli schemas for the canonical supervisory entities.
 
@@ -28,12 +27,14 @@
    producer.
 
    All maps are open (additional keys pass through) per
-   N5-delta-1 §12.4.")
+   N5-delta-1 §12.4."
+  (:require
+   [ai.miniforge.schema.interface :as shared]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Contract version
 
-(def schema-version
+;; Contract version
+(def ^{:stratum 0} schema-version
   "Version of the supervisory entity contract, stamped as
    `:supervisory/schema-version` on every supervisory snapshot event
    (N3 §3.19): the `:supervisory/*-upserted` families plus
@@ -49,87 +50,87 @@
    at runtime on mismatch instead of silently dropping fields."
   1)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Enums — match the Rust enum variants in supervisory-entities
-
-(def workflow-run-statuses
+(def ^{:stratum 0} workflow-run-statuses
   [:queued :running :paused :blocked :completed :failed :cancelled])
 
-(def trigger-sources
+(def ^{:stratum 0} trigger-sources
   [:mcp :cli :api :chain])
 
-(def agent-statuses
+(def ^{:stratum 0} agent-statuses
   [:idle :starting :executing :blocked :completed :failed :unreachable :unknown :running :terminated])
 
-(def pr-statuses
+(def ^{:stratum 0} pr-statuses
   [:draft :open :reviewing :changes-requested :approved :merging :merged :closed :failed])
 
-(def ci-statuses
+(def ^{:stratum 0} ci-statuses
   [:pending :running :passed :failed :skipped])
 
-(def violation-severities
-  [:info :low :medium :high :critical])
+(def ^{:stratum 0} violation-severities
+  "Pass-through to the canonical severity scale (policy-clause via the
+   shared schema interface); enum use only."
+  shared/severities)
 
-(def violation-categories
+(def ^{:stratum 0} violation-categories
   [:style :security :testing :documentation :architecture :process :budget])
 
-(def attention-severities
+(def ^{:stratum 0} attention-severities
   [:critical :warning :info])
 
-(def attention-source-types
+(def ^{:stratum 0} attention-source-types
   [:workflow :pr :train :policy :agent])
 
-(def policy-target-types
+(def ^{:stratum 0} policy-target-types
   [:pr :artifact :workflow-output])
 
-(def risk-levels
+(def ^{:stratum 0} risk-levels
   "Pre-computed risk tier from pr-train.risk/assess-risk, per N5-delta-2 §2.2."
   [:low :medium :high :critical])
 
-(def policy-overall-states
+(def ^{:stratum 0} policy-overall-states
   "Aggregate policy-evaluation summary per N5-delta-2 §2.3. `:waived` reflects
    that a Waiver record covers every violation; `:unknown` is the initial
    state before policy has run."
   [:pass :fail :waived :unknown])
 
-(def pr-recommendations
+(def ^{:stratum 0} pr-recommendations
   "Single-keyword action suggestion per N5-delta-2 §2.4. Consumers render
    the keyword verbatim."
   [:merge :approve :review :remediate :decompose :wait :escalate])
 
-(def task-kanban-columns
+(def ^{:stratum 0} task-kanban-columns
   "Closed six-column set for the DAG Kanban view (N5 §3.2.5 / N5-δ3 §2.3).
    This is a display contract: adding a column breaks consumers."
   [:blocked :ready :active :in-review :merging :done])
 
-(def decision-types
+(def ^{:stratum 0} decision-types
   "Known decision request shapes per N5-δ3 §2.4. Open — producer may emit
    additional types (control-plane can extend without a spec bump)."
   [:approval :choice :input :confirmation :unknown])
 
-(def decision-priorities
+(def ^{:stratum 0} decision-priorities
   "Known priority tiers per N5-δ3 §2.4. Open by convention."
   [:critical :high :medium :low])
 
-(def decision-statuses
+(def ^{:stratum 0} decision-statuses
   "Lifecycle status of a DecisionCard per N5-δ3 §2.4. `:expired` is
    reserved for the future `:control-plane/decision-expired` event or
    a deadline-vs-wall-clock derivation; today's producers emit only
    `:pending` (on create) and `:resolved` (on resolve)."
   [:pending :resolved :expired])
 
-(def intervention-states
+(def ^{:stratum 0} intervention-states
   "Lifecycle states of an InterventionRequest per
    N5-delta-supervisory-control-plane §3.3."
   [:proposed :pending-human :approved :rejected :dispatched :applied :verified :failed])
 
-(def dependency-kinds
+(def ^{:stratum 0} dependency-kinds
   [:provider :platform :environment])
 
-(def dependency-statuses
+(def ^{:stratum 0} dependency-statuses
   [:healthy :degraded :unavailable :misconfigured :operator-action-required])
 
-(def spec-statuses
+(def ^{:stratum 0} spec-statuses
   "Lifecycle states a long-lived Spec passes through (N5-delta-3 §5.1).
 
    - :draft     — created, no MiniforgeRun yet
@@ -142,10 +143,70 @@
    `pr-statuses` / etc. throughout this namespace."
   [:draft :active :completed :archived])
 
+;; Per-PR scoring sub-entities (N5-delta-2 §2). All three are OPTIONAL on
+;; PrFleetEntry: absent = "not yet scored", per §5.4 — distinct from a
+;; score of zero.
+(def ^{:stratum 0} ReadinessFactor
+  "One factor breakdown row from pr-train.readiness/explain-readiness
+   per N5-delta-2 §2.1."
+  [:map
+   [:factor keyword?]
+   [:weight number?]
+   [:score number?]
+   [:contribution number?]
+   [:explanation {:optional true} [:maybe string?]]])
+
+(def ^{:stratum 0} RiskFactor
+  "One factor breakdown row from pr-train.risk/assess-risk per N5-delta-2 §2.2."
+  [:map
+   [:factor keyword?]
+   [:weight number?]
+   [:value {:optional true} any?]
+   [:score number?]
+   [:explanation {:optional true} [:maybe string?]]])
+
+(def ^{:stratum 0} PolicyViolationSummary
+  "Per-violation display row on PrPolicy per N5-delta-2 §2.3. Distinct
+   from the authoritative PolicyViolation entity (§3.1 N5-delta-1) —
+   this is a display-facing projection."
+  [:map
+   [:rule-id keyword?]
+   [:severity :violation/severity]
+   [:message string?]
+   [:path {:optional true} string?]
+   [:waived? {:optional true} boolean?]])
+
+(def ^{:stratum 0} PolicyCounts
+  "Violation-severity histogram per N5-delta-2 §2.3, keyed by the canonical
+   5-level severity scale (`:critical/:high/:medium/:low/:info`) so it aligns
+   with `:violation/severity`, plus `:total`. The per-severity counts sum to
+   `:total`."
+  [:map
+   [:critical :common/non-neg-int]
+   [:high     :common/non-neg-int]
+   [:medium   :common/non-neg-int]
+   [:low      :common/non-neg-int]
+   [:info     :common/non-neg-int]
+   [:total    :common/non-neg-int]])
+
+(def ^{:stratum 0} empty-table
+  "Initial empty entity table."
+  {:specs {}
+   :workflows {}
+   :agents {}
+   :prs {}
+   :policy-evals {}
+   :attention {}
+   :tasks {}
+   :decisions {}
+   :interventions {}
+   :dependencies {}})
+
+;------------------------------------------------------------------------------ Layer 1
+
 ;------------------------------------------------------------------------------ Layer 0a
 ;; Registry extensions for supervisory v1
-
-(def registry
+(def ^{:stratum 1} registry
   "Malli registry for supervisory v1 keyword types.
 
    Inlines the few base keyword types the supervisory entities need
@@ -220,10 +281,10 @@
    :spec/id                      :id/uuid
    :spec/status                  (into [:enum] spec-statuses)})
 
-;------------------------------------------------------------------------------ Layer 1
-;; Entity schemas — open maps, mirror N5-delta-1 §3.1
+;------------------------------------------------------------------------------ Layer 2
 
-(def WorkflowRun
+;; Entity schemas — open maps, mirror N5-delta-1 §3.1
+(def ^{:stratum 2} WorkflowRun
   "A concrete execution instance of a workflow per N5-delta-1 §3.1.
 
    Open: additional keys pass through validation."
@@ -265,7 +326,7 @@
       [:pr/author {:optional true} [:maybe string?]]
       [:pr/merge-order {:optional true} [:maybe :common/non-neg-int]]]]]])
 
-(def Spec
+(def ^{:stratum 2} Spec
   "A long-lived supervisory entity representing the operator's
    top-level unit of work (N5-delta-3 §3.1, §5.1). One Spec owns N
    WorkflowRuns over its lifetime.
@@ -296,7 +357,7 @@
    [:spec/tags        {:optional true} [:vector [:or :string :keyword]]]
    [:spec/origin      {:optional true} keyword?]])
 
-(def AgentSession
+(def ^{:stratum 2} AgentSession
   "An external or internal agent observable to the supervisory plane.
 
    Mirrors the Rust supervisory-entities `AgentSession` shape. The
@@ -316,21 +377,7 @@
    [:agent/last-heartbeat :common/timestamp]
    [:agent/task {:optional true} [:maybe string?]]])
 
-;; Per-PR scoring sub-entities (N5-delta-2 §2). All three are OPTIONAL on
-;; PrFleetEntry: absent = "not yet scored", per §5.4 — distinct from a
-;; score of zero.
-
-(def ReadinessFactor
-  "One factor breakdown row from pr-train.readiness/explain-readiness
-   per N5-delta-2 §2.1."
-  [:map
-   [:factor keyword?]
-   [:weight number?]
-   [:score number?]
-   [:contribution number?]
-   [:explanation {:optional true} [:maybe string?]]])
-
-(def PrReadiness
+(def ^{:stratum 2} PrReadiness
   "Merge-readiness score block per N5-delta-2 §2.1."
   [:map {:registry registry}
    [:readiness/score number?]
@@ -338,47 +385,14 @@
    [:readiness/ready? boolean?]
    [:readiness/factors [:vector ReadinessFactor]]])
 
-(def RiskFactor
-  "One factor breakdown row from pr-train.risk/assess-risk per N5-delta-2 §2.2."
-  [:map
-   [:factor keyword?]
-   [:weight number?]
-   [:value {:optional true} any?]
-   [:score number?]
-   [:explanation {:optional true} [:maybe string?]]])
-
-(def PrRisk
+(def ^{:stratum 2} PrRisk
   "Risk-assessment score block per N5-delta-2 §2.2."
   [:map {:registry registry}
    [:risk/score number?]
    [:risk/level :risk/level]
    [:risk/factors [:vector RiskFactor]]])
 
-(def PolicyViolationSummary
-  "Per-violation display row on PrPolicy per N5-delta-2 §2.3. Distinct
-   from the authoritative PolicyViolation entity (§3.1 N5-delta-1) —
-   this is a display-facing projection."
-  [:map
-   [:rule-id keyword?]
-   [:severity :violation/severity]
-   [:message string?]
-   [:path {:optional true} string?]
-   [:waived? {:optional true} boolean?]])
-
-(def PolicyCounts
-  "Violation-severity histogram per N5-delta-2 §2.3, keyed by the canonical
-   5-level severity scale (`:critical/:high/:medium/:low/:info`) so it aligns
-   with `:violation/severity`, plus `:total`. The per-severity counts sum to
-   `:total`."
-  [:map
-   [:critical :common/non-neg-int]
-   [:high     :common/non-neg-int]
-   [:medium   :common/non-neg-int]
-   [:low      :common/non-neg-int]
-   [:info     :common/non-neg-int]
-   [:total    :common/non-neg-int]])
-
-(def PrPolicy
+(def ^{:stratum 2} PrPolicy
   "Aggregated external-PR policy result per N5-delta-2 §2.3."
   [:map {:registry registry}
    [:policy/overall :policy/overall]
@@ -387,7 +401,118 @@
    [:policy/violations [:vector PolicyViolationSummary]]
    [:policy/artifacts-checked {:optional true} [:maybe :common/non-neg-int]]])
 
-(def PrFleetEntry
+(def ^{:stratum 2} PolicyViolation
+  "A single rule failure within a PolicyEvaluation per N5-delta-1 §3.1."
+  [:map {:registry registry}
+   [:violation/rule-id keyword?]
+   [:violation/severity :violation/severity]
+   [:violation/category :violation/category]
+   [:violation/message [:string {:min 1}]]
+   [:violation/location {:optional true} [:maybe string?]]
+   [:violation/remediable? boolean?]])
+
+(def ^{:stratum 2} AttentionItem
+  "A derived supervisory signal per N5-delta-1 §3.1 + §5."
+  [:map {:registry registry}
+   [:attention/id :attention/id]
+   [:attention/severity :attention/severity]
+   [:attention/source-type :attention/source-type]
+   [:attention/source-id any?]
+   [:attention/summary [:string {:min 1}]]
+   [:attention/derived-at :common/timestamp]
+   [:attention/resolved? boolean?]])
+
+(def ^{:stratum 2} TaskNode
+  "A single DAG task observable in the Kanban view (N5 §3.2.5 / N5-δ3 §2.3).
+
+   `:task/status` is an OPEN keyword — workflow families may add their own
+   statuses via the DAG state-profile system. `:task/kanban-column` is the
+   closed display contract derived from status + dependency resolution per
+   N5-δ3 §2.3's status→column table; unknown statuses fall back to
+   `:blocked` so they surface visibly."
+  [:map {:registry registry}
+   [:task/id :task/id]
+   [:task/workflow-run-id :id/uuid]
+   [:task/description string?]
+   [:task/type {:optional true} [:maybe keyword?]]
+   [:task/component {:optional true} [:maybe string?]]
+   [:task/status keyword?]
+   [:task/kanban-column :task/kanban-column]
+   [:task/dependencies {:optional true} [:vector :id/uuid]]
+   [:task/dependents   {:optional true} [:vector :id/uuid]]
+   [:task/started-at   {:optional true} [:maybe :common/timestamp]]
+   [:task/completed-at {:optional true} [:maybe :common/timestamp]]
+   [:task/elapsed-ms   {:optional true} [:maybe :common/non-neg-int]]
+   [:task/exclusive-files? {:optional true} boolean?]
+   [:task/stratum?         {:optional true} boolean?]])
+
+(def ^{:stratum 2} DecisionCard
+  "A pending or resolved decision request from an agent per N5-δ3 §2.4.
+
+   Today's `:control-plane/decision-created` / `-resolved` events carry a
+   thin payload (id, agent-id, summary, optional priority; resolution on
+   resolve). Richer fields — `:decision/type`, `:decision/context`,
+   `:decision/options`, `:decision/deadline`, `:decision/comment` — are
+   part of the entity shape so future control-plane extensions can
+   surface them; supervisory-state populates only what arrives on the
+   wire, per the open-map rule."
+  [:map {:registry registry}
+   [:decision/id :decision/id]
+   [:decision/agent-id :id/uuid]
+   [:decision/workflow-run-id {:optional true} [:maybe :id/uuid]]
+   [:decision/type {:optional true} [:maybe :decision/type]]
+   [:decision/priority {:optional true} [:maybe :decision/priority]]
+   [:decision/status :decision/status]
+   [:decision/summary string?]
+   [:decision/context  {:optional true} [:maybe string?]]
+   [:decision/options  {:optional true} [:vector string?]]
+   [:decision/deadline {:optional true} [:maybe :common/timestamp]]
+   [:decision/created-at :common/timestamp]
+   [:decision/resolution {:optional true} [:maybe string?]]
+   [:decision/comment    {:optional true} [:maybe string?]]
+   [:decision/resolved-at {:optional true} [:maybe :common/timestamp]]])
+
+(def ^{:stratum 2} InterventionRequest
+  "A bounded supervisory control request per N5 supervisory delta §3.1.
+
+   The type and target-type stay open keywords at this boundary so replay and
+   downstream consumers preserve future spec-aligned additions."
+  [:map {:registry registry}
+   [:intervention/id :intervention/id]
+   [:intervention/type keyword?]
+   [:intervention/target-type keyword?]
+   [:intervention/target-id any?]
+   [:intervention/requested-by [:string {:min 1}]]
+   [:intervention/request-source keyword?]
+   [:intervention/state :intervention/state]
+   [:intervention/requested-at :common/timestamp]
+   [:intervention/updated-at :common/timestamp]
+   [:intervention/justification {:optional true} [:maybe string?]]
+   [:intervention/details {:optional true} [:maybe map?]]
+   [:intervention/approval-required? {:optional true} boolean?]
+   [:intervention/reason {:optional true} [:maybe string?]]
+   [:intervention/outcome {:optional true} any?]])
+
+(def ^{:stratum 2} DependencyHealth
+  "Projected health for an external provider, platform, or user environment."
+  [:map {:registry registry}
+   [:dependency/id :dependency/id]
+   [:dependency/source keyword?]
+   [:dependency/kind :dependency/kind]
+   [:dependency/status :dependency/status]
+   [:dependency/failure-count :common/non-neg-int]
+   [:dependency/window-size :common/non-neg-int]
+   [:dependency/incident-counts [:map-of :dependency/status :common/non-neg-int]]
+   [:dependency/vendor {:optional true} [:maybe keyword?]]
+   [:dependency/class {:optional true} [:maybe keyword?]]
+   [:dependency/retryability {:optional true} [:maybe keyword?]]
+   [:failure/class {:optional true} [:maybe keyword?]]
+   [:dependency/last-observed-at {:optional true} [:maybe :common/timestamp]]
+   [:dependency/last-recovered-at {:optional true} [:maybe :common/timestamp]]])
+
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} PrFleetEntry
   "A pull request observable in the supervisory PR fleet view (N5/N9).
 
    The four `:pr/readiness`, `:pr/risk`, `:pr/policy`, `:pr/recommendation`
@@ -417,17 +542,7 @@
    [:pr/policy {:optional true} [:maybe PrPolicy]]
    [:pr/recommendation {:optional true} [:maybe :pr/recommendation]]])
 
-(def PolicyViolation
-  "A single rule failure within a PolicyEvaluation per N5-delta-1 §3.1."
-  [:map {:registry registry}
-   [:violation/rule-id keyword?]
-   [:violation/severity :violation/severity]
-   [:violation/category :violation/category]
-   [:violation/message [:string {:min 1}]]
-   [:violation/location {:optional true} [:maybe string?]]
-   [:violation/remediable? boolean?]])
-
-(def PolicyEvaluation
+(def ^{:stratum 3} PolicyEvaluation
   "Immutable record of a completed policy evaluation per N5-delta-1 §3.1.
 
   A re-evaluation MUST produce a new record with a fresh `:policy-eval/id`
@@ -443,109 +558,10 @@
    [:policy-eval/violations [:vector PolicyViolation]]
    [:policy-eval/evaluated-at :common/timestamp]])
 
-(def AttentionItem
-  "A derived supervisory signal per N5-delta-1 §3.1 + §5."
-  [:map {:registry registry}
-   [:attention/id :attention/id]
-   [:attention/severity :attention/severity]
-   [:attention/source-type :attention/source-type]
-   [:attention/source-id any?]
-   [:attention/summary [:string {:min 1}]]
-   [:attention/derived-at :common/timestamp]
-   [:attention/resolved? boolean?]])
+;------------------------------------------------------------------------------ Layer 4
 
-(def TaskNode
-  "A single DAG task observable in the Kanban view (N5 §3.2.5 / N5-δ3 §2.3).
-
-   `:task/status` is an OPEN keyword — workflow families may add their own
-   statuses via the DAG state-profile system. `:task/kanban-column` is the
-   closed display contract derived from status + dependency resolution per
-   N5-δ3 §2.3's status→column table; unknown statuses fall back to
-   `:blocked` so they surface visibly."
-  [:map {:registry registry}
-   [:task/id :task/id]
-   [:task/workflow-run-id :id/uuid]
-   [:task/description string?]
-   [:task/type {:optional true} [:maybe keyword?]]
-   [:task/component {:optional true} [:maybe string?]]
-   [:task/status keyword?]
-   [:task/kanban-column :task/kanban-column]
-   [:task/dependencies {:optional true} [:vector :id/uuid]]
-   [:task/dependents   {:optional true} [:vector :id/uuid]]
-   [:task/started-at   {:optional true} [:maybe :common/timestamp]]
-   [:task/completed-at {:optional true} [:maybe :common/timestamp]]
-   [:task/elapsed-ms   {:optional true} [:maybe :common/non-neg-int]]
-   [:task/exclusive-files? {:optional true} boolean?]
-   [:task/stratum?         {:optional true} boolean?]])
-
-(def DecisionCard
-  "A pending or resolved decision request from an agent per N5-δ3 §2.4.
-
-   Today's `:control-plane/decision-created` / `-resolved` events carry a
-   thin payload (id, agent-id, summary, optional priority; resolution on
-   resolve). Richer fields — `:decision/type`, `:decision/context`,
-   `:decision/options`, `:decision/deadline`, `:decision/comment` — are
-   part of the entity shape so future control-plane extensions can
-   surface them; supervisory-state populates only what arrives on the
-   wire, per the open-map rule."
-  [:map {:registry registry}
-   [:decision/id :decision/id]
-   [:decision/agent-id :id/uuid]
-   [:decision/workflow-run-id {:optional true} [:maybe :id/uuid]]
-   [:decision/type {:optional true} [:maybe :decision/type]]
-   [:decision/priority {:optional true} [:maybe :decision/priority]]
-   [:decision/status :decision/status]
-   [:decision/summary string?]
-   [:decision/context  {:optional true} [:maybe string?]]
-   [:decision/options  {:optional true} [:vector string?]]
-   [:decision/deadline {:optional true} [:maybe :common/timestamp]]
-   [:decision/created-at :common/timestamp]
-   [:decision/resolution {:optional true} [:maybe string?]]
-   [:decision/comment    {:optional true} [:maybe string?]]
-   [:decision/resolved-at {:optional true} [:maybe :common/timestamp]]])
-
-(def InterventionRequest
-  "A bounded supervisory control request per N5 supervisory delta §3.1.
-
-   The type and target-type stay open keywords at this boundary so replay and
-   downstream consumers preserve future spec-aligned additions."
-  [:map {:registry registry}
-   [:intervention/id :intervention/id]
-   [:intervention/type keyword?]
-   [:intervention/target-type keyword?]
-   [:intervention/target-id any?]
-   [:intervention/requested-by [:string {:min 1}]]
-   [:intervention/request-source keyword?]
-   [:intervention/state :intervention/state]
-   [:intervention/requested-at :common/timestamp]
-   [:intervention/updated-at :common/timestamp]
-   [:intervention/justification {:optional true} [:maybe string?]]
-   [:intervention/details {:optional true} [:maybe map?]]
-   [:intervention/approval-required? {:optional true} boolean?]
-   [:intervention/reason {:optional true} [:maybe string?]]
-   [:intervention/outcome {:optional true} any?]])
-
-(def DependencyHealth
-  "Projected health for an external provider, platform, or user environment."
-  [:map {:registry registry}
-   [:dependency/id :dependency/id]
-   [:dependency/source keyword?]
-   [:dependency/kind :dependency/kind]
-   [:dependency/status :dependency/status]
-   [:dependency/failure-count :common/non-neg-int]
-   [:dependency/window-size :common/non-neg-int]
-   [:dependency/incident-counts [:map-of :dependency/status :common/non-neg-int]]
-   [:dependency/vendor {:optional true} [:maybe keyword?]]
-   [:dependency/class {:optional true} [:maybe keyword?]]
-   [:dependency/retryability {:optional true} [:maybe keyword?]]
-   [:failure/class {:optional true} [:maybe keyword?]]
-   [:dependency/last-observed-at {:optional true} [:maybe :common/timestamp]]
-   [:dependency/last-recovered-at {:optional true} [:maybe :common/timestamp]]])
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Component-internal entity table
-
-(def EntityTable
+(def ^{:stratum 4} EntityTable
   "Aggregate state held by the supervisory-state component."
   [:map
    [:specs         [:map-of :id/uuid Spec]]
@@ -558,16 +574,3 @@
    [:decisions     [:map-of :id/uuid DecisionCard]]
    [:interventions [:map-of :id/uuid InterventionRequest]]
    [:dependencies  [:map-of :dependency/id DependencyHealth]]])
-
-(def empty-table
-  "Initial empty entity table."
-  {:specs {}
-   :workflows {}
-   :agents {}
-   :prs {}
-   :policy-evals {}
-   :attention {}
-   :tasks {}
-   :decisions {}
-   :interventions {}
-   :dependencies {}})

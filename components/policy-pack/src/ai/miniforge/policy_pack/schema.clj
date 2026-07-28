@@ -55,8 +55,10 @@
   shared/Severity)
 
 (def ^{:stratum 0} enforcement-actions
-  "Enforcement actions, ordered from strictest to most lenient."
-  [:hard-halt :require-approval :warn :audit])
+  "Enforcement actions, ordered from strictest to most lenient. Defined by
+   the policy-clause component (Ariadne step 1a); passed through here so
+   pack consumers keep one import site."
+  shared/enforcement-actions)
 
 (def ^{:stratum 0} detection-types
   "Types of violation detection."

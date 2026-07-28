@@ -27,7 +27,10 @@
   [:style :security :testing :documentation :architecture :process :budget])
 
 (def ^{:stratum 0} violation-severities
-  [:info :low :medium :high :critical])
+  "Pass-through to the canonical severity scale (policy-clause via core).
+   Enum use only — the canonical most-to-least order replaces the reversed
+   copy that used to live here."
+  core/severities)
 
 (def ^{:stratum 0} attention-source-types
   [:workflow :policy :agent :system :human])

@@ -42,7 +42,8 @@
         ai.miniforge/phase                     {:local/root "../../components/phase"}
         ai.miniforge/policy-pack               {:local/root "../../components/policy-pack"}
         ai.miniforge/response                  {:local/root "../../components/response"}
-        ai.miniforge/schema                    {:local/root "../../components/schema"}}
+        ai.miniforge/schema                    {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause             {:local/root "../../components/policy-clause"}}
 
  :aliases
  {:test {:extra-paths ["../../bases/etl/test"

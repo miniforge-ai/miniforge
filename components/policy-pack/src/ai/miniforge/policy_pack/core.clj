@@ -46,11 +46,9 @@
 
 ;; Severity and enforcement comparison
 (def ^{:stratum 0} enforcement-order
-  "Enforcement actions from strictest to most lenient."
-  {:hard-halt 0
-   :require-approval 1
-   :warn 2
-   :audit 3})
+  "Enforcement actions from strictest to most lenient — pass-through to
+   the shared vocabulary (policy-clause via schema)."
+  shared/enforcement-order)
 
 (def ^{:stratum 0} compare-severity
   "Compare two severities by the shared canonical order (negative if a is more
