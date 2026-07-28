@@ -796,9 +796,9 @@
 
 (defn ^{:stratum 2} load-or-create-workflow [load-workflow workflow-type workflow-version]
   (let [workflow-type (resolve-workflow-alias workflow-type)]
-    (try
+    (try+
       (load-and-validate-workflow load-workflow workflow-type workflow-version)
-      (catch Exception e
+      (catch [:anomaly/category :anomalies/not-found] _
         (case workflow-type
           :test-only
           {:workflow/id :test-only
@@ -815,7 +815,7 @@
                                {:phase :done}]
            :workflow/config {:max-tokens 20000 :max-iterations 5}}
 
-          (throw e))))))
+          (throw+))))))
 
 (defn ^{:stratum 2} execute-with-events [{:keys [run-pipeline workflow workflow-input context artifact-store
                                      event-stream workflow-id sandbox-cleanup opts]}]
