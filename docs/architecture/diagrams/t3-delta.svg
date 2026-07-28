@@ -62,10 +62,10 @@
   <rect class="part" x="536" y="276" width="600" height="170" rx="8"/>
   <text class="h" x="548" y="298">PARTIAL — real but thin, or in progress</text>
   <text class="m" x="548" y="318">Phase D control path (control-plane-client crate exists; wiring in progress)</text>
-  <text class="m" x="548" y="334">N11 capsule ~50% · runtime policy gating at phase boundaries (unwired)</text>
+  <text class="m" x="548" y="334">N11 capsule ~50% (phase gates themselves: wired, fail-closed)</text>
   <text class="m" x="548" y="350">Fleet governance comps = in-memory 3-clj stubs: authz ·</text>
   <text class="m" x="548" y="366">conflict-detection · resource-management · policy-distribution · analytics</text>
-  <text class="m" x="548" y="382">HTTP LLM streaming (falls back) · datalevin (interface only)</text>
+  <text class="m" x="548" y="382">HTTP LLM streaming (falls back)</text>
   <text class="m" x="548" y="398">workbench-orchestration-adapter (no CLI wiring)</text>
   <text class="m" x="548" y="414">WorktreeInbox read-side: claude-code only; bash write-only</text>
   <rect class="spec" x="536" y="462" width="600" height="180" rx="8"/>

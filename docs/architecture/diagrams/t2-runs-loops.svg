@@ -53,30 +53,32 @@
   <!-- LOOPS -->
   <rect class="zone" x="520" y="62" width="640" height="560" rx="6"/>
   <text class="zoneT" x="536" y="84">THREE NESTED LOOPS (product-vision · N5-delta-2)</text>
-  <rect class="lp" x="536" y="100" width="600" height="140" rx="8"/>
+  <rect class="lp" x="536" y="100" width="600" height="104" rx="8"/>
   <text class="h" x="548" y="122">Loop 0 — inner (the agent's own loop)</text>
   <text class="m" x="548" y="142">plan → implement → test → review → release</text>
-  <text class="s" x="548" y="162">validate-and-repair until gates pass; budget-bounded;</text>
-  <text class="s" x="548" y="176">semantic-intent checks ("IMPORT spec ⇒ 0 creates")</text>
-  <text class="s" x="548" y="196">runs inside the engine, no human in the loop</text>
-  <text class="s" x="548" y="216" font-style="italic">as-built today — panel A2 is this loop</text>
-  <rect class="lp" x="536" y="256" width="600" height="120" rx="8"/>
-  <text class="h" x="548" y="278">Loop 1 — outer (PR monitor)</text>
-  <text class="s" x="548" y="298">watches the open PR: resolves review feedback, pushes</text>
-  <text class="s" x="548" y="312">fixes, manages budget, escalates when stuck</text>
-  <text class="s" x="548" y="332">pr-lifecycle + pr-train as-built; the monitor loop is the</text>
-  <text class="s" x="548" y="346">designed autonomous version</text>
-  <rect class="lp" x="536" y="392" width="600" height="120" rx="8"/>
-  <text class="h" x="548" y="414">Loops 2/3 — meta (the human, from the console)</text>
-  <text class="s" x="548" y="434">observe everything; command when needed: pause · resume ·</text>
-  <text class="s" x="548" y="448">cancel · retry-from-phase · waive · force-safe-mode</text>
-  <text class="s" x="548" y="468">one operator, many runs — the control-room premise;</text>
-  <text class="s" x="548" y="482">commands flow ONLY through the intervention round-trip (right)</text>
+  <text class="s" x="548" y="162">validate-and-repair until gates pass; budget-bounded; no human</text>
+  <text class="s" x="548" y="182" font-style="italic">as-built today — panel A2 is this loop</text>
+  <rect class="lp" x="536" y="214" width="600" height="86" rx="8"/>
+  <text class="h" x="548" y="236">Loop 1 — outer (PR monitor)</text>
+  <text class="s" x="548" y="256">watches the open PR: resolves feedback, pushes fixes, manages</text>
+  <text class="s" x="548" y="270">budget, escalates when stuck (pr-lifecycle + pr-train as-built;</text>
+  <text class="s" x="548" y="284">the fully autonomous monitor is the designed version)</text>
+  <rect class="lp" x="536" y="310" width="600" height="100" rx="8"/>
+  <text class="h" x="548" y="332">Loop 2 — META AGENTS (doormen over meaning)</text>
+  <text class="s" x="548" y="352">a set of meta agents gate SEMANTIC INTENT and run specialized</text>
+  <text class="s" x="548" y="366">reviews: did the agent build something DIFFERENT than planned?</text>
+  <text class="s" x="548" y="380">("IMPORT spec ⇒ 0 creates" lives here) — a perfectly built</text>
+  <text class="s" x="548" y="394">wrong thing fails · meta-evaluator + coordinator (as-built roster)</text>
+  <rect class="lp" x="536" y="420" width="600" height="92" rx="8"/>
+  <text class="h" x="548" y="442">Loop 3 — META-META: the operator (plumbed, nearing release)</text>
+  <text class="s" x="548" y="462">the operator component orchestrates the meta loop itself;</text>
+  <text class="s" x="548" y="476">the human supervises it from the console — pause · resume · cancel ·</text>
+  <text class="s" x="548" y="490">retry · waive — always through the intervention round-trip (right)</text>
   <rect class="fx" x="536" y="528" width="600" height="80" rx="8"/>
   <text class="h" x="548" y="550">FSM roster — 10 machines on one fsm component</text>
   <text class="m" x="548" y="568">execution · supervision · degradation · pr-lifecycle · task ·</text>
   <text class="m" x="548" y="582">dag-task · inner-loop · agent-lifecycle · heuristic · circuit-breaker</text>
-  <text class="s" x="548" y="600">+ 2 state-tracked: intervention lifecycle, supervisory WorkflowRun projection</text>
+  <text class="s" x="548" y="600">ONE phase authority: the workflow FSM (current-phase-id) — all others observe, feeding back only via the orchestrator</text>
 
   <!-- GOVERNANCE -->
   <rect class="zone" x="1180" y="62" width="720" height="560" rx="6"/>
@@ -84,8 +86,8 @@
   <rect class="gv" x="1196" y="100" width="688" height="120" rx="8"/>
   <text class="h" x="1208" y="122">policy packs → gates → evidence bundles</text>
   <text class="m" x="1208" y="142">per-rule :rule/enforcement — hard-halt · require-approval · warn · audit</text>
-  <text class="s" x="1208" y="162">gates check AND repair; evidence bundles carry provenance chains +</text>
-  <text class="s" x="1208" y="176">semantic-intent validation for every transition</text>
+  <text class="s" x="1208" y="162">COMPILED packs (policy-pack/compiler) drive gates wired fail-closed at every</text>
+  <text class="s" x="1208" y="176">transition (as-built); evidence bundles carry provenance + semantic intent</text>
   <text class="s" x="1208" y="196" font-style="italic">known gap: today's deployment gate fails OPEN on vocabulary mismatch — T3 #4</text>
   <rect class="gv" x="1196" y="236" width="688" height="90" rx="8"/>
   <text class="h" x="1208" y="258">trust model</text>

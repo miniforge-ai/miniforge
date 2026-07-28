@@ -36,8 +36,8 @@
   <rect class="built" x="36" y="326" width="588" height="86" rx="8"/>
   <text class="h" x="48" y="348">Learning layer</text>
   <text class="m" x="48" y="366">Observer → Meta-loop → Heuristic registry → Knowledge base</text>
-  <text class="s" x="48" y="386">self-improvement from run outcomes; training-capture</text>
-  <text class="s" x="36" y="436">runs on a workstation or CI · ~100 components, 4 bases (panel A1)</text>
+  <text class="s" x="48" y="386">meta agents = semantic doormen; operator = meta-meta (nearing release)</text>
+  <text class="s" x="36" y="436">runs on a workstation or CI · isolation ladder as-built: worktree → container → k8s Jobs</text>
   <text class="s" x="36" y="452">the engine exists and dogfoods itself daily (panel A2)</text>
 
   <!-- Plane 2 -->
@@ -119,8 +119,7 @@
   <text class="s" x="1380" y="636">(forcing function: proprietary data that can't leave the network)</text>
   <rect class="rec" x="1316" y="660" width="568" height="36" rx="6"/>
   <text class="t" x="1328" y="678" font-weight="bold">Thesium</text><text class="t" x="1400" y="678">standalone: GHA + R2 + data-plane gateway — NO Fleet dependency</text>
-  <rect class="rec" x="1316" y="702" width="568" height="34" rx="6"/>
-  <text class="t" x="1328" y="720" font-weight="bold">Engrammic</text><text class="t" x="1416" y="720">licenses Fleet — "Fleet is to Engrammic what k8s is to an app"</text>
+  <text class="s" x="1328" y="722" font-style="italic">(the licensing-model spec also names a fourth shape, now retired — spec predates it)</text>
 
   <!-- governance split strip -->
   <rect class="note" x="20" y="762" width="1880" height="90" rx="6"/>
