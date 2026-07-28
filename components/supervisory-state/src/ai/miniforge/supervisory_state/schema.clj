@@ -47,8 +47,15 @@
 
    Consumers (miniforge-control supervisory-entities crate) pin the
    version their vendored golden fixtures were generated from and warn
-   at runtime on mismatch instead of silently dropping fields."
-  1)
+   at runtime on mismatch instead of silently dropping fields.
+
+   v2 (Ariadne 1e): the golden corpus now exercises the four
+   policy-attention keys the producer always emitted but the corpus
+   never showed (:attention/workflow-run-id :attention/gate-id
+   :attention/target-type :attention/target-id) and adds the
+   :gate/decision event family carrying the DecisionEnvelope — the one
+   truth artifact for gated transitions."
+  2)
 
 ;; Enums — match the Rust enum variants in supervisory-entities
 (def ^{:stratum 0} workflow-run-statuses

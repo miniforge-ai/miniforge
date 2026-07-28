@@ -1,1 +1,1 @@
-{:supervisory/schema-version 1, :fixture/families [:workflow-run :spec :agent :pr :policy-eval :attention :task-node :decision :intervention]}
+{:supervisory/schema-version 2, :fixture/families [:workflow-run :spec :agent :pr :policy-eval :attention :task-node :decision :intervention :gate-decision]}

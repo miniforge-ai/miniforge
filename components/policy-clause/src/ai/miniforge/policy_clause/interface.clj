@@ -78,6 +78,10 @@
   "Mechanical gate value -> policy severity; anomaly for `:none`/unknown."
   core/mechanical->severity)
 
+(def ^{:stratum 0} severity->attention
+  "Policy severity -> attention scale (:critical/:warning/:info); anomaly for unknown."
+  core/severity->attention)
+
 (def ^{:stratum 0} severity->mechanical
   "Policy severity -> mechanical gate value; anomaly for unknown."
   core/severity->mechanical)

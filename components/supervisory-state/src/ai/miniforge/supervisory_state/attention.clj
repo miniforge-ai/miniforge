@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.supervisory-state.attention
   "Pure derivation of AttentionItems from the canonical entity table.
 
@@ -25,6 +24,7 @@
    deterministic attention list keyed by stable UUIDv5 IDs so consumers don't
    see flicker on identical signals."
   (:require
+   [ai.miniforge.policy-clause.interface :as clause]
    [ai.miniforge.supervisory-state.messages :as msg])
   (:import
    (java.util UUID)
@@ -32,14 +32,14 @@
    (java.nio ByteBuffer)))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Deterministic AttentionItem ID
 
-(def ^:private attention-ns
+;; Deterministic AttentionItem ID
+(def ^{:stratum 0} ^:private attention-ns
   "Stable namespace UUID for attention-item IDs (matches the Rust side's
    `ATTENTION_NS` constant in miniforge-control/state/src/projections.rs)."
   (UUID/fromString "6ba7b810-9dad-11d1-80b4-00c04fd430c8"))
 
-(defn- uuid-v5
+(defn- ^{:stratum 0} uuid-v5
   "Derive a deterministic UUID v5 from a namespace UUID and a string key.
 
    Uses SHA-1 per RFC-4122 §4.3. The bit-math constants are encoded as
@@ -65,15 +65,25 @@
                           Long/MIN_VALUE)]
       (UUID. hi lo))))
 
-(defn- attention-id
+(defn- ^{:stratum 0} now [] (java.util.Date.))
+
+(def ^{:stratum 0} ^:private stale-workflow-threshold-ms
+  "A running workflow is considered stale if `:workflow-run/updated-at` is
+   older than this. 10 minutes matches the ballpark the Clojure TUI uses
+   for its own stale detection."
+  (* 10 60 1000))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} attention-id
   "Stable ID derived from source-type and source-id so the same logical
    signal keeps the same UUID across derivations."
   [source-type source-id]
   (uuid-v5 attention-ns (str (name source-type) ":" (pr-str source-id))))
 
-(defn- now [] (java.util.Date.))
+;------------------------------------------------------------------------------ Layer 2
 
-(defn- item
+(defn- ^{:stratum 2} item
   ([severity source-type source-id summary]
    (item severity source-type source-id summary {}))
   ([severity source-type source-id summary extra]
@@ -86,10 +96,10 @@
            :attention/resolved?   false}
           extra)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Individual rules — each returns a seq of AttentionItems
+;------------------------------------------------------------------------------ Layer 3
 
-(defn- workflow-failed-rule
+;; Individual rules — each returns a seq of AttentionItems
+(defn- ^{:stratum 3} workflow-failed-rule
   "Critical: workflow is in :failed state (N5-delta-1 §5.1)."
   [{:keys [workflows]}]
   (for [[_ wf] workflows
@@ -98,7 +108,7 @@
           (str (:workflow-run/id wf))
           (str "Workflow failed: " (:workflow-run/workflow-key wf)))))
 
-(defn- workflow-completed-rule
+(defn- ^{:stratum 3} workflow-completed-rule
   "Info: workflow completed successfully (N5-delta-1 §5.1)."
   [{:keys [workflows]}]
   (for [[_ wf] workflows
@@ -107,13 +117,7 @@
           (str (:workflow-run/id wf))
           (str "Workflow completed: " (:workflow-run/workflow-key wf)))))
 
-(def ^:private stale-workflow-threshold-ms
-  "A running workflow is considered stale if `:workflow-run/updated-at` is
-   older than this. 10 minutes matches the ballpark the Clojure TUI uses
-   for its own stale detection."
-  (* 10 60 1000))
-
-(defn- workflow-stale-rule
+(defn- ^{:stratum 3} workflow-stale-rule
   "Warning: running workflow hasn't produced an event recently."
   [{:keys [workflows]}]
   (let [cutoff (- (.getTime (now)) stale-workflow-threshold-ms)]
@@ -124,7 +128,7 @@
             (str (:workflow-run/id wf))
             (str "Workflow stale: " (:workflow-run/workflow-key wf))))))
 
-(defn- agent-blocked-rule
+(defn- ^{:stratum 3} agent-blocked-rule
   "Warning: agent in :blocked state (awaiting decision)."
   [{:keys [agents]}]
   (for [[_ a] agents
@@ -133,7 +137,7 @@
           (str (:agent/id a))
           (str "Agent blocked: " (:agent/name a)))))
 
-(defn- agent-failed-rule
+(defn- ^{:stratum 3} agent-failed-rule
   "Critical: agent in terminal failed state."
   [{:keys [agents]}]
   (for [[_ a] agents
@@ -142,7 +146,7 @@
           (str (:agent/id a))
           (str "Agent failed: " (:agent/name a)))))
 
-(defn- pr-ci-failed-rule
+(defn- ^{:stratum 3} pr-ci-failed-rule
   "Warning: PR has CI failing and is not yet terminal."
   [{:keys [prs]}]
   (for [[_ pr] prs
@@ -152,7 +156,7 @@
           [(:pr/repo pr) (:pr/number pr)]
           (str "CI failed: " (:pr/repo pr) "#" (:pr/number pr) " — " (:pr/title pr)))))
 
-(defn- pr-behind-main-rule
+(defn- ^{:stratum 3} pr-behind-main-rule
   "Warning: non-terminal PR is behind main (potential merge conflict)."
   [{:keys [prs]}]
   (for [[_ pr] prs
@@ -162,14 +166,22 @@
           [(:pr/repo pr) (:pr/number pr)]
           (str "PR behind main: " (:pr/repo pr) "#" (:pr/number pr)))))
 
-(defn- policy-violation-rule
+(defn- ^{:stratum 3} policy-violation-rule
   "Critical (high/critical violations) or Info (lower) for failed policy evals."
   [{:keys [policy-evals]}]
   (for [[_ ev] policy-evals
         :when (false? (:policy-eval/passed? ev))
-        :let [critical? (some #(#{:critical :high} (:violation/severity %))
-                              (:policy-eval/violations ev))
-              sev       (if critical? :critical :info)
+        :let [worst (reduce (fn [acc s]
+                              (let [m (clause/more-severe acc s)]
+                                (if (keyword? m) m acc)))
+                            :info
+                            (keep :violation/severity (:policy-eval/violations ev)))
+              ;; Severity comes FROM the violation set via the one policy->
+              ;; attention crossing (Ariadne 1e) — no local map. A crossing
+              ;; anomaly falls back to :critical: over-alerting, never
+              ;; under-alerting.
+              att (clause/severity->attention worst)
+              sev (if (keyword? att) att :critical)
               gate-id   (:policy-eval/gate-id ev)
               target-type (:policy-eval/target-type ev)
               target-id (:policy-eval/target-id ev)
@@ -208,10 +220,10 @@
            :attention/target-type target-type
            :attention/target-id target-id})))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Rule registry + runner
+;------------------------------------------------------------------------------ Layer 4
 
-(def rules
+;; Rule registry + runner
+(def ^{:stratum 4} rules
   "Rule registry. Each rule is `(table) -> seq<AttentionItem>`."
   [workflow-failed-rule
    workflow-completed-rule
@@ -222,7 +234,9 @@
    pr-behind-main-rule
    policy-violation-rule])
 
-(defn derive-items
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} derive-items
   "Run all rules against the entity table and return a map `{id → item}`.
 
    Using a map keyed by attention/id guarantees deduplication: if two rules
@@ -236,7 +250,9 @@
        (map (juxt :attention/id identity))
        (into {})))
 
-(defn derive-seq
+;------------------------------------------------------------------------------ Layer 6
+
+(defn ^{:stratum 6} derive-seq
   "Same as `derive-items` but returns a sorted sequence suitable for display.
 
    Sort: severity rank (critical → warning → info), then summary ascending."

@@ -66,6 +66,13 @@
     (is (= :info (clause/mechanical->severity :note)))
     (is (anomaly/anomaly? (clause/mechanical->severity :none)))
     (is (anomaly/anomaly? (clause/mechanical->severity :meltdown))))
+  (testing "policy -> attention"
+    (is (= :critical (clause/severity->attention :critical)))
+    (is (= :critical (clause/severity->attention :high)))
+    (is (= :warning (clause/severity->attention :medium)))
+    (is (= :warning (clause/severity->attention :low)))
+    (is (= :info (clause/severity->attention :info)))
+    (is (anomaly/anomaly? (clause/severity->attention :wobbly))))
   (testing "policy -> mechanical"
     (is (= :error (clause/severity->mechanical :critical)))
     (is (= :error (clause/severity->mechanical :high)))
