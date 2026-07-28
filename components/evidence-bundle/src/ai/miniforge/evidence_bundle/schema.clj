@@ -71,7 +71,12 @@
    :policy-check/checked-at inst?
    :policy-check/violations vector?
    :policy-check/passed? boolean?
-   :policy-check/duration-ms pos-int?})
+   ;; nat-int?: evidence collection defaults a missing duration to 0
+   ;; (build-policy-check-evidence), which pos-int? would reject
+   :policy-check/duration-ms nat-int?
+   ;; nilable: legacy/mechanical gate results carry no DecisionEnvelope —
+   ;; the collector always writes the key, with nil for envelope-less checks
+   :policy-check/envelope (some-fn nil? map?)})
 
 ;; Outcome Schema
 (def ^{:stratum 0} pr-statuses #{:open :merged :closed})

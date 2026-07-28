@@ -203,7 +203,7 @@
    run carries no event stream. Fail-safe: evidence emission must never break
    enforcement, so a publish error is swallowed (the gate verdict still
    stands)."
-  [ctx phase classified]
+  [ctx phase classified envelope-id]
   (when-let [stream (:event-stream ctx)]
     (try
       (let [wid (:workflow/id ctx)]
@@ -213,7 +213,8 @@
            (event-stream/gate-rule-applied stream wid phase rule-id status
                                            {:severity    severity
                                             :enforcement enforcement
-                                            :violation   violation}))))
+                                            :violation   violation
+                                            :envelope-id envelope-id}))))
       (catch Exception _ nil))))
 
 (defn ^{:stratum 0} repair-policy-pack
@@ -518,7 +519,8 @@
         (when (:compiled? result)
           (emit-rule-evidence! ctx phase
                                (classify-rules packs phase artifact context
-                                               (:violations result))))
+                                               (:violations result))
+                               (get-in result [:envelope :envelope/id])))
         (cond-> {:passed?  (:passed? result)
                  :errors   (vec (concat (:blocking result)
                                         (:require-approval result)))

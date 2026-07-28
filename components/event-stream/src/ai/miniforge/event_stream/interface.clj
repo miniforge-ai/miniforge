@@ -318,6 +318,10 @@
    carried through."
   events/gate-failed)
 
+(def ^{:stratum 0} phase-decision
+  "One event per gated phase transition carrying the DecisionEnvelope."
+  events/phase-decision)
+
 (def ^{:stratum 0} gate-rule-applied
   "Build and return a :gate/rule-applied event envelope map: per-rule
    policy evidence recording rule-id evaluated in phase with status

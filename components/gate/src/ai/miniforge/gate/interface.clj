@@ -28,6 +28,7 @@
      (check-gate :lint artifact ctx)
      (repair-gate :lint artifact errors ctx)"
   (:require
+   [ai.miniforge.gate.decide :as decide]
    ;; Require implementations for side effects
    [ai.miniforge.gate.syntax]
    [ai.miniforge.gate.lint]
@@ -99,14 +100,14 @@
 ;; Gate operations
 (defn ^{:stratum 0} emit-gate-event!
   "Emit a gate lifecycle event when the context carries an event stream."
-  [ctx gate-kw event-type & [extra]]
+  [ctx gate-kw event-type & [extra extra2]]
   (try
     (when-let [stream (get ctx :event-stream)]
       (let [constructor (case event-type
                           :started events/gate-started
                           :passed events/gate-passed
                           :failed events/gate-failed)]
-        (events/publish! stream (constructor stream (:workflow/id ctx) gate-kw extra))))
+        (events/publish! stream (constructor stream (:workflow/id ctx) gate-kw extra extra2))))
     (catch Exception _ nil)))
 
 (defn- ^{:stratum 0} repair-succeeded?
@@ -117,6 +118,14 @@
     (contains? result :success?) (boolean (:success? result))
     (response/success? result)   true
     :else                        false))
+
+(def ^{:stratum 0} gates->envelope
+  "Phase-level DecisionEnvelope from a check-gates result (Ariadne 1d)."
+  decide/gates->envelope)
+
+(def ^{:stratum 0} decision-allowed?
+  "True when an envelope's decision is not :deny."
+  decide/allowed?)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -144,7 +153,9 @@
             result (assoc result :gate gate-kw)]
         (if (passed? result)
           (emit-gate-event! ctx gate-kw :passed (- (System/currentTimeMillis) start-ms))
-          (emit-gate-event! ctx gate-kw :failed (:errors result)))
+          (emit-gate-event! ctx gate-kw :failed (:errors result)
+                            (when-let [e (:envelope result)]
+                              {:envelope-id (:envelope/id e)})))
         result)
       (catch Exception ex
         (let [result {:passed? false
