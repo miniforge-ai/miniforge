@@ -7,25 +7,25 @@
 ;; 1 and 2 groundwork (the envelope becomes what crosses the seam).
 ;;
 ;; Verified wiring points (2026-07-28, against origin/main):
-;;   workflow/execution.clj:132-160  apply-gate-validation attaches
+;;   workflow/execution.clj  apply-gate-validation attaches
 ;;     :phase/status :failed + :phase/gate-errors on failure
-;;   workflow/execution.clj:168-188  update-response-chain builds the
+;;   workflow/execution.clj  update-response-chain builds the
 ;;     :anomalies.gate/validation-failed anomaly from gate-errors
-;;   event-stream/core.clj:796-832   gate-started/gate-passed/
+;;   event-stream/core.clj   gate-started/gate-passed/
 ;;     gate-failed/gate-rule-applied constructors
-;;   gate/policy_pack.clj:204-220    emit-rule-evidence! (swallows
+;;   gate/policy_pack.clj    emit-rule-evidence! (swallows
 ;;     exceptions - evidence never breaks enforcement; keep that)
-;;   evidence-bundle/schema.clj:181-189 policy-check block shape
+;;   evidence-bundle/schema.clj policy-check block shape
 
 {:spec/title "Ariadne step 1d: gates emit DecisionEnvelopes through the phase lifecycle"
 
  :spec/description
- "Wire decide() into the phase lifecycle so one envelope is THE record
+ "Wire decide into the phase lifecycle so one envelope is THE record
   of each gated transition, visible identically in the phase result,
   the event stream, and the evidence bundle.
 
   GROUP 1: Phase result carries the envelope
-  apply-gate-validation routes the gate-check result through decide();
+  apply-gate-validation routes the gate-check result through decide;
   the phase result gains :phase/decision-envelope. :phase/gate-errors
   is REPLACED by projection from envelope reasons (no dual storage);
   update-response-chain derives its anomaly from the envelope.

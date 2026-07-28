@@ -8,22 +8,22 @@
 ;;
 ;; Verified state (2026-07-28; Clojure against origin/main, Rust
 ;; against miniforge-control checkout):
-;;   Deriver A  supervisory-state attention.clj:225 derive-items;
-;;              agent-blocked-rule :127-134 emits FIXED :warning
-;;   Deriver B  miniforge-control state/src/state.rs:509
-;;              apply_agent_blocked locally mints DecisionCard (:563)
-;;              + AttentionItem (:592) with its own UUIDv5 namespaces
-;;              (state.rs:113,118) and its own confidence->severity map
-;;              (:168) - while projections/attention.rs:13-14 claims
+;;   Deriver A  supervisory-state attention.clj derive-items;
+;;              agent-blocked-rule emits FIXED :warning
+;;   Deriver B  miniforge-control state/src/state.rs
+;;              apply_agent_blocked locally mints DecisionCard 
+;;              + AttentionItem  with its own UUIDv5 namespaces
+;;              (state.rs,118) and its own confidence->severity map
+;;               - while projections/attention.rs claims
 ;;              "no local derivation, no duplicate rules across
 ;;              languages"
-;;   Silent drop  attention.clj:206-209 attaches four keys
+;;   Silent drop  attention.clj attaches four keys
 ;;              (:attention/workflow-run-id :attention/gate-id
 ;;               :attention/target-type :attention/target-id) that do
 ;;              not exist on the Rust AttentionItem struct
-;;              (entities.rs:332-364) - serde drops them, schema
+;;              (entities.rs) - serde drops them, schema
 ;;              version stays 1, warn-only check never fires
-;;              (manager.rs:270-281)
+;;              (manager.rs)
 
 {:spec/title "Ariadne step 1e: DecisionEnvelope crosses the console seam as a versioned contract"
 

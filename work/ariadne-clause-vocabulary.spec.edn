@@ -7,18 +7,18 @@
 ;; docs/architecture/tenancy-ownership-access.md); T3 contradiction 5.
 ;;
 ;; Verified state (2026-07-28, all cited against origin/main):
-;;   Vocabulary A  components/schema .../schema/core.clj:54-61
+;;   Vocabulary A  components/schema .../schema/core.clj
 ;;                 severities [:critical :high :medium :low :info];
-;;                 policy-pack schema.clj:57-59 enforcement-actions
+;;                 policy-pack schema.clj enforcement-actions
 ;;                 [:hard-halt :require-approval :warn :audit]
-;;   Vocabulary B  gate-classification schema.clj:32 mechanical
+;;   Vocabulary B  gate-classification schema.clj mechanical
 ;;                 [:error :warning :note :none] (distinct axis, kept)
-;;   Vocabulary C  schema/supervisory.clj:29-30 violation-severities
+;;   Vocabulary C  schema/supervisory.clj violation-severities
 ;;                 REVERSED-order copy of A; evidence-bundle
-;;                 schema.clj:169-179 a THIRD copy as a set
-;;   Fail-open     schema/core.clj:122-127 compare-severity sorts any
+;;                 schema.clj a THIRD copy as a set
+;;   Fail-open     schema/core.clj compare-severity sorts any
 ;;                 unknown severity LAST (rank 99) instead of erroring
-;;   Collision     gate/pre_verify_lint.clj:51 defaults a mechanical-gate
+;;   Collision     gate/pre_verify_lint.clj defaults a mechanical-gate
 ;;                 severity from Vocabulary A's :high
 
 {:spec/title "Ariadne step 1a: one clause vocabulary for severity and enforcement"
@@ -85,7 +85,7 @@
  {:tier :blocker
   :axes #{:governance-credibility :policy-enforcement}
   :theme :ariadne-adoption
-  :rationale "Every later Ariadne artifact (clause labels, envelopes, decide()) speaks this vocabulary; five definition sites and a sort-last default make fail-closed unrepresentable today."
+  :rationale "Every later Ariadne artifact (clause labels, envelopes, decide) speaks this vocabulary; five definition sites and a sort-last default make fail-closed unrepresentable today."
   :blocks ["ariadne-decision-envelope.spec.edn"]
   :blocked-by []}
 

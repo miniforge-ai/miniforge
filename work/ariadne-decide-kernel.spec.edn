@@ -1,15 +1,15 @@
 ;; =============================================================================
-;; Spec: Ariadne step 1c — fail-closed decide() over compiled pack results
+;; Spec: Ariadne step 1c — fail-closed decide over compiled pack results
 ;; =============================================================================
 ;;
 ;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
-;; step 1; ratified decision 1); Ariadne §13.2/§13.7 (decide(),
+;; step 1; ratified decision 1); Ariadne §13.2/§13.7 (decide,
 ;; fail-closed on unknown); T3 contradiction 4.
 ;;
 ;; Verified fail-open being closed (2026-07-28, against origin/main):
-;;   policy-pack detection.clj:297-316 - four equality filters, one per
+;;   policy-pack detection.clj - four equality filters, one per
 ;;   known enforcement action; a violation with any OTHER action matches
-;;   none of them, and gate/policy_pack.clj:478 sets
+;;   none of them, and gate/policy_pack.clj sets
 ;;   :passed? (empty? blocking) - so the unknown violation passes and
 ;;   vanishes. Also today :require-approval does NOT block (only
 ;;   :hard-halt does) - it is recorded as a warning and the gate passes.
@@ -17,13 +17,13 @@
 ;;   only {:action :audit}, so flipping :require-approval to deny is a
 ;;   semantics fix with no live rule impact - verify in-build.
 
-{:spec/title "Ariadne step 1c: fail-closed decide() kernel over compiled pack results"
+{:spec/title "Ariadne step 1c: fail-closed decide kernel over compiled pack results"
 
  :spec/description
- "Add decide() to the gate component: the one function that turns a
+ "Add decide to the gate component: the one function that turns a
   compiled policy-pack check result plus phase context into a
   DecisionEnvelope. The existing gate core (enter->gates->leave,
-  check-gates) stays; decide() replaces the enforcement-classification
+  check-gates) stays; decide replaces the enforcement-classification
   layer above it.
 
   GROUP 1: The decision table
@@ -46,7 +46,7 @@
 
   GROUP 2: Delete the fall-through classifiers
   detection.clj's four independent equality filters are replaced by an
-  exhaustive dispatch in decide() that has no default-pass branch. The
+  exhaustive dispatch in decide that has no default-pass branch. The
   filters' remaining callers migrate to envelope accessors.
 
   GROUP 3: Nil-artifact discipline preserved
@@ -64,7 +64,7 @@
  :spec/constraints
  ["Exhaustive enforcement dispatch: no default branch that allows; the unknown case is an explicit :deny"
   "Verify the live pack inventory before flipping :require-approval semantics; record the inventory in the PR"
-  "decide() is pure: violations + ctx + revision in, envelope out; emission stays at the call site"
+  "decide is pure: violations + ctx + revision in, envelope out; emission stays at the call site"
   "No dual path: the old blocking/approval/warning/audit filter outputs are removed, not shadowed"
   "Full bb test, not affected-only"]
 
