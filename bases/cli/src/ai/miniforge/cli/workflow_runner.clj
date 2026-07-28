@@ -41,7 +41,7 @@
    [ai.miniforge.cli.workflow-runner.dashboard :as dashboard]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.response.interface :as response]
-   [slingshot.slingshot :refer [try+]]
+   [slingshot.slingshot :refer [try+ throw+]]
    [ai.miniforge.dag-executor.interface :as gc-queue]
    [ai.miniforge.cli.worktree :as worktree]
    [ai.miniforge.cli.workflow-runner.gc-hooks :as gc-hooks]))
