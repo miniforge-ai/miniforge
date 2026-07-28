@@ -71,7 +71,9 @@
    :policy-check/checked-at inst?
    :policy-check/violations vector?
    :policy-check/passed? boolean?
-   :policy-check/duration-ms pos-int?
+   ;; nat-int?: evidence collection defaults a missing duration to 0
+   ;; (build-policy-check-evidence), which pos-int? would reject
+   :policy-check/duration-ms nat-int?
    :policy-check/envelope map?})
 
 ;; Outcome Schema
