@@ -6,7 +6,8 @@
 
 # RFC: Adopting Ariadne in Miniforge
 
-**Status:** Proposed (2026-07-28). Graduated from the owner-reviewed
+**Status:** Accepted (2026-07-28, owner ratification — all three
+decisions below). Graduated from the owner-reviewed
 adoption assessment; the analysis below is unchanged from that
 review apart from naming and the ratification list.
 
