@@ -1,0 +1,92 @@
+;; =============================================================================
+;; Spec: Ariadne step 1a — one clause vocabulary for severity + enforcement
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (Accepted;
+;; ratified decision 1, adoption step 1); Ariadne §13.1 (thesium-career
+;; docs/architecture/tenancy-ownership-access.md); T3 contradiction 5.
+;;
+;; Verified state (2026-07-28, all cited against origin/main):
+;;   Vocabulary A  components/schema .../schema/core.clj
+;;                 severities [:critical :high :medium :low :info];
+;;                 policy-pack schema.clj enforcement-actions
+;;                 [:hard-halt :require-approval :warn :audit]
+;;   Vocabulary B  gate-classification schema.clj mechanical
+;;                 [:error :warning :note :none] (distinct axis, kept)
+;;   Vocabulary C  schema/supervisory.clj violation-severities
+;;                 REVERSED-order copy of A; evidence-bundle
+;;                 schema.clj a THIRD copy as a set
+;;   Fail-open     schema/core.clj compare-severity sorts any
+;;                 unknown severity LAST (rank 99) instead of erroring
+;;   Collision     gate/pre_verify_lint.clj defaults a mechanical-gate
+;;                 severity from Vocabulary A's :high
+
+{:spec/title "Ariadne step 1a: one clause vocabulary for severity and enforcement"
+
+ :spec/description
+ "Create component policy-clause: the single definition site for the
+  severity scale and the enforcement-action vocabulary, as the ground
+  layer for Ariadne PolicyClause labels.
+
+  GROUP 1: The vocabulary component
+  New component policy-clause exposing: the severity scale
+  [:critical :high :medium :low :info] with total order; the
+  enforcement actions [:hard-halt :require-approval :warn :audit]
+  documented as relaxation modes (hard-halt = no relaxation;
+  require-approval = approval workflow; warn/audit = envelope
+  obligations); Malli schemas for both; predicate + comparator fns
+  that REJECT unknown values with an anomaly instead of defaulting.
+
+  GROUP 2: Collapse the copies
+  schema/supervisory.clj violation-severities and evidence-bundle
+  schema.clj violation-severities are deleted; both namespaces (and
+  policy-pack RuleSeverity) become interface pass-throughs to
+  policy-clause. schema/core.clj severities moves behind the same
+  interface. No duplicate literal vocabularies survive anywhere
+  (grep-clean acceptance below).
+
+  GROUP 3: Kill the silent ordering default
+  compare-severity's unknown->rank-99 default is replaced: comparing
+  or filtering on an unknown severity returns an anomaly (fail-loud).
+  All call sites swept in the same change - no eventually-consistent
+  drift window.
+
+  GROUP 4: The mechanical axis stays, mapped
+  The gate-classification mechanical scale [:error :warning :note
+  :none] is a different axis (tool exit semantics, not policy
+  severity). It stays, but policy-clause owns the one explicit
+  mapping fn mechanical->severity, and gate/pre_verify_lint.clj's
+  cross-vocabulary default (:rule/severity :high into a mechanical
+  path) is rewritten through that mapping."
+
+ :spec/intent {:type :feature
+               :scope ["components/policy-clause/"
+                       "components/schema/src/ai/miniforge/schema/core.clj"
+                       "components/schema/src/ai/miniforge/schema/supervisory.clj"
+                       "components/policy-pack/src/ai/miniforge/policy_pack/schema.clj"
+                       "components/evidence-bundle/src/ai/miniforge/evidence_bundle/schema.clj"
+                       "components/gate/src/ai/miniforge/gate/pre_verify_lint.clj"]}
+
+ :spec/constraints
+ ["One definition site; every other namespace is an interface pass-through (DRY per component+interface rule)"
+  "Unknown severity or enforcement value anywhere = anomaly, never a default rank, never a silent drop"
+  "Run the FULL test suite, not affected-only: schema components have dependents the affected-tests selector misses"
+  "No compat shims: the deleted duplicate defs are deleted, not deprecated"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["grep for the severity vector/set literals finds exactly one definition site (policy-clause) outside tests"
+  "compare/rank on an unknown severity returns an anomaly; a test proves the old sort-last behavior is gone"
+  "policy-pack, supervisory, evidence-bundle schemas validate against the shared vocabulary via pass-through"
+  "mechanical->severity is the only crossing between the mechanical axis and the policy axis; pre_verify_lint uses it"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:governance-credibility :policy-enforcement}
+  :theme :ariadne-adoption
+  :rationale "Every later Ariadne artifact (clause labels, envelopes, decide) speaks this vocabulary; five definition sites and a sort-last default make fail-closed unrepresentable today."
+  :blocks ["ariadne-decision-envelope.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

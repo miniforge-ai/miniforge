@@ -1,0 +1,77 @@
+;; =============================================================================
+;; Spec: Ariadne step 1d — gates emit DecisionEnvelopes through the lifecycle
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 1: "gives the console one truth artifact"); T3 contradictions
+;; 1 and 2 groundwork (the envelope becomes what crosses the seam).
+;;
+;; Verified wiring points (2026-07-28, against origin/main):
+;;   workflow/execution.clj  apply-gate-validation attaches
+;;     :phase/status :failed + :phase/gate-errors on failure
+;;   workflow/execution.clj  update-response-chain builds the
+;;     :anomalies.gate/validation-failed anomaly from gate-errors
+;;   event-stream/core.clj   gate-started/gate-passed/
+;;     gate-failed/gate-rule-applied constructors
+;;   gate/policy_pack.clj    emit-rule-evidence! (swallows
+;;     exceptions - evidence never breaks enforcement; keep that)
+;;   evidence-bundle/schema.clj policy-check block shape
+
+{:spec/title "Ariadne step 1d: gates emit DecisionEnvelopes through the phase lifecycle"
+
+ :spec/description
+ "Wire decide into the phase lifecycle so one envelope is THE record
+  of each gated transition, visible identically in the phase result,
+  the event stream, and the evidence bundle.
+
+  GROUP 1: Phase result carries the envelope
+  apply-gate-validation routes the gate-check result through decide;
+  the phase result gains :phase/decision-envelope. :phase/gate-errors
+  is REPLACED by projection from envelope reasons (no dual storage);
+  update-response-chain derives its anomaly from the envelope.
+
+  GROUP 2: Events carry the envelope
+  gate-passed/gate-failed events attach the envelope (gate-failed
+  keeps its violation summary, now derived from envelope reasons).
+  gate-rule-applied stays per-rule but gains :envelope/id so per-rule
+  evidence joins to its decision. Evidence emission keeps its
+  never-breaks-enforcement catch.
+
+  GROUP 3: Evidence bundle records the envelope
+  The bundle's policy-check block stores the envelope (or its id +
+  digest) instead of a bespoke passed?/violations shape, keeping the
+  bundle self-contained for audit replay.
+
+  No dual emission anywhere: consumers of the old shapes are migrated
+  in this change, pre-alpha style - no deprecation shims."
+
+ :spec/intent {:type :refactor
+               :scope ["components/workflow/src/ai/miniforge/workflow/execution.clj"
+                       "components/gate/src/ai/miniforge/gate/interface.clj"
+                       "components/gate/src/ai/miniforge/gate/policy_pack.clj"
+                       "components/event-stream/src/ai/miniforge/event_stream/core.clj"
+                       "components/evidence-bundle/"]}
+
+ :spec/constraints
+ ["One envelope per gated transition; events and evidence reference it by id, never re-derive a rival truth"
+  "Failure behavior identical for the pass/fail outcome (except the ratified :require-approval change from step 1c)"
+  "Evidence emission remains non-blocking for enforcement"
+  "Full bb test - workflow/event-stream/evidence dependents exceed the affected-tests selector"
+  "No legacy gate-error shape retained alongside the envelope"]
+
+ :spec/acceptance-criteria
+ ["Integration test: a failing policy gate yields exactly one envelope, and the phase result, gate-failed event, and evidence bundle all carry/reference the same :envelope/id"
+  "A passing gate with :warn violations yields :allow-with-obligations, and the obligations appear in the evidence bundle"
+  "update-response-chain anomalies are derived from envelope reasons; :phase/gate-errors as an independent shape is gone"
+  "Event constructors validate: gate events without an envelope id fail schema validation"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:governance-credibility :policy-enforcement}
+  :theme :ariadne-adoption
+  :rationale "Without the wiring, the envelope is a data type nobody trusts; with it, contradictions 1/2 become solvable at the console seam (step 1e)."
+  :blocks ["ariadne-envelope-entity-contract.spec.edn"]
+  :blocked-by ["ariadne-decide-kernel.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

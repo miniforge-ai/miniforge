@@ -1,0 +1,93 @@
+;; =============================================================================
+;; Spec: Ariadne step 1e — the envelope crosses the console seam as contract
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 1 "kills 1 and 2 with it"); Ariadne §13.6 (attested contracts);
+;; T3 contradictions 1 (two derivers) and 2 (convention not contract).
+;;
+;; Verified state (2026-07-28; Clojure against origin/main, Rust
+;; against miniforge-control checkout):
+;;   Deriver A  supervisory-state attention.clj derive-items;
+;;              agent-blocked-rule emits FIXED :warning
+;;   Deriver B  miniforge-control state/src/state.rs
+;;              apply_agent_blocked locally mints DecisionCard 
+;;              + AttentionItem  with its own UUIDv5 namespaces
+;;              (state.rs,118) and its own confidence->severity map
+;;               - while projections/attention.rs claims
+;;              "no local derivation, no duplicate rules across
+;;              languages"
+;;   Silent drop  attention.clj attaches four keys
+;;              (:attention/workflow-run-id :attention/gate-id
+;;               :attention/target-type :attention/target-id) that do
+;;              not exist on the Rust AttentionItem struct
+;;              (entities.rs) - serde drops them, schema
+;;              version stays 1, warn-only check never fires
+;;              (manager.rs)
+
+{:spec/title "Ariadne step 1e: DecisionEnvelope crosses the console seam as a versioned contract"
+
+ :spec/description
+ "Make the envelope the supervisory-truth artifact at the Clojure/Rust
+  seam, and make the contract enforced instead of conventional. This
+  spec covers the miniforge (producer) side; a companion
+  miniforge-control change consumes it.
+
+  GROUP 1: Envelope as supervisory entity
+  Add DecisionEnvelope to the supervisory entity schema; the
+  supervisory-state emitter derives attention items for :deny and
+  :obligation-carrying envelopes with severity taken FROM the envelope
+  (via policy-clause), not from a per-consumer map. Attention items
+  minted from envelopes carry :envelope/id.
+
+  GROUP 2: Contract version + goldens
+  Bump the supervisory contract schema-version 1 -> 2. Re-vendor the
+  Transit goldens (contracts/ manifest) including: the envelope
+  entity, and the four currently-dropped attention keys
+  (workflow-run-id, gate-id, target-type, target-id) so the vendored
+  corpus finally matches what the producer emits.
+
+  GROUP 3: Producer-side conformance test (the real fix for
+  convention-not-contract)
+  A test that walks every entity the Clojure side can emit and
+  validates it key-for-key against the vendored golden corpus -
+  additive drift now FAILS a test on the producer side instead of
+  silently dropping in the consumer. This converts the §13.6
+  discipline from prose to CI.
+
+  Out of scope (companion miniforge-control spec, tracked in that
+  repo): regenerating the Rust structs for v2, adding the four
+  attention fields, replacing state.rs's local gate/policy attention
+  minting with projection of envelope-derived entities per its own
+  projections/attention.rs contract, and the warn-only version check
+  becoming reject-on-major."
+
+ :spec/intent {:type :feature
+               :scope ["components/supervisory-state/"
+                       "components/schema/src/ai/miniforge/schema/supervisory.clj"
+                       "components/decision-envelope/"
+                       "contracts/"]}
+
+ :spec/constraints
+ ["Envelope-derived attention severity comes from the envelope; no consumer-side severity maps"
+  "Schema-version bump is explicit and the golden manifest records it"
+  "The conformance test enumerates emitted entity types programmatically - a new entity type without goldens fails"
+  "Coordinate merge with the companion miniforge-control PR: producer lands first (additive v2 corpus), consumer follows"
+  "Full bb test"]
+
+ :spec/acceptance-criteria
+ ["Golden corpus at schema-version 2 includes DecisionEnvelope + the four previously-dropped attention keys"
+  "Producer conformance test fails if an emitted entity carries a key absent from the vendored corpus"
+  "Attention items derived from envelopes carry :envelope/id and envelope-sourced severity"
+  "A companion spec exists in miniforge-control referencing this one"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:governance-credibility :policy-enforcement}
+  :theme :ariadne-adoption
+  :rationale "Steps 1a-1d make one truth artifact exist; this makes it the thing that crosses the language boundary, dissolving T3 contradictions 1 and 2 instead of relocating them."
+  :blocks []
+  :blocked-by ["ariadne-gate-envelope-wiring.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
