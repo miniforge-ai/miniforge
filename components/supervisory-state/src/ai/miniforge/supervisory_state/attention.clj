@@ -173,15 +173,19 @@
         :when (false? (:policy-eval/passed? ev))
         :let [worst (reduce (fn [acc s]
                               (let [m (clause/more-severe acc s)]
-                                (if (keyword? m) m acc)))
+                                ;; An unknown severity poisons the whole
+                                ;; comparison — short-circuit instead of
+                                ;; silently keeping the accumulator.
+                                (if (keyword? m) m (reduced ::unknown))))
                             :info
                             (keep :violation/severity (:policy-eval/violations ev)))
               ;; Severity comes FROM the violation set via the one policy->
-              ;; attention crossing (Ariadne 1e) — no local map. A crossing
-              ;; anomaly falls back to :critical: over-alerting, never
-              ;; under-alerting.
-              att (clause/severity->attention worst)
-              sev (if (keyword? att) att :critical)
+              ;; attention crossing (Ariadne 1e) — no local map. Any unknown
+              ;; severity (in the set or at the crossing) falls back to
+              ;; :critical: over-alerting, never under-alerting.
+              att (when (keyword? worst)
+                    (clause/severity->attention worst))
+              sev (if (and (not= ::unknown worst) (keyword? att)) att :critical)
               gate-id   (:policy-eval/gate-id ev)
               target-type (:policy-eval/target-type ev)
               target-id (:policy-eval/target-id ev)

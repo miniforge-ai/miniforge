@@ -59,9 +59,9 @@
 
 (def ^{:stratum 0} ^:private envelope-id-slot-offset
   "golden-uuid slot offset for envelope event ids. Entity ids occupy
-   slots 1-9; envelope event ids occupy 100-108 (offset + 0-based
-   family index), so no fixture's `:event/id` can collide with an
-   entity id."
+   low slots (1-10); envelope event ids occupy slot 100 + the 0-based
+   family index (one per `families` entry), so no fixture's
+   `:event/id` can collide with an entity id."
   100)
 
 (def ^{:stratum 0} ^:private pinned-sequence-number
