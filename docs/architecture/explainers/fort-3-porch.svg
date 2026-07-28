@@ -31,14 +31,14 @@
   <rect x="364" y="158" width="66" height="16" rx="8" fill="#fffde7" stroke="#c8b900"/>
   <text x="397" y="170" text-anchor="middle" font-size="8.5" fill="#6a5a10">3 parts at once</text>
   <rect x="148" y="212" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5" stroke-dasharray="5 3"/>
-  <text x="193" y="230" text-anchor="middle" font-size="9.5" fill="#333">cousin's robot:</text>
+  <text x="193" y="230" text-anchor="middle" font-size="9.5" fill="#333">borrowed robot:</text>
   <text x="193" y="243" text-anchor="middle" font-size="9.5" fill="#333">birdhouse</text>
   <rect x="160" y="252" width="66" height="16" rx="8" fill="#ffe6cc" stroke="#d79b00"/>
   <text x="193" y="264" text-anchor="middle" font-size="8.5" fill="#8a5a00">stuck?</text>
   <rect x="250" y="212" width="192" height="70" rx="5" fill="#eef4fb" stroke="#6c8ebf" stroke-width="1"/>
-  <text x="346" y="236" text-anchor="middle" font-size="10.5" fill="#274b73">you didn't hire the cousin's robot —</text>
-  <text x="346" y="250" text-anchor="middle" font-size="10.5" fill="#274b73">the board shows it anyway, and you</text>
-  <text x="346" y="264" text-anchor="middle" font-size="10.5" fill="#274b73">can slide a note its way</text>
+  <text x="346" y="236" text-anchor="middle" font-size="10.5" fill="#274b73">a friend lent you this one — not on</text>
+  <text x="346" y="250" text-anchor="middle" font-size="10.5" fill="#274b73">the team, so no coach hands it jobs.</text>
+  <text x="346" y="264" text-anchor="middle" font-size="10.5" fill="#274b73">YOU tell it what to do, from here</text>
 
   <!-- the jar -->
   <rect x="510" y="140" width="150" height="170" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
@@ -73,5 +73,5 @@
   <text x="430" y="466" font-size="12" fill="#333">same as everything else</text>
 
   <rect x="120" y="500" width="660" height="44" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
-  <text x="450" y="527" text-anchor="middle" font-size="15" fill="#4a4a20">Watching your yard doesn't require having hired everyone in it.</text>
+  <text x="450" y="527" text-anchor="middle" font-size="15" fill="#4a4a20">The team listens to its coach; the borrowed robots listen only to you.</text>
 </svg>

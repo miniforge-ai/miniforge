@@ -27,10 +27,13 @@ Every fort goes the same way:
 
 1. **Look at the yard.** Where's the good tree? Where's the swing
    we can't touch?
-2. **Make the job list.** One robot turns your drawing into jobs:
-   *ladder first, then floor, then walls, then lookout.* And if
-   your drawing already lists the jobs? It doesn't redo your
-   thinking — it just checks the list makes sense and gets going.
+2. **Make the job list.** The team has a **coach**. The coach
+   turns your drawing into jobs — *ladder first, then floor, then
+   walls, then lookout* — and hands each robot its job. You never
+   boss a team robot around one at a time; that's the coach's
+   whole job. And if your drawing already lists the jobs? The
+   coach doesn't redo your thinking — just checks the list makes
+   sense and gets going.
 3. **Build.**
 4. **Wiggle test.** A checker grabs every board and *wiggles* it.
    Loose board? Red sticker. Red sticker means **fix it and test
@@ -79,12 +82,16 @@ fort-building too:
 You don't stand in the yard all day. You sit on the porch with a
 board that shows **everything happening in your yard at once** —
 every fort, what's building, what's stuck, what's got a red
-sticker. And not just your fort team: sometimes another robot is
-working in your yard that your team didn't hire — your cousin left
-his robot here for the week, and it's building a birdhouse in the
-corner. Your board shows it too — busy, stuck, done — and you can
-slide a note its way. **Watching your yard doesn't require having
-hired everyone in it.**
+sticker. And not every robot in your yard is on the fort team.
+You've also got a couple of **borrowed robots** — a friend lent
+them to you, and they're terrific builders. They're yours, and
+they're in *your* yard, but they're not on the team, so the coach
+doesn't hand them jobs. If you want a borrowed robot to build a
+birdhouse, *you* tell it — right from the porch, one note at a
+time. The board shows them the same way as everyone else — busy,
+stuck, done. **The team listens to its coach; the borrowed robots
+listen only to you.** (Maybe someday the coach takes the borrowed
+robots onto the team. Not yet.)
 
 Two porch rules, and they never bend:
 
@@ -165,6 +172,7 @@ to hang passes on.
 | your drawing | a work spec — intent + constraints |
 | the garage board, flops kept pinned | the `work/` kanban; failures keep their trail |
 | look → job list → build → tests → show → learn | the phase pipeline: explore → plan → implement → verify → review → release → observe |
+| the coach | the orchestrator — turns the spec into tasks and hands each agent its work |
 | not redoing your thinking | the 0-token `plan-from-spec-tasks` path |
 | the wiggle test, red stickers | fail-closed gates at phase transitions; validate-and-repair |
 | nobody builds on a red sticker | gate failure blocks the next phase — never bypassed |
@@ -177,7 +185,7 @@ to hang passes on.
 | the diary | the append-only event stream |
 | sticky notes until there aren't any | the PR review loop; the designed autonomous monitor |
 | the porch board — your whole yard, one view | the operator console — the control-room premise |
-| the cousin's robot you didn't hire | bare-agent supervision (Claude Code / codex sessions, adapter-observed) |
+| the borrowed robots, coachless | bare agents (Claude Code / codex sessions) — you direct them from the console; adapter-observed, not orchestrated by miniforge (yet) |
 | notes in the jar, never shouting | the intervention round-trip — every supervisory write is a logged InterventionRequest first |
 | the safety rules, each with a seriousness | policy packs; per-rule enforcement: hard-halt / require-approval / warn / audit |
 | the helpful neighbor who never blocks | Fleet — advisory coordination, pack distribution; mostly spec-only today |
