@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1020" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9673a6"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .built{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .part{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;stroke-dasharray:6 3;}
+      .spec{fill:#f5f5f5;stroke:#8a8a82;stroke-width:1.5;stroke-dasharray:2 3;}
+      .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11px;fill:#333;} .s{font-size:10px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.5;fill:none;} .eP{stroke:#9673a6;stroke-width:1.5;fill:none;}
+      .tag{font-size:10px;font-weight:bold;}
+    </style>
+  </defs>
+  <rect width="1920" height="1020" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Miniforge Target — T1. Five Planes &amp; Deployment Shapes</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">the autonomous software factory: spec in → governed, provenanced PRs out · "PR management is a VIEW, not the PRODUCT"</text>
+
+  <!-- Plane 1 -->
+  <rect class="zone" x="20" y="62" width="620" height="440" rx="6"/>
+  <text class="zoneT" x="36" y="84">PLANE 1 · OSS FACTORY ENGINE (Apache-2.0)</text>
+  <rect class="built" x="36" y="96" width="90" height="20" rx="10"/><text class="tag" x="81" y="110" text-anchor="middle" fill="#3a6a34">BUILT ~85%</text>
+  <rect class="built" x="36" y="126" width="588" height="90" rx="8"/>
+  <text class="h" x="48" y="148">Control plane</text>
+  <text class="m" x="48" y="166">Operator agent → Workflows engine → Policy engine</text>
+  <text class="s" x="48" y="186">task routing · budget · knowledge · gates at phase transitions;</text>
+  <text class="s" x="48" y="200">DAG / PR-train orchestration</text>
+  <rect class="built" x="36" y="228" width="588" height="86" rx="8"/>
+  <text class="h" x="48" y="250">Agent layer</text>
+  <text class="m" x="48" y="268">Planner → Implementer → Tester → Reviewer workers</text>
+  <text class="s" x="48" y="288">inner validate-and-repair loop until gates pass</text>
+  <rect class="built" x="36" y="326" width="588" height="86" rx="8"/>
+  <text class="h" x="48" y="348">Learning layer</text>
+  <text class="m" x="48" y="366">Observer → Meta-loop → Heuristic registry → Knowledge base</text>
+  <text class="s" x="48" y="386">self-improvement from run outcomes; training-capture</text>
+  <text class="s" x="36" y="436">runs on a workstation or CI · ~100 components, 4 bases (panel A1)</text>
+  <text class="s" x="36" y="452">the engine exists and dogfoods itself daily (panel A2)</text>
+
+  <!-- Plane 2 -->
+  <rect class="zone" x="660" y="62" width="620" height="440" rx="6"/>
+  <text class="zoneT" x="676" y="84">PLANE 2 · OPERATOR CONSOLE (miniforge-control, Rust)</text>
+  <rect class="built" x="676" y="96" width="70" height="20" rx="10"/><text class="tag" x="711" y="110" text-anchor="middle" fill="#3a6a34">BUILT</text>
+  <rect class="part" x="756" y="96" width="180" height="20" rx="10"/><text class="tag" x="846" y="110" text-anchor="middle" fill="#8a5a00">PHASE D IN PROGRESS</text>
+  <rect class="built" x="676" y="126" width="588" height="120" rx="8"/>
+  <text class="h" x="688" y="148">Rust core (729 tests)</text>
+  <text class="m" x="688" y="166">contracts · event-client · state (manager + projections) ·</text>
+  <text class="m" x="688" y="182">agent-adapters (claude-code/codex/bash/opencode/miniforge-run)</text>
+  <text class="m" x="688" y="198">ffi (C-ABI) · notification arbiter · replay/snowflake store</text>
+  <text class="s" x="688" y="218">renderers: ratatui TUI + macOS SwiftUI shell; Linux/Windows deferred</text>
+  <text class="s" x="688" y="232">consumes vendored contracts/ Transit goldens — never links Clojure</text>
+  <rect class="part" x="676" y="258" width="588" height="86" rx="8"/>
+  <text class="h" x="688" y="280">Phase D — the control path</text>
+  <text class="m" x="688" y="298">control-plane-client: pause · resume · cancel · retry-from-phase ·</text>
+  <text class="m" x="688" y="314">force-safe-mode (command.rs/event.rs/transit.rs/writer.rs/golden.rs)</text>
+  <text class="s" x="688" y="334">observe today; command arriving — Clojure stays the server</text>
+  <rect class="note" x="676" y="356" width="588" height="96" rx="6"/>
+  <text class="h" x="688" y="378">the "nuclear-plant control room"</text>
+  <text class="t" x="688" y="398">one operator supervises all agents/runs — miniforge runs, bare Claude</text>
+  <text class="t" x="688" y="414">Code sessions, codex — without leaving the surface. Bare-agent lifecycle:</text>
+  <text class="m" x="688" y="432">Discovered→Watching→Blocked→Idle→Completed/Failed→Unreachable</text>
+  <text class="s" x="688" y="450"> </text>
+
+  <!-- Plane 3 -->
+  <rect class="zone" x="1300" y="62" width="600" height="440" rx="6"/>
+  <text class="zoneT" x="1316" y="84">PLANE 3 · FLEET — COORDINATION + GOVERNANCE (BSL)</text>
+  <rect class="part" x="1316" y="96" width="150" height="20" rx="10"/><text class="tag" x="1391" y="110" text-anchor="middle" fill="#8a5a00">PARTIAL SCAFFOLDS</text>
+  <rect class="part" x="1316" y="126" width="568" height="110" rx="8"/>
+  <text class="h" x="1328" y="148">Coordination (advisory, never blocking)</text>
+  <text class="m" x="1328" y="166">fleet-server (HTTP :8780) · instance registry + heartbeat</text>
+  <text class="m" x="1328" y="182">status: idle | busy | draining | offline</text>
+  <text class="s" x="1328" y="202">each OSS instance registers on startup; coordinator issues</text>
+  <text class="s" x="1328" y="216">queue / proceed-with-caution on repo-level conflict</text>
+  <rect class="part" x="1316" y="248" width="568" height="106" rx="8"/>
+  <text class="h" x="1328" y="270">Governance (in-memory stubs, 3 clj each)</text>
+  <text class="m" x="1328" y="288">authz (RBAC · approvals · audit) · resource-management (org</text>
+  <text class="m" x="1328" y="304">budgets) · policy-distribution (central pack registry) ·</text>
+  <text class="m" x="1328" y="320">conflict-detection · telemetry · fleet-analytics</text>
+  <text class="s" x="1328" y="340">substantial: knowledge-shared · auto-apply · dag-graph · approvals</text>
+  <rect class="spec" x="1316" y="366" width="568" height="86" rx="8"/>
+  <text class="h" x="1328" y="388">Enterprise (N10–N12, spec-only)</text>
+  <text class="m" x="1328" y="406">certification tiers: Unverified→Verified→Certified→Enterprise-Trusted</text>
+  <text class="m" x="1328" y="422">capability grants, no ambient authority · SSO/SCIM · signing ·</text>
+  <text class="m" x="1328" y="438">private registries · marketplace · fleet-web console</text>
+  <text class="s" x="1316" y="474">rule: Fleet depends on OSS interfaces only, and must emit OSS-valid</text>
+  <text class="s" x="1316" y="490">pack/candidate artifacts — no private parallel model</text>
+
+  <!-- Plane 4 + 5 -->
+  <rect class="zone" x="20" y="522" width="620" height="220" rx="6"/>
+  <text class="zoneT" x="36" y="544">PLANE 4 · DATA FOUNDRY (ETL)</text>
+  <rect class="built" x="36" y="556" width="90" height="20" rx="10"/><text class="tag" x="81" y="570" text-anchor="middle" fill="#3a6a34">BUILT</text>
+  <rect class="built" x="36" y="586" width="588" height="100" rx="8"/>
+  <text class="m" x="48" y="608">pipeline runner · connector fleet · transform primitives</text>
+  <text class="s" x="48" y="628">being merged INTO miniforge OSS (Build Plan); transform</text>
+  <text class="s" x="48" y="642">extensibility via runtime context-map, not code-bearing packs —</text>
+  <text class="s" x="48" y="656">packs are pure data</text>
+  <text class="s" x="48" y="676">deployment connectors (AWS/GCP/Azure/Vault) — unbuilt (T3)</text>
+
+  <rect class="zone" x="660" y="522" width="620" height="220" rx="6"/>
+  <text class="zoneT" x="676" y="544">PLANE 5 · CROSS-PRODUCT EVAL SEAM</text>
+  <rect class="built" x="676" y="556" width="130" height="20" rx="10"/><text class="tag" x="741" y="570" text-anchor="middle" fill="#3a6a34">BUILT (first slice)</text>
+  <rect class="built" x="676" y="586" width="588" height="100" rx="8"/>
+  <text class="m" x="688" y="608">workbench-contract: WorkbenchSnapshotV1 (pure types)</text>
+  <text class="m" x="688" y="624">minibench: tenant-agnostic kernel + data-plane app shell</text>
+  <text class="s" x="688" y="644">every product (risk, career, miniforge governance) emits</text>
+  <text class="s" x="688" y="658">workbench_snapshot/v1; kernel does status roll-up + blocking-gate</text>
+  <text class="s" x="688" y="672">detection; fixtures are the Rust/Swift/Clojure contract test</text>
+
+  <!-- deployment shapes -->
+  <rect class="zone" x="1300" y="522" width="600" height="220" rx="6"/>
+  <text class="zoneT" x="1316" y="544">DEPLOYMENT SHAPES</text>
+  <rect class="rec" x="1316" y="556" width="568" height="40" rx="6"/>
+  <text class="t" x="1328" y="574" font-weight="bold">OSS</text><text class="t" x="1380" y="574">workstation / CI — the engine alone</text>
+  <rect class="rec" x="1316" y="602" width="568" height="52" rx="6"/>
+  <text class="t" x="1328" y="620" font-weight="bold">Fleet</text><text class="t" x="1380" y="620">on-prem, customer's Kubernetes; customer controls all data</text>
+  <text class="s" x="1380" y="636">(forcing function: proprietary data that can't leave the network)</text>
+  <rect class="rec" x="1316" y="660" width="568" height="36" rx="6"/>
+  <text class="t" x="1328" y="678" font-weight="bold">Thesium</text><text class="t" x="1400" y="678">standalone: GHA + R2 + data-plane gateway — NO Fleet dependency</text>
+  <rect class="rec" x="1316" y="702" width="568" height="34" rx="6"/>
+  <text class="t" x="1328" y="720" font-weight="bold">Engrammic</text><text class="t" x="1416" y="720">licenses Fleet — "Fleet is to Engrammic what k8s is to an app"</text>
+
+  <!-- governance split strip -->
+  <rect class="note" x="20" y="762" width="1880" height="90" rx="6"/>
+  <text class="h" x="36" y="786">The policy governance split (fleet-policy-origination-and-governance)</text>
+  <text class="t" x="36" y="808">OSS owns: the policy language · local compilation · provenance · repo attachment.   Fleet owns: org-wide discovery · review/approval routing ·</text>
+  <text class="t" x="36" y="826">the canonical pack registry · distribution/rollout · drift/staleness · waivers · audit dashboards. Fleet coordination stays advisory — an instance</text>
+  <text class="t" x="36" y="844">is never blocked by the coordinator; conflicts produce directives, not locks.</text>
+
+  <!-- edges -->
+  <path class="eB" d="M640,300 L658,300" marker-end="url(#aB)"/>
+  <text class="s" x="643" y="290" fill="#3a76b8"> </text>
+  <path class="eP" d="M1280,300 L1298,300" marker-end="url(#aP)"/>
+  <text class="s" x="960" y="516" text-anchor="middle" font-style="italic" fill="#555">console observes/commands the engine via contracts + event stream · Fleet coordinates many engines · Data Foundry feeds them · minibench judges the output</text>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="872" width="1880" height="66" rx="6"/>
+  <text class="zoneT" x="36" y="894">STATUS</text>
+  <rect class="built" x="40" y="906" width="26" height="16" rx="3"/><text class="s" x="74" y="918">built</text>
+  <rect class="part" x="160" y="906" width="26" height="16" rx="3"/><text class="s" x="194" y="918">partial / scaffold / in progress</text>
+  <rect class="spec" x="420" y="906" width="26" height="16" rx="3"/><text class="s" x="454" y="918">spec-only</text>
+  <text class="s" x="600" y="918" font-style="italic">sources: product-vision.md · N5 deltas 2–3 · fleet specs N10–N12 · deployment-licensing-model.md · fleet-build-plan.md</text>
+</svg>
