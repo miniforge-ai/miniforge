@@ -11,6 +11,7 @@
         ai.miniforge/automation-edge-correlator {:local/root "../../components/automation-edge-correlator"}
         ;; Core domain components needed by CLI
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}

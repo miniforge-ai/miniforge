@@ -6,6 +6,7 @@
         ai.miniforge/workflow {:local/root "../../components/workflow"}
         ai.miniforge/workflow-resume {:local/root "../../components/workflow-resume"}
         ai.miniforge/schema {:local/root "../../components/schema"}
+        ai.miniforge/policy-clause {:local/root "../../components/policy-clause"}
         ai.miniforge/config {:local/root "../../components/config"}
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}

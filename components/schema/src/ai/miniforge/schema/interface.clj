@@ -19,6 +19,7 @@
   "Public API for the schema component.
    Provides validation functions and schema access for domain types."
   (:require
+   [ai.miniforge.policy-clause.interface :as clause]
    [malli.core :as m]
    [malli.error :as me]
    [ai.miniforge.anomaly.interface :as anomaly]
@@ -186,11 +187,31 @@
 
 (def ^{:stratum 0} compare-severity
   "Compare two severities: negative when the first is more severe, positive when
-   less, 0 when equal."
+   less, 0 when equal. Unknown severities return an `:invalid-input` anomaly
+   instead of sorting last."
   core/compare-severity)
 
+(def ^{:stratum 0} rank-severity
+  "Checked severity rank (0 = most severe); anomaly for unknown values."
+  clause/rank-severity)
+
+(def ^{:stratum 0} sort-by-severity
+  "Most-severe-first sort with up-front validation; anomaly when any item
+   carries an unknown severity."
+  clause/sort-by-severity)
+
+(def ^{:stratum 0} enforcement-actions
+  "Enforcement actions, strictest to most lenient (relaxation modes), defined
+   by policy-clause."
+  clause/enforcement-actions)
+
+(def ^{:stratum 0} enforcement-order
+  "Enforcement action -> rank, 0 = strictest."
+  clause/enforcement-order)
+
 (def ^{:stratum 0} more-severe
-  "Return the more severe of two severities."
+  "Return the more severe of two severities, or an anomaly when either is
+   unknown."
   core/more-severe)
 
 (def ^{:stratum 0} log-levels

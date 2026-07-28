@@ -73,8 +73,8 @@
     (is (some #{:testing} schema/violation-categories))
     (is (some #{:architecture} schema/violation-categories)))
 
-  (testing "violation-severities contains expected values"
-    (is (= [:info :low :medium :high :critical] schema/violation-severities)))
+  (testing "violation-severities is the canonical scale (policy-clause pass-through)"
+    (is (= [:critical :high :medium :low :info] schema/violation-severities)))
 
   (testing "attention-source-types contains expected values"
     (is (some #{:workflow} schema/attention-source-types))
