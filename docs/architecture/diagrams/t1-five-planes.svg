@@ -74,17 +74,17 @@
   <text class="m" x="1328" y="182">status: idle | busy | draining | offline</text>
   <text class="s" x="1328" y="202">each OSS instance registers on startup; coordinator issues</text>
   <text class="s" x="1328" y="216">queue / proceed-with-caution on repo-level conflict</text>
-  <rect class="part" x="1316" y="248" width="568" height="106" rx="8"/>
-  <text class="h" x="1328" y="270">Governance (in-memory stubs, 3 clj each)</text>
-  <text class="m" x="1328" y="288">authz (RBAC · approvals · audit) · resource-management (org</text>
-  <text class="m" x="1328" y="304">budgets) · policy-distribution (central pack registry) ·</text>
-  <text class="m" x="1328" y="320">conflict-detection · telemetry · fleet-analytics</text>
-  <text class="s" x="1328" y="340">substantial: knowledge-shared · auto-apply · dag-graph · approvals</text>
+  <rect class="spec" x="1316" y="248" width="568" height="106" rx="8"/>
+  <text class="h" x="1328" y="270">Governance — replaced by Ariadne (RFC decision 2)</text>
+  <text class="m" x="1328" y="288">authz → relations + grants · approvals → relaxation workflows ·</text>
+  <text class="m" x="1328" y="304">quotas → entitlement tuples + grant ceilings · distribution →</text>
+  <text class="m" x="1328" y="320">org-owned packs, clauses ride the copies · waivers → scoped grants</text>
+  <text class="s" x="1328" y="340">the five in-memory stubs are DELETED, not built; conflict-detection/telemetry stay advisory</text>
   <rect class="spec" x="1316" y="366" width="568" height="86" rx="8"/>
-  <text class="h" x="1328" y="388">Enterprise (N10–N12, spec-only)</text>
-  <text class="m" x="1328" y="406">certification tiers: Unverified→Verified→Certified→Enterprise-Trusted</text>
-  <text class="m" x="1328" y="422">capability grants, no ambient authority · SSO/SCIM · signing ·</text>
-  <text class="m" x="1328" y="438">private registries · marketplace · fleet-web console</text>
+  <text class="h" x="1328" y="388">Enterprise (N10–N12 → Ariadne profiles, spec-only)</text>
+  <text class="m" x="1328" y="406">N10 SUBSUMED: tiers = ExecutionGrants + attestation + breach-history</text>
+  <text class="m" x="1328" y="422">routing eligibility · N12: SSO/SCIM = thin authn mapping; signing +</text>
+  <text class="m" x="1328" y="438">private registries = capability-version attestation (§13.6) · fleet-web</text>
   <text class="s" x="1316" y="474">rule: Fleet depends on OSS interfaces only, and must emit OSS-valid</text>
   <text class="s" x="1316" y="490">pack/candidate artifacts — no private parallel model</text>
 
@@ -124,8 +124,8 @@
   <!-- governance split strip -->
   <rect class="note" x="20" y="762" width="1880" height="90" rx="6"/>
   <text class="h" x="36" y="786">The policy governance split (fleet-policy-origination-and-governance)</text>
-  <text class="t" x="36" y="808">OSS owns: the policy language · local compilation · provenance · repo attachment.   Fleet owns: org-wide discovery · review/approval routing ·</text>
-  <text class="t" x="36" y="826">the canonical pack registry · distribution/rollout · drift/staleness · waivers · audit dashboards. Fleet coordination stays advisory — an instance</text>
+  <text class="t" x="36" y="808">OSS owns: the policy language · local compilation · provenance · repo attachment.   Fleet shrinks to: advisory coordination + the hosted relation/policy</text>
+  <text class="t" x="36" y="826">store. Approval routing = relaxation workflows on clauses · rollout = clause-carrying shared assets · drift = freshness contract. Advisory stays advisory — an instance</text>
   <text class="t" x="36" y="844">is never blocked by the coordinator; conflicts produce directives, not locks.</text>
 
   <!-- edges -->
