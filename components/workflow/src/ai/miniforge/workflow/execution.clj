@@ -97,20 +97,16 @@
   (or (phase/already-done? phase-result)
       (phase/already-done? (:result phase-result))))
 
-(defn- ^{:stratum 0} emit-phase-decision!
-  "Publish the :gate/decision event for a gated transition; never breaks
-   enforcement."
-  [ctx phase-result envelope]
-  (try
-    (when-let [stream (or (:event-stream ctx) (:execution/event-stream ctx))]
-      (when envelope
-        (events/publish! stream
-                         (events/phase-decision stream (:workflow/id ctx)
-                                                (or (:phase/name phase-result)
-                                                    (:phase phase-result))
-                                                envelope))))
-    (catch Exception _ nil))
-  nil)
+(defn- ^{:stratum 0} resolve-event-stream
+  "Find the event stream from context, matching phase/telemetry's lookup."
+  [ctx]
+  (or (:event-stream ctx)
+      (:execution/event-stream ctx)
+      (get-in ctx [:execution/opts :event-stream])))
+
+(defn- ^{:stratum 0} resolve-workflow-id
+  [ctx]
+  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
 
 (defn- ^{:stratum 0} phase-transition-event-message
   [event]
@@ -206,17 +202,6 @@
 (def ^{:stratum 0} ^:private failure-statuses
   #{:error :failed :failure})
 
-(defn- ^{:stratum 0} resolve-event-stream
-  "Find the event stream from context, matching phase/telemetry's lookup."
-  [ctx]
-  (or (:event-stream ctx)
-      (:execution/event-stream ctx)
-      (get-in ctx [:execution/opts :event-stream])))
-
-(defn- ^{:stratum 0} resolve-workflow-id
-  [ctx]
-  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
-
 (defn- ^{:stratum 0} merge-sub-worktree-changes!
   "Copy changed files from DAG sub-worktrees into the parent worktree.
    Each sub-workflow wrote to its own isolated worktree. For the release
@@ -252,6 +237,23 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn- ^{:stratum 1} emit-phase-decision!
+  "Publish the :gate/decision event for a gated transition; never breaks
+   enforcement. Stream and workflow id come from the canonical resolvers
+   (same lookup as phase telemetry), so contexts carrying the stream under
+   :execution/opts publish too."
+  [ctx phase-result envelope]
+  (try
+    (when-let [stream (resolve-event-stream ctx)]
+      (when envelope
+        (events/publish! stream
+                         (events/phase-decision stream (resolve-workflow-id ctx)
+                                                (or (:phase/name phase-result)
+                                                    (:phase phase-result))
+                                                envelope))))
+    (catch Exception _ nil))
+  nil)
+
 (defn ^{:stratum 1} execute-enter
   "Execute the :enter function of an interceptor.
 
@@ -283,49 +285,6 @@
               (error-fn ctx-with-error ex)
               (context/transition-to-failed ctx-with-error)))))
       ctx)))
-
-(defn ^{:stratum 1} apply-gate-validation
-  "Apply gate validation to phase result.
-
-   Returns updated phase-result carrying :phase/decision-envelope (the ONE
-   truth artifact for the gated transition, Ariadne 1d) — plus
-   :phase/status :failed and :phase/gate-errors (a projection of the
-   envelope's reasons, no longer an independent shape) when the decision is
-   :deny. Skips gate checks when phase indicates work is already done. When
-   gates are configured they run even if the canonical artifact
-   ([:result :output]) is nil — a nil artifact fails the gate (fail-closed),
-   never bypasses it; the envelope carries :reason/missing-artifact."
-  [interceptor phase-result ctx]
-  (if (already-done? phase-result)
-    phase-result
-    (let [gate-keywords (get-in interceptor [:config :gates] [])
-          ;; Canonical: gates validate the phase's :output ([:result :output]) —
-          ;; one location, no shape-guessing. The old (or :artifact
-          ;; [:result :artifact] [:result :output]) could hand a gate the wrong
-          ;; map: the review gate got the code-under-review at :artifact instead
-          ;; of the verdict at :output, so it rejected every approved review.
-          artifact (response/phase-output phase-result)]
-      ;; Fail closed: when gates are configured, run them even if the canonical
-      ;; artifact is nil. Skipping on nil would let a phase that omits its
-      ;; :output bypass validation entirely — the gate runner turns a nil
-      ;; artifact into a failed gate result (loud), which is what we want.
-      (if (seq gate-keywords)
-        (let [gate-result (gate/check-gates gate-keywords artifact ctx)
-              minted (gate/gates->envelope gate-result (nil? artifact))
-              ;; envelope minting can itself anomaly; fail closed on that too
-              envelope (when (:envelope/id minted) minted)]
-          (emit-phase-decision! ctx phase-result envelope)
-          (if (and (:passed? gate-result)
-                   envelope
-                   (gate/decision-allowed? envelope))
-            (assoc phase-result :phase/decision-envelope envelope)
-            (assoc phase-result
-                   :phase/status :failed
-                   :phase/decision-envelope envelope
-                   :phase/gate-errors (if envelope
-                                        (vec (:envelope/reasons envelope))
-                                        (vec (:failed-gates gate-result))))))
-        phase-result))))
 
 (defn ^{:stratum 1} phase-succeeded?
   "Check if phase completed successfully or work was already done."
@@ -477,6 +436,49 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
+(defn ^{:stratum 2} apply-gate-validation
+  "Apply gate validation to phase result.
+
+   Returns updated phase-result carrying :phase/decision-envelope (the ONE
+   truth artifact for the gated transition, Ariadne 1d) — plus
+   :phase/status :failed and :phase/gate-errors (a projection of the
+   envelope's reasons, no longer an independent shape) when the decision is
+   :deny. Skips gate checks when phase indicates work is already done. When
+   gates are configured they run even if the canonical artifact
+   ([:result :output]) is nil — a nil artifact fails the gate (fail-closed),
+   never bypasses it; the envelope carries :reason/missing-artifact."
+  [interceptor phase-result ctx]
+  (if (already-done? phase-result)
+    phase-result
+    (let [gate-keywords (get-in interceptor [:config :gates] [])
+          ;; Canonical: gates validate the phase's :output ([:result :output]) —
+          ;; one location, no shape-guessing. The old (or :artifact
+          ;; [:result :artifact] [:result :output]) could hand a gate the wrong
+          ;; map: the review gate got the code-under-review at :artifact instead
+          ;; of the verdict at :output, so it rejected every approved review.
+          artifact (response/phase-output phase-result)]
+      ;; Fail closed: when gates are configured, run them even if the canonical
+      ;; artifact is nil. Skipping on nil would let a phase that omits its
+      ;; :output bypass validation entirely — the gate runner turns a nil
+      ;; artifact into a failed gate result (loud), which is what we want.
+      (if (seq gate-keywords)
+        (let [gate-result (gate/check-gates gate-keywords artifact ctx)
+              minted (gate/gates->envelope gate-result (nil? artifact))
+              ;; envelope minting can itself anomaly; fail closed on that too
+              envelope (when (:envelope/id minted) minted)]
+          (emit-phase-decision! ctx phase-result envelope)
+          (if (and (:passed? gate-result)
+                   envelope
+                   (gate/decision-allowed? envelope))
+            (assoc phase-result :phase/decision-envelope envelope)
+            (assoc phase-result
+                   :phase/status :failed
+                   :phase/decision-envelope envelope
+                   :phase/gate-errors (if envelope
+                                        (vec (:envelope/reasons envelope))
+                                        (vec (:failed-gates gate-result))))))
+        phase-result))))
+
 (defn ^{:stratum 2} update-response-chain
   "Update response chain with phase result."
   [ctx phase-name phase-result]
@@ -500,23 +502,6 @@
               response/add-failure phase-name
               anomaly
               phase-result))))
-
-;------------------------------------------------------------------------------ Layer 1: Composition
-(defn ^{:stratum 2} execute-phase-lifecycle
-  "Execute phase enter -> gates -> leave lifecycle.
-
-   Returns [ctx phase-result]."
-  [interceptor ctx]
-  ;; Clear :phase map before each phase to prevent stale transition requests
-  ;; from leaking across phase boundaries.
-  (let [ctx-clean (dissoc ctx :phase)
-        ctx-entered (execute-enter interceptor ctx-clean)
-        phase-result (extract-phase-result ctx-entered)
-        phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
-        ctx-left (if (entered-phase-context? phase-result-gated)
-                   (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
-                   (assoc ctx-entered :phase phase-result-gated))]
-    [ctx-left (extract-phase-result ctx-left)]))
 
 (defn ^{:stratum 2} apply-phase-transition
   "Apply a phase-outcome event through the execution machine.
@@ -576,6 +561,23 @@
       (not-empty summary))))
 
 ;------------------------------------------------------------------------------ Layer 3
+
+;------------------------------------------------------------------------------ Layer 1: Composition
+(defn ^{:stratum 3} execute-phase-lifecycle
+  "Execute phase enter -> gates -> leave lifecycle.
+
+   Returns [ctx phase-result]."
+  [interceptor ctx]
+  ;; Clear :phase map before each phase to prevent stale transition requests
+  ;; from leaking across phase boundaries.
+  (let [ctx-clean (dissoc ctx :phase)
+        ctx-entered (execute-enter interceptor ctx-clean)
+        phase-result (extract-phase-result ctx-entered)
+        phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
+        ctx-left (if (entered-phase-context? phase-result-gated)
+                   (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
+                   (assoc ctx-entered :phase phase-result-gated))]
+    [ctx-left (extract-phase-result ctx-left)]))
 
 (defn ^{:stratum 3} process-phase-result
   "Process phase result: update response chain, record metrics/files/artifacts.
