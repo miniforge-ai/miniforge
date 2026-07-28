@@ -47,6 +47,7 @@
    [ai.miniforge.policy-pack.ast :as ast]
    [ai.miniforge.policy-pack.capability :as capability]
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-clause.interface :as clause]
    [clojure.data :as data]
    [clojure.string :as str]))
 
@@ -293,27 +294,41 @@ depending on ambient namespace loading or raw var resolution."}
                :rule-id  (:rule/id rule)
                :severity (:rule/severity rule))))))
 
-;; Violation classification helpers
-(defn ^{:stratum 0} blocking-violations
+;; Violation classification
+(defn ^{:stratum 0} classify-violations
+  "Exhaustively classify `violations` by enforcement action into
+   {:blocking :require-approval :warnings :audits :unknown}. There is NO
+   default-pass branch: a violation whose action is off the vocabulary,
+   or whose severity is off the scale, lands in `:unknown` (tagged with
+   `:classify/problem`) — the pre-Ariadne per-action equality filters
+   silently dropped those (the fail-open T3 calls 'the checker who
+   stamps words he cannot read'). Every group is always present."
   [violations]
-  (filter #(= :hard-halt (get-in % [:rule :rule/enforcement :action]))
-          violations))
+  (reduce
+   (fn [acc v]
+     (let [action (get-in v [:rule :rule/enforcement :action])
+           severity (get-in v [:rule :rule/severity])
+           severity-ok? (or (nil? severity) (clause/known-severity? severity))]
+       (cond
+         (not severity-ok?)
+         (update acc :unknown conj (assoc v :classify/problem :unknown-severity))
 
-(defn ^{:stratum 0} approval-required-violations
-  [violations]
-  (filter #(= :require-approval (get-in % [:rule :rule/enforcement :action]))
-          violations))
+         (= :hard-halt action)
+         (update acc :blocking conj v)
 
-(defn ^{:stratum 0} warning-violations
-  [violations]
-  (filter #(= :warn (get-in % [:rule :rule/enforcement :action]))
-          violations))
+         (= :require-approval action)
+         (update acc :require-approval conj v)
 
-(defn ^{:stratum 0} audit-violations
-  "Filter violations that are audit-only."
-  [violations]
-  (filter #(= :audit (get-in % [:rule :rule/enforcement :action]))
-          violations))
+         (= :warn action)
+         (update acc :warnings conj v)
+
+         (= :audit action)
+         (update acc :audits conj v)
+
+         :else
+         (update acc :unknown conj (assoc v :classify/problem :unknown-enforcement)))))
+   {:blocking [] :require-approval [] :warnings [] :audits [] :unknown []}
+   violations))
 
 (defn- ^{:stratum 0} normalize-line
   "A finding's line number, or nil when the judge omitted it. The

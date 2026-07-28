@@ -455,16 +455,16 @@
         applicable (filter-applicable-rules resolved ctx)
         violations (detection/check-rules applicable artifact context)
 
-        ;; Classify violations
-        blocking (detection/blocking-violations violations)
-        approvals (detection/approval-required-violations violations)
-        warnings (detection/warning-violations violations)
-        audits (detection/audit-violations violations)]
+        ;; Exhaustive classification - unknown enforcement/severity and
+        ;; require-approval violations fail the check (Ariadne 1c; the
+        ;; old shape passed everything but :hard-halt)
+        {:keys [blocking require-approval warnings audits unknown]}
+        (detection/classify-violations violations)]
 
-    {:passed? (empty? blocking)
+    {:passed? (and (empty? blocking) (empty? require-approval) (empty? unknown))
      :violations violations
-     :blocking (mapv detection/violation->error blocking)
-     :require-approval (mapv detection/violation->error approvals)
+     :blocking (mapv detection/violation->error (concat blocking unknown))
+     :require-approval (mapv detection/violation->error require-approval)
      :warnings (mapv detection/violation->warning warnings)
      :audits (mapv detection/violation->warning audits)
      :read-only? (boolean (:read-only? context))}))

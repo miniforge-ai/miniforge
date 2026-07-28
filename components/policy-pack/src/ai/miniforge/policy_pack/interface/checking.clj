@@ -72,20 +72,10 @@
    has no :phases constraint or its constraint contains phase."
   core/rule-applies-to-phase?)
 
-(def ^{:stratum 0} blocking-violations
-  "Filter check-rules violations to those whose rule enforces :hard-halt.
-   Returns a lazy seq of the matching violation entries."
-  detection/blocking-violations)
-
-(def ^{:stratum 0} approval-required-violations
-  "Filter check-rules violations to those whose rule enforces
-   :require-approval. Returns a lazy seq of the matching violation entries."
-  detection/approval-required-violations)
-
-(def ^{:stratum 0} warning-violations
-  "Filter check-rules violations to those whose rule enforces :warn. Returns a
-   lazy seq of the matching violation entries."
-  detection/warning-violations)
+(def ^{:stratum 0} classify-violations
+  "Exhaustive violation classification: {:blocking :require-approval
+   :warnings :audits :unknown}; no default-pass branch."
+  detection/classify-violations)
 
 (def ^{:stratum 0} violation->error
   "Convert a check-rules violation entry into a gate error map
