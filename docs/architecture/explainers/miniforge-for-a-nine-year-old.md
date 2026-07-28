@@ -185,7 +185,7 @@ to hang passes on.
 | the diary | the append-only event stream |
 | sticky notes until there aren't any | the PR review loop; the designed autonomous monitor |
 | the porch board — your whole yard, one view | the operator console — the control-room premise |
-| the borrowed robots, coachless | bare agents (Claude Code / codex sessions) — you direct them from the console; adapter-observed, not orchestrated by miniforge (yet) |
+| the borrowed robots, coachless | bare agents (Claude Code / codex sessions) — you direct them from the console; adapter-observed, not orchestrated by Miniforge (yet) |
 | notes in the jar, never shouting | the intervention round-trip — every supervisory write is a logged InterventionRequest first |
 | the safety rules, each with a seriousness | policy packs; per-rule enforcement: hard-halt / require-approval / warn / audit |
 | the helpful neighbor who never blocks | Fleet — advisory coordination, pack distribution; mostly spec-only today |
