@@ -163,6 +163,34 @@
   :theme/status :planned
   :theme/owner :christopher}
 
+ :ariadne-adoption
+ {:theme/id :ariadne-adoption
+  :theme/title "Ariadne adoption - step 1: envelopes + fail-closed decide()"
+  :theme/description
+  "Adopt the Ariadne architecture (RFC Accepted 2026-07-28) in the
+   ratified order. This theme is step 1 only: one clause vocabulary,
+   the DecisionEnvelope truth artifact, a fail-closed decide() kernel
+   over the existing gate core, lifecycle wiring, and the versioned
+   contract at the console seam. Steps 2-4 (grants on irreversible
+   effects, tenants/owners, Fleet re-scope) get their own themes when
+   step 1 lands."
+  :theme/informative-spec "docs/architecture/rfc-ariadne-adoption.md"
+  :theme/normative-refs
+  [{:doc "docs/architecture/rfc-ariadne-adoption.md"
+    :relation :primary}
+   {:doc "thesium-career docs/architecture/tenancy-ownership-access.md (Ariadne v1.5) sections 13.1-13.7"
+    :relation :primary}
+   {:doc "docs/architecture/diagrams/README.md" :section "T3 contradiction register"
+    :relation :supporting}]
+  :theme/completion-criteria
+  ["one severity + enforcement vocabulary; unknown values anomaly everywhere (T3 #5 dissolved)"
+   "every gated phase transition produces exactly one DecisionEnvelope visible in phase result, events, and evidence bundle (T3 #4 dissolved - no fail-open classification path remains)"
+   ":require-approval denies with an approval obligation instead of passing as a warning"
+   "supervisory contract at schema-version 2 with envelope entity + producer-side conformance test (T3 #1/#2 dissolved at the seam)"]
+  :theme/status :in-flight
+  :theme/owner :christopher
+  :theme/started #inst "2026-07-28"}
+
  :policy-enforcement
  {:theme/id :policy-enforcement
   :theme/title "Policy enforcement (applied + guaranteed)"

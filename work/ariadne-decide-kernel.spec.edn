@@ -1,0 +1,87 @@
+;; =============================================================================
+;; Spec: Ariadne step 1c — fail-closed decide() over compiled pack results
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 1; ratified decision 1); Ariadne §13.2/§13.7 (decide(),
+;; fail-closed on unknown); T3 contradiction 4.
+;;
+;; Verified fail-open being closed (2026-07-28, against origin/main):
+;;   policy-pack detection.clj:297-316 - four equality filters, one per
+;;   known enforcement action; a violation with any OTHER action matches
+;;   none of them, and gate/policy_pack.clj:478 sets
+;;   :passed? (empty? blocking) - so the unknown violation passes and
+;;   vanishes. Also today :require-approval does NOT block (only
+;;   :hard-halt does) - it is recorded as a warning and the gate passes.
+;;   Both pack EDNs in components/phase/resources/packs/ currently use
+;;   only {:action :audit}, so flipping :require-approval to deny is a
+;;   semantics fix with no live rule impact - verify in-build.
+
+{:spec/title "Ariadne step 1c: fail-closed decide() kernel over compiled pack results"
+
+ :spec/description
+ "Add decide() to the gate component: the one function that turns a
+  compiled policy-pack check result plus phase context into a
+  DecisionEnvelope. The existing gate core (enter->gates->leave,
+  check-gates) stays; decide() replaces the enforcement-classification
+  layer above it.
+
+  GROUP 1: The decision table
+  Input: the violations vector from the compiled check
+  (gate/policy_pack.clj compiled-check-result) + phase ctx + pack
+  revision. Per violation, by enforcement action from policy-clause:
+    :hard-halt          -> :deny, reason :reason/rule-violation
+    :require-approval   -> :deny + :obligation/approval-required
+                           (BEHAVIOR CHANGE: today this passes with a
+                           warning; under Ariadne it denies until an
+                           approval workflow exists in step 2+. Ratified
+                           by RFC decision 1.)
+    :warn               -> :allow-with-obligations + :obligation/warn-recorded
+    :audit              -> :allow + :obligation/audit-recorded
+    anything else       -> :deny, reason :reason/unknown-enforcement
+  Unknown severity on any violation -> :deny, :reason/unknown-severity.
+  Empty violations -> :allow with pins.
+  Aggregation: worst decision wins (:deny > :allow-with-obligations >
+  :allow); all reasons and obligations accumulate.
+
+  GROUP 2: Delete the fall-through classifiers
+  detection.clj's four independent equality filters are replaced by an
+  exhaustive dispatch in decide() that has no default-pass branch. The
+  filters' remaining callers migrate to envelope accessors.
+
+  GROUP 3: Nil-artifact discipline preserved
+  The existing rule (nil artifact fails the gate when gates are
+  configured, workflow/execution.clj apply-gate-validation) is
+  preserved and now expressed as an envelope: :deny with
+  :reason/missing-artifact."
+
+ :spec/intent {:type :refactor
+               :scope ["components/gate/src/ai/miniforge/gate/policy_pack.clj"
+                       "components/policy-pack/src/ai/miniforge/policy_pack/detection.clj"
+                       "components/decision-envelope/"
+                       "components/policy-clause/"]}
+
+ :spec/constraints
+ ["Exhaustive enforcement dispatch: no default branch that allows; the unknown case is an explicit :deny"
+  "Verify the live pack inventory before flipping :require-approval semantics; record the inventory in the PR"
+  "decide() is pure: violations + ctx + revision in, envelope out; emission stays at the call site"
+  "No dual path: the old blocking/approval/warning/audit filter outputs are removed, not shadowed"
+  "Full bb test, not affected-only"]
+
+ :spec/acceptance-criteria
+ ["Table-driven test covering every enforcement action plus a not-in-vocabulary action and an unknown severity - the last two produce :deny"
+  "A :require-approval violation denies with :obligation/approval-required; test documents the intended step-2 relaxation path"
+  "Nil artifact with configured gates yields :deny :reason/missing-artifact"
+  "Envelope pins carry the pack revision that was evaluated"
+  "detection.clj no longer contains per-action equality filters"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:governance-credibility :policy-enforcement}
+  :theme :ariadne-adoption
+  :rationale "This is the exact hole T3 calls 'the checker who stamps words he cannot read' - the credibility fix the RFC sequences first."
+  :blocks ["ariadne-gate-envelope-wiring.spec.edn"]
+  :blocked-by ["ariadne-decision-envelope.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
