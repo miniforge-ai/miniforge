@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The street, the fort fair, and the fridge list</text>
+
+  <!-- street of yards -->
+  <rect x="40" y="70" width="560" height="200" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="96" font-size="15" font-weight="bold" fill="#232323">every yard has its own robots and its own forts</text>
+  <g>
+    <rect x="60" y="120" width="150" height="110" rx="6" fill="#eef7ec" stroke="#82b366" stroke-width="1.5"/>
+    <path d="M90,205 L90,170 L120,152 L150,170 L150,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="166" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="135" y="222" text-anchor="middle" font-size="10" fill="#3a6a34">your yard</text>
+  </g>
+  <g>
+    <rect x="230" y="120" width="150" height="110" rx="6" fill="#eef4fb" stroke="#6c8ebf" stroke-width="1.5"/>
+    <path d="M260,205 L260,172 L290,156 L320,172 L320,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="336" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="305" y="222" text-anchor="middle" font-size="10" fill="#274b73">next door</text>
+  </g>
+  <g>
+    <rect x="400" y="120" width="150" height="110" rx="6" fill="#fdf3e6" stroke="#d79b00" stroke-width="1.5"/>
+    <path d="M430,205 L430,172 L460,156 L490,172 L490,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="506" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="475" y="222" text-anchor="middle" font-size="10" fill="#8a5a00">down the street</text>
+  </g>
+  <text x="320" y="254" text-anchor="middle" font-size="11" font-style="italic" fill="#555">two yards about to build in the same corner? she'll notice.</text>
+
+  <!-- neighbor lady -->
+  <rect x="620" y="70" width="250" height="200" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <circle cx="695" cy="130" r="22" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <path d="M675,116 Q695,100 715,116" stroke="#8a8a82" stroke-width="6" fill="none"/>
+  <circle cx="687" cy="126" r="3" fill="#232323"/><circle cx="703" cy="126" r="3" fill="#232323"/>
+  <path d="M687,140 Q695,146 703,140" stroke="#232323" stroke-width="2" fill="none"/>
+  <rect x="675" y="154" width="40" height="46" rx="10" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <rect x="726" y="120" width="130" height="56" rx="8" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="791" y="140" text-anchor="middle" font-size="10" fill="#333">"you two — same</text>
+  <text x="791" y="154" text-anchor="middle" font-size="10" fill="#333">corner. go talk!"</text>
+  <text x="745" y="216" text-anchor="middle" font-size="12" font-weight="bold" fill="#4a355c">the helpful neighbor lady</text>
+  <text x="745" y="234" text-anchor="middle" font-size="11" fill="#555">advice, never permission —</text>
+  <text x="745" y="248" text-anchor="middle" font-size="11" fill="#555">nobody waits for her OK</text>
+  <text x="745" y="262" text-anchor="middle" font-size="10" font-style="italic" fill="#8a5a00">(most of her house is still a drawing)</text>
+
+  <!-- fort fair -->
+  <rect x="40" y="292" width="400" height="120" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="318" font-size="15" font-weight="bold" fill="#232323">the fort fair</text>
+  <rect x="60" y="332" width="130 " height="60" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="125" y="352" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">SCORECARD</text>
+  <line x1="72" y1="362" x2="178" y2="362" stroke="#c8c8c0" stroke-width="1.5"/>
+  <line x1="72" y1="374" x2="178" y2="374" stroke="#c8c8c0" stroke-width="1.5"/>
+  <text x="210" y="352" font-size="12" fill="#333">one judge, one scorecard,</text>
+  <text x="210" y="368" font-size="12" fill="#333">every yard's forts — no favorites.</text>
+  <text x="210" y="392" font-size="11.5" font-style="italic" fill="#555">our robots enter their own rule-following. nerve.</text>
+
+  <!-- fridge -->
+  <rect x="460" y="292" width="410" height="230" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <rect x="480" y="312" width="120" height="190" rx="8" fill="#eef4fb" stroke="#8a8a82" stroke-width="2.5"/>
+  <line x1="480" y1="380" x2="600" y2="380" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="590" cy="350" r="3" fill="#8a8a82"/><circle cx="590" cy="410" r="3" fill="#8a8a82"/>
+  <rect x="492" y="324" width="96" height="120" rx="2" fill="#fffde7" stroke="#c8b900" stroke-width="1.5" transform="rotate(-2 540 384)"/>
+  <text x="540" y="342" text-anchor="middle" font-size="8.5" font-weight="bold" fill="#4a4a20" transform="rotate(-2 540 384)">BROKEN STUFF</text>
+  <line x1="500" y1="352" x2="580" y2="352" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="366" x2="580" y2="366" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="380" x2="580" y2="380" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="394" x2="580" y2="394" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="408" x2="580" y2="408" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <text x="620" y="330" font-size="12" font-weight="bold" fill="#232323">the fridge list — on purpose,</text>
+  <text x="620" y="346" font-size="12" font-weight="bold" fill="#232323">where everyone can see:</text>
+  <text x="620" y="368" font-size="10.5" fill="#555">· the checker who stamps words he can't read</text>
+  <text x="620" y="384" font-size="10.5" fill="#555">· three words for "dangerous"</text>
+  <text x="620" y="400" font-size="10.5" fill="#555">· two diaries in two drawers</text>
+  <text x="620" y="416" font-size="10.5" fill="#555">· the "please don't" sticky note</text>
+  <text x="620" y="432" font-size="10.5" fill="#555">· the neighbor lady's unbuilt house</text>
+  <text x="620" y="456" font-size="11" font-style="italic" fill="#7a3230">a notebook that never lies has to</text>
+  <text x="620" y="470" font-size="11" font-style="italic" fill="#7a3230">list its own loose boards</text>
+
+  <rect x="40" y="428" width="400" height="94" rx="10" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="56" y="454" font-size="13" font-weight="bold" fill="#4a4a20">whose yard is this?</text>
+  <text x="56" y="474" font-size="12" fill="#4a4a20">the robots wrote down everything except that.</text>
+  <text x="56" y="490" font-size="12" fill="#4a4a20">no deeds, no passes — yet. it's next, and the</text>
+  <text x="56" y="506" font-size="12" fill="#4a4a20">notebook-and-checker bones are ready for it.</text>
+</svg>
