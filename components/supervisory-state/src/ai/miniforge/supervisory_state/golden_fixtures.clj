@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.supervisory-state.golden-fixtures
   "Generate the canonical golden fixtures for the supervisory entity
    contract — one supervisory snapshot event (N3 §3.19) per entity
@@ -34,6 +33,7 @@
    synthetic — `golden/*` names, `example.invalid` URLs — so a fixture
    can never be mistaken for captured production data."
   (:require
+   [ai.miniforge.decision-envelope.interface :as env]
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.emitter :as emitter]
@@ -45,42 +45,116 @@
    [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pinned synthetic identity — fixed UUIDs, one fixed instant
 
-(defn- golden-uuid
+;; Pinned synthetic identity — fixed UUIDs, one fixed instant
+(defn- ^{:stratum 0} golden-uuid
   "A fixed, obviously-synthetic UUID for slot `n` (1-255)."
   [n]
   (java.util.UUID/fromString
    (format "00000000-0000-4000-8000-%012x" (long n))))
 
-(def ^:private t0
+(def ^{:stratum 0} ^:private t0
   "The single pinned timestamp used everywhere in the fixtures."
   (Date/from (java.time.Instant/parse "2026-01-01T00:00:00Z")))
 
-(def ^:private envelope-id-slot-offset
+(def ^{:stratum 0} ^:private envelope-id-slot-offset
   "golden-uuid slot offset for envelope event ids. Entity ids occupy
-   slots 1-9; envelope event ids occupy 100-108 (offset + 0-based
-   family index), so no fixture's `:event/id` can collide with an
-   entity id."
+   low slots (1-10); envelope event ids occupy slot 100 + the 0-based
+   family index (one per `families` entry), so no fixture's
+   `:event/id` can collide with an entity id."
   100)
 
-(def ^:private pinned-sequence-number
+(def ^{:stratum 0} ^:private pinned-sequence-number
   "Every fixture pins `:event/sequence-number` to the first slot —
    sequence numbering is per-workflow runtime state, meaningless in a
    single-event fixture."
   1)
 
-(def ^:private workflow-run-id (golden-uuid 1))
-(def ^:private correlation-id  (golden-uuid 2))
-(def ^:private spec-id         (golden-uuid 3))
-(def ^:private agent-id        (golden-uuid 4))
-(def ^:private policy-eval-id  (golden-uuid 5))
-(def ^:private attention-id    (golden-uuid 6))
-(def ^:private task-id         (golden-uuid 7))
-(def ^:private decision-id     (golden-uuid 8))
-(def ^:private intervention-id (golden-uuid 9))
+(defn- ^{:stratum 0} validate-result
+  "Validate `entity` against `entity-schema`, returning the entity on success
+   or a legacy response anomaly map on schema drift."
+  [family entity-schema entity]
+  (if (m/validate entity-schema entity)
+    entity
+    (response/make-anomaly :anomalies/incorrect
+                           (str "Golden fixture entity invalid for " family)
+                           {:family family
+                            :errors (me/humanize (m/explain entity-schema entity))})))
+
+;; Disk layout — one file per family + a manifest for consumers
+(defn- ^{:stratum 0} clear-stale-fixtures!
+  "Delete previously generated fixture files in `dir` so a removed or
+   renamed family cannot leave an orphan behind that only the drift
+   gate would notice. Touches only the generator's own output shapes."
+  [dir]
+  (doseq [^java.io.File f (or (.listFiles (io/file dir)) [])
+          :when (or (.endsWith (.getName f) ".transit.json")
+                    (= "manifest.edn" (.getName f)))]
+    (io/delete-file f)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private workflow-run-id (golden-uuid 1))
+
+(def ^{:stratum 1} ^:private correlation-id  (golden-uuid 2))
+
+(def ^{:stratum 1} ^:private spec-id         (golden-uuid 3))
+
+(def ^{:stratum 1} ^:private agent-id        (golden-uuid 4))
+
+(def ^{:stratum 1} ^:private policy-eval-id  (golden-uuid 5))
+
+(def ^{:stratum 1} ^:private attention-id    (golden-uuid 6))
+
+(def ^{:stratum 1} ^:private task-id         (golden-uuid 7))
+
+(def ^{:stratum 1} ^:private decision-id     (golden-uuid 8))
+
+(def ^{:stratum 1} ^:private intervention-id (golden-uuid 9))
+
+;; Family table — name, emitter constructor, schema, entity
+(def ^{:stratum 1} ^:private golden-envelope
+  ;; Minted through the real factory (decision derived, never supplied),
+  ;; then identity-pinned for determinism — the KEY SET and derivation
+  ;; are production; only :envelope/id and :envelope/at are pinned.
+  (-> (env/envelope
+       [{:reason/code :reason/rule-violation
+         :reason/rule-id :golden/forbidden
+         :reason/severity :high
+         :reason/detail "Golden synthetic rule violation"}]
+       [{:obligation/type :obligation/audit-recorded
+         :obligation/rule-id :golden/audited
+         :obligation/detail "Golden synthetic audit obligation"}]
+       {:pins/pack-revision "golden-pack@1"
+        :pins/rule-ids [:golden/forbidden :golden/audited]
+        :pins/event-watermark 1})
+      (assoc :envelope/id (golden-uuid 10)
+             :envelope/at t0)))
+
+;; Event construction — real constructor + real encoder, pinned envelope
+(defn- ^{:stratum 1} validate!
+  "Boundary wrapper around the anomaly-returning `validate-result`.
+   The generator fails closed: a fixture that does not validate against the
+   current schema must never be written."
+  [family entity-schema entity]
+  (let [result (validate-result family entity-schema entity)]
+    (when (response/anomaly-map? result)
+      (throw (ex-info (:anomaly/message result)
+                      (select-keys result [:family :errors]))))))
+
+(defn- ^{:stratum 1} pin-envelope
+  "Replace the nondeterministic envelope fields (`create-envelope`
+   stamps a wall-clock timestamp and a snowflake/random event id) with
+   pinned values so regeneration is byte-identical. The KEY SET is the
+   production key set; only the values are pinned."
+  [event n]
+  (assoc event
+         :event/id (golden-uuid (+ envelope-id-slot-offset n))
+         :event/timestamp t0
+         :event/sequence-number pinned-sequence-number))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Canonical synthetic entities — one per family, exercising the
 ;; optional blocks the Rust contract also models (PR scoring, nested
 ;; spec snapshot, violations) so absence-vs-presence both round-trip.
@@ -91,8 +165,7 @@
 ;; They are deliberately asymmetric (additions 10 vs deletions 2,
 ;; score 0.5 vs threshold 0.8) so a field transposition in either
 ;; codec shows up as a fixture diff instead of cancelling out.
-
-(def ^:private workflow-run-entity
+(def ^{:stratum 2} ^:private workflow-run-entity
   {:workflow-run/id workflow-run-id
    :workflow-run/workflow-key "golden-synthetic-workflow"
    :workflow-run/intent "Golden fixture — synthetic, not a real run"
@@ -113,7 +186,7 @@
                        :pr/author "golden-bot"
                        :pr/merge-order 0}]})
 
-(def ^:private spec-entity
+(def ^{:stratum 2} ^:private spec-entity
   {:spec/id spec-id
    :spec/title "Golden synthetic spec"
    :spec/status :active
@@ -123,7 +196,7 @@
    :spec/tags ["golden"]
    :spec/origin :miniforge})
 
-(def ^:private agent-entity
+(def ^{:stratum 2} ^:private agent-entity
   {:agent/id agent-id
    :agent/vendor "golden-vendor"
    :agent/external-id "golden-agent-1"
@@ -137,7 +210,7 @@
    :agent/last-heartbeat t0
    :agent/task "golden synthetic task"})
 
-(def ^:private pr-entity
+(def ^{:stratum 2} ^:private pr-entity
   {:pr/repo "golden/synthetic"
    :pr/number 1
    :pr/url "https://example.invalid/golden/pr/1"
@@ -180,7 +253,7 @@
                :policy/artifacts-checked 1}
    :pr/recommendation :review})
 
-(def ^:private policy-eval-entity
+(def ^{:stratum 2} ^:private policy-eval-entity
   {:policy-eval/id policy-eval-id
    :policy-eval/workflow-run-id workflow-run-id
    :policy-eval/gate-id :golden/gate
@@ -196,16 +269,23 @@
                              :violation/remediable? true}]
    :policy-eval/evaluated-at t0})
 
-(def ^:private attention-entity
+(def ^{:stratum 2} ^:private attention-entity
+  ;; v2: exercises the four policy-attention keys the producer has always
+  ;; emitted (policy-violation-rule) but the corpus never showed — the
+  ;; silent-drop class at the Rust seam (Ariadne 1e).
   {:attention/id attention-id
    :attention/severity :warning
    :attention/source-type :workflow
    :attention/source-id workflow-run-id
    :attention/summary "Golden synthetic attention item"
    :attention/derived-at t0
-   :attention/resolved? false})
+   :attention/resolved? false
+   :attention/workflow-run-id workflow-run-id
+   :attention/gate-id :policy-review
+   :attention/target-type :pr
+   :attention/target-id ["golden/synthetic-repo" 7]})
 
-(def ^:private task-node-entity
+(def ^{:stratum 2} ^:private task-node-entity
   {:task/id task-id
    :task/workflow-run-id workflow-run-id
    :task/description "Golden synthetic task"
@@ -220,7 +300,7 @@
    :task/exclusive-files? false
    :task/stratum? false})
 
-(def ^:private decision-entity
+(def ^{:stratum 2} ^:private decision-entity
   {:decision/id decision-id
    :decision/agent-id agent-id
    :decision/workflow-run-id workflow-run-id
@@ -232,7 +312,7 @@
    :decision/options ["golden option a" "golden option b"]
    :decision/created-at t0})
 
-(def ^:private intervention-entity
+(def ^{:stratum 2} ^:private intervention-entity
   {:intervention/id intervention-id
    :intervention/type :pause
    :intervention/target-type :workflow
@@ -245,10 +325,18 @@
    :intervention/justification "golden synthetic justification"
    :intervention/approval-required? false})
 
-;------------------------------------------------------------------------------ Layer 2
-;; Family table — name, emitter constructor, schema, entity
+(defn- ^{:stratum 2} gate-decision-ctor
+  "Fixture ctor for the :gate/decision family: the production
+   phase-decision constructor plus the supervisory version stamp and
+   the uniform :supervisory/entity slot the corpus tests traverse."
+  [stream envelope]
+  (-> (es/phase-decision stream workflow-run-id :implement envelope)
+      (assoc :supervisory/entity envelope
+             :supervisory/schema-version schema/schema-version)))
 
-(def families
+;------------------------------------------------------------------------------ Layer 3
+
+(def ^{:stratum 3} families
   "The contract surface: every entity family the Clojure side emits as
    a `:supervisory/*-upserted` event. Worktree and AutomationEdge are
    absent by design — those families originate in the miniforge-control
@@ -262,44 +350,12 @@
    {:family :attention    :ctor emitter/attention-derived     :schema schema/AttentionItem      :entity attention-entity}
    {:family :task-node    :ctor emitter/task-node-upserted    :schema schema/TaskNode           :entity task-node-entity}
    {:family :decision     :ctor emitter/decision-upserted     :schema schema/DecisionCard       :entity decision-entity}
-   {:family :intervention :ctor emitter/intervention-upserted :schema schema/InterventionRequest :entity intervention-entity}])
+   {:family :intervention :ctor emitter/intervention-upserted :schema schema/InterventionRequest :entity intervention-entity}
+   {:family :gate-decision :ctor gate-decision-ctor            :schema env/DecisionEnvelope      :entity golden-envelope}])
 
-(defn- validate-result
-  "Validate `entity` against `entity-schema`, returning the entity on success
-   or a legacy response anomaly map on schema drift."
-  [family entity-schema entity]
-  (if (m/validate entity-schema entity)
-    entity
-    (response/make-anomaly :anomalies/incorrect
-                           (str "Golden fixture entity invalid for " family)
-                           {:family family
-                            :errors (me/humanize (m/explain entity-schema entity))})))
+;------------------------------------------------------------------------------ Layer 4
 
-;------------------------------------------------------------------------------ Layer 3
-;; Event construction — real constructor + real encoder, pinned envelope
-
-(defn- validate!
-  "Boundary wrapper around the anomaly-returning `validate-result`.
-   The generator fails closed: a fixture that does not validate against the
-   current schema must never be written."
-  [family entity-schema entity]
-  (let [result (validate-result family entity-schema entity)]
-    (when (response/anomaly-map? result)
-      (throw (ex-info (:anomaly/message result)
-                      (select-keys result [:family :errors]))))))
-
-(defn- pin-envelope
-  "Replace the nondeterministic envelope fields (`create-envelope`
-   stamps a wall-clock timestamp and a snowflake/random event id) with
-   pinned values so regeneration is byte-identical. The KEY SET is the
-   production key set; only the values are pinned."
-  [event n]
-  (assoc event
-         :event/id (golden-uuid (+ envelope-id-slot-offset n))
-         :event/timestamp t0
-         :event/sequence-number pinned-sequence-number))
-
-(defn golden-events
+(defn ^{:stratum 4} golden-events
   "Build the pinned upsert event for every family, as a fully realized
    vector — callers traverse it repeatedly, and the constructors touch
    stream state (sequence numbering), so laziness would mean silent
@@ -315,20 +371,9 @@
               :event (pin-envelope (ctor stream entity) n)}))
           families)))
 
-;------------------------------------------------------------------------------ Layer 4
-;; Disk layout — one file per family + a manifest for consumers
+;------------------------------------------------------------------------------ Layer 5
 
-(defn- clear-stale-fixtures!
-  "Delete previously generated fixture files in `dir` so a removed or
-   renamed family cannot leave an orphan behind that only the drift
-   gate would notice. Touches only the generator's own output shapes."
-  [dir]
-  (doseq [^java.io.File f (or (.listFiles (io/file dir)) [])
-          :when (or (.endsWith (.getName f) ".transit.json")
-                    (= "manifest.edn" (.getName f)))]
-    (io/delete-file f)))
-
-(defn write-golden-fixtures!
+(defn ^{:stratum 5} write-golden-fixtures!
   "Write `<family>.transit.json` per family plus `manifest.edn` into
    `:out-dir` (string path), replacing any previously generated files
    there. Returns a summary map. Designed for `clojure -X` invocation;

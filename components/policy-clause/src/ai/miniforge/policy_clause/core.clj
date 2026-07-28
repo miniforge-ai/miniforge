@@ -60,6 +60,23 @@
                               (pr-str mechanical))
                          {:mechanical mechanical})))
 
+(defn ^{:stratum 0} severity->attention
+  "Map a policy severity onto the attention scale ([:critical :warning
+   :info] — the console's three-level axis): `:critical`/`:high` →
+   `:critical`, `:medium`/`:low` → `:warning`, `:info` → `:info`.
+   Unknown values return an anomaly. Lives here with the other axis
+   crossings — consumers must not carry their own severity maps."
+  [severity]
+  (case (voc/normalize-severity severity)
+    (:critical :high) :critical
+    (:medium :low) :warning
+    :info :info
+    (anomaly/sub-anomaly :invalid-input
+                         :anomalies.policy-clause/unknown-severity
+                         (str "No attention severity for policy severity "
+                              (pr-str severity))
+                         {:severity severity})))
+
 (defn ^{:stratum 0} severity->mechanical
   "Map a policy severity onto the mechanical gate scale (`:critical`/
    `:high` → `:error`, `:medium`/`:low` → `:warning`, `:info` →

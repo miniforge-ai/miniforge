@@ -1,5 +1,7 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/config {:local/root "../config"}
+ :deps {ai.miniforge/decision-envelope {:local/root "../decision-envelope"}
+        ai.miniforge/policy-clause {:local/root "../policy-clause"}
+        ai.miniforge/config {:local/root "../config"}
         ai.miniforge/event-stream {:local/root "../event-stream"}
         ai.miniforge/logging {:local/root "../logging"}
         ai.miniforge/messages {:local/root "../messages"}
