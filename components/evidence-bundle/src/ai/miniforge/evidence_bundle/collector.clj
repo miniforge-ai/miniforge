@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.collector
   "Utilities for collecting evidence during workflow execution.
    Provides helpers for gathering phase results, artifacts, and metadata."
@@ -30,9 +29,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Anomaly detection (dual shape during W2 convergence)
 
-(defn- any-anomaly?
+;; Anomaly detection (dual shape during W2 convergence)
+(defn- ^{:stratum 0} any-anomaly?
   "True when `x` is either a canonical anomaly (`:anomaly/type`) or a
    legacy response anomaly (`:anomaly/category`).
 
@@ -45,10 +44,8 @@
   (or (anomaly/anomaly? x)
       (response/anomaly-map? x)))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Intent Collection
-
-(defn extract-intent
+(defn ^{:stratum 0} extract-intent
   [workflow-spec]
   {:intent/type (get workflow-spec :intent/type :update)
    :intent/description (or (:description workflow-spec)
@@ -59,10 +56,8 @@
    :intent/declared-at (java.time.Instant/now)
    :intent/author (get workflow-spec :author "system")})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Compliance Defaults and Overrides
-
-(defn- build-default-compliance-metadata
+(defn- ^{:stratum 0} build-default-compliance-metadata
   "Return the default compliance map for assembled evidence bundles.
    Uses schema-defined defaults so the single source of truth lives in schema.clj.
    Covers the assembly path; the template function covers manual construction."
@@ -75,7 +70,7 @@
    :evidence/regulatory-tags     #{}
    :evidence/created-by          schema/default-created-by-principal})
 
-(def ^:private compliance-override-keys
+(def ^{:stratum 0} ^:private compliance-override-keys
   "Allowed keys for workflow-spec and opts compliance override maps."
   #{:evidence/data-classification
     :evidence/contains-pii?
@@ -83,29 +78,7 @@
     :evidence/regulatory-tags
     :evidence/created-by})
 
-(defn- normalize-compliance-overrides
-  "Return only documented compliance override keys from m, or nil for non-maps."
-  [m]
-  (when (map? m)
-    (select-keys m compliance-override-keys)))
-
-(defn- extract-compliance-overrides
-  "Read compliance overrides from workflow-spec or opts.
-   Checks the :compliance key on the spec map first, then falls back to opts.
-   Returns a map of overrides to merge into the bundle, or {} when absent.
-
-   Allowed override keys:
-   - :evidence/data-classification
-   - :evidence/contains-pii?
-   - :evidence/retention-policy  (partial — merged one level deep)
-   - :evidence/regulatory-tags
-   - :evidence/created-by"
-  [workflow-spec opts]
-  (or (normalize-compliance-overrides (:compliance workflow-spec))
-      (normalize-compliance-overrides (:compliance opts))
-      {}))
-
-(defn- merge-compliance
+(defn- ^{:stratum 0} merge-compliance
   "Merge compliance defaults with operator overrides.
    :evidence/retention-policy is merged one level deep so callers may supply
    only the keys they wish to change (e.g. just {:retain-days 365}) without
@@ -120,10 +93,8 @@
                     (get overrides :evidence/retention-policy)))
       base)))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Access Log
-
-(defn append-access-log-entry
+(defn ^{:stratum 0} append-access-log-entry
   "Append an access log entry to the bundle's :evidence/access-log.
    Stamps :access-log/timestamp on the entry when absent.
    Append-only contract: existing entries are never removed or mutated.
@@ -136,10 +107,8 @@
             (fn [access-log]
               (conj (vec (or access-log [])) stamped)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Phase Evidence Collection
-
-(defn- build-phase-output
+(defn- ^{:stratum 0} build-phase-output
   "Extract the output map for phase evidence.
 
    Handles both:
@@ -160,7 +129,146 @@
        (:summary phase-result)        (assoc :summary        (:summary phase-result))
        (:metrics phase-result)        (assoc :metrics        (:metrics phase-result))
        (:environment-id phase-result) (assoc :environment-id (:environment-id phase-result))))
-   {}))\n\n(defn build-phase-evidence
+   {}))
+
+(defn ^{:stratum 0} collect-tool-invocations
+  "Collect tool invocation records from workflow state."
+  [workflow-state]
+  (vec (get workflow-state :workflow/tool-invocations [])))
+
+;------------------------------------------------------------------------------ Layer 1.5
+;; Rules Applied Evidence
+(defn- ^{:stratum 0} build-rule-applied-entry
+  "Normalize a manifest entry into the expected rule-applied shape.
+   Ensures all fields have valid defaults and annotates with phase name."
+  [entry phase-name]
+  {:id (or (:id entry) (random-uuid))
+   :title (get entry :title "unknown")
+   :role (get entry :role :unknown)
+   :tags-matched (vec (get entry :tags-matched []))
+   :score (double (get entry :score 0.0))
+   :phase (get entry :phase phase-name)})
+
+;; Policy Check Evidence
+(defn ^{:stratum 0} build-policy-check-evidence
+  "Build policy check evidence from gate result.
+   Returns policy check evidence per N6 spec."
+  [gate-result]
+  {:policy-check/pack-id (get gate-result :pack-id "unknown")
+   :policy-check/pack-version (get gate-result :pack-version "1.0.0")
+   :policy-check/phase (get gate-result :phase :unknown)
+   :policy-check/checked-at (get gate-result :checked-at (java.time.Instant/now))
+   :policy-check/violations (vec (get gate-result :violations []))
+   :policy-check/passed? (get gate-result :passed? true)
+   :policy-check/duration-ms (get gate-result :duration-ms 0)
+   :policy-check/envelope (get gate-result :envelope)})
+
+;; Pack Promotion Evidence
+(defn ^{:stratum 0} build-pack-promotion-evidence
+  "Build pack promotion evidence from promotion record.
+   Returns pack promotion evidence per N6 section 2.1.
+
+   If the promotion record already has the correct format (with :pack/id),
+   return it as-is. Otherwise, build from legacy format."
+  [promotion-record]
+  ;; If already in correct format, return as-is
+  (if (contains? promotion-record :pack/id)
+    promotion-record
+    ;; Otherwise, build from legacy format
+    {:pack/id (get promotion-record :pack-id "unknown")
+     :pack/type (get promotion-record :pack-type :knowledge)
+     :from-trust (get promotion-record :from-trust :untrusted)
+     :to-trust (get promotion-record :to-trust :trusted)
+     :promoted-by (get promotion-record :promoted-by "system")
+     :promoted-at (get promotion-record :promoted-at (java.time.Instant/now))
+     :promotion-policy (get promotion-record :promotion-policy "knowledge-safety")
+     :promotion-justification (get promotion-record :promotion-justification
+                                   "No justification provided")
+     :pack-hash (get promotion-record :pack-hash "")
+     :pack-signature (get promotion-record :pack-signature "")}))
+
+;------------------------------------------------------------------------------ Layer 3.5
+;; Supervision Decision Evidence (N6)
+(defn- ^{:stratum 0} collect-event-stream-events
+  [event-stream query]
+  (try
+    (when event-stream
+      (vec (event-stream/get-events event-stream query)))
+    (catch Exception _e
+      [])))
+
+;------------------------------------------------------------------------------ Layer 4.5
+;; Execution Evidence (N11 §9.1)
+(defn ^{:stratum 0} collect-execution-evidence
+  "Extract N11 §9.1 execution evidence fields from workflow state.
+   Looks in :execution/output for evidence fields produced by runner/extract-output.
+   Returns a map of evidence keys to merge into the bundle, or empty map."
+  [workflow-state]
+  (let [output (get workflow-state :execution/output {})]
+    (cond-> {}
+      (contains? output :evidence/execution-mode)
+      (assoc :evidence/execution-mode (:evidence/execution-mode output))
+
+      (contains? output :evidence/runtime-class)
+      (assoc :evidence/runtime-class (:evidence/runtime-class output))
+
+      (contains? output :evidence/task-started-at)
+      (assoc :evidence/task-started-at (:evidence/task-started-at output))
+
+      (contains? output :evidence/task-finished-at)
+      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
+
+      (contains? output :evidence/image-digest)
+      (assoc :evidence/image-digest (:evidence/image-digest output)))))
+
+(def ^{:stratum 0} ^:private dependency-event-types
+  #{:dependency/health-updated
+    :dependency/recovered})
+
+(def ^{:stratum 0} ^:private dependency-health-keys
+  [:dependency/id
+   :dependency/source
+   :dependency/kind
+   :dependency/status
+   :dependency/failure-count
+   :dependency/window-size
+   :dependency/incident-counts
+   :dependency/vendor
+   :dependency/class
+   :dependency/retryability
+   :failure/class
+   :dependency/last-observed-at
+   :dependency/last-recovered-at])
+
+(def ^{:stratum 0} ^:private failure-attribution-keys
+  [:failure/source
+   :failure/vendor
+   :failure/class
+   :failure/message
+   :dependency/class
+   :dependency/retryability
+   :dependency/id
+   :dependency/source
+   :dependency/kind
+   :dependency/vendor
+   :dependency/status])
+
+;; Workflow Integration Helpers
+(defn ^{:stratum 0} should-create-bundle?
+  "Check if evidence bundle should be created for workflow.
+   Always create bundle at completion, even on failure (per N6 spec)."
+  [workflow-state]
+  (contains? #{:completed :failed} (:workflow/status workflow-state)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} normalize-compliance-overrides
+  "Return only documented compliance override keys from m, or nil for non-maps."
+  [m]
+  (when (map? m)
+    (select-keys m compliance-override-keys)))
+
+(defn ^{:stratum 1} build-phase-evidence
   "Build phase evidence from phase execution context.
    Returns phase evidence map per N6 spec.
 
@@ -184,49 +292,7 @@
      :phase/event-stream-range  (get phase-result :event-stream-range
                                      {:start-seq 0 :end-seq 0})}))
 
-(defn collect-phase-evidence
-  "Collect evidence for a single phase from workflow state.
-   Returns phase evidence map or nil if phase not executed."
-  [workflow-state phase-name]
-  (when-let [phase-data (get-in workflow-state [:workflow/phases phase-name])]
-    (build-phase-evidence
-     phase-name
-     (get phase-data :agent :unknown)
-     phase-data)))
-
-(defn collect-all-phases
-  "Collect evidence for all executed phases.
-   Returns map of evidence keys to phase evidence."
-  [workflow-state]
-  (let [phases [:plan :design :implement :verify :review :release :observe]]
-    (reduce
-     (fn [acc phase-name]
-       (if-let [evidence (collect-phase-evidence workflow-state phase-name)]
-         (assoc acc (keyword "evidence" (name phase-name)) evidence)
-         acc))
-     {}
-     phases)))
-
-(defn collect-tool-invocations
-  "Collect tool invocation records from workflow state."
-  [workflow-state]
-  (vec (get workflow-state :workflow/tool-invocations [])))
-
-;------------------------------------------------------------------------------ Layer 1.5
-;; Rules Applied Evidence
-
-(defn- build-rule-applied-entry
-  "Normalize a manifest entry into the expected rule-applied shape.
-   Ensures all fields have valid defaults and annotates with phase name."
-  [entry phase-name]
-  {:id (or (:id entry) (random-uuid))
-   :title (get entry :title "unknown")
-   :role (get entry :role :unknown)
-   :tags-matched (vec (get entry :tags-matched []))
-   :score (double (get entry :score 0.0))
-   :phase (get entry :phase phase-name)})
-
-(defn collect-rules-applied
+(defn ^{:stratum 1} collect-rules-applied
   "Collect rules-applied evidence from phase results.
    Each phase that captured a rules-manifest has its entries normalized
    and annotated with the phase name.
@@ -238,73 +304,21 @@
                      (mapv #(build-rule-applied-entry % phase-name) manifest)))
                  phases))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Policy Check Evidence
-
-(defn build-policy-check-evidence
-  "Build policy check evidence from gate result.
-   Returns policy check evidence per N6 spec."
-  [gate-result]
-  {:policy-check/pack-id (get gate-result :pack-id "unknown")
-   :policy-check/pack-version (get gate-result :pack-version "1.0.0")
-   :policy-check/phase (get gate-result :phase :unknown)
-   :policy-check/checked-at (get gate-result :checked-at (java.time.Instant/now))
-   :policy-check/violations (vec (get gate-result :violations []))
-   :policy-check/passed? (get gate-result :passed? true)
-   :policy-check/duration-ms (get gate-result :duration-ms 0)})
-
-(defn collect-policy-checks
+(defn ^{:stratum 1} collect-policy-checks
   "Collect all policy check evidence from workflow state.
    Returns vector of policy check evidence."
   [workflow-state]
   (let [gate-results (get workflow-state :workflow/gate-results [])]
     (mapv build-policy-check-evidence gate-results)))
 
-;------------------------------------------------------------------------------ Layer 3
-;; Pack Promotion Evidence
-
-(defn build-pack-promotion-evidence
-  "Build pack promotion evidence from promotion record.
-   Returns pack promotion evidence per N6 section 2.1.
-
-   If the promotion record already has the correct format (with :pack/id),
-   return it as-is. Otherwise, build from legacy format."
-  [promotion-record]
-  ;; If already in correct format, return as-is
-  (if (contains? promotion-record :pack/id)
-    promotion-record
-    ;; Otherwise, build from legacy format
-    {:pack/id (get promotion-record :pack-id "unknown")
-     :pack/type (get promotion-record :pack-type :knowledge)
-     :from-trust (get promotion-record :from-trust :untrusted)
-     :to-trust (get promotion-record :to-trust :trusted)
-     :promoted-by (get promotion-record :promoted-by "system")
-     :promoted-at (get promotion-record :promoted-at (java.time.Instant/now))
-     :promotion-policy (get promotion-record :promotion-policy "knowledge-safety")
-     :promotion-justification (get promotion-record :promotion-justification
-                                   "No justification provided")
-     :pack-hash (get promotion-record :pack-hash "")
-     :pack-signature (get promotion-record :pack-signature "")}))
-
-(defn collect-pack-promotions
+(defn ^{:stratum 1} collect-pack-promotions
   "Collect all pack promotion evidence from workflow state.
    Returns vector of pack promotion evidence."
   [workflow-state]
   (let [promotions (get workflow-state :workflow/pack-promotions [])]
     (mapv build-pack-promotion-evidence promotions)))
 
-;------------------------------------------------------------------------------ Layer 3.5
-;; Supervision Decision Evidence (N6)
-
-(defn- collect-event-stream-events
-  [event-stream query]
-  (try
-    (when event-stream
-      (vec (event-stream/get-events event-stream query)))
-    (catch Exception _e
-      [])))
-
-(defn collect-supervision-decisions
+(defn ^{:stratum 1} collect-supervision-decisions
   "Collect supervision decision events from the event stream.
 
    Filters for :supervision/tool-use-evaluated events and transforms
@@ -342,7 +356,7 @@
       ;; event-stream dependency might not be loaded
       [])))
 
-(defn collect-control-actions
+(defn ^{:stratum 1} collect-control-actions
   "Collect control action events from the event stream.
 
    Pairs :control-action/requested with :control-action/executed events.
@@ -380,10 +394,8 @@
     (catch Exception _e
       [])))
 
-;------------------------------------------------------------------------------ Layer 4
 ;; Outcome Evidence
-
-(defn build-outcome-evidence
+(defn ^{:stratum 1} build-outcome-evidence
   "Build outcome evidence from workflow final state.
    Uses anomaly->outcome-evidence when anomaly maps are available.
    Returns outcome evidence per N6 spec."
@@ -413,58 +425,48 @@
           :outcome/error-phase (:phase error-info)
           :outcome/error-details error-info})))))
 
-;------------------------------------------------------------------------------ Layer 4.5
-;; Execution Evidence (N11 §9.1)
-
-(defn collect-execution-evidence
-  "Extract N11 §9.1 execution evidence fields from workflow state.
-   Looks in :execution/output for evidence fields produced by runner/extract-output.
-   Returns a map of evidence keys to merge into the bundle, or empty map."
-  [workflow-state]
-  (let [output (get workflow-state :execution/output {})]
-    (cond-> {}
-      (contains? output :evidence/execution-mode)
-      (assoc :evidence/execution-mode (:evidence/execution-mode output))
-
-      (contains? output :evidence/runtime-class)
-      (assoc :evidence/runtime-class (:evidence/runtime-class output))
-
-      (contains? output :evidence/task-started-at)
-      (assoc :evidence/task-started-at (:evidence/task-started-at output))
-
-      (contains? output :evidence/task-finished-at)
-      (assoc :evidence/task-finished-at (:evidence/task-finished-at output))
-
-      (contains? output :evidence/image-digest)
-      (assoc :evidence/image-digest (:evidence/image-digest output)))))
-
-(def ^:private dependency-event-types
-  #{:dependency/health-updated
-    :dependency/recovered})
-
-(def ^:private dependency-health-keys
-  [:dependency/id
-   :dependency/source
-   :dependency/kind
-   :dependency/status
-   :dependency/failure-count
-   :dependency/window-size
-   :dependency/incident-counts
-   :dependency/vendor
-   :dependency/class
-   :dependency/retryability
-   :failure/class
-   :dependency/last-observed-at
-   :dependency/last-recovered-at])
-
-(defn- canonical-dependency-entry
+(defn- ^{:stratum 1} canonical-dependency-entry
   [dependency-id dependency]
   (let [entity (select-keys dependency dependency-health-keys)
         canonical-id (or dependency-id (:dependency/id entity))]
     (when canonical-id
       (assoc entity :dependency/id canonical-id))))
 
-(defn- canonical-dependency-health
+(defn- ^{:stratum 1} failure-attribution
+  [failure]
+  (let [attribution (select-keys failure failure-attribution-keys)]
+    (when (seq attribution)
+      attribution)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} extract-compliance-overrides
+  "Read compliance overrides from workflow-spec or opts.
+   Checks the :compliance key on the spec map first, then falls back to opts.
+   Returns a map of overrides to merge into the bundle, or {} when absent.
+
+   Allowed override keys:
+   - :evidence/data-classification
+   - :evidence/contains-pii?
+   - :evidence/retention-policy  (partial — merged one level deep)
+   - :evidence/regulatory-tags
+   - :evidence/created-by"
+  [workflow-spec opts]
+  (or (normalize-compliance-overrides (:compliance workflow-spec))
+      (normalize-compliance-overrides (:compliance opts))
+      {}))
+
+(defn ^{:stratum 2} collect-phase-evidence
+  "Collect evidence for a single phase from workflow state.
+   Returns phase evidence map or nil if phase not executed."
+  [workflow-state phase-name]
+  (when-let [phase-data (get-in workflow-state [:workflow/phases phase-name])]
+    (build-phase-evidence
+     phase-name
+     (get phase-data :agent :unknown)
+     phase-data)))
+
+(defn- ^{:stratum 2} canonical-dependency-health
   [dependency-health]
   (into {}
         (keep (fn [[dependency-id dependency]]
@@ -472,7 +474,7 @@
                   [(:dependency/id entry) entry])))
         dependency-health))
 
-(defn- dependency-health-from-events
+(defn- ^{:stratum 2} dependency-health-from-events
   [stream workflow-id]
   (->> dependency-event-types
        (mapcat #(collect-event-stream-events stream
@@ -484,34 +486,7 @@
                    projection))
                {})))
 
-(defn- collect-dependency-health
-  [workflow-state stream workflow-id opts]
-  (let [projection (or (:dependency-health opts)
-                       (:dependency-health workflow-state)
-                       (when stream
-                         (dependency-health-from-events stream workflow-id)))]
-    (canonical-dependency-health projection)))
-
-(def ^:private failure-attribution-keys
-  [:failure/source
-   :failure/vendor
-   :failure/class
-   :failure/message
-   :dependency/class
-   :dependency/retryability
-   :dependency/id
-   :dependency/source
-   :dependency/kind
-   :dependency/vendor
-   :dependency/status])
-
-(defn- failure-attribution
-  [failure]
-  (let [attribution (select-keys failure failure-attribution-keys)]
-    (when (seq attribution)
-      attribution)))
-
-(defn- collect-failure-attribution
+(defn- ^{:stratum 2} collect-failure-attribution
   [workflow-state opts]
   (or (:failure-attribution opts)
       (some-> (:workflow/error workflow-state) failure-attribution)
@@ -519,10 +494,33 @@
                (keep failure-attribution)
                first)))
 
-;------------------------------------------------------------------------------ Layer 5
-;; Complete Bundle Assembly
+;------------------------------------------------------------------------------ Layer 3
 
-(defn assemble-evidence-bundle
+(defn ^{:stratum 3} collect-all-phases
+  "Collect evidence for all executed phases.
+   Returns map of evidence keys to phase evidence."
+  [workflow-state]
+  (let [phases [:plan :design :implement :verify :review :release :observe]]
+    (reduce
+     (fn [acc phase-name]
+       (if-let [evidence (collect-phase-evidence workflow-state phase-name)]
+         (assoc acc (keyword "evidence" (name phase-name)) evidence)
+         acc))
+     {}
+     phases)))
+
+(defn- ^{:stratum 3} collect-dependency-health
+  [workflow-state stream workflow-id opts]
+  (let [projection (or (:dependency-health opts)
+                       (:dependency-health workflow-state)
+                       (when stream
+                         (dependency-health-from-events stream workflow-id)))]
+    (canonical-dependency-health projection)))
+
+;------------------------------------------------------------------------------ Layer 4
+
+;; Complete Bundle Assembly
+(defn ^{:stratum 4} assemble-evidence-bundle
   "Assemble complete evidence bundle from workflow state and context.
    Merges N11 §9.1 execution evidence fields from :execution/output.
 
@@ -618,16 +616,13 @@
                  scan-result (merge scan-result))]
     (assoc bundle :evidence/content-hash (content-hash/content-hash bundle))))
 
-;------------------------------------------------------------------------------ Layer 6
-;; Workflow Integration Helpers
+;------------------------------------------------------------------------------ Layer 5
 
-(defn should-create-bundle?
-  "Check if evidence bundle should be created for workflow.
-   Always create bundle at completion, even on failure (per N6 spec)."
-  [workflow-state]
-  (contains? #{:completed :failed} (:workflow/status workflow-state)))
-
-(defn auto-collect-evidence
+(defn ^{:stratum 5} auto-collect-evidence
   [workflow-id workflow-state artifact-store]
   (when (should-create-bundle? workflow-state)
     (assemble-evidence-bundle workflow-id workflow-state artifact-store)))
+
+\n
+
+\n

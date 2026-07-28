@@ -49,6 +49,30 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} gates->envelope
+  "Phase-level envelope from a `check-gates` result (Ariadne 1d): ONE
+   envelope per gated transition. Policy-gate results already carry an
+   envelope — their reasons and obligations merge in; a mechanical gate
+   failure contributes a :reason/gate-check-failed; a nil artifact with
+   gates configured contributes :reason/missing-artifact. Pins come
+   from the first policy envelope present (nil pins otherwise)."
+  [{:keys [results]} artifact-nil?]
+  (let [gate-envs (keep :envelope results)
+        mech-failures (remove :envelope (remove :passed? results))
+        pins (or (:envelope/pins (first gate-envs))
+                 {:pins/pack-revision nil :pins/rule-ids [] :pins/event-watermark nil})]
+    (env/envelope
+     (concat (mapcat :envelope/reasons gate-envs)
+             (map (fn [r]
+                    {:reason/code :reason/gate-check-failed
+                     :reason/detail (str "gate " (name (or (:gate r) :unknown))
+                                         " failed: "
+                                         (or (:message (first (:errors r))) "check failed"))})
+                  mech-failures)
+             (when artifact-nil? [(missing-artifact-reason)]))
+     (mapcat :envelope/obligations gate-envs)
+     pins)))
+
 ;; Reason/obligation translation
 (defn- ^{:stratum 1} unknown->reason
   [v]

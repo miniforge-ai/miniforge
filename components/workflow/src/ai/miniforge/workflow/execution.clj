@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.execution
   "Phase execution lifecycle.
 
@@ -36,9 +35,10 @@
             [ai.miniforge.workflow.runner-defaults :as defaults]
             [ai.miniforge.workflow.messages :as messages]))
 
-;------------------------------------------------------------------------------ Layer 0: Atomic operations
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- enter-error-record
+;------------------------------------------------------------------------------ Layer 0: Atomic operations
+(defn- ^{:stratum 0} enter-error-record
   "Build the canonical entry recorded against `:execution/errors` for a
    phase-enter exception. Used uniformly whether or not the interceptor
    defines its own `:error` handler, so the `workflow/failed` event
@@ -50,7 +50,209 @@
    :data (ex-data ex)
    :anomaly anom})
 
-(defn execute-enter
+(defn ^{:stratum 0} execute-leave
+  "Execute the :leave function of an interceptor.
+
+   Returns updated context."
+  [interceptor ctx]
+  (let [phase-name (get-in interceptor [:config :phase])]
+    (if-let [leave-fn (:leave interceptor)]
+      (try
+        (leave-fn ctx)
+        (catch Exception ex
+          (let [anom (response/from-exception ex)]
+            (-> ctx
+                (update :execution/errors conj
+                        {:type :leave-error
+                         :phase phase-name
+                         :message (ex-message ex)
+                         :anomaly anom})
+                (update :execution/response-chain
+                        response/add-failure phase-name
+                        (assoc anom :anomaly/category :anomalies.phase/leave-failed
+                                    :anomaly/phase phase-name)
+                        {:error (ex-message ex)})))))
+      ctx)))
+
+(defn- ^{:stratum 0} entered-phase-context?
+  "True when the phase enter step established the standard phase context.
+
+   Enter-path exceptions are normalized by the interceptor error handler into
+   `{:phase {:status :failed :error ...}}`, but that path does not populate the
+   normal enter-context keys like `:started-at` or `:result`. In that state the
+   corresponding `:leave` function has no valid phase context to finalize."
+  [phase-result]
+  (and (map? phase-result)
+       (contains? phase-result :started-at)
+       (contains? phase-result :result)))
+
+(defn ^{:stratum 0} extract-phase-result
+  "Extract phase result from context."
+  [ctx]
+  (get-in ctx [:phase]))
+
+(defn ^{:stratum 0} already-done?
+  "Check if phase result indicates work was already done."
+  [phase-result]
+  (or (phase/already-done? phase-result)
+      (phase/already-done? (:result phase-result))))
+
+(defn- ^{:stratum 0} emit-phase-decision!
+  "Publish the :gate/decision event for a gated transition; never breaks
+   enforcement."
+  [ctx phase-result envelope]
+  (try
+    (when-let [stream (or (:event-stream ctx) (:execution/event-stream ctx))]
+      (when envelope
+        (events/publish! stream
+                         (events/phase-decision stream (:workflow/id ctx)
+                                                (or (:phase/name phase-result)
+                                                    (:phase phase-result))
+                                                envelope))))
+    (catch Exception _ nil))
+  nil)
+
+(defn- ^{:stratum 0} phase-transition-event-message
+  [event]
+  (messages/t :status/invalid-phase-transition-event {:event event}))
+
+(defn ^{:stratum 0} record-phase-metrics
+  "Record phase metrics in execution context."
+  [ctx phase-result merge-metrics-fn]
+  (update ctx :execution/metrics merge-metrics-fn
+          (get phase-result :metrics {})))
+
+(defn ^{:stratum 0} track-phase-files
+  "Track files written by phase for workflow supervision.
+
+   In the new environment model, code changes live in the execution
+   environment's git working tree (:execution/worktree-path) rather than
+   being serialized into phase results. File tracking via :code/files in
+   phase output is therefore a no-op; actual file discovery happens at
+   release time via git diff."
+  [ctx _phase-result]
+  ;; Phase results no longer carry :code/files.
+  ;; File changes are in the environment's worktree, captured at release time.
+  ctx)
+
+(defn ^{:stratum 0} record-phase-artifacts
+  "Record phase artifacts in execution context.
+
+   In the new environment model, phase results carry provenance metadata
+   (:environment-id, :summary, :metrics) rather than serialized :code/files.
+   The recorded artifact captures lightweight provenance metadata for the
+   evidence bundle."
+  [ctx phase-result]
+  (let [result   (get phase-result :result)
+        artifact (when (map? result)
+                   (not-empty (select-keys result [:status :environment-id
+                                                   :summary :metrics])))]
+    (update ctx :execution/artifacts into (if artifact [artifact] []))))
+
+;; Phase 4b removed `redirect-target`. With handle-error refactored
+;; to emit `:phase/verdict :repair-requested` (the last in-production
+;; caller of `phase/request-redirect`), no phase result carries a
+;; redirect-target marker anymore. `determine-phase-event` reads the
+;; verdict instead.
+(defn- ^{:stratum 0} phase-verdict
+  "Read the `:phase/verdict` keyword from a phase result.
+
+   Production shape: leave-* fns assoc the verdict into the inner agent
+   result at `[:phase :result :output :phase/verdict]` on the ctx —
+   so the `phase-result` extracted by `extract-phase-result` (which is
+   the `:phase` map) carries it at `[:result :output :phase/verdict]`.
+
+   Copilot's #1030 review caught the original `[:output :phase/verdict]`
+   read path that never resolved against the production shape — the
+   path-bug was latent from Phase 2b and silently dropped verdict
+   events for the whole Phase 3 series. Fall back to a top-level
+   `:phase/verdict` for synthetic test results."
+  [phase-result]
+  (or (get-in phase-result [:result :output :phase/verdict])
+      (get-in phase-result [:output :phase/verdict])
+      (get phase-result :phase/verdict)))
+
+(def ^{:stratum 0} max-redirects
+  "Maximum number of phase redirects before failing to prevent infinite loops."
+  (defaults/max-redirects))
+
+;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
+(defn ^{:stratum 0} extract-plan-from-phase-result
+  "Extract a plan map from an interceptor-style phase result, if present."
+  [phase-result]
+  (let [output (get-in phase-result [:result :output])]
+    (when (and (map? output) (:plan/id output))
+      output)))
+
+(defn ^{:stratum 0} index-after-phase
+  "Find the index of the phase immediately after the named phase in the pipeline."
+  [pipeline phase-kw]
+  (some (fn [[i ic]]
+          (when (= phase-kw (get-in ic [:config :phase]))
+            (inc i)))
+        (map-indexed vector pipeline)))
+
+(defn- ^{:stratum 0} classify-output
+  "Describe the shape of the :output value without leaking its contents.
+   Returns a keyword suitable for event payload."
+  [output]
+  (cond
+    (nil? output) :nil
+    (map? output) :map
+    (sequential? output) :sequential
+    (string? output) :string
+    :else :other))
+
+(def ^{:stratum 0} ^:private failure-statuses
+  #{:error :failed :failure})
+
+(defn- ^{:stratum 0} resolve-event-stream
+  "Find the event stream from context, matching phase/telemetry's lookup."
+  [ctx]
+  (or (:event-stream ctx)
+      (:execution/event-stream ctx)
+      (get-in ctx [:execution/opts :event-stream])))
+
+(defn- ^{:stratum 0} resolve-workflow-id
+  [ctx]
+  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
+
+(defn- ^{:stratum 0} merge-sub-worktree-changes!
+  "Copy changed files from DAG sub-worktrees into the parent worktree.
+   Each sub-workflow wrote to its own isolated worktree. For the release
+   phase to find dirty files, we need to merge those changes back."
+  [parent-worktree sub-worktree-paths]
+  (doseq [sub-wt sub-worktree-paths]
+    (try
+      (let [{:keys [out]} (shell/sh
+                            "git" "diff" "--name-only" "HEAD"
+                            :dir sub-wt)
+            changed-files (remove str/blank?
+                                  (str/split-lines (or out "")))]
+        (doseq [f changed-files]
+          (let [src (io/file sub-wt f)
+                dst (io/file parent-worktree f)]
+            (when (.exists src)
+              (io/make-parents dst)
+              (io/copy src dst)))))
+      (catch Exception _e nil))))
+
+(defn- ^{:stratum 0} roll-dag-metrics-into-execution
+  "Accumulate DAG sub-workflow tokens / cost / duration into top-line
+   `:execution/metrics`. Without this, sub-workflow spend stays buried in
+   `:execution/dag-result` and the run summary lies (`Cost: $0.0000` on a
+   real spend). Applied on BOTH success and failure paths — tokens were
+   spent either way."
+  [ctx dag-result]
+  (let [{:keys [tokens cost-usd duration-ms]} (:metrics dag-result)]
+    (-> ctx
+        (update-in [:execution/metrics :tokens]      (fnil + 0)   (or tokens 0))
+        (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
+        (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} execute-enter
   "Execute the :enter function of an interceptor.
 
    Returns updated context. When the enter function throws, the
@@ -82,60 +284,17 @@
               (context/transition-to-failed ctx-with-error)))))
       ctx)))
 
-(defn execute-leave
-  "Execute the :leave function of an interceptor.
-
-   Returns updated context."
-  [interceptor ctx]
-  (let [phase-name (get-in interceptor [:config :phase])]
-    (if-let [leave-fn (:leave interceptor)]
-      (try
-        (leave-fn ctx)
-        (catch Exception ex
-          (let [anom (response/from-exception ex)]
-            (-> ctx
-                (update :execution/errors conj
-                        {:type :leave-error
-                         :phase phase-name
-                         :message (ex-message ex)
-                         :anomaly anom})
-                (update :execution/response-chain
-                        response/add-failure phase-name
-                        (assoc anom :anomaly/category :anomalies.phase/leave-failed
-                                    :anomaly/phase phase-name)
-                        {:error (ex-message ex)})))))
-      ctx)))
-
-(defn- entered-phase-context?
-  "True when the phase enter step established the standard phase context.
-
-   Enter-path exceptions are normalized by the interceptor error handler into
-   `{:phase {:status :failed :error ...}}`, but that path does not populate the
-   normal enter-context keys like `:started-at` or `:result`. In that state the
-   corresponding `:leave` function has no valid phase context to finalize."
-  [phase-result]
-  (and (map? phase-result)
-       (contains? phase-result :started-at)
-       (contains? phase-result :result)))
-
-(defn extract-phase-result
-  "Extract phase result from context."
-  [ctx]
-  (get-in ctx [:phase]))
-
-(defn already-done?
-  "Check if phase result indicates work was already done."
-  [phase-result]
-  (or (phase/already-done? phase-result)
-      (phase/already-done? (:result phase-result))))
-
-(defn apply-gate-validation
+(defn ^{:stratum 1} apply-gate-validation
   "Apply gate validation to phase result.
 
-   Returns updated phase-result with :phase/status and :phase/gate-errors if gates fail.
-   Skips gate checks when phase indicates work is already done. When gates are
-   configured they run even if the canonical artifact ([:result :output]) is
-   nil — a nil artifact fails the gate (fail-closed), never bypasses it."
+   Returns updated phase-result carrying :phase/decision-envelope (the ONE
+   truth artifact for the gated transition, Ariadne 1d) — plus
+   :phase/status :failed and :phase/gate-errors (a projection of the
+   envelope's reasons, no longer an independent shape) when the decision is
+   :deny. Skips gate checks when phase indicates work is already done. When
+   gates are configured they run even if the canonical artifact
+   ([:result :output]) is nil — a nil artifact fails the gate (fail-closed),
+   never bypasses it; the envelope carries :reason/missing-artifact."
   [interceptor phase-result ctx]
   (if (already-done? phase-result)
     phase-result
@@ -151,53 +310,36 @@
       ;; :output bypass validation entirely — the gate runner turns a nil
       ;; artifact into a failed gate result (loud), which is what we want.
       (if (seq gate-keywords)
-        (let [gate-result (gate/check-gates gate-keywords artifact ctx)]
-          (if (:passed? gate-result)
-            phase-result
+        (let [gate-result (gate/check-gates gate-keywords artifact ctx)
+              minted (gate/gates->envelope gate-result (nil? artifact))
+              ;; envelope minting can itself anomaly; fail closed on that too
+              envelope (when (:envelope/id minted) minted)]
+          (emit-phase-decision! ctx phase-result envelope)
+          (if (and (:passed? gate-result)
+                   envelope
+                   (gate/decision-allowed? envelope))
+            (assoc phase-result :phase/decision-envelope envelope)
             (assoc phase-result
                    :phase/status :failed
-                   :phase/gate-errors (:failed-gates gate-result))))
+                   :phase/decision-envelope envelope
+                   :phase/gate-errors (if envelope
+                                        (vec (:envelope/reasons envelope))
+                                        (vec (:failed-gates gate-result))))))
         phase-result))))
 
-(defn phase-succeeded?
+(defn ^{:stratum 1} phase-succeeded?
   "Check if phase completed successfully or work was already done."
   [phase-result]
   (or (phase/succeeded-or-done? phase-result)
       (already-done? phase-result)))
 
-(defn update-response-chain
-  "Update response chain with phase result."
-  [ctx phase-name phase-result]
-  (if (phase-succeeded? phase-result)
-    (update ctx :execution/response-chain
-            response/add-success phase-name phase-result)
-    (let [gate-errors (:phase/gate-errors phase-result)
-          anomaly (if gate-errors
-                    (response/gate-anomaly
-                     :anomalies.gate/validation-failed
-                     (messages/t :phase/gate-failed-phase {:phase (name phase-name)})
-                     gate-errors
-                     {:anomaly/phase phase-name})
-                    (response/make-anomaly
-                     :anomalies.phase/agent-failed
-                     (messages/t :phase/agent-failed-phase {:phase (name phase-name)})
-                     {:anomaly/phase phase-name}))]
-      (update ctx :execution/response-chain
-              response/add-failure phase-name
-              anomaly
-              phase-result))))
-
-(defn- phase-transition-event-message
-  [event]
-  (messages/t :status/invalid-phase-transition-event {:event event}))
-
-(defn- invalid-phase-transition-anomaly
+(defn- ^{:stratum 1} invalid-phase-transition-anomaly
   [event]
   (response/make-anomaly
    :anomalies.workflow/invalid-transition
    (phase-transition-event-message event)))
 
-(defn- phase-transition-failure
+(defn- ^{:stratum 1} phase-transition-failure
   [ctx event anomaly transition-to-failed-fn]
   (let [message (phase-transition-event-message event)]
     (-> ctx
@@ -211,94 +353,7 @@
                  :event event})
         (transition-to-failed-fn))))
 
-(defn record-phase-metrics
-  "Record phase metrics in execution context."
-  [ctx phase-result merge-metrics-fn]
-  (update ctx :execution/metrics merge-metrics-fn
-          (get phase-result :metrics {})))
-
-(defn track-phase-files
-  "Track files written by phase for workflow supervision.
-
-   In the new environment model, code changes live in the execution
-   environment's git working tree (:execution/worktree-path) rather than
-   being serialized into phase results. File tracking via :code/files in
-   phase output is therefore a no-op; actual file discovery happens at
-   release time via git diff."
-  [ctx _phase-result]
-  ;; Phase results no longer carry :code/files.
-  ;; File changes are in the environment's worktree, captured at release time.
-  ctx)
-
-(defn record-phase-artifacts
-  "Record phase artifacts in execution context.
-
-   In the new environment model, phase results carry provenance metadata
-   (:environment-id, :summary, :metrics) rather than serialized :code/files.
-   The recorded artifact captures lightweight provenance metadata for the
-   evidence bundle."
-  [ctx phase-result]
-  (let [result   (get phase-result :result)
-        artifact (when (map? result)
-                   (not-empty (select-keys result [:status :environment-id
-                                                   :summary :metrics])))]
-    (update ctx :execution/artifacts into (if artifact [artifact] []))))
-
-;------------------------------------------------------------------------------ Layer 1: Composition
-
-(defn execute-phase-lifecycle
-  "Execute phase enter -> gates -> leave lifecycle.
-
-   Returns [ctx phase-result]."
-  [interceptor ctx]
-  ;; Clear :phase map before each phase to prevent stale transition requests
-  ;; from leaking across phase boundaries.
-  (let [ctx-clean (dissoc ctx :phase)
-        ctx-entered (execute-enter interceptor ctx-clean)
-        phase-result (extract-phase-result ctx-entered)
-        phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
-        ctx-left (if (entered-phase-context? phase-result-gated)
-                   (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
-                   (assoc ctx-entered :phase phase-result-gated))]
-    [ctx-left (extract-phase-result ctx-left)]))
-
-(defn process-phase-result
-  "Process phase result: update response chain, record metrics/files/artifacts.
-
-   Returns updated context."
-  [ctx phase-name phase-result merge-metrics-fn]
-  (-> ctx
-      (update-response-chain phase-name phase-result)
-      (assoc-in [:execution/phase-results phase-name] phase-result)
-      (record-phase-metrics phase-result merge-metrics-fn)
-      (record-phase-artifacts phase-result)
-      (track-phase-files phase-result)))
-
-;; Phase 4b removed `redirect-target`. With handle-error refactored
-;; to emit `:phase/verdict :repair-requested` (the last in-production
-;; caller of `phase/request-redirect`), no phase result carries a
-;; redirect-target marker anymore. `determine-phase-event` reads the
-;; verdict instead.
-
-(defn- phase-verdict
-  "Read the `:phase/verdict` keyword from a phase result.
-
-   Production shape: leave-* fns assoc the verdict into the inner agent
-   result at `[:phase :result :output :phase/verdict]` on the ctx —
-   so the `phase-result` extracted by `extract-phase-result` (which is
-   the `:phase` map) carries it at `[:result :output :phase/verdict]`.
-
-   Copilot's #1030 review caught the original `[:output :phase/verdict]`
-   read path that never resolved against the production shape — the
-   path-bug was latent from Phase 2b and silently dropped verdict
-   events for the whole Phase 3 series. Fall back to a top-level
-   `:phase/verdict` for synthetic test results."
-  [phase-result]
-  (or (get-in phase-result [:result :output :phase/verdict])
-      (get-in phase-result [:output :phase/verdict])
-      (get phase-result :phase/verdict)))
-
-(defn determine-phase-event
+(defn ^{:stratum 1} determine-phase-event
   "Translate a phase result into an execution-machine event.
 
    For failed phases that attached a `:phase/verdict`, returns a map
@@ -335,11 +390,135 @@
       :else
       :phase/succeed)))
 
-(def max-redirects
-  "Maximum number of phase redirects before failing to prevent infinite loops."
-  (defaults/max-redirects))
+(defn ^{:stratum 1} dag-skip-reason
+  "Return the reason DAG execution should be skipped, or nil if it should proceed.
+   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks."
+  [phase-name phase-result ctx]
+  (cond
+    (not= :plan phase-name) :not-plan-phase
+    (:disable-dag-execution ctx) :disabled
+    :else (let [plan (extract-plan-from-phase-result phase-result)]
+            (cond
+              (nil? plan) :no-plan-id
+              (empty? (:plan/tasks plan)) :no-tasks
+              :else nil))))
 
-(defn apply-phase-transition
+(defn- ^{:stratum 1} failed?
+  "True when a result map carries a failure status."
+  [result]
+  (contains? failure-statuses (:status result)))
+
+(defn ^{:stratum 1} dag-applicable?
+  "Check whether DAG execution should be attempted for this phase result.
+   Returns the plan map if applicable, nil otherwise."
+  [phase-name phase-result ctx]
+  (when (and (= :plan phase-name)
+             (not (:disable-dag-execution ctx)))
+    (extract-plan-from-phase-result phase-result)))
+
+(defn- ^{:stratum 1} emit-dag-considered!
+  "Emit a :workflow/dag-considered event describing whether DAG fired and why.
+   Swallows errors — observability must not break execution."
+  [ctx outcome reason extra]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (let [event (merge
+                    {:event/type :workflow/dag-considered
+                     :event/timestamp (str (java.time.Instant/now))
+                     :workflow/id (resolve-workflow-id ctx)
+                     :dag/outcome outcome
+                     :dag/reason reason}
+                    extra)]
+        (events/publish! stream event))
+      (catch Exception _ nil))))
+
+(defn- ^{:stratum 1} emit-dag-activated!
+  "Emit :workflow/dag-activated when the DAG orchestrator takes over.
+
+   Distinct event type from :workflow/dag-considered so consumers can
+   filter on a single keyword to see every DAG activation without parsing
+   the outcome field.  Swallows errors — observability must not break execution."
+  [ctx plan]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (events/publish! stream {:event/type      :workflow/dag-activated
+                               :event/timestamp (str (java.time.Instant/now))
+                               :workflow/id     (resolve-workflow-id ctx)
+                               :plan/id         (:plan/id plan)
+                               :plan/task-count (count (:plan/tasks plan))})
+      (catch Exception _ nil))))
+
+(defn- ^{:stratum 1} emit-dag-skipped!
+  "Emit :workflow/dag-skipped when DAG execution is not attempted.
+
+   Distinct event type from :workflow/dag-considered so consumers can
+   filter on a single keyword to see every DAG skip without parsing the
+   outcome field.  Swallows errors — observability must not break execution."
+  [ctx reason extra]
+  (when-let [stream (resolve-event-stream ctx)]
+    (try
+      (events/publish! stream (merge {:event/type      :workflow/dag-skipped
+                                      :event/timestamp (str (java.time.Instant/now))
+                                      :workflow/id     (resolve-workflow-id ctx)
+                                      :dag/reason      reason}
+                                     extra))
+      (catch Exception _ nil))))
+
+(defn ^{:stratum 1} apply-dag-failure
+  "Apply a failed DAG result to the execution context."
+  [ctx dag-result transition-to-failed-fn]
+  (transition-to-failed-fn
+   (-> ctx
+       (assoc :execution/dag-result dag-result)
+       (roll-dag-metrics-into-execution dag-result)
+       (update :execution/errors conj
+               {:type :dag-execution-failed
+                :dag-result dag-result}))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} update-response-chain
+  "Update response chain with phase result."
+  [ctx phase-name phase-result]
+  (if (phase-succeeded? phase-result)
+    (update ctx :execution/response-chain
+            response/add-success phase-name phase-result)
+    (let [gate-errors (:phase/gate-errors phase-result)
+          envelope (:phase/decision-envelope phase-result)
+          anomaly (if gate-errors
+                    (response/gate-anomaly
+                     :anomalies.gate/validation-failed
+                     (messages/t :phase/gate-failed-phase {:phase (name phase-name)})
+                     gate-errors
+                     (cond-> {:anomaly/phase phase-name}
+                       envelope (assoc :anomaly/envelope-id (:envelope/id envelope))))
+                    (response/make-anomaly
+                     :anomalies.phase/agent-failed
+                     (messages/t :phase/agent-failed-phase {:phase (name phase-name)})
+                     {:anomaly/phase phase-name}))]
+      (update ctx :execution/response-chain
+              response/add-failure phase-name
+              anomaly
+              phase-result))))
+
+;------------------------------------------------------------------------------ Layer 1: Composition
+(defn ^{:stratum 2} execute-phase-lifecycle
+  "Execute phase enter -> gates -> leave lifecycle.
+
+   Returns [ctx phase-result]."
+  [interceptor ctx]
+  ;; Clear :phase map before each phase to prevent stale transition requests
+  ;; from leaking across phase boundaries.
+  (let [ctx-clean (dissoc ctx :phase)
+        ctx-entered (execute-enter interceptor ctx-clean)
+        phase-result (extract-phase-result ctx-entered)
+        phase-result-gated (apply-gate-validation interceptor phase-result ctx-entered)
+        ctx-left (if (entered-phase-context? phase-result-gated)
+                   (execute-leave interceptor (assoc ctx-entered :phase phase-result-gated))
+                   (assoc ctx-entered :phase phase-result-gated))]
+    [ctx-left (extract-phase-result ctx-left)]))
+
+(defn ^{:stratum 2} apply-phase-transition
   "Apply a phase-outcome event through the execution machine.
 
    Phase 4b: dropped the parallel `is-redirect?` budget check. The
@@ -374,56 +553,7 @@
       (= :phase/retry event) next-ctx
       :else (fail))))
 
-;------------------------------------------------------------------------------ Layer 1.5: DAG integration helpers
-
-(defn extract-plan-from-phase-result
-  "Extract a plan map from an interceptor-style phase result, if present."
-  [phase-result]
-  (let [output (get-in phase-result [:result :output])]
-    (when (and (map? output) (:plan/id output))
-      output)))
-
-(defn index-after-phase
-  "Find the index of the phase immediately after the named phase in the pipeline."
-  [pipeline phase-kw]
-  (some (fn [[i ic]]
-          (when (= phase-kw (get-in ic [:config :phase]))
-            (inc i)))
-        (map-indexed vector pipeline)))
-
-(defn dag-skip-reason
-  "Return the reason DAG execution should be skipped, or nil if it should proceed.
-   Reasons are keywords — :not-plan-phase, :disabled, :no-plan-id, :no-tasks."
-  [phase-name phase-result ctx]
-  (cond
-    (not= :plan phase-name) :not-plan-phase
-    (:disable-dag-execution ctx) :disabled
-    :else (let [plan (extract-plan-from-phase-result phase-result)]
-            (cond
-              (nil? plan) :no-plan-id
-              (empty? (:plan/tasks plan)) :no-tasks
-              :else nil))))
-
-(defn- classify-output
-  "Describe the shape of the :output value without leaking its contents.
-   Returns a keyword suitable for event payload."
-  [output]
-  (cond
-    (nil? output) :nil
-    (map? output) :map
-    (sequential? output) :sequential
-    (string? output) :string
-    :else :other))
-
-(def ^:private failure-statuses
-  #{:error :failed :failure})
-
-(defn- failed?
-  "True when a result map carries a failure status."
-  [result]
-  (contains? failure-statuses (:status result)))
-
-(defn- summarize-error
+(defn- ^{:stratum 2} summarize-error
   "Keys-only/trimmed summary of a failure result's :error map so the event
    carries enough to diagnose without leaking large payloads (stack traces,
    token arrays). Returns nil when the result isn't a failure or carries no
@@ -445,7 +575,21 @@
                     (seq data-keys)           (assoc :error/data-keys (vec data-keys)))]
       (not-empty summary))))
 
-(defn dag-skip-diagnostic
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} process-phase-result
+  "Process phase result: update response chain, record metrics/files/artifacts.
+
+   Returns updated context."
+  [ctx phase-name phase-result merge-metrics-fn]
+  (-> ctx
+      (update-response-chain phase-name phase-result)
+      (assoc-in [:execution/phase-results phase-name] phase-result)
+      (record-phase-metrics phase-result merge-metrics-fn)
+      (record-phase-artifacts phase-result)
+      (track-phase-files phase-result)))
+
+(defn ^{:stratum 3} dag-skip-diagnostic
   "Produce a structured snapshot of phase-result for :no-plan-id / :no-tasks
    skips. Keys-only (no values) so the event stays bounded and we don't leak
    full plan content into the log.
@@ -481,107 +625,7 @@
       (= :no-tasks reason)    (assoc :plan/task-count
                                      (count (:plan/tasks plan))))))
 
-(defn dag-applicable?
-  "Check whether DAG execution should be attempted for this phase result.
-   Returns the plan map if applicable, nil otherwise."
-  [phase-name phase-result ctx]
-  (when (and (= :plan phase-name)
-             (not (:disable-dag-execution ctx)))
-    (extract-plan-from-phase-result phase-result)))
-
-(defn- resolve-event-stream
-  "Find the event stream from context, matching phase/telemetry's lookup."
-  [ctx]
-  (or (:event-stream ctx)
-      (:execution/event-stream ctx)
-      (get-in ctx [:execution/opts :event-stream])))
-
-(defn- resolve-workflow-id
-  [ctx]
-  (or (:execution/id ctx) (:workflow/id ctx) (:workflow-id ctx)))
-
-(defn- emit-dag-considered!
-  "Emit a :workflow/dag-considered event describing whether DAG fired and why.
-   Swallows errors — observability must not break execution."
-  [ctx outcome reason extra]
-  (when-let [stream (resolve-event-stream ctx)]
-    (try
-      (let [event (merge
-                    {:event/type :workflow/dag-considered
-                     :event/timestamp (str (java.time.Instant/now))
-                     :workflow/id (resolve-workflow-id ctx)
-                     :dag/outcome outcome
-                     :dag/reason reason}
-                    extra)]
-        (events/publish! stream event))
-      (catch Exception _ nil))))
-
-(defn- emit-dag-activated!
-  "Emit :workflow/dag-activated when the DAG orchestrator takes over.
-
-   Distinct event type from :workflow/dag-considered so consumers can
-   filter on a single keyword to see every DAG activation without parsing
-   the outcome field.  Swallows errors — observability must not break execution."
-  [ctx plan]
-  (when-let [stream (resolve-event-stream ctx)]
-    (try
-      (events/publish! stream {:event/type      :workflow/dag-activated
-                               :event/timestamp (str (java.time.Instant/now))
-                               :workflow/id     (resolve-workflow-id ctx)
-                               :plan/id         (:plan/id plan)
-                               :plan/task-count (count (:plan/tasks plan))})
-      (catch Exception _ nil))))
-
-(defn- emit-dag-skipped!
-  "Emit :workflow/dag-skipped when DAG execution is not attempted.
-
-   Distinct event type from :workflow/dag-considered so consumers can
-   filter on a single keyword to see every DAG skip without parsing the
-   outcome field.  Swallows errors — observability must not break execution."
-  [ctx reason extra]
-  (when-let [stream (resolve-event-stream ctx)]
-    (try
-      (events/publish! stream (merge {:event/type      :workflow/dag-skipped
-                                      :event/timestamp (str (java.time.Instant/now))
-                                      :workflow/id     (resolve-workflow-id ctx)
-                                      :dag/reason      reason}
-                                     extra))
-      (catch Exception _ nil))))
-
-(defn- merge-sub-worktree-changes!
-  "Copy changed files from DAG sub-worktrees into the parent worktree.
-   Each sub-workflow wrote to its own isolated worktree. For the release
-   phase to find dirty files, we need to merge those changes back."
-  [parent-worktree sub-worktree-paths]
-  (doseq [sub-wt sub-worktree-paths]
-    (try
-      (let [{:keys [out]} (shell/sh
-                            "git" "diff" "--name-only" "HEAD"
-                            :dir sub-wt)
-            changed-files (remove str/blank?
-                                  (str/split-lines (or out "")))]
-        (doseq [f changed-files]
-          (let [src (io/file sub-wt f)
-                dst (io/file parent-worktree f)]
-            (when (.exists src)
-              (io/make-parents dst)
-              (io/copy src dst)))))
-      (catch Exception _e nil))))
-
-(defn- roll-dag-metrics-into-execution
-  "Accumulate DAG sub-workflow tokens / cost / duration into top-line
-   `:execution/metrics`. Without this, sub-workflow spend stays buried in
-   `:execution/dag-result` and the run summary lies (`Cost: $0.0000` on a
-   real spend). Applied on BOTH success and failure paths — tokens were
-   spent either way."
-  [ctx dag-result]
-  (let [{:keys [tokens cost-usd duration-ms]} (:metrics dag-result)]
-    (-> ctx
-        (update-in [:execution/metrics :tokens]      (fnil + 0)   (or tokens 0))
-        (update-in [:execution/metrics :cost-usd]    (fnil + 0.0) (or cost-usd 0.0))
-        (update-in [:execution/metrics :duration-ms] (fnil + 0)   (or duration-ms 0)))))
-
-(defn apply-dag-success
+(defn ^{:stratum 3} apply-dag-success
   "Apply a successful DAG result to the execution context.
    Merges artifact provenance, copies sub-worktree file changes into the
    parent worktree, synthesizes an :implement phase result, and advances
@@ -626,18 +670,9 @@
                               transition-to-completed-fn
                               transition-to-failed-fn))))
 
-(defn apply-dag-failure
-  "Apply a failed DAG result to the execution context."
-  [ctx dag-result transition-to-failed-fn]
-  (transition-to-failed-fn
-   (-> ctx
-       (assoc :execution/dag-result dag-result)
-       (roll-dag-metrics-into-execution dag-result)
-       (update :execution/errors conj
-               {:type :dag-execution-failed
-                :dag-result dag-result}))))
+;------------------------------------------------------------------------------ Layer 4
 
-(defn try-dag-execution
+(defn ^{:stratum 4} try-dag-execution
   "After plan phase, execute all plans via the DAG executor.
 
    The DAG executor is the universal executor — it handles both parallel
@@ -674,9 +709,10 @@
                              transition-to-failed-fn)
           (apply-dag-failure ctx dag-result transition-to-failed-fn))))))
 
-;------------------------------------------------------------------------------ Layer 2: Phase step execution
+;------------------------------------------------------------------------------ Layer 5
 
-(defn execute-phase-step
+;------------------------------------------------------------------------------ Layer 2: Phase step execution
+(defn ^{:stratum 5} execute-phase-step
   "Execute a single phase step and return updated context.
 
    Arguments:

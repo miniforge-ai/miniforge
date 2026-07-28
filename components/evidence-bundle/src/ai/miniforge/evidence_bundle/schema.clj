@@ -71,7 +71,8 @@
    :policy-check/checked-at inst?
    :policy-check/violations vector?
    :policy-check/passed? boolean?
-   :policy-check/duration-ms pos-int?})
+   :policy-check/duration-ms pos-int?
+   :policy-check/envelope map?})
 
 ;; Outcome Schema
 (def ^{:stratum 0} pr-statuses #{:open :merged :closed})

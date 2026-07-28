@@ -76,6 +76,41 @@
     (is (= :deny (:envelope/decision
                   (classify+decide [(v :audit) (v :warn) (v :hard-halt)]))))))
 
+(deftest ^{:stratum 2} gates->envelope-test
+  (testing "policy-gate envelope reasons/obligations merge into the phase envelope"
+    (let [pol (classify+decide [(v :hard-halt)])
+          phase-env (decide/gates->envelope
+                     {:results [{:passed? false :gate :policy-pack :envelope pol
+                                 :errors [{:message "x"}]}]}
+                     false)]
+      (is (= :deny (:envelope/decision phase-env)))
+      (is (= [:reason/rule-violation]
+             (mapv :reason/code (:envelope/reasons phase-env))))
+      (is (= "test@1" (get-in phase-env [:envelope/pins :pins/pack-revision])))))
+  (testing "a mechanical failure contributes :reason/gate-check-failed"
+    (let [phase-env (decide/gates->envelope
+                     {:results [{:passed? false :gate :lint
+                                 :errors [{:message "loose board"}]}]}
+                     false)]
+      (is (= :deny (:envelope/decision phase-env)))
+      (is (= [:reason/gate-check-failed]
+             (mapv :reason/code (:envelope/reasons phase-env))))))
+  (testing "nil artifact with gates configured denies with :reason/missing-artifact"
+    (let [phase-env (decide/gates->envelope {:results []} true)]
+      (is (= :deny (:envelope/decision phase-env)))
+      (is (= [:reason/missing-artifact]
+             (mapv :reason/code (:envelope/reasons phase-env))))))
+  (testing "all passed, no obligations: allow"
+    (let [phase-env (decide/gates->envelope
+                     {:results [{:passed? true :gate :lint}]} false)]
+      (is (= :allow (:envelope/decision phase-env)))))
+  (testing "a passing policy gate's warn obligations survive to the phase envelope"
+    (let [pol (classify+decide [(v :warn)])
+          phase-env (decide/gates->envelope
+                     {:results [{:passed? true :gate :policy-pack :envelope pol}]}
+                     false)]
+      (is (= :allow-with-obligations (:envelope/decision phase-env))))))
+
 (deftest ^{:stratum 2} allowed?-test
   (is (decide/allowed? (classify+decide [(v :warn)])))
   (is (not (decide/allowed? (classify+decide [(v :hard-halt)])))))
