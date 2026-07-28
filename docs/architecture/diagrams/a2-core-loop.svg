@@ -53,8 +53,8 @@
   <rect class="st" x="356" y="212" width="408" height="120" rx="8"/>
   <text class="h" x="368" y="234">DAG orchestrator — parallel tasks</text>
   <text class="m" x="368" y="252">workflow/dag_orchestrator → dag-executor</text>
-  <text class="s" x="368" y="270">each task = a FULL sub-pipeline (explore→plan→</text>
-  <text class="s" x="368" y="284">implement→verify) in an OCI capsule</text>
+  <text class="s" x="368" y="270">each task = a FULL sub-pipeline; isolation ladder:</text>
+  <text class="s" x="368" y="284">worktree (fallback) → docker → k8s Jobs + plan-security</text>
   <text class="s" x="368" y="300">resumable: :pre-completed-ids + :dag/task-completed</text>
   <text class="s" x="368" y="316">multi-parent git merges: merge_resolution</text>
   <rect class="note" x="356" y="348" width="408" height="116" rx="6"/>
@@ -121,10 +121,11 @@
 
   <!-- gates row -->
   <rect class="gv" x="816" y="336" width="500" height="96" rx="8"/>
-  <text class="h" x="828" y="358">gates + policy (phase transitions)</text>
-  <text class="m" x="828" y="378">policy · policy-pack · gate: syntax · lint · no-secrets ·</text>
-  <text class="m" x="828" y="394">tests-pass · coverage</text>
-  <text class="s" x="828" y="414">fail → validate-and-repair loop back into the phase</text>
+  <text class="h" x="828" y="358">gates + compiled policy packs (fail-closed)</text>
+  <text class="m" x="828" y="374">enter → gates → leave (workflow/execution) · policy-pack/compiler</text>
+  <text class="m" x="828" y="390">gate: syntax · lint · no-secrets · tests-pass · coverage</text>
+  <text class="s" x="828" y="406">nil artifact FAILS the gate, never bypasses; policy-gates floor:</text>
+  <text class="s" x="828" y="420">overrides can never drop governance gates · fail → repair loop</text>
   <rect class="gv" x="1336" y="336" width="472" height="96" rx="8"/>
   <text class="h" x="1348" y="358">evidence-bundle</text>
   <text class="s" x="1348" y="378">provenance chains per phase/gate decision —</text>
@@ -149,7 +150,7 @@
   <text class="h" x="748" y="562">checkpoints + git bundles</text>
   <text class="m" x="748" y="580">~/.miniforge/checkpoints/&lt;wf&gt;/&lt;task&gt;.bundle</text>
   <text class="s" x="748" y="598">authoritative machine snapshot per workflow;</text>
-  <text class="s" x="748" y="612">bundles pushed to R2; bb harvest pulls them back as branches</text>
+  <text class="s" x="748" y="612">bb harvest = explicit LOCAL recovery: bundles → named branches</text>
   <rect class="rec" x="1176" y="540" width="330" height="90" rx="8"/>
   <text class="h" x="1188" y="562">supervisory surface</text>
   <text class="s" x="1188" y="582">event-stream → supervisory-state →</text>

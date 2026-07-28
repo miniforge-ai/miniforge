@@ -58,14 +58,14 @@
   <text class="m" x="498" y="370">  keyed [connector-ref schema-name]</text>
   <text class="s" x="498" y="392">formats: EDN (specs/config/defs) · Transit (goldens) ·</text>
   <text class="s" x="498" y="406">JSON (MCP, dashboard, GitHub) · git bundles</text>
-  <text class="s" x="498" y="428" font-style="italic">datalevin: interface exists, not meaningfully wired —</text>
-  <text class="s" x="498" y="442" font-style="italic">persistence is deliberately files + git + R2 today</text>
+  <text class="s" x="498" y="428" font-style="italic">datalevin backs the artifact + pipeline-pack stores;</text>
+  <text class="s" x="498" y="442" font-style="italic">workflow state itself stays files + git bundles</text>
 
   <rect class="fs" x="36" y="472" width="880" height="90" rx="8"/>
-  <text class="h" x="48" y="494">Cloudflare R2 — the off-box residue</text>
-  <text class="m" x="48" y="514">bb-r2 wraps wrangler: bundle push/pull</text>
-  <text class="m" x="48" y="530">bb harvest → fetches persisted task bundles back as harvest/&lt;wf&gt;/&lt;task&gt; branches</text>
-  <text class="s" x="48" y="550">workflow output survives the workstation; harvest is how another machine picks a task's work back up</text>
+  <text class="h" x="48" y="494">Harvest — local checkpoint recovery (no R2 in this loop)</text>
+  <text class="m" x="48" y="514">bb harvest → ~/.miniforge/checkpoints/&lt;wf&gt;/&lt;task&gt;.bundle → harvest/&lt;wf&gt;/&lt;task&gt; branches</text>
+  <text class="m" x="48" y="530">bb-r2 (wrangler wrapper) is a bb-utils helper consumed by Thesium risk — not miniforge's loop</text>
+  <text class="s" x="48" y="550">bundles preserve agent work as real commits; harvest is the explicit, user-driven merge step</text>
 
   <rect class="note" x="36" y="578" width="880" height="86" rx="6"/>
   <text class="h" x="52" y="600">Reading the map</text>
@@ -94,12 +94,12 @@
   <text class="s" x="1448" y="218">everything is shell-out or plain REST — no daemons</text>
 
   <rect class="ig" x="976" y="276" width="440" height="150" rx="8"/>
-  <text class="h" x="988" y="298">Container runtime (N11 capsules)</text>
-  <text class="m" x="988" y="318">dag-executor shells OCI CLIs: docker · podman · nerdctl</text>
-  <text class="m" x="988" y="334">selection: explicit → probe [podman docker nerdctl]</text>
-  <text class="m" x="988" y="350">per-runtime quirks in runtime/registry.edn</text>
-  <text class="s" x="988" y="372">no daemon API; fully-qualified images only;</text>
-  <text class="s" x="988" y="386">task capsules for DAG parallel execution</text>
+  <text class="h" x="988" y="298">Isolation ladder (dag-executor)</text>
+  <text class="m" x="988" y="318">worktree executor (fallback) → docker/OCI → k8s Jobs</text>
+  <text class="m" x="988" y="334">OCI CLIs: docker · podman · nerdctl (probe order)</text>
+  <text class="m" x="988" y="350">plan-security: capsule-isolation hard-stop policies</text>
+  <text class="s" x="988" y="372">(e.g. runtime-no-host-docker-socket) · no daemon API;</text>
+  <text class="s" x="988" y="386">fully-qualified images; per-runtime quirks in registry.edn</text>
   <rect class="ig" x="1436" y="276" width="450" height="150" rx="8"/>
   <text class="h" x="1448" y="298">MCP surfaces</text>
   <text class="m" x="1448" y="318">in-repo bases: mcp-context-server · lsp-mcp-bridge</text>

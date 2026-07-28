@@ -58,7 +58,7 @@
   <text class="h" x="342" y="122">Workflow / orchestration core</text>
   <text class="m" x="342" y="142">workflow (FSM+DAG+checkpoints)</text>
   <text class="m" x="342" y="158">orchestrator · operator (meta-loop)</text>
-  <text class="m" x="342" y="174">dag-executor (OCI capsules)</text>
+  <text class="m" x="342" y="174">dag-executor (worktree|docker|k8s)</text>
   <text class="m" x="342" y="190">dag-primitives · loop · fsm</text>
   <text class="m" x="342" y="206">phase (interceptor registry+loader)</text>
   <text class="s" x="342" y="232">the engine — real, end-to-end</text>
@@ -143,11 +143,11 @@
 
   <rect class="grpO part" x="650" y="598" width="300" height="130" rx="8"/>
   <text class="h" x="662" y="620">Thin / partially wired</text>
-  <text class="m" x="662" y="640">datalevin (interface-only; persistence</text>
-  <text class="m" x="662" y="656">is files + R2, not the DB)</text>
-  <text class="m" x="662" y="672">HTTP LLM streaming → non-streaming</text>
-  <text class="m" x="662" y="688">workbench-orchestration-adapter</text>
-  <text class="s" x="662" y="712">(no CLI wiring yet)</text>
+  <text class="m" x="662" y="640">HTTP LLM streaming → non-streaming</text>
+  <text class="m" x="662" y="656">workbench-orchestration-adapter</text>
+  <text class="m" x="662" y="672">(no CLI wiring yet)</text>
+  <text class="s" x="662" y="696">note: datalevin is REAL — it backs the</text>
+  <text class="s" x="662" y="710">artifact + pipeline-pack stores</text>
 
   <rect class="note" x="970" y="598" width="310" height="130" rx="6"/>
   <text class="h" x="982" y="620">Three products, one brick set</text>
