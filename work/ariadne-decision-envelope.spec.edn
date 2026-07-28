@@ -1,0 +1,73 @@
+;; =============================================================================
+;; Spec: Ariadne step 1b — DecisionEnvelope, the one truth artifact
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 1); Ariadne §13.3 (DecisionEnvelope) + §13.4 (label plane is
+;; model-unwritable); T3 contradictions 1 and 2 (what this artifact
+;; eventually unifies at the console seam).
+
+{:spec/title "Ariadne step 1b: DecisionEnvelope component - the one truth artifact for policy decisions"
+
+ :spec/description
+ "Create component decision-envelope: the single runtime-constructed
+  record of a policy decision, replacing bespoke gate-result shapes as
+  the thing consumers trust.
+
+  GROUP 1: Schema (closed, not convention)
+  A CLOSED Malli map (unknown keys rejected - envelopes are contract,
+  not open convention):
+    :envelope/id          uuid
+    :envelope/decision    [:enum :allow :allow-with-obligations :deny]
+    :envelope/reasons     vector of {:reason/code keyword,
+                          :reason/rule-id (optional), :reason/detail
+                          string} - reason codes are a registered enum,
+                          including :reason/unknown-enforcement and
+                          :reason/unknown-severity
+    :envelope/obligations vector of {:obligation/type keyword, ...}
+                          (:obligation/approval-required,
+                           :obligation/warn-recorded, :obligation/audit-recorded)
+    :envelope/pins        {:pins/pack-revision, :pins/rule-ids,
+                           :pins/event-watermark} - what policy revision
+                          this decision was made against
+    :envelope/produced-by [:enum :runtime]
+    :envelope/at          inst
+
+  GROUP 2: Runtime-only construction (the no-ears rule)
+  The constructor is the only way to mint an envelope, and no public
+  API accepts a caller-supplied :envelope/decision. Agent output can
+  REQUEST; only the runtime DECIDES. This is Ariadne's
+  label-plane-model-unwritable rule: a forged envelope arriving as
+  agent text is data shaped like an envelope, never an envelope.
+  Docstrings state the rule explicitly.
+
+  GROUP 3: Severity/enforcement from policy-clause
+  All vocabulary references come from the policy-clause component
+  (step 1a). No literals."
+
+ :spec/intent {:type :feature
+               :scope ["components/decision-envelope/"]}
+
+ :spec/constraints
+ ["Closed schema - m/validate rejects unknown keys; a test proves it"
+  "No public constructor path accepts a decision value computed outside the component"
+  "Reason codes are enumerated, not free-form keywords"
+  "Vocabulary via policy-clause interface only"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["Envelope schema validates the documented shape and rejects extra keys"
+  "Factory + accessor interface complete; direct map construction in consumer code is not needed anywhere"
+  "Test: attempting to build an envelope from an agent-supplied decision map fails validation"
+  "Pins carry pack revision + rule ids + event watermark"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:governance-credibility :policy-enforcement}
+  :theme :ariadne-adoption
+  :rationale "The envelope is the artifact every later step (decide(), gate wiring, console seam, grants) produces or consumes; it must exist before decide() has a return type."
+  :blocks ["ariadne-decide-kernel.spec.edn"]
+  :blocked-by ["ariadne-clause-vocabulary.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
