@@ -622,7 +622,3 @@
   [workflow-id workflow-state artifact-store]
   (when (should-create-bundle? workflow-state)
     (assemble-evidence-bundle workflow-id workflow-state artifact-store)))
-
-\n
-
-\n
