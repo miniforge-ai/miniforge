@@ -84,8 +84,8 @@ board that shows **everything happening in your yard at once** —
 every fort, what's building, what's stuck, what's got a red
 sticker. And not every robot in your yard is on the fort team.
 You've also got a couple of **borrowed robots** — a friend lent
-them to you, and they're terrific builders. They're yours, and
-they're in *your* yard, but they're not on the team, so the coach
+them to you, and they're terrific builders. They work for you,
+in *your* yard, but they're not on the team, so the coach
 doesn't hand them jobs. If you want a borrowed robot to build a
 birdhouse, *you* tell it — right from the porch, one note at a
 time. The board shows them the same way as everyone else — busy,
