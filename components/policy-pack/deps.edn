@@ -1,5 +1,6 @@
 {:paths ["src" "resources"]
- :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+ :deps {ai.miniforge/policy-clause {:local/root "../policy-clause"}
+        ai.miniforge/anomaly {:local/root "../anomaly"}
         ai.miniforge/coerce {:local/root "../coerce"}
         ai.miniforge/algorithms {:local/root "../algorithms"}
         ai.miniforge/config {:local/root "../config"}
