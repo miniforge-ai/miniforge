@@ -24,7 +24,9 @@
    [malli.error :as me]
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.schema.core :as core]
+   [ai.miniforge.schema.vocab :as vocab]
    [ai.miniforge.schema.logging :as logging]
+   [ai.miniforge.schema.logging-vocab :as logging-vocab]
    [ai.miniforge.schema.supervisory :as supervisory]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -138,58 +140,58 @@
 (def ^{:stratum 0} agent-roles
   "Vector of canonical agent role keywords, ordered by implementation priority
    (`:planner`, `:architect`, `:implementer`, ...)."
-  core/agent-roles)
+  vocab/agent-roles)
 
 (def ^{:stratum 0} task-types
   "Vector of task-type keywords (`:plan`, `:design`, `:implement`, `:test`,
    `:review`, `:deploy`)."
-  core/task-types)
+  vocab/task-types)
 
 (def ^{:stratum 0} task-statuses
   "Vector of task-status keywords (`:pending`, `:running`, `:completed`,
    `:failed`, `:blocked`)."
-  core/task-statuses)
+  vocab/task-statuses)
 
 (def ^{:stratum 0} artifact-types
   "Vector of artifact-type keywords (`:spec`, `:plan`, `:adr`, `:code`,
    `:test`, `:review`, `:manifest`, `:image`, `:telemetry`, `:incident`)."
-  core/artifact-types)
+  vocab/artifact-types)
 
 (def ^{:stratum 0} workflow-phases
   "Vector of outer-loop SDLC phase keywords (`:plan`, `:design`, `:implement`,
    `:verify`, `:review`, `:release`, `:observe`)."
-  core/workflow-phases)
+  vocab/workflow-phases)
 
 (def ^{:stratum 0} workflow-statuses
   "Vector of workflow-status keywords (`:pending`, `:running`, `:paused`,
    `:completed`, `:failed`, `:cancelled`)."
-  core/workflow-statuses)
+  vocab/workflow-statuses)
 
 (def ^{:stratum 0} severities
   "Canonical severity levels, most to least severe
    (`:critical :high :medium :low :info`). One source of truth for rule,
    violation, attention, and display severity."
-  core/severities)
+  vocab/severities)
 
 (def ^{:stratum 0} Severity
   "Malli enum schema for a canonical severity level."
-  core/Severity)
+  vocab/Severity)
 
 (def ^{:stratum 0} severity-order
   "Map from severity keyword to rank (0 = most severe), derived from
    `severities`."
-  core/severity-order)
+  vocab/severity-order)
 
 (def ^{:stratum 0} normalize-severity
   "Coerce a legacy severity (`:major` → `:high`, `:minor` → `:low`) to the
    canonical enum; canonical/other values pass through unchanged."
-  core/normalize-severity)
+  vocab/normalize-severity)
 
 (def ^{:stratum 0} compare-severity
   "Compare two severities: negative when the first is more severe, positive when
    less, 0 when equal. Unknown severities return an `:invalid-input` anomaly
    instead of sorting last."
-  core/compare-severity)
+  vocab/compare-severity)
 
 (def ^{:stratum 0} rank-severity
   "Checked severity rank (0 = most severe); anomaly for unknown values."
@@ -212,27 +214,27 @@
 (def ^{:stratum 0} more-severe
   "Return the more severe of two severities, or an anomaly when either is
    unknown."
-  core/more-severe)
+  vocab/more-severe)
 
 (def ^{:stratum 0} log-levels
   "Vector of log severity keywords, most to least verbose (`:trace`, `:debug`,
    `:info`, `:warn`, `:error`, `:fatal`)."
-  logging/log-levels)
+  logging-vocab/log-levels)
 
 (def ^{:stratum 0} log-categories
   "Vector of log category keywords (`:agent`, `:loop`, `:policy`, `:artifact`,
    `:system`)."
-  logging/log-categories)
+  logging-vocab/log-categories)
 
 (def ^{:stratum 0} all-events
   "Vector of all known log-event keywords across the agent, loop, policy,
    artifact, and system taxonomies."
-  logging/all-events)
+  logging-vocab/all-events)
 
 (def ^{:stratum 0} scenario-tags
   "Vector of standard scenario-test tag keywords (`:canary`, `:shadow`,
    `:regression`, ...)."
-  logging/scenario-tags)
+  logging-vocab/scenario-tags)
 
 ;; Supervisory enum value sets
 (def ^{:stratum 0} eval-results

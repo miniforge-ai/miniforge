@@ -16,134 +16,53 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.schema.logging
-  "Logging schemas for miniforge structured EDN logging.
-   Layer 0: Base event/level/category vocabularies
-   Layer 1: all-events (aggregates the Layer 0 event vocabularies)
-   Layer 2: logging-registry (the malli registry)
-   Layer 3: Composite schemas (LogContext, ScenarioContext, TraceContext,
-            PerfMetrics, LogEntry, Scenario)"
+  "Logging schemas for miniforge structured EDN logging. Event/level/category
+   vocabularies and the logging registry live in `logging-vocab.clj` (split
+   out under SL003, Wave 2) — this file only holds the `:map` composites
+   built on top of that registry.
+   Layer 0: Composite schemas (LogContext, ScenarioContext, TraceContext,
+            PerfMetrics, LogEntry, Scenario) — each depends only on
+            `logging-vocab/logging-registry`, not on one another"
   (:require
    [malli.core :as m]
-   [ai.miniforge.schema.core :as core]))
+   [ai.miniforge.schema.logging-vocab :as logging-vocab]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Base types and event taxonomy
-(def ^{:stratum 0} log-levels
-  [:trace :debug :info :warn :error :fatal])
-
-(def ^{:stratum 0} log-categories
-  [:agent :loop :policy :artifact :system])
-
-(def ^{:stratum 0} loop-types
-  "Types of control loops in the system."
-  [:inner :outer :meta])
-
-(def ^{:stratum 0} agent-events
-  "Events emitted by agent operations."
-  [:agent/task-started
-   :agent/task-completed
-   :agent/task-failed
-   :agent/prompt-sent
-   :agent/response-received
-   :agent/memory-updated])
-
-(def ^{:stratum 0} loop-events
-  "Events emitted by control loops."
-  [:inner/iteration-started
-   :inner/validation-passed
-   :inner/validation-failed
-   :inner/repair-attempted
-   :inner/escalated
-   :outer/phase-entered
-   :outer/phase-completed
-   :outer/phase-failed
-   :outer/workflow-completed
-   :meta/signal-collected
-   :meta/improvement-proposed
-   :meta/improvement-applied])
-
-(def ^{:stratum 0} policy-events
-  "Events emitted by policy evaluation."
-  [:policy/gate-evaluated
-   :policy/budget-checked
-   :policy/budget-exceeded
-   :policy/escalation
-   :policy/human-required
-   :policy/human-approved])
-
-(def ^{:stratum 0} artifact-events
-  "Events emitted by artifact operations."
-  [:artifact/created
-   :artifact/versioned
-   :artifact/linked
-   :artifact/validation])
-
-(def ^{:stratum 0} system-events
-  "Events emitted by system operations."
-  [:system/startup
-   :system/shutdown
-   :system/config-changed
-   :system/plugin-loaded
-   :system/health-check])
-
-(def ^{:stratum 0} scenario-tags
-  [:canary :shadow :regression :smoke :stress :chaos :golden-path :error-recovery :rollback])
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} all-events
-  (vec (concat agent-events loop-events policy-events artifact-events system-events)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(def ^{:stratum 2} logging-registry
-  "Malli registry for logging schema types."
-  (merge
-   core/registry
-   {:log/id        :id/uuid
-    :log/level     (into [:enum] log-levels)
-    :log/category  (into [:enum] log-categories)
-    :log/event     (into [:enum] all-events)
-    :log/loop-type (into [:enum] loop-types)
-    :scenario/tag  (into [:enum] scenario-tags)}))
-
-;------------------------------------------------------------------------------ Layer 3
-
 ;; Composite schemas
-(def ^{:stratum 3} LogContext
+(def ^{:stratum 0} LogContext
   "Schema for log entry context fields."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    [:ctx/workflow-id {:optional true} :workflow/id]
    [:ctx/task-id {:optional true} :task/id]
    [:ctx/agent-id {:optional true} :agent/id]
    [:ctx/phase {:optional true} :workflow/phase]
    [:ctx/loop {:optional true} :log/loop-type]])
 
-(def ^{:stratum 3} ScenarioContext
+(def ^{:stratum 0} ScenarioContext
   "Schema for scenario tracking in logs."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    [:scenario/id {:optional true} :id/uuid]
    [:scenario/tags {:optional true} [:set :scenario/tag]]])
 
-(def ^{:stratum 3} TraceContext
+(def ^{:stratum 0} TraceContext
   "Schema for distributed tracing correlation."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    [:trace/id {:optional true} :id/uuid]
    [:span/id {:optional true} :id/uuid]
    [:parent-span/id {:optional true} :id/uuid]])
 
-(def ^{:stratum 3} PerfMetrics
+(def ^{:stratum 0} PerfMetrics
   "Schema for performance metrics in log entries."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    [:perf/duration-ms {:optional true} :common/non-neg-int]
    [:perf/tokens-used {:optional true} :common/non-neg-int]
    [:perf/cost-usd {:optional true} :common/pos-number]])
 
-(def ^{:stratum 3} LogEntry
+(def ^{:stratum 0} LogEntry
   "Schema for a structured log entry.
    Core data substrate for debugging, tracing, and meta loop signals."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    ;; Required fields
    [:log/id :log/id]
    [:log/timestamp :common/timestamp]
@@ -178,9 +97,9 @@
    [:perf/tokens-used {:optional true} :common/non-neg-int]
    [:perf/cost-usd {:optional true} :common/pos-number]])
 
-(def ^{:stratum 3} Scenario
+(def ^{:stratum 0} Scenario
   "Schema for a test scenario definition."
-  [:map {:registry logging-registry}
+  [:map {:registry logging-vocab/logging-registry}
    [:scenario/id :id/uuid]
    [:scenario/name [:string {:min 1}]]
    [:scenario/tags {:optional true} [:set :scenario/tag]]
@@ -221,7 +140,7 @@
   (m/explain LogEntry {:log/id "not-uuid" :log/level :invalid})
 
   ;; Check all events are valid
-  (every? #(m/validate (into [:enum] all-events) %) all-events)
+  (every? #(m/validate (into [:enum] logging-vocab/all-events) %) logging-vocab/all-events)
   ;; => true
 
   :leave-this-here)
