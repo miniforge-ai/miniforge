@@ -121,14 +121,14 @@
 
   <!-- gates row -->
   <rect class="gv" x="816" y="336" width="500" height="96" rx="8"/>
-  <text class="h" x="828" y="358">gates + compiled policy packs (fail-closed)</text>
-  <text class="m" x="828" y="374">enter → gates → leave (workflow/execution) · policy-pack/compiler</text>
+  <text class="h" x="828" y="358">gates + packs → decide() → DecisionEnvelope (fail-closed)</text>
+  <text class="m" x="828" y="374">enter → gates → decide → leave · policy-pack/compiler · policy-clause</text>
   <text class="m" x="828" y="390">gate: syntax · lint · no-secrets · tests-pass · coverage</text>
-  <text class="s" x="828" y="406">nil artifact FAILS the gate, never bypasses; policy-gates floor:</text>
-  <text class="s" x="828" y="420">overrides can never drop governance gates · fail → repair loop</text>
+  <text class="s" x="828" y="406">nil artifact / unknown enforcement / unknown severity DENY (Ariadne 1);</text>
+  <text class="s" x="828" y="420">policy-gates floor: overrides never drop governance gates · fail → repair</text>
   <rect class="gv" x="1336" y="336" width="472" height="96" rx="8"/>
   <text class="h" x="1348" y="358">evidence-bundle</text>
-  <text class="s" x="1348" y="378">provenance chains per phase/gate decision —</text>
+  <text class="s" x="1348" y="378">provenance chains + the phase DecisionEnvelope —</text>
   <text class="s" x="1348" y="392">who/what/why for every transition</text>
   <text class="s" x="1348" y="412">event-stream: append-only + fsync archive</text>
   <path class="bad" d="M1316,376 C1328,376 1328,370 1328,180" marker-end="url(#aR)"/>
