@@ -509,13 +509,14 @@
                        "## Agent behavior\n\n- Do the thing.")
           {:keys [success? rule]} (sut/mdc->rule "full-example.mdc" content)]
       (is (true? success?))
-      ;; Require the schema ns to validate
+      ;; Require the schema namespaces to validate
       (require '[ai.miniforge.policy-pack.schema :as schema])
+      (require '[ai.miniforge.policy-pack.schema-validation :as schema-validation])
       (let [validate-rule (resolve 'ai.miniforge.policy-pack.schema/valid-rule?)]
         (when validate-rule
           (is (validate-rule rule)
               (str "Compiled rule should pass schema validation: "
-                   ((resolve 'ai.miniforge.policy-pack.schema/explain)
+                   ((resolve 'ai.miniforge.policy-pack.schema-validation/explain)
                     @(resolve 'ai.miniforge.policy-pack.schema/Rule) rule))))))))
 
 ;------------------------------------------------------------------------------ Layer 1
