@@ -17,7 +17,7 @@
 ;; limitations under the License.
 (ns ai.miniforge.schema.logging
   "Logging schemas for miniforge structured EDN logging. Event/level/category
-   vocabularies and the logging registry live in `logging-vocab.clj` (split
+   vocabularies and the logging registry live in `logging_vocab.clj` (split
    out under SL003, Wave 2) — this file only holds the `:map` composites
    built on top of that registry.
    Layer 0: Composite schemas (LogContext, ScenarioContext, TraceContext,

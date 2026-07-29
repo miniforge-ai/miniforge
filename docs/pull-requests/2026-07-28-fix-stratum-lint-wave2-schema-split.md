@@ -13,7 +13,7 @@ headings, and `^{:stratum n}` metadata change.
 - `core.clj` (327 lines, 4 real layers) → `vocab.clj` (enums + severity
   pass-throughs + `registry` + `Severity`, 3 layers) + `core.clj`
   (composite entity schemas, 2 layers).
-- `logging.clj` (228 lines, 4 real layers) → `logging-vocab.clj` (event
+- `logging.clj` (228 lines, 4 real layers) → `logging_vocab.clj` (event
   taxonomy + `all-events` + `logging-registry`, 3 layers) +
   `logging.clj` (composite log/scenario schemas, 1 layer).
 
@@ -72,7 +72,7 @@ to this file — they only reference `vocab/registry`, not each other),
 and the four top-level composites are Layer 1 (they reference the
 Layer-0 composites in the same file). 2 real layers, within budget.
 
-### `logging.clj` → `logging-vocab.clj` + `logging.clj`
+### `logging.clj` → `logging_vocab.clj` + `logging.clj`
 
 Same shape. The event/level/category vocabularies (`log-levels`,
 `agent-events`, `scenario-tags`, ...) are leaves; `all-events` (Layer 1)
@@ -85,7 +85,7 @@ reference each other (`LogEntry` re-lists the same keys `LogContext`
 etc. declare rather than embedding them as sub-schemas; that redundancy
 predates this PR and is out of scope here — no behavior change).
 
-New `logging-vocab.clj` takes the vocabularies through `logging-registry`
+New `logging_vocab.clj` takes the vocabularies through `logging-registry`
 (3 layers, requires `vocab` for the base `registry` merge). `logging.clj`
 keeps only the six composite schemas, now requiring `logging-vocab`:
 since none of the six reference each other, they all land at a single
@@ -217,7 +217,7 @@ of the component's `SL003` findings are now resolved (not deferred to
 - [x] Split designed around the real same-file reference graph, not a
       mechanical line-count cut
 - [x] `core.clj` → `vocab.clj` (3 layers) + `core.clj` (2 layers)
-- [x] `logging.clj` → `logging-vocab.clj` (3 layers) + `logging.clj`
+- [x] `logging.clj` → `logging_vocab.clj` (3 layers) + `logging.clj`
       (1 layer)
 - [x] `interface.clj` re-exports repointed to whichever namespace now
       owns each moved symbol; no implementation logic added to it
