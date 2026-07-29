@@ -20,7 +20,8 @@
    Pure functions organized in layers."
   (:require
    [ai.miniforge.evidence-bundle.collector :as collector]
-   [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.schema.domain :as domain]
+   [ai.miniforge.evidence-bundle.schema.validation :as validation]
    [ai.miniforge.logging.interface :as log]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -131,7 +132,7 @@
         ;; Validate intent structure
         intent (:evidence/intent bundle)
         intent-validation (when intent
-                            (schema/validate-schema schema/intent-schema intent))
+                            (validation/validate-schema domain/intent-schema intent))
 
         _ (when (and intent-validation (not (:valid? intent-validation)))
             (swap! errors concat (:errors intent-validation)))
@@ -139,8 +140,8 @@
         ;; Validate semantic validation structure (only if present and non-empty)
         sem-val (:evidence/semantic-validation bundle)
         sem-val-validation (when (and sem-val (seq sem-val))
-                             (schema/validate-schema
-                              schema/semantic-validation-schema sem-val))
+                             (validation/validate-schema
+                              domain/semantic-validation-schema sem-val))
 
         _ (when (and sem-val-validation (not (:valid? sem-val-validation)))
             (swap! errors concat (:errors sem-val-validation)))]

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.assembly-integration-test
   "Integration test for evidence bundle assembly.
 
@@ -28,22 +27,24 @@
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.content-hash.interface :as hash]
    [ai.miniforge.evidence-bundle.collector :as collector]
-   [ai.miniforge.evidence-bundle.schema :as schema]))
+   [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.schema.domain :as domain]
+   [ai.miniforge.evidence-bundle.schema.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Factory functions
 
-(defn make-workflow-id
+;; Factory functions
+(defn ^{:stratum 0} make-workflow-id
   "Create a random workflow UUID."
   []
   (random-uuid))
 
-(defn make-timestamp
+(defn ^{:stratum 0} make-timestamp
   "Create a timestamp for test data."
   []
   (java.time.Instant/now))
 
-(defn make-workflow-spec
+(defn ^{:stratum 0} make-workflow-spec
   "Create a workflow specification."
   [& {:keys [intent-type description]
       :or {intent-type :create
@@ -55,7 +56,61 @@
                   :constraint/description "No breaking changes"}]
    :author "test-agent"})
 
-(defn make-phase-data
+(deftest ^{:stratum 0} extract-intent-defaults-test
+  (testing "Intent extraction handles missing fields with defaults"
+    (let [minimal-spec {}
+          intent (collector/extract-intent minimal-spec)]
+      (is (= :update (:intent/type intent))
+          "Default intent type should be :update")
+      (is (string? (:intent/description intent))
+          "Description should default to empty string")
+      (is (string? (:intent/business-reason intent))
+          "Business reason should have a default"))))
+
+;; Bundle validation
+(deftest ^{:stratum 0} validate-bundle-template-test
+  (testing "Bundle template passes schema validation for present fields"
+    (let [template (schema/create-evidence-bundle-template)]
+      (is (uuid? (:evidence-bundle/id template))
+          "Template should have a UUID")
+      (is (inst? (:evidence-bundle/created-at template))
+          "Template should have a timestamp")
+      (is (vector? (:evidence/policy-checks template))
+          "Template should have policy-checks vector")
+      (is (vector? (:evidence/tool-invocations template))
+          "Template should have tool-invocations vector"))))
+
+(deftest ^{:stratum 0} validate-incomplete-bundle-test
+  (testing "Schema validation catches missing required fields"
+    (let [incomplete-bundle {:evidence-bundle/id (random-uuid)}
+          result (validation/validate-schema schema/evidence-bundle-schema
+                                             incomplete-bundle)]
+      (is (false? (:valid? result))
+          "Incomplete bundle should fail validation")
+      (is (pos? (count (:errors result)))
+          "Should report missing field errors"))))
+
+;; Content hashing
+(deftest ^{:stratum 0} content-hash-deterministic-test
+  (testing "Same content produces same hash"
+    (let [content {:key "value" :number 42}
+          hash1 (hash/content-hash content)
+          hash2 (hash/content-hash content)]
+      (is (= hash1 hash2)
+          "Hash should be deterministic")
+      (is (= 64 (count hash1))
+          "SHA-256 hex hash should be 64 characters"))))
+
+(deftest ^{:stratum 0} content-hash-different-content-test
+  (testing "Different content produces different hash"
+    (let [hash1 (hash/content-hash {:key "value-a"})
+          hash2 (hash/content-hash {:key "value-b"})]
+      (is (not= hash1 hash2)
+          "Different content should produce different hashes"))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} make-phase-data
   "Create phase execution data for a single phase."
   [& {:keys [agent status started-at completed-at duration-ms artifacts]
       :or {agent :implementer
@@ -74,7 +129,7 @@
      :output {:summary "Phase completed successfully"
               :metrics {:tokens 1000 :duration-ms duration-ms}}}))
 
-(defn make-workflow-state
+(defn ^{:stratum 1} make-workflow-state
   "Create a complete workflow state for bundle assembly."
   [& {:keys [workflow-id status phases gate-results pr-info error
              tool-invocations pack-promotions]
@@ -93,7 +148,7 @@
     pr-info (assoc :workflow/pr-info pr-info)
     error (assoc :workflow/error error)))
 
-(defn make-gate-result
+(defn ^{:stratum 1} make-gate-result
   "Create a gate result record."
   [& {:keys [pack-id phase passed?]
       :or {pack-id "test-pack" phase :implement passed? true}}]
@@ -106,10 +161,8 @@
    :passed? passed?
    :duration-ms 100})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Intent extraction
-
-(deftest extract-intent-test
+(deftest ^{:stratum 1} extract-intent-test
   (testing "Intent is extracted from workflow specification"
     (let [spec (make-workflow-spec :intent-type :create
                                    :description "Build auth module")
@@ -123,21 +176,26 @@
       (is (inst? (:intent/declared-at intent))
           "Declared-at timestamp should be present"))))
 
-(deftest extract-intent-defaults-test
-  (testing "Intent extraction handles missing fields with defaults"
-    (let [minimal-spec {}
-          intent (collector/extract-intent minimal-spec)]
-      (is (= :update (:intent/type intent))
-          "Default intent type should be :update")
-      (is (string? (:intent/description intent))
-          "Description should default to empty string")
-      (is (string? (:intent/business-reason intent))
-          "Business reason should have a default"))))
+(deftest ^{:stratum 1} validate-intent-schema-test
+  (testing "Intent evidence schema validates required fields"
+    (let [valid-intent {:intent/type :create
+                        :intent/description "Build feature"
+                        :intent/business-reason "User demand"
+                        :intent/constraints []
+                        :intent/declared-at (make-timestamp)}
+          result (validation/validate-schema domain/intent-schema valid-intent)]
+      (is (true? (:valid? result))
+          "Valid intent should pass schema validation"))
 
-;------------------------------------------------------------------------------ Layer 1
+    (let [invalid-intent {:intent/type :create}
+          result (validation/validate-schema domain/intent-schema invalid-intent)]
+      (is (false? (:valid? result))
+          "Intent missing required fields should fail"))))
+
+;------------------------------------------------------------------------------ Layer 2
+
 ;; Phase evidence collection
-
-(deftest collect-single-phase-evidence-test
+(deftest ^{:stratum 2} collect-single-phase-evidence-test
   (testing "Evidence is collected for an executed phase"
     (let [workflow-state (make-workflow-state
                           :phases {:implement (make-phase-data :agent :implementer)})
@@ -159,14 +217,14 @@
       (is (map? (:phase/output evidence))
           "Output should be a map"))))
 
-(deftest collect-phase-evidence-missing-phase-test
+(deftest ^{:stratum 2} collect-phase-evidence-missing-phase-test
   (testing "Returns nil for unexecuted phase"
     (let [workflow-state (make-workflow-state :phases {})
           evidence (collector/collect-phase-evidence workflow-state :implement)]
       (is (nil? evidence)
           "Should return nil for unexecuted phase"))))
 
-(deftest collect-all-phases-test
+(deftest ^{:stratum 2} collect-all-phases-test
   (testing "Evidence is collected for all executed phases"
     (let [workflow-state (make-workflow-state
                           :phases {:plan (make-phase-data :agent :planner)
@@ -184,10 +242,8 @@
       (is (not (contains? all-evidence :evidence/verify))
           "Should not have evidence for unexecuted verify phase"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Outcome evidence
-
-(deftest outcome-evidence-success-test
+(deftest ^{:stratum 2} outcome-evidence-success-test
   (testing "Outcome evidence for successful workflow"
     (let [workflow-state (make-workflow-state
                           :status :completed
@@ -203,7 +259,7 @@
       (is (= "https://github.com/org/repo/pull/42" (:outcome/pr-url outcome))
           "PR URL should be present"))))
 
-(deftest outcome-evidence-failure-test
+(deftest ^{:stratum 2} outcome-evidence-failure-test
   (testing "Outcome evidence for failed workflow"
     (let [workflow-state (make-workflow-state
                           :status :failed
@@ -217,10 +273,8 @@
       (is (= :implement (:outcome/error-phase outcome))
           "Error phase should be preserved"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Policy check collection
-
-(deftest collect-policy-checks-test
+(deftest ^{:stratum 2} collect-policy-checks-test
   (testing "Policy checks are collected from gate results"
     (let [workflow-state (make-workflow-state
                           :gate-results [(make-gate-result :phase :implement :passed? true)
@@ -235,17 +289,15 @@
       (is (every? inst? (map :policy-check/checked-at checks))
           "All checks should have timestamps"))))
 
-(deftest collect-policy-checks-empty-test
+(deftest ^{:stratum 2} collect-policy-checks-empty-test
   (testing "Empty gate results produce empty vector"
     (let [workflow-state (make-workflow-state :gate-results [])
           checks (collector/collect-policy-checks workflow-state)]
       (is (empty? checks)
           "Should return empty vector when no gate results"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Bundle assembly (without artifact store)
-
-(deftest assemble-bundle-required-fields-test
+(deftest ^{:stratum 2} assemble-bundle-required-fields-test
   (testing "Assembled bundle contains all required fields"
     (let [workflow-id (make-workflow-id)
           workflow-state (make-workflow-state
@@ -271,7 +323,7 @@
       (is (string? (:evidence/content-hash bundle))
           "Content hash should be present"))))
 
-(deftest assemble-bundle-with-phases-test
+(deftest ^{:stratum 2} assemble-bundle-with-phases-test
   (testing "Bundle includes phase evidence for executed phases"
     (let [workflow-id (make-workflow-id)
           workflow-state (make-workflow-state
@@ -293,71 +345,8 @@
       (is (nil? (:evidence/release bundle))
           "Release evidence should not be in bundle (not executed)"))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Bundle validation
-
-(deftest validate-bundle-template-test
-  (testing "Bundle template passes schema validation for present fields"
-    (let [template (schema/create-evidence-bundle-template)]
-      (is (uuid? (:evidence-bundle/id template))
-          "Template should have a UUID")
-      (is (inst? (:evidence-bundle/created-at template))
-          "Template should have a timestamp")
-      (is (vector? (:evidence/policy-checks template))
-          "Template should have policy-checks vector")
-      (is (vector? (:evidence/tool-invocations template))
-          "Template should have tool-invocations vector"))))
-
-(deftest validate-incomplete-bundle-test
-  (testing "Schema validation catches missing required fields"
-    (let [incomplete-bundle {:evidence-bundle/id (random-uuid)}
-          result (schema/validate-schema schema/evidence-bundle-schema
-                                         incomplete-bundle)]
-      (is (false? (:valid? result))
-          "Incomplete bundle should fail validation")
-      (is (pos? (count (:errors result)))
-          "Should report missing field errors"))))
-
-(deftest validate-intent-schema-test
-  (testing "Intent evidence schema validates required fields"
-    (let [valid-intent {:intent/type :create
-                        :intent/description "Build feature"
-                        :intent/business-reason "User demand"
-                        :intent/constraints []
-                        :intent/declared-at (make-timestamp)}
-          result (schema/validate-schema schema/intent-schema valid-intent)]
-      (is (true? (:valid? result))
-          "Valid intent should pass schema validation"))
-
-    (let [invalid-intent {:intent/type :create}
-          result (schema/validate-schema schema/intent-schema invalid-intent)]
-      (is (false? (:valid? result))
-          "Intent missing required fields should fail"))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Content hashing
-
-(deftest content-hash-deterministic-test
-  (testing "Same content produces same hash"
-    (let [content {:key "value" :number 42}
-          hash1 (hash/content-hash content)
-          hash2 (hash/content-hash content)]
-      (is (= hash1 hash2)
-          "Hash should be deterministic")
-      (is (= 64 (count hash1))
-          "SHA-256 hex hash should be 64 characters"))))
-
-(deftest content-hash-different-content-test
-  (testing "Different content produces different hash"
-    (let [hash1 (hash/content-hash {:key "value-a"})
-          hash2 (hash/content-hash {:key "value-b"})]
-      (is (not= hash1 hash2)
-          "Different content should produce different hashes"))))
-
-;------------------------------------------------------------------------------ Layer 1
 ;; Auto-collect evidence
-
-(deftest auto-collect-completed-workflow-test
+(deftest ^{:stratum 2} auto-collect-completed-workflow-test
   (testing "Auto-collect creates bundle for completed workflow"
     (let [workflow-id (make-workflow-id)
           workflow-state (make-workflow-state
@@ -370,7 +359,7 @@
       (is (uuid? (:evidence-bundle/id bundle))
           "Bundle should have an ID"))))
 
-(deftest auto-collect-failed-workflow-test
+(deftest ^{:stratum 2} auto-collect-failed-workflow-test
   (testing "Auto-collect creates bundle for failed workflow"
     (let [workflow-id (make-workflow-id)
           workflow-state (make-workflow-state
@@ -382,7 +371,7 @@
       (is (some? bundle)
           "Bundle should be created even for failed workflows"))))
 
-(deftest auto-collect-in-progress-workflow-test
+(deftest ^{:stratum 2} auto-collect-in-progress-workflow-test
   (testing "Auto-collect returns nil for in-progress workflow"
     (let [workflow-id (make-workflow-id)
           workflow-state (make-workflow-state
@@ -393,10 +382,8 @@
       (is (nil? bundle)
           "Bundle should not be created for running workflow"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Rules-applied collection
-
-(deftest collect-rules-applied-test
+(deftest ^{:stratum 2} collect-rules-applied-test
   (testing "Rules-applied entries are collected from phase manifests"
     (let [rule-id (random-uuid)
           workflow-state (make-workflow-state
@@ -416,17 +403,15 @@
       (is (= :implement (:phase (first rules)))
           "Phase annotation should be :implement"))))
 
-(deftest collect-rules-applied-empty-test
+(deftest ^{:stratum 2} collect-rules-applied-empty-test
   (testing "Returns empty vector when no rules manifests exist"
     (let [workflow-state (make-workflow-state :phases {:implement (make-phase-data)})
           rules (collector/collect-rules-applied workflow-state)]
       (is (empty? rules)
           "Should return empty vector"))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Tool invocation collection
-
-(deftest collect-tool-invocations-test
+(deftest ^{:stratum 2} collect-tool-invocations-test
   (testing "Tool invocations are collected from workflow state"
     (let [invocation {:tool/id :gh-pr-create
                       :tool/invoked-at (make-timestamp)

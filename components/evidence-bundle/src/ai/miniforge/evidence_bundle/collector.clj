@@ -24,6 +24,7 @@
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.evidence-bundle.protocols.impl.semantic-validator :as semantic-validator]
    [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.scanner :as scanner]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.response.interface :as response]))
@@ -59,16 +60,17 @@
 ;; Compliance Defaults and Overrides
 (defn- ^{:stratum 0} build-default-compliance-metadata
   "Return the default compliance map for assembled evidence bundles.
-   Uses schema-defined defaults so the single source of truth lives in schema.clj.
-   Covers the assembly path; the template function covers manual construction."
+   Uses schema.compliance-defined defaults so the single source of truth
+   lives there. Covers the assembly path; the template function covers
+   manual construction."
   []
-  {:evidence/data-classification schema/default-data-classification
+  {:evidence/data-classification compliance/default-data-classification
    :evidence/contains-pii?       false
-   :evidence/retention-policy    {:retain-days  schema/default-retention-days
+   :evidence/retention-policy    {:retain-days  compliance/default-retention-days
                                   :auto-delete? true
                                   :legal-hold?  false}
    :evidence/regulatory-tags     #{}
-   :evidence/created-by          schema/default-created-by-principal})
+   :evidence/created-by          compliance/default-created-by-principal})
 
 (def ^{:stratum 0} ^:private compliance-override-keys
   "Allowed keys for workflow-spec and opts compliance override maps."
