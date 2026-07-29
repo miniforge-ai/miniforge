@@ -128,7 +128,11 @@ staying exactly where the registry/interface machinery expects it
       findings vs. this file; 4 pre-existing unrelated findings confirmed
       present on `main`)
 - [x] `clj-kondo` clean before/after (0 errors, 0 warnings)
-- [x] `bb test` run (see Testing Plan for result)
+- [x] `ai.miniforge.gate.*` test namespaces run directly (118 tests, 351
+      assertions, 0 failures/errors) plus the pre-commit hook's own
+      331-test smoke suite on both commits, both green — full-monorepo
+      `bb test` did not finish (Docker-dependent `dag-executor` retries
+      unrelated to this change; see Testing Plan)
 - [x] No behavior change: same gate keyword, same check/repair semantics
 - [x] `interface.clj` confirmed unaffected (side-effect require still
       resolves transitively)
