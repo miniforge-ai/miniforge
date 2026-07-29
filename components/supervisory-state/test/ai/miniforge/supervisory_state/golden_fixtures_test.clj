@@ -27,6 +27,7 @@
    [ai.miniforge.supervisory-state.attention :as attention]
    [ai.miniforge.decision-envelope.interface :as env]
    [ai.miniforge.response.interface :as response]
+   [ai.miniforge.supervisory-state.entities :as entities]
    [ai.miniforge.supervisory-state.golden-fixtures :as golden-fixtures]
    [ai.miniforge.supervisory-state.schema :as schema]
    [clojure.java.io :as io]
@@ -63,22 +64,22 @@
   8)
 
 (def ^{:stratum 0} ^:private family->schema
-  {:workflow-run schema/WorkflowRun
-   :spec         schema/Spec
-   :agent        schema/AgentSession
-   :pr           schema/PrFleetEntry
-   :policy-eval  schema/PolicyEvaluation
-   :attention    schema/AttentionItem
-   :task-node    schema/TaskNode
-   :decision     schema/DecisionCard
-   :intervention schema/InterventionRequest
+  {:workflow-run entities/WorkflowRun
+   :spec         entities/Spec
+   :agent        entities/AgentSession
+   :pr           entities/PrFleetEntry
+   :policy-eval  entities/PolicyEvaluation
+   :attention    entities/AttentionItem
+   :task-node    entities/TaskNode
+   :decision     entities/DecisionCard
+   :intervention entities/InterventionRequest
    :gate-decision env/DecisionEnvelope})
 
 (deftest ^{:stratum 0} validate-result-returns-anomaly-for-invalid-entity
   (testing "invalid golden fixture entities are represented as anomaly data"
     (let [result (@#'golden-fixtures/validate-result
                   :workflow-run
-                  schema/WorkflowRun
+                  entities/WorkflowRun
                   {:not :valid})]
       (is (response/anomaly-map? result))
       (is (= :anomalies/incorrect (:anomaly/category result)))
