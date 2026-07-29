@@ -1059,49 +1059,19 @@
 ;; the JVM-side reader is alive. These tests lock both halves of the
 ;; contract — the bug pattern (silence => stagnation) and the fix
 ;; (keepalive masks silence).
-(deftest ^{:stratum 0} stagnation-fires-on-silence-without-keepalive-test
-  (testing "without keepalive, a silent monitor stagnates after the threshold"
-    ;; Bug demonstration: this is the dogfood failure mode in unit form.
-    ;; record-activity! once at start, then silence — the timer expires.
-    (let [monitor (pm/create-progress-monitor
-                   {:stagnation-threshold-ms 80
-                    :max-total-ms            5000
-                    :min-activity-interval-ms 1})]
-      (pm/record-activity! monitor :stream-init)
-      (Thread/sleep 200)
-      (let [timeout (pm/check-timeout monitor)]
-        (is (= :stagnation (:type timeout))
-            "silence beyond stagnation-threshold-ms ⇒ stagnation fires")))))
+;; Shared timing constants for the keepalive/stagnation trio below.
+;; stagnation-threshold-ms is set high relative to keepalive-interval-ms
+;; (25:1) so ordinary CI scheduler jitter on the daemon keepalive thread
+;; cannot cross the stagnation line — a single missed or delayed tick
+;; costs nowhere near the full window. Observed CI flake (run 30340889808):
+;; a loaded runner delayed the thread enough that 135ms elapsed against
+;; an 80ms threshold; 500ms gives ~3.7x headroom over that observed stall,
+;; without changing what the tests prove (real daemon thread, real clock).
+(def ^{:stratum 0} ^:private keepalive-test-stagnation-threshold-ms 500)
 
-(deftest ^{:stratum 0} keepalive-prevents-stagnation-during-silence-test
-  (testing "keepalive thread refreshes the monitor across silent periods"
-    (let [monitor (pm/create-progress-monitor
-                   {:stagnation-threshold-ms 80
-                    :max-total-ms            5000
-                    :min-activity-interval-ms 1})
-          stop! (pm/start-keepalive! monitor 20)]
-      (try
-        (pm/record-activity! monitor :stream-init)
-        (Thread/sleep 200)
-        (is (nil? (pm/check-timeout monitor))
-            "keepalive refreshes ⇒ stagnation timer never expires")
-        (finally
-          (stop!))))))
+(def ^{:stratum 0} ^:private keepalive-test-interval-ms 20)
 
-(deftest ^{:stratum 0} keepalive-stop-fn-halts-the-thread-test
-  (testing "stop! returned by start-keepalive! halts further refreshes"
-    (let [monitor (pm/create-progress-monitor
-                   {:stagnation-threshold-ms 80
-                    :max-total-ms            5000
-                    :min-activity-interval-ms 1})
-          stop! (pm/start-keepalive! monitor 20)]
-      (pm/record-activity! monitor :stream-init)
-      (Thread/sleep 50)
-      (stop!)
-      ;; Allow any in-flight tick to settle, then sleep past the threshold.
-      (Thread/sleep 200)
-      (is (= :stagnation (:type (pm/check-timeout monitor)))
-          "after stop!, silence stagnates as expected"))))
+(def ^{:stratum 0} ^:private keepalive-test-sleep-ms 600)
 
 (deftest ^{:stratum 0} keepalive-rejects-non-positive-interval-test
   (testing "start-keepalive! refuses non-positive interval-ms"
@@ -1415,6 +1385,50 @@
           ":tool-result must advance :last-activity-at to keep monitor alive"))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} stagnation-fires-on-silence-without-keepalive-test
+  (testing "without keepalive, a silent monitor stagnates after the threshold"
+    ;; Bug demonstration: this is the dogfood failure mode in unit form.
+    ;; record-activity! once at start, then silence — the timer expires.
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms keepalive-test-stagnation-threshold-ms
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})]
+      (pm/record-activity! monitor :stream-init)
+      (Thread/sleep keepalive-test-sleep-ms)
+      (let [timeout (pm/check-timeout monitor)]
+        (is (= :stagnation (:type timeout))
+            "silence beyond stagnation-threshold-ms ⇒ stagnation fires")))))
+
+(deftest ^{:stratum 1} keepalive-prevents-stagnation-during-silence-test
+  (testing "keepalive thread refreshes the monitor across silent periods"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms keepalive-test-stagnation-threshold-ms
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor keepalive-test-interval-ms)]
+      (try
+        (pm/record-activity! monitor :stream-init)
+        (Thread/sleep keepalive-test-sleep-ms)
+        (is (nil? (pm/check-timeout monitor))
+            "keepalive refreshes ⇒ stagnation timer never expires")
+        (finally
+          (stop!))))))
+
+(deftest ^{:stratum 1} keepalive-stop-fn-halts-the-thread-test
+  (testing "stop! returned by start-keepalive! halts further refreshes"
+    (let [monitor (pm/create-progress-monitor
+                   {:stagnation-threshold-ms keepalive-test-stagnation-threshold-ms
+                    :max-total-ms            5000
+                    :min-activity-interval-ms 1})
+          stop! (pm/start-keepalive! monitor keepalive-test-interval-ms)]
+      (pm/record-activity! monitor :stream-init)
+      (Thread/sleep 50)
+      (stop!)
+      ;; Allow any in-flight tick to settle, then sleep past the threshold.
+      (Thread/sleep keepalive-test-sleep-ms)
+      (is (= :stagnation (:type (pm/check-timeout monitor)))
+          "after stop!, silence stagnates as expected"))))
 
 (deftest ^{:stratum 1} start-stream-reader!-clean-shutdown-prints-no-stderr-test
   ;; Regression: pre-fix the daemon's `(catch Exception e ...)` caught
