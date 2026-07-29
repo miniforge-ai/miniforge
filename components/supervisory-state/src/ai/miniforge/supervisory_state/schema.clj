@@ -30,12 +30,13 @@
 
    All maps are open (additional keys pass through) per N5-delta-1 §12.4.
 
-   The ten canonical entity schemas (WorkflowRun, Spec, AgentSession,
-   PrFleetEntry, PolicyEvaluation, PolicyViolation, AttentionItem, TaskNode,
-   DecisionCard, InterventionRequest, DependencyHealth) and the aggregate
-   EntityTable live in `ai.miniforge.supervisory-state.entities` — they
-   compose the `registry` defined here, which pushed this namespace over
-   the 3-layer stratum budget when they lived in one file (SL003, Wave 2)."
+   The twelve canonical entity schemas (WorkflowRun, Spec, AgentSession,
+   PrReadiness, PrRisk, PrPolicy, PolicyViolation, AttentionItem, TaskNode,
+   DecisionCard, InterventionRequest, DependencyHealth), the composite
+   PrFleetEntry/PolicyEvaluation, and the aggregate EntityTable live in
+   `ai.miniforge.supervisory-state.entities` — they compose the `registry`
+   defined here, which pushed this namespace over the 3-layer stratum
+   budget when they lived in one file (SL003, Wave 2)."
   (:require
    [ai.miniforge.schema.interface :as shared]))
 
@@ -231,9 +232,11 @@
    duplicating 3 lines here keeps supervisory-state from reaching across
    a Polylith boundary.
 
-   Consumed by the entity schemas in `ai.miniforge.supervisory-state.entities`
-   via `{:registry registry}` — that same-namespace reference back to a
-   value defined here is what makes this a genuine second layer."
+   Composes the same-file Layer 0 enums (`workflow-run-statuses`,
+   `violation-severities`, `risk-levels`, etc.) into their `:workflow-run/
+   status`-style keyword entries below — that's what makes this a genuine
+   second layer. Consumed cross-namespace by the entity schemas in
+   `ai.miniforge.supervisory-state.entities` via `{:registry schema/registry}`."
   {;; Primitives
    :id/uuid            uuid?
    :common/timestamp   inst?
