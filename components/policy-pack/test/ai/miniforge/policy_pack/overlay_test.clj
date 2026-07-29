@@ -23,11 +23,11 @@
    - Rule ID collision detection
    - Override application (severity and enabled? only)
    - Taxonomy ref inheritance and conflict detection
-   - :rule/enabled? filtering in core/filter-applicable-rules"
+   - :rule/enabled? filtering in applicability/filter-applicable-rules"
   (:require
    [clojure.test :refer [deftest testing is]]
    [ai.miniforge.policy-pack.loader :as loader]
-   [ai.miniforge.policy-pack.core :as core]))
+   [ai.miniforge.policy-pack.applicability :as applicability]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -69,7 +69,7 @@
 (def ^{:stratum 1} extra-rule-c (make-rule :test/rule-c :info))
 
 ;; ============================================================================
-;; :rule/enabled? filtering in core
+;; :rule/enabled? filtering in applicability
 ;; ============================================================================
 (deftest ^{:stratum 1} filter-applicable-rules-respects-enabled-test
   (testing "disabled rules are excluded by filter-applicable-rules"
@@ -78,14 +78,14 @@
           rules         [enabled-rule disabled-rule]
           context       {:artifact {:artifact/path "foo.clj"}
                          :phase    :implement}
-          result        (core/filter-applicable-rules rules context)]
+          result        (applicability/filter-applicable-rules rules context)]
       (is (= 1 (count result)))
       (is (= :test/enabled (:rule/id (first result))))))
 
   (testing "rules without :rule/enabled? default to enabled"
     (let [rules   [(make-rule :test/implicit-enabled :low)]
           context {:artifact {:artifact/path "foo.clj"} :phase :implement}
-          result  (core/filter-applicable-rules rules context)]
+          result  (applicability/filter-applicable-rules rules context)]
       (is (= 1 (count result))))))
 
 ;------------------------------------------------------------------------------ Layer 2

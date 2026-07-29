@@ -18,7 +18,8 @@
 (ns ai.miniforge.policy-pack.interface.schema
   "Schema and validation helpers for the policy-pack public API."
   (:require
-   [ai.miniforge.policy-pack.schema :as schema]))
+   [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-types :as schema-types]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -38,39 +39,39 @@
 (def ^{:stratum 0} RuleSeverity
   "Malli enum schema (`[:enum :critical :high :medium :low :info]`) for a rule's
    severity level."
-  schema/RuleSeverity)
+  schema-types/RuleSeverity)
 
 (def ^{:stratum 0} RuleEnforcement
   "Malli enum schema (`[:enum :hard-halt :require-approval :warn :audit]`) for
    a rule's enforcement action."
-  schema/RuleEnforcement)
+  schema-types/RuleEnforcement)
 
 (def ^{:stratum 0} RuleApplicability
   "Malli schema (a `[:map ...]` vector) for when a rule applies — optional
    task-types, file-globs, resource-patterns, repo-types, and phases."
-  schema/RuleApplicability)
+  schema-types/RuleApplicability)
 
 (def ^{:stratum 0} RuleDetection
   "Malli schema (a `[:map ...]` vector) for how to detect violations —
    required :type plus optional pattern(s), context-lines, custom-fn,
    capability, mode, and email-pattern."
-  schema/RuleDetection)
+  schema-types/RuleDetection)
 
 (def ^{:stratum 0} rule-severities
   "Vector of severity keywords `[:critical :high :medium :low :info]`, ordered most
    to least severe."
-  schema/rule-severities)
+  schema-types/rule-severities)
 
 (def ^{:stratum 0} enforcement-actions
   "Vector of enforcement keywords `[:hard-halt :require-approval :warn :audit]`,
    ordered strictest to most lenient."
-  schema/enforcement-actions)
+  schema-types/enforcement-actions)
 
 (def ^{:stratum 0} detection-types
   "Vector of detection-type keywords
    `[:plan-output :diff-analysis :state-comparison :content-scan :ast-analysis
    :custom :capability]`."
-  schema/detection-types)
+  schema-types/detection-types)
 
 (def ^{:stratum 0} valid-rule?
   "Predicate. Returns true when the value validates against the Rule schema,

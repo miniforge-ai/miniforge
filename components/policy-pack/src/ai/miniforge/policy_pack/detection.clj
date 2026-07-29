@@ -46,7 +46,7 @@
   (:require
    [ai.miniforge.policy-pack.ast :as ast]
    [ai.miniforge.policy-pack.capability :as capability]
-   [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-validation :as schema]
    [ai.miniforge.policy-clause.interface :as clause]
    [clojure.data :as data]
    [clojure.string :as str]))

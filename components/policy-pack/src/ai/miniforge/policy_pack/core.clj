@@ -16,302 +16,27 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.policy-pack.core
-  "Core policy pack operations.
+  "Core policy pack operations: validation-layer ordering and artifact
+   checking orchestration.
 
-   Layer 0: Severity/enforcement comparison, rule applicability predicates,
-     pack/rule constructors, per-type detection and enforcement builders,
-     ordered-validation — all pure or construction, no same-file dependents yet
-   Layer 1: compare-enforcement, filter-applicable-rules (over Layer 0's
-     comparisons and predicates)
-   Layer 2: stricter-enforcement (over compare-enforcement)
-   Layer 3: merge-rules (over stricter-enforcement)
-   Layer 4: resolve-rules (over merge-rules)
-   Layer 5: check-artifact (over resolve-rules + filter-applicable-rules)
-   Layer 6: check-artifacts (over check-artifact)
+   Was over the rule 210 budget at 7 real layers (Wave 2, SL003); split into
+   four namespaces along the real reference graph:
+   - `enforcement.clj` — severity/enforcement comparison
+   - `applicability.clj` — rule-applies-to-* predicates + filter-applicable-rules
+   - `builders.clj` — pack/rule construction + merge-rules/resolve-rules
+   - `core.clj` (this file) — the two, above, wired together into checks
 
-   7 real strata — over the rule 210 budget of 3; a genuine namespace split
-   (Wave 2), not a labeling problem.
-
-   Handles multi-pack rule resolution with:
-   - Merge by category
-   - Override by ID (later pack wins)
-   - Severity escalation (higher wins)
-   - Enforcement escalation (stricter wins)"
+   Layer 0: ordered-validation (self-contained validation-layer runner);
+     check-artifact (orchestrates builders/resolve-rules,
+     applicability/filter-applicable-rules, and detection/*, all external —
+     no same-file dependents)
+   Layer 1: check-artifacts (over check-artifact)"
   (:require
-   [ai.miniforge.policy-pack.detection :as detection]
-   [ai.miniforge.policy-pack.registry :as registry]
-   [ai.miniforge.schema.interface :as shared]))
+   [ai.miniforge.policy-pack.applicability :as applicability]
+   [ai.miniforge.policy-pack.builders :as builders]
+   [ai.miniforge.policy-pack.detection :as detection]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; Severity and enforcement comparison
-(def ^{:stratum 0} enforcement-order
-  "Enforcement actions from strictest to most lenient — pass-through to
-   the shared vocabulary (policy-clause via schema)."
-  shared/enforcement-order)
-
-(def ^{:stratum 0} compare-severity
-  "Compare two severities by the shared canonical order (negative if a is more
-   severe, positive if b is, 0 if equal)."
-  shared/compare-severity)
-
-(def ^{:stratum 0} more-severe
-  "Return the more severe of two severities (shared canonical order)."
-  shared/more-severe)
-
-;; Rule applicability
-(defn ^{:stratum 0} rule-applies-to-artifact?
-  "Check if a rule applies to an artifact based on file globs.
-
-   Arguments:
-   - rule - Rule with :rule/applies-to
-   - artifact - Artifact with :artifact/path
-
-   Returns:
-   - true if rule applies, false otherwise"
-  [rule artifact]
-  (let [file-globs (get-in rule [:rule/applies-to :file-globs])
-        path (:artifact/path artifact "")]
-    (or (nil? file-globs)
-        (empty? file-globs)
-        (some #(registry/glob-matches? % path) file-globs))))
-
-(defn ^{:stratum 0} rule-applies-to-task?
-  "Check if a rule applies to a task type.
-
-   Arguments:
-   - rule - Rule with :rule/applies-to
-   - task-type - Task type keyword
-
-   Returns:
-   - true if rule applies, false otherwise"
-  [rule task-type]
-  (let [task-types (get-in rule [:rule/applies-to :task-types])]
-    (or (nil? task-types)
-        (empty? task-types)
-        (contains? task-types task-type))))
-
-(defn ^{:stratum 0} rule-applies-to-phase?
-  "Check if a rule applies to a workflow phase.
-
-   Arguments:
-   - rule - Rule with :rule/applies-to
-   - phase - Phase keyword
-
-   Returns:
-   - true if rule applies, false otherwise"
-  [rule phase]
-  (let [phases (get-in rule [:rule/applies-to :phases])]
-    (or (nil? phases)
-        (empty? phases)
-        (contains? phases phase))))
-
-;; Pack operations
-(defn ^{:stratum 0} create-pack
-  "Create a new policy pack with default values.
-
-   Arguments:
-   - id - Pack ID string
-   - name - Human-readable name
-   - description - Pack description
-   - author - Author string
-
-   Options:
-   - :version - DateVer string (default: today's date)
-   - :license - License string
-   - :rules - Vector of rules
-
-   Returns:
-   - PackManifest"
-  [id name description author & {:keys [version license rules]
-                                  :or {rules []}}]
-  (let [now (java.time.Instant/now)
-        version (or version
-                    (let [date (java.time.LocalDate/now)]
-                      (format "%d.%02d.%02d"
-                              (.getYear date)
-                              (.getMonthValue date)
-                              (.getDayOfMonth date))))]
-    {:pack/id id
-     :pack/name name
-     :pack/version version
-     :pack/description description
-     :pack/author author
-     :pack/license license
-     :pack/categories []
-     :pack/rules (vec rules)
-     :pack/created-at now
-     :pack/updated-at now}))
-
-(defn ^{:stratum 0} add-rule-to-pack
-  "Add a rule to a pack.
-
-   Arguments:
-   - pack - PackManifest
-   - rule - Rule to add
-
-   Returns:
-   - Updated pack"
-  [pack rule]
-  (-> pack
-      (update :pack/rules conj rule)
-      (assoc :pack/updated-at (java.time.Instant/now))))
-
-(defn ^{:stratum 0} remove-rule-from-pack
-  "Remove a rule from a pack by ID.
-
-   Arguments:
-   - pack - PackManifest
-   - rule-id - Rule ID keyword
-
-   Returns:
-   - Updated pack"
-  [pack rule-id]
-  (-> pack
-      (update :pack/rules (fn [rules]
-                            (vec (remove #(= rule-id (:rule/id %)) rules))))
-      (assoc :pack/updated-at (java.time.Instant/now))))
-
-(defn ^{:stratum 0} update-pack-categories
-  "Update pack categories based on rules.
-
-   Automatically generates categories from rule category codes.
-
-   Arguments:
-   - pack - PackManifest
-
-   Returns:
-   - Updated pack with regenerated categories"
-  [pack]
-  (let [rules (:pack/rules pack)
-        by-category (group-by :rule/category rules)
-        categories (->> by-category
-                        (map (fn [[cat-id rules]]
-                               {:category/id cat-id
-                                :category/name (str "Category " cat-id)
-                                :category/rules (mapv :rule/id rules)}))
-                        (sort-by :category/id)
-                        vec)]
-    (assoc pack :pack/categories categories)))
-
-;; Rule creation helpers
-(defn ^{:stratum 0} create-rule
-  "Create a new rule with required fields.
-
-   Arguments:
-   - id - Rule ID keyword (e.g., :310-import-preservation)
-   - title - Short title
-   - description - Full description
-   - severity - :critical, :high, :medium, :low, or :info
-   - category - Dewey category string (e.g., \"310\")
-   - detection - Detection config map
-   - enforcement - Enforcement config map
-
-   Options:
-   - :applies-to - Applicability config
-   - :agent-behavior - Agent guidance string
-   - :examples - Vector of example maps
-
-   Returns:
-   - Rule map"
-  [id title description severity category detection enforcement
-   & {:keys [applies-to agent-behavior examples]}]
-  {:rule/id id
-   :rule/title title
-   :rule/description description
-   :rule/severity severity
-   :rule/category category
-   :rule/applies-to (or applies-to {})
-   :rule/detection detection
-   :rule/enforcement enforcement
-   :rule/agent-behavior agent-behavior
-   :rule/examples examples})
-
-(defn ^{:stratum 0} content-scan-detection
-  "Create a content-scan detection config.
-
-   Arguments:
-   - pattern - Regex pattern string or compiled pattern
-   - opts - Optional map with :context-lines
-
-   Returns:
-   - Detection config map"
-  ([pattern]
-   (content-scan-detection pattern {}))
-  ([pattern {:keys [context-lines] :or {context-lines 2}}]
-   {:type :content-scan
-    :pattern pattern
-    :context-lines context-lines}))
-
-(defn ^{:stratum 0} diff-analysis-detection
-  "Create a diff-analysis detection config.
-
-   Arguments:
-   - pattern - Regex pattern string or compiled pattern
-   - opts - Optional map with :context-lines
-
-   Returns:
-   - Detection config map"
-  ([pattern]
-   (diff-analysis-detection pattern {}))
-  ([pattern {:keys [context-lines] :or {context-lines 3}}]
-   {:type :diff-analysis
-    :pattern pattern
-    :context-lines context-lines}))
-
-(defn ^{:stratum 0} plan-output-detection
-  "Create a plan-output detection config.
-
-   Arguments:
-   - patterns - Vector of regex patterns
-
-   Returns:
-   - Detection config map"
-  [patterns]
-  {:type :plan-output
-   :patterns patterns})
-
-(defn ^{:stratum 0} warn-enforcement
-  "Create a warn-only enforcement config.
-
-   Arguments:
-   - message - Violation message
-
-   Returns:
-   - Enforcement config map"
-  [message]
-  {:action :warn
-   :message message})
-
-(defn ^{:stratum 0} halt-enforcement
-  "Create a hard-halt enforcement config.
-
-   Arguments:
-   - message - Violation message
-   - opts - Optional map with :remediation
-
-   Returns:
-   - Enforcement config map"
-  ([message]
-   (halt-enforcement message {}))
-  ([message {:keys [remediation]}]
-   (cond-> {:action :hard-halt
-            :message message}
-     remediation (assoc :remediation remediation))))
-
-(defn ^{:stratum 0} approval-enforcement
-  "Create a require-approval enforcement config.
-
-   Arguments:
-   - message - Violation message
-   - approvers - Vector of approver types
-
-   Returns:
-   - Enforcement config map"
-  [message approvers]
-  {:action :require-approval
-   :message message
-   :approvers approvers})
 
 ;; Validation layer ordering (N4 §3, five-layer model)
 (defn ^{:stratum 0} ordered-validation
@@ -337,98 +62,8 @@
            :results            results'
            :short-circuited-at layer})))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} compare-enforcement
-  "Compare two enforcement actions.
-   Returns negative if a is stricter, positive if b is stricter, 0 if equal."
-  [a b]
-  (- (get enforcement-order a 99)
-     (get enforcement-order b 99)))
-
-(defn ^{:stratum 1} filter-applicable-rules
-  "Filter rules to those applicable to the given context.
-
-   Arguments:
-   - rules - Vector of rules
-   - context - Context map with :artifact, :task, :phase
-
-   Returns:
-   - Vector of applicable rules"
-  [rules context]
-  (let [artifact (:artifact context)
-        task-type (get-in context [:task :task/intent :intent/type])
-        phase (:phase context)]
-    (filterv (fn [rule]
-               (and (get rule :rule/enabled? true)
-                    (rule-applies-to-artifact? rule artifact)
-                    (rule-applies-to-task? rule task-type)
-                    (rule-applies-to-phase? rule phase)))
-             rules)))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} stricter-enforcement
-  "Return the stricter of two enforcement actions."
-  [a b]
-  (if (neg? (compare-enforcement a b)) a b))
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; Rule merging
-(defn ^{:stratum 3} merge-rules
-  "Merge two rules with the same ID.
-
-   Resolution strategy:
-   - Later rule overrides base rule for most fields
-   - Severity: higher severity wins
-   - Enforcement action: stricter action wins
-   - Description: concatenate with separator if different
-
-   Arguments:
-   - base - Original rule
-   - override - Rule that overrides base
-
-   Returns:
-   - Merged rule"
-  [base override]
-  (let [base-severity (:rule/severity base)
-        override-severity (:rule/severity override)
-        base-enforcement (get-in base [:rule/enforcement :action])
-        override-enforcement (get-in override [:rule/enforcement :action])]
-    (-> (merge base override)
-        ;; Escalate severity
-        (assoc :rule/severity (more-severe base-severity override-severity))
-        ;; Escalate enforcement
-        (assoc-in [:rule/enforcement :action]
-                  (stricter-enforcement base-enforcement override-enforcement)))))
-
-;------------------------------------------------------------------------------ Layer 4
-
-(defn ^{:stratum 4} resolve-rules
-  "Resolve a collection of rules from multiple packs.
-
-   Resolution:
-   1. Group rules by ID
-   2. For each ID, merge all rules using merge-rules
-   3. Return deduplicated rules
-
-   Arguments:
-   - rules - Sequence of rules from multiple packs (in order of precedence)
-
-   Returns:
-   - Vector of resolved rules"
-  [rules]
-  (let [by-id (group-by :rule/id rules)]
-    (->> by-id
-         (map (fn [[_id group]]
-                (reduce merge-rules group)))
-         vec)))
-
-;------------------------------------------------------------------------------ Layer 5
-
 ;; Rule checking orchestration
-(defn ^{:stratum 5} check-artifact
+(defn ^{:stratum 0} check-artifact
   "Check an artifact against all applicable rules from a pack.
 
    Arguments:
@@ -450,9 +85,9 @@
   (let [;; Handle single pack or vector of packs
         packs (if (vector? pack) pack [pack])
         all-rules (mapcat :pack/rules packs)
-        resolved (resolve-rules all-rules)
+        resolved (builders/resolve-rules all-rules)
         ctx (assoc context :artifact artifact)
-        applicable (filter-applicable-rules resolved ctx)
+        applicable (applicability/filter-applicable-rules resolved ctx)
         violations (detection/check-rules applicable artifact context)
 
         ;; Exhaustive classification - unknown enforcement/severity and
@@ -469,9 +104,9 @@
      :audits (mapv detection/violation->warning audits)
      :read-only? (boolean (:read-only? context))}))
 
-;------------------------------------------------------------------------------ Layer 6
+;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 6} check-artifacts
+(defn ^{:stratum 1} check-artifacts
   "Check multiple artifacts against pack rules.
 
    Arguments:
@@ -486,45 +121,20 @@
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
-  ;; Test severity comparison
-  (compare-severity :critical :high)  ;; => -1 (critical more severe)
-  (more-severe :low :high)          ;; => :high
-
-  ;; Test enforcement comparison
-  (compare-enforcement :hard-halt :warn)  ;; => -2 (hard-halt stricter)
-  (stricter-enforcement :warn :require-approval)  ;; => :require-approval
-
-  ;; Test rule merging
-  (merge-rules
-   {:rule/id :test
-    :rule/severity :high
-    :rule/enforcement {:action :warn :message "Warning"}}
-   {:rule/id :test
-    :rule/severity :low  ; Less severe, but original keeps high
-    :rule/enforcement {:action :hard-halt :message "Halt"}})
-  ;; => severity stays :high, enforcement escalates to :hard-halt
-
-  ;; Create a pack
+  ;; Create a pack and check an artifact
   (def test-pack
-    (create-pack "test" "Test Pack" "A test" "author"
-                 :rules
-                 [(create-rule :no-todos
-                               "No TODOs"
-                               "Don't leave TODOs in code"
-                               :low "800"
-                               (content-scan-detection "TODO")
-                               (warn-enforcement "Found TODO comment"))]))
+    (builders/create-pack "test" "Test Pack" "A test" "author"
+                          :rules
+                          [(builders/create-rule :no-todos
+                                                 "No TODOs"
+                                                 "Don't leave TODOs in code"
+                                                 :low "800"
+                                                 (builders/content-scan-detection "TODO")
+                                                 (builders/warn-enforcement "Found TODO comment"))]))
 
-  ;; Check artifact
   (check-artifact test-pack
                   {:artifact/content "# TODO: fix this"
                    :artifact/path "main.py"}
                   {})
-
-  ;; Resolve rules from multiple packs
-  (resolve-rules
-   [{:rule/id :test :rule/severity :low :rule/enforcement {:action :warn}}
-    {:rule/id :test :rule/severity :high :rule/enforcement {:action :hard-halt}}
-    {:rule/id :other :rule/severity :info :rule/enforcement {:action :audit}}])
 
   :leave-this-here)

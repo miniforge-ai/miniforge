@@ -26,7 +26,7 @@
    Layer 1: Query execution and output parsing
    Layer 2: Match-to-violation conversion"
   (:require
-   [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-validation :as schema]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0

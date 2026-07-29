@@ -48,7 +48,8 @@
      .standards/                                 — source .mdc files (input)"
   (:require
    [ai.miniforge.coerce.interface :as coerce]
-   [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-types :as schema-types]
+   [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [clojure.java.io :as io]
    [clojure.string :as str]))
 
@@ -130,11 +131,11 @@
 
 (def ^{:stratum 0} ^:private valid-enforcement-actions
   "Enforcement actions a rule may opt into via frontmatter `enforcement.action`,
-   derived from the ONE canonical source (`schema/enforcement-actions`) so the
+   derived from the ONE canonical source (`schema-types/enforcement-actions`) so the
    compiler can never accept an action the rule schema rejects. `:hard-halt`
    makes a pack-derived gate BLOCK; the rest are non-blocking. An unrecognized
    value falls back to the alwaysApply default — a typo can't produce garbage."
-  (set schema/enforcement-actions))
+  (set schema-types/enforcement-actions))
 
 ;; Field mapping transforms
 ;; ── Dewey code → phases ─────────────────────────────────────────────────────
@@ -676,10 +677,10 @@
                  agent-behavior
                  (assoc :rule/agent-behavior agent-behavior))]
 
-      (schema/success :rule rule {}))
+      (schema-validation/success :rule rule {}))
 
     (catch Exception e
-      (merge (schema/failure :rule (.getMessage e))
+      (merge (schema-validation/failure :rule (.getMessage e))
              {:filename filename}))))
 
 ;------------------------------------------------------------------------------ Layer 8
@@ -703,7 +704,7 @@
   [standards-dir]
   (let [dir (io/file standards-dir)]
     (if-not (.isDirectory dir)
-      (schema/failure-with-errors :pack [(str "Standards directory not found: " standards-dir)])
+      (schema-validation/failure-with-errors :pack [(str "Standards directory not found: " standards-dir)])
 
       (let [mdc-files (->> (file-seq dir)
                            (filter #(.isFile %))
@@ -714,7 +715,7 @@
             dup-errors (validate-no-duplicate-slugs mdc-files)]
 
         (if dup-errors
-          (schema/failure-with-errors :pack dup-errors)
+          (schema-validation/failure-with-errors :pack dup-errors)
 
           (let [results (mapv (fn [f]
                                (let [content (slurp f)
@@ -723,8 +724,8 @@
                                         :source-path (str f))))
                              mdc-files)
 
-                successes (filterv schema/succeeded? results)
-                failures  (filterv (complement schema/succeeded?) results)
+                successes (filterv schema-validation/succeeded? results)
+                failures  (filterv (complement schema-validation/succeeded?) results)
                 rules     (mapv :rule successes)
                 sorted-rules (vec (sort-by (comp str :rule/id) rules))
 
@@ -760,7 +761,7 @@
                                  sorted-rules)
                            (conj "Some always-inject rules have no applicable phases (Dewey 900 meta range)"))]
 
-            (schema/success :pack pack {:warnings       warnings
+            (schema-validation/success :pack pack {:warnings       warnings
                                         :compiled-count (count successes)
                                         :failed-count   (count failures)})))))))
 

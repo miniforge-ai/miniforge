@@ -35,6 +35,7 @@
    - Tainted content is isolated from instruction authority"
   (:require
    [ai.miniforge.policy-pack.schema :as schema]
+   [ai.miniforge.policy-pack.schema-validation :as schema-validation]
    [ai.miniforge.policy-pack.rules.pack-dependency-validation :as dep-validation]
    [ai.miniforge.knowledge.interface :as knowledge]
    [clojure.java.io :as io]
@@ -69,9 +70,9 @@
   (try
     (let [content (slurp file)
           data (edn/read-string content)]
-      (schema/success :data data {:error nil}))
+      (schema-validation/success :data data {:error nil}))
     (catch Exception e
-      (schema/failure :data (.getMessage e)))))
+      (schema-validation/failure :data (.getMessage e)))))
 
 (defn ^{:stratum 0} ensure-instant
   "Convert various timestamp representations to Instant."
@@ -202,7 +203,7 @@
       (spit file-path content)
       {:success? true :error nil})
     (catch Exception e
-      (schema/failure nil (.getMessage e)))))
+      (schema-validation/failure nil (.getMessage e)))))
 
 ;; Trust validation (N1 §2.10.2)
 (defn ^{:stratum 0} pack->trust-ref
@@ -235,8 +236,8 @@
   [file]
   (let [{:keys [success? data error]} (safe-read-edn file)]
     (if success?
-      (schema/success :rule (normalize-rule data) {:error nil})
-      (schema/failure :rule error))))
+      (schema-validation/success :rule (normalize-rule data) {:error nil})
+      (schema-validation/failure :rule error))))
 
 (defn- ^{:stratum 1} compose-resolved-pack
   "Merge inherited + overlay rules, apply overrides, inherit taxonomy ref."
@@ -248,7 +249,7 @@
         final-tax-ref  (or (:pack/taxonomy-ref overlay-pack) base-tax-ref)
         resolved-pack  (cond-> (assoc overlay-pack :pack/rules final-rules)
                          final-tax-ref (assoc :pack/taxonomy-ref final-tax-ref))]
-    (schema/success :pack resolved-pack {})))
+    (schema-validation/success :pack resolved-pack {})))
 
 (defn ^{:stratum 1} discover-packs
   "Discover all packs in a directory.
@@ -352,10 +353,10 @@
           (let [pack (normalize-pack data)
                 {:keys [valid? errors]} (schema/validate-pack pack)]
             (if valid?
-              (schema/success :pack pack {:errors nil})
-              (schema/failure-with-errors :pack errors)))
-          (schema/failure-with-errors :pack [{:file file-path :error error}])))
-      (schema/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
+              (schema-validation/success :pack pack {:errors nil})
+              (schema-validation/failure-with-errors :pack errors)))
+          (schema-validation/failure-with-errors :pack [{:file file-path :error error}])))
+      (schema-validation/failure-with-errors :pack [{:file file-path :error "File not found"}]))))
 
 (defn ^{:stratum 2} load-pack-from-directory
   "Load a policy pack from a directory structure.
@@ -389,23 +390,23 @@
 
     (cond
       (not (.exists dir))
-      (schema/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
+      (schema-validation/failure-with-errors :pack [{:dir dir-path :error "Directory not found"}])
 
       (not (.exists manifest-file))
-      (schema/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
+      (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error "Manifest not found in directory"}])
 
       :else
       (let [{:keys [success? data error]} (safe-read-edn manifest-file)]
         (if-not success?
-          (schema/failure-with-errors :pack [{:file "pack.edn" :error error}])
+          (schema-validation/failure-with-errors :pack [{:file "pack.edn" :error error}])
 
           ;; Load rules from rules/ directory if it exists
           (let [rule-files (when (.exists rules-dir)
                              (find-rule-files rules-dir))
                 rule-results (mapv load-rule-file rule-files)
-                successful-rules (keep :rule (filter schema/succeeded? rule-results))
+                successful-rules (keep :rule (filter schema-validation/succeeded? rule-results))
                 rule-errors (keep (fn [r]
-                                    (when-not (schema/succeeded? r)
+                                    (when-not (schema-validation/succeeded? r)
                                       {:error (:error r)}))
                                   rule-results)
 
@@ -423,8 +424,8 @@
                 {:keys [valid? errors]} (schema/validate-pack pack)]
 
             (if valid?
-              (schema/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
-              (schema/failure-with-errors :pack (concat errors rule-errors)))))))))
+              (schema-validation/success :pack pack {:errors (when (seq rule-errors) rule-errors)})
+              (schema-validation/failure-with-errors :pack (concat errors rule-errors)))))))))
 
 (defn ^{:stratum 2} resolve-overlay
   "Resolve an overlay pack by merging inherited rules from base packs.
@@ -448,12 +449,12 @@
         missing    (find-missing-base-packs extends base-packs)]
 
     (if (seq missing)
-      (schema/failure-with-errors :pack (vec missing))
+      (schema-validation/failure-with-errors :pack (vec missing))
 
       (let [tax-errors (validate-taxonomy-refs (filterv some? base-packs) overlay-pack)]
 
         (if (seq tax-errors)
-          (schema/failure-with-errors :pack tax-errors)
+          (schema-validation/failure-with-errors :pack tax-errors)
 
           (let [inherited-rules  (vec (mapcat :pack/rules (filterv some? base-packs)))
                 inherited-ids    (set (map :rule/id inherited-rules))
@@ -461,7 +462,7 @@
                 collision-errors (validate-no-rule-id-collisions inherited-ids overlay-rules)]
 
             (if (seq collision-errors)
-              (schema/failure-with-errors :pack collision-errors)
+              (schema-validation/failure-with-errors :pack collision-errors)
               (compose-resolved-pack overlay-pack base-packs
                                      inherited-rules overlay-rules))))))))
 
@@ -488,7 +489,7 @@
   (let [file (io/file path)]
     (cond
       (not (.exists file))
-      (schema/failure-with-errors :pack [{:path path :error "Path not found"}])
+      (schema-validation/failure-with-errors :pack [{:path path :error "Path not found"}])
 
       (.isFile file)
       (load-pack-from-file path)
@@ -497,7 +498,7 @@
       (load-pack-from-directory path)
 
       :else
-      (schema/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
+      (schema-validation/failure-with-errors :pack [{:path path :error "Unknown path type"}]))))
 
 ;------------------------------------------------------------------------------ Layer 4
 
@@ -527,9 +528,9 @@
          results (map (fn [{:keys [path]}]
                         (assoc (load-pack path) :path path))
                       discovered)
-         loaded-packs (vec (keep :pack (filter schema/succeeded? results)))
+         loaded-packs (vec (keep :pack (filter schema-validation/succeeded? results)))
          failed (vec (map #(select-keys % [:path :errors])
-                         (remove schema/succeeded? results)))
+                         (remove schema-validation/succeeded? results)))
 
          ;; Run dependency validation if requested
          dep-validation-result (when (and validate-deps? (seq loaded-packs))
@@ -565,7 +566,7 @@
   (let [load-result (load-pack path)
         skip-trust? (:skip-trust-validation? options false)]
 
-    (if-not (schema/succeeded? load-result)
+    (if-not (schema-validation/succeeded? load-result)
       load-result  ; Return load errors immediately
 
       ;; Apply overrides if provided
