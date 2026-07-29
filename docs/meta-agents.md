@@ -304,7 +304,7 @@ Workflow runner integrates coordinator:
 2. **Add to Registry**
 
    ```clojure
-   ;; In components/schema/src/ai/miniforge/schema/core.clj
+   ;; In components/schema/src/ai/miniforge/schema/vocab.clj
    (def meta-agent-roles
      [...existing...
       :my-agent])
