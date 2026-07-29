@@ -37,6 +37,7 @@
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.response.interface :as response]
    [ai.miniforge.supervisory-state.emitter :as emitter]
+   [ai.miniforge.supervisory-state.entities :as entities]
    [ai.miniforge.supervisory-state.schema :as schema]
    [clojure.java.io :as io]
    [malli.core :as m]
@@ -342,15 +343,15 @@
    absent by design — those families originate in the miniforge-control
    Rust adapters (N5-delta-3) and their fixtures live with their
    producer."
-  [{:family :workflow-run :ctor emitter/workflow-upserted     :schema schema/WorkflowRun        :entity workflow-run-entity}
-   {:family :spec         :ctor emitter/spec-upserted         :schema schema/Spec               :entity spec-entity}
-   {:family :agent        :ctor emitter/agent-upserted        :schema schema/AgentSession       :entity agent-entity}
-   {:family :pr           :ctor emitter/pr-upserted           :schema schema/PrFleetEntry       :entity pr-entity}
-   {:family :policy-eval  :ctor emitter/policy-evaluated      :schema schema/PolicyEvaluation   :entity policy-eval-entity}
-   {:family :attention    :ctor emitter/attention-derived     :schema schema/AttentionItem      :entity attention-entity}
-   {:family :task-node    :ctor emitter/task-node-upserted    :schema schema/TaskNode           :entity task-node-entity}
-   {:family :decision     :ctor emitter/decision-upserted     :schema schema/DecisionCard       :entity decision-entity}
-   {:family :intervention :ctor emitter/intervention-upserted :schema schema/InterventionRequest :entity intervention-entity}
+  [{:family :workflow-run :ctor emitter/workflow-upserted     :schema entities/WorkflowRun        :entity workflow-run-entity}
+   {:family :spec         :ctor emitter/spec-upserted         :schema entities/Spec               :entity spec-entity}
+   {:family :agent        :ctor emitter/agent-upserted        :schema entities/AgentSession       :entity agent-entity}
+   {:family :pr           :ctor emitter/pr-upserted           :schema entities/PrFleetEntry       :entity pr-entity}
+   {:family :policy-eval  :ctor emitter/policy-evaluated      :schema entities/PolicyEvaluation   :entity policy-eval-entity}
+   {:family :attention    :ctor emitter/attention-derived     :schema entities/AttentionItem      :entity attention-entity}
+   {:family :task-node    :ctor emitter/task-node-upserted    :schema entities/TaskNode           :entity task-node-entity}
+   {:family :decision     :ctor emitter/decision-upserted     :schema entities/DecisionCard       :entity decision-entity}
+   {:family :intervention :ctor emitter/intervention-upserted :schema entities/InterventionRequest :entity intervention-entity}
    {:family :gate-decision :ctor gate-decision-ctor            :schema env/DecisionEnvelope      :entity golden-envelope}])
 
 ;------------------------------------------------------------------------------ Layer 4

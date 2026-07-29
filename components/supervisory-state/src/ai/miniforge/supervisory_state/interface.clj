@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.supervisory-state.interface
   "Public API for the supervisory-state component.
 
@@ -27,13 +26,14 @@
   (:require
    [ai.miniforge.supervisory-state.accumulator :as accumulator]
    [ai.miniforge.supervisory-state.core :as core]
+   [ai.miniforge.supervisory-state.entities :as entities]
    [ai.miniforge.supervisory-state.golden-fixtures :as golden-fixtures]
    [ai.miniforge.supervisory-state.schema :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Contract version + golden fixtures
 
-(def schema-version
+;; Contract version + golden fixtures
+(def ^{:stratum 0} schema-version
   "Version of the supervisory entity contract, stamped as
    `:supervisory/schema-version` on every supervisory snapshot event
    (N3 §3.19, including `:supervisory/policy-evaluated` and
@@ -41,7 +41,7 @@
    `schema/schema-version`."
   schema/schema-version)
 
-(def write-golden-fixtures!
+(def ^{:stratum 0} write-golden-fixtures!
   "Write the canonical golden fixtures — one pinned, schema-validated
    `:supervisory/*-upserted` event per entity family, serialized through
    the production transit encoder — plus `manifest.edn` into `:out-dir`.
@@ -50,155 +50,149 @@
    compatible; see the `fixtures:supervisory` bb task."
   golden-fixtures/write-golden-fixtures!)
 
-(def empty-table
+(def ^{:stratum 0} empty-table
   "Initial empty EntityTable. Seed value for [[apply-event]] /
    [[apply-events]] when folding an event sequence without a component."
   schema/empty-table)
 
-(def apply-event
+(def ^{:stratum 0} apply-event
   "Pure reducer: apply one event to an EntityTable, returning the (possibly
    identical) updated table. Unknown event types are ignored at the entity
    level. Lets consumers (replay tooling, workbench adapters, tests)
    materialize a table from an event sequence without a live stream."
   accumulator/apply-event)
 
-(def apply-events
+(def ^{:stratum 0} apply-events
   "Pure fold of an event sequence into an EntityTable via [[apply-event]]."
   accumulator/apply-events)
 
-;------------------------------------------------------------------------------ Layer 0
 ;; Schemas (re-exports)
-
-(def Spec
+(def ^{:stratum 0} Spec
   "Malli `[:map ...]` schema (open) for a long-lived Spec — the operator's
    top-level unit of work that owns N WorkflowRuns over its lifetime
    (N5-delta-3 §3.1, §5.1)."
-  schema/Spec)
+  entities/Spec)
 
-(def WorkflowRun
+(def ^{:stratum 0} WorkflowRun
   "Malli `[:map ...]` schema (open) for a WorkflowRun — one concrete
    execution instance of a workflow (N5-delta-1 §3.1)."
-  schema/WorkflowRun)
+  entities/WorkflowRun)
 
-(def AgentSession
+(def ^{:stratum 0} AgentSession
   "Malli `[:map ...]` schema (open) for an AgentSession — an external or
    internal agent observable to the supervisory plane (N5-delta-1 §3.3)."
-  schema/AgentSession)
+  entities/AgentSession)
 
-(def PrFleetEntry
+(def ^{:stratum 0} PrFleetEntry
   "Malli `[:map ...]` schema (open) for a PrFleetEntry — a pull request in
    the supervisory PR fleet view, with optional pre-computed readiness/risk/
    policy/recommendation scores (N5-delta-2)."
-  schema/PrFleetEntry)
+  entities/PrFleetEntry)
 
-(def PolicyEvaluation
+(def ^{:stratum 0} PolicyEvaluation
   "Malli `[:map ...]` schema (open) for a PolicyEvaluation — an immutable
    record of a completed policy evaluation (N5-delta-1 §3.1)."
-  schema/PolicyEvaluation)
+  entities/PolicyEvaluation)
 
-(def PolicyViolation
+(def ^{:stratum 0} PolicyViolation
   "Malli `[:map ...]` schema (open) for a PolicyViolation — a single rule
    failure within a PolicyEvaluation (N5-delta-1 §3.1)."
-  schema/PolicyViolation)
+  entities/PolicyViolation)
 
-(def AttentionItem
+(def ^{:stratum 0} AttentionItem
   "Malli `[:map ...]` schema (open) for an AttentionItem — a derived
    supervisory signal (N5-delta-1 §3.1 + §5)."
-  schema/AttentionItem)
+  entities/AttentionItem)
 
-(def InterventionRequest
+(def ^{:stratum 0} InterventionRequest
   "Malli `[:map ...]` schema (open) for an InterventionRequest — a bounded
    supervisory control request (N5 supervisory delta §3.1)."
-  schema/InterventionRequest)
+  entities/InterventionRequest)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Lifecycle
-
-(def create
+(def ^{:stratum 0} create
   "Build a fresh supervisory-state component instance bound to `stream`.
    Returns an atom holding the component state; does not subscribe yet —
    call `start!` to begin consuming events."
   core/create)
 
-(def start!
+(def ^{:stratum 0} start!
   "Subscribe the component to its stream so it begins materializing the
    entity table from live events. Idempotent — repeat calls are no-ops.
    Returns the component. No startup replay of the event log."
   core/start!)
 
-(def stop!
+(def ^{:stratum 0} stop!
   "Unsubscribe the component from its stream. The entity table is retained
    so it stays queryable post-shutdown. Returns the component."
   core/stop!)
 
-(def attach!
+(def ^{:stratum 0} attach!
   "Create a component bound to `stream` and start it in one step
    (create + start!). Returns the started component."
   core/attach!)
 
-(def attached?
+(def ^{:stratum 0} attached?
   "True when supervisory-state is already subscribed to `stream`; false
    otherwise. Returns boolean."
   core/attached?)
 
-(def ensure-attached!
+(def ^{:stratum 0} ensure-attached!
   "Attach supervisory-state to `stream` exactly once, synchronized per
    stream so concurrent callers cannot double-attach. Returns a new
    component when an attachment is created; otherwise nil."
   core/ensure-attached!)
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Query API (reads only; consumers should prefer subscribing to
 ;; `:supervisory/*-upserted` events on the event stream)
-
-(def table
+(def ^{:stratum 0} table
   "Current entity table snapshot for `component` (pure read). Returns the
    EntityTable map: keys `:specs :workflows :agents :prs :policy-evals
    :attention :tasks :decisions :interventions :dependencies`, each a map
    of id -> entity."
   core/table)
 
-(def specs
+(def ^{:stratum 0} specs
   "All Spec entities in `component`. Returns a seq of Spec maps (empty when
    none)."
   core/specs)
 
-(def workflows
+(def ^{:stratum 0} workflows
   "All WorkflowRun entities in `component`. Returns a seq of WorkflowRun
    maps (empty when none)."
   core/workflows)
 
-(def agents
+(def ^{:stratum 0} agents
   "All AgentSession entities in `component`. Returns a seq of AgentSession
    maps (empty when none)."
   core/agents)
 
-(def prs
+(def ^{:stratum 0} prs
   "All PrFleetEntry entities in `component`. Returns a seq of PrFleetEntry
    maps (empty when none)."
   core/prs)
 
-(def policy-evals
+(def ^{:stratum 0} policy-evals
   "All PolicyEvaluation entities in `component`. Returns a seq of
    PolicyEvaluation maps (empty when none)."
   core/policy-evals)
 
-(def attention
+(def ^{:stratum 0} attention
   "All derived AttentionItem entities in `component`. Returns a seq of
    AttentionItem maps (empty when none)."
   core/attention)
 
-(def tasks
+(def ^{:stratum 0} tasks
   "All TaskNode entities in `component`. Returns a seq of TaskNode maps
    (empty when none)."
   core/tasks)
 
-(def decisions
+(def ^{:stratum 0} decisions
   "All DecisionCard entities in `component`. Returns a seq of DecisionCard
    maps (empty when none)."
   core/decisions)
 
-(def interventions
+(def ^{:stratum 0} interventions
   "All InterventionRequest entities in `component`. Returns a seq of
    InterventionRequest maps (empty when none)."
   core/interventions)
