@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>The Fort-Building Robots — miniforge.ai</title>
+  <meta name="description" content="Miniforge's architecture, explained simply: forts, robots, wiggle tests, and the two notebooks.">
+  <link rel="canonical" href="https://miniforge.ai/architectures/eli9-the-fort-building-robots">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+</head>
+<body>
+<div style="max-width:640px;margin:0 auto 28px;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; MINIFORGE.AI // DRAWING REGISTER</a>
+</div>
+
+<style>
+:root { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --accent:#ff5e1a; --card:#ffffff; --line:#e0dcd4; }
+@media (prefers-color-scheme: dark) { :root { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; } }
+:root[data-theme="dark"] { --bg:#1c1a17; --ink:#ece8e0; --sub:#a49c90; --card:#26231e; --line:#3a362f; }
+:root[data-theme="light"] { --bg:#faf9f6; --ink:#26221c; --sub:#6a635a; --card:#ffffff; --line:#e0dcd4; }
+body { background:var(--bg); color:var(--ink); font-family:Georgia, 'Times New Roman', serif; margin:0; padding:40px 20px 80px; line-height:1.65; }
+h1 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:34px; text-align:center; max-width:700px; margin:0 auto 8px; text-wrap:balance; }
+h2 { font-family:Helvetica, Arial, sans-serif; color:var(--accent); font-size:23px; max-width:640px; margin:44px auto 8px; }
+p, blockquote { max-width:640px; margin:14px auto; font-size:17px; }
+p.li { margin:8px auto; padding-left:1.2em; }
+em { color:var(--sub); }
+blockquote { border-left:4px solid var(--accent); padding:10px 20px; background:var(--card); border-radius:0 8px 8px 0; font-size:18px; }
+code { font-family:Menlo, Consolas, monospace; font-size:.85em; background:rgba(30,95,150,.12); padding:1px 5px; border-radius:4px; }
+hr { border:none; border-top:1px solid var(--line); max-width:640px; margin:40px auto; }
+.twrap { max-width:900px; margin:20px auto; overflow-x:auto; background:#ffffff; border:1px solid var(--line); border-radius:8px; }
+table { border-collapse:collapse; width:100%; font-family:Helvetica, Arial, sans-serif; font-size:13.5px; color:#26221c; }
+th, td { text-align:left; padding:8px 12px; border-bottom:1px solid #e8e4dc; }
+th { background:#f0eee8; }
+.fig { max-width:960px; margin:26px auto; background:#ffffff; border:1px solid var(--line); border-radius:10px; padding:10px; overflow-x:auto; }
+.fig svg { display:block; min-width:700px; width:100%; height:auto; }
+</style>
+<h1>The Fort-Building Robots</h1>
+<p><em>Miniforge, explained simply — same world as the house, the clubhouse, and the sticker rules. Same gullible robots, same no-ears checkers, same two notebooks. Grown-up translation table at the end.</em></p>
+<hr>
+<h2>Draw what you want</h2>
+<p>You want a fort. So you draw it: <em>a lookout on top, a rope ladder, a secret door. Don't touch the swing.</em> You pin your drawing to the board on the garage door, and the robot friends take it from there.</p>
+<p>The garage board has four columns: <strong>waiting</strong>, <strong>building</strong>, <strong>done</strong>, and <strong>didn't work</strong> — and the didn't-work drawings stay pinned up with notes on them, so anybody can see what went wrong. No hiding the flops.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 520" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+  </defs>
+  <rect width="900" height="520" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">You draw it. The garage board runs the yard.</text>
+
+  <!-- kid + drawing -->
+  <circle cx="100" cy="130" r="22" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <circle cx="92" cy="126" r="3" fill="#232323"/><circle cx="108" cy="126" r="3" fill="#232323"/>
+  <path d="M92,138 Q100,144 108,138" stroke="#232323" stroke-width="2" fill="none"/>
+  <rect x="80" y="156" width="40" height="52" rx="10" fill="#cfe2f3" stroke="#6c8ebf" stroke-width="2"/>
+
+  <rect x="150" y="90" width="200" height="170" rx="6" fill="#ffffff" stroke="#8a8a82" stroke-width="2" transform="rotate(-2 250 175)"/>
+  <text x="250" y="118" text-anchor="middle" font-size="14" font-weight="bold" fill="#232323" transform="rotate(-2 250 175)">MY FORT</text>
+  <path d="M200,210 L200,160 L250,132 L300,160 L300,210 Z" fill="none" stroke="#b85450" stroke-width="2.5" transform="rotate(-2 250 175)"/>
+  <rect x="238" y="140" width="24" height="16" fill="none" stroke="#b85450" stroke-width="2" transform="rotate(-2 250 175)"/>
+  <line x1="208" y1="210" x2="208" y2="182" stroke="#b8860b" stroke-width="2.5" transform="rotate(-2 250 175)"/>
+  <line x1="216" y1="210" x2="216" y2="182" stroke="#b8860b" stroke-width="2.5" transform="rotate(-2 250 175)"/>
+  <line x1="204" y1="190" x2="220" y2="190" stroke="#b8860b" stroke-width="2" transform="rotate(-2 250 175)"/>
+  <line x1="204" y1="200" x2="220" y2="200" stroke="#b8860b" stroke-width="2" transform="rotate(-2 250 175)"/>
+  <text x="250" y="228" text-anchor="middle" font-size="10" fill="#333" transform="rotate(-2 250 175)">lookout · rope ladder · secret door</text>
+  <text x="250" y="244" text-anchor="middle" font-size="10" font-weight="bold" fill="#b85450" transform="rotate(-2 250 175)">DON'T TOUCH THE SWING!</text>
+  <text x="250" y="286" text-anchor="middle" font-size="13" fill="#555">your drawing</text>
+
+  <path d="M360,175 L420,175" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="390" y="164" text-anchor="middle" font-size="12" fill="#3a76b8">pin it up</text>
+
+  <!-- garage board -->
+  <rect x="430" y="80" width="440" height="240" rx="8" fill="#f6e0b5" stroke="#b8860b" stroke-width="2.5"/>
+  <text x="650" y="106" text-anchor="middle" font-size="14" font-weight="bold" fill="#6a4a10">THE GARAGE BOARD</text>
+  <rect x="446" y="120" width="98" height="180" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="495" y="140" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">waiting</text>
+  <rect x="456" y="150" width="78" height="34" rx="3" fill="#fffde7" stroke="#c8b900"/>
+  <rect x="456" y="190" width="78" height="34" rx="3" fill="#fffde7" stroke="#c8b900"/>
+  <rect x="556" y="120" width="98" height="180" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="605" y="140" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">building</text>
+  <rect x="566" y="150" width="78" height="34" rx="3" fill="#dae8fc" stroke="#6c8ebf"/>
+  <rect x="666" y="120" width="98" height="180" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="715" y="140" text-anchor="middle" font-size="11" font-weight="bold" fill="#333">done</text>
+  <rect x="676" y="150" width="78" height="34" rx="3" fill="#d5e8d4" stroke="#82b366"/>
+  <rect x="676" y="190" width="78" height="34" rx="3" fill="#d5e8d4" stroke="#82b366"/>
+  <rect x="776" y="120" width="80" height="180" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="816" y="134" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">didn't</text>
+  <text x="816" y="146" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">work</text>
+  <rect x="784" y="154" width="64" height="40" rx="3" fill="#f8cecc" stroke="#b85450"/>
+  <text x="816" y="172" text-anchor="middle" font-size="8" fill="#7a3230">+ notes on</text>
+  <text x="816" y="184" text-anchor="middle" font-size="8" fill="#7a3230">what went wrong</text>
+  <text x="650" y="342" text-anchor="middle" font-size="12" fill="#6a4a10">the flops stay pinned up — no hiding them</text>
+
+  <!-- robot takes it -->
+  <line x1="470" y1="392" x2="470" y2="376" stroke="#d6b656" stroke-width="3"/>
+  <circle cx="470" cy="370" r="6" fill="#d79b00"/>
+  <rect x="436" y="392" width="68" height="54" rx="12" fill="#fff2cc" stroke="#d6b656" stroke-width="2.5"/>
+  <circle cx="458" cy="414" r="6" fill="#232323"/><circle cx="482" cy="414" r="6" fill="#232323"/>
+  <path d="M456,432 Q470,440 484,432" stroke="#232323" stroke-width="2.5" fill="none"/>
+  <path d="M520,415 L580,415" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="620" y="408" font-size="13" fill="#333">the robot friends take it</text>
+  <text x="620" y="426" font-size="13" fill="#333">from there</text>
+
+  <rect x="120" y="460" width="660" height="44" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="487" text-anchor="middle" font-size="15" fill="#4a4a20">Your drawing is the whole ask — what you want, and what they must not touch.</text>
+</svg>
+</div><p></p>
+<h2>How the robots build</h2>
+<p>Every fort goes the same way:</p>
+<p class="li"><strong>Look at the yard.</strong> Where's the good tree? Where's the swing we can't touch?</p>
+<p class="li"><strong>Make the job list.</strong> The team has a <strong>coach</strong>. The coach turns your drawing into jobs — <em>ladder first, then floor, then walls, then lookout</em> — and hands each robot its job. You never boss a team robot around one at a time; that's the coach's whole job. And if your drawing already lists the jobs? The coach doesn't redo your thinking — just checks the list makes sense and gets going.</p>
+<p class="li"><strong>Build.</strong></p>
+<p class="li"><strong>Wiggle test.</strong> A checker grabs every board and <em>wiggles</em> it. Loose board? Red sticker. Red sticker means <strong>fix it and test it again</strong> — and nobody builds on top of a red sticker, ever. The checker has no ears, so "it's fine, trust me" lands on nothing.</p>
+<p class="li"><strong>The did-you-build-the-drawing check.</strong> A different checker holds up your drawing next to the fort. Lookout? Yes. Rope ladder? Yes. Secret door? …they built a <em>window</em>. <strong>A great fort that isn't your fort fails.</strong> Back they go.</p>
+<p class="li"><strong>Show you.</strong> You climb it, hang on stuff, and leave sticky notes: <em>ladder's too far apart. More pillows.</em> The robots work the sticky notes until there aren't any.</p>
+<p class="li"><strong>Write down what they learned.</strong> <em>Wet rope slips. Floor before walls.</em> Into the team notebook — next fort starts smarter.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The wiggle test — and the did-you-build-the-drawing check</text>
+
+  <!-- wiggle test -->
+  <rect x="40" y="70" width="400" height="230" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="96" font-size="16" font-weight="bold" fill="#232323">the wiggle test</text>
+  <!-- fort piece -->
+  <rect x="70" y="130" width="120" height="100" fill="#f6e0b5" stroke="#b8860b" stroke-width="2.5"/>
+  <line x1="70" y1="160" x2="190" y2="160" stroke="#b8860b" stroke-width="1.5"/>
+  <line x1="70" y1="190" x2="190" y2="190" stroke="#b8860b" stroke-width="1.5"/>
+  <rect x="88" y="166" width="60" height="18" rx="3" fill="#f6e0b5" stroke="#b8860b" stroke-width="2" transform="rotate(-8 118 175)"/>
+  <!-- checker -->
+  <rect x="230" y="132" width="24" height="20" rx="5" fill="#8a8a82"/>
+  <circle cx="242" cy="168" r="20" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <circle cx="235" cy="164" r="3" fill="#232323"/><circle cx="249" cy="164" r="3" fill="#232323"/>
+  <line x1="235" y1="177" x2="249" y2="177" stroke="#232323" stroke-width="2"/>
+  <rect x="216" y="190" width="52" height="46" rx="9" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <path d="M214,205 L196,180" stroke="#8a8a82" stroke-width="3" stroke-linecap="round"/>
+  <text x="242" y="256" text-anchor="middle" font-size="11" fill="#555">no ears — "trust me"</text>
+  <text x="242" y="270" text-anchor="middle" font-size="11" fill="#555">lands on nothing</text>
+  <!-- red sticker -->
+  <circle cx="118" cy="176" r="14" fill="#f8cecc" stroke="#b85450" stroke-width="2.5"/>
+  <text x="118" y="180" text-anchor="middle" font-size="8" font-weight="bold" fill="#7a3230">LOOSE</text>
+  <path d="M118,196 C118,240 150,258 190,258" stroke="#c0392b" stroke-width="2.5" fill="none" marker-end="url(#ar)" stroke-dasharray="6 4"/>
+  <text x="120" y="248" font-size="11" font-weight="bold" fill="#c0392b">fix it,</text>
+  <text x="120" y="262" font-size="11" font-weight="bold" fill="#c0392b">test again</text>
+  <rect x="290" y="120" width="140" height="0" fill="none"/>
+  <text x="320" y="132" font-size="12" fill="#7a3230" font-weight="bold">nobody builds on top</text>
+  <text x="320" y="147" font-size="12" fill="#7a3230" font-weight="bold">of a red sticker. ever.</text>
+
+  <!-- drawing check -->
+  <rect x="460" y="70" width="400" height="230" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="476" y="96" font-size="16" font-weight="bold" fill="#232323">the did-you-build-the-drawing check</text>
+  <!-- drawing -->
+  <rect x="480" y="116" width="110" height="120" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <path d="M500,210 L500,160 L535,140 L570,160 L570,210 Z" fill="none" stroke="#b85450" stroke-width="2"/>
+  <rect x="526" y="168" width="18" height="26" fill="none" stroke="#b85450" stroke-width="2"/>
+  <text x="535" y="228" text-anchor="middle" font-size="9" fill="#333">secret DOOR</text>
+  <!-- fort -->
+  <rect x="620" y="116" width="110" height="120" rx="4" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+  <path d="M640,210 L640,160 L675,140 L710,160 L710,210 Z" fill="#fffdf5" stroke="#b8860b" stroke-width="2"/>
+  <rect x="666" y="164" width="20" height="16" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2"/>
+  <text x="675" y="228" text-anchor="middle" font-size="9" fill="#333">…a WINDOW?</text>
+  <text x="605" y="180" text-anchor="middle" font-size="18" font-weight="bold" fill="#555">vs</text>
+  <line x1="740" y1="130" x2="800" y2="190" stroke="#c0392b" stroke-width="5"/>
+  <line x1="800" y1="130" x2="740" y2="190" stroke="#c0392b" stroke-width="5"/>
+  <text x="670" y="262" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#7a3230">a great fort that isn't YOUR fort fails.</text>
+  <text x="670" y="278" text-anchor="middle" font-size="11" fill="#555">back they go.</text>
+
+  <!-- sticky notes loop -->
+  <rect x="40" y="320" width="820" height="150" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="346" font-size="16" font-weight="bold" fill="#232323">then you climb it — and leave sticky notes</text>
+  <rect x="60" y="362" width="120" height="60" rx="3" fill="#fffde7" stroke="#c8b900" stroke-width="1.5" transform="rotate(-3 120 392)"/>
+  <text x="120" y="388" text-anchor="middle" font-size="10.5" fill="#4a4a20" transform="rotate(-3 120 392)">ladder steps too</text>
+  <text x="120" y="402" text-anchor="middle" font-size="10.5" fill="#4a4a20" transform="rotate(-3 120 392)">far apart!</text>
+  <rect x="200" y="366" width="120" height="60" rx="3" fill="#fffde7" stroke="#c8b900" stroke-width="1.5" transform="rotate(2 260 396)"/>
+  <text x="260" y="392" text-anchor="middle" font-size="10.5" fill="#4a4a20" transform="rotate(2 260 396)">more pillows</text>
+  <text x="260" y="406" text-anchor="middle" font-size="10.5" fill="#4a4a20" transform="rotate(2 260 396)">in the lookout</text>
+  <path d="M340,395 L400,395" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#a)"/>
+  <text x="420" y="388" font-size="13" fill="#333">the robots fix each note and call the checkers again,</text>
+  <text x="420" y="406" font-size="13" fill="#333">around and around, until there are no notes left</text>
+  <path d="M800,380 C830,400 830,430 790,440" stroke="#4a9a4a" stroke-width="2.5" fill="none" marker-end="url(#ag)"/>
+  <text x="756" y="456" font-size="12" fill="#3a6a34" font-weight="bold">done ✓</text>
+
+  <rect x="120" y="496" width="660" height="44" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="523" text-anchor="middle" font-size="15" fill="#4a4a20">Strong AND yours — a fort has to pass both checkers, every stage, every time.</text>
+</svg>
+</div><p></p>
+<h2>Big forts</h2>
+<p>A castle-sized fort? The job list gets split up and <strong>different robots build different parts at the same time</strong> — one on the lookout, one on the ladder, one on the walls. Where two parts meet, a careful robot fits them together, and the fit gets its own wiggle test.</p>
+<p>And every part gets photographed into a shoebox as they go. If a robot stops halfway — rain, dead battery — any other robot grabs the photos and <strong>keeps building right where it stopped</strong>. No fort is ever stuck inside one robot's head.</p>
+<h2>The two notebooks</h2>
+<p>You know these already — they run the house, and they run the fort-building too:</p>
+<p class="li"><strong>The proof notebook.</strong> Every wiggle test, every sticker, every photo. "Is the lookout safe?" Nobody says "the robot promised." They open to the page. <strong>Not in the notebook = didn't happen.</strong></p>
+<p class="li"><strong>The diary.</strong> Everything that happens, one line at a time, in the no-ears checker's own handwriting. Never erased.</p>
+<h2>Watching from the porch</h2>
+<p>You don't stand in the yard all day. You sit on the porch with a board that shows <strong>everything happening in your yard at once</strong> — every fort, what's building, what's stuck, what's got a red sticker. And not every robot in your yard is on the fort team. You've also got a couple of <strong>borrowed robots</strong> — a friend lent them to you, and they're terrific builders. They work for you in <em>your</em> yard, but they're not on the team, so the coach doesn't hand them jobs. If you want a borrowed robot to build a birdhouse, <em>you</em> tell it — right from the porch, one note at a time. The board shows them the same way as everyone else — busy, stuck, done. <strong>The team listens to its coach; the borrowed robots listen only to you.</strong> (Maybe someday the coach takes the borrowed robots onto the team. Not yet.)</p>
+<p>Two porch rules, and they never bend:</p>
+<p class="li"><strong>Notes, never shouting.</strong> Want to pause a fort, or redo the ladder? Write it, drop it in the jar, and the diary gets a copy <em>before</em> any robot moves. If it isn't a note in the jar, the robots don't do it — even from you.</p>
+<p class="li"><strong>There's a robot for the checkers too.</strong> Somebody has to decide which checks each fort needs and read all the verdicts. That's one more robot — the checker-boss — and it's nearly switched on. You watch <em>it</em> from the porch, same as everything else.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The porch: one kid, the whole yard, notes in the jar</text>
+
+  <!-- porch + kid -->
+  <rect x="30" y="330" width="270" height="14" rx="3" fill="#b8860b"/>
+  <line x1="50" y1="344" x2="50" y2="380" stroke="#b8860b" stroke-width="5"/>
+  <line x1="280" y1="344" x2="280" y2="380" stroke="#b8860b" stroke-width="5"/>
+  <circle cx="90" cy="272" r="20" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <circle cx="83" cy="268" r="3" fill="#232323"/><circle cx="97" cy="268" r="3" fill="#232323"/>
+  <path d="M83,280 Q90,286 97,280" stroke="#232323" stroke-width="2" fill="none"/>
+  <rect x="72" y="296" width="36" height="36" rx="9" fill="#cfe2f3" stroke="#6c8ebf" stroke-width="2"/>
+  <text x="90" y="368" text-anchor="middle" font-size="12" fill="#555">you, on the porch</text>
+
+  <!-- the board -->
+  <rect x="130" y="90" width="330" height="220" rx="10" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <text x="295" y="116" text-anchor="middle" font-size="14" font-weight="bold" fill="#274b73">THE PORCH BOARD — your whole yard</text>
+  <rect x="148" y="130" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="193" y="150" text-anchor="middle" font-size="10" fill="#333">tree fort</text>
+  <rect x="160" y="158" width="66" height="16" rx="8" fill="#d5e8d4" stroke="#82b366"/>
+  <text x="193" y="170" text-anchor="middle" font-size="8.5" fill="#3a6a34">building ✓</text>
+  <rect x="250" y="130" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="295" y="150" text-anchor="middle" font-size="10" fill="#333">pillow fort</text>
+  <rect x="262" y="158" width="66" height="16" rx="8" fill="#f8cecc" stroke="#b85450"/>
+  <text x="295" y="170" text-anchor="middle" font-size="8.5" fill="#7a3230">red sticker!</text>
+  <rect x="352" y="130" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="397" y="150" text-anchor="middle" font-size="10" fill="#333">castle fort</text>
+  <rect x="364" y="158" width="66" height="16" rx="8" fill="#fffde7" stroke="#c8b900"/>
+  <text x="397" y="170" text-anchor="middle" font-size="8.5" fill="#6a5a10">3 parts at once</text>
+  <rect x="148" y="212" width="90" height="70" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5" stroke-dasharray="5 3"/>
+  <text x="193" y="230" text-anchor="middle" font-size="9.5" fill="#333">borrowed robot:</text>
+  <text x="193" y="243" text-anchor="middle" font-size="9.5" fill="#333">birdhouse</text>
+  <rect x="160" y="252" width="66" height="16" rx="8" fill="#ffe6cc" stroke="#d79b00"/>
+  <text x="193" y="264" text-anchor="middle" font-size="8.5" fill="#8a5a00">stuck?</text>
+  <rect x="250" y="212" width="192" height="70" rx="5" fill="#eef4fb" stroke="#6c8ebf" stroke-width="1"/>
+  <text x="346" y="236" text-anchor="middle" font-size="10.5" fill="#274b73">a friend lent you this one — not on</text>
+  <text x="346" y="250" text-anchor="middle" font-size="10.5" fill="#274b73">the team, so no coach hands it jobs.</text>
+  <text x="346" y="264" text-anchor="middle" font-size="10.5" fill="#274b73">YOU tell it what to do, from here</text>
+
+  <!-- the jar -->
+  <rect x="510" y="140" width="150" height="170" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <path d="M550,190 L550,280 Q550,292 562,292 L608,292 Q620,292 620,280 L620,190 Z" fill="#eef4fb" stroke="#6c8ebf" stroke-width="2.5"/>
+  <rect x="544" y="178" width="82" height="14" rx="4" fill="#6c8ebf"/>
+  <rect x="560" y="220" width="50" height="30" rx="2" fill="#fffde7" stroke="#c8b900" transform="rotate(-6 585 235)"/>
+  <text x="585" y="234" text-anchor="middle" font-size="7.5" fill="#4a4a20" transform="rotate(-6 585 235)">pause the</text>
+  <text x="585" y="244" text-anchor="middle" font-size="7.5" fill="#4a4a20" transform="rotate(-6 585 235)">pillow fort</text>
+  <text x="585" y="166" text-anchor="middle" font-size="12" font-weight="bold" fill="#333">THE JAR</text>
+
+  <rect x="680" y="140" width="190" height="170" rx="10" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="775" y="164" text-anchor="middle" font-size="13" font-weight="bold" fill="#4a4a20">notes, never shouting</text>
+  <text x="692" y="188" font-size="11.5" fill="#4a4a20">write it → drop it in the jar →</text>
+  <text x="692" y="204" font-size="11.5" fill="#4a4a20">the diary gets a copy → THEN</text>
+  <text x="692" y="220" font-size="11.5" fill="#4a4a20">the robots move.</text>
+  <text x="692" y="244" font-size="11.5" font-weight="bold" fill="#7a3230">not a note in the jar?</text>
+  <text x="692" y="260" font-size="11.5" font-weight="bold" fill="#7a3230">the robots don't do it —</text>
+  <text x="692" y="276" font-size="11.5" font-weight="bold" fill="#7a3230">even from you.</text>
+  <path d="M300,300 C400,340 480,300 545,270" stroke="#3a76b8" stroke-width="2" fill="none" stroke-dasharray="5 4" marker-end="url(#a)"/>
+
+  <!-- checker boss -->
+  <rect x="330" y="380" width="540" height="100" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <line x1="380" y1="416" x2="380" y2="402" stroke="#d6b656" stroke-width="3"/>
+  <circle cx="380" cy="397" r="5" fill="#d79b00"/>
+  <rect x="352" y="416" width="56" height="44" rx="10" fill="#fff2cc" stroke="#d6b656" stroke-width="2.5"/>
+  <circle cx="370" cy="434" r="5" fill="#232323"/><circle cx="390" cy="434" r="5" fill="#232323"/>
+  <line x1="368" y1="448" x2="392" y2="448" stroke="#232323" stroke-width="2"/>
+  <rect x="342" y="404" width="18" height="14" rx="3" fill="#8a8a82"/>
+  <text x="430" y="414" font-size="13" font-weight="bold" fill="#232323">the checker-boss (nearly switched on)</text>
+  <text x="430" y="434" font-size="12" fill="#333">decides which checks each fort needs, reads every verdict,</text>
+  <text x="430" y="450" font-size="12" fill="#333">sends robots back — and you watch IT from the porch,</text>
+  <text x="430" y="466" font-size="12" fill="#333">same as everything else</text>
+
+  <rect x="120" y="500" width="660" height="44" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="450" y="527" text-anchor="middle" font-size="15" fill="#4a4a20">The team listens to its coach; the borrowed robots listen only to you.</text>
+</svg>
+</div><p></p>
+<h2>The safety rules</h2>
+<p>Taped inside the garage: the safety rules. Each one says how serious it is — <em>stop everything</em> (no building over the well), <em>ask first</em> (anything taller than Dad), <em>be careful</em> (splinters), or <em>just write it down</em>. The checkers' checklists come straight from this sheet.</p>
+<p>That's your yard. But the whole <em>street</em> has yards, and every yard has its own robots building its own forts. So one helpful neighbor lady keeps an eye on the street. She'll say "you two are building in the same corner — go talk," and she keeps the newest copy of the safety rules for everyone. But here's her rule: <strong>she never stops anyone's building.</strong> Advice, not permission. (Honestly, most of her house is still a drawing itself — the robots have plans for her job that they haven't built.)</p>
+<p>There's also the <strong>fort fair</strong> at the end of summer, where one judge grades every yard's forts with the same scorecard. Our robots enter their own rule-following as a fort. Takes nerve.</p>
+<p></p><div class="fig"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">The street, the fort fair, and the fridge list</text>
+
+  <!-- street of yards -->
+  <rect x="40" y="70" width="560" height="200" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="96" font-size="15" font-weight="bold" fill="#232323">every yard has its own robots and its own forts</text>
+  <g>
+    <rect x="60" y="120" width="150" height="110" rx="6" fill="#eef7ec" stroke="#82b366" stroke-width="1.5"/>
+    <path d="M90,205 L90,170 L120,152 L150,170 L150,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="166" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="135" y="222" text-anchor="middle" font-size="10" fill="#3a6a34">your yard</text>
+  </g>
+  <g>
+    <rect x="230" y="120" width="150" height="110" rx="6" fill="#eef4fb" stroke="#6c8ebf" stroke-width="1.5"/>
+    <path d="M260,205 L260,172 L290,156 L320,172 L320,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="336" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="305" y="222" text-anchor="middle" font-size="10" fill="#274b73">next door</text>
+  </g>
+  <g>
+    <rect x="400" y="120" width="150" height="110" rx="6" fill="#fdf3e6" stroke="#d79b00" stroke-width="1.5"/>
+    <path d="M430,205 L430,172 L460,156 L490,172 L490,205 Z" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <rect x="506" y="180" width="26" height="24" rx="6" fill="#fff2cc" stroke="#d6b656" stroke-width="1.5"/>
+    <text x="475" y="222" text-anchor="middle" font-size="10" fill="#8a5a00">down the street</text>
+  </g>
+  <text x="320" y="254" text-anchor="middle" font-size="11" font-style="italic" fill="#555">two yards about to build in the same corner? she'll notice.</text>
+
+  <!-- neighbor lady -->
+  <rect x="620" y="70" width="250" height="200" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <circle cx="695" cy="130" r="22" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <path d="M675,116 Q695,100 715,116" stroke="#8a8a82" stroke-width="6" fill="none"/>
+  <circle cx="687" cy="126" r="3" fill="#232323"/><circle cx="703" cy="126" r="3" fill="#232323"/>
+  <path d="M687,140 Q695,146 703,140" stroke="#232323" stroke-width="2" fill="none"/>
+  <rect x="675" y="154" width="40" height="46" rx="10" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <rect x="726" y="120" width="130" height="56" rx="8" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="791" y="140" text-anchor="middle" font-size="10" fill="#333">"you two — same</text>
+  <text x="791" y="154" text-anchor="middle" font-size="10" fill="#333">corner. go talk!"</text>
+  <text x="745" y="216" text-anchor="middle" font-size="12" font-weight="bold" fill="#4a355c">the helpful neighbor lady</text>
+  <text x="745" y="234" text-anchor="middle" font-size="11" fill="#555">advice, never permission —</text>
+  <text x="745" y="248" text-anchor="middle" font-size="11" fill="#555">nobody waits for her OK</text>
+  <text x="745" y="262" text-anchor="middle" font-size="10" font-style="italic" fill="#8a5a00">(most of her house is still a drawing)</text>
+
+  <!-- fort fair -->
+  <rect x="40" y="292" width="400" height="120" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="56" y="318" font-size="15" font-weight="bold" fill="#232323">the fort fair</text>
+  <rect x="60" y="332" width="130 " height="60" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="125" y="352" text-anchor="middle" font-size="10" font-weight="bold" fill="#333">SCORECARD</text>
+  <line x1="72" y1="362" x2="178" y2="362" stroke="#c8c8c0" stroke-width="1.5"/>
+  <line x1="72" y1="374" x2="178" y2="374" stroke="#c8c8c0" stroke-width="1.5"/>
+  <text x="210" y="352" font-size="12" fill="#333">one judge, one scorecard,</text>
+  <text x="210" y="368" font-size="12" fill="#333">every yard's forts — no favorites.</text>
+  <text x="210" y="392" font-size="11.5" font-style="italic" fill="#555">our robots enter their own rule-following. nerve.</text>
+
+  <!-- fridge -->
+  <rect x="460" y="292" width="410" height="230" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <rect x="480" y="312" width="120" height="190" rx="8" fill="#eef4fb" stroke="#8a8a82" stroke-width="2.5"/>
+  <line x1="480" y1="380" x2="600" y2="380" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="590" cy="350" r="3" fill="#8a8a82"/><circle cx="590" cy="410" r="3" fill="#8a8a82"/>
+  <rect x="492" y="324" width="96" height="120" rx="2" fill="#fffde7" stroke="#c8b900" stroke-width="1.5" transform="rotate(-2 540 384)"/>
+  <text x="540" y="342" text-anchor="middle" font-size="8.5" font-weight="bold" fill="#4a4a20" transform="rotate(-2 540 384)">BROKEN STUFF</text>
+  <line x1="500" y1="352" x2="580" y2="352" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="366" x2="580" y2="366" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="380" x2="580" y2="380" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="394" x2="580" y2="394" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <line x1="500" y1="408" x2="580" y2="408" stroke="#c8b900" transform="rotate(-2 540 384)"/>
+  <text x="620" y="330" font-size="12" font-weight="bold" fill="#232323">the fridge list — on purpose,</text>
+  <text x="620" y="346" font-size="12" font-weight="bold" fill="#232323">where everyone can see:</text>
+  <text x="620" y="368" font-size="10.5" fill="#555">· the checker who stamps words he can't read</text>
+  <text x="620" y="384" font-size="10.5" fill="#555">· three words for "dangerous"</text>
+  <text x="620" y="400" font-size="10.5" fill="#555">· two diaries in two drawers</text>
+  <text x="620" y="416" font-size="10.5" fill="#555">· the "please don't" sticky note</text>
+  <text x="620" y="432" font-size="10.5" fill="#555">· the neighbor lady's unbuilt house</text>
+  <text x="620" y="456" font-size="11" font-style="italic" fill="#7a3230">a notebook that never lies has to</text>
+  <text x="620" y="470" font-size="11" font-style="italic" fill="#7a3230">list its own loose boards</text>
+
+  <rect x="40" y="428" width="400" height="94" rx="10" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="56" y="454" font-size="13" font-weight="bold" fill="#4a4a20">whose yard is this?</text>
+  <text x="56" y="474" font-size="12" fill="#4a4a20">the robots wrote down everything except that.</text>
+  <text x="56" y="490" font-size="12" fill="#4a4a20">no deeds, no passes — yet. it's next, and the</text>
+  <text x="56" y="506" font-size="12" fill="#4a4a20">notebook-and-checker bones are ready for it.</text>
+</svg>
+</div><p></p>
+<h2>The fridge list</h2>
+<p>On the fridge, the robots keep a list of what's broken or missing in their own system — on purpose, where everyone can see:</p>
+<p class="li">Whole parts of the neighbor-lady's job: still just drawings.</p>
+<p class="li">One checker <strong>stamps words he can't read.</strong> If his checklist says "wobbly" and the rules sheet says "shaky," he shrugs and stamps it fine. A checker who passes what he doesn't understand isn't a checker. (Top of the list.)</p>
+<p class="li">Three sheets use three different words for <em>dangerous</em>, and nothing makes them match.</p>
+<p class="li">Two diaries in two drawers, and they don't always agree. Two diaries is zero diaries.</p>
+<p class="li">One helper robot is secretly a whole fort-building team by himself — and we manage him with a sticky note that says "please don't." Everyone knows that's silly. The fix is drawn, not built.</p>
+<p>Why keep the list on the fridge? Because the robots' whole promise is <em>the notebook never lies</em>. A team like that has to list its own loose boards, or the notebook means nothing.</p>
+<h2>Whose yard is this?</h2>
+<p>One last thing, and you already know how it ends. The robots keep perfect notebooks about <em>what</em> they built and <em>how</em> — and almost nothing about <strong>whose yard they built it in</strong>. No house deeds, no passes, no bracelets — none of the whose-things-are-whose world has reached the fort robots yet. It's next. And the nice part: when it arrives, the robots won't have to change their bones — notebooks and no-ears checkers are already exactly the right bones to hang passes on.</p>
+<hr>
+<h2>The same story in grown-up words</h2>
+<div class="twrap"><table>
+<tr><th>In the story</th><th>In the architecture</th></tr>
+<tr><td>your drawing</td><td>a work spec — intent + constraints</td></tr>
+<tr><td>the garage board, flops kept pinned</td><td>the <code>work/</code> kanban; failures keep their trail</td></tr>
+<tr><td>look → job list → build → tests → show → learn</td><td>the phase pipeline: explore → plan → implement → verify → review → release → observe</td></tr>
+<tr><td>the coach</td><td>the orchestrator — turns the spec into tasks and hands each agent its work</td></tr>
+<tr><td>not redoing your thinking</td><td>the 0-token <code>plan-from-spec-tasks</code> path</td></tr>
+<tr><td>the wiggle test, red stickers</td><td>fail-closed gates at phase transitions; validate-and-repair</td></tr>
+<tr><td>nobody builds on a red sticker</td><td>gate failure blocks the next phase — never bypassed</td></tr>
+<tr><td>the did-you-build-the-drawing checker</td><td>the meta agents: semantic-intent gating — built ≠ planned fails</td></tr>
+<tr><td>the checker-boss, nearly switched on</td><td>the operator (meta-meta loop), plumbed and nearing release</td></tr>
+<tr><td>different robots, different parts</td><td>DAG execution; each part a full sub-pipeline in its own sandbox (worktree → container → k8s)</td></tr>
+<tr><td>fitting parts together, with its own test</td><td>multi-parent merge resolution, gated</td></tr>
+<tr><td>the shoebox of photos</td><td>checkpoints + git bundles; <code>bb harvest</code> recovers them</td></tr>
+<tr><td>the proof notebook</td><td>evidence bundles — provenance for every transition</td></tr>
+<tr><td>the diary</td><td>the append-only event stream</td></tr>
+<tr><td>sticky notes until there aren't any</td><td>the PR review loop; the designed autonomous monitor</td></tr>
+<tr><td>the porch board — your whole yard, one view</td><td>the operator console — the control-room premise</td></tr>
+<tr><td>the borrowed robots, coachless</td><td>bare agents (Claude Code / codex sessions) — you direct them from the console; adapter-observed, not orchestrated by Miniforge (yet)</td></tr>
+<tr><td>notes in the jar, never shouting</td><td>the intervention round-trip — every supervisory write is a logged InterventionRequest first</td></tr>
+<tr><td>the safety rules, each with a seriousness</td><td>policy packs; per-rule enforcement: hard-halt / require-approval / warn / audit</td></tr>
+<tr><td>the helpful neighbor who never blocks</td><td>Fleet — advisory coordination, pack distribution; mostly spec-only today</td></tr>
+<tr><td>the fort fair's one scorecard</td><td>minibench + workbench-contract — cross-product eval, including miniforge's own governance</td></tr>
+<tr><td>the fridge list</td><td>panel T3: the delta and contradiction register</td></tr>
+<tr><td>the checker who stamps what he can't read</td><td>governance failing open on severity-vocabulary mismatch</td></tr>
+<tr><td>three words for dangerous</td><td>three severity vocabularies, unenforced</td></tr>
+<tr><td>two diaries in two drawers</td><td>two derivers of supervisory truth</td></tr>
+<tr><td>the sticky note that says "please don't"</td><td>an orchestrator nested inside an orchestrator, restrained by prose</td></tr>
+<tr><td>whose yard? nobody wrote it down</td><td>tenancy absent; the passes-world adoption starts from zero</td></tr>
+</table></div>
+<p>One sentence: <strong>you draw it, robots build it, no-ears checkers wiggle every board and hold your drawing up against the fort, two notebooks remember everything — and the loose-board list stays on the fridge, because a notebook that never lies is the whole point.</strong></p>
+
+<div style="max-width:640px;margin:40px auto 0;font-family:Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em">
+<a href="/architectures" style="color:#ff5e1a;text-decoration:none">&larr; BACK TO THE DRAWING REGISTER</a>
+</div>
+</body>
+</html>
