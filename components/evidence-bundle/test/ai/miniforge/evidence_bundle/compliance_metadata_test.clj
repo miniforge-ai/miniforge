@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.compliance-metadata-test
   "Tests for compliance metadata assembly, defaults, overrides, and access-log.
 
@@ -31,148 +30,54 @@
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.collector :as collector]
-   [ai.miniforge.evidence-bundle.schema :as schema]))
+   [ai.miniforge.evidence-bundle.schema :as schema]
+   [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
+   [ai.miniforge.evidence-bundle.schema.validation :as validation]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fixtures and Named Constants
 
-(def ^:private workflow-id
+;; Fixtures and Named Constants
+(def ^{:stratum 0} ^:private workflow-id
   #uuid "cafebabe-0000-0000-0000-000000000001")
 
-(def ^:private base-workflow-state
+(def ^{:stratum 0} ^:private base-workflow-state
   {:workflow/status :completed
    :workflow/spec   {:intent/type :update
                      :description "compliance-metadata test workflow"}
    :workflow/phases {}})
 
-(def ^:private one-year-retention-days
+(def ^{:stratum 0} ^:private one-year-retention-days
   "Retention period used in override tests to verify a non-default value
    is accepted and survives the round-trip through assemble-evidence-bundle."
   365)
 
-(def ^:private two-year-retention-days
+(def ^{:stratum 0} ^:private two-year-retention-days
   "Two-year retention used in the validate-schema round-trip test to exercise
    a non-default :retain-days value end-to-end through assemble-evidence-bundle."
   730)
 
-(def ^:private seven-year-retention-days
+(def ^{:stratum 0} ^:private seven-year-retention-days
   "Seven-year retention (2555 days) used to test full override of all three
    retention-policy sub-keys simultaneously. SOX mandates 7 years."
   2555)
 
-(def ^:private preserved-access-log-first-timestamp
+(def ^{:stratum 0} ^:private preserved-access-log-first-timestamp
   "Stable timestamp for the first pre-existing access-log entry; verifies
    append-access-log-entry preserves earlier entries without mutation."
   (java.time.Instant/parse "2024-01-01T00:00:00Z"))
 
-(def ^:private preserved-access-log-second-timestamp
+(def ^{:stratum 0} ^:private preserved-access-log-second-timestamp
   "Stable timestamp for the second pre-existing access-log entry; verifies
    append ordering across multiple pre-existing entries."
   (java.time.Instant/parse "2024-06-01T00:00:00Z"))
 
-(def ^:private caller-supplied-access-log-timestamp
+(def ^{:stratum 0} ^:private caller-supplied-access-log-timestamp
   "Stable timestamp supplied by the caller; verifies append-access-log-entry
    does not replace a timestamp that is already present."
   (java.time.Instant/parse "2024-03-15T12:00:00Z"))
 
-;------------------------------------------------------------------------------ Layer 1
-;; assemble-evidence-bundle: Defaults and Overrides
-
-(deftest assemble-produces-default-compliance-metadata
-  (testing "assembled bundle carries default data-classification (:internal)"
-    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
-      (is (= schema/default-data-classification
-             (:evidence/data-classification bundle)))))
-  (testing "assembled bundle has :evidence/contains-pii? false by default"
-    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
-      (is (false? (:evidence/contains-pii? bundle)))))
-  (testing "assembled bundle has retention policy with schema-defined defaults"
-    (let [retention (:evidence/retention-policy
-                     (collector/assemble-evidence-bundle workflow-id base-workflow-state nil))]
-      (is (map? retention))
-      (is (= schema/default-retention-days (:retain-days retention)))
-      (is (true? (:auto-delete? retention)))
-      (is (false? (:legal-hold? retention)))))
-  (testing "assembled bundle has empty :evidence/regulatory-tags by default"
-    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
-      (is (= #{} (:evidence/regulatory-tags bundle)))))
-  (testing "assembled bundle has schema/default-created-by-principal"
-    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
-      (is (= schema/default-created-by-principal (:evidence/created-by bundle)))))
-  (testing "assembled bundle has empty :evidence/access-log by default"
-    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
-      (is (vector? (:evidence/access-log bundle)))
-      (is (empty? (:evidence/access-log bundle))))))
-
-(deftest assemble-applies-workflow-spec-compliance-overrides
-  (testing "workflow-spec :compliance overrides :evidence/data-classification"
-    (let [state  (assoc base-workflow-state :workflow/spec
-                        {:intent/type :update :description "classified"
-                         :compliance  {:evidence/data-classification :restricted}})
-          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
-      (is (= :restricted (:evidence/data-classification bundle)))))
-  (testing "workflow-spec :compliance overrides :evidence/contains-pii?"
-    (let [state  (assoc base-workflow-state :workflow/spec
-                        {:intent/type :update :description "pii"
-                         :compliance  {:evidence/contains-pii? true}})
-          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
-      (is (true? (:evidence/contains-pii? bundle)))))
-  (testing "workflow-spec :compliance overrides :evidence/regulatory-tags"
-    (let [state  (assoc base-workflow-state :workflow/spec
-                        {:intent/type :update :description "gdpr"
-                         :compliance  {:evidence/regulatory-tags #{:gdpr :sox}}})
-          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
-      (is (= #{:gdpr :sox} (:evidence/regulatory-tags bundle))))))
-
-(deftest assemble-applies-opts-compliance-overrides
-  (testing "opts :compliance overrides :evidence/data-classification"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/data-classification :confidential}})]
-      (is (= :confidential (:evidence/data-classification bundle)))))
-  (testing "opts :compliance overrides :evidence/contains-pii?"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/contains-pii? true}})]
-      (is (true? (:evidence/contains-pii? bundle)))))
-  (testing "opts :compliance overrides :evidence/created-by"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/created-by "operator-alice"}})]
-      (is (= "operator-alice" (:evidence/created-by bundle))))))
-
-(deftest assemble-partial-retention-policy-merges-with-defaults
-  (testing "only :legal-hold? true — :retain-days and :auto-delete? survive from defaults"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/retention-policy {:legal-hold? true}}})]
-      (is (true?  (get-in bundle [:evidence/retention-policy :legal-hold?])))
-      (is (= schema/default-retention-days
-             (get-in bundle [:evidence/retention-policy :retain-days])))
-      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))))
-  (testing "only :retain-days supplied — :auto-delete? and :legal-hold? survive from defaults"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/retention-policy
-                                {:retain-days one-year-retention-days}}})]
-      (is (= one-year-retention-days (get-in bundle [:evidence/retention-policy :retain-days])))
-      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))
-      (is (false? (get-in bundle [:evidence/retention-policy :legal-hold?])))))
-  (testing "full override replaces all three sub-keys"
-    (let [bundle (collector/assemble-evidence-bundle
-                  workflow-id base-workflow-state nil
-                  {:compliance {:evidence/retention-policy
-                                {:retain-days  seven-year-retention-days
-                                 :auto-delete? false
-                                 :legal-hold?  true}}})]
-      (is (= seven-year-retention-days (get-in bundle [:evidence/retention-policy :retain-days])))
-      (is (false? (get-in bundle [:evidence/retention-policy :auto-delete?])))
-      (is (true?  (get-in bundle [:evidence/retention-policy :legal-hold?]))))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; append-access-log-entry and validate-schema Round-Trips
-
-(deftest append-access-log-entry-appends-entries-correctly
+(deftest ^{:stratum 0} append-access-log-entry-appends-entries-correctly
   (testing "entry is appended to an empty access log"
     (let [result (collector/append-access-log-entry
                   {:evidence/access-log []}
@@ -195,7 +100,101 @@
       (is (= "bob"   (:access-log/principal (first  (:evidence/access-log result)))))
       (is (= "alice" (:access-log/principal (second (:evidence/access-log result))))))))
 
-(deftest append-access-log-entry-preserves-existing-entries
+;------------------------------------------------------------------------------ Layer 1
+
+;; assemble-evidence-bundle: Defaults and Overrides
+(deftest ^{:stratum 1} assemble-produces-default-compliance-metadata
+  (testing "assembled bundle carries default data-classification (:internal)"
+    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
+      (is (= compliance/default-data-classification
+             (:evidence/data-classification bundle)))))
+  (testing "assembled bundle has :evidence/contains-pii? false by default"
+    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
+      (is (false? (:evidence/contains-pii? bundle)))))
+  (testing "assembled bundle has retention policy with schema-defined defaults"
+    (let [retention (:evidence/retention-policy
+                     (collector/assemble-evidence-bundle workflow-id base-workflow-state nil))]
+      (is (map? retention))
+      (is (= compliance/default-retention-days (:retain-days retention)))
+      (is (true? (:auto-delete? retention)))
+      (is (false? (:legal-hold? retention)))))
+  (testing "assembled bundle has empty :evidence/regulatory-tags by default"
+    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
+      (is (= #{} (:evidence/regulatory-tags bundle)))))
+  (testing "assembled bundle has compliance/default-created-by-principal"
+    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
+      (is (= compliance/default-created-by-principal (:evidence/created-by bundle)))))
+  (testing "assembled bundle has empty :evidence/access-log by default"
+    (let [bundle (collector/assemble-evidence-bundle workflow-id base-workflow-state nil)]
+      (is (vector? (:evidence/access-log bundle)))
+      (is (empty? (:evidence/access-log bundle))))))
+
+(deftest ^{:stratum 1} assemble-applies-workflow-spec-compliance-overrides
+  (testing "workflow-spec :compliance overrides :evidence/data-classification"
+    (let [state  (assoc base-workflow-state :workflow/spec
+                        {:intent/type :update :description "classified"
+                         :compliance  {:evidence/data-classification :restricted}})
+          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
+      (is (= :restricted (:evidence/data-classification bundle)))))
+  (testing "workflow-spec :compliance overrides :evidence/contains-pii?"
+    (let [state  (assoc base-workflow-state :workflow/spec
+                        {:intent/type :update :description "pii"
+                         :compliance  {:evidence/contains-pii? true}})
+          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
+      (is (true? (:evidence/contains-pii? bundle)))))
+  (testing "workflow-spec :compliance overrides :evidence/regulatory-tags"
+    (let [state  (assoc base-workflow-state :workflow/spec
+                        {:intent/type :update :description "gdpr"
+                         :compliance  {:evidence/regulatory-tags #{:gdpr :sox}}})
+          bundle (collector/assemble-evidence-bundle workflow-id state nil)]
+      (is (= #{:gdpr :sox} (:evidence/regulatory-tags bundle))))))
+
+(deftest ^{:stratum 1} assemble-applies-opts-compliance-overrides
+  (testing "opts :compliance overrides :evidence/data-classification"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/data-classification :confidential}})]
+      (is (= :confidential (:evidence/data-classification bundle)))))
+  (testing "opts :compliance overrides :evidence/contains-pii?"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/contains-pii? true}})]
+      (is (true? (:evidence/contains-pii? bundle)))))
+  (testing "opts :compliance overrides :evidence/created-by"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/created-by "operator-alice"}})]
+      (is (= "operator-alice" (:evidence/created-by bundle))))))
+
+(deftest ^{:stratum 1} assemble-partial-retention-policy-merges-with-defaults
+  (testing "only :legal-hold? true — :retain-days and :auto-delete? survive from defaults"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/retention-policy {:legal-hold? true}}})]
+      (is (true?  (get-in bundle [:evidence/retention-policy :legal-hold?])))
+      (is (= compliance/default-retention-days
+             (get-in bundle [:evidence/retention-policy :retain-days])))
+      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))))
+  (testing "only :retain-days supplied — :auto-delete? and :legal-hold? survive from defaults"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/retention-policy
+                                {:retain-days one-year-retention-days}}})]
+      (is (= one-year-retention-days (get-in bundle [:evidence/retention-policy :retain-days])))
+      (is (true? (get-in bundle [:evidence/retention-policy :auto-delete?])))
+      (is (false? (get-in bundle [:evidence/retention-policy :legal-hold?])))))
+  (testing "full override replaces all three sub-keys"
+    (let [bundle (collector/assemble-evidence-bundle
+                  workflow-id base-workflow-state nil
+                  {:compliance {:evidence/retention-policy
+                                {:retain-days  seven-year-retention-days
+                                 :auto-delete? false
+                                 :legal-hold?  true}}})]
+      (is (= seven-year-retention-days (get-in bundle [:evidence/retention-policy :retain-days])))
+      (is (false? (get-in bundle [:evidence/retention-policy :auto-delete?])))
+      (is (true?  (get-in bundle [:evidence/retention-policy :legal-hold?]))))))
+
+(deftest ^{:stratum 1} append-access-log-entry-preserves-existing-entries
   (testing "append-only: existing entries are never removed or mutated"
     (let [e1     {:access-log/principal "alice"
                   :access-log/action :read
@@ -219,7 +218,7 @@
              (:access-log/timestamp (nth log 1))))
       (is (= "carol" (:access-log/principal (nth log 2)))))))
 
-(deftest append-access-log-entry-stamps-timestamp-when-absent
+(deftest ^{:stratum 1} append-access-log-entry-stamps-timestamp-when-absent
   (testing ":access-log/timestamp is auto-added when missing"
     (let [result (collector/append-access-log-entry
                   {:evidence/access-log []}
@@ -238,11 +237,11 @@
       (is (= caller-supplied-access-log-timestamp
              (:access-log/timestamp logged))))))
 
-(deftest assembled-bundle-passes-validate-schema
+(deftest ^{:stratum 1} assembled-bundle-passes-validate-schema
   (testing "default assembled bundle satisfies evidence-bundle-schema"
-    (let [result (schema/validate-schema schema/evidence-bundle-schema
-                                         (collector/assemble-evidence-bundle
-                                          workflow-id base-workflow-state nil))]
+    (let [result (validation/validate-schema schema/evidence-bundle-schema
+                                             (collector/assemble-evidence-bundle
+                                              workflow-id base-workflow-state nil))]
       (is (:valid? result)
           (str "Default bundle must pass evidence-bundle-schema; errors: "
                (:errors result)))))
@@ -259,7 +258,7 @@
                                 {:retain-days  two-year-retention-days
                                  :auto-delete? false
                                  :legal-hold?  true}}})
-          result (schema/validate-schema schema/evidence-bundle-schema bundle)]
+          result (validation/validate-schema schema/evidence-bundle-schema bundle)]
       (is (:valid? result)
           (str "Overridden bundle must pass evidence-bundle-schema; errors: "
                (:errors result)))))
@@ -269,7 +268,7 @@
                    bundle
                    {:access-log/principal "auditor@example.com"
                     :access-log/action    :read})
-          result  (schema/validate-schema schema/evidence-bundle-schema bundle+)]
+          result  (validation/validate-schema schema/evidence-bundle-schema bundle+)]
       (is (:valid? result)
           (str "Bundle with access-log entry must pass evidence-bundle-schema; errors: "
                (:errors result))))))
