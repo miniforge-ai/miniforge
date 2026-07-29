@@ -18,7 +18,7 @@
 (ns ai.miniforge.policy-pack.interface.builders
   "Policy-pack builders, rule resolution, and external-PR evaluation."
   (:require
-   [ai.miniforge.policy-pack.core :as core]
+   [ai.miniforge.policy-pack.builders :as builders]
    [ai.miniforge.policy-pack.external :as external]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -28,74 +28,74 @@
   "Build a new PackManifest map with defaults.
    (create-pack id name description author & {:keys [version license rules]}).
    :version defaults to today's DateVer, :rules to []. Returns the pack map."
-  core/create-pack)
+  builders/create-pack)
 
 (def ^{:stratum 0} create-rule
   "Build a new rule map from required fields plus options.
    (create-rule id title description severity category detection enforcement
    & {:keys [applies-to agent-behavior examples]}). Returns the rule map."
-  core/create-rule)
+  builders/create-rule)
 
 (def ^{:stratum 0} add-rule-to-pack
   "Append a rule to a pack and bump :pack/updated-at. (add-rule-to-pack pack
    rule) returns the updated pack map."
-  core/add-rule-to-pack)
+  builders/add-rule-to-pack)
 
 (def ^{:stratum 0} remove-rule-from-pack
   "Remove a rule by :rule/id from a pack and bump :pack/updated-at.
    (remove-rule-from-pack pack rule-id) returns the updated pack map."
-  core/remove-rule-from-pack)
+  builders/remove-rule-from-pack)
 
 (def ^{:stratum 0} update-pack-categories
   "Regenerate :pack/categories from the pack's rules, grouped by
    :rule/category. (update-pack-categories pack) returns the updated pack map."
-  core/update-pack-categories)
+  builders/update-pack-categories)
 
 (def ^{:stratum 0} content-scan-detection
   "Build a content-scan detection config map. (content-scan-detection pattern)
    or (content-scan-detection pattern {:context-lines n}) (default 2). Returns
    {:type :content-scan :pattern ... :context-lines ...}."
-  core/content-scan-detection)
+  builders/content-scan-detection)
 
 (def ^{:stratum 0} diff-analysis-detection
   "Build a diff-analysis detection config map. (diff-analysis-detection pattern)
    or (diff-analysis-detection pattern {:context-lines n}) (default 3). Returns
    {:type :diff-analysis :pattern ... :context-lines ...}."
-  core/diff-analysis-detection)
+  builders/diff-analysis-detection)
 
 (def ^{:stratum 0} plan-output-detection
   "Build a plan-output detection config map. (plan-output-detection patterns)
    returns {:type :plan-output :patterns patterns}."
-  core/plan-output-detection)
+  builders/plan-output-detection)
 
 (def ^{:stratum 0} warn-enforcement
   "Build a warn-only enforcement config map. (warn-enforcement message) returns
    {:action :warn :message message}."
-  core/warn-enforcement)
+  builders/warn-enforcement)
 
 (def ^{:stratum 0} halt-enforcement
   "Build a hard-halt enforcement config map. (halt-enforcement message) or
    (halt-enforcement message {:remediation s}) returns
    {:action :hard-halt :message ... :remediation} (:remediation present only when supplied)."
-  core/halt-enforcement)
+  builders/halt-enforcement)
 
 (def ^{:stratum 0} approval-enforcement
   "Build a require-approval enforcement config map. (approval-enforcement
    message approvers) returns {:action :require-approval :message ...
    :approvers ...}."
-  core/approval-enforcement)
+  builders/approval-enforcement)
 
 (def ^{:stratum 0} resolve-rules
   "Resolve a sequence of rules from multiple packs: group by :rule/id and merge
    each group (severity escalates higher, enforcement escalates stricter).
    (resolve-rules rules) returns a vector of resolved rules."
-  core/resolve-rules)
+  builders/resolve-rules)
 
 (def ^{:stratum 0} merge-rules
   "Merge two same-id rules. (merge-rules base override) returns a rule map where
    override wins for most fields but :rule/severity keeps the more severe and
    :rule/enforcement :action keeps the stricter."
-  core/merge-rules)
+  builders/merge-rules)
 
 (def ^{:stratum 0} evaluate-external-pr
   "Evaluate an external PR against policy packs in read-only mode.
