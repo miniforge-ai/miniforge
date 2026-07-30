@@ -35,11 +35,12 @@
   (try
     (let [rdr (java.io.PushbackReader. (java.io.StringReader. code-str))
           eof (Object.)
-          forms (loop [forms []]
-                  (let [form (read {:eof eof} rdr)]
-                    (if (identical? form eof)
-                      forms
-                      (recur (conj forms form)))))]
+          forms (binding [*read-eval* false]
+                  (loop [forms []]
+                    (let [form (read {:eof eof} rdr)]
+                      (if (identical? form eof)
+                        forms
+                        (recur (conj forms form))))))]
       {:valid? true :form-count (count forms)})
     (catch Exception ex
       {:valid? false
