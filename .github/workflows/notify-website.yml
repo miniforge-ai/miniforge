@@ -4,6 +4,10 @@
 # sync-content.yml then pulls the canonical files and redeploys.
 # The website also runs a daily cron backstop, so a failed dispatch
 # delays the sync rather than losing it.
+#
+# Uses the write-scoped website-sync GitHub App (installed on
+# miniforge-website only); credentials are the org secrets
+# CI_BOT_WRITE_APPID / CI_BOT_WRITE_PEM.
 
 name: Notify website
 
@@ -17,11 +21,6 @@ on:
 
 permissions: {}
 
-env:
-  # Public identifier for the Miniforge CI GitHub App; credentials
-  # remain in MINIFORGE_CI_BOT_KEY.
-  MINIFORGE_CI_BOT_APP_ID: "3360143"
-
 jobs:
   dispatch:
     name: Dispatch to miniforge-website
@@ -31,8 +30,8 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
         with:
-          app-id: ${{ env.MINIFORGE_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.MINIFORGE_CI_BOT_KEY }}
+          app-id: ${{ secrets.CI_BOT_WRITE_APPID }}
+          private-key: ${{ secrets.CI_BOT_WRITE_PEM }}
           owner: miniforge-ai
           repositories: miniforge-website
 
