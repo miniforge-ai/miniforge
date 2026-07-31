@@ -187,9 +187,62 @@
    "every gated phase transition produces exactly one DecisionEnvelope visible in phase result, events, and evidence bundle (T3 #4 dissolved - no fail-open classification path remains)"
    ":require-approval denies with an approval obligation instead of passing as a warning"
    "supervisory contract at schema-version 2 with envelope entity + producer-side conformance test (T3 #1/#2 dissolved at the seam)"]
+  :theme/status :complete
+  :theme/owner :christopher
+  :theme/started #inst "2026-07-28"
+  :theme/completed #inst "2026-07-29"
+  :theme/completion-note
+  "All five specs merged (#1555 1a, #1556 1b, #1557 1c, #1558 1d,
+   #1559 1e) plus the consumer half in miniforge-control #197
+   (supervisory contract v2 consumed: attention provenance fields,
+   gate-decision golden family, DecisionEnvelope, fail-closed
+   schema-version check). T3 contradictions 1, 2, 4, and 5 are
+   recorded resolved in the T3 register (#1560)."}
+
+ :ariadne-grants
+ {:theme/id :ariadne-grants
+  :theme/title "Ariadne adoption - step 2: grants on the irreversible effects"
+  :theme/description
+  "Step 2 of the ratified Ariadne adoption order: authority stops being
+   ambient. Bounded authority becomes an object (ExecutionGrant with
+   lineage, TTL, and constraints), grant constraints become an input
+   class to the fail-closed decide() kernel step 1 built, the
+   irreversible effects (merge, deploy, spend) become transacted
+   propose->commit->reconcile operations, and a constraint breach
+   revokes the grant and is remembered.
+
+   This is what structurally bounds T3 contradiction 9 (the runaway
+   burn class): a ceiling lives on the grant and is checked at one
+   site, instead of being wired per-channel where one unwired channel
+   costs 3h40m and $8-15.
+
+   Two scope corrections against the RFC's step-2 text, both
+   source-verified during planning: (a) Phase D commands are ALREADY
+   transacted - the operator intervention lifecycle does
+   propose->dispatch->apply->verify with readback comparison, so step 2
+   generalizes an existing in-tree pattern rather than inventing one;
+   (b) spend is bounded by a grant cost constraint rather than a
+   per-call proposal record, because minting a durable record per LLM
+   call would add a disk write per token and reconcile nothing."
+  :theme/informative-spec "docs/architecture/rfc-ariadne-adoption.md"
+  :theme/normative-refs
+  [{:doc "docs/architecture/rfc-ariadne-adoption.md" :section "Suggested adoption order, step 2"
+    :relation :primary}
+   {:doc "thesium-career docs/architecture/tenancy-ownership-access.md (Ariadne v1.5) section 13.5"
+    :relation :primary}
+   {:doc "specs/normative/N10-governed-tool-execution.md" :section "§6 Capability Model"
+    :relation :supporting}
+   {:doc "docs/architecture/diagrams/README.md" :section "T3 contradiction register, #7 and #9"
+    :relation :supporting}]
+  :theme/completion-criteria
+  ["bounded authority is an object: no irreversible effect fires without an active ExecutionGrant covering it"
+   "a cost ceiling is enforced regardless of which code path reaches the effect (T3 #9 structurally bounded)"
+   "no effect reports an outcome it cannot substantiate - enabling auto-merge is not merging, and published SHAs come from reconciliation"
+   ":unknown-outcome is a first-class effect state, distinct from :failed (T3 #7 dissolved for effects)"
+   "a constraint breach revokes the authorizing grant transitively over lineage, and the breach is recorded append-only for future granting"]
   :theme/status :in-flight
   :theme/owner :christopher
-  :theme/started #inst "2026-07-28"}
+  :theme/started #inst "2026-07-29"}
 
  :policy-enforcement
  {:theme/id :policy-enforcement

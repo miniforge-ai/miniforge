@@ -1,0 +1,109 @@
+;; =============================================================================
+;; Spec: Ariadne step 2d — merge and deploy become granted, transacted effects
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2 — "grants on the irreversible effects (merge, deploy,
+;; spend)"); Ariadne §13.5. Spend is handled by 2b's cost constraint
+;; rather than a per-call proposal record — see the description.
+
+{:spec/title "Ariadne step 2d: migrate merge and deploy onto the granted, transacted path"
+
+ :spec/description
+ "Move the two discrete irreversible effects — PR merge and cluster
+  deploy — onto 2c's transaction coordinator, requiring a 2a grant
+  checked by 2b's decide().
+
+  WHY THESE TWO, AND WHY NOT SPEND THE SAME WAY. Merge and deploy are
+  DISCRETE effects: one decision, one external mutation, one outcome to
+  reconcile — the shape a proposal record fits. Spend is CONTINUOUS:
+  minting a proposal record per LLM call would add a disk write to
+  every token and reconcile nothing useful. Spend is bounded correctly
+  by 2b — a :constraint/max-cost-usd on the grant, checked at decide()
+  and re-checked at commit. That is a deliberate split, not an
+  oversight.
+
+  MERGE — what changes (source-verified today's state):
+    * `pr-lifecycle/merge.clj` `merge-pr!` unconditionally passes
+      --auto and returns {:merged? true}. After this spec, enabling
+      auto-merge produces an :effect/state of :committing with the
+      proposal recorded, NOT a merged claim. The merged event is
+      published only after `reconcile!` observes the merge on GitHub.
+    * The merge SHA stops coming from local `git rev-parse HEAD` and
+      starts coming from the reconciled `gh pr view --json mergeCommit`.
+      A SHA the code cannot substantiate is not published.
+    * `evaluate-merge-readiness` stays as a pre-flight self-check but
+      is no longer the authority — the grant + envelope are. Its
+      `check-unresolved-threads` is a STUB that always returns
+      {:has-unresolved? false}, making the :require-no-unresolved-threads?
+      policy key inert; either implement it or delete the key, but do
+      not leave an inert policy knob in a governance product.
+
+  DEPLOY — what changes:
+    * `phase-deployment/deploy.clj` `enter-deploy` goes
+      resolve-deploy-config -> capture-current-state ->
+      `kustomize-apply!` with NO policy gate (verified). After this
+      spec the apply requires an :effect/deploy grant and an allow
+      envelope.
+    * `phase_deployment/policy.clj` `check-resource-count` and
+      `check-gke-node-limit` EXIST and are never called from
+      `enter-deploy`. Wire them as constraint inputs rather than
+      writing new checks.
+    * Fix the rollback-evidence drop: `store-apply-failure` currently
+      discards `:evidence/rollback-info`, losing the undo artifact
+      precisely on failure. Attach it on BOTH branches.
+    * `kustomize-apply!` already accepts dry-run? and `enter-deploy`
+      never passes it. The proposal stage SHOULD render the dry-run
+      diff into :effect/proposal so the record says what was about to
+      change.
+
+  OUT OF SCOPE, deliberately: git push, PR create, and the resume
+  webhook. They are irreversible too, but the RFC names three, and
+  widening the blast radius of a single migration spec is how
+  migrations stall. The webhook already documents at-least-once
+  delivery with an acknowledged duplicate risk; push and PR-create get
+  their own follow-up once this pattern has proven itself on merge.
+
+  ALSO FOUND, NOT FIXED HERE (filed as follow-ups):
+  `compliance_scanner/execute.clj` `execute-rule-fix!` ignores the exit
+  code of both `git push` and `gh pr create` and returns
+  (str/trim (:out pr-result)) as :pr-url — an empty string on failure,
+  reported as success. That is a correctness bug independent of
+  Ariadne and should not be smuggled into this spec."
+
+ :spec/intent {:type :feature
+               :scope ["components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/merge.clj"
+                       "components/pr-lifecycle/src/ai/miniforge/pr_lifecycle/controller.clj"
+                       "components/phase-deployment/src/ai/miniforge/phase_deployment/deploy.clj"
+                       "components/phase-deployment/src/ai/miniforge/phase_deployment/policy.clj"]}
+
+ :spec/constraints
+ ["No effect fires without an active grant and an allow (or allow-with-obligations) envelope"
+  "No success is reported that the code cannot substantiate - enabling auto-merge is not merging"
+  "Published SHAs come from reconciliation against GitHub, never from local git rev-parse"
+  "Reuse phase_deployment/policy.clj's existing checks as constraint inputs; do not write parallel ones"
+  "Rollback evidence is attached on the failure branch as well as the success branch"
+  "Spend is NOT given a per-call proposal record - it is bounded by the 2b cost constraint"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["merge-pr! with no active :effect/merge grant denies and fires no gh command"
+  "A merge with a valid grant writes a durable proposal record before any gh invocation"
+  "Enabling auto-merge yields :effect/state :committing - a test asserts it does NOT yield a merged claim"
+  "The merged event is published only after reconcile! observes the merge on GitHub"
+  "The published merge SHA equals the reconciled mergeCommit, and a test proves it differs from local HEAD in a squash scenario"
+  "kustomize-apply! with no active :effect/deploy grant denies and runs no kubectl command"
+  "check-resource-count and check-gke-node-limit are consulted before the apply"
+  ":evidence/rollback-info is present on the ctx after a FAILED apply, not just a successful one"
+  "The deploy proposal record carries the dry-run rendered diff"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :observation :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "This is where step 2 becomes real behavior rather than available machinery; high rather than blocker because 2e can proceed in parallel once the coordinator lands."
+  :blocks []
+  :blocked-by ["ariadne-effect-transaction.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

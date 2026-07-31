@@ -1,0 +1,108 @@
+;; =============================================================================
+;; Spec: Ariadne step 2a — ExecutionGrant, bounded authority as an object
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2; ratified decision 3 — "N10 is subsumed, not extended");
+;; Ariadne §13.5 (ExecutionGrant / Delegation, lineage, revocation for
+;; cause); N10-governed-tool-execution.md §6 (Capability Model — the
+;; same object under the older name).
+
+{:spec/title "Ariadne step 2a: execution-grant component - bounded authority as a first-class object"
+
+ :spec/description
+ "Create component execution-grant: the object that carries authority
+  to perform an effect, so authority stops being ambient.
+
+  Today authority is ambient — an agent that is running can do what the
+  process can do. `components/policy/` declares `check-budget`,
+  `enforce-policy`, and `evaluate-gates` but has ZERO callers outside
+  its own ns form (verified: grepping `ai.miniforge.policy.interface`
+  across components/, bases/, and projects/ returns only the interface
+  file itself). There is no object anywhere in the tree that says
+  'this actor may do this effect, within these bounds, until this time.'
+
+  N10 §6 already specifies this object as `:capability/*` — structure,
+  verbs, limits, ttl-seconds, policy-bindings, revocation-handle. Per
+  the RFC's ratified decision 3, N10 is SUBSUMED: this component is
+  N10's capability re-expressed in Ariadne vocabulary, not a second
+  parallel mechanism. N10's spec text gets rewritten as a profile of
+  this interface in step 4; this spec builds the interface.
+
+  GROUP 1: Schema (closed, like DecisionEnvelope)
+  A CLOSED Malli map — unknown keys rejected:
+    :grant/id            uuid
+    :grant/principal     the actor the grant is issued TO (opaque
+                         principal ref; tenants arrive in step 3, so
+                         this is a bare identifier for now)
+    :grant/effect-class  [:enum :effect/merge :effect/deploy
+                          :effect/spend :effect/push :effect/pr-create]
+                         - the closed set of irreversible effects
+    :grant/scope         map - what the grant is bounded TO (repo, PR
+                         number, namespace, workflow-run id)
+    :grant/constraints   map - the ceilings: {:constraint/max-cost-usd,
+                         :constraint/max-tokens, :constraint/max-count,
+                         :constraint/expires-at}
+    :grant/parent-id     uuid or nil - LINEAGE. A delegated grant names
+                         the grant it was cut from.
+    :grant/delegable?    boolean - may this grant be sub-delegated
+    :grant/issued-at     inst
+    :grant/expires-at    inst
+    :grant/revoked-at    inst or nil
+    :grant/revocation-reason keyword or nil
+
+  GROUP 2: Lineage is enforced, not decorative
+  A delegated grant MUST NOT exceed its parent on any constraint axis
+  (Ariadne's attenuation rule: you cannot lend what you were not lent).
+  `delegate` returns an anomaly when the child would widen scope,
+  raise a ceiling, extend expiry past the parent, or when the parent
+  is non-delegable or already revoked.
+
+  GROUP 3: Revocation is a state, not a deletion
+  `revoke` stamps :grant/revoked-at + :grant/revocation-reason and
+  leaves the record. Revoking a parent transitively invalidates its
+  descendants — `active?` walks lineage rather than trusting a flag.
+  This is the representation step 2e's revocation-for-cause acts on.
+
+  GROUP 4: Runtime-only construction
+  Same label-plane rule as DecisionEnvelope (§13.4): no public API
+  accepts an agent-supplied grant. A grant arriving as agent text is
+  data shaped like a grant, never a grant. Docstrings state it.
+
+  This spec builds the OBJECT ONLY. Nothing consults grants yet — that
+  is 2b (decide) and 2d (call sites). Shipping the object first keeps
+  the enforcement specs small and gives them a return type."
+
+ :spec/intent {:type :feature
+               :scope ["components/execution-grant/"
+                       "projects/*/deps.edn"]}
+
+ :spec/constraints
+ ["Closed schema - m/validate rejects unknown keys; a test proves it"
+  "No public constructor accepts an externally-supplied :grant/id or decision to grant"
+  "Effect classes are a closed enum, not free-form keywords"
+  "Attenuation enforced in code, not documented in prose"
+  "Vocabulary (severity, enforcement, reason codes) via policy-clause interface only - no new literals"
+  "Stratified design, max 3 layers per file"
+  "New component MUST be added to all four projects' deps.edn or poly check fails"]
+
+ :spec/acceptance-criteria
+ ["Grant schema validates the documented shape and rejects extra keys"
+  "delegate returns an anomaly when the child grant raises any constraint ceiling above its parent"
+  "delegate returns an anomaly when the parent is :grant/delegable? false"
+  "delegate returns an anomaly when the parent is already revoked"
+  "active? returns false for a grant whose ANCESTOR was revoked, not just its own :grant/revoked-at"
+  "active? returns false for an expired grant even when :grant/revoked-at is nil"
+  "revoke preserves the record - the grant is still readable after revocation, with reason"
+  "poly check reports 0 errors"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :governance-credibility :policy-enforcement}
+  :theme :ariadne-grants
+  :rationale "Every later step-2 spec produces or consumes a grant; decide() cannot check a constraint that has no representation."
+  :blocks ["ariadne-grant-constraints-decide.spec.edn"]
+  :blocked-by []}
+
+ :spec/workflow-type :canonical-sdlc}

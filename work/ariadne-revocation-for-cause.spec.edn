@@ -1,0 +1,100 @@
+;; =============================================================================
+;; Spec: Ariadne step 2e — revocation for cause, and breach history as
+;; a routing input
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2 — "revocation-for-cause"; T3 contradiction 9); Ariadne §13.5
+;; (revocation for cause; breach history feeds routing eligibility);
+;; explainer #563 "Mary's hall pass" — grants are conditional, and the
+;; crossing-off remembers.
+
+{:spec/title "Ariadne step 2e: revocation for cause - a breach ends the grant and is remembered"
+
+ :spec/description
+ "Close the loop: a constraint breach revokes the grant that was
+  breached, the revocation is durable, and the breach becomes an input
+  to future granting rather than a log line nobody reads.
+
+  WHY. Today a budget breach has no consequence beyond the individual
+  check that caught it. The runaway is stopped (maybe, on the channels
+  that are wired) but nothing about the actor changes — the next run
+  gets the same authority. Ariadne's rule is that authority is
+  conditional: breach it and the pass is crossed off, and the
+  crossing-off is remembered.
+
+  GROUP 1: Breach -> revocation
+  When 2b's decide() or 2c's commit re-check finds a constraint
+  exceeded, the grant is revoked with :grant/revocation-reason naming
+  the axis (:breach/cost-exceeded, :breach/expired,
+  :breach/scope-violation). Revocation is transitive over lineage
+  (2a's `active?` already walks ancestors) — revoking a parent ends
+  every grant cut from it, which is what makes a delegated inner
+  orchestrator containable.
+
+  GROUP 2: Un-gateable conditions are AUDITED, not pretended
+  Ariadne §13.5's honest half: gates prevent what they can, logbooks
+  catch the rest. Some conditions cannot be checked before the fact
+  (a cost that only materializes mid-stream, an effect whose true
+  outcome arrives later). Those are reconciled by 2c and, when found
+  breached after the fact, produce a revocation + an audit record
+  rather than a pretence that the gate caught them. A governance
+  product that claims to prevent what it can only detect is lying;
+  say which is which.
+
+  GROUP 3: Breach history
+  A durable, append-only record keyed by principal: what was breached,
+  when, on which grant, and whether it was prevented or detected. This
+  is the object step 4's routing eligibility consumes. Building the
+  RECORD here and the CONSUMPTION later is deliberate — the history
+  needs to exist before anything can be scored against it.
+
+  GROUP 4: Eligibility hook (narrow)
+  Expose a single predicate — 'may this principal be granted this
+  effect class at this ceiling' — that consults breach history. Wire
+  it into grant ISSUANCE only. Model-selection routing (the
+  `:policy-first routing` line in the RFC's mapping table) is step-3/4
+  work and is explicitly NOT wired here; this spec provides the input
+  it will eventually call, nothing more.
+
+  SCOPE HONESTY. There is exactly one circuit breaker in the tree
+  (`connector-retry/circuit_breaker.clj` — states :closed/:open/
+  :half-open, trips at 5 failures / 60s reset) and it has NO
+  production callers: grepping allow-request?/record-failure outside
+  the component finds only deps.edn entries. It is an HTTP-connector
+  breaker, not an authority breaker. This spec does NOT resurrect or
+  extend it — revocation is a grant-lifecycle concern, and reusing an
+  unconsumed HTTP breaker for it would be the wrong seam. If the
+  connector breaker should live or die, that is its own decision."
+
+ :spec/intent {:type :feature
+               :scope ["components/execution-grant/"
+                       "components/effect-transaction/"]}
+
+ :spec/constraints
+ ["Revocation is transitive over lineage - revoking a parent ends descendants"
+  "Prevented breaches and detected-after-the-fact breaches are DISTINGUISHABLE in the record"
+  "Breach history is append-only - a breach is never edited or deleted"
+  "The eligibility predicate is wired into grant issuance ONLY, not into model routing"
+  "Do not extend or revive components/connector-retry's circuit breaker for this"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["A cost-constraint breach at commit revokes the authorizing grant with :breach/cost-exceeded"
+  "Revoking a parent grant makes every descendant grant fail active?"
+  "A breach detected during reconciliation (not prevented at decide) is recorded as detected, and a test asserts the two are distinguishable"
+  "Breach history survives process restart"
+  "Breach history is append-only - a test proves an existing breach record cannot be mutated"
+  "The eligibility predicate refuses a ceiling above what the principal's breach history permits"
+  "Issuing a grant consults the eligibility predicate; a test proves a breaching principal cannot immediately re-obtain the same ceiling"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :governance-credibility :policy-enforcement}
+  :theme :ariadne-grants
+  :rationale "Without revocation a grant ceiling is advisory; this is what makes the bound structural rather than a check that can be re-passed indefinitely."
+  :blocks []
+  :blocked-by ["ariadne-effect-transaction.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

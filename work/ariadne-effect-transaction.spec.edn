@@ -1,0 +1,124 @@
+;; =============================================================================
+;; Spec: Ariadne step 2c — transacted effects (propose -> commit -> reconcile)
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2; T3 contradiction 7 — "WorktreeInbox dead-drop measures
+;; writes, not reads"); Ariadne §13.5 (transacted effects, unknown
+;; outcome as a first-class state) + the delivery-is-not-acceptance
+;; rule (Sneaky Bob, explainer #562).
+
+{:spec/title "Ariadne step 2c: effect-transaction component - propose, commit, reconcile"
+
+ :spec/description
+ "Create component effect-transaction: the coordinator that turns an
+  irreversible effect into a transaction with a durable record written
+  BEFORE the effect and a reconciliation pass that discovers the true
+  outcome afterwards.
+
+  WHY. Today's irreversible effects execute directly and report
+  outcomes they cannot substantiate. Source-verified:
+
+    * `pr-lifecycle/merge.clj` `merge-pr!` builds
+      [\"gh\" \"pr\" \"merge\" n method-flag \"--auto\"] - the --auto flag
+      is UNCONDITIONAL - then returns {:merged? true} on exit 0. With
+      --auto, exit 0 means 'auto-merge was ENABLED', not 'merged'. The
+      published merged event then carries a SHA from
+      `git rev-parse HEAD` in the LOCAL worktree - the branch tip, not
+      the squash commit on base. Two claims the code cannot support.
+    * `llm/protocols/impl/llm_client.clj` `handle-streaming` computes
+      cost only on exit-code 0. A call that dies mid-stream or exits
+      non-zero records NO COST - money spent, ledger empty.
+    * `phase-deployment/deploy.clj` `enter-deploy` captures
+      `capture-current-state` rollback evidence, then attaches it to
+      ctx only on SUCCESS; the `store-apply-failure` branch DROPS it -
+      the one artifact needed to undo a partial apply is discarded
+      exactly when the apply failed.
+    * `pr-lifecycle/events.clj` `publish!` is a swap! on an in-memory
+      atom. Nothing about a merge attempt survives process death.
+
+  THE REFERENCE IMPLEMENTATION ALREADY EXISTS IN-TREE. The RFC lists
+  'makes Phase D commands transacted' as step-2 work, but the operator
+  intervention path is ALREADY transacted and is the model to copy
+  (source-verified): `event-stream/operator_requests.clj`
+  `request-intervention!` lands the request with ATOMIC_MOVE and
+  refuses to report success for a gesture that did not reach disk;
+  `operator/consumer.clj` `route-intervention!` rebuilds the record
+  server-side rather than trusting the client; `operator/application.clj`
+  `apply-intervention!` advances to :dispatched BEFORE firing the
+  effect, and `verify-readback!` compares {:observed :expected},
+  transitioning to :verified only on match and to
+  :control-state-readback-mismatch otherwise.
+
+  So this spec GENERALIZES an existing working pattern rather than
+  inventing one. That is a material scope reduction against the RFC's
+  assumption.
+
+  GROUP 1: The transaction record
+  A closed Malli map, durable before the effect:
+    :effect/id, :effect/class (the :grant/effect-class enum),
+    :effect/grant-id (the grant authorizing it),
+    :effect/envelope-id (the DecisionEnvelope that allowed it),
+    :effect/proposal (the intended action, structured),
+    :effect/state [:enum :proposed :committing :succeeded :failed
+                   :unknown-outcome :reconciled],
+    :effect/observed (readback result), :effect/at.
+
+  GROUP 2: :unknown-outcome is first-class, not an error
+  The state a process death between commit and confirmation lands in.
+  It is NOT :failed - claiming failure for a merge that actually landed
+  is as wrong as claiming success. Reconciliation resolves it; until
+  then it is honestly unknown.
+
+  GROUP 3: Durability
+  Records land with the same ATOMIC_MOVE discipline as
+  `operator_requests.clj` `write-event-file!`. A transaction that did
+  not reach disk MUST NOT report a committed effect - the intervention
+  path's stated rule, applied to effects.
+
+  GROUP 4: Reconcile reads the world, not the log
+  `reconcile!` takes a record in :unknown-outcome or :committing and
+  asks the EXTERNAL system what actually happened (for merge: gh pr
+  view --json state,mergeCommit). The answer, not the local guess,
+  becomes :effect/observed. Mismatch between proposal and observation
+  is recorded, never smoothed over.
+
+  GROUP 5: Commit re-checks the grant
+  Calls 2b's re-check entry point. A grant revoked or expired between
+  propose and commit fails the commit and leaves the record honest.
+
+  This spec builds the COORDINATOR ONLY - no call site is migrated
+  here. 2d does that."
+
+ :spec/intent {:type :feature
+               :scope ["components/effect-transaction/"
+                       "projects/*/deps.edn"]}
+
+ :spec/constraints
+ ["Record is durable (ATOMIC_MOVE) before the effect fires - not after, not in an atom"
+  ":unknown-outcome is a distinct state from :failed; conflating them is a review rejection"
+  "reconcile! MUST query the external system - it MUST NOT infer outcome from local state"
+  "Commit re-checks the grant via the 2b entry point"
+  "Follow the operator intervention lifecycle's shape; do not invent a second, divergent state machine"
+  "Stratified design, max 3 layers per file"
+  "New component MUST be added to all four projects' deps.edn or poly check fails"]
+
+ :spec/acceptance-criteria
+ ["A proposal record is readable from disk after a simulated process kill between propose and commit"
+  "An effect interrupted after commit lands in :unknown-outcome, NOT :failed"
+  "reconcile! on an :unknown-outcome merge record queries the external system and records the observed state"
+  "reconcile! records a mismatch when the observed outcome contradicts the proposal, rather than overwriting the proposal"
+  "Commit fails when the authorizing grant was revoked after the proposal was written"
+  "A transaction whose record could not be written reports failure and does NOT fire the effect"
+  "poly check reports 0 errors"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :observation :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "The call-site migration in 2d has nothing to migrate onto until the coordinator exists."
+  :blocks ["ariadne-granted-effect-call-sites.spec.edn"]
+  :blocked-by ["ariadne-grant-constraints-decide.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
