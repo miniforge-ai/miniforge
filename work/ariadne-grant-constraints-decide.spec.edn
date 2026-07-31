@@ -1,0 +1,108 @@
+;; =============================================================================
+;; Spec: Ariadne step 2b — grant constraints are a decide() input class
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2; T3 contradiction 9 — "FSM doesn't own decisions / runaway
+;; burn"); Ariadne §13.5 (grant constraints checked at decide and
+;; re-checked at commit) + §13.7 (missing policy fails closed).
+
+{:spec/title "Ariadne step 2b: grant constraints as a decide() input class - budgets stop being plumbing"
+
+ :spec/description
+ "Make `decide()` consult grants, so a budget ceiling lives on the
+  grant instead of being wired per-channel.
+
+  WHY THIS DISSOLVES CONTRADICTION 9. The 3h40m/$8-15 runaway happened
+  because the redirect budget was wired to one of two channels. That
+  specific asymmetry is fixed (`fsm.clj` `transition-execution` no
+  longer counts; `:redirect/inc-count` on the guarded array is the
+  single accounting site) — but the CLASS is not, and the tree still
+  shows it:
+
+    * `fsm.clj` `guarded-phases` is #{:review :verify :release
+      :implement} (verified). Every other phase gets the flat
+      `:phase/fail -> failure-target` form with no budget guard and no
+      counter. `standard-deploy-v1.0.0.edn` and `quick-deploy-v1.0.0.edn`
+      set :on-fail on :provision, :deploy, and :validate — none of which
+      are guarded. Those redirect loops are unmetered. `fsm.clj`'s own
+      comment says 'Phase 4 drops this set and applies the guarded form
+      to every phase unconditionally'; that drop has not happened.
+    * `phase-fail-entries` returns nil for the flat keyword form, so the
+      structural invariants CANNOT SEE an unmetered redirect - it passes
+      validation silently.
+    * `:budget :tokens` and `:budget :time-seconds` are declared in
+      schemas and EDN and read by NOTHING - every read site
+      (`phase/interface.clj` `handle-error`, explore/implement/release/
+      review) reads only `:iterations`.
+    * `orchestrator` BudgetManager (`track-usage`/`check-budget`/
+      `set-budget`) and `policy/core.clj` `check-budget` have zero
+      production callers - test-only.
+    * There is no wall-clock deadline on a workflow run at all; the
+      highest time ceiling is the per-LLM-call 10-minute `max-total-ms`.
+
+  Wiring each of those channels individually is the mistake that
+  produced the runaway. The fix is representational: a ceiling is a
+  GRANT CONSTRAINT, and every effect passes through one check site.
+
+  GROUP 1: decide() gains a grant input
+  `gate/decide.clj` `decide` today takes classified violations + pins ->
+  envelope. Extend it to take an optional grant context. Grant
+  constraint breaches become deny reasons in the SAME shape as rule
+  violations (:reason/code :reason/grant-exceeded, with the constraint
+  axis and observed value in :reason/detail). No new decision path -
+  the envelope already knows how to deny.
+
+  GROUP 2: Missing grant fails closed (§13.7)
+  When an effect class REQUIRES a grant and no active grant covers it,
+  decide() denies with :reason/grant-absent. Absence is not silence.
+  This mirrors 1c's ratified treatment of unknown enforcement actions.
+
+  GROUP 3: Budgets re-expressed as constraints
+  Introduce the mapping from today's scattered budget keys to
+  :grant/constraints, and make the spend path consult it. This spec
+  does NOT delete the existing per-phase :iterations budget (that
+  still governs phase looping, which is not an irreversible effect);
+  it moves the COST and TIME ceilings - the runaway axes - onto grants.
+
+  GROUP 4: Re-check at commit
+  A constraint checked only at decide() is a check against stale
+  state. Expose the re-check entry point that step 2c's commit stage
+  calls; a grant that expired or was revoked between decide and commit
+  MUST fail the commit.
+
+  Deliberately NOT in scope: the `guarded-phases` set. Applying the
+  guarded form to every phase is worthwhile but is FSM work, not
+  Ariadne work - filed as a follow-up rather than smuggled in here."
+
+ :spec/intent {:type :feature
+               :scope ["components/gate/src/ai/miniforge/gate/decide.clj"
+                       "components/gate/src/ai/miniforge/gate/interface.clj"
+                       "components/execution-grant/"]}
+
+ :spec/constraints
+ ["Grant breach reasons use the existing reason-code enum - extend the enum, do not invent a parallel shape"
+  "No new decision path: a grant breach produces a deny envelope through the existing derivation"
+  "decide() stays pure - grant lookup is passed in, not fetched inside the kernel"
+  "Missing grant for a grant-requiring effect denies; it MUST NOT pass with a warning"
+  "Existing callers of decide() that pass no grant context keep working (phase gating is not an effect)"
+  "Stratified design, max 3 layers per file"]
+
+ :spec/acceptance-criteria
+ ["decide() returns a :deny envelope carrying :reason/grant-exceeded when a cost constraint is breached"
+  "decide() returns a :deny envelope carrying :reason/grant-absent when a grant-requiring effect has no active grant"
+  "decide() returns the same envelope as today when called with no grant context - regression test on an existing gate path"
+  "A grant revoked between decide and the commit re-check fails the re-check"
+  "An expired grant fails the commit re-check even though decide() passed while it was live"
+  "Test names the two-channel lesson: a cost ceiling is enforced regardless of which code path reaches the effect"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :token-conservation :policy-enforcement}
+  :theme :ariadne-grants
+  :rationale "This is the check site that bounds the runaway class; the effect call sites in 2d have nothing to call without it."
+  :blocks ["ariadne-effect-transaction.spec.edn"]
+  :blocked-by ["ariadne-execution-grant.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}

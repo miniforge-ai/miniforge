@@ -20,6 +20,40 @@ Miniforge is an agent-CLI-agnostic platform. Every supported CLI
 |---|---|---|---|---|
 | blocker | ● | multi-backend-parity | `multi-backend-cli-parity.spec.edn` — Multi-backend CLI parity — make codex / cursor-agent / copilot / open-codex first-class planners and implementers | correctness+scale+dogfoodenabler |
 
+## Theme — Ariadne adoption - step 2: grants on the irreversible effects (`ariadne-grants`, status: in-flight)
+
+Step 2 of the ratified Ariadne adoption order: authority stops being
+   ambient. Bounded authority becomes an object (ExecutionGrant with
+   lineage, TTL, and constraints), grant constraints become an input
+   class to the fail-closed decide() kernel step 1 built, the
+   irreversible effects (merge, deploy, spend) become transacted
+   propose->commit->reconcile operations, and a constraint breach
+   revokes the grant and is remembered.
+
+   This is what structurally bounds T3 contradiction 9 (the runaway
+   burn class): a ceiling lives on the grant and is checked at one
+   site, instead of being wired per-channel where one unwired channel
+   costs 3h40m and $8-15.
+
+   Two scope corrections against the RFC's step-2 text, both
+   source-verified during planning: (a) Phase D commands are ALREADY
+   transacted - the operator intervention lifecycle does
+   propose->dispatch->apply->verify with readback comparison, so step 2
+   generalizes an existing in-tree pattern rather than inventing one;
+   (b) spend is bounded by a grant cost constraint rather than a
+   per-call proposal record, because minting a durable record per LLM
+   call would add a disk write per token and reconcile nothing.
+
+**Informative spec:** `docs/architecture/rfc-ariadne-adoption.md`
+
+| tier | r | theme | spec | axes |
+|---|---|---|---|---|
+| blocker | ● | ariadne-grants | `ariadne-execution-grant.spec.edn` — Ariadne step 2a: execution-grant component - bounded authority as a first-class object | correctness+policyenforcement+governancecredibility |
+| blocker | ○ | ariadne-grants | `ariadne-effect-transaction.spec.edn` — Ariadne step 2c: effect-transaction component - propose, commit, reconcile | correctness+observation+governancecredibility |
+| blocker | ○ | ariadne-grants | `ariadne-grant-constraints-decide.spec.edn` — Ariadne step 2b: grant constraints as a decide() input class - budgets stop being plumbing | correctness+policyenforcement+tokenconservation |
+| high | ○ | ariadne-grants | `ariadne-granted-effect-call-sites.spec.edn` — Ariadne step 2d: migrate merge and deploy onto the granted, transacted path | correctness+observation+governancecredibility |
+| high | ○ | ariadne-grants | `ariadne-revocation-for-cause.spec.edn` — Ariadne step 2e: revocation for cause - a breach ends the grant and is remembered | correctness+policyenforcement+governancecredibility |
+
 ## Theme — Dogfood resilience (`dogfood-resilience`, status: in-flight)
 
 Make miniforge capable of running miniforge without paying for
@@ -64,26 +98,6 @@ Miniforge's reason for existence: policy-as-code that is APPLIED and
 |---|---|---|---|---|
 | blocker | ● | policy-enforcement | `policy-gate-compiler.spec.edn` — Compile policy-pack rules into executable check-fns | correctness+observation+dogfoodenabler |
 | blocker | ○ | policy-enforcement | `policy-gate-phase-wiring-and-evidence.spec.edn` — Execute pack-derived policy gates in verify/review + emit per-rule evidence | correctness+observation+tokenconservation+dogfoodenabler |
-
-## Theme — Ariadne adoption - step 1: envelopes + fail-closed decide() (`ariadne-adoption`, status: in-flight)
-
-Adopt the Ariadne architecture (RFC Accepted 2026-07-28) in the
-   ratified order. This theme is step 1 only: one clause vocabulary,
-   the DecisionEnvelope truth artifact, a fail-closed decide() kernel
-   over the existing gate core, lifecycle wiring, and the versioned
-   contract at the console seam. Steps 2-4 (grants on irreversible
-   effects, tenants/owners, Fleet re-scope) get their own themes when
-   step 1 lands.
-
-**Informative spec:** `docs/architecture/rfc-ariadne-adoption.md`
-
-| tier | r | theme | spec | axes |
-|---|---|---|---|---|
-| blocker | ● | ariadne-adoption | `ariadne-clause-vocabulary.spec.edn` — Ariadne step 1a: one clause vocabulary for severity and enforcement | policyenforcement+governancecredibility |
-| blocker | ○ | ariadne-adoption | `ariadne-decide-kernel.spec.edn` — Ariadne step 1c: fail-closed decide() kernel over compiled pack results | policyenforcement+governancecredibility |
-| blocker | ○ | ariadne-adoption | `ariadne-decision-envelope.spec.edn` — Ariadne step 1b: DecisionEnvelope component - the one truth artifact for policy decisions | policyenforcement+governancecredibility |
-| blocker | ○ | ariadne-adoption | `ariadne-gate-envelope-wiring.spec.edn` — Ariadne step 1d: gates emit DecisionEnvelopes through the phase lifecycle | policyenforcement+governancecredibility |
-| high | ○ | ariadne-adoption | `ariadne-envelope-entity-contract.spec.edn` — Ariadne step 1e: DecisionEnvelope crosses the console seam as a versioned contract | policyenforcement+governancecredibility |
 
 ## Theme — DAG orchestration (`dag-orchestration`, status: in-flight)
 

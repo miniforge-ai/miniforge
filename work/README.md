@@ -33,7 +33,7 @@ DAG task definitions for parallel execution:
 - **Design specifications** -> `specs/informative/`
 - **Normative requirements** -> `specs/normative/`
 - **PR documentation** -> `docs/prs/` or `docs/pull-requests/`
-- **Completed specs** -> `work/archive/done/`
+- **Completed specs** -> `work/done/`
 
 ## Lifecycle
 
@@ -43,7 +43,7 @@ work/                    # Active work inputs
        |
 [Miniforge executes work]
        |
-work/archive/done/       # Completed work archived
+work/done/               # Completed work archived
   |-- my-feature.spec.edn
 ```
 
@@ -51,12 +51,13 @@ work/archive/done/       # Completed work archived
 
 Specs are archived into subdirectories when they are no longer active:
 
-- `archive/done/` -- Work completed and merged
+- `done/` -- Work completed and merged
 - `archive/stale/` -- Specs with outdated assumptions, tech stack, or framing
 
 ## Current Specs
 
 ### Ready to Run
+
 | Spec | Description | Priority |
 |------|-------------|----------|
 | `finish-event-telemetry.spec.edn` | Wire phase events in verify/review/release | High |
@@ -73,7 +74,9 @@ Specs are archived into subdirectories when they are no longer active:
 | `workflow-redesign-use-case-targeted.spec.edn` | Use-case specific workflow definitions | Low |
 
 ### Reliability Nines Series (rn-*)
+
 16 interconnected specs for reliability engineering:
+
 | Spec | Description |
 |------|-------------|
 | `rn-00-reliability-nines-dag.edn` | DAG orchestration for the series |
@@ -106,6 +109,7 @@ normative spec requirements (see `docs/progress-review-2026-04-13.md`):
 | `oss-integration-test-coverage` | OSS | 6 high-priority integration tests (TEST_OPPORTUNITIES.md) | High |
 
 ### Not Started
+
 | Spec | Description |
 |------|-------------|
 | `gitlab-support.spec.edn` | Git provider abstraction + GitLab adapter |
@@ -122,7 +126,7 @@ bb miniforge run work/finish-event-telemetry.spec.edn
 ### Archive completed work
 
 ```bash
-git mv work/completed-feature.spec.edn work/archive/done/
+git mv work/completed-feature.spec.edn work/done/
 ```
 
 ---
