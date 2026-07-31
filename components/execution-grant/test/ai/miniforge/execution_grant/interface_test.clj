@@ -146,6 +146,61 @@
                                   now)]
         (is (= :effect/merge (:grant/effect-class child)))))))
 
+(deftest ^{:stratum 2} scope-narrowing-has-no-sentinel-hole-test
+  (testing "a scope value equal to a presence sentinel cannot smuggle a dropped key"
+    ;; Scope values are `any?`, so any sentinel default is a value some
+    ;; scope may legitimately hold. Presence must be tested with
+    ;; `contains?`, or a child could drop exactly this key undetected.
+    (let [sentinel :ai.miniforge.execution-grant.attenuation/absent
+          parent (root {:scope {:repo "miniforge-ai/miniforge" :marker sentinel}})]
+      (is (anomaly/anomaly?
+           (grant/delegate parent
+                           {:principal "agent:x"
+                            :scope {:repo "miniforge-ai/miniforge"}
+                            :constraints (:grant/constraints parent)
+                            :expires-at later}
+                           now))
+          "dropping a key whose value equals the sentinel is still a widening")))
+
+  (testing "a key bound to nil must still be carried by the child"
+    (let [parent (root {:scope {:repo "miniforge-ai/miniforge" :branch nil}})]
+      (is (anomaly/anomaly?
+           (grant/delegate parent
+                           {:principal "agent:x"
+                            :scope {:repo "miniforge-ai/miniforge"}
+                            :constraints (:grant/constraints parent)
+                            :expires-at later}
+                           now))
+          "an absent key is not the same as a key bound to nil")
+      (is (grant/valid?
+           (grant/delegate parent
+                           {:principal "agent:x"
+                            :scope {:repo "miniforge-ai/miniforge" :branch nil}
+                            :constraints (:grant/constraints parent)
+                            :expires-at later}
+                           now))
+          "carrying the nil binding is a legal narrowing"))))
+
+(deftest ^{:stratum 2} anomaly-types-are-routable-test
+  (testing "a malformed parent is :invalid-input, not :unauthorized"
+    (let [a (grant/delegate {:not "a grant"}
+                            {:principal "agent:x" :expires-at later}
+                            now)]
+      (is (anomaly/anomaly? a))
+      (is (= :invalid-input (:anomaly/type a))
+          "bad caller data and denied authority must route apart")))
+
+  (testing "a refused delegation from a valid parent is :unauthorized"
+    (let [a (grant/delegate (root {:delegable? false})
+                            {:principal "agent:x"
+                             :scope {:repo "miniforge-ai/miniforge"}
+                             :constraints {:constraint/max-cost-usd 1.0
+                                           :constraint/max-tokens 10
+                                           :constraint/max-count 1}
+                             :expires-at later}
+                            now)]
+      (is (= :unauthorized (:anomaly/type a))))))
+
 (deftest ^{:stratum 2} delegation-structural-refusals-test
   (testing "a non-delegable parent cannot be delegated from"
     (let [parent (root {:delegable? false})]

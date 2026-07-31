@@ -108,8 +108,11 @@
   ([parent opts] (delegate parent opts (Instant/now)))
   ([parent opts ^Instant now]
    (cond
+     ;; A malformed parent is bad caller-supplied DATA, not a permission
+     ;; failure — `:invalid-input` keeps the two routable apart, and
+     ;; carries the Malli explanation of what was wrong with it.
      (not (valid? parent))
-     (refused "cannot delegate from a grant that is not a valid ExecutionGrant" {})
+     (invalid "cannot delegate from a value that is not a valid ExecutionGrant" parent)
 
      (not (:grant/delegable? parent))
      (refused "parent grant is not delegable"

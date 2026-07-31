@@ -54,9 +54,17 @@
 (defn ^{:stratum 0} scope-widened?
   "True when `child-scope` fails to carry every binding `parent-scope`
    set. A child may ADD keys (that narrows); it may not drop or change
-   one (that widens)."
+   one (that widens).
+
+   Presence is tested with `contains?` rather than a sentinel default:
+   scope values are `any?`, so any sentinel is a value a scope could
+   legitimately hold, and a collision would let a child drop that key
+   undetected. `contains?` also distinguishes an absent key from one
+   bound to nil."
   [parent-scope child-scope]
-  (not (every? (fn [[k v]] (= v (get child-scope k ::absent)))
+  (not (every? (fn [[k v]]
+                 (and (contains? child-scope k)
+                      (= v (get child-scope k))))
                parent-scope)))
 
 (defn ^{:stratum 0} expiry-extended?
