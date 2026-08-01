@@ -16,7 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.compliance-scanner.execute-test
-  "Unit tests for execute-patch/patch-file-content — the pure file-patching logic."
+  "Unit tests for execute-patch/patch-file-content (pure file-patching
+   logic) and execute-pr-doc/build-pr-doc, build-pr-body (PR doc
+   generation)."
   (:require [clojure.test   :refer [deftest testing is]]
             [clojure.string :as str]
             [ai.miniforge.compliance-scanner.execute-patch :as patch]

@@ -36,8 +36,7 @@
   [v]
   (str "| `" (get v :file "") "` | " (get v :line 0)
        " | `" (get v :current "") "`"
-       (when-let [s (get v :suggested)]
-         (str " | `" s "`"))
+       " | " (if-let [s (get v :suggested)] (str "`" s "`") "")
        " |"))
 
 (defn ^{:stratum 0} write-pr-doc!
