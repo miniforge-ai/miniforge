@@ -21,84 +21,21 @@
 
    Pure functions only. Consumers (e.g., `connector-github`) take the
    structured comment maps emitted here and post them via the provider's
-   review-comment API.
+   review-comment API. Severity inference and payload/body-rendering
+   primitives live in `comments-payload` (rule 210: a fourth real layer
+   here is the signal to split it).
 
-   Layer 0: payload helpers
-   Layer 1: comment-record builders
-   Layer 2: bulk renderer + severity inference"
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]))
+   Layer 0: single-violation payload + comment-body builders
+   Layer 1: single-comment builder
+   Layer 2: bulk comment renderer"
+  (:require [ai.miniforge.compliance-scanner.comments-payload :as payload]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Severity inference
-(defn- ^{:stratum 0} infer-severity
-  "Map a classified Violation to a :violation/severity keyword.
+;; Re-export: round-trip payload parser lives in `comments-payload`.
+(def ^{:stratum 0} extract-payload payload/extract-payload)
 
-   Heuristic: violations whose `:rule/category` matches
-   security/safety/critical → :error. Everything else → :warning,
-   regardless of auto-fixability. Callers may override by providing
-   `:severity-override` on the violation map."
-  [violation]
-  (or (:severity-override violation)
-      (let [category      (some-> (:rule/category violation) str/lower-case)
-            critical-cat? (and category
-                               (or (str/includes? category "security")
-                                   (str/includes? category "safety")
-                                   (str/includes? category "critical")))]
-        (if critical-cat? :error :warning))))
-
-;; Payload construction
-(defn- ^{:stratum 0} rationale-text
-  "Return a violation rationale when it is a string; otherwise return empty text."
-  [violation]
-  (let [rationale (get violation :rationale)]
-    (if (string? rationale) rationale "")))
-
-;; Body rendering
-(defn- ^{:stratum 0} pr-edn
-  "Pretty-print an EDN value for embedding in a comment body. Stable
-   key ordering keeps comment diffs minimal across re-renders."
-  [v]
-  (if (map? v)
-    (let [ordered-keys [:violation/rule-id
-                        :violation/severity
-                        :violation/auto-fixable?
-                        :violation/suggested-fix
-                        :violation/rationale
-                        :violation/pack-id
-                        :violation/pack-version]
-          present      (filter #(contains? v %) ordered-keys)
-          extras       (sort (remove (set ordered-keys) (keys v)))
-          all-keys     (concat present extras)
-          lines        (for [k all-keys]
-                         (str " " (pr-str k) " " (pr-str (get v k))))]
-      (str "{" (str/triml (str/join "\n" lines)) "}"))
-    (pr-str v)))
-
-;; Parser (round-trip helper)
-(defn ^{:stratum 0} extract-payload
-  "Extract a `:comment/payload` map from a comment body produced by
-   `render-body`. Returns nil if no payload block is found.
-
-   Used by the Comment Response Agent's bot-comment-table parser
-   (per `pr-monitoring-workflow.md` Bot Comment Handling) to recover
-   the structured payload from a posted comment."
-  [body]
-  (when (string? body)
-    (let [block-re #"(?s)```edn\s*:comment/payload\s*(\{.*?\})\s*```"]
-      (when-let [[_ edn-str] (re-find block-re body)]
-        (try
-          ;; clojure.edn/read-string is strictly EDN — no reader macros,
-          ;; no #=, no eval. Comment bodies are untrusted input once
-          ;; posted/retrieved from a PR. {:default identity} swallows
-          ;; unknown tagged literals safely.
-          (edn/read-string {:default (fn [_tag value] value)} edn-str)
-          (catch Exception _ nil))))))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn ^{:stratum 1} violation->payload
+(defn ^{:stratum 0} violation->payload
   "Build the :comment/payload map for a single classified Violation.
 
    Arguments:
@@ -116,33 +53,33 @@
       :violation/pack-version  string}"
   [violation pack-info]
   {:violation/rule-id        (:rule/id violation)
-   :violation/severity       (infer-severity violation)
+   :violation/severity       (payload/infer-severity violation)
    :violation/auto-fixable?  (boolean (:auto-fixable? violation))
    :violation/suggested-fix  (:suggested violation)
-   :violation/rationale      (rationale-text violation)
+   :violation/rationale      (payload/rationale-text violation)
    :violation/pack-id        (:pack/id pack-info)
    :violation/pack-version   (:pack/version pack-info)})
 
-(defn- ^{:stratum 1} render-body
+(defn- ^{:stratum 0} render-body
   "Build the human-readable comment body with the embedded EDN payload
    block."
-  [violation payload]
+  [violation payload-map]
   (str "**" (or (:rule/title violation) (name (:rule/id violation))) "**\n"
        "\n"
-       (when-let [r (not-empty (:violation/rationale payload))]
+       (when-let [r (not-empty (:violation/rationale payload-map))]
          (str r "\n\n"))
        (when-let [s (:suggested violation)]
          (str "Suggested fix:\n```\n" s "\n```\n\n"))
        "```edn\n"
        ":comment/payload\n"
-       (pr-edn payload) "\n"
+       (payload/pr-edn payload-map) "\n"
        "```\n"
        "<sub>Posted by `miniforge-policy-evaluator[bot]` — see N13 §2.3</sub>"))
 
-;------------------------------------------------------------------------------ Layer 2
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Single-comment builder
-(defn ^{:stratum 2} violation->comment
+(defn ^{:stratum 1} violation->comment
   "Render a single classified Violation to the comment record per
    N13 §2.3.
 
@@ -158,18 +95,18 @@
       :comment/body    string  ; markdown w/ embedded :comment/payload EDN
       :comment/payload {:violation/...}}"
   [violation pack-info]
-  (let [payload (violation->payload violation pack-info)
-        body    (render-body violation payload)]
+  (let [payload-map (violation->payload violation pack-info)
+        body        (render-body violation payload-map)]
     {:comment/author  "miniforge-policy-evaluator[bot]"
      :comment/path    (:file violation)
      :comment/line    (:line violation)
      :comment/body    body
-     :comment/payload payload}))
+     :comment/payload payload-map}))
 
-;------------------------------------------------------------------------------ Layer 3
+;------------------------------------------------------------------------------ Layer 2
 
 ;; Bulk renderer
-(defn ^{:stratum 3} violations->comments
+(defn ^{:stratum 2} violations->comments
   "Render a vector of classified Violations to a vector of comment
    records.
 
