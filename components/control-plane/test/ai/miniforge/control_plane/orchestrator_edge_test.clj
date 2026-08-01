@@ -10,12 +10,11 @@
    [ai.miniforge.control-plane.orchestrator :as sut]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
+   [ai.miniforge.control-plane.async-test-support :as support]
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private default-wait-timeout-ms 2000)
 
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
@@ -75,23 +74,6 @@
       (is (nil? (:event-stream orch))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} wait-until-count
-  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
-   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
-  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
-  ([items-atom n timeout-ms]
-   (let [done (promise)
-         k    (gensym "wait-count-")]
-     (when (>= (count @items-atom) n)
-       (deliver done :immediate))
-     (add-watch items-atom k
-                (fn [_ _ _ new-val]
-                  (when (>= (count new-val) n)
-                    (deliver done :reached))))
-     (let [result (deref done timeout-ms ::timeout)]
-       (remove-watch items-atom k)
-       (not= result ::timeout)))))
 
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: no matching adapter for agent's vendor
@@ -427,12 +409,10 @@
       (is (contains? stopped :registry))
       (is (false? @(:running stopped))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: emits decision-resolved event
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 2} resolve-and-deliver-emits-decision-resolved-event-test
+(deftest ^{:stratum 1} resolve-and-deliver-emits-decision-resolved-event-test
   (testing "resolve-and-deliver! emits :control-plane/decision-resolved event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -453,17 +433,17 @@
           decision (sut/submit-decision-from-agent!
                     orch (:agent/id agent-rec) "Resolve event test")
           ;; Wait for submit-emitted events, then clear before resolve.
-          _ (wait-until-count published 1)
+          _ (support/wait-until-count published 1)
           _ (reset! published [])
           _ (sut/resolve-and-deliver!
              orch (:decision/id decision) "approved")]
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should have published decision-resolved event"))))
 
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: uses :status key from status-update (not :agent/status)
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 2} run-poll-pass-uses-status-key-test
+(deftest ^{:stratum 1} run-poll-pass-uses-status-key-test
   (testing "poll pass extracts new-status from :status key in status-update"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
@@ -485,5 +465,5 @@
       (#'sut/run-poll-pass orch)
       ;; Agent was :initializing, poll returned :status :running
       ;; This should trigger a state-changed event
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should emit state-changed when :status key differs from current"))))

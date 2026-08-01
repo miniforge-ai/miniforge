@@ -7,6 +7,7 @@
    [ai.miniforge.control-plane.orchestrator :as sut]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
+   [ai.miniforge.control-plane.async-test-support :as support]
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
@@ -46,8 +47,6 @@
   (let [events-atom (atom [])]
     {:stream (stream/create-event-stream {:sinks []})
      :published events-atom}))
-
-(def ^{:stratum 0} ^:private default-wait-timeout-ms 2000)
 
 (def ^{:stratum 0} test-workflow-id (java.util.UUID/fromString "00000000-0000-0000-0000-000000000001"))
 
@@ -127,36 +126,6 @@
       (is (instance? clojure.lang.Atom (:futures orch))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} wait-until-count
-  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
-   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
-  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
-  ([items-atom n timeout-ms]
-   (let [done (promise)
-         k    (gensym "wait-count-")]
-     (when (>= (count @items-atom) n)
-       (deliver done :immediate))
-     (add-watch items-atom k
-                (fn [_ _ _ new-val]
-                  (when (>= (count new-val) n)
-                    (deliver done :reached))))
-     (let [result (deref done timeout-ms ::timeout)]
-       (remove-watch items-atom k)
-       (not= result ::timeout)))))
-
-(defn- ^{:stratum 1} wait-until
-  "Block until `(pred)` returns truthy or `timeout-ms` elapses.
-   Returns true if pred satisfied, false on timeout."
-  ([pred] (wait-until pred default-wait-timeout-ms))
-  ([pred timeout-ms]
-   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-     (loop []
-       (cond
-         (pred) true
-         (> (System/currentTimeMillis) deadline) false
-         :else (do (java.util.concurrent.locks.LockSupport/parkNanos 1000000)
-                   (recur)))))))
 
 (defn ^{:stratum 1} base-orchestrator-opts
   "Minimal valid opts for creating an orchestrator."
@@ -309,7 +278,7 @@
                   :adapters [adapter]
                   :event-stream es}))]
       (#'sut/run-discovery-pass orch)
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should have published at least one event"))))
 
 (deftest ^{:stratum 2} run-discovery-pass-empty-results-test
@@ -498,7 +467,7 @@
                   :event-stream es}))]
       (#'sut/run-poll-pass orch)
       ;; Should have emitted a state-changed event since status went from :initializing to :running
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should have published at least one state-changed event"))))
 
 (deftest ^{:stratum 2} run-poll-pass-no-event-when-status-unchanged-test
@@ -521,7 +490,7 @@
                   :adapters [adapter]
                   :event-stream es}))]
       (#'sut/run-poll-pass orch)
-      (wait-until-count published 1)
+      (support/wait-until-count published 1)
       (let [event-types (map :event/type @published)]
         (is (= [:control-plane/agent-heartbeat] event-types)
             "stable polls should publish heartbeat context but not a state change")))))
@@ -593,6 +562,13 @@
   (testing "start! triggers discovery loop that finds agents"
     (let [reg (registry/create-registry)
           discovered (atom [])
+          ;; The discovery pass itself delivers this: no interval, no poll,
+          ;; no watch to install too late. `start!` runs the first discovery
+          ;; pass before the loop's first sleep, so the configured intervals
+          ;; only decide when a redundant SECOND pass would run — they never
+          ;; decide whether this test passes. The timeout below is a deadlock
+          ;; guard, not a bet on how fast a loaded CI runner schedules.
+          first-discovery (promise)
           agent-info {:agent/external-id "ext-loop"
                       :agent/name "Loop Agent"
                       :agent/vendor :test-adapter}
@@ -602,23 +578,28 @@
                 (base-orchestrator-opts
                  {:registry reg
                   :adapters [adapter]
-                  :on-agent-discovered #(swap! discovered conj %)
-                  :discovery-interval-ms 50
-                  :poll-interval-ms 50}))]
-      (sut/start! orch)
-      ;; Wait for the on-agent-discovered callback to fire — not just for
-      ;; registry registration. run-discovery-pass calls register-agent!
-      ;; immediately before on-agent-discovered, so waiting on the registry
-      ;; count can observe the agent in the window before the callback runs
-      ;; and then race stop!, leaving `discovered` empty. Waiting on the
-      ;; callback's own effect makes both assertions deterministic.
-      (is (wait-until-count discovered 1)
-          "discovery callback should fire before the wait times out")
-      (sut/stop! orch)
+                  :on-agent-discovered (fn [agent-record]
+                                         (swap! discovered conj agent-record)
+                                         (deliver first-discovery agent-record))}))
+          started (sut/start! orch)
+          ;; deref establishes happens-before with everything the discovery
+          ;; thread did up to the deliver — the register-agent! and the swap!
+          ;; — so the assertions after stop! read settled state.
+          delivered (deref first-discovery support/default-wait-timeout-ms nil)]
+      (sut/stop! started)
+      (is (some? delivered)
+          "on-agent-discovered should fire on the discovery loop's first pass")
+      (is (= "ext-loop" (:agent/external-id delivered))
+          "callback should receive the agent the adapter discovered")
       (is (pos? (registry/count-agents reg))
           "discovery loop should have registered agents")
-      (is (pos? (count @discovered))
-          "on-agent-discovered should have been called"))))
+      ;; Drive the second pass here, on this thread, now that the loop is
+      ;; stopped. Waiting for the background loop to tick again before stop!
+      ;; would put the claim below back at the mercy of the scheduler; the
+      ;; agent is registered either way, so the callback must not fire again.
+      (#'sut/run-discovery-pass started)
+      (is (= ["ext-loop"] (mapv :agent/external-id @discovered))
+          "an already-registered agent is not re-announced on a later pass"))))
 
 (deftest ^{:stratum 2} stop-idempotent-test
   (testing "stop! can be called multiple times safely"
@@ -746,7 +727,7 @@
                   :event-stream es}))]
       (sut/submit-decision-from-agent!
        orch (:agent/id agent-rec) "Event decision?")
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should have published a decision-created event"))))
 
 (deftest ^{:stratum 2} submit-multiple-decisions-same-agent-test
@@ -866,7 +847,7 @@
           _ (sut/resolve-and-deliver!
              orch (:decision/id decision) "approved")]
       ;; Should have events for: decision-created, decision-resolved
-      (is (wait-until-count published 2)
+      (is (support/wait-until-count published 2)
           "should have published decision-created and decision-resolved events"))))
 
 (deftest ^{:stratum 2} resolve-and-deliver-without-comment-test
@@ -961,7 +942,7 @@
 
       ;; Start orchestrator and wait for discovery to register the agent.
       (sut/start! orch)
-      (wait-until #(pos? (registry/count-agents reg)))
+      (support/wait-until #(pos? (registry/count-agents reg)))
 
       (let [agents (registry/list-agents reg)]
         (is (= 1 (count agents)) "should have discovered one agent")
@@ -1005,7 +986,7 @@
                   :discovery-interval-ms 50
                   :poll-interval-ms 50}))]
       (sut/start! orch)
-      (wait-until #(pos? (registry/count-agents reg)))
+      (support/wait-until #(pos? (registry/count-agents reg)))
 
       (let [agents (registry/list-agents reg)
             agent-id (:agent/id (first agents))
@@ -1016,7 +997,7 @@
             _ (sut/resolve-and-deliver!
                orch (:decision/id decision) "yes")]
         ;; Should have: agent-registered, possibly state-changed, decision-created, decision-resolved
-        (is (wait-until-count published 3)
+        (is (support/wait-until-count published 3)
             "should have published multiple events throughout lifecycle"))
 
       (sut/stop! orch))))
