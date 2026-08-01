@@ -79,8 +79,8 @@
 
 ;; File enumeration and scan entry point
 (defn ^{:stratum 0} target-file?
-  "True when the path matches `components/*/src/**/*.clj` or
-   `bases/*/src/**/*.clj`. Repo-relative path expected."
+  "True when the path matches `components/*/src/**/*.{clj,cljc}` or
+   `bases/*/src/**/*.{clj,cljc}`. Repo-relative path expected."
   [^String relative-path]
   (and (or (str/starts-with? relative-path "components/")
            (str/starts-with? relative-path "bases/"))
@@ -204,17 +204,28 @@
    :snippet    (form-snippet form)})
 
 (defn ^{:stratum 1} list-target-files
-  "Walk the repo root and return repo-relative paths for every Clojure
-   source file under components/*/src or bases/*/src. Test files are
-   intentionally excluded — the rule is about production source.
+  "Walk `components/` and `bases/` under the repo root and return
+   repo-relative paths for every Clojure source file under
+   components/*/src or bases/*/src. Test files are intentionally
+   excluded — the rule is about production source.
+
+   Traversal is pruned to those two top-level directories rather than
+   the whole repo (skips `.git/`, `node_modules/`, `target/`, etc.),
+   and every visited file is checked against `within-root?` so a
+   symlink can't walk enumeration outside `repo-root`.
 
    Paths are normalized to forward-slash separators so `target-file?`
    matches consistently on Windows and POSIX hosts."
   [repo-root]
-  (let [root     (io/file repo-root)
-        root-len (inc (count (.getAbsolutePath root)))]
-    (->> (file-seq root)
-         (filter #(.isFile ^java.io.File %))
+  (let [root       (io/file repo-root)
+        root-len   (inc (count (.getAbsolutePath root)))
+        scan-roots (->> ["components" "bases"]
+                        (map #(io/file root %))
+                        (filter #(.isDirectory ^java.io.File %)))]
+    (->> scan-roots
+         (mapcat file-seq)
+         (filter #(and (.isFile ^java.io.File %)
+                       (within-root? root %)))
          (map (fn [^java.io.File f]
                 (let [abs (.getAbsolutePath f)
                       rel (if (>= (count abs) root-len)
