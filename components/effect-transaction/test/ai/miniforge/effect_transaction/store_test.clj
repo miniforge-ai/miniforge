@@ -25,7 +25,8 @@
   (:import
    [java.nio.file Files]
    [java.nio.file.attribute FileAttribute]
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -97,3 +98,30 @@
     (fx/write! dir (assoc t :effect/state :committing))
     (is (= 1 (count (fx/list-records dir))))
     (is (= :committing (:effect/state (fx/read-record dir (:effect/id t)))))))
+
+(deftest ^{:stratum 2} both-inst-types-round-trip-test
+  ;; The schema says `inst?`, and `inst?` admits java.util.Date as well
+  ;; as java.time.Instant — so a record the schema ACCEPTS can arrive at
+  ;; the store holding either. Both must survive the disk boundary, or
+  ;; the store rejects records its own contract calls valid.
+  (let [dir (tmp-dir)
+        as-date (record {:effect/at (Date/from now)})
+        as-instant (record {:effect/at now})]
+    (is (fx/valid? as-date) "a Date is a valid :effect/at per the schema")
+    (fx/write! dir as-date)
+    (fx/write! dir as-instant)
+    (is (= now (:effect/at (fx/read-record dir (:effect/id as-date))))
+        "a Date normalizes to the same instant on the way out")
+    (is (= now (:effect/at (fx/read-record dir (:effect/id as-instant)))))))
+
+(deftest ^{:stratum 2} unsupported-timestamp-throws-rather-than-persisting-test
+  ;; Persisting a value that cannot be read back turns a durable record
+  ;; into a landmine that only goes off later, when someone is trying to
+  ;; reconcile an effect they already performed.
+  (let [dir (tmp-dir)]
+    (testing "a number is refused"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (fx/write! dir (record {:effect/updated-at 12345})))))
+    (testing "a string is refused too — it would persist and fail only on READ"
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (fx/write! dir (record {:effect/at "not-a-timestamp-at-all"})))))))

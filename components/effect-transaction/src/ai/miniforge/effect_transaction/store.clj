@@ -35,7 +35,8 @@
   (:import
    [java.io File]
    [java.nio.file Files StandardCopyOption]
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -52,20 +53,44 @@
   ^File [dir id]
   (io/file dir (str id ".edn")))
 
+(defn ^{:stratum 0} ->iso
+  "Timestamp -> ISO-8601 string, by actual type rather than by type hint.
+
+   The schema says `inst?`, and `inst?` admits BOTH `java.time.Instant`
+   and `java.util.Date` — so a record the schema accepts can arrive here
+   holding either. Both are normalized; anything else throws.
+
+   Throwing is the right answer for a store: persisting a value that
+   cannot be read back turns a durable record into a landmine that only
+   goes off later, when someone is trying to reconcile an effect they
+   already performed.
+
+   Strings are NOT waved through. A string that happens not to parse
+   would persist fine and only fail on the way back out — which is the
+   landmine this is meant to prevent, just relocated."
+  ^String [v]
+  (cond
+    (instance? Instant v) (.toString ^Instant v)
+    (instance? Date v) (.toString (.toInstant ^Date v))
+    :else (throw (ex-info "EffectTransaction timestamp is not a supported instant type"
+                          {:value v :type (some-> v class .getName)}))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} ->wire
-  "Record -> EDN-safe map (Instants to ISO-8601 strings)."
+  "Record -> EDN-safe map (timestamps to ISO-8601 strings)."
   [record]
   (reduce (fn [acc k]
-            (if-let [^Instant v (get acc k)]
-              (assoc acc k (.toString v))
+            (if (some? (get acc k))
+              (assoc acc k (->iso (get acc k)))
               acc))
           record
           instant-keys))
 
 (defn ^{:stratum 1} <-wire
-  "EDN map -> record (ISO-8601 strings back to Instants)."
+  "EDN map -> record (ISO-8601 strings back to Instants). Reading is
+   deliberately strict: a stored value that will not parse is corruption
+   and must surface, not be silently carried forward as a string."
   [m]
   (reduce (fn [acc k]
             (if-let [v (get acc k)]
@@ -108,10 +133,13 @@
    `.edn` suffix filter — a partial write is never mistaken for a
    record."
   [dir]
-  (let [^File d (io/file dir)]
+  (let [^File d (io/file dir)
+        ;; Bound rather than inlined: as an inline `(comp ...)` argument
+        ;; this read as a 2-arity `into` to two reviewers running, which
+        ;; is reason enough to name it even though the 3-arity form was
+        ;; correct.
+        xform (comp (filter #(.endsWith (.getName ^File %) ".edn"))
+                    (map #(<-wire (edn/read-string (slurp % :encoding "UTF-8")))))]
     (if-not (.isDirectory d)
       []
-      (into []
-            (comp (filter #(.endsWith (.getName ^File %) ".edn"))
-                  (map #(<-wire (edn/read-string (slurp % :encoding "UTF-8")))))
-            (.listFiles d)))))
+      (into [] xform (.listFiles d)))))
