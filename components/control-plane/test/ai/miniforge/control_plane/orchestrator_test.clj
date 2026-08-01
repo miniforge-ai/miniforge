@@ -593,8 +593,13 @@
           "callback should receive the agent the adapter discovered")
       (is (pos? (registry/count-agents reg))
           "discovery loop should have registered agents")
+      ;; Drive the second pass here, on this thread, now that the loop is
+      ;; stopped. Waiting for the background loop to tick again before stop!
+      ;; would put the claim below back at the mercy of the scheduler; the
+      ;; agent is registered either way, so the callback must not fire again.
+      (#'sut/run-discovery-pass started)
       (is (= ["ext-loop"] (mapv :agent/external-id @discovered))
-          "already-registered agents are not re-announced on later passes"))))
+          "an already-registered agent is not re-announced on a later pass"))))
 
 (deftest ^{:stratum 2} stop-idempotent-test
   (testing "stop! can be called multiple times safely"
