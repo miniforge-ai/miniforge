@@ -1,0 +1,205 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 960" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9673a6"/></marker>
+    <marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .pt{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ot{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .rel{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;} .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .ext{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;} .dis{fill:#f8cecc;stroke:#b85450;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11.5px;fill:#333;} .s{font-size:10.5px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:10px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .eP{stroke:#9673a6;stroke-width:1.6;fill:none;}
+      .eO{stroke:#d79b00;stroke-width:1.6;fill:none;}
+      .own{font-size:10px;font-weight:bold;}
+    </style>
+  </defs>
+
+  <rect width="1920" height="960" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Tenancy, Ownership &amp; Access — 3. Ownership by Provenance</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">§6 · owner = a column stamped by the creating context · a record's type NEVER implies its owner kind</text>
+
+  <!-- zones -->
+  <rect class="zone" x="20" y="62" width="360" height="700" rx="6"/>
+  <text class="zoneT" x="36" y="84">INTAKE CHANNELS</text>
+  <rect class="zone" x="400" y="62" width="330" height="700" rx="6"/>
+  <text class="zoneT" x="416" y="84">SUBSTRATE — artifacts · evidence</text>
+  <rect class="zone" x="830" y="62" width="340" height="700" rx="6"/>
+  <text class="zoneT" x="846" y="84">DERIVED IDENTITY — claims · profile</text>
+  <rect class="zone" x="1190" y="62" width="710" height="700" rx="6"/>
+  <text class="zoneT" x="1206" y="84">PROJECTIONS &amp; SHARED ASSETS</text>
+
+  <!-- IP boundary -->
+  <line x1="790" y1="70" x2="790" y2="755" stroke="#b03030" stroke-width="3" stroke-dasharray="10 6"/>
+  <text x="783" y="420" font-size="13" font-weight="bold" fill="#b03030" transform="rotate(-90 783 420)">THE IP BOUNDARY — DERIVATION</text>
+
+  <!-- channels -->
+  <rect class="ot" x="44" y="104" width="312" height="120" rx="8"/>
+  <text class="h" x="58" y="128">Org-bound connectors</text>
+  <text class="s" x="58" y="146">Jira · git · review docs · Teams/Slack — the</text>
+  <text class="s" x="58" y="160">employer's channels carry the employer's IP claim</text>
+  <rect class="rec" x="58" y="172" width="180" height="22" rx="11" fill="#dae8fc"/><text class="own" x="148" y="187" text-anchor="middle" fill="#274b73">owner: tenant:acme (org)</text>
+  <rect class="dis" x="248" y="172" width="94" height="22" rx="11"/><text class="s" x="295" y="187" text-anchor="middle">:confidential</text>
+  <text class="s" x="58" y="212" font-style="italic">connector bindings are org-owned assets</text>
+
+  <rect class="pt" x="44" y="244" width="312" height="110" rx="8"/>
+  <text class="h" x="58" y="268">Personal drop folder / self-import</text>
+  <text class="s" x="58" y="286">resume · portfolio · personal projects — no</text>
+  <text class="s" x="58" y="300">employer claim exists on this route</text>
+  <rect class="rec" x="58" y="314" width="196" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="156" y="329" text-anchor="middle" fill="#3a6a34">owner: tenant:chris (personal)</text>
+
+  <rect class="ext" x="44" y="374" width="312" height="120" rx="8"/>
+  <text class="h" x="58" y="398">Licensed feed</text>
+  <text class="s" x="58" y="416">e.g. market data (EODHD pattern) — custodian</text>
+  <text class="s" x="58" y="430">owns the manifest; the PAYLOAD rights are the licensor's</text>
+  <rect class="rec" x="58" y="444" width="150" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="133" y="459" text-anchor="middle" fill="#3a6a34">custodian: intake tenant</text>
+  <rect class="dis" x="218" y="444" width="124" height="22" rx="11"/><text class="s" x="280" y="459" text-anchor="middle">rights: licensed [TTL]</text>
+  <text class="s" x="58" y="482" font-style="italic">access routes through license relation → diagram 5</text>
+
+  <rect class="ext" x="44" y="514" width="312" height="120" rx="8"/>
+  <text class="h" x="58" y="538">Open-web fetch</text>
+  <text class="s" x="58" y="556">scraped pages — public is NOT public domain;</text>
+  <text class="s" x="58" y="570">copyright defaults on (Berne)</text>
+  <rect class="dis" x="58" y="584" width="172" height="22" rx="11"/><text class="s" x="144" y="599" text-anchor="middle">rights: third-party-unknown</text>
+  <text class="s" x="58" y="622" font-style="italic">ephemeral use · upgrade = recorded human determination</text>
+
+  <rect class="note" x="44" y="662" width="312" height="84" rx="6"/>
+  <text class="h" x="58" y="684">Provenance rule</text>
+  <text class="t" x="58" y="704">Substrate takes the intake channel's tenant. No</text>
+  <text class="t" x="58" y="720">per-record adjudication on the normal path —</text>
+  <text class="t" x="58" y="736">corrections are privileged and audited (§6).</text>
+
+  <!-- substrate -->
+  <rect class="ot" x="424" y="104" width="282" height="150" rx="8"/>
+  <text class="h" x="438" y="128">org-owned substrate</text>
+  <rect class="rec" x="438" y="140" width="254" height="26" rx="4"/><text class="t" x="448" y="157">artifact: sprint retro doc</text>
+  <rect class="rec" x="438" y="172" width="254" height="26" rx="4"/><text class="t" x="448" y="189">evidence: PR history extract</text>
+  <rect class="dis" x="438" y="206" width="94" height="20" rx="10"/><text class="s" x="485" y="220" text-anchor="middle">:confidential</text>
+  <text class="s" x="544" y="221">employer keeps these on exit</text>
+
+  <rect class="pt" x="424" y="286" width="282" height="150" rx="8"/>
+  <text class="h" x="438" y="310">personal-owned substrate</text>
+  <rect class="rec" x="438" y="322" width="254" height="26" rx="4"/><text class="t" x="448" y="339">artifact: resume.pdf</text>
+  <rect class="rec" x="438" y="354" width="254" height="26" rx="4"/><text class="t" x="448" y="371">evidence: side-project repo</text>
+  <rect class="dis" x="438" y="388" width="74" height="20" rx="10"/><text class="s" x="475" y="402" text-anchor="middle">:private</text>
+
+  <rect class="note" x="424" y="470" width="282" height="130" rx="6"/>
+  <text class="h" x="438" y="492">Unowned world-state: the bigger risk</text>
+  <text class="t" x="438" y="512">Shared corpora, catalogs, event logs, license</text>
+  <text class="t" x="438" y="528">state — install-scoped with NO owner at all.</text>
+  <text class="t" x="438" y="546">Migration must ADD ownership to these, not</text>
+  <text class="t" x="438" y="562">merely re-scope what already had a key.</text>
+  <text class="t" x="438" y="582">(observed: jobs table, rubric catalog, events)</text>
+
+  <rect class="note" x="424" y="624" width="282" height="122" rx="6"/>
+  <text class="h" x="438" y="646">Identity landmine</text>
+  <text class="m" x="438" y="666">artifact-id = sha256(owner-id</text>
+  <text class="m" x="438" y="680">              + source-path)</text>
+  <text class="t" x="438" y="700">content addresses can embed the id string:</text>
+  <text class="t" x="438" y="716">adopt existing ids VERBATIM at migration —</text>
+  <text class="t" x="438" y="732">rename = silent re-key of the whole store.</text>
+
+  <!-- derived -->
+  <rect class="pt" x="854" y="104" width="292" height="200" rx="8"/>
+  <text class="h" x="868" y="128">claims + profile</text>
+  <rect class="rec" x="868" y="140" width="264" height="26" rx="4"/><text class="t" x="878" y="157">claim: "led multi-region migration"</text>
+  <rect class="dis" x="868" y="174" width="150" height="20" rx="10"/><text class="s" x="943" y="188" text-anchor="middle">:confidential (inherited)</text>
+  <rect class="rec" x="868" y="204" width="264" height="26" rx="4"/><text class="t" x="878" y="221">profile: synthesized professional identity</text>
+  <rect class="rec" x="868" y="240" width="264" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="1000" y="255" text-anchor="middle" fill="#3a6a34">owner: the subject's personal tenant — ALWAYS</text>
+  <text class="s" x="868" y="284" font-style="italic">regardless of source provenance (the resume norm:</text>
+  <text class="s" x="868" y="298" font-style="italic">the experience is the person's; the documents aren't)</text>
+
+  <rect class="note" x="854" y="330" width="292" height="140" rx="6"/>
+  <text class="h" x="868" y="352">Clause inheritance (§13.1)</text>
+  <text class="t" x="868" y="374">Derived records carry EVERY source clause</text>
+  <text class="t" x="868" y="390">(union); a clause is removed only by its</text>
+  <text class="t" x="868" y="410">authority's declared policy transformation,</text>
+  <text class="t" x="868" y="426">run by a trusted capability version. Ownership</text>
+  <text class="t" x="868" y="442">transfers at derivation; clauses do not.</text>
+
+  <rect class="note" x="854" y="494" width="292" height="120" rx="6"/>
+  <text class="h" x="868" y="516">Rights inheritance (licensed sources)</text>
+  <text class="t" x="868" y="538">Term-driven, not automatic: the license's</text>
+  <text class="t" x="868" y="554">derivation clause decides. EODHD pattern:</text>
+  <text class="t" x="868" y="572">raw series → licensed [TTL] · derived</text>
+  <text class="t" x="868" y="588">analytics → owned. No terms? third-party.</text>
+
+  <rect class="note" x="854" y="640" width="292" height="106" rx="6"/>
+  <text class="h" x="868" y="662">On offboarding</text>
+  <text class="t" x="868" y="684">The employer keeps (and re-closes) its</text>
+  <text class="t" x="868" y="700">documents; the person keeps the derived</text>
+  <text class="t" x="868" y="716">identity — still carrying inherited gates.</text>
+  <text class="t" x="868" y="732">Neither side keeps the other's property.</text>
+
+  <!-- projections -->
+  <rect class="pt" x="1214" y="104" width="320" height="140" rx="8"/>
+  <text class="h" x="1228" y="128">Self-serve projections</text>
+  <rect class="rec" x="1228" y="140" width="292" height="26" rx="4"/><text class="t" x="1238" y="157">fit report · growth read · eval run · story</text>
+  <rect class="rec" x="1228" y="176" width="228" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="1342" y="191" text-anchor="middle" fill="#3a6a34">owner: the subject's personal tenant</text>
+  <text class="s" x="1228" y="222" font-style="italic">run for oneself, owned by oneself</text>
+
+  <rect class="pt" x="1214" y="272" width="320" height="220" rx="8"/>
+  <text class="h" x="1228" y="296">Commissioned projections</text>
+  <rect class="rec" x="1228" y="308" width="292" height="26" rx="4"/><text class="t" x="1238" y="325">review run under acme's cycle</text>
+  <rect class="rec" x="1228" y="344" width="252" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="1354" y="359" text-anchor="middle" fill="#3a6a34">owner: tenant:chris (subject) — the DEFAULT</text>
+  <text class="s" x="1228" y="386" font-weight="bold">commissioning tenant gets relations, not ownership:</text>
+  <rect class="rel" x="1228" y="396" width="292" height="24" rx="5"/><text class="m" x="1238" y="412">review:V#commissioner@tenant:acme</text>
+  <rect class="rel" x="1228" y="426" width="292" height="24" rx="5"/><text class="m" x="1238" y="442">review:V#viewer@tenant:acme</text>
+  <text class="m" x="1228" y="470">review:V#engagement@engagement:chris-acme</text>
+  <text class="s" x="1228" y="484" font-style="italic">visibility granted, property kept — bounded by the engagement</text>
+
+  <rect class="dis" x="1214" y="516" width="320" height="96" rx="8"/>
+  <text class="h" x="1228" y="540">Exception: official-record policy flip</text>
+  <text class="t" x="1228" y="562">HR-integrated deployments may org-own</text>
+  <text class="t" x="1228" y="578">commissioned reviews — an explicit, NAMED</text>
+  <text class="t" x="1228" y="594">org-tenant policy set at onboarding. Its cost to</text>
+  <text class="t" x="1228" y="608">employees is visible by design: out of the takeaway.</text>
+
+  <!-- lenses -->
+  <rect class="rec" x="1560" y="104" width="316" height="240" rx="8"/>
+  <text class="h" x="1574" y="128">Shared assets — lenses</text>
+  <text class="s" x="1574" y="146">JD lens · growth rubric / CSP · templates · catalogs</text>
+  <rect class="rec" x="1574" y="160" width="288" height="22" rx="11" fill="#fffde7" stroke="#c8b900"/><text class="own" x="1718" y="175" text-anchor="middle" fill="#6a5a10">owner: the IMPORTING tenant — whichever kind</text>
+  <text class="s" x="1574" y="204" font-weight="bold">the same record type, two legitimate owners:</text>
+  <rect class="ot" x="1574" y="216" width="288" height="34" rx="6"/>
+  <text class="t" x="1586" y="230">corporate onboarding imports the CSP</text>
+  <text class="s" x="1586" y="244">→ org-owned, shared via #viewer userset</text>
+  <rect class="pt" x="1574" y="258" width="288" height="34" rx="6"/>
+  <text class="t" x="1586" y="272">B2C user imports the same document</text>
+  <text class="s" x="1586" y="286">→ personal-owned; no org exists to own it</text>
+  <text class="s" x="1574" y="318" font-style="italic">ownership and person-keying are different axes:</text>
+  <text class="s" x="1574" y="332" font-style="italic">a rubric carries no person fields either way</text>
+
+  <!-- defaults rail -->
+  <rect class="note" x="1214" y="640" width="662" height="106" rx="6"/>
+  <text class="h" x="1228" y="662">Ownership defaults — one line each</text>
+  <text class="t" x="1228" y="684">intake substrate → the channel's tenant · derived identity → the person, always · self-serve projections → the person</text>
+  <text class="t" x="1228" y="702">shared assets → the importing tenant · commissioned projections → the person + commissioner relations (flip = named org policy)</text>
+  <text class="t" x="1228" y="726" font-style="italic">The creating context decides; the owner is a COLUMN on the record, not a rule per type.</text>
+
+  <!-- flow arrows -->
+  <path class="eB" d="M356,164 C390,164 390,175 422,178" marker-end="url(#aB)"/>
+  <path class="eB" d="M356,300 C390,300 390,350 422,355" marker-end="url(#aB)"/>
+  <path class="eO" d="M356,434 C395,434 480,452 560,438" marker-end="url(#aO)" stroke-dasharray="5 3"/>
+  <text class="s" x="380" y="456" fill="#a06a00">payload custody · rights ride separately</text>
+  <path class="eB" d="M706,180 C770,180 770,200 852,200" marker-end="url(#aB)"/>
+  <path class="eB" d="M706,360 C770,360 770,230 852,225" marker-end="url(#aB)"/>
+  <text class="s" x="742" y="160" fill="#3a76b8">synthesis</text>
+  <path class="eB" d="M1146,200 C1180,200 1180,170 1212,170" marker-end="url(#aB)"/>
+  <path class="eB" d="M1146,220 C1180,220 1180,340 1212,345" marker-end="url(#aB)"/>
+  <text class="s" x="1176" y="136" fill="#3a76b8" text-anchor="middle">projected</text>
+  <text class="s" x="1176" y="148" fill="#3a76b8" text-anchor="middle">via lenses</text>
+  <path class="eP" d="M1534,408 C1548,408 1552,300 1560,240" marker-end="url(#aP)" stroke-dasharray="5 3"/>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="782" width="1880" height="80" rx="6"/>
+  <text class="zoneT" x="36" y="804">READING</text>
+  <line class="eB" x1="40" y1="828" x2="90" y2="828" marker-end="url(#aB)"/><text class="s" x="100" y="832">data flow (intake → substrate → derivation → projection)</text>
+  <line class="eP" x1="440" y1="828" x2="490" y2="828" marker-end="url(#aP)"/><text class="s" x="500" y="832">relation granted instead of ownership</text>
+  <line class="eO" x1="760" y1="828" x2="810" y2="828" marker-end="url(#aO)" stroke-dasharray="5 3"/><text class="s" x="820" y="832">licensed payload — rights ride separately (diagram 5)</text>
+  <text class="s" x="1220" y="832" font-style="italic">Bold dashed red line = the derivation boundary where ownership changes hands but restrictions do not.</text>
+</svg>

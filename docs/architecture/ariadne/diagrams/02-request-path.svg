@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 900" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .pt{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ot{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .rel{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;} .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .ext{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;} .dis{fill:#f8cecc;stroke:#b85450;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11.5px;fill:#333;} .s{font-size:10.5px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:10px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .ok{stroke:#4a9a4a;stroke-width:1.8;fill:none;}
+      .bad{stroke:#c0392b;stroke-width:1.5;fill:none;}
+      .q{font-size:11px;font-weight:bold;fill:#1e5f96;}
+    </style>
+  </defs>
+
+  <rect width="1920" height="900" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Tenancy, Ownership &amp; Access — 2. Request Path: Four Orthogonal Layers</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">§3, §5 · one context shape for every deployment · four questions, four layers, no schema leaks</text>
+
+  <!-- ZONES -->
+  <rect class="zone" x="20" y="62" width="260" height="560" rx="6"/>
+  <text class="zoneT" x="36" y="84">ENTRY POINTS</text>
+  <rect class="zone" x="300" y="62" width="340" height="560" rx="6"/>
+  <text class="zoneT" x="316" y="84">RESOLUTION (deployment-shaped)</text>
+  <rect class="zone" x="660" y="62" width="320" height="560" rx="6"/>
+  <text class="zoneT" x="676" y="84">THE INVOCATION CONTEXT</text>
+  <rect class="zone" x="1000" y="62" width="900" height="560" rx="6"/>
+  <text class="zoneT" x="1016" y="84">SCOPED STORE ACCESS — every read/write runs the gauntlet</text>
+
+  <!-- entries -->
+  <rect class="rec" x="44" y="120" width="212" height="56" rx="6"/>
+  <text class="h" x="56" y="144">CLI</text>
+  <text class="s" x="56" y="162">subcommands · --subject flags</text>
+  <rect class="rec" x="44" y="200" width="212" height="56" rx="6"/>
+  <text class="h" x="56" y="224">Data-plane API</text>
+  <text class="s" x="56" y="242">/v1/runs · subject, not user</text>
+  <rect class="rec" x="44" y="280" width="212" height="56" rx="6"/>
+  <text class="h" x="56" y="304">Desktop app</text>
+  <text class="s" x="56" y="322">lens structs carry subject</text>
+  <rect class="note" x="44" y="376" width="212" height="120" rx="6"/>
+  <text class="h" x="56" y="398">Wire discipline</text>
+  <text class="s" x="56" y="418">field renamed: user → subject</text>
+  <text class="s" x="56" y="434">derived-identity strings deleted:</text>
+  <text class="m" x="56" y="450">"{user}--{run_id}"  ✗</text>
+  <text class="s" x="56" y="468">run scope is an explicit</text>
+  <text class="s" x="56" y="482">context field, never string glue</text>
+
+  <!-- resolvers -->
+  <rect class="pt" x="324" y="120" width="292" height="140" rx="8"/>
+  <text class="h" x="338" y="144">SELF-RESOLVER (dev/test/internal)</text>
+  <text class="t" x="338" y="166">pure fn(request, local state) — no login</text>
+  <text class="s" x="338" y="186">tenant = subject = the one personal tenant</text>
+  <text class="s" x="338" y="202">workspace = workspace/default</text>
+  <text class="s" x="338" y="218">principal = the local operator</text>
+  <text class="s" x="338" y="238">only check: requested subject EXISTS (404, not auth)</text>
+  <rect class="ot" x="324" y="290" width="292" height="120" rx="8"/>
+  <text class="h" x="338" y="314">IDENTITY RESOLVER (shipped tiers)</text>
+  <text class="t" x="338" y="336">paid/pro/corp: identity-backed ALWAYS —</text>
+  <text class="s" x="338" y="356">platform identity (App Store) or own IdP (DMG);</text>
+  <text class="s" x="338" y="372">free tier: per-product choice. identity ≠ hosted —</text>
+  <text class="s" x="338" y="388">store stays local. context shape: IDENTICAL</text>
+  <rect class="note" x="324" y="440" width="292" height="88" rx="6"/>
+  <text class="t" x="338" y="464">Resolution is deployment-shaped;</text>
+  <text class="t" x="338" y="480">the context is not. Downstream code</text>
+  <text class="t" x="338" y="496">cannot tell which resolver ran —</text>
+  <text class="t" x="338" y="512">and never branches on it.</text>
+
+  <!-- context -->
+  <rect class="rel" x="684" y="120" width="272" height="220" rx="8"/>
+  <text class="h" x="698" y="144">InvocationContext</text>
+  <text class="m" x="698" y="170">:tenant/id      "chris"</text>
+  <text class="m" x="698" y="190">:workspace/id   "workspace/default"</text>
+  <text class="m" x="698" y="210">:principal/id   "chris"</text>
+  <text class="m" x="698" y="230">:subject/id     "chris"</text>
+  <text class="m" x="698" y="250">:run/id         (optional, explicit)</text>
+  <text class="m" x="698" y="270">:purpose (+ :purpose-basis)</text>
+  <text class="m" x="698" y="290">+ relation/policy revision pins</text>
+  <text class="s" x="698" y="312">threaded to every store/pipeline call;</text>
+  <text class="s" x="698" y="326">purpose is resolver-set, never model-set</text>
+  <rect class="note" x="684" y="368" width="272" height="104" rx="6"/>
+  <text class="h" x="698" y="390">One id shape, one validator</text>
+  <text class="s" x="698" y="410">a single shared component defines the</text>
+  <text class="s" x="698" y="426">legal identifier for every store that puts</text>
+  <text class="s" x="698" y="442">an id in a path, row, filename, or hash —</text>
+  <text class="s" x="698" y="458">all stores REJECT; none sanitize</text>
+
+  <!-- store API -->
+  <rect class="rec" x="1024" y="120" width="240" height="130" rx="8"/>
+  <text class="h" x="1038" y="144">Store API (ctx-scoped)</text>
+  <text class="m" x="1038" y="168">(list-fit-reports ctx)</text>
+  <text class="m" x="1038" y="188">(save-artifact! ctx a)</text>
+  <text class="m" x="1038" y="208">(get-profile ctx)</text>
+  <text class="s" x="1038" y="234">keys by owner tenant resolved from ctx</text>
+
+  <!-- GAUNTLET -->
+  <text class="q" x="1310" y="120">1 · WHO IS ASKING?</text>
+  <rect class="rec" x="1290" y="130" width="132" height="84" rx="8" stroke-dasharray="5 3"/>
+  <text class="h" x="1302" y="152">Authentication</text>
+  <text class="s" x="1302" y="170">resolver-selected per</text>
+  <text class="s" x="1302" y="184">channel × tier (see left);</text>
+  <text class="s" x="1302" y="198">reserved slot: principal</text>
+
+  <text class="q" x="1470" y="120">2 · MAY THEY?</text>
+  <rect class="rel" x="1450" y="130" width="150" height="84" rx="8"/>
+  <text class="h" x="1462" y="152">Authorization</text>
+  <text class="m" x="1462" y="170">check(p, rel, obj)</text>
+  <text class="s" x="1462" y="186">over relation tuples —</text>
+  <text class="s" x="1462" y="200">local #owner / hosted engine</text>
+
+  <text class="q" x="1650" y="120">3 · DOES THE RECORD PERMIT?</text>
+  <rect class="dis" x="1630" y="130" width="150" height="84" rx="8"/>
+  <text class="h" x="1642" y="152">Disclosure veto</text>
+  <text class="s" x="1642" y="170">policy clauses: destination ×</text>
+  <text class="s" x="1642" y="184">purpose × operation —</text>
+  <text class="s" x="1642" y="198">vetoes ANY relation path</text>
+
+  <text class="q" x="1310" y="290">4 · MAY THIS TENANT COMPUTE?</text>
+  <rect class="ext" x="1290" y="300" width="150" height="84" rx="8"/>
+  <text class="h" x="1302" y="322">Entitlement</text>
+  <text class="s" x="1302" y="340">license tuples on the</text>
+  <text class="s" x="1302" y="354">paying tenant — gates</text>
+  <text class="s" x="1302" y="368">COMPUTE, never data</text>
+
+  <rect class="rec" x="1490" y="300" width="290" height="84" rx="8"/>
+  <text class="h" x="1504" y="322">Stores — one DB, columns not files</text>
+  <text class="s" x="1504" y="342">owner_tenant_id on every owned record;</text>
+  <text class="s" x="1504" y="356">tenancy = columns + scoped queries;</text>
+  <text class="s" x="1504" y="370">no per-tenant DBs, no RLS until hosted scale</text>
+
+  <!-- flow arrows -->
+  <path class="eB" d="M256,148 C300,148 300,175 322,178" marker-end="url(#aB)"/>
+  <path class="eB" d="M256,228 C290,228 292,220 322,205" marker-end="url(#aB)"/>
+  <path class="eB" d="M256,308 C300,308 300,330 322,335" marker-end="url(#aB)"/>
+  <path class="eB" d="M616,180 C650,180 650,200 682,205" marker-end="url(#aB)"/>
+  <path class="eB" d="M616,345 C650,345 650,250 682,240" marker-end="url(#aB)"/>
+  <path class="eB" d="M956,215 C990,215 990,185 1022,185" marker-end="url(#aB)"/>
+  <path class="ok" d="M1264,172 L1288,172" marker-end="url(#aG)"/>
+  <path class="ok" d="M1422,172 L1448,172" marker-end="url(#aG)"/>
+  <path class="ok" d="M1600,172 L1628,172" marker-end="url(#aG)"/>
+  <path class="ok" d="M1705,214 C1705,260 1480,262 1442,300" marker-end="url(#aG)"/>
+  <path class="ok" d="M1440,342 L1488,342" marker-end="url(#aG)"/>
+
+  <!-- refusals -->
+  <path class="bad" d="M1525,214 L1525,252" marker-end="url(#aR)"/>
+  <rect class="dis" x="1450" y="254" width="150" height="22" rx="11"/><text class="s" x="1525" y="269" text-anchor="middle">no relation path → refuse</text>
+  <path class="bad" d="M1705,384 L1705,420" marker-end="url(#aR)"/>
+  <rect class="dis" x="1640" y="422" width="130" height="22" rx="11"/><text class="s" x="1705" y="437" text-anchor="middle">record veto → refuse</text>
+  <path class="bad" d="M1365,384 L1365,420" marker-end="url(#aR)"/>
+  <rect class="dis" x="1270" y="422" width="190" height="22" rx="11"/><text class="s" x="1365" y="437" text-anchor="middle">no entitlement → no new compute</text>
+  <text class="s" x="1290" y="466" font-style="italic">…but reading / exporting owned data NEVER</text>
+  <text class="s" x="1290" y="480" font-style="italic">fails entitlement — property right of the owner</text>
+
+  <!-- seam note -->
+  <rect class="note" x="1024" y="290" width="240" height="150" rx="6"/>
+  <text class="h" x="1038" y="312">The check seam</text>
+  <text class="s" x="1038" y="332">local: in-process function over the</text>
+  <text class="s" x="1038" y="346">same tuple vocabulary; one personal</text>
+  <text class="s" x="1038" y="360">tenant → every check is #owner, true</text>
+  <text class="s" x="1038" y="380">hosted: SpiceDB / OpenFGA replaces the</text>
+  <text class="s" x="1038" y="394">function behind the same signature;</text>
+  <text class="s" x="1038" y="408">zookies / caching / rewrite rules stay</text>
+  <text class="s" x="1038" y="422">the engine's concern, not the domain's</text>
+
+  <!-- orthogonality strip -->
+  <rect class="note" x="1024" y="470" width="856" height="130" rx="6"/>
+  <text class="h" x="1038" y="494">Why four layers stay separate</text>
+  <text class="t" x="1038" y="516">Disclosure ≠ access: a :public record inside the wrong boundary is still unreachable without a relation path; a #manager relation never reads :confidential.</text>
+  <text class="t" x="1038" y="536">Entitlement ≠ access: "may this tenant run a growth read" and "may this principal see this record" are different questions with different answers.</text>
+  <text class="t" x="1038" y="556">Authentication is a slot, not a dependency: the context shape does not change when tokens arrive.</text>
+  <text class="t" x="1038" y="576">Role facts live in tuples (§4) — no roles array rides the context.</text>
+  <text class="t" x="1038" y="594">The runtime's full question is decide() → a decision envelope: reasons, obligations, revision pins (§13.3).</text>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="646" width="1880" height="90" rx="6"/>
+  <text class="zoneT" x="36" y="668">FLOW</text>
+  <line class="eB" x1="40" y1="692" x2="90" y2="692" marker-end="url(#aB)"/><text class="s" x="100" y="696">request / context propagation</text>
+  <line class="ok" x1="300" y1="692" x2="350" y2="692" marker-end="url(#aG)"/><text class="s" x="360" y="696">passes gate</text>
+  <line class="bad" x1="480" y1="692" x2="530" y2="692" marker-end="url(#aR)"/><text class="s" x="540" y="696">refused</text>
+  <text class="s" x="40" y="722" font-style="italic">Migration order (§9): M1 identifiers + context → M2 thread context, rename wire → M3 stamp ownership (ids adopted verbatim — hash landmine) → M4 kill derived identities → M5 relations + tests.</text>
+</svg>

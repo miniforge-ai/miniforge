@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Where it was made decides — and what you learned is always yours</text>
+
+  <!-- coach's office -->
+  <rect x="40" y="80" width="210" height="120" rx="8" fill="#dae8fc" stroke="#6c8ebf" stroke-width="2.5"/>
+  <text x="145" y="104" text-anchor="middle" font-size="13" font-weight="bold" fill="#274b73">THE COACH'S OFFICE</text>
+  <rect x="58" y="116" width="120" height="40" rx="3" fill="#ffffff" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="118" y="132" text-anchor="middle" font-size="8.5" fill="#274b73">game plans · season notes</text>
+  <text x="118" y="146" text-anchor="middle" font-size="8.5" fill="#274b73">MADE at this desk</text>
+  <rect x="192" y="116" width="42" height="60" rx="3" fill="#6c8ebf"/>
+  <circle cx="226" cy="146" r="3.5" fill="#dae8fc"/>
+  <rect x="200" y="130" width="14" height="16" rx="2" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="118" y="174" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">your member pass does</text>
+  <text x="118" y="188" text-anchor="middle" font-size="10" font-weight="bold" fill="#c0392b">NOT open this door</text>
+
+  <!-- handed copy -->
+  <path d="M250,140 L306,140" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#aB)"/>
+  <text x="278" y="128" text-anchor="middle" font-size="10" fill="#3a76b8">when it's</text>
+  <text x="278" y="158" text-anchor="middle" font-size="10" fill="#3a76b8">FINISHED</text>
+  <rect x="310" y="86" width="190" height="118" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="405" y="108" text-anchor="middle" font-size="12" font-weight="bold" fill="#232323">the coach hands out copies</text>
+  <rect x="330" y="118" width="80" height="52" rx="4" fill="#ffffff" stroke="#8a8a82" stroke-width="1.5"/>
+  <text x="370" y="136" text-anchor="middle" font-size="8.5" fill="#333">forward</text>
+  <text x="370" y="148" text-anchor="middle" font-size="8.5" fill="#333">game plan</text>
+  <circle cx="344" cy="128" r="9" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="344" y="131" text-anchor="middle" font-size="5.5" fill="#274b73">team</text>
+  <text x="424" y="136" font-size="9.5" fill="#555">your copy → your</text>
+  <text x="424" y="149" font-size="9.5" fill="#555">house, wearing the</text>
+  <text x="424" y="162" font-size="9.5" fill="#555">club's sticker</text>
+  <text x="405" y="182" text-anchor="middle" font-size="9.5" font-style="italic" fill="#555">the original never left the desk ·</text>
+  <text x="405" y="195" text-anchor="middle" font-size="9.5" font-style="italic" fill="#555">the notes are never handed out</text>
+
+  <!-- made at home -->
+  <rect x="40" y="234" width="210" height="76" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="145" y="260" text-anchor="middle" font-size="13" font-weight="bold" fill="#3a6a34">MADE AT YOUR HOUSE</text>
+  <text x="145" y="282" text-anchor="middle" font-size="11" fill="#3a6a34">your drawings · your projects</text>
+  <path d="M250,272 L306,272" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#aG)"/>
+  <rect x="310" y="240" width="190" height="64" rx="8" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <text x="405" y="266" text-anchor="middle" font-size="13" font-weight="bold" fill="#3a6a34">your house</text>
+  <text x="405" y="286" text-anchor="middle" font-size="11" fill="#3a6a34">yours, forever</text>
+
+  <rect x="130" y="330" width="290" height="40" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="275" y="349" text-anchor="middle" font-size="12.5" fill="#4a4a20">nobody sorts paper by paper —</text>
+  <text x="275" y="364" text-anchor="middle" font-size="12.5" font-weight="bold" fill="#4a4a20">where it was MADE decides</text>
+
+  <!-- right: the learning rule -->
+  <rect x="520" y="80" width="350" height="290" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="695" y="108" text-anchor="middle" font-size="16" font-weight="bold" fill="#3a6a34">the most important rule</text>
+
+  <text x="545" y="140" font-size="12.5" fill="#333">learned at the club, on club fields,</text>
+  <text x="545" y="156" font-size="12.5" fill="#333">with club drills…</text>
+  <circle cx="620" cy="196" r="16" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+  <path d="M610,220 Q620,230 630,220" stroke="#232323" stroke-width="2" fill="none"/>
+  <circle cx="660" cy="210" r="10" fill="#ffffff" stroke="#232323" stroke-width="2"/>
+  <text x="700" y="205" font-size="11" fill="#555">⚽ corner kick, bent!</text>
+
+  <path d="M660,240 L660,272" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#aG)"/>
+
+  <rect x="545" y="272" width="230" height="88" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="660" y="292" text-anchor="middle" font-size="12" font-weight="bold" fill="#3a6a34">SKILLS NOTEBOOK — in YOUR house</text>
+  <text x="557" y="314" font-size="11.5" fill="#333">✓ bend a corner kick</text>
+  <rect x="700" y="302" width="60" height="18" rx="9" fill="#f8cecc" stroke="#b85450" stroke-width="1.5"/>
+  <text x="730" y="315" text-anchor="middle" font-size="8.5" fill="#7a3230">club secret</text>
+  <text x="557" y="336" font-size="10.5" font-style="italic" fill="#555">the special play's sticker rides along —</text>
+  <text x="557" y="350" font-size="10.5" font-style="italic" fill="#555">yours to have, theirs to gate</text>
+
+  <text x="800" y="300" font-size="11" fill="#3a6a34" font-weight="bold">the club keeps</text>
+  <text x="800" y="315" font-size="11" fill="#3a6a34" font-weight="bold">its drill sheets;</text>
+  <text x="800" y="330" font-size="11" fill="#3a6a34" font-weight="bold">you keep</text>
+  <text x="800" y="345" font-size="11" fill="#3a6a34" font-weight="bold">your feet</text>
+
+  <!-- bottom: commissioned report -->
+  <rect x="40" y="400" width="830" height="120" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="60" y="428" font-size="15" font-weight="bold" fill="#232323">The coach asks for a season report about you</text>
+  <rect x="60" y="442" width="150" height="62" rx="6" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="135" y="466" text-anchor="middle" font-size="12" font-weight="bold" fill="#3a6a34">the report</text>
+  <text x="135" y="484" text-anchor="middle" font-size="11" fill="#3a6a34">lives in YOUR house</text>
+  <rect x="260" y="442" width="150" height="62" rx="6" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="335" y="464" text-anchor="middle" font-size="11" font-weight="bold" fill="#4a355c">READING PASS</text>
+  <text x="335" y="480" text-anchor="middle" font-size="9" fill="#4a355c">for: Coach · opens: this report</text>
+  <text x="335" y="494" text-anchor="middle" font-size="9" fill="#4a355c">why: fall season · until: it ends</text>
+  <text x="335" y="518" text-anchor="middle" font-size="11" fill="#4a355c">the coach gets a READING PASS</text>
+  <text x="460" y="462" font-size="12.5" fill="#333">a pass to read it —</text>
+  <text x="460" y="480" font-size="12.5" font-weight="bold" fill="#333">never a hand to carry it off.</text>
+  <text x="460" y="500" font-size="11.5" font-style="italic" fill="#555">season ends → the pass dies by itself → the report stays on your shelf.</text>
+</svg>

@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Every goodbye is a torn pass — and the moving-box promise</text>
+
+  <!-- big torn pass icon -->
+  <g transform="translate(450,110)">
+    <path d="M-70,-28 L-6,-28 L-14,-14 L-4,0 L-12,14 L-6,28 L-70,28 Z" fill="#e1d5e7" stroke="#9673a6" stroke-width="2.5" transform="rotate(-4)"/>
+    <path d="M70,-28 L2,-28 L-6,-14 L4,0 L-4,14 L2,28 L70,28 Z" fill="#e1d5e7" stroke="#9673a6" stroke-width="2.5" transform="rotate(5) translate(14,2)"/>
+    <text x="-40" y="6" text-anchor="middle" font-size="10" fill="#4a355c" transform="rotate(-4)">PA</text>
+    <text x="52" y="6" text-anchor="middle" font-size="10" fill="#4a355c" transform="rotate(5)">SS</text>
+  </g>
+  <text x="450" y="172" text-anchor="middle" font-size="13" font-weight="bold" fill="#555">the same small motion, every goodbye</text>
+
+  <!-- four goodbye rows -->
+  <g>
+    <rect x="60" y="200" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="222" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">leaving the club</text>
+    <text x="150" y="240" text-anchor="middle" font-size="10.5" fill="#555">the member pass</text>
+    <rect x="270" y="212" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="208" x2="330" y2="246" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="208" x2="266" y2="246" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="231" font-size="11.5" fill="#555">club keeps club papers · your house untouched · your skills notebook rides along</text>
+  </g>
+  <g>
+    <rect x="60" y="268" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="290" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">season over</text>
+    <text x="150" y="308" text-anchor="middle" font-size="10.5" fill="#555">reading pass dies by itself</text>
+    <rect x="270" y="280" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="276" x2="330" y2="314" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="276" x2="266" y2="314" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="299" font-size="11.5" fill="#555">the coach's reading pass expires — the report stays on your shelf</text>
+  </g>
+  <g>
+    <rect x="60" y="336" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="358" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">robot retired</text>
+    <text x="150" y="376" text-anchor="middle" font-size="10.5" fill="#555">its lent passes</text>
+    <rect x="270" y="348" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="344" x2="330" y2="382" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="344" x2="266" y2="382" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="367" font-size="11.5" fill="#555">it owned nothing, so nothing is stranded — every act still signed in the logbook</text>
+  </g>
+  <g>
+    <rect x="60" y="404" width="180" height="52" rx="8" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+    <text x="150" y="426" text-anchor="middle" font-size="13.5" font-weight="bold" fill="#232323">library card expires</text>
+    <text x="150" y="444" text-anchor="middle" font-size="10.5" fill="#555">a pass with a date</text>
+    <rect x="270" y="416" width="56" height="30" rx="4" fill="#e1d5e7" stroke="#9673a6" stroke-width="1.5"/>
+    <line x1="266" y1="412" x2="330" y2="450" stroke="#c0392b" stroke-width="3.5"/>
+    <line x1="330" y1="412" x2="266" y2="450" stroke="#c0392b" stroke-width="3.5"/>
+    <text x="360" y="435" font-size="11.5" fill="#555">the book walks home to its shelf — your book report doesn't move</text>
+  </g>
+
+  <text x="450" y="480" text-anchor="middle" font-size="13" font-style="italic" fill="#555">no boxes, no arguments — nobody ever held anyone else's things, only passes to visit them</text>
+
+  <!-- moving box promise -->
+  <g transform="translate(84,500)">
+    <rect x="0" y="6" width="44" height="30" fill="#f6e0b5" stroke="#b8860b" stroke-width="2"/>
+    <path d="M0,6 L10,-4 L54,-4 L44,6 Z" fill="#fce5cd" stroke="#b8860b" stroke-width="2"/>
+    <line x1="22" y1="6" x2="22" y2="36" stroke="#b8860b" stroke-width="1.5"/>
+  </g>
+  <rect x="150" y="494" width="690" height="52" rx="10" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="495" y="516" text-anchor="middle" font-size="15" font-weight="bold" fill="#3a6a34">Any day: pack your own house into boxes and go. No switch bolts your own door.</text>
+  <text x="495" y="537" text-anchor="middle" font-size="13" fill="#3a6a34">club papers were never in your house · borrowed books walk home · locked stickers travel locked</text>
+</svg>

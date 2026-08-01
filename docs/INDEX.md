@@ -34,6 +34,8 @@
 - **[Orchestrator Architecture](design/orchestrator-architecture.md)** -- Coordination, phase transitions, event routing
 - **[RFC: Adopting Ariadne](architecture/rfc-ariadne-adoption.md)** -- Tenancy, grants, clause labels, transacted
   effects for miniforge
+- **[Ariadne architecture](architecture/ariadne/tenancy-ownership-access.md)** -- The portable tenancy / ownership /
+  access architecture itself; versioned and tagged (`ariadne/v*`)
 - **[Knowledge Component](design/knowledge-component.md)** -- Symbol resolution, trust model, caching
 - **[Policy Pack Taxonomy](design/policy-pack-taxonomy.md)** -- Pack classification, lifecycle, governance
 - **[Compliance Scanner](design/compliance-scanner.md)** -- Scan, classify, plan, execute

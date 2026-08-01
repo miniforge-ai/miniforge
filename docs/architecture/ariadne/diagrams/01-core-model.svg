@@ -1,0 +1,251 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1040" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9673a6"/></marker>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .pt{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ot{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .pr{fill:#fff2cc;stroke:#d6b656;stroke-width:1.5;} .rel{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;}
+      .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;} .ext{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;}
+      .dis{fill:#f8cecc;stroke:#b85450;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11.5px;fill:#333;} .s{font-size:10.5px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:10px;fill:#4a355c;} .mS{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;} .noteT{font-size:11px;fill:#4a4a20;}
+      .eP{stroke:#9673a6;stroke-width:1.6;fill:none;} .eB{stroke:#3a76b8;stroke-width:1.4;fill:none;}
+      .bad{stroke:#c0392b;stroke-width:1.6;fill:none;} .ok{stroke:#4a9a4a;stroke-width:1.6;fill:none;}
+      .lgT{font-size:11px;fill:#333;}
+    </style>
+  </defs>
+
+  <rect width="1920" height="1040" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Tenancy, Ownership &amp; Access — 1. Core Model</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">ADR 008 · tenancy-ownership-access.md §2–§4 · people are tenants · one owner per record · membership is a relation</text>
+
+  <!-- ZONES -->
+  <rect class="zone" x="20" y="62" width="600" height="800" rx="6"/>
+  <text class="zoneT" x="36" y="84">PERSONAL TENANTS — a person IS a tenant of one</text>
+  <rect class="zone" x="640" y="62" width="560" height="800" rx="6"/>
+  <text class="zoneT" x="656" y="84">RELATION GRAPH — Zanzibar tuples: the only cross-boundary mechanism</text>
+  <rect class="zone" x="1220" y="62" width="430" height="800" rx="6"/>
+  <text class="zoneT" x="1236" y="84">ORGANIZATIONAL TENANT</text>
+  <rect class="zone" x="1670" y="62" width="230" height="800" rx="6"/>
+  <text class="zoneT" x="1686" y="84">NON-RESIDENT AUTHORITIES</text>
+
+  <!-- tenant:chris -->
+  <rect class="pt" x="44" y="104" width="270" height="380" rx="8"/>
+  <text class="h" x="60" y="128">tenant:chris</text>
+  <text class="s" x="60" y="144">personal · exactly one person</text>
+  <rect class="pr" x="60" y="156" width="238" height="34" rx="6"/>
+  <text class="h" x="72" y="177" font-size="12">principal:chris</text>
+  <text class="s" x="176" y="177">#controller (may be several)</text>
+  <text class="s" x="60" y="212" font-weight="bold">owns (owner_tenant_id = tenant:chris)</text>
+  <rect class="rec" x="60" y="222" width="238" height="30" rx="4"/>
+  <text class="t" x="70" y="241">evidence: resume, portfolio</text>
+  <rect class="dis" x="232" y="227" width="58" height="18" rx="9"/><text class="s" x="261" y="240" text-anchor="middle">:private</text>
+  <rect class="rec" x="60" y="258" width="238" height="30" rx="4"/>
+  <text class="t" x="70" y="277">claims + profile (derived)</text>
+  <rect class="dis" x="212" y="263" width="78" height="18" rx="9"/><text class="s" x="251" y="276" text-anchor="middle">:confidential*</text>
+  <rect class="rec" x="60" y="294" width="238" height="30" rx="4"/>
+  <text class="t" x="70" y="313">projections: fit report, growth read</text>
+  <rect class="rec" x="60" y="330" width="238" height="30" rx="4"/>
+  <text class="t" x="70" y="349">commissioned review (default)</text>
+  <text class="s" x="60" y="382">* inherited from :confidential org sources —</text>
+  <text class="s" x="60" y="396">restriction is the imposer's, record is chris's</text>
+  <text class="s" x="60" y="424" font-style="italic">subject-id ≡ personal-tenant id.</text>
+  <text class="s" x="60" y="438" font-style="italic">No separate user / subject layer.</text>
+  <text class="s" x="60" y="452" font-style="italic">B2C = this box alone; human-owner checks</text>
+  <text class="s" x="60" y="466" font-style="italic">trivial; agent principals resolve delegations.</text>
+
+  <!-- tenant:alex -->
+  <rect class="pt" x="340" y="104" width="256" height="200" rx="8"/>
+  <text class="h" x="356" y="128">tenant:alex</text>
+  <text class="s" x="356" y="144">personal · teammate (bottom-up adoption)</text>
+  <rect class="pr" x="356" y="156" width="224" height="30" rx="6"/>
+  <text class="h" x="368" y="175" font-size="12">principal:alex</text>
+  <rect class="rec" x="356" y="194" width="224" height="28" rx="4"/>
+  <text class="t" x="366" y="212">evidence + claims + projections</text>
+  <text class="s" x="356" y="242">rides license:L as #seat — manager pays,</text>
+  <text class="s" x="356" y="256">owns none of alex's records (§3.7)</text>
+
+  <!-- external principals card -->
+  <rect class="pr" x="340" y="330" width="256" height="120" rx="8"/>
+  <text class="h" x="356" y="354">principals without residency here</text>
+  <rect class="pr" x="356" y="366" width="110" height="28" rx="6"/><text class="t" x="366" y="384">principal:dana</text>
+  <rect class="pr" x="478" y="366" width="102" height="28" rx="6"/><text class="t" x="488" y="384">principal:sam</text>
+  <text class="s" x="356" y="414">hold relations INTO tenants (manager,</text>
+  <text class="s" x="356" y="428">coach); own nothing by holding them</text>
+
+  <!-- containment vs relation callout -->
+  <rect class="note" x="44" y="520" width="552" height="150" rx="6"/>
+  <text class="h" x="60" y="544">Membership is a relation — NEVER containment</text>
+  <!-- containment mini (crossed) -->
+  <rect x="60" y="558" width="150" height="92" rx="6" fill="#dae8fc" stroke="#6c8ebf"/>
+  <rect x="76" y="586" width="118" height="50" rx="6" fill="#d5e8d4" stroke="#82b366"/>
+  <text class="s" x="86" y="606">person nested</text>
+  <text class="s" x="86" y="620">inside org</text>
+  <line class="bad" x1="62" y1="560" x2="208" y2="648"/><line class="bad" x1="208" y1="560" x2="62" y2="648"/>
+  <text class="s" x="60" y="664" fill="#c0392b">✗ offboarding = data migration</text>
+  <!-- relation mini (ok) -->
+  <rect x="260" y="574" width="96" height="46" rx="6" fill="#dae8fc" stroke="#6c8ebf"/><text class="s" x="272" y="601">tenant:org</text>
+  <rect x="452" y="574" width="112" height="46" rx="6" fill="#d5e8d4" stroke="#82b366"/><text class="s" x="464" y="601">tenant:person</text>
+  <line class="eP" x1="356" y1="597" x2="450" y2="597" marker-end="url(#aP)"/>
+  <text class="mS" x="403" y="590" text-anchor="middle">#employee</text>
+  <text class="s" x="260" y="664" fill="#3a7a3a">✓ offboarding = delete one tuple; no data moves</text>
+
+  <!-- axioms strip -->
+  <rect class="note" x="44" y="690" width="552" height="150" rx="6"/>
+  <text class="h" x="60" y="714">Axioms</text>
+  <text class="t" x="60" y="736">A1 — People are tenants: the subject of a record is a personal tenant.</text>
+  <text class="t" x="60" y="756">A2 — Every record has exactly ONE owner tenant. Visibility for a</text>
+  <text class="t" x="80" y="772">second party is a granted relation, never a second owner.</text>
+  <text class="t" x="60" y="792">A3 — Employment / coaching / seats are tuples between tenants;</text>
+  <text class="t" x="80" y="808">severing one revokes access and moves nothing.</text>
+
+  <!-- RELATION GRAPH ZONE -->
+  <rect class="rel" x="664" y="104" width="512" height="76" rx="8"/>
+  <text class="h" x="680" y="128">check(principal, relation, object)</text>
+  <text class="s" x="680" y="146">the ONLY authorization question</text>
+  <text class="s" x="680" y="162">local: in-process fn (trivially #owner) · hosted: SpiceDB / OpenFGA, same seam</text>
+
+  <!-- tuples -->
+  <text class="s" x="680" y="196" font-weight="bold">relation tuples — object#relation@subject</text>
+  <rect class="rel" x="664" y="208" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="227">tenant:acme#employee@tenant:chris</text>
+  <text class="s" x="1000" y="227">employment</text>
+  <rect class="rel" x="664" y="244" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="263">engagement:chris-acme#manager@principal:dana</text>
+  <text class="s" x="1000" y="263">role scoped to engagement</text>
+  <rect class="rel" x="664" y="280" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="299">tenant:chris#coach@principal:sam</text>
+  <text class="s" x="1000" y="299">Studio / Coach shape</text>
+  <rect class="rel" x="664" y="316" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="335">assessment:A#engagement@engagement:chris-acme</text>
+  <text class="s" x="1000" y="335">record hangs off the engagement</text>
+  <rect class="rel" x="664" y="352" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="371">rubric:R#viewer@tenant:acme#employee</text>
+  <text class="s" x="1000" y="371">userset: all employees</text>
+  <rect class="rel" x="664" y="388" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="407">evidence:E#owner@tenant:chris</text>
+  <text class="s" x="1000" y="407">materialized from owner col.</text>
+  <rect class="rel" x="664" y="424" width="512" height="30" rx="5"/>
+  <text class="m" x="676" y="443">license:L#holder@tenant:dana · license:L#seat@tenant:alex</text>
+  <text class="s" x="1060" y="443">entitlement</text>
+
+  <!-- role facts note -->
+  <rect class="note" x="664" y="478" width="512" height="66" rx="6"/>
+  <text class="t" x="680" y="500">Role facts live in tuples — no roles array on a session or context.</text>
+  <text class="t" x="680" y="518">A role is a relation somebody granted and somebody can revoke.</text>
+  <text class="t" x="680" y="536">Negative-authorization tests exist before any second principal does.</text>
+
+  <!-- four layers mini -->
+  <rect class="note" x="664" y="560" width="512" height="130" rx="6"/>
+  <text class="h" x="680" y="584">Four orthogonal layers (§3) — none leaks into another's schema</text>
+  <rect class="rec" x="680" y="596" width="228" height="38" rx="4"/><text class="t" x="690" y="612" font-weight="bold">Authentication</text><text class="s" x="690" y="627">who is the principal? (deferred locally)</text>
+  <rect class="rel" x="920" y="596" width="240" height="38" rx="4"/><text class="t" x="930" y="612" font-weight="bold">Authorization</text><text class="s" x="930" y="627">check() over relation tuples</text>
+  <rect class="dis" x="680" y="640" width="228" height="38" rx="4"/><text class="t" x="690" y="656" font-weight="bold">Disclosure &amp; processing</text><text class="s" x="690" y="671">clauses: destination × purpose × operation</text>
+  <rect class="ext" x="920" y="640" width="240" height="38" rx="4"/><text class="t" x="930" y="656" font-weight="bold">Entitlement</text><text class="s" x="930" y="671">license tuples — gates compute, never data</text>
+
+  <!-- workspace note -->
+  <rect class="note" x="664" y="706" width="512" height="134" rx="6"/>
+  <text class="h" x="680" y="730">Deployment shapes, one model</text>
+  <text class="t" x="680" y="752">B2C local: tenant = subject = the one personal tenant; resolver is a</text>
+  <text class="t" x="680" y="768">pure function; no login; checks trivially #owner.</text>
+  <text class="t" x="680" y="788">Bottom-up team: personal tenants + license/seat + #manager tuples —</text>
+  <text class="t" x="680" y="804">no org tenant required, nobody owns anyone's records.</text>
+  <text class="t" x="680" y="824">Enterprise: org tenant appears additively; its claim reaches forward.</text>
+
+  <!-- ORG TENANT -->
+  <rect class="ot" x="1244" y="104" width="382" height="420" rx="8"/>
+  <text class="h" x="1260" y="128">tenant:acme</text>
+  <text class="s" x="1260" y="144">organizational · multi-member · structurally identical to personal</text>
+  <rect class="rec" x="1260" y="158" width="350" height="30" rx="4"/>
+  <text class="t" x="1270" y="177">workspace/default</text>
+  <text class="s" x="1400" y="177">(team / cycle contexts when needed)</text>
+  <text class="s" x="1260" y="212" font-weight="bold">owns (assets &amp; channels — never people's records)</text>
+  <rect class="rec" x="1260" y="222" width="350" height="30" rx="4"/>
+  <text class="t" x="1270" y="241">rubric / CSP lens (shared via #viewer userset)</text>
+  <rect class="rec" x="1260" y="258" width="350" height="30" rx="4"/>
+  <text class="t" x="1270" y="277">JD corpus · catalog entries</text>
+  <rect class="rec" x="1260" y="294" width="350" height="30" rx="4"/>
+  <text class="t" x="1270" y="313">connector bindings (Jira · git · docs channels)</text>
+  <rect class="rec" x="1260" y="330" width="350" height="30" rx="4"/>
+  <text class="t" x="1270" y="349">org-channel intake: artifacts / evidence</text>
+  <rect class="dis" x="1544" y="335" width="58" height="18" rx="9"/><text class="s" x="1573" y="348" text-anchor="middle">:conf.</text>
+  <rect class="pr" x="1260" y="376" width="350" height="34" rx="6"/>
+  <text class="t" x="1270" y="390" font-weight="bold">principal:dana</text>
+  <text class="s" x="1270" y="404">HR admin / manager — operates via granted relations</text>
+  <text class="s" x="1260" y="434" font-style="italic">A record's TYPE never implies its owner kind:</text>
+  <text class="s" x="1260" y="448" font-style="italic">a CSP lens is org-owned here, personal-owned in B2C.</text>
+  <text class="s" x="1260" y="462" font-style="italic">The creating context decides — owner is a column,</text>
+  <text class="s" x="1260" y="476" font-style="italic">not a rule per type.</text>
+
+  <!-- commissioning note -->
+  <rect class="note" x="1244" y="544" width="382" height="120" rx="6"/>
+  <text class="h" x="1260" y="568">Commissioning = visibility, not ownership</text>
+  <text class="t" x="1260" y="590">A review run under acme's cycle: chris keeps the record;</text>
+  <text class="t" x="1260" y="606">acme holds #commissioner / #viewer relations.</text>
+  <text class="t" x="1260" y="626">Official-record semantics only by explicit org policy</text>
+  <text class="t" x="1260" y="642">flip at onboarding — a named opt-in, never the default.</text>
+
+  <!-- offboarding note -->
+  <rect class="note" x="1244" y="680" width="382" height="160" rx="6"/>
+  <text class="h" x="1260" y="704">Offboarding (§7)</text>
+  <text class="t" x="1260" y="726">Delete employment + seat tuples →</text>
+  <text class="t" x="1260" y="742">· acme's relations into tenant:chris revoked</text>
+  <text class="t" x="1260" y="758">· chris's access to acme-owned intake revoked</text>
+  <text class="t" x="1260" y="774">· tenant:chris and everything it owns: untouched</text>
+  <text class="t" x="1260" y="794">Entitlement gates compute, never data. Takeaway</text>
+  <text class="t" x="1260" y="810">export: always available, hard policy, no off switch.</text>
+
+  <!-- NON-RESIDENT -->
+  <rect class="ext" x="1690" y="104" width="192" height="240" rx="8"/>
+  <text class="h" x="1702" y="128">licensor</text>
+  <text class="mS" x="1702" y="146">license:eodhd</text>
+  <text class="s" x="1702" y="168">imposes terms on payloads</text>
+  <text class="s" x="1702" y="182">that ride its feed (§12)</text>
+  <text class="s" x="1702" y="204">not in the tuple store —</text>
+  <text class="s" x="1702" y="218">no principal inside can</text>
+  <text class="s" x="1702" y="232">lower its restrictions</text>
+  <text class="s" x="1702" y="252">comply, or renegotiate</text>
+  <text class="s" x="1702" y="266">out-of-band</text>
+  <text class="s" x="1702" y="290">expiry = one relation cut</text>
+  <text class="s" x="1702" y="304">(diagram 5)</text>
+
+  <rect class="ext" x="1690" y="368" width="192" height="200" rx="8"/>
+  <text class="h" x="1702" y="392">web authors</text>
+  <text class="s" x="1702" y="412">rights-holders of scraped</text>
+  <text class="s" x="1702" y="426">content — public is NOT</text>
+  <text class="s" x="1702" y="440">public domain (Berne)</text>
+  <text class="s" x="1702" y="462">default label:</text>
+  <rect class="dis" x="1702" y="472" width="168" height="20" rx="10"/>
+  <text class="s" x="1786" y="486" text-anchor="middle">third-party-unknown</text>
+  <text class="s" x="1702" y="512">upgrades = recorded</text>
+  <text class="s" x="1702" y="526">human determinations</text>
+
+  <!-- relation edges across zones -->
+  <path class="eP" d="M1244,180 C1210,180 1206,223 1178,223" marker-end="url(#aP)"/>
+  <path class="eP" d="M664,223 C560,223 420,210 314,210" marker-end="url(#aP)"/>
+  <path class="eP" d="M664,259 C630,259 620,380 596,380" marker-end="url(#aP)"/>
+  <path class="eP" d="M1244,391 C1215,391 1216,263 1176,263" marker-end="url(#aP)"/>
+
+  <!-- LEGEND -->
+  <rect class="zone" x="20" y="880" width="1880" height="140" rx="6"/>
+  <text class="zoneT" x="36" y="902">LEGEND — consistent across diagrams 1–5</text>
+  <rect class="pt" x="40" y="916" width="26" height="16" rx="3"/><text class="lgT" x="74" y="929">personal tenant</text>
+  <rect class="ot" x="200" y="916" width="26" height="16" rx="3"/><text class="lgT" x="234" y="929">organizational tenant</text>
+  <rect class="pr" x="400" y="916" width="26" height="16" rx="3"/><text class="lgT" x="434" y="929">principal (human)</text>
+  <rect x="580" y="916" width="26" height="16" rx="3" fill="#fff2cc" stroke="#d6b656" stroke-dasharray="4 2"/><text class="lgT" x="614" y="929">agent principal (owns nothing)</text>
+  <rect class="rel" x="830" y="916" width="26" height="16" rx="3"/><text class="lgT" x="864" y="929">relation tuple / Zanzibar engine</text>
+  <rect class="rec" x="1090" y="916" width="26" height="16" rx="3"/><text class="lgT" x="1124" y="929">record / store / asset</text>
+  <rect class="ext" x="1300" y="916" width="26" height="16" rx="3"/><text class="lgT" x="1334" y="929">gate · entitlement · non-resident authority</text>
+  <rect class="dis" x="1630" y="916" width="26" height="16" rx="3"/><text class="lgT" x="1664" y="929">disclosure / rights label</text>
+  <line class="eP" x1="40" y1="962" x2="90" y2="962" marker-end="url(#aP)"/><text class="lgT" x="100" y="966">relation (tuple) edge</text>
+  <line class="eB" x1="280" y1="962" x2="330" y2="962" marker-end="url(#aB)"/><text class="lgT" x="340" y="966">data / ownership flow</text>
+  <line class="ok" x1="520" y1="962" x2="570" y2="962"/><text class="lgT" x="580" y="966">permitted flow</text>
+  <line x1="720" y1="962" x2="770" y2="962" stroke="#d79b00" stroke-width="1.6"/><text class="lgT" x="780" y="966">escalation (HIL elevation)</text>
+  <line class="bad" x1="980" y1="962" x2="1030" y2="962"/><text class="lgT" x="1040" y="966">refused / severed</text>
+  <text class="lgT" x="40" y="998" font-style="italic">Reading order: 1 core model → 2 request path → 3 ownership by provenance → 4 agent orchestration &amp; tool gates → 5 revocation &amp; third-party rights.</text>
+</svg>

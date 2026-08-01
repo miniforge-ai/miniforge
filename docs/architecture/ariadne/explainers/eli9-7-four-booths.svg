@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 500" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+  </defs>
+  <rect width="900" height="500" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Four questions at every door — none does another's job</text>
+
+  <!-- booth template x4 -->
+  <!-- booth 1 -->
+  <rect x="40" y="90" width="190" height="230" rx="10" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2.5"/>
+  <rect x="40" y="90" width="190" height="44" rx="10" fill="#8a8a82"/>
+  <text x="135" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">1 · WHO ARE YOU?</text>
+  <rect x="88" y="160" width="94" height="50" rx="8" fill="#fff2cc" stroke="#d6b656" stroke-width="2"/>
+  <circle cx="112" cy="185" r="10" fill="none" stroke="#8a6d1a" stroke-width="2.5"/>
+  <rect x="122" y="182" width="34" height="6" rx="3" fill="#8a6d1a"/>
+  <text x="135" y="238" text-anchor="middle" font-size="12" fill="#555">show a key</text>
+  <text x="135" y="266" text-anchor="middle" font-size="11" font-style="italic" fill="#555">keys prove it's you;</text>
+  <text x="135" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">they decide nothing else</text>
+
+  <!-- booth 2 -->
+  <rect x="260" y="90" width="190" height="230" rx="10" fill="#f0e8f4" stroke="#9673a6" stroke-width="2.5"/>
+  <rect x="260" y="90" width="190" height="44" rx="10" fill="#9673a6"/>
+  <text x="355" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">2 · SHOW THE PASS</text>
+  <rect x="308" y="164" width="94" height="44" rx="6" fill="#e1d5e7" stroke="#9673a6" stroke-width="2"/>
+  <text x="355" y="182" text-anchor="middle" font-size="10" font-weight="bold" fill="#4a355c">PASS</text>
+  <text x="355" y="198" text-anchor="middle" font-size="8.5" fill="#4a355c">who · door · why · until</text>
+  <text x="355" y="238" text-anchor="middle" font-size="12" fill="#4a355c">owner · member pass ·</text>
+  <text x="355" y="254" text-anchor="middle" font-size="12" fill="#4a355c">reading pass · library card</text>
+  <text x="355" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no pass, no entry —</text>
+  <text x="355" y="298" text-anchor="middle" font-size="11" font-style="italic" fill="#555">however nice you are</text>
+
+  <!-- booth 3 -->
+  <rect x="480" y="90" width="190" height="230" rx="10" fill="#fbeeee" stroke="#b85450" stroke-width="2.5"/>
+  <rect x="480" y="90" width="190" height="44" rx="10" fill="#b85450"/>
+  <text x="575" y="111" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">3 · WHAT DO ITS OWN</text>
+  <text x="575" y="127" text-anchor="middle" font-size="14" font-weight="bold" fill="#ffffff">STICKERS SAY?</text>
+  <rect x="536" y="158" width="78" height="56" rx="5" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="552" cy="172" r="11" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <circle cx="578" cy="172" r="11" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="575" y="240" text-anchor="middle" font-size="12" fill="#7a3230">the paper itself votes</text>
+  <text x="575" y="268" text-anchor="middle" font-size="11" font-style="italic" fill="#555">this booth is the whole</text>
+  <text x="575" y="284" text-anchor="middle" font-size="11" font-style="italic" fill="#555">robot story</text>
+
+  <!-- booth 4 -->
+  <rect x="700" y="90" width="190" height="230" rx="10" fill="#fdf3e6" stroke="#d79b00" stroke-width="2.5"/>
+  <rect x="700" y="90" width="190" height="44" rx="10" fill="#d79b00"/>
+  <text x="795" y="118" text-anchor="middle" font-size="15" font-weight="bold" fill="#ffffff">4 · GOT TOKENS?</text>
+  <circle cx="770" cy="180" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2.5"/>
+  <text x="770" y="186" text-anchor="middle" font-size="14" font-weight="bold" fill="#8a5a00">T</text>
+  <circle cx="806" cy="180" r="16" fill="#ffe6cc" stroke="#d79b00" stroke-width="2.5"/>
+  <text x="806" y="186" text-anchor="middle" font-size="14" font-weight="bold" fill="#8a5a00">T</text>
+  <text x="795" y="238" text-anchor="middle" font-size="12" fill="#8a5a00">the arcade machines —</text>
+  <text x="795" y="254" text-anchor="middle" font-size="12" fill="#8a5a00">fancy helpers cost tokens</text>
+  <text x="795" y="282" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no tokens →</text>
+  <text x="795" y="298" text-anchor="middle" font-size="11" font-style="italic" fill="#555">no NEW games</text>
+
+  <path d="M232,205 L256,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#aG)"/>
+  <path d="M452,205 L476,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#aG)"/>
+  <path d="M672,205 L696,205" stroke="#4a9a4a" stroke-width="2.5" marker-end="url(#aG)"/>
+
+  <text x="450" y="356" text-anchor="middle" font-size="13.5" fill="#555">each booth knows ONLY its own question — and none of them have ears: passes in, decisions out, no talking</text>
+
+  <rect x="120" y="386" width="660" height="84" rx="10" fill="#fffde7" stroke="#c8b900" stroke-width="2"/>
+  <text x="450" y="416" text-anchor="middle" font-size="17" font-weight="bold" fill="#4a4a20">Tokens buy machine time — never your own toy box.</text>
+  <text x="450" y="440" text-anchor="middle" font-size="14" fill="#4a4a20">Running out of tokens can stop new games. It can never bolt the front door of the house</text>
+  <text x="450" y="458" text-anchor="middle" font-size="14" fill="#4a4a20">you already own. Your stuff doesn't rent itself back to you.</text>
+</svg>
