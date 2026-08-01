@@ -32,8 +32,6 @@
 
 (def ^{:stratum 0} later (Instant/parse "2026-08-01T01:00:00Z"))
 
-(def ^{:stratum 0} much-later (Instant/parse "2026-08-02T00:00:00Z"))
-
 (defn ^{:stratum 0} tmp-dir
   "A fresh directory per test — records are files, so tests that shared
    one would see each other's."

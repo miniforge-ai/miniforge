@@ -154,3 +154,23 @@
                            (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
       (is (= :failed (:effect/state done)))
       (is (not @fired)))))
+
+(deftest ^{:stratum 2} only-a-proposed-record-may-be-committed-test
+  ;; The accident this component exists to prevent: committing a record
+  ;; that has already moved on re-runs an irreversible effect. A second
+  ;; merge. A second deploy.
+  (let [dir (tmp-dir)
+        g (merge-grant)]
+    (doseq [state [:committing :succeeded :failed :unknown-outcome :reconciled]]
+      (let [t (assoc (propose-merge! dir g) :effect/state state)
+            fired (atom false)
+            result (fx/commit! dir t g {} now
+                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+        (is (anomaly/anomaly? result) (str "commit from " state " must refuse"))
+        (is (= :conflict (:anomaly/type result)) (str state))
+        (is (not @fired)
+            (str "the effect MUST NOT re-fire from " state))))
+    (testing "a :proposed record still commits normally"
+      (let [t (propose-merge! dir g)
+            done (fx/commit! dir t g {} now (fn [] {:effect/outcome :succeeded}))]
+        (is (= :succeeded (:effect/state done)))))))

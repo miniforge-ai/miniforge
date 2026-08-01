@@ -153,20 +153,38 @@
 
    A throw is not a failure. The call may have reached GitHub and come
    back as a timeout; the record stays honestly unknown until
-   `reconcile!` asks."
+   `reconcile!` asks.
+
+   Only a `:proposed` record may be committed. Committing one that has
+   already moved on would re-run an irreversible effect — a second
+   merge, a second deploy — which is the exact class of accident this
+   component exists to make impossible. Refused, and the effect does not
+   fire.
+
+   JVM `Error`s are NOT caught. An OutOfMemoryError is not an effect
+   outcome, and the record is already `:committing` on disk before
+   `effect-fn` runs, so letting it propagate leaves precisely the state
+   reconciliation is built for."
   [dir t grant-record usage ^Instant now effect-fn]
   (let [auth (grant/authorize grant-record usage now)]
-    (if-not (grant/authorized? auth)
+    (cond
+      (not= :proposed (:effect/state t))
+      (wrong-state "only a :proposed record may be committed"
+                   {:effect/id (:effect/id t) :effect/state (:effect/state t)})
+
+      (not (grant/authorized? auth))
       (advance! dir t {:effect/state :failed
                        :effect/failure (str "grant re-check failed at commit: "
                                             (name (:grant/outcome auth)))}
                 now)
+
+      :else
       (let [committing (advance! dir t {:effect/state :committing} now)]
         (if (anomaly/anomaly? committing)
           committing
           (let [reported (try
                            {:ok (effect-fn)}
-                           (catch Throwable e
+                           (catch Exception e
                              {:threw (or (ex-message e) (str (class e)))}))]
             (if (contains? reported :threw)
               (advance! dir committing
@@ -197,7 +215,11 @@
 
    An answer that omits `:effect/matched?` records `false`: an
    unconfirmed match is treated as a mismatch, because an unflagged
-   disagreement is worse than a flagged one."
+   disagreement is worse than a flagged one.
+
+   JVM `Error`s are NOT caught here either — a probe that dies of
+   OutOfMemory has not told us the effect is unresolvable, it has told
+   us the process is."
   [dir t probe-fn ^Instant now]
   (if-not (contains? schema/reconcilable-states (:effect/state t))
     (wrong-state "only :committing or :unknown-outcome records are reconcilable"
@@ -206,7 +228,7 @@
     ;; the probe returns caller-shaped data, so any in-band sentinel is a
     ;; value it could legitimately carry. The wrapper map is ours.
     (let [probed (try {:ok (probe-fn t)}
-                      (catch Throwable e {:threw (or (ex-message e) (str (class e)))}))
+                      (catch Exception e {:threw (or (ex-message e) (str (class e)))}))
           answer (:ok probed)]
       (if (or (contains? probed :threw)
               (not (map? answer))
