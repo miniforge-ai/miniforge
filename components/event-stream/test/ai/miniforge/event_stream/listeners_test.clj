@@ -75,7 +75,6 @@
       (es/publish! stream (es/agent-started stream wf-id :implementer))
       (is (some #(= :agent/started (:event/type %)) @received)))))
 
-
 (deftest ^{:stratum 0} register-and-deregister-listener-test
   (testing "register-listener! returns a UUID and listener appears in list"
     (let [stream (es/create-event-stream {:sinks []})
@@ -110,7 +109,9 @@
         (is (= 0 (count (es/list-listeners stream))))
         ;; Should no longer receive events
         (es/publish! stream (es/workflow-started stream (random-uuid)))
-        ;; Only the attach/detach events + the one workflow event from before
+        ;; No new events after deregistration -- unsubscribe happens before
+        ;; :listener/detached publishes, and :listener/attached is :internal
+        ;; privacy so this :observe listener never saw it either.
         (is (= pre-count (count @received)))))))
 
 (deftest ^{:stratum 0} listener-filtering-test
