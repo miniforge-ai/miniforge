@@ -89,7 +89,10 @@
    Defaults on for `:all` / `:always-apply`; opts in for explicit selectors."
   [opts]
   (let [raw       (get opts :rules :always-apply)
-        requested (if (string? raw) (keyword (subs raw 1)) raw)]
+        requested (if (string? raw)
+                    (let [trimmed (cond-> raw (str/starts-with? raw ":") (subs 1))]
+                      (if (str/blank? trimmed) :always-apply (keyword trimmed)))
+                    raw)]
     (cond
       (contains? #{:all :always-apply} requested) true
       (= exc-data/rule-id requested)              true

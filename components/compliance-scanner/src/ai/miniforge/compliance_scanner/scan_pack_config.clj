@@ -121,7 +121,10 @@
    plan-output) pass through."
   [pack-rules opts]
   (let [raw       (get opts :rules :always-apply)
-        requested (if (string? raw) (keyword (subs raw 1)) raw)
+        requested (if (string? raw)
+                    (let [trimmed (cond-> raw (str/starts-with? raw ":") (subs 1))]
+                      (if (str/blank? trimmed) :always-apply (keyword trimmed)))
+                    raw)
         scannable (filter #(contains? scannable-types
                                       (get-in % [:rule/detection :type]))
                           pack-rules)]
