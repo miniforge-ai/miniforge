@@ -12,18 +12,24 @@ engine-agnostic and portable.
 `main`: see [VERSIONING.md](VERSIONING.md) for what a major/minor/patch
 bump means and how to fork against a fixed version.
 
-**Status:** v1.5 lineage (2026-07-27; semantic-convergence pass — §11
-rewritten to §13 mechanics, authority-defined policy
-transformations, clause destination-constraints with expiry
-polarity and relaxation modes, purpose-basis, first-class
-delegations, decision envelopes, freshness contract, scoped taint),
-distilled from ADR 008 and its implementation review (both in the
-Thesium Career repository, where this architecture was first written;
-that ADR is the product's own instantiation record, not part of the
-portable architecture). Generic by intent: the model is written to be instantiated in
-any product where people and organizations both hold data. Lineage:
-first implemented for Ixi; ADR 008 adds the Zanzibar relation layer
-and higher-fidelity personal ↔ org ↔ corporate interaction rules.
+1.6.0 is the current and only tagged version; earlier `v1.x` numbers
+in the history below were untagged working revisions, superseded by
+this one. See [CHANGELOG.md](CHANGELOG.md).
+
+**Origin.** Distilled from ADR 008 and its implementation review (both
+in the Thesium Career repository, where this architecture was first
+written; that ADR is the product's own instantiation record, not part
+of the portable architecture). Lineage: first implemented for Ixi;
+ADR 008 added the Zanzibar relation layer and higher-fidelity
+personal ↔ org ↔ corporate interaction rules. The last untagged
+revision (2026-07-27) was a semantic-convergence pass that rewrote §11
+to §13 mechanics: authority-defined policy transformations, clause
+destination-constraints with expiry polarity and relaxation modes,
+purpose-basis, first-class delegations, decision envelopes, the
+freshness contract, and scoped taint.
+
+Generic by intent: the model is written to be instantiated in any
+product where people and organizations both hold data.
 
 **Intended reuse:** interview articulation, an RFC for a corporate
 codebase, adoption in other Miniforge products. §8 carries the
