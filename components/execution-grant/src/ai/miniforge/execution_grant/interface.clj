@@ -25,6 +25,7 @@
    liveness over lineage."
   (:require
    [ai.miniforge.execution-grant.attenuation :as attenuation]
+   [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.lineage :as lineage]
    [ai.miniforge.execution-grant.schema :as schema]))
@@ -89,3 +90,21 @@
 (def ^{:stratum 0} attenuation-violations
   "Every axis on which a child fails to attenuate its parent."
   attenuation/violations)
+
+(def ^{:stratum 0} authorize
+  "The one check site: is this effect within its grant, as of now?
+   Called at decide() and AGAIN at commit — a grant live at the first
+   call and revoked before the second fails the second."
+  constraints/authorize)
+
+(def ^{:stratum 0} authorized?
+  "True when an `authorize` result is `:authorized`."
+  constraints/authorized?)
+
+(def ^{:stratum 0} breaches
+  "Ceilings a usage reading exceeds on a grant."
+  constraints/breaches)
+
+(def ^{:stratum 0} budget->constraints
+  "Translate a legacy budget map into `:grant/constraints`."
+  constraints/budget->constraints)

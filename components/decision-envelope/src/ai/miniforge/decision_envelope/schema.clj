@@ -42,7 +42,11 @@
    :reason/unknown-severity
    :reason/missing-artifact
    :reason/gate-check-failed
-   :reason/no-violations])
+   :reason/no-violations
+   ;; Ariadne 2b — authority, not policy: the action may be legal and
+   ;; still be beyond what this principal was granted.
+   :reason/grant-exceeded
+   :reason/grant-absent])
 
 (def ^{:stratum 0} obligation-types
   "Registered obligation types: what an :allow-with-obligations or a
