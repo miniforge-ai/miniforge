@@ -109,6 +109,33 @@
     (is (= :deny (:envelope/decision e)))
     (is (seq (:envelope/obligations e)) "the warn obligation is still recorded")))
 
+(deftest ^{:stratum 1} malformed-grant-result-still-denies-test
+  ;; grant->reasons takes plain data across a component boundary, so it
+  ;; must survive a malformed producer WITHOUT falling open. Zero reasons
+  ;; is an allow — an :exceeded outcome that yields none would be a
+  ;; fail-open in the enforcement path.
+  (let [clean (policy-pack/classify-violations [])]
+    (testing ":exceeded with no breach detail still denies"
+      (doseq [result [{:grant/outcome :exceeded}
+                      {:grant/outcome :exceeded :constraint/breaches []}
+                      {:grant/outcome :exceeded :constraint/breaches nil}]]
+        (let [e (decide/decide clean pins result)]
+          (is (= :deny (:envelope/decision e)) (pr-str result))
+          (is (= [:reason/grant-exceeded] (mapv :reason/code (:envelope/reasons e)))))))
+
+    (testing "a breach entry with a non-keyword axis denies rather than throwing"
+      (let [e (decide/decide clean pins
+                             {:grant/outcome :exceeded
+                              :constraint/breaches [{:constraint/axis nil
+                                                     :constraint/limit 5
+                                                     :constraint/observed 6}]})]
+        (is (= :deny (:envelope/decision e)))))
+
+    (testing "an inactive outcome with a non-keyword revocation reason still denies"
+      (let [e (decide/decide clean pins {:grant/outcome :inactive
+                                         :grant/revocation-reason nil})]
+        (is (= :deny (:envelope/decision e)))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} decision-table-test

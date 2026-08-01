@@ -83,11 +83,12 @@
    above a stated ceiling counts — a run that lands exactly ON its
    budget spent what it was given, not more.
 
-   A reading that is present but NOT a number counts as a breach. It is
-   not a pass (we cannot show it is under the ceiling) and it must not
-   throw (a crash at the check site neither denies nor allows — it just
-   takes the effect path down). Unverifiable is denied, same as
-   everywhere else here."
+   A present-but-NON-NUMERIC value on either side — a malformed reading
+   OR a malformed ceiling on a persisted grant — counts as a breach. It
+   is not a pass (we cannot show the reading is under the ceiling) and
+   it must not throw (a crash at the check site neither denies nor
+   allows — it just takes the effect path down). Unverifiable is denied,
+   same as everywhere else here."
   [grant usage]
   (into []
         (keep (fn [[usage-key axis]]
@@ -95,7 +96,8 @@
                       observed (get usage usage-key)]
                   (when (and (some? limit)
                              (some? observed)
-                             (or (not (number? observed))
+                             (or (not (number? limit))
+                                 (not (number? observed))
                                  (> observed limit)))
                     {:constraint/axis axis
                      :constraint/limit limit

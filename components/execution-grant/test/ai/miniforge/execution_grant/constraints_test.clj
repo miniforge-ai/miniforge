@@ -172,3 +172,26 @@
     (let [g (spend-grant)]
       (is (grant/authorized? (grant/authorize g {:usage/cost-usd 4.0} now)))
       (is (= :exceeded (:grant/outcome (grant/authorize g {:usage/cost-usd 5.5} now)))))))
+
+(deftest ^{:stratum 2} malformed-ceiling-is-a-breach-test
+  ;; A persisted grant could carry a non-numeric ceiling. The check site
+  ;; must not throw on it — unverifiable is denied, on BOTH sides of the
+  ;; comparison, not just the usage side.
+  (let [;; `issue` REJECTS this shape — the factory is not the hole. The
+        ;; hole is a grant that reached the check site without passing
+        ;; through it: read back from a store, hand-assembled, or
+        ;; deserialized. Build it that way deliberately.
+        g (assoc-in (spend-grant) [:grant/constraints :constraint/max-cost-usd] "five")]
+    (is (not (grant/valid? (grant/issue {:principal "p"
+                                         :effect-class :effect/spend
+                                         :scope {}
+                                         :constraints {:constraint/max-cost-usd "five"}
+                                         :delegable? false
+                                         :expires-at later}
+                                        now)))
+        "the factory refuses a non-numeric ceiling outright")
+    (is (not (grant/valid? g)) "and such a grant is not schema-valid")
+    (is (= [:constraint/max-cost-usd]
+           (mapv :constraint/axis (grant/breaches g {:usage/cost-usd 1.0})))
+        "but the check site must still deny rather than throw")
+    (is (= :exceeded (:grant/outcome (grant/authorize g {:usage/cost-usd 1.0} now))))))

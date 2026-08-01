@@ -49,8 +49,13 @@
 
 ;; Grant translation (Ariadne 2b)
 (defn- ^{:stratum 0} breach-detail
+  "Render one breach. `axis` is printed defensively rather than
+   `name`-d: this translator takes plain data, and a malformed entry
+   must still produce a deny reason instead of throwing on its way to
+   describing one."
   [{:constraint/keys [axis limit observed]}]
-  (str (name axis) ": " observed " exceeds " limit))
+  (str (if (keyword? axis) (name axis) (pr-str axis))
+       ": " observed " exceeds " limit))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -119,10 +124,18 @@
                 :reason/detail (str "grant is not active"
                                     (when-let [r (:grant/revocation-reason result)]
                                       (str " (revoked: " (name r) ")")))}]
-    :exceeded (mapv (fn [b]
-                      {:reason/code :reason/grant-exceeded
-                       :reason/detail (breach-detail b)})
-                    (:constraint/breaches result))
+    ;; An :exceeded outcome ALWAYS yields at least one deny reason. If
+    ;; the breach detail is missing or empty, mapping over it would
+    ;; produce zero reasons — and zero reasons is an ALLOW. The outcome
+    ;; is the authority here; the detail is only description.
+    :exceeded (let [breaches (:constraint/breaches result)]
+                (if (seq breaches)
+                  (mapv (fn [b]
+                          {:reason/code :reason/grant-exceeded
+                           :reason/detail (breach-detail b)})
+                        breaches)
+                  [{:reason/code :reason/grant-exceeded
+                    :reason/detail "grant exceeded; no breach detail supplied"}]))
     ;; An outcome this translator does not know is an outcome nobody
     ;; decided the meaning of — deny rather than drop it silently.
     [{:reason/code :reason/grant-absent
