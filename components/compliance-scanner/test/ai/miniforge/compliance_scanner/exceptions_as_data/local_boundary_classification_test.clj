@@ -20,6 +20,7 @@
    ordinary throwers in component code remain actionable."
   (:require
    [ai.miniforge.compliance-scanner.exceptions-as-data :as exc]
+   [ai.miniforge.compliance-scanner.exceptions-as-data-classify :as classify]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -53,7 +54,7 @@
                      {:defn-doc false}
                      {:defn-doc :not-text}
                      {:defn-doc 42}]]
-      (is (false? (#'exc/local-boundary-wrapper? context))
+      (is (false? (#'classify/local-boundary-wrapper? context))
           (str "ignored " (pr-str (:defn-doc context)))))))
 
 (deftest ^{:stratum 0} throwing-boundary-with-data-equivalent-is-local-boundary
