@@ -48,8 +48,7 @@ Step 2 of the ratified Ariadne adoption order: authority stops being
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| blocker | ● | ariadne-grants | `ariadne-grant-constraints-decide.spec.edn` — Ariadne step 2b: grant constraints as a decide() input class - budgets stop being plumbing | correctness+policyenforcement+tokenconservation |
-| blocker | ○ | ariadne-grants | `ariadne-effect-transaction.spec.edn` — Ariadne step 2c: effect-transaction component - propose, commit, reconcile | correctness+observation+governancecredibility |
+| blocker | ● | ariadne-grants | `ariadne-effect-transaction.spec.edn` — Ariadne step 2c: effect-transaction component - propose, commit, reconcile | correctness+observation+governancecredibility |
 | high | ○ | ariadne-grants | `ariadne-granted-effect-call-sites.spec.edn` — Ariadne step 2d: migrate merge and deploy onto the granted, transacted path | correctness+observation+governancecredibility |
 | high | ○ | ariadne-grants | `ariadne-revocation-for-cause.spec.edn` — Ariadne step 2e: revocation for cause - a breach ends the grant and is remembered | correctness+policyenforcement+governancecredibility |
 
