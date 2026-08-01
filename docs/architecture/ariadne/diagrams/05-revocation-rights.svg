@@ -1,0 +1,202 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1000" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9673a6"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .pt{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ot{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .rel{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;} .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .ext{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;} .dis{fill:#f8cecc;stroke:#b85450;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11.5px;fill:#333;} .s{font-size:10.5px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:10px;fill:#4a355c;} .mS{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .eP{stroke:#9673a6;stroke-width:1.6;fill:none;}
+      .ok{stroke:#4a9a4a;stroke-width:1.8;fill:none;} .bad{stroke:#c0392b;stroke-width:1.8;fill:none;}
+      .cut{stroke:#c0392b;stroke-width:2.4;}
+    </style>
+  </defs>
+
+  <rect width="1920" height="1000" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Tenancy, Ownership &amp; Access — 5. Revocation &amp; Third-Party Rights</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">§7, §12, §13.5 · one authoritative relation cut, completed by runtime enforcement · possession is not rights</text>
+
+  <!-- ZONE: three domains -->
+  <rect class="zone" x="20" y="62" width="1140" height="520" rx="6"/>
+  <text class="zoneT" x="36" y="84">ONE MECHANISM, THREE DOMAINS — one authoritative cut; runtime enforcement completes it; no data moves</text>
+
+  <!-- lane 1 employment -->
+  <text class="h" x="44" y="116">employee offboarding</text>
+  <rect class="rel" x="44" y="126" width="300" height="28" rx="5"/>
+  <text class="m" x="56" y="144">tenant:acme#employee@tenant:chris</text>
+  <line class="cut" x1="330" y1="120" x2="366" y2="160"/><line class="cut" x1="366" y1="120" x2="330" y2="160"/>
+  <path class="bad" d="M370,140 L420,140" marker-end="url(#aR)"/>
+  <rect class="rec" x="424" y="98" width="332" height="120" rx="8"/>
+  <text class="t" x="436" y="120">· acme's relations into tenant:chris — revoked</text>
+  <text class="t" x="436" y="138">· chris's access to acme-owned intake — revoked</text>
+  <text class="t" x="436" y="156">· tenant:chris + everything it owns — untouched</text>
+  <text class="t" x="436" y="174">· claims persist, still carrying inherited gates</text>
+  <text class="t" x="436" y="192">· path to personal = re-license, not migration</text>
+  <text class="s" x="436" y="210" font-style="italic">the employer keeps its documents; neither side keeps the other's property</text>
+
+  <!-- lane 2 agent -->
+  <text class="h" x="44" y="262">agent decommission</text>
+  <rect class="rel" x="44" y="272" width="300" height="28" rx="5"/>
+  <text class="mS" x="56" y="290">principal:chris#delegate@principal:agent-a</text>
+  <line class="cut" x1="330" y1="266" x2="366" y2="306"/><line class="cut" x1="366" y1="266" x2="330" y2="306"/>
+  <path class="bad" d="M370,286 L420,286" marker-end="url(#aR)"/>
+  <rect class="rec" x="424" y="244" width="332" height="104" rx="8"/>
+  <text class="t" x="436" y="266">· cut is authoritative; commit-time recheck completes it</text>
+  <text class="t" x="436" y="284">· execution artifacts → launching tenant; outputs → §6</text>
+  <text class="t" x="436" y="302">· audit trail survives: every act attributable</text>
+  <text class="t" x="436" y="320">· grant lineage: descendants die with their basis</text>
+  <text class="s" x="436" y="338" font-style="italic">the agent owned nothing, so nothing strands</text>
+
+  <!-- lane 3 license -->
+  <text class="h" x="44" y="392">license expiry / invalidation</text>
+  <rect class="rel" x="44" y="402" width="300" height="28" rx="5"/>
+  <text class="mS" x="56" y="420">license:eodhd#beneficiary@tenant:chris [TTL]</text>
+  <line class="cut" x1="330" y1="396" x2="366" y2="436"/><line class="cut" x1="366" y1="396" x2="330" y2="436"/>
+  <path class="bad" d="M370,416 L420,416" marker-end="url(#aR)"/>
+  <rect class="rec" x="424" y="374" width="332" height="120" rx="8"/>
+  <text class="t" x="436" y="396">· payload access severed at check time — one cut</text>
+  <text class="t" x="436" y="414">  reaches every record routed through the license</text>
+  <text class="t" x="436" y="432">· quarantine (grace / renewal) → purge per terms</text>
+  <text class="t" x="436" y="450">· manifest + fingerprint (the custodian's) survive</text>
+  <text class="t" x="436" y="468">· renewal re-fetches into the same identity</text>
+  <text class="s" x="436" y="486" font-style="italic">no re-stamping of a million rows — the graph route IS the switch</text>
+
+  <rect class="rec" x="44" y="510" width="712" height="58" rx="6"/>
+  <text class="h" x="58" y="532">runtime enforcement completes every cut (§13.5)</text>
+  <text class="mS" x="58" y="552">cut → new revision/watermark → queued work canceled → leases fenced → commits rechecked → stale results rejected</text>
+
+  <!-- unifier -->
+  <rect class="note" x="790" y="98" width="346" height="396" rx="8"/>
+  <text class="h" x="806" y="124">Why this repetition matters</text>
+  <text class="t" x="806" y="148">The licensor is a NON-RESIDENT tenant.</text>
+  <text class="t" x="806" y="166">The license is its employment tuple.</text>
+  <text class="t" x="806" y="184">Expiry is offboarding.</text>
+  <text class="t" x="806" y="212">Same shape, third time. One mechanism</text>
+  <text class="t" x="806" y="230">handles employee exit, agent kill-switch,</text>
+  <text class="t" x="806" y="248">and contract lapse — because ownership</text>
+  <text class="t" x="806" y="266">never crossed the boundary in the first</text>
+  <text class="t" x="806" y="284">place; only relations did.</text>
+  <text class="t" x="806" y="312" font-weight="bold">Entitlement gates compute, never data —</text>
+  <text class="t" x="806" y="330">no tension with license expiry: licensed</text>
+  <text class="t" x="806" y="348">payloads were never the tenant's property;</text>
+  <text class="t" x="806" y="366">the license was the only path to them.</text>
+  <text class="t" x="806" y="384">The path dying with the license is the</text>
+  <text class="t" x="806" y="402">invariant working.</text>
+  <text class="s" x="806" y="434" font-style="italic">Interview lead: three different revocation</text>
+  <text class="s" x="806" y="450" font-style="italic">problems, one mechanism, no data movement.</text>
+  <text class="s" x="806" y="466" font-style="italic">That convergence is the architecture's proof.</text>
+
+  <!-- ZONE: license routing -->
+  <rect class="zone" x="1180" y="62" width="720" height="520" rx="6"/>
+  <text class="zoneT" x="1196" y="84">LICENSE AS A RELATION OBJECT — §12</text>
+
+  <rect class="rec" x="1204" y="110" width="180" height="60" rx="8"/>
+  <text class="h" x="1216" y="134">record:R</text>
+  <text class="s" x="1216" y="152">licensed payload (raw series)</text>
+  <rect class="ext" x="1470" y="110" width="180" height="60" rx="8"/>
+  <text class="h" x="1482" y="134">license:eodhd</text>
+  <text class="s" x="1482" y="152">terms · TTL · derivation clause</text>
+  <rect class="pt" x="1716" y="110" width="160" height="60" rx="8"/>
+  <text class="h" x="1728" y="134">tenant:chris</text>
+  <text class="s" x="1728" y="152">custodian / beneficiary</text>
+  <path class="eP" d="M1384,140 L1468,140" marker-end="url(#aP)"/>
+  <text class="mS" x="1426" y="132" text-anchor="middle">#rights</text>
+  <path class="eP" d="M1650,140 L1714,140" marker-end="url(#aP)"/>
+  <text class="mS" x="1682" y="132" text-anchor="middle">#beneficiary</text>
+  <text class="s" x="1204" y="192" font-style="italic">readability routes THROUGH the license node — check(chris, read, R) traverses #rights → #beneficiary; expired TTL = no path</text>
+
+  <text class="h" x="1204" y="226">terms classes — UX projections over policy clauses (§13.1)</text>
+  <rect class="pt" x="1204" y="238" width="120" height="24" rx="12"/><text class="s" x="1264" y="254" text-anchor="middle">owned</text>
+  <rect class="ext" x="1334" y="238" width="150" height="24" rx="12"/><text class="s" x="1409" y="254" text-anchor="middle">licensed [TTL, terms]</text>
+  <rect class="rec" x="1494" y="238" width="140" height="24" rx="12"/><text class="s" x="1564" y="254" text-anchor="middle">public-domain (proven)</text>
+  <rect class="dis" x="1644" y="238" width="160" height="24" rx="12"/><text class="s" x="1724" y="254" text-anchor="middle">third-party-unknown</text>
+
+  <rect class="note" x="1204" y="284" width="672" height="90" rx="6"/>
+  <text class="h" x="1218" y="306">Derivation clause — term-driven, not automatic</text>
+  <text class="t" x="1218" y="328">EODHD pattern: raw series → licensed [TTL] · derived analytics → owned (yours).</text>
+  <text class="t" x="1218" y="346">Absent explicit terms: derived keeps the third-party label — the safe default.</text>
+  <text class="s" x="1218" y="364" font-style="italic">same rule as claims-over-employer-evidence: the governing agreement decides, machine-readably</text>
+
+  <rect class="note" x="1204" y="392" width="672" height="86" rx="6"/>
+  <text class="h" x="1218" y="414">Open-web intake — public ≠ public domain (Berne: copyright defaults on)</text>
+  <text class="t" x="1218" y="436">default: third-party-unknown + ephemeral use — transient task-scoped retention; derived claims OK</text>
+  <text class="t" x="1218" y="454">(facts aren't copyrightable); raw retention / redistribution / external egress refused by default.</text>
+  <text class="t" x="1218" y="472">Upgrades = recorded human determinations via the elevation machinery (diagram 4).</text>
+
+  <rect class="dis" x="1204" y="496" width="672" height="66" rx="6"/>
+  <text class="h" x="1218" y="518">The liability inversion</text>
+  <text class="t" x="1218" y="538">Frontier-lab class-action posture: no rights label at intake, retention by default, no record of any decision.</text>
+  <text class="t" x="1218" y="554">This model: conservative label by default; the risky position is a named human's audited determination.</text>
+
+  <!-- ZONE: takeaway -->
+  <rect class="zone" x="20" y="602" width="1880" height="310" rx="6"/>
+  <text class="zoneT" x="36" y="624">THE TAKEAWAY EXPORT — always available, hard policy, no off switch</text>
+
+  <rect class="pt" x="44" y="650" width="240" height="120" rx="8"/>
+  <text class="h" x="58" y="674">tenant:chris — all records</text>
+  <text class="s" x="58" y="694">evidence · claims · profile · projections</text>
+  <text class="s" x="58" y="710">+ org-channel intake (acme-owned)</text>
+  <text class="s" x="58" y="726">+ licensed payloads (eodhd rights)</text>
+  <text class="s" x="58" y="742">+ scraped raw pages (third-party)</text>
+
+  <path class="eB" d="M284,710 L336,710" marker-end="url(#aB)"/>
+  <rect class="ot" x="340" y="650" width="230" height="120" rx="8"/>
+  <text class="h" x="354" y="674">filter 1 — OWNERSHIP</text>
+  <text class="t" x="354" y="696">org-owned intake: excluded</text>
+  <text class="t" x="354" y="712">before disclosure even applies</text>
+  <text class="s" x="354" y="734" font-style="italic">employer-IP-clean</text>
+  <text class="s" x="354" y="748" font-style="italic">by construction</text>
+
+  <path class="eB" d="M570,710 L622,710" marker-end="url(#aB)"/>
+  <rect class="ext" x="626" y="650" width="230" height="120" rx="8"/>
+  <text class="h" x="640" y="674">filter 2 — RIGHTS</text>
+  <text class="t" x="640" y="696">licensed payloads: out</text>
+  <text class="t" x="640" y="712">manifests/pointers (yours): ride —</text>
+  <text class="t" x="640" y="728">re-fetch under your own license</text>
+  <text class="s" x="640" y="750" font-style="italic">licensor-clean, same construction</text>
+
+  <path class="eB" d="M856,710 L908,710" marker-end="url(#aB)"/>
+  <rect class="dis" x="912" y="650" width="230" height="120" rx="8"/>
+  <text class="h" x="926" y="674">filter 3 — EXPORTABILITY</text>
+  <text class="t" x="926" y="696">:never-export — stays</text>
+  <text class="t" x="926" y="712">:requires-user-unlock — prompts</text>
+  <text class="t" x="926" y="728">inherited gates travel WITH the</text>
+  <text class="t" x="926" y="744">records they gate</text>
+
+  <path class="ok" d="M1142,710 L1194,710" marker-end="url(#aG)"/>
+  <rect class="pt" x="1198" y="650" width="250" height="120" rx="8"/>
+  <text class="h" x="1212" y="674">the bundle — a SNAPSHOT</text>
+  <text class="t" x="1212" y="696">consistency token · data + policy + relation</text>
+  <text class="t" x="1212" y="712">versions · hashes · machine-readable</text>
+  <text class="t" x="1212" y="728">exclusion reasons · ids/provenance intact</text>
+  <text class="s" x="1212" y="750" font-style="italic">digital equivalent of taking your resume</text>
+
+  <path class="ok" d="M1448,710 L1500,710" marker-end="url(#aG)"/>
+  <rect class="rec" x="1504" y="650" width="230" height="120" rx="8"/>
+  <text class="h" x="1518" y="674">restore = tenant restore</text>
+  <text class="t" x="1518" y="696">fresh install imports records as-is;</text>
+  <text class="t" x="1518" y="712">not re-ingestion; owner-only</text>
+  <text class="t" x="1518" y="728">affordance</text>
+  <text class="s" x="1518" y="750" font-style="italic">the B2C conversion funnel</text>
+
+  <rect class="note" x="44" y="794" width="1690 " height="96" rx="6"/>
+  <text class="h" x="58" y="818">Hard policy — deliberately no configuration surface</text>
+  <text class="t" x="58" y="840">No org setting, policy pack, or deployment flag disables or narrows the takeaway — the switch's existence is what invites the procurement demand,</text>
+  <text class="t" x="58" y="858">and the bundle is employer- and licensor-clean by construction, so there is nothing of theirs to protect. Any commercial exception is a per-contract</text>
+  <text class="t" x="58" y="876">bespoke fork, priced as such. Available at ANY time — by offboarding day, the company laptop may already be gone. Also the GDPR export/erasure unit.</text>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="930" width="1880" height="52" rx="6"/>
+  <line class="cut" x1="44" y1="956" x2="64" y2="972"/><line class="cut" x1="64" y1="956" x2="44" y2="972"/><text class="s" x="76" y="968">relation deleted / TTL expired</text>
+  <line class="eP" x1="280" y1="964" x2="330" y2="964" marker-end="url(#aP)"/><text class="s" x="340" y="968">relation route (check traverses it)</text>
+  <line class="eB" x1="580" y1="964" x2="630" y2="964" marker-end="url(#aB)"/><text class="s" x="640" y="968">export pipeline</text>
+  <line class="ok" x1="800" y1="964" x2="850" y2="964" marker-end="url(#aG)"/><text class="s" x="860" y="968">survives every filter — the owner's property</text>
+</svg>

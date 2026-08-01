@@ -1,0 +1,90 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 560" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+  </defs>
+  <rect width="900" height="560" fill="#ffffff"/>
+  <text x="450" y="40" text-anchor="middle" font-size="24" font-weight="bold" fill="#1e5f96">Picking a helper: cross off first, THEN pick the best</text>
+
+  <!-- the package -->
+  <rect x="40" y="80" width="130" height="90" rx="6" fill="#ffffff" stroke="#8a8a82" stroke-width="2"/>
+  <circle cx="62" cy="98" r="13" fill="#f8cecc" stroke="#b85450" stroke-width="2"/>
+  <text x="62" y="102" text-anchor="middle" font-size="8" fill="#7a3230">house</text>
+  <circle cx="92" cy="98" r="13" fill="#dae8fc" stroke="#6c8ebf" stroke-width="1.5"/>
+  <text x="105" y="146" text-anchor="middle" font-size="12" fill="#333">the job + its</text>
+  <text x="105" y="162" text-anchor="middle" font-size="12" fill="#333">stickers</text>
+
+  <!-- STEP 1 -->
+  <rect x="200" y="70" width="670" height="220" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="216" y="96" font-size="16" font-weight="bold" fill="#c0392b">STEP 1 — the stickers cross helpers off. No contest yet.</text>
+
+  <!-- helpers -->
+  <g>
+    <circle cx="270" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="270" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">ZIP</text>
+    <text x="270" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">fast</text>
+    <text x="270" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="390" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="390" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">PENNY</text>
+    <text x="390" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">cheap</text>
+    <text x="390" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="510" cy="150" r="26" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+    <text x="510" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#3a6a34">SAGE</text>
+    <text x="510" y="160" text-anchor="middle" font-size="9" fill="#3a6a34">genius</text>
+    <text x="510" y="200" text-anchor="middle" font-size="11" fill="#555">keeps nothing</text>
+  </g>
+  <g>
+    <circle cx="640" cy="150" r="26" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2"/>
+    <text x="640" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">GABBY</text>
+    <text x="640" y="160" text-anchor="middle" font-size="9" fill="#555">genius!</text>
+    <text x="640" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">blabs everything</text>
+    <line x1="614" y1="124" x2="666" y2="176" stroke="#c0392b" stroke-width="5"/>
+    <line x1="666" y1="124" x2="614" y2="176" stroke="#c0392b" stroke-width="5"/>
+  </g>
+  <g>
+    <circle cx="780" cy="150" r="26" fill="#f5f5f5" stroke="#8a8a82" stroke-width="2"/>
+    <text x="780" y="146" text-anchor="middle" font-size="11" font-weight="bold" fill="#555">XEROXA</text>
+    <text x="780" y="160" text-anchor="middle" font-size="9" fill="#555">free!</text>
+    <text x="780" y="200" text-anchor="middle" font-size="11" font-weight="bold" fill="#c0392b">keeps copies</text>
+    <line x1="754" y1="124" x2="806" y2="176" stroke="#c0392b" stroke-width="5"/>
+    <line x1="806" y1="124" x2="754" y2="176" stroke="#c0392b" stroke-width="5"/>
+  </g>
+  <text x="216" y="248" font-size="13" fill="#7a3230" font-weight="bold">the "stays in the house" sticker crossed off Gabby and Xeroxa BEFORE anyone</text>
+  <text x="216" y="266" font-size="13" fill="#7a3230" font-weight="bold">compared smartness or price. Genius and free never entered into it.</text>
+
+  <path class="e" d="M170,125 L196,125" stroke="#3a76b8" stroke-width="2.5" marker-end="url(#a)" fill="none"/>
+
+  <!-- STEP 2 -->
+  <rect x="200" y="316" width="440" height="150" rx="10" fill="#fcfcfa" stroke="#b8b8b0" stroke-width="1.5"/>
+  <text x="216" y="342" font-size="16" font-weight="bold" fill="#3a6a34">STEP 2 — NOW the contest, among who's left</text>
+  <circle cx="270" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="270" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">ZIP</text>
+  <circle cx="350" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="2.5"/>
+  <text x="350" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">PENNY</text>
+  <circle cx="430" cy="400" r="24" fill="#d5e8d4" stroke="#82b366" stroke-width="3.5"/>
+  <text x="430" y="405" text-anchor="middle" font-size="10" font-weight="bold" fill="#3a6a34">SAGE</text>
+  <circle cx="430" cy="366" r="12" fill="#fff2cc" stroke="#d6b656" stroke-width="2"/>
+  <text x="430" y="371" text-anchor="middle" font-size="11">★</text>
+  <text x="480" y="396" font-size="12.5" fill="#333">best of the ALLOWED:</text>
+  <text x="480" y="412" font-size="12.5" fill="#333">smartest wins today</text>
+  <text x="216" y="448" font-size="12" font-style="italic" fill="#555">fastest? cheapest? smartest? — a fair fight, because everyone here is safe</text>
+
+  <!-- fallback -->
+  <rect x="660" y="316" width="210" height="150" rx="10" fill="#ffe6cc" stroke="#d79b00" stroke-width="2"/>
+  <text x="765" y="342" text-anchor="middle" font-size="15" font-weight="bold" fill="#8a5a00">Sage is sick today?</text>
+  <circle cx="710" cy="386" r="20" fill="#d5e8d4" stroke="#82b366" stroke-width="2"/>
+  <rect x="700" y="376" width="20" height="8" rx="4" fill="#c0392b"/>
+  <text x="740" y="382" font-size="12" fill="#333">don't just grab</text>
+  <text x="740" y="398" font-size="12" fill="#333">the next name —</text>
+  <text x="765" y="426" text-anchor="middle" font-size="13" font-weight="bold" fill="#c0392b">RE-DO the crossing-off</text>
+  <text x="765" y="444" text-anchor="middle" font-size="11" font-style="italic" fill="#8a5a00">"the good one was busy" never</text>
+  <text x="765" y="458" text-anchor="middle" font-size="11" font-style="italic" fill="#8a5a00">makes the blabbermouth okay</text>
+  <path d="M765,316 C765,300 700,296 660,292" stroke="#d79b00" stroke-width="2.5" fill="none" stroke-dasharray="6 4" marker-end="url(#ao)"/>
+
+  <rect x="40" y="492" width="830" height="50" rx="8" fill="#fffde7" stroke="#c8b900" stroke-width="1.5"/>
+  <text x="455" y="523" text-anchor="middle" font-size="15" font-weight="bold" fill="#4a4a20">Choosing the best model only ever happens among the models the rules already allowed.</text>
+</svg>

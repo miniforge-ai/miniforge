@@ -1,0 +1,244 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1120" font-family="Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="aB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a76b8"/></marker>
+    <marker id="aP" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9673a6"/></marker>
+    <marker id="aG" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4a9a4a"/></marker>
+    <marker id="aO" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#d79b00"/></marker>
+    <marker id="aR" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#c0392b"/></marker>
+    <style>
+      .band{fill:#1e5f96;} .bandT{fill:#fff;font-size:20px;font-weight:bold;} .bandS{fill:#cfe2f3;font-size:12px;}
+      .zone{fill:#fcfcfa;stroke:#b8b8b0;stroke-width:1.2;} .zoneT{fill:#1e5f96;font-size:13px;font-weight:bold;letter-spacing:.4px;}
+      .pt{fill:#d5e8d4;stroke:#82b366;stroke-width:1.5;} .ot{fill:#dae8fc;stroke:#6c8ebf;stroke-width:1.5;}
+      .pr{fill:#fff2cc;stroke:#d6b656;stroke-width:1.5;} .ag{fill:#fff2cc;stroke:#d6b656;stroke-width:1.5;stroke-dasharray:5 3;}
+      .rel{fill:#e1d5e7;stroke:#9673a6;stroke-width:1.5;} .rec{fill:#ffffff;stroke:#8a8a82;stroke-width:1;}
+      .ext{fill:#ffe6cc;stroke:#d79b00;stroke-width:1.5;} .dis{fill:#f8cecc;stroke:#b85450;stroke-width:1;}
+      .h{font-size:13px;font-weight:bold;fill:#232323;} .t{font-size:11.5px;fill:#333;} .s{font-size:10.5px;fill:#555;}
+      .m{font-family:Menlo,Consolas,monospace;font-size:10px;fill:#4a355c;} .mS{font-family:Menlo,Consolas,monospace;font-size:9.5px;fill:#4a355c;}
+      .note{fill:#fffde7;stroke:#c8b900;stroke-width:1;}
+      .eB{stroke:#3a76b8;stroke-width:1.6;fill:none;} .eP{stroke:#9673a6;stroke-width:1.6;fill:none;}
+      .ok{stroke:#4a9a4a;stroke-width:1.8;fill:none;} .eO{stroke:#d79b00;stroke-width:1.8;fill:none;}
+      .bad{stroke:#c0392b;stroke-width:1.6;fill:none;}
+      .q{font-size:11px;font-weight:bold;fill:#1e5f96;}
+    </style>
+  </defs>
+
+  <rect width="1920" height="1120" fill="#ffffff"/>
+  <rect class="band" x="0" y="0" width="1920" height="44"/>
+  <text class="bandT" x="20" y="29">Tenancy, Ownership &amp; Access — 4. Agent Orchestration: Transacted Effects</text>
+  <text class="bandS" x="1900" y="28" text-anchor="end">§11, §13 · models propose; deterministic authority, information-flow, and effect-control systems decide and execute</text>
+
+  <!-- zones -->
+  <rect class="zone" x="20" y="62" width="440" height="940" rx="6"/>
+  <text class="zoneT" x="36" y="84">DELEGATION — authority lives outside the model</text>
+  <rect class="zone" x="480" y="62" width="850" height="940" rx="6"/>
+  <text class="zoneT" x="496" y="84">TRANSACTED INVOCATION — propose → decide → commit → reconcile</text>
+  <rect class="zone" x="1350" y="62" width="550" height="940" rx="6"/>
+  <text class="zoneT" x="1366" y="84">RELAXATION &amp; SCOPED GRANTS — the human side</text>
+
+  <!-- DELEGATION -->
+  <rect class="pr" x="44" y="104" width="392" height="60" rx="8"/>
+  <text class="h" x="58" y="128">principal:chris (human)</text>
+  <text class="s" x="58" y="146">delegates — is never impersonated by the agent</text>
+
+  <rect class="rel" x="44" y="180" width="392" height="150" rx="8"/>
+  <text class="h" x="58" y="204">delegation:D — a first-class grant object</text>
+  <text class="mS" x="58" y="224">delegation:D#grantor@principal:chris</text>
+  <text class="mS" x="58" y="240">delegation:D#grantee@principal:agent-a</text>
+  <text class="mS" x="58" y="256">delegation:D#basis@engagement:chris-acme</text>
+  <text class="mS" x="58" y="272">run:R#delegation@delegation:D</text>
+  <text class="s" x="58" y="292">record: scope · purpose · argument constraints ·</text>
+  <text class="s" x="58" y="306">allowed capability versions · :delegable? · TTL ·</text>
+  <text class="s" x="58" y="320">policy version · immutable GENERATION (lineage target)</text>
+
+  <rect class="ag" x="44" y="348" width="392" height="76" rx="8"/>
+  <text class="h" x="58" y="372">principal:agent-a (instance)</text>
+  <text class="s" x="58" y="390">tenant-less · owns nothing · expiring · execution</text>
+  <text class="s" x="58" y="404">artifacts → launching tenant; domain outputs → §6</text>
+
+  <rect class="ag" x="44" y="440" width="392" height="86" rx="8"/>
+  <text class="h" x="58" y="464">principal:agent-a.1 (child)</text>
+  <text class="s" x="58" y="482" font-weight="bold">delegation needs :delegable? — a separate authority;</text>
+  <text class="s" x="58" y="496">child constraints fit within the parent's DELEGABLE</text>
+  <text class="s" x="58" y="510">constraints. Monotone through orchestration depth.</text>
+  <path class="eP" d="M240,164 L240,178" marker-end="url(#aP)"/>
+  <path class="eP" d="M240,330 L240,346" marker-end="url(#aP)"/>
+  <path class="eP" d="M240,424 L240,438" marker-end="url(#aP)"/>
+
+  <rect class="note" x="44" y="548" width="392" height="112" rx="6"/>
+  <text class="h" x="58" y="572">The injection argument</text>
+  <text class="t" x="58" y="594">Injected text can talk the model into WANTING anything.</text>
+  <text class="t" x="58" y="610">Authority lives in grant objects the injected text cannot</text>
+  <text class="t" x="58" y="626">write. Blast radius of a rogue agent = its grants, and</text>
+  <text class="t" x="58" y="642">the model classifies nothing (destination, purpose, effect).</text>
+
+  <rect class="note" x="44" y="676" width="392" height="104" rx="6"/>
+  <text class="h" x="58" y="700">Why not agent-as-tenant?</text>
+  <text class="t" x="58" y="722">Tenants exist to own; an agent must own nothing.</text>
+  <text class="t" x="58" y="738">A tenant would let records land as the property of a</text>
+  <text class="t" x="58" y="754">process — decommission becomes data migration:</text>
+  <text class="t" x="58" y="770">the containment trap, rearranged.</text>
+
+  <rect class="note" x="44" y="796" width="392" height="90" rx="6"/>
+  <text class="h" x="58" y="820">Sandboxing ≠ this</text>
+  <text class="t" x="58" y="842">Sandbox bounds the process; grants bound authority;</text>
+  <text class="t" x="58" y="858">clauses bound egress. Only the last two survive hosted</text>
+  <text class="t" x="58" y="874">compute, new tools, or spawned children.</text>
+
+  <rect class="note" x="44" y="902" width="392" height="86" rx="6"/>
+  <text class="h" x="58" y="926">Revocation (§13.5)</text>
+  <text class="t" x="58" y="948">Cutting D (or its basis) is authoritative immediately;</text>
+  <text class="t" x="58" y="964">the commit worker completes it — freshness recheck,</text>
+  <text class="t" x="58" y="980">lease fencing, stale-generation results rejected.</text>
+
+  <!-- PIPELINE -->
+  <rect class="rec" x="504" y="104" width="380" height="88" rx="8"/>
+  <text class="h" x="518" y="128">1 · agent/model PROPOSAL → canonical transaction</text>
+  <text class="s" x="518" y="148">capability version · binding · canonical arguments ·</text>
+  <text class="s" x="518" y="162">labeled input refs · destination · expected effect</text>
+  <text class="s" x="518" y="180" font-style="italic">trusted resolvers classify destination/effect — never the model</text>
+
+  <path class="eB" d="M694,192 L694,214" marker-end="url(#aB)"/>
+
+  <rect class="ext" x="504" y="216" width="380" height="240" rx="8"/>
+  <text class="h" x="518" y="240">2 · POLICY DECISION — decide(), three planes</text>
+  <rect class="rel" x="518" y="252" width="352" height="56" rx="6"/>
+  <text class="t" x="530" y="270" font-weight="bold">authority</text>
+  <text class="s" x="530" y="286">capability grant + object access + grant lineage (basis valid?)</text>
+  <rect class="dis" x="518" y="314" width="352" height="56" rx="6"/>
+  <text class="t" x="530" y="332" font-weight="bold">information flow / processing</text>
+  <text class="s" x="530" y="348">every input clause × purpose (basis-rooted) × destination</text>
+  <rect class="rec" x="518" y="376" width="352" height="56" rx="6"/>
+  <text class="t" x="530" y="394" font-weight="bold">effect</text>
+  <text class="s" x="530" y="410">impact class within grant · argument constraints</text>
+  <text class="s" x="518" y="448" font-style="italic">object access is part of authority — not a separate peer gate</text>
+
+  <path class="eB" d="M694,456 L694,478" marker-end="url(#aB)"/>
+
+  <rect class="rel" x="504" y="480" width="380" height="104" rx="8"/>
+  <text class="h" x="518" y="504">3 · DECISION ENVELOPE (not a boolean)</text>
+  <text class="s" x="518" y="524">allowed? · reason codes · obligations (redact field, zero</text>
+  <text class="s" x="518" y="538">retention) · required approvals · relation revision · policy</text>
+  <text class="s" x="518" y="552">digest · grant generations · effect-scope digest · validity</text>
+  <text class="s" x="518" y="572" font-style="italic">rides the approval hash, commit recheck, receipt, audit</text>
+
+  <path class="bad" d="M884,532 L920,532" marker-end="url(#aR)"/>
+  <rect class="dis" x="924" y="510" width="150" height="44" rx="6"/>
+  <text class="s" x="936" y="528" font-weight="bold">refused</text>
+  <text class="s" x="936" y="542">reason codes say why</text>
+
+  <path class="eO" d="M884,500 C1150,500 1200,150 1348,150" marker-end="url(#aO)"/>
+  <text class="s" x="1120" y="480" fill="#a06a00">approvals required → relaxation workflow (right)</text>
+
+  <path class="ok" d="M694,584 L694,606" marker-end="url(#aG)"/>
+
+  <rect class="pt" x="504" y="608" width="380" height="110" rx="8"/>
+  <text class="h" x="518" y="632">4 · COMMIT WORKER (the only committer)</text>
+  <text class="s" x="518" y="652">lease + fencing generation in the commit condition ·</text>
+  <text class="s" x="518" y="666">freshness recheck ≥ every relevant revocation/policy</text>
+  <text class="s" x="518" y="680">watermark (never the run-start snapshot) · idempotency</text>
+  <text class="s" x="518" y="694">key · approval hash still matches the exact transaction</text>
+  <text class="s" x="518" y="712" font-style="italic">unknown-outcome is a first-class state</text>
+
+  <path class="eB" d="M694,718 L694,740" marker-end="url(#aB)"/>
+
+  <rect class="rec" x="504" y="742" width="380" height="72" rx="8"/>
+  <text class="h" x="518" y="766">5 · RECONCILE → RECEIPT → AUDIT / EVAL</text>
+  <text class="s" x="518" y="786">what crossed the boundary is compensated and audited,</text>
+  <text class="s" x="518" y="800">never retroactively de-authorized (three revocations, §13.5)</text>
+
+  <!-- model routing card -->
+  <rect class="ot" x="904" y="104" width="402" height="200" rx="8"/>
+  <text class="h" x="918" y="128">Model calls take the SAME path</text>
+  <text class="s" x="918" y="148">a model endpoint is a capability binding: retention,</text>
+  <text class="s" x="918" y="162">training policy, residency, trust boundary, quality, cost</text>
+  <text class="t" x="918" y="186" font-weight="bold">routing = optimizer over policy-cleared bindings:</text>
+  <text class="s" x="918" y="206">1 discover capability-compatible bindings</text>
+  <text class="s" x="918" y="220">2 validate grant + lineage · 3 clauses × purpose ×</text>
+  <text class="s" x="918" y="234">destination × effect · 4 drop forbidden (residency,</text>
+  <text class="s" x="918" y="248">retention, training, rights) · 5 entitlement/budget/limits</text>
+  <text class="s" x="918" y="262">6 rank survivors (quality, latency, cost, health) · 7 invoke</text>
+  <text class="s" x="918" y="282" font-weight="bold">fallback re-runs eligibility, not just ranking</text>
+
+  <rect class="note" x="904" y="326" width="402" height="130" rx="6"/>
+  <text class="h" x="918" y="350">Scoped taint on the shared blackboard (§13.4)</text>
+  <text class="s" x="918" y="370">artifact label = its ACTUAL inputs · agent context =</text>
+  <text class="s" x="918" y="384">what that agent actually read · run summary = audit</text>
+  <text class="s" x="918" y="398">upper bound · the blackboard is a container, NOT a</text>
+  <text class="s" x="918" y="412">flow between everything on it</text>
+  <text class="s" x="918" y="432" font-style="italic">subtask eligibility from the subtask's inputs — A's</text>
+  <text class="s" x="918" y="446" font-style="italic">confidential read does not taint B's public branch</text>
+
+  <rect class="note" x="904" y="608" width="402" height="106" rx="6"/>
+  <text class="h" x="918" y="632">Tool = channel; mailbox = domain (§11.6)</text>
+  <text class="s" x="918" y="652">reading mail is intake — provenance-owned, store-checked;</text>
+  <text class="s" x="918" y="666">sending is egress — trusted resolver derives the</text>
+  <text class="s" x="918" y="680">destination from the recipient argument, per invocation</text>
+  <text class="s" x="918" y="700" font-style="italic">argument constraints live on the grant and binding</text>
+
+  <rect class="note" x="904" y="742" width="402" height="150" rx="6"/>
+  <text class="h" x="918" y="766">Known limits — conceded up front</text>
+  <text class="s" x="918" y="786">label creep: clause union ratchets → authority-defined</text>
+  <text class="s" x="918" y="800">transforms + granular payloads + normalization/digests</text>
+  <text class="s" x="918" y="818">aggregation: jointly-sensitive publics pass the union —</text>
+  <text class="s" x="918" y="832">aggregates may get clauses at creation; detection o.o.s.</text>
+  <text class="s" x="918" y="850">irreversibility: a sent prompt/email/payment cannot be</text>
+  <text class="s" x="918" y="864">un-sent — reconciliation, compensation, audit (§13.5)</text>
+
+  <!-- RELAXATION ZONE -->
+  <rect class="rec" x="1374" y="110" width="502" height="80" rx="8"/>
+  <text class="h" x="1388" y="134">relaxation request (agent may ask — never approve)</text>
+  <text class="t" x="1388" y="156">carries the rendered payload + its clauses + the destination;</text>
+  <text class="t" x="1388" y="172">out-of-band — not a tool the agent calls with its own arguments</text>
+
+  <rect class="dis" x="1374" y="204" width="502" height="88" rx="8"/>
+  <text class="h" x="1388" y="228">an approval request is itself a disclosure</text>
+  <text class="t" x="1388" y="250">the approver must be entitled to see the payload; otherwise a</text>
+  <text class="t" x="1388" y="266">policy-safe redacted preview, an artifact reference, or a</text>
+  <text class="t" x="1388" y="282">differently-authorized approver. No laundering via the queue.</text>
+
+  <rect class="ot" x="1374" y="306" width="502" height="96" rx="8"/>
+  <text class="h" x="1388" y="330">per-clause relaxation mode — machine-readable (§13.1)</text>
+  <text class="t" x="1388" y="352">approval-workflow · quorum · proof-of-contract · authority-</text>
+  <text class="t" x="1388" y="368">defined policy transform · automatic embargo release · NONE</text>
+  <text class="s" x="1388" y="388" font-style="italic">every unsatisfied clause's authority must authorize — not just the strictest</text>
+
+  <rect class="ext" x="1374" y="426" width="502" height="168" rx="8"/>
+  <text class="h" x="1388" y="450">approval mints a SCOPED grant — the fatigue fix</text>
+  <rect class="rec" x="1388" y="462" width="112" height="52" rx="6"/><text class="t" x="1398" y="480" font-weight="bold">once</text><text class="s" x="1398" y="496">this invocation</text><text class="s" x="1398" y="508">(default)</text>
+  <rect class="rec" x="1510" y="462" width="112" height="52" rx="6"/><text class="t" x="1520" y="480" font-weight="bold">session</text><text class="s" x="1520" y="496">dies with the</text><text class="s" x="1520" y="508">taint it judged</text>
+  <rect class="rec" x="1632" y="462" width="112" height="52" rx="6"/><text class="t" x="1642" y="480" font-weight="bold">context</text><text class="s" x="1642" y="496">repo / cycle ·</text><text class="s" x="1642" y="508">time-boxed</text>
+  <rect class="dis" x="1754" y="462" width="108" height="52" rx="6"/><text class="t" x="1764" y="480" font-weight="bold">permanent</text><text class="s" x="1764" y="496">= transform via</text><text class="s" x="1764" y="508">authority (§13.1)</text>
+  <rect class="rel" x="1388" y="526" width="474" height="26" rx="5"/>
+  <text class="mS" x="1398" y="543">class:review#flow[dest⊆related]@principal:agent-a {session:S, ttl:2h}</text>
+  <text class="s" x="1388" y="568">condition tuples in the same store as all authority — auditable,</text>
+  <text class="s" x="1388" y="582">revocable, expiring (PIM / JIT ≡ Myers–Liskov DLM)</text>
+
+  <rect class="note" x="1374" y="616" width="502" height="76" rx="6"/>
+  <text class="h" x="1388" y="640">Grants attach to FLOWS, not tools</text>
+  <text class="t" x="1388" y="660">(principal, record class, destination, scope) — granting the TOOL</text>
+  <text class="t" x="1388" y="676">reopens laundering. "Always allow this tool" = channel bypass.</text>
+
+  <rect class="note" x="1374" y="708" width="502" height="72" rx="6"/>
+  <text class="h" x="1388" y="732">Elevation never relabels</text>
+  <text class="t" x="1388" y="752">a flow exception attached to (payload, destination, invocation);</text>
+  <text class="t" x="1388" y="768">persistent relaxation = the clause authority's mechanism only.</text>
+
+  <rect class="note" x="1374" y="796" width="502" height="96" rx="6"/>
+  <text class="h" x="1388" y="820">Person-held vs credential-scoped roles (§4)</text>
+  <text class="t" x="1388" y="842">human roles bind to the person's TENANT (resolved through its</text>
+  <text class="t" x="1388" y="858">#controller relations — survives IdP/device change); direct</text>
+  <text class="t" x="1388" y="874">principal relations are for agents, service accounts, devices.</text>
+
+  <path class="ok" d="M1374,540 C1340,540 1330,560 1320,600 C1300,680 940,700 888,660" marker-end="url(#aG)" stroke-dasharray="6 3"/>
+  <text class="s" x="1100" y="576" fill="#4a9a4a" text-anchor="middle">minted grant re-enters the</text>
+  <text class="s" x="1100" y="590" fill="#4a9a4a" text-anchor="middle">decision for its scope/TTL</text>
+
+  <!-- legend -->
+  <rect class="zone" x="20" y="1018" width="1880" height="72" rx="6"/>
+  <text class="zoneT" x="36" y="1040">FLOW</text>
+  <line class="eP" x1="90" y1="1062" x2="140" y2="1062" marker-end="url(#aP)"/><text class="s" x="150" y="1066">delegation / relation</text>
+  <line class="eB" x1="300" y1="1062" x2="350" y2="1062" marker-end="url(#aB)"/><text class="s" x="360" y="1066">pipeline step</text>
+  <line class="ok" x1="480" y1="1062" x2="530" y2="1062" marker-end="url(#aG)"/><text class="s" x="540" y="1066">decision: proceed</text>
+  <line class="eO" x1="690" y1="1062" x2="740" y2="1062" marker-end="url(#aO)"/><text class="s" x="750" y="1066">approvals required → relaxation workflow</text>
+  <line class="bad" x1="1010" y1="1062" x2="1060" y2="1062" marker-end="url(#aR)"/><text class="s" x="1070" y="1066">refused (envelope carries reason codes)</text>
+</svg>
