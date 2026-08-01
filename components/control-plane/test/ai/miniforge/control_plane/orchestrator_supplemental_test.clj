@@ -10,12 +10,11 @@
    [ai.miniforge.control-plane.orchestrator :as sut]
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
+   [ai.miniforge.control-plane.async-test-support :as support]
    [ai.miniforge.control-plane-adapter.protocol :as adapter]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-(def ^{:stratum 0} ^:private default-wait-timeout-ms 2000)
 
 ;; ---------------------------------------------------------------------------
 ;; Test helpers
@@ -77,23 +76,6 @@
       (is (= 0 (:poll-interval-ms orch))))))
 
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} wait-until-count
-  "Block until `(count @items-atom) >= n` or `timeout-ms` elapses.
-   Uses add-watch + promise — no fixed sleep. Returns true if reached, false on timeout."
-  ([items-atom n] (wait-until-count items-atom n default-wait-timeout-ms))
-  ([items-atom n timeout-ms]
-   (let [done (promise)
-         k    (gensym "wait-count-")]
-     (when (>= (count @items-atom) n)
-       (deliver done :immediate))
-     (add-watch items-atom k
-                (fn [_ _ _ new-val]
-                  (when (>= (count new-val) n)
-                    (deliver done :reached))))
-     (let [result (deref done timeout-ms ::timeout)]
-       (remove-watch items-atom k)
-       (not= result ::timeout)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Discovery: adapter returns nil instead of empty seq
@@ -560,12 +542,10 @@
       (sut/resolve-and-deliver! orch (:decision/id d2) "no")
       (is (= :running (:agent/status (registry/get-agent reg (:agent/id a2))))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
 ;; ---------------------------------------------------------------------------
 ;; Poll: status changes emit correct old/new values
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 2} run-poll-pass-status-change-event-values-test
+(deftest ^{:stratum 1} run-poll-pass-status-change-event-values-test
   (testing "poll emits state-changed with correct old and new status values"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
@@ -585,13 +565,13 @@
                             :event-stream es}))]
       (#'sut/run-poll-pass orch)
       ;; Verify at least one event was published with state change
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should emit event for status change"))))
 
 ;; ---------------------------------------------------------------------------
 ;; submit-decision-from-agent!: with event stream, event has correct fields
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 2} submit-decision-event-fields-test
+(deftest ^{:stratum 1} submit-decision-event-fields-test
   (testing "decision-created event contains agent-id and summary"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -608,7 +588,7 @@
                             :event-stream es}))
           decision (sut/submit-decision-from-agent!
                     orch (:agent/id agent-rec) "Event field test")]
-      (is (wait-until-count published 1)
+      (is (support/wait-until-count published 1)
           "should have published decision-created event")
       ;; Verify the returned decision is well-formed
       (is (= (:agent/id agent-rec) (:decision/agent-id decision))))))
