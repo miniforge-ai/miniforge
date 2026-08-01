@@ -243,3 +243,21 @@
     (is (contains? fx/reconcilable-states :committing))
     (is (= :reconciled (:effect/state settled)))
     (is (false? (:effect/matched? settled)))))
+
+(deftest ^{:stratum 2} refusal-anomalies-route-correctly-test
+  ;; :unauthorized would say "you lack permission", which is neither
+  ;; true nor useful here. A wrong lifecycle position is a :conflict; a
+  ;; probe that did not answer is :unavailable — transient, ask again.
+  (let [dir (tmp-dir)
+        g (merge-grant)
+        settled (fx/commit! dir (propose-merge! dir g) g {} now
+                            (fn [] {:effect/outcome :succeeded}))
+        unknown (fx/commit! dir (propose-merge! dir g) g {} now
+                            (fn [] (throw (ex-info "boom" {}))))]
+    (testing "reconciling a settled record is a :conflict, not a permission error"
+      (is (= :conflict (:anomaly/type
+                        (fx/reconcile! dir settled (constantly {:effect/observed :x}) later)))))
+    (testing "a probe that did not answer is :unavailable, and carries the cause"
+      (let [a (fx/reconcile! dir unknown (fn [_] (throw (ex-info "network down" {}))) later)]
+        (is (= :unavailable (:anomaly/type a)))
+        (is (= "network down" (get-in a [:anomaly/data :probe/error])))))))

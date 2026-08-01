@@ -56,10 +56,24 @@
                        message
                        {:explain (me/humanize (m/explain schema/EffectTransaction t))}))
 
-(defn- ^{:stratum 0} refused
+(defn- ^{:stratum 0} wrong-state
+  "The record is not in a state this operation applies to — a caller
+   error about lifecycle position, not permission and not a transient
+   fault. `:conflict` is what routes that correctly."
   [message data]
-  (anomaly/sub-anomaly :unauthorized
-                       :anomalies.effect-transaction/refused
+  (anomaly/sub-anomaly :conflict
+                       :anomalies.effect-transaction/wrong-state
+                       message
+                       data))
+
+(defn- ^{:stratum 0} unresolved
+  "The external system did not answer, so the record stays as it is.
+   `:unavailable` because this is TRANSIENT and the right response is to
+   ask again later — classifying it as a caller error would send it to
+   handling that never retries."
+  [message data]
+  (anomaly/sub-anomaly :unavailable
+                       :anomalies.effect-transaction/unresolved
                        message
                        data))
 
@@ -93,8 +107,20 @@
 
    A write failure propagates rather than returning a soft error: if we
    cannot record that we are about to do something irreversible, the
-   caller must not do it."
-  ([opts] (propose! (:dir opts) opts (Instant/now)))
+   caller must not do it.
+
+   The 1-arity convenience form REQUIRES `:dir`. A nil directory would
+   land records in the process working directory instead of the store —
+   the durability component silently writing the audit trail somewhere
+   nobody looks is the worst failure it could have, so it is refused
+   rather than defaulted."
+  ([{:keys [dir] :as opts}]
+   (if (nil? dir)
+     (anomaly/sub-anomaly :invalid-input
+                          :anomalies.effect-transaction/no-store-dir
+                          "propose! requires :dir — refusing to write records to the process working directory"
+                          {})
+     (propose! dir opts (Instant/now))))
   ([dir {:keys [effect-class grant-id envelope-id proposal]} ^Instant now]
    (let [t {:effect/id (random-uuid)
             :effect/class effect-class
@@ -174,8 +200,8 @@
    disagreement is worse than a flagged one."
   [dir t probe-fn ^Instant now]
   (if-not (contains? schema/reconcilable-states (:effect/state t))
-    (refused "only :committing or :unknown-outcome records are reconcilable"
-             {:effect/id (:effect/id t) :effect/state (:effect/state t)})
+    (wrong-state "only :committing or :unknown-outcome records are reconcilable"
+                 {:effect/id (:effect/id t) :effect/state (:effect/state t)})
     ;; The probe's answer is wrapped rather than probed for a marker key:
     ;; the probe returns caller-shaped data, so any in-band sentinel is a
     ;; value it could legitimately carry. The wrapper map is ours.
@@ -185,8 +211,10 @@
       (if (or (contains? probed :threw)
               (not (map? answer))
               (not (contains? answer :effect/observed)))
-        (refused "reconciliation probe did not answer; record stays unresolved"
-                 {:effect/id (:effect/id t) :effect/state (:effect/state t)})
+        (unresolved "reconciliation probe did not answer; record stays unresolved"
+                    (cond-> {:effect/id (:effect/id t) :effect/state (:effect/state t)}
+                      (contains? probed :threw)
+                      (assoc :probe/error (:threw probed))))
         (advance! dir t
                   {:effect/state :reconciled
                    :effect/observed (:effect/observed answer)

@@ -19,6 +19,7 @@
   "Durability: the record must reach disk BEFORE the effect, and survive
    to a reader that shares no memory with the writer."
   (:require
+   [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.effect-transaction.interface :as fx]
    [clojure.test :refer [deftest is testing]])
   (:import
@@ -32,6 +33,16 @@
 
 (defn ^{:stratum 0} tmp-dir []
   (str (.toFile (Files/createTempDirectory "fx-store-test" (into-array FileAttribute [])))))
+
+(deftest ^{:stratum 0} propose-refuses-a-missing-store-dir-test
+  ;; A durability component silently writing the audit trail into the
+  ;; process CWD is the worst failure it could have — refuse, never
+  ;; default.
+  (let [result (fx/propose! {:effect-class :effect/merge
+                             :grant-id (random-uuid)
+                             :proposal {}})]
+    (is (anomaly/anomaly? result))
+    (is (= :invalid-input (:anomaly/type result)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
