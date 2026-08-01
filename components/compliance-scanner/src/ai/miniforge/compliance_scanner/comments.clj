@@ -23,9 +23,10 @@
    structured comment maps emitted here and post them via the provider's
    review-comment API.
 
-   Layer 0: payload helpers
-   Layer 1: comment-record builders
-   Layer 2: bulk renderer + severity inference"
+   Layer 0: severity inference + payload/body rendering helpers
+   Layer 1: single-violation payload + comment-body builders
+   Layer 2: single-comment builder
+   Layer 3: bulk comment renderer"
   (:require [clojure.edn :as edn]
             [clojure.string :as str]))
 

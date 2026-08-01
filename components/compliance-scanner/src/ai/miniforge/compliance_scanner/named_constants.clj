@@ -31,8 +31,12 @@
    tokens in code positions. Structured-string magic literals (paths, format
    placeholders) are out of scope here; the judge still covers those.
 
-   Layer 0: char-lexer + numeric classification
-   Layer 1: file + repo scan"
+   Layer 0: char-lexer state helpers + rule identity constants
+   Layer 1: numeric-token classification + file listing
+   Layer 2: magic-number value classification
+   Layer 3: content char-lexer scan
+   Layer 4: per-file violation mapping
+   Layer 5: top-level repo scan entry point"
   (:require
    [clojure.java.io :as io]
    [clojure.string :as str]))

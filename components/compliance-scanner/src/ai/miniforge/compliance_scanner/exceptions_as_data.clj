@@ -27,13 +27,17 @@
    string literals containing the word `throw` cannot trigger false
    positives.
 
-   Layer 0: Pure classification — boundary namespace patterns,
-            local boundary wrappers, programmer-error guards,
-            throw-shaped form recognition
-   Layer 1: File-level analysis — read forms with location metadata,
-            walk recursively, classify each candidate site
-   Layer 2: Repo-level scan entry point — enumerate target files,
-            aggregate violations as data"
+   Layer 0: Pure classification constants + AST/reader primitives —
+            boundary namespace patterns, throw-shaped form recognition,
+            programmer-error markers, reader/form-meta helpers
+   Layer 1: Per-form context extraction — boundary/throw-shape/defn-context,
+            form reading, file listing, violation-record construction
+   Layer 2: Boundary + throw-shape + rethrow classification
+   Layer 3: Per-form traversal context enrichment
+   Layer 4: Recursive form walk emitting violations
+   Layer 5: Single-file content analysis
+   Layer 6: Single-file path-safe analysis entry point
+   Layer 7: Top-level repo scan entry point"
   (:require
    [ai.miniforge.compliance-scanner.factory :as factory]
    [clojure.java.io                          :as io]

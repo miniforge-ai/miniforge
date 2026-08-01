@@ -18,9 +18,11 @@
 (ns ai.miniforge.compliance-scanner.plan
   "Plan phase: generate DAG task defs and markdown work spec from violations.
 
-   Layer 0: DAG topology helpers
-   Layer 1: Markdown work-spec builder
-   Layer 2: Top-level plan entry point"
+   Layer 0: DAG topology + Dewey-order helpers
+   Layer 1: Rule-id ordering + violation-group rendering
+   Layer 2: DAG task assembly + per-rule section rendering
+   Layer 3: Markdown work-spec assembly
+   Layer 4: Top-level plan entry point"
   (:require [ai.miniforge.coerce.interface             :as coerce]
             [ai.miniforge.compliance-scanner.factory   :as factory]
             [ai.miniforge.compliance-scanner.messages  :as msg]

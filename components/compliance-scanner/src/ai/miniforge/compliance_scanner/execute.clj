@@ -18,11 +18,11 @@
 (ns ai.miniforge.compliance-scanner.execute
   "Apply auto-fixable violations to files and create one PR per rule.
 
-   Layer 0: File patch helpers (pure)
-   Layer 1: Git shell helpers
-   Layer 1.5: PR documentation (pure)
-   Layer 2: Per-rule fix, commit, and PR
-   Layer 3: Top-level execute! entry point"
+   Layer 0: File patch + git shell + PR-documentation helpers (pure)
+   Layer 1: Content patching, semantic-repair prompt, branch/PR-doc builders
+   Layer 2: Per-file patch application
+   Layer 3: Per-rule fix, commit, and PR orchestration
+   Layer 4: Top-level execute! entry point"
   (:require [clojure.java.io    :as io]
             [clojure.java.shell :as shell]
             [clojure.string     :as str]))

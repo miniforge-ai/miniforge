@@ -18,11 +18,16 @@
 (ns ai.miniforge.compliance-scanner.scan
   "Scan phase: load files, run detection, return violations.
 
-   Layer 0: Per-file detection helpers
-   Layer 0.5: Pack-driven detection config (glob matching, suggest builder)
-   Layer 0.6: Diff/plan detection helpers
-   Layer 1: Per-rule scanning
-   Layer 2: Top-level scan-repo entry point"
+   Layer 0: Per-file detection + pack-driven config helpers (globs,
+            suggest-fn, diff/plan detection)
+   Layer 1: Per-rule scanning (positive/negative rules, pack config
+            conversion, git diff)
+   Layer 2: File-level scan dispatch + selector matching
+   Layer 3: Pack-rule filtering + per-file-record scanning
+   Layer 4: Rule-config loading + full/incremental repo scan
+   Layer 5: Rule-config resolution + scan-and-enrich
+   Layer 6: Content-rule scanning across the repo index
+   Layer 7: Top-level scan-repo entry point"
   (:require [ai.miniforge.compliance-scanner.factory             :as factory]
             [ai.miniforge.compliance-scanner.messages            :as msg]
             [ai.miniforge.compliance-scanner.exceptions-as-data  :as exc-data]
