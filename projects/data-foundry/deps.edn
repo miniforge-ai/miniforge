@@ -45,7 +45,8 @@
         ai.miniforge/schema                    {:local/root "../../components/schema"}
         ai.miniforge/policy-clause             {:local/root "../../components/policy-clause"}
         ai.miniforge/decision-envelope         {:local/root "../../components/decision-envelope"}
-        ai.miniforge/execution-grant           {:local/root "../../components/execution-grant"}}
+        ai.miniforge/execution-grant           {:local/root "../../components/execution-grant"}
+        ai.miniforge/effect-transaction        {:local/root "../../components/effect-transaction"}}
 
  :aliases
  {:test {:extra-paths ["../../bases/etl/test"
