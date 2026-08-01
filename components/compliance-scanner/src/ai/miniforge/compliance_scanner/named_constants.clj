@@ -31,8 +31,8 @@
    Structured-string magic literals (paths, format placeholders) are out
    of scope here; the judge still covers those.
 
-   Layer 0: Rule identity + file-path helpers + per-file violation mapping
-   Layer 1: Repo file listing
+   Layer 0: Rule identity + file-path helpers
+   Layer 1: Per-file violation mapping + repo file listing
    Layer 2: Top-level repo scan entry point"
   (:require
    [ai.miniforge.compliance-scanner.named-constants-lexer :as lexer]
