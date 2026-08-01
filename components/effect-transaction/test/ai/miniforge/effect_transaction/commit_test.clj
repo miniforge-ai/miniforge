@@ -145,15 +145,21 @@
       (is (= :failed (:effect/state done)))
       (is (not @fired))))
 
-  (testing "no grant at all fails the commit"
+  (testing "no grant at all is refused as a mismatch, and the record is untouched"
+    ;; Distinct from a revoked-or-expired grant above: passing nil when
+    ;; the record NAMES a grant is a caller supplying the wrong argument,
+    ;; not the authority lapsing. Marking the record :failed for that
+    ;; would blame the transaction for the caller's mistake.
     (let [dir (tmp-dir)
           g (merge-grant)
           t (propose-merge! dir g)
           fired (atom false)
-          done (fx/commit! dir t nil {} now
-                           (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
-      (is (= :failed (:effect/state done)))
-      (is (not @fired)))))
+          result (fx/commit! dir t nil {} now
+                             (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+      (is (anomaly/anomaly? result))
+      (is (not @fired))
+      (is (= :proposed (:effect/state (fx/read-record dir (:effect/id t))))
+          "the durable record is left as it was"))))
 
 (deftest ^{:stratum 2} only-a-proposed-record-may-be-committed-test
   ;; The accident this component exists to prevent: committing a record
@@ -173,4 +179,40 @@
     (testing "a :proposed record still commits normally"
       (let [t (propose-merge! dir g)
             done (fx/commit! dir t g {} now (fn [] {:effect/outcome :succeeded}))]
+        (is (= :succeeded (:effect/state done)))))))
+
+(deftest ^{:stratum 2} commit-must-use-the-grant-the-proposal-named-test
+  ;; The re-check is only worth anything if it re-checks the SAME grant.
+  ;; Otherwise: propose under a narrow grant, commit under a broad one,
+  ;; and the durable record attests to authority that was never used.
+  (let [dir (tmp-dir)
+        recorded (merge-grant)
+        t (propose-merge! dir recorded)]
+
+    (testing "a different grant is refused, even a valid and broader one"
+      (let [other (merge-grant {:constraints {}})
+            fired (atom false)
+            result (fx/commit! dir t other {} now
+                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+        (is (anomaly/anomaly? result))
+        (is (= :conflict (:anomaly/type result)))
+        (is (not @fired) "substituting a broader grant must not fire the effect")))
+
+    (testing "a grant for a different effect class is refused"
+      (let [deploy-grant (grant/issue {:principal "agent:implementer"
+                                       :effect-class :effect/deploy
+                                       :scope {}
+                                       :constraints {}
+                                       :delegable? false
+                                       :expires-at later}
+                                      now)
+            mismatched (assoc t :effect/grant-id (:grant/id deploy-grant))
+            fired (atom false)
+            result (fx/commit! dir mismatched deploy-grant {} now
+                               (fn [] (reset! fired true) {:effect/outcome :succeeded}))]
+        (is (anomaly/anomaly? result))
+        (is (not @fired) "a merge proposal must not be authorized by a deploy grant")))
+
+    (testing "the recorded grant still commits"
+      (let [done (fx/commit! dir t recorded {} now (fn [] {:effect/outcome :succeeded}))]
         (is (= :succeeded (:effect/state done)))))))

@@ -155,6 +155,11 @@
    back as a timeout; the record stays honestly unknown until
    `reconcile!` asks.
 
+   The supplied grant must be THE grant the proposal named, and its
+   effect class must match the proposed effect. Re-checking a different
+   grant would authorize the effect against authority the proposal never
+   claimed.
+
    Only a `:proposed` record may be committed. Committing one that has
    already moved on would re-run an irreversible effect — a second
    merge, a second deploy — which is the exact class of accident this
@@ -171,6 +176,24 @@
       (not= :proposed (:effect/state t))
       (wrong-state "only a :proposed record may be committed"
                    {:effect/id (:effect/id t) :effect/state (:effect/state t)})
+
+      ;; The record NAMES the grant that authorized it. Re-checking some
+      ;; other grant would authorize the effect against authority the
+      ;; proposal never claimed — propose under a narrow grant, commit
+      ;; under a broad one, and the audit trail records a lie. The
+      ;; re-check is only worth anything if it re-checks the SAME grant.
+      (not= (:effect/grant-id t) (:grant/id grant-record))
+      (wrong-state "grant does not match the one recorded on the proposal"
+                   {:effect/id (:effect/id t)
+                    :effect/grant-id (:effect/grant-id t)
+                    :grant/id (:grant/id grant-record)})
+
+      ;; Likewise the class: a merge grant must not authorize a deploy.
+      (not= (:effect/class t) (:grant/effect-class grant-record))
+      (wrong-state "grant effect-class does not match the proposed effect"
+                   {:effect/id (:effect/id t)
+                    :effect/class (:effect/class t)
+                    :grant/effect-class (:grant/effect-class grant-record)})
 
       (not (grant/authorized? auth))
       (advance! dir t {:effect/state :failed
