@@ -18,15 +18,16 @@
 (ns ai.miniforge.compliance-scanner.named-constants-test
   (:require
    [ai.miniforge.compliance-scanner.named-constants :as sut]
+   [ai.miniforge.compliance-scanner.named-constants-lexer :as lexer]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(defn- ^{:stratum 0} tokens [s] (mapv :token (sut/scan-numeric-tokens s)))
+(defn- ^{:stratum 0} tokens [s] (mapv :token (lexer/scan-numeric-tokens s)))
 
 (deftest ^{:stratum 0} string-with-newline-keeps-line-numbers-test
   (testing "a multi-line string does not desync line tracking"
-    (let [r (sut/scan-numeric-tokens "(def s \"a\nb\")\n(def n 42)")]
+    (let [r (lexer/scan-numeric-tokens "(def s \"a\nb\")\n(def n 42)")]
       (is (= [{:token "42"}] (mapv #(select-keys % [:token]) r)))
       (is (= 3 (:line (first r))) "42 is on line 3, after the 2-line string"))))
 
