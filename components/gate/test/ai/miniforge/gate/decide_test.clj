@@ -40,6 +40,75 @@
 (defn- ^{:stratum 1} classify+decide [violations]
   (decide/decide (policy-pack/classify-violations violations) pins))
 
+;; ── Grant constraints as a decide() input (Ariadne 2b) ──────────────────────
+(deftest ^{:stratum 1} decide-without-grant-context-is-unchanged-test
+  ;; The regression that matters most: every existing caller passes no
+  ;; grant, and phase gating is not an effect. The 2-arity and the
+  ;; 3-arity-with-nil forms must produce exactly what today produces.
+  (doseq [violations [[] [(v :warn)] [(v :hard-halt)] [(v :require-approval)]]]
+    (let [classified (policy-pack/classify-violations violations)
+          two-arity (decide/decide classified pins)
+          explicit-nil (decide/decide classified pins nil)]
+      (is (= (:envelope/decision two-arity) (:envelope/decision explicit-nil)))
+      (is (= (:envelope/reasons two-arity) (:envelope/reasons explicit-nil)))
+      (is (= (:envelope/obligations two-arity) (:envelope/obligations explicit-nil)))))
+  (testing "an authorized grant adds nothing either"
+    (let [classified (policy-pack/classify-violations [])
+          authorized (decide/decide classified pins {:grant/outcome :authorized})]
+      (is (= :allow (:envelope/decision authorized)))
+      (is (empty? (:envelope/reasons authorized))))))
+
+(deftest ^{:stratum 1} decide-denies-on-grant-breach-test
+  (let [clean (policy-pack/classify-violations [])]
+    (testing "a breached cost ceiling denies with :reason/grant-exceeded"
+      (let [e (decide/decide clean pins
+                             {:grant/outcome :exceeded
+                              :constraint/breaches
+                              [{:constraint/axis :constraint/max-cost-usd
+                                :constraint/limit 5.0
+                                :constraint/observed 6.0}]})]
+        (is (= :deny (:envelope/decision e)))
+        (is (= [:reason/grant-exceeded] (mapv :reason/code (:envelope/reasons e))))
+        (is (re-find #"max-cost-usd" (:reason/detail (first (:envelope/reasons e)))))))
+
+    (testing "no grant for a grant-requiring effect denies with :reason/grant-absent"
+      (let [e (decide/decide clean pins {:grant/outcome :absent})]
+        (is (= :deny (:envelope/decision e)))
+        (is (= [:reason/grant-absent] (mapv :reason/code (:envelope/reasons e))))))
+
+    (testing "a revoked grant denies and names the cause"
+      (let [e (decide/decide clean pins {:grant/outcome :inactive
+                                         :grant/revocation-reason :breach/cost-exceeded})]
+        (is (= :deny (:envelope/decision e)))
+        (is (re-find #"cost-exceeded" (:reason/detail (first (:envelope/reasons e)))))))
+
+    (testing "an unrecognized outcome denies rather than passing silently"
+      (let [e (decide/decide clean pins {:grant/outcome :something-new})]
+        (is (= :deny (:envelope/decision e)))))
+
+    (testing "every breached axis is reported, not just the first"
+      (let [e (decide/decide clean pins
+                             {:grant/outcome :exceeded
+                              :constraint/breaches
+                              [{:constraint/axis :constraint/max-cost-usd
+                                :constraint/limit 5.0 :constraint/observed 6.0}
+                               {:constraint/axis :constraint/max-tokens
+                                :constraint/limit 10 :constraint/observed 99}]})]
+        (is (= 2 (count (:envelope/reasons e))))))))
+
+(deftest ^{:stratum 1} grant-breach-cannot-be-downgraded-test
+  ;; A ceiling that denies only sometimes is not a ceiling. Even
+  ;; alongside obligations that would otherwise yield
+  ;; :allow-with-obligations, a grant breach must still deny.
+  (let [with-warning (policy-pack/classify-violations [(v :warn)])
+        e (decide/decide with-warning pins
+                         {:grant/outcome :exceeded
+                          :constraint/breaches
+                          [{:constraint/axis :constraint/max-tokens
+                            :constraint/limit 10 :constraint/observed 11}]})]
+    (is (= :deny (:envelope/decision e)))
+    (is (seq (:envelope/obligations e)) "the warn obligation is still recorded")))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} decision-table-test

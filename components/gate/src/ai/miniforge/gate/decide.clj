@@ -47,6 +47,11 @@
   [envelope]
   (not= :deny (:envelope/decision envelope)))
 
+;; Grant translation (Ariadne 2b)
+(defn- ^{:stratum 0} breach-detail
+  [{:constraint/keys [axis limit observed]}]
+  (str (name axis) ": " observed " exceeds " limit))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} gates->envelope
@@ -94,6 +99,36 @@
    :obligation/rule-id (rule-id v)
    :obligation/detail (violation-detail v)})
 
+(defn ^{:stratum 1} grant->reasons
+  "Translate an `execution-grant/authorize` result into envelope
+   reasons. `nil` means no grant was required — phase gating is not an
+   effect — and yields no reasons, which is what keeps every existing
+   `decide` caller behaving exactly as it does today.
+
+   Both non-authorized outcomes are deny-class. `:inactive` reports as
+   `:reason/grant-absent` rather than a code of its own: a revoked or
+   expired grant is precisely the case of 'no ACTIVE grant covers this
+   effect', and the detail says which."
+  [result]
+  (case (:grant/outcome result)
+    nil []
+    :authorized []
+    :absent [{:reason/code :reason/grant-absent
+              :reason/detail "no grant covers this effect"}]
+    :inactive [{:reason/code :reason/grant-absent
+                :reason/detail (str "grant is not active"
+                                    (when-let [r (:grant/revocation-reason result)]
+                                      (str " (revoked: " (name r) ")")))}]
+    :exceeded (mapv (fn [b]
+                      {:reason/code :reason/grant-exceeded
+                       :reason/detail (breach-detail b)})
+                    (:constraint/breaches result))
+    ;; An outcome this translator does not know is an outcome nobody
+    ;; decided the meaning of — deny rather than drop it silently.
+    [{:reason/code :reason/grant-absent
+      :reason/detail (str "unrecognized grant outcome: "
+                          (pr-str (:grant/outcome result)))}]))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 ;; The kernel
@@ -103,12 +138,23 @@
    become deny reasons; :require-approval becomes an approval
    obligation (which the envelope derivation treats as :deny until an
    approval workflow clears it — the ratified 1c behavior change);
-   :warn/:audit become recording obligations."
-  [{:keys [blocking require-approval warnings audits unknown]} pins]
-  (env/envelope
-   (concat (map blocking->reason blocking)
-           (map unknown->reason unknown))
-   (concat (map (partial obligation :obligation/approval-required) require-approval)
-           (map (partial obligation :obligation/warn-recorded) warnings)
-           (map (partial obligation :obligation/audit-recorded) audits))
-   pins))
+   :warn/:audit become recording obligations.
+
+   The 3-arity form adds authority to policy (Ariadne 2b): pass the
+   result of `execution-grant/authorize` and a grant breach becomes a
+   deny reason alongside the rule violations, through the SAME envelope
+   derivation — there is no second decision path for authority.
+
+   The kernel stays pure: the caller resolves and checks the grant, and
+   passes the answer in. Omitting the argument is how every non-effect
+   caller (phase gating) keeps today's behavior exactly."
+  ([classified pins] (decide classified pins nil))
+  ([{:keys [blocking require-approval warnings audits unknown]} pins grant-result]
+   (env/envelope
+    (concat (map blocking->reason blocking)
+            (map unknown->reason unknown)
+            (grant->reasons grant-result))
+    (concat (map (partial obligation :obligation/approval-required) require-approval)
+            (map (partial obligation :obligation/warn-recorded) warnings)
+            (map (partial obligation :obligation/audit-recorded) audits))
+    pins)))

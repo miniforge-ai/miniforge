@@ -127,6 +127,17 @@
   "True when an envelope's decision is not :deny."
   decide/allowed?)
 
+(def ^{:stratum 0} decide
+  "The fail-closed kernel: classified violations + pins -> envelope.
+   The 3-arity form also takes an `execution-grant/authorize` result,
+   so a grant breach denies through the same derivation (Ariadne 2b)."
+  decide/decide)
+
+(def ^{:stratum 0} grant->reasons
+  "Translate an `execution-grant/authorize` result into envelope
+   reasons; nil (no grant required) yields none."
+  decide/grant->reasons)
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn ^{:stratum 1} failed?
