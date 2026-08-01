@@ -32,9 +32,13 @@
    the helpers return as soon as their condition holds."
   2000)
 
-(def ^{:stratum 0} ^:private poll-park-nanos
-  "How long `wait-until` parks between polls (1ms)."
+(def ^{:stratum 0} ^:private nanos-per-ms
+  "Nanoseconds in a millisecond."
   1000000)
+
+(def ^{:stratum 0} ^:private poll-park-ms
+  "How long `wait-until` parks between polls."
+  1)
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -67,13 +71,19 @@
 
    Polls, so it carries the cost of a stale read for up to one park. Prefer
    `wait-until-count`, or a promise the code under test delivers to, when
-   the condition is reachable as a watched value."
+   the condition is reachable as a watched value.
+
+   Deadline is on `nanoTime`, not `currentTimeMillis`: the wall clock can
+   step (NTP, a suspend/resume) and cut the wait short, which is the class
+   of failure this namespace exists to remove."
   ([pred] (wait-until pred default-wait-timeout-ms))
   ([pred timeout-ms]
-   (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+   (let [deadline (+ (System/nanoTime) (* timeout-ms nanos-per-ms))]
      (loop []
        (cond
          (pred) true
-         (> (System/currentTimeMillis) deadline) false
-         :else (do (LockSupport/parkNanos poll-park-nanos)
+         ;; Subtract rather than compare: nanoTime's origin is arbitrary and
+         ;; the difference stays correct if the counter wraps.
+         (neg? (- deadline (System/nanoTime))) false
+         :else (do (LockSupport/parkNanos (* poll-park-ms nanos-per-ms))
                    (recur)))))))
