@@ -19,12 +19,12 @@
   "Public API for the effect-transaction component (Ariadne step 2c):
    an irreversible effect as a durable record.
 
-   This half is the RECORD and its store. The propose/commit/reconcile
-   coordinator lands next, and 2d moves merge and deploy onto it."
+   Record, durable store, and the propose/commit/reconcile coordinator.
+   2d moves merge and deploy onto this path."
   (:require
+   [ai.miniforge.effect-transaction.core :as core]
    [ai.miniforge.effect-transaction.schema :as schema]
-   [ai.miniforge.effect-transaction.store :as store]
-   [malli.core :as m]))
+   [ai.miniforge.effect-transaction.store :as store]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -57,7 +57,21 @@
   "Every persisted record under a directory."
   store/list-records)
 
-(defn ^{:stratum 0} valid?
+(def ^{:stratum 0} valid?
   "True when `t` satisfies the closed EffectTransaction schema."
-  [t]
-  (m/validate schema/EffectTransaction t))
+  core/valid?)
+
+(def ^{:stratum 0} propose!
+  "Record the intent durably, BEFORE the effect happens. Refuses a
+   missing store dir rather than writing to the process CWD."
+  core/propose!)
+
+(def ^{:stratum 0} commit!
+  "Re-check the grant, mark :committing, run the effect, record what it
+   reported. A throw is :unknown-outcome, never :failed."
+  core/commit!)
+
+(def ^{:stratum 0} reconcile!
+  "Ask the external system what actually happened and record the answer,
+   mismatch included."
+  core/reconcile!)
