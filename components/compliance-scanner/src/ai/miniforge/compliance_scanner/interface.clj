@@ -21,7 +21,8 @@
    Thin pass-throughs only — no implementation logic here.
 
    Layer 0: Schema/factory re-exports + single-phase entry points
-            (scan, classify, plan, write-report!, execute!, comment renderers)
+            (scan, classify, plan, write-report!, write-work-spec!,
+            execute!, comment renderers)
    Layer 1: Composite entry points (write-delta-report!, pr-review,
             compliance-run!)"
   (:require [ai.miniforge.compliance-scanner.schema             :as schema]
