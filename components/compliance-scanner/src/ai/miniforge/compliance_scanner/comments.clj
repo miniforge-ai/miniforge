@@ -32,8 +32,17 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Re-export: round-trip payload parser lives in `comments-payload`.
-(def ^{:stratum 0} extract-payload payload/extract-payload)
+;; Re-export: round-trip payload parser lives in `comments-payload`. A
+;; real `defn` delegate rather than `def`-aliasing the Var, so the
+;; docstring and the name shown in stack traces / REPL doc stay
+;; `comments/extract-payload`, not `comments-payload/extract-payload`.
+(defn ^{:stratum 0} extract-payload
+  "Extract a `:comment/payload` map from a comment body produced by
+   `violation->payload`/`render-body`. Returns nil if no payload block
+   is found. See `comments-payload/extract-payload` for the full
+   contract."
+  [body]
+  (payload/extract-payload body))
 
 (defn ^{:stratum 0} violation->payload
   "Build the :comment/payload map for a single classified Violation.
