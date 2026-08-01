@@ -51,8 +51,8 @@
 
 (defn ^{:stratum 2} section-for-rule
   "Render a markdown section for all violations of one rule."
-  [_rule-id viols]
-  (let [rule-title (get (first viols) :rule/title (str _rule-id))
+  [rule-id viols]
+  (let [rule-title (get (first viols) :rule/title (str rule-id))
         rule-cat   (get (first viols) :rule/category "?")
         auto       (filter :auto-fixable? viols)
         needs      (remove :auto-fixable? viols)]

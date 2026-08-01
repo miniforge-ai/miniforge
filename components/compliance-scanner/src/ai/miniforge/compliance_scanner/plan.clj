@@ -40,10 +40,10 @@
 
    Returns Plan map."
   [violations _repo-path]
-  (let [dag-tasks (plan-dag/build-dag-tasks violations)
-        summary   (factory/->plan-summary violations)
-        work-spec (work-spec/build-work-spec violations summary)]
-    (factory/->plan dag-tasks work-spec summary)))
+  (let [dag-tasks    (plan-dag/build-dag-tasks violations)
+        summary      (factory/->plan-summary violations)
+        work-spec-md (work-spec/build-work-spec violations summary)]
+    (factory/->plan dag-tasks work-spec-md summary)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
