@@ -22,7 +22,8 @@
   (:require [clojure.test :refer [deftest is testing]]
             [clojure.edn  :as edn]
             [clojure.java.io :as io]
-            [ai.miniforge.compliance-scanner.scan :as scan]))
+            [ai.miniforge.compliance-scanner.scan :as scan]
+            [ai.miniforge.compliance-scanner.scan-diff-plan :as diff-plan]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -68,20 +69,20 @@
 ;; safe-git-ref? validation
 (deftest ^{:stratum 0} safe-git-ref-allows-well-formed-refs
   (testing "common git ref forms are accepted"
-    (is (#'scan/safe-git-ref? "origin/main"))
-    (is (#'scan/safe-git-ref? "HEAD~1"))
-    (is (#'scan/safe-git-ref? "abc123def456"))
-    (is (#'scan/safe-git-ref? "v1.0.0-rc1"))
-    (is (#'scan/safe-git-ref? "refs/heads/feature-branch"))))
+    (is (#'diff-plan/safe-git-ref? "origin/main"))
+    (is (#'diff-plan/safe-git-ref? "HEAD~1"))
+    (is (#'diff-plan/safe-git-ref? "abc123def456"))
+    (is (#'diff-plan/safe-git-ref? "v1.0.0-rc1"))
+    (is (#'diff-plan/safe-git-ref? "refs/heads/feature-branch"))))
 
 (deftest ^{:stratum 0} safe-git-ref-rejects-unsafe-values
   (testing "values that could inject git options or shell constructs are rejected"
-    (is (not (#'scan/safe-git-ref? "; rm -rf /")))
-    (is (not (#'scan/safe-git-ref? "--exec=cmd")))
-    (is (not (#'scan/safe-git-ref? "-C /malicious/path")))
-    (is (not (#'scan/safe-git-ref? "ref with spaces")))
-    (is (not (#'scan/safe-git-ref? "")))
-    (is (not (#'scan/safe-git-ref? nil)))))
+    (is (not (#'diff-plan/safe-git-ref? "; rm -rf /")))
+    (is (not (#'diff-plan/safe-git-ref? "--exec=cmd")))
+    (is (not (#'diff-plan/safe-git-ref? "-C /malicious/path")))
+    (is (not (#'diff-plan/safe-git-ref? "ref with spaces")))
+    (is (not (#'diff-plan/safe-git-ref? "")))
+    (is (not (#'diff-plan/safe-git-ref? nil)))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
