@@ -18,9 +18,11 @@
 (ns ai.miniforge.knowledge.zettel
   "Zettel (atomic note) operations.
    Layer 0: pure helpers — link/backlink management, summary/validation,
-     frontmatter formatting/parsing, id/inst coercion
-   Layer 1: markdown <-> zettel serialization + content-projection (over Layer 0)
-   Layer 2: compute-digest (over the Layer 1 content-projection)
+     frontmatter parsing, id/inst coercion (`->iso`, `parse-inst`)
+   Layer 1: frontmatter formatting (over `->iso`) + markdown->zettel +
+     content-projection
+   Layer 2: zettel->markdown (over Layer 1 frontmatter formatting) +
+     compute-digest (over the Layer 1 content-projection)
    Layer 3: stamp-revision (over the Layer 2 digest)
    Layer 4: create-zettel / update-zettel (over stamp-revision)
 
@@ -33,7 +35,8 @@
    [clj-yaml.core :as yaml]
    [malli.core :as m])
   (:import
-   [java.util UUID]))
+   [java.time Instant]
+   [java.util Date UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -155,24 +158,31 @@
    zettels))
 
 ;; Serialization (Markdown with YAML frontmatter)
-(defn ^{:stratum 0} format-frontmatter
-  "Convert zettel metadata to YAML frontmatter."
-  [zettel]
-  (let [meta (cond-> {:id (str (:zettel/id zettel))
-                      :uid (:zettel/uid zettel)
-                      :type (name (:zettel/type zettel))
-                      :created (str (:zettel/created zettel))
-                      :author (:zettel/author zettel)}
-               (:zettel/dewey zettel) (assoc :dewey (:zettel/dewey zettel))
-               (seq (:zettel/tags zettel)) (assoc :tags (mapv name (:zettel/tags zettel)))
-               (:zettel/modified zettel) (assoc :modified (str (:zettel/modified zettel)))
-               (seq (:zettel/links zettel))
-               (assoc :links (mapv (fn [link]
-                                     {:target (str (:link/target-id link))
-                                      :type (name (:link/type link))
-                                      :rationale (:link/rationale link)})
-                                   (:zettel/links zettel))))]
-    (yaml/generate-string meta :dumper-options {:flow-style :block})))
+(defn ^{:stratum 0} ->iso
+  "Timestamp -> ISO-8601 string, by actual type rather than by `str`.
+
+   `:zettel/created` / `:zettel/modified` are validated with `inst?`,
+   and `inst?` admits BOTH `java.time.Instant` and `java.util.Date` — so
+   a zettel the schema accepts can arrive here holding either. `str` on
+   a Date yields `Sat Aug 01 05:34:56 PDT 2026`, which is not ISO-8601:
+   it carries the writing machine's default timezone, drops
+   milliseconds, and `parse-inst`'s `Instant/parse` cannot read it back.
+   Both types are normalized here; anything else throws.
+
+   Throwing is the right answer at a persistence boundary. The
+   alternative is what this replaces: a frontmatter timestamp that only
+   fails on the way back out, where `markdown->zettel` substitutes
+   `(java.util.Date.)` and the note's creation date silently becomes the
+   moment somebody read it.
+
+   Same defect class as effect-transaction's store and execution-grant's
+   breach history; swept here rather than fixed a third time in place."
+  ^String [v]
+  (cond
+    (instance? Instant v) (.toString ^Instant v)
+    (instance? Date v) (.toString (.toInstant ^Date v))
+    :else (throw (ex-info "zettel timestamp is not a supported instant type"
+                          {:value v :type (some-> v class .getName)}))))
 
 (defn ^{:stratum 0} parse-frontmatter
   "Parse YAML frontmatter from a string."
@@ -196,12 +206,19 @@
     (catch Exception _e nil)))
 
 (defn ^{:stratum 0} parse-inst
-  "Parse a string as inst, or return nil."
+  "Parse a string as inst, or return nil.
+
+   The `Date.toString` fallback is a RECOVERY path, not a supported
+   format: `->iso` now writes ISO-8601 for either inst type, so nothing
+   can produce that shape again. It stays only to read frontmatter
+   written before that fix, and it reads such records badly — the
+   pattern is locale-dependent (`EEE`/`MMM` do not parse under a
+   non-English default Locale, giving nil) and has no millisecond field.
+   Do not treat it as a second wire format."
   [s]
   (try
     (java.util.Date/from (java.time.Instant/parse s))
     (catch Exception _e
-      ;; Try alternate format
       (try
         (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy")]
           (.parse fmt s))
@@ -209,19 +226,30 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
+(defn ^{:stratum 1} format-frontmatter
+  "Convert zettel metadata to YAML frontmatter."
+  [zettel]
+  (let [meta (cond-> {:id (str (:zettel/id zettel))
+                      :uid (:zettel/uid zettel)
+                      :type (name (:zettel/type zettel))
+                      :created (->iso (:zettel/created zettel))
+                      :author (:zettel/author zettel)}
+               (:zettel/dewey zettel) (assoc :dewey (:zettel/dewey zettel))
+               (seq (:zettel/tags zettel)) (assoc :tags (mapv name (:zettel/tags zettel)))
+               (:zettel/modified zettel) (assoc :modified (->iso (:zettel/modified zettel)))
+               (seq (:zettel/links zettel))
+               (assoc :links (mapv (fn [link]
+                                     {:target (str (:link/target-id link))
+                                      :type (name (:link/type link))
+                                      :rationale (:link/rationale link)})
+                                   (:zettel/links zettel))))]
+    (yaml/generate-string meta :dumper-options {:flow-style :block})))
+
 (defn- ^{:stratum 1} content-projection
   "Pure: project `zettel` down to the content-bearing subset that feeds
    the digest. Stable across additions of operational metadata."
   [zettel]
   (select-keys zettel content-bearing-fields))
-
-(defn ^{:stratum 1} zettel->markdown
-  [zettel]
-  (str "---\n"
-       (format-frontmatter zettel)
-       "---\n\n"
-       "# " (:zettel/title zettel) "\n\n"
-       (:zettel/content zettel)))
 
 (defn ^{:stratum 1} markdown->zettel
   [markdown-str]
@@ -254,6 +282,14 @@
                          (:links frontmatter)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} zettel->markdown
+  [zettel]
+  (str "---\n"
+       (format-frontmatter zettel)
+       "---\n\n"
+       "# " (:zettel/title zettel) "\n\n"
+       (:zettel/content zettel)))
 
 (defn ^{:stratum 2} compute-digest
   "Pure: SHA-256 hex digest of the zettel's canonical-EDN
