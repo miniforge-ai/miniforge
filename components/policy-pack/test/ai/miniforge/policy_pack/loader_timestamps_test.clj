@@ -40,7 +40,8 @@
   (Instant/parse "2026-08-01T12:34:56.789Z"))
 
 (defn- ^{:stratum 0} pack-with
-  "A schema-valid pack manifest whose timestamps hold `t`."
+  "A pack manifest whose timestamps hold `t`. Valid for every other field,
+   so validity turns on `t` alone — which is what the refusal cases rely on."
   [t]
   {:pack/id          "timestamps"
    :pack/name        "Timestamps"
