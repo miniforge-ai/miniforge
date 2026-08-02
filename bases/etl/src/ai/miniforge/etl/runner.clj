@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.etl.runner
   "Orchestrates one pack execution: load pipeline + env EDNs, instantiate
    connectors from the pack-declared `:env/connectors`, resolve the
@@ -30,15 +29,16 @@
    `etl.registry`."
   {:miniforge/runtime :jvm-only}
   (:require
+   [ai.miniforge.etl.cursors :as cursors]
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.pipeline-config.interface :as pc]
    [ai.miniforge.pipeline-runner.interface :as pr-run]
    [ai.miniforge.schema.interface :as schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Env + pipeline assembly
 
-(defn- load-inputs
+;; Env + pipeline assembly
+(defn- ^{:stratum 0} load-inputs
   "Load pipeline + env EDNs. On success, returns
    `(schema/success :inputs {:pipeline <edn> :env-config <edn>})`;
    otherwise propagates the first `schema/failure` encountered."
@@ -52,14 +52,14 @@
           (schema/success :inputs {:pipeline   (:pipeline pipeline)
                                    :env-config (:env-config env)}))))))
 
-(defn- unsupported-types
+(defn- ^{:stratum 0} unsupported-types
   "Connector types referenced by the env that the registry can't
    construct. Returns a vector of keywords."
   [env-conn-types]
   (let [supported (set (registry/supported-types))]
     (->> (vals env-conn-types) distinct (remove supported) vec)))
 
-(defn- unsupported-types-failure
+(defn- ^{:stratum 0} unsupported-types-failure
   "Produce a `schema/failure` describing the unsupported connector
    types, listing what the runner does support for operator guidance."
   [unknown]
@@ -69,7 +69,7 @@
          (pr-str unknown)
          ". Supported: " (pr-str (registry/supported-types)))))
 
-(defn- instantiate+resolve
+(defn- ^{:stratum 0} instantiate+resolve
   "Given the loaded inputs, instantiate live connectors from the env's
    connector-type declarations and resolve the pipeline EDN against the
    env's stage overrides. Returns `{:resolved ... :connectors ...}`."
@@ -84,14 +84,28 @@
     {:resolved   (pc/resolve-pipeline pipeline res-ctx)
      :connectors (:connectors instantiated)}))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Public entry
+;; Pack-level helpers (pipeline discovery + validation)
+(defn ^{:stratum 0} list-pipelines
+  "Discover pipeline EDNs under one or more search paths. Passes through
+   to `pipeline-config/discover-pipelines`."
+  [search-paths]
+  (pc/discover-pipelines search-paths))
 
-(defn run-pack
+;------------------------------------------------------------------------------ Layer 1
+
+;; Public entry
+(defn ^{:stratum 1} run-pack
   "Execute the pipeline at `pipeline-path` using the environment at
    `env-path`. `context` is passed through to
    `pipeline-runner/execute-pipeline` (intended for event-stream, log
-   sinks, etc.).
+   sinks, etc.); its `:logger`, if any, also carries the cursor store's
+   own logging.
+
+   An `:incremental` pipeline resumes from the watermark its previous
+   run persisted and writes a new one when this run succeeds — see
+   `etl.cursors` for which modes and outcomes that covers, and note
+   that it owns `:pipeline-run/connector-cursors` in the context it
+   hands the runner.
 
    Returns the pipeline-runner result map (schema/success or
    schema/failure with `:pipeline-run`)."
@@ -105,10 +119,16 @@
              unknown (unsupported-types (pc/extract-connector-types (:env-config inputs)))]
          (if (seq unknown)
            (unsupported-types-failure unknown)
-           (let [{:keys [resolved connectors]} (instantiate+resolve inputs)]
-             (pr-run/execute-pipeline resolved connectors context))))))))
+           (let [{:keys [resolved connectors]} (instantiate+resolve inputs)
+                 logger (:logger context)
+                 primed (cursors/prime-context logger pipeline-path resolved context)]
+             (if (schema/failed? primed)
+               primed
+               (cursors/persist-cursors!
+                logger pipeline-path resolved
+                (pr-run/execute-pipeline resolved connectors (:context primed)))))))))))
 
-(defn load-run-configuration
+(defn ^{:stratum 1} load-run-configuration
   "Load the concrete pipeline/environment pair that controls one ETL run.
 
    The returned map intentionally precedes generated stage UUIDs and timestamps,
@@ -128,16 +148,7 @@
                           {:pipeline (:pipeline inputs)
                            :environment (:env-config inputs)}))))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Pack-level helpers (pipeline discovery + validation)
-
-(defn list-pipelines
-  "Discover pipeline EDNs under one or more search paths. Passes through
-   to `pipeline-config/discover-pipelines`."
-  [search-paths]
-  (pc/discover-pipelines search-paths))
-
-(defn validate-pack
+(defn ^{:stratum 1} validate-pack
   "Load + resolve the pipeline at `pipeline-path` with `env-path` without
    executing it. Surfaces any loader, env, or resolver failure."
   [pipeline-path env-path]
