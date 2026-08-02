@@ -26,19 +26,31 @@
     (io/file dir ".cursors" (.getName f))))
 
 (defn- ^{:stratum 0} normalize-for-storage
-  "Re-key {stage-uuid → cursor-entry} to {[connector-ref schema-name] → cursor-entry}.
-   Entries missing connector-ref or schema-name are dropped with a warning."
+  "Re-key {stage-uuid → cursor-entry} to {[stage-name schema-name] → cursor-entry}.
+   Entries missing stage-name or schema-name are dropped with a warning.
+
+   The key has to survive between runs, which rules out both of the
+   identifiers a cursor entry carries alongside them.
+   `:stage/id` is regenerated per run. So is `:stage/connector-ref`:
+   `pipeline-config`'s `instantiate-connectors` mints a fresh
+   `UUID/randomUUID` per connector and the resolver substitutes it for
+   the pack's symbolic `:conn/…` keyword, so a resolved stage's
+   connector-ref is a different value on every run and a file keyed by
+   it would never match on reload. `:stage/name` comes verbatim from
+   the pipeline EDN — the same string an env config uses to key its
+   per-stage overrides, so the pack format already depends on it being
+   stable and unique within a pipeline."
   [logger cursor-map]
   (reduce-kv
    (fn [acc _id entry]
-     (let [cref  (:stage/connector-ref entry)
-           sname (:stage/schema-name entry)]
-       (if (and cref sname)
-         (assoc acc [cref sname] entry)
+     (let [sname  (:stage/name entry)
+           schema (:stage/schema-name entry)]
+       (if (and sname schema)
+         (assoc acc [sname schema] entry)
          (do (when logger
                (log/warn logger :cursor-store :cursor-store/entry-dropped
-                         {:message "Cursor entry dropped — missing connector-ref or schema-name"
-                          :data {:stage/name (or (:stage/name entry) "unknown")}}))
+                         {:message "Cursor entry dropped — missing stage-name or schema-name"
+                          :data {:stage/name (get entry :stage/name "unknown")}}))
              acc))))
    {}
    cursor-map))
@@ -81,7 +93,8 @@
 (defn ^{:stratum 1} save-cursors
   "Persist connector cursors to <pipeline-dir>/.cursors/<pipeline-filename>.
    cursor-map is the raw {stage-uuid → cursor-entry} map from
-   :pipeline-run/connector-cursors. Returns schema/success or schema/failure."
+   :pipeline-run/connector-cursors, re-keyed for cross-run lookup.
+   Returns schema/success or schema/failure."
   [logger pipeline-path cursor-map]
   (try
     (let [normalized (normalize-for-storage logger cursor-map)
@@ -108,7 +121,7 @@
 
 (defn ^{:stratum 1} load-cursors
   "Load persisted cursors for a pipeline. Returns schema/success with
-   :cursors key (map keyed by [connector-ref schema-name]).
+   :cursors key (map keyed by [stage-name schema-name]).
    Returns schema/success with {} on first run (no file yet).
    Returns schema/failure only on parse errors."
   [logger pipeline-path]

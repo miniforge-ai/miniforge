@@ -55,12 +55,12 @@
   (testing "save then load preserves cursor data with stable key"
     (let [path      (tmp-pipeline-path)
           stage-id  (random-uuid)
-          conn-ref  :conn/gitlab
+          stage     "Ingest Issues"
           schema    "issues"
           instant   (Instant/now)
           cursor-map {stage-id {:stage/id            stage-id
-                                :stage/name          "Ingest Issues"
-                                :stage/connector-ref conn-ref
+                                :stage/name          stage
+                                :stage/connector-ref (random-uuid)
                                 :stage/schema-name   schema
                                 :cursor              {:cursor/type  :offset
                                                       :cursor/value 42}
@@ -68,7 +68,7 @@
       (is (:success? (sut/save-cursors logger path cursor-map)))
       (let [result (sut/load-cursors logger path)]
         (is (:success? result))
-        (let [loaded (get (:cursors result) [conn-ref schema])]
+        (let [loaded (get (:cursors result) [stage schema])]
           (is (some? loaded))
           (is (= :offset (get-in loaded [:cursor :cursor/type])))
           (is (= 42 (get-in loaded [:cursor :cursor/value])))
@@ -77,23 +77,29 @@
           (is (= (str instant) (:cursor/updated-at loaded))))))))
 
 (deftest ^{:stratum 1} multi-stage-round-trip-test
-  (testing "Multiple stages produce multiple entries keyed by connector/schema"
-    (let [path  (tmp-pipeline-path)
-          id-1  (random-uuid)
-          id-2  (random-uuid)
-          cursor-map {id-1 {:stage/connector-ref :conn/gitlab
-                             :stage/schema-name   "issues"
-                             :cursor              {:cursor/type :offset :cursor/value 10}
-                             :cursor/updated-at   (Instant/now)}
-                      id-2 {:stage/connector-ref :conn/gitlab
-                             :stage/schema-name   "merge-requests"
-                             :cursor              {:cursor/type :offset :cursor/value 5}
-                             :cursor/updated-at   (Instant/now)}}]
+  (testing "Two stages sharing one connector keep separate entries"
+    (let [path      (tmp-pipeline-path)
+          id-1      (random-uuid)
+          id-2      (random-uuid)
+          ;; Both stages read through the same connector, as an
+          ;; ingest-issues/ingest-merge-requests pack does.
+          conn-ref  (random-uuid)
+          cursor-map {id-1 {:stage/name          "Ingest Issues"
+                            :stage/connector-ref conn-ref
+                            :stage/schema-name   "issues"
+                            :cursor              {:cursor/type :offset :cursor/value 10}
+                            :cursor/updated-at   (Instant/now)}
+                      id-2 {:stage/name          "Ingest Merge Requests"
+                            :stage/connector-ref conn-ref
+                            :stage/schema-name   "merge-requests"
+                            :cursor              {:cursor/type :offset :cursor/value 5}
+                            :cursor/updated-at   (Instant/now)}}]
       (sut/save-cursors logger path cursor-map)
       (let [loaded (:cursors (sut/load-cursors logger path))]
         (is (= 2 (count loaded)))
-        (is (= 10 (get-in loaded [[:conn/gitlab "issues"] :cursor :cursor/value])))
-        (is (= 5 (get-in loaded [[:conn/gitlab "merge-requests"] :cursor :cursor/value])))))))
+        (is (= 10 (get-in loaded [["Ingest Issues" "issues"] :cursor :cursor/value])))
+        (is (= 5 (get-in loaded [["Ingest Merge Requests" "merge-requests"]
+                                 :cursor :cursor/value])))))))
 
 (defn- ^{:stratum 1} persisted-cursor
   "Save `cursor-value` as a timestamp watermark, then load it back.
@@ -108,7 +114,8 @@
   (let [path   (tmp-pipeline-path)
         saved  (sut/save-cursors
                 logger path
-                {(random-uuid) {:stage/connector-ref :conn/gitlab
+                {(random-uuid) {:stage/name          "Ingest Issues"
+                                :stage/connector-ref (random-uuid)
                                 :stage/schema-name   "issues"
                                 :cursor {:cursor/type  :timestamp-watermark
                                          :cursor/value cursor-value}
@@ -116,44 +123,55 @@
         loaded (sut/load-cursors logger path)]
     (is (:success? saved) (str "save-cursors failed: " (:error saved)))
     (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
-    (-> loaded :cursors (get [:conn/gitlab "issues"]) :cursor)))
+    (-> loaded :cursors (get ["Ingest Issues" "issues"]) :cursor)))
 
 ;; ---------------------------------------------------------------------------
 ;; normalization
 (deftest ^{:stratum 1} normalization-drops-incomplete-entries-test
-  (testing "Entries without connector-ref or schema-name are excluded"
-    (let [path     (tmp-pipeline-path)
-          good-id  (random-uuid)
-          bad-id   (random-uuid)
-          cursor-map {good-id {:stage/connector-ref :conn/github
-                               :stage/schema-name   "pulls"
-                               :cursor              {:cursor/type :offset :cursor/value 1}
-                               :cursor/updated-at   (Instant/now)}
-                      bad-id  {:stage/name        "No-ref stage"
-                               :cursor            {:cursor/type :offset :cursor/value 2}
-                               :cursor/updated-at (Instant/now)}}]
+  (testing "Entries without stage-name or schema-name are excluded"
+    (let [path       (tmp-pipeline-path)
+          good-id    (random-uuid)
+          no-schema  (random-uuid)
+          no-name    (random-uuid)
+          cursor-map {good-id   {:stage/name        "Ingest PRs"
+                                 :stage/schema-name "pulls"
+                                 :cursor            {:cursor/type :offset :cursor/value 1}
+                                 :cursor/updated-at (Instant/now)}
+                      no-schema {:stage/name        "No-schema stage"
+                                 :cursor            {:cursor/type :offset :cursor/value 2}
+                                 :cursor/updated-at (Instant/now)}
+                      no-name   {:stage/schema-name "orphan"
+                                 :cursor            {:cursor/type :offset :cursor/value 3}
+                                 :cursor/updated-at (Instant/now)}}]
       (sut/save-cursors logger path cursor-map)
       (let [loaded (:cursors (sut/load-cursors logger path))]
         (is (= 1 (count loaded)))
-        (is (contains? loaded [:conn/github "pulls"]))))))
+        (is (contains? loaded ["Ingest PRs" "pulls"]))))))
 
 ;; ---------------------------------------------------------------------------
 ;; idempotency — second save overwrites first
 (deftest ^{:stratum 1} overwrite-test
   (testing "Saving again overwrites prior cursor with updated value"
-    (let [path     (tmp-pipeline-path)
-          conn-ref :conn/gitlab
-          schema   "issues"
-          run1 {(random-uuid) {:stage/connector-ref conn-ref :stage/schema-name schema
-                               :cursor {:cursor/type :offset :cursor/value 10}
-                               :cursor/updated-at (Instant/now)}}
-          run2 {(random-uuid) {:stage/connector-ref conn-ref :stage/schema-name schema
-                               :cursor {:cursor/type :offset :cursor/value 20}
-                               :cursor/updated-at (Instant/now)}}]
-      (sut/save-cursors logger path run1)
-      (sut/save-cursors logger path run2)
+    ;; Every identifier a run generates differs between run1 and run2 —
+    ;; stage id and connector-ref are both fresh UUIDs each time. Only
+    ;; the pack-declared stage name and schema name carry over, which is
+    ;; why the store keys on those: anything else makes the second save
+    ;; a second entry instead of an update, and the watermark never
+    ;; advances.
+    (let [path   (tmp-pipeline-path)
+          stage  "Ingest Issues"
+          schema "issues"
+          run-of (fn [value]
+                   {(random-uuid) {:stage/name          stage
+                                   :stage/connector-ref (random-uuid)
+                                   :stage/schema-name   schema
+                                   :cursor {:cursor/type :offset :cursor/value value}
+                                   :cursor/updated-at (Instant/now)}})]
+      (sut/save-cursors logger path (run-of 10))
+      (sut/save-cursors logger path (run-of 20))
       (let [loaded (:cursors (sut/load-cursors logger path))]
-        (is (= 20 (get-in loaded [[conn-ref schema] :cursor :cursor/value])))))))
+        (is (= 1 (count loaded)))
+        (is (= 20 (get-in loaded [[stage schema] :cursor :cursor/value])))))))
 
 (deftest ^{:stratum 1} inst-tagged-cursor-file-loads-as-string-test
   (testing "a cursor file containing #inst still yields a filterable watermark"
@@ -165,14 +183,14 @@
           file (io/file (.getParentFile (io/file path))
                         ".cursors" (.getName (io/file path)))]
       (io/make-parents file)
-      (spit file (pr-str {[:conn/gitlab "issues"]
-                          {:stage/connector-ref :conn/gitlab
-                           :stage/schema-name   "issues"
+      (spit file (pr-str {["Ingest Issues" "issues"]
+                          {:stage/name        "Ingest Issues"
+                           :stage/schema-name "issues"
                            :cursor {:cursor/type  :timestamp-watermark
                                     :cursor/value (Date/from
                                                    (Instant/parse watermark-iso))}}}))
       (let [loaded (sut/load-cursors logger path)
-            cursor (get-in (:cursors loaded) [[:conn/gitlab "issues"] :cursor])]
+            cursor (get-in (:cursors loaded) [["Ingest Issues" "issues"] :cursor])]
         (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
         (is (= watermark-iso (:cursor/value cursor)))
         (is (false? (connector-http/after-cursor?
