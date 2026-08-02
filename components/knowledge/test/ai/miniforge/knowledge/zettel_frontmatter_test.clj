@@ -112,6 +112,27 @@
       (finally
         (Locale/setDefault original)))))
 
+(deftest ^{:stratum 1} pre-fix-recovery-path-is-locale-independent-test
+  ;; Reading records written BEFORE `->iso` landed. `Date.toString`
+  ;; always emits English `EEE`/`MMM` regardless of locale, so a
+  ;; default-locale `SimpleDateFormat` cannot parse its own producer's
+  ;; output on a non-English host — it returns nil, and callers stamp
+  ;; now instead. Recovery has to work on exactly the hosts most likely
+  ;; to hold unreadable records.
+  (let [original (Locale/getDefault)
+        legacy (str (Date/from now))]                    ; the pre-fix wire shape
+    (try
+      (doseq [tag ["de-DE" "ja-JP" "en-US"]]
+        (Locale/setDefault (Locale/forLanguageTag tag))
+        (testing (str "a pre-fix Date.toString frontmatter value still parses under " tag)
+          (is (some? (zettel/parse-inst legacy)))
+          ;; To the second — Date.toString carries no milliseconds. That
+          ;; loss is why this is a recovery path and not a wire format.
+          (is (= (.getTime (Date/from (.minusMillis now 789)))
+                 (.getTime ^Date (zettel/parse-inst legacy))))))
+      (finally
+        (Locale/setDefault original)))))
+
 (deftest ^{:stratum 1} unsupported-timestamp-throws-rather-than-persisting-test
   ;; Persisting a timestamp nothing can read back does not fail here; it
   ;; fails later, when someone is trying to establish when a note was

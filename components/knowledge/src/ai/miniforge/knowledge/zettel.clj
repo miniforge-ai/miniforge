@@ -36,7 +36,7 @@
    [malli.core :as m])
   (:import
    [java.time Instant]
-   [java.util Date UUID]))
+   [java.util Date Locale UUID]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -211,16 +211,23 @@
    The `Date.toString` fallback is a RECOVERY path, not a supported
    format: `->iso` now writes ISO-8601 for either inst type, so nothing
    can produce that shape again. It stays only to read frontmatter
-   written before that fix, and it reads such records badly — the
-   pattern is locale-dependent (`EEE`/`MMM` do not parse under a
-   non-English default Locale, giving nil) and has no millisecond field.
-   Do not treat it as a second wire format."
+   written before that fix. It is still lossy — `Date.toString` has no
+   millisecond field — so do not treat it as a second wire format.
+
+   The formatter pins `Locale/ENGLISH` rather than inheriting the host
+   default. `Date.toString` always emits English `EEE`/`MMM` regardless
+   of locale, so a default-locale formatter cannot parse its own
+   producer's output on a non-English host: it returns nil, and
+   `markdown->zettel` then stamps `(java.util.Date.)` — silently
+   re-dating the note to the moment it was read. Recovery has to work
+   on exactly the hosts most likely to need it."
   [s]
   (try
     (java.util.Date/from (java.time.Instant/parse s))
     (catch Exception _e
       (try
-        (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy")]
+        (let [fmt (java.text.SimpleDateFormat. "EEE MMM dd HH:mm:ss zzz yyyy"
+                                               Locale/ENGLISH)]
           (.parse fmt s))
         (catch Exception _e2 nil)))))
 
