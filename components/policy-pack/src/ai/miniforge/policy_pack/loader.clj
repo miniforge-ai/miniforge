@@ -42,7 +42,10 @@
    [clojure.edn :as edn]
    [clojure.pprint :as pprint]
    [clojure.set]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -74,16 +77,60 @@
     (catch Exception e
       (schema-validation/failure :data (.getMessage e)))))
 
+;; Timestamp wire form
+(defn ^{:stratum 0} map-instant-keys
+  "Apply `f` to every timestamp key PRESENT in `pack`. Those keys cross
+   the disk boundary as ISO-8601 strings, parsed back on read.
+
+   Presence, not non-nil-ness: an absent `:pack/signed-at` is legitimately
+   optional, but a key explicitly holding nil is a bad timestamp and goes
+   to `f` like any other. A missing required one stays missing so the
+   schema reports it, rather than being invented here."
+  [pack f]
+  (reduce (fn [acc k]
+            (if (contains? acc k)
+              (assoc acc k (f (get acc k)))
+              acc))
+          pack
+          [:pack/created-at :pack/updated-at :pack/signed-at]))
+
+(defn ^{:stratum 0} ->iso
+  "Timestamp -> ISO-8601 string, by actual type rather than by print form.
+
+   `inst?` admits BOTH `java.time.Instant` and `java.util.Date`, and
+   `pprint` renders them differently: a Date prints as `#inst` and reads
+   back, an Instant prints as `#object[...]` and makes the whole file
+   unreadable by `edn/read-string`. `builders/make-pack` stamps an
+   Instant, so the unreadable form is the default one.
+
+   Both are normalized; anything else throws, strings included — one that
+   does not parse would persist fine and fail only on the way back out.
+   Same defect class as effect-transaction's store and zettel frontmatter."
+  ^String [v]
+  (cond
+    (instance? Instant v) (.toString ^Instant v)
+    (instance? Date v) (.toString (.toInstant ^Date v))
+    :else (throw (ex-info "policy pack timestamp is not a supported instant type"
+                          {:value v :type (some-> v class .getName)}))))
+
 (defn ^{:stratum 0} ensure-instant
-  "Convert various timestamp representations to Instant."
+  "Wire timestamp -> Instant, or nil when the value is not a readable one.
+
+   Returns nil rather than the old fail-soft `Instant/now`. A pack whose
+   created-at cannot be read is corrupt, and stamping the current time
+   hides that at the moment it should surface — the pack loads clean,
+   dated today, and nothing downstream can tell. nil fails the schema's
+   `inst?` on the next step, so the corruption surfaces through the
+   loader's own `{:success? false :errors [...]}` channel: one entry in
+   `load-all-packs`' `:failed`, not an exception aborting the rest."
   [value]
   (cond
-    (inst? value) value
+    (instance? Instant value) value
+    (instance? Date value) (.toInstant ^Date value)
     (string? value) (try
-                      (java.time.Instant/parse value)
-                      (catch Exception _
-                        (java.time.Instant/now)))
-    :else (java.time.Instant/now)))
+                      (Instant/parse value)
+                      (catch Exception _ nil))
+    :else nil))
 
 (defn ^{:stratum 0} normalize-rule
   "Normalize a rule, ensuring required fields and types."
@@ -186,25 +233,6 @@
       {:max-depth max-depth
        :check-trust? check-trust?}))))
 
-;; Pack writing
-(defn ^{:stratum 0} write-pack-to-file
-  "Write a pack manifest to a single EDN file.
-
-   Arguments:
-   - pack - PackManifest
-   - file-path - Output file path
-
-   Returns:
-   - {:success? bool :error string}"
-  [pack file-path]
-  (try
-    (let [content (with-out-str
-                    (pprint/pprint pack))]
-      (spit file-path content)
-      {:success? true :error nil})
-    (catch Exception e
-      (schema-validation/failure nil (.getMessage e)))))
-
 ;; Trust validation (N1 §2.10.2)
 (defn ^{:stratum 0} pack->trust-ref
   "Convert a pack manifest to a trust reference for validation."
@@ -223,12 +251,35 @@
   (-> pack
       (update :pack/rules #(mapv normalize-rule (or % [])))
       (update :pack/categories #(or % []))
-      (update :pack/created-at ensure-instant)
-      (update :pack/updated-at ensure-instant)
+      (map-instant-keys ensure-instant)
       ;; Default trust metadata
       (update :pack/trust-level #(or % :untrusted))
       (update :pack/authority #(or % :authority/data))
       (update :pack/dependencies #(or % []))))
+
+;; Pack writing
+(defn ^{:stratum 1} write-pack-to-file
+  "Write a pack manifest to a single EDN file.
+
+   Timestamps are normalized to ISO-8601 strings first: written raw, the
+   file cannot be read back at all. An unsupported timestamp is refused —
+   `->iso` throws, nothing is written, and the caller gets
+   `{:success? false}` instead of a file that fails only on load.
+
+   Arguments:
+   - pack - PackManifest
+   - file-path - Output file path
+
+   Returns:
+   - {:success? bool :error string-or-nil} — :error is nil on success"
+  [pack file-path]
+  (try
+    (let [content (with-out-str
+                    (pprint/pprint (map-instant-keys pack ->iso)))]
+      (spit file-path content)
+      {:success? true :error nil})
+    (catch Exception e
+      (schema-validation/failure nil (.getMessage e)))))
 
 ;; Directory structure loader
 (defn ^{:stratum 1} load-rule-file
