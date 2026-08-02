@@ -13,7 +13,7 @@ review apart from naming and the ratification list.
 
 **Ariadne** is the tenancy/ownership/access architecture distilled
 in [`docs/architecture/ariadne/tenancy-ownership-access.md`](ariadne/tenancy-ownership-access.md),
-**adopted at tag `ariadne/v1.6.0`**: clause-set policy labels,
+**adopted at tag `ariadne/v1.6.1`**: clause-set policy labels,
 `decide()` decision envelopes,
 execution grants with lineage, transacted effects, tenants and
 Zanzibar-style relations, revocation-for-cause. It is
@@ -40,7 +40,7 @@ is analysis in support of them.
    routing eligibility; N10 and half of N12 get rewritten as
    profiles of Ariadne's six frozen interfaces.
 
-**Adopted version:** `ariadne/v1.6.0`. Adoption is pinned to a tag,
+**Adopted version:** `ariadne/v1.6.1`. Adoption is pinned to a tag,
 not to `main` — see [ariadne/VERSIONING.md](ariadne/VERSIONING.md) for
 bump semantics and the fork workflow. v1.6.0 carries the same axioms,
 interfaces, and vocabularies as the untagged v1.5 lineage this RFC was
@@ -229,6 +229,6 @@ it pays for itself before anyone believes in the rest.
 
 *Sources: as-built and target panels (miniforge #1548 + #1549
 corrections, source-verified); the contradiction register (T3);
-Ariadne v1.6.0 §§2–13; N-spec status per
+Ariadne v1.6.1 §§2–13; N-spec status per
 ROADMAP and the 2026-06-10 design review; Fleet specs N10–N12;
 governance audit 2026-07-05.*

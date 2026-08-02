@@ -25,7 +25,7 @@
 
 ;; Syntax checking
 (defn ^{:stratum 0} parse-clojure
-  "Parse Clojure code using read-string for AST validation.
+  "Parse Clojure code using clojure.core/read with a PushbackReader.
 
    Reads all top-level forms (not just the first one).
 
@@ -35,12 +35,13 @@
   (try
     (let [rdr (java.io.PushbackReader. (java.io.StringReader. code-str))
           eof (Object.)
-          forms (loop [forms []]
-                  (let [form (read {:eof eof} rdr)]
-                    (if (identical? form eof)
-                      forms
-                      (recur (conj forms form)))))]
-      {:valid? true :form-count (count forms)})
+          form-count (binding [*read-eval* false]
+                       (loop [n 0]
+                         (let [form (read {:eof eof} rdr)]
+                           (if (identical? form eof)
+                             n
+                             (recur (inc n))))))]
+      {:valid? true :form-count form-count})
     (catch Exception ex
       {:valid? false
        :error (ex-message ex)})))
