@@ -20,10 +20,15 @@
    Babashka CLI because the concrete source connectors depend on hato
    and Apache POI, which aren't BB-compatible.
 
-   The entry point and subcommand handlers share the top stratum;
-   serialization remains below them. Value-normalization is no longer
-   local — instants go through `coerce/stringify-instants`, shared
-   with cursor-store and the workflow checkpoint store."
+   Strata, bottom-up: exit codes, result printing and serialization
+   (0); `exit!` (1); the subcommand handlers (2); `-main`, which
+   dispatches to them (3). Four, one over the budget — `-main` sits
+   genuinely above the handlers it dispatches to, so closing SL003
+   here means splitting the namespace, not relabelling it.
+
+   Value-normalization is no longer local: instants go through
+   `coerce/stringify-instants`, shared with cursor-store and the
+   workflow checkpoint store."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.coerce.interface :as coerce]
