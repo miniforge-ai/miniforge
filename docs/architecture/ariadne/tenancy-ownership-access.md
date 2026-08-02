@@ -8,11 +8,11 @@ The name pairs with the Theseus engine (Thesium's), where the
 model was first distilled; the architecture itself is
 engine-agnostic and portable.
 
-**Version:** 1.6.0 — tagged `ariadne/v1.6.0`. Cite the tag, not
+**Version:** 1.6.1 — tagged `ariadne/v1.6.1`. Cite the tag, not
 `main`: see [VERSIONING.md](VERSIONING.md) for what a major/minor/patch
 bump means and how to fork against a fixed version.
 
-1.6.0 is the current and only tagged version; earlier `v1.x` numbers
+1.6.1 is the current version; earlier `v1.x` numbers
 in the history below were untagged working revisions, superseded by
 this one. See [CHANGELOG.md](CHANGELOG.md).
 
