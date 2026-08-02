@@ -74,6 +74,36 @@
     (testing "the original survives untouched"
       (is (= 9.0 (:breach/observed (first (grant/breach-history dir "agent:x"))))))))
 
+(deftest ^{:stratum 1} both-inst-types-round-trip-test
+  ;; inst? admits java.util.Date as well as Instant, so a breach the
+  ;; schema ACCEPTS can arrive holding either. A Date's .toString is not
+  ;; ISO-8601 and would corrupt the history at the moment of recording.
+  (let [dir (tmp-dir)
+        base {:breach/principal "agent:x"
+              :breach/grant-id (random-uuid)
+              :breach/effect-class :effect/spend
+              :breach/axis :constraint/max-cost-usd
+              :breach/limit 5.0 :breach/observed 9.0
+              :breach/detection :detected}
+        as-date (assoc base :breach/id (random-uuid)
+                       :breach/at (java.util.Date/from now))
+        as-instant (assoc base :breach/id (random-uuid) :breach/at now)]
+    (grant/record-breach! dir as-date)
+    (grant/record-breach! dir as-instant)
+    (is (= [now now] (mapv :breach/at (grant/breach-history dir "agent:x")))
+        "a Date normalizes to the same instant on the way out"))
+  (testing "an unsupported timestamp throws rather than corrupting the history"
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (grant/record-breach! (tmp-dir)
+                                       {:breach/id (random-uuid)
+                                        :breach/principal "p"
+                                        :breach/grant-id (random-uuid)
+                                        :breach/effect-class :effect/spend
+                                        :breach/axis :constraint/max-cost-usd
+                                        :breach/limit 1.0 :breach/observed 2.0
+                                        :breach/detection :detected
+                                        :breach/at "nope"})))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} revoke-for-cause-ends-the-grant-and-remembers-test

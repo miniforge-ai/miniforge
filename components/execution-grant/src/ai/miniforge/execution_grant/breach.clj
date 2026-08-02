@@ -36,12 +36,27 @@
   (:import
    [java.io File]
    [java.nio.file Files StandardCopyOption]
-   [java.time Instant]))
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Durable, append-only
-(defn- ^{:stratum 0} ->wire [b] (update b :breach/at #(.toString ^Instant %)))
+(defn- ^{:stratum 0} ->iso
+  "Timestamp -> ISO-8601, by actual type rather than by type hint.
+
+   `:breach/at` is validated with `inst?`, and `inst?` admits
+   `java.util.Date` as well as `java.time.Instant`. A Date's `.toString`
+   is not ISO-8601, so persisting one would write a value `Instant/parse`
+   cannot read back — corrupting the history at the moment of recording
+   it. Same defect effect-transaction's store carried; fixed there and
+   not swept here until review caught it."
+  ^String [v]
+  (cond
+    (instance? Instant v) (.toString ^Instant v)
+    (instance? Date v) (.toString (.toInstant ^Date v))
+    :else (throw (ex-info "breach timestamp is not a supported instant type"
+                          {:value v :type (some-> v class .getName)}))))
 
 (defn- ^{:stratum 0} <-wire [m] (update m :breach/at #(Instant/parse %)))
 
@@ -51,6 +66,8 @@
   (m/validate schema/Breach b))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} ->wire [b] (update b :breach/at ->iso))
 
 (defn ^{:stratum 1} history
   "Every recorded breach under `dir`, optionally narrowed to one
@@ -67,7 +84,9 @@
        []
        (into [] xform (.listFiles d))))))
 
-(defn ^{:stratum 1} record!
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} record!
   "Append one breach to `dir`. One file per breach, written atomically
    and never rewritten — the append-only property is structural rather
    than a rule someone has to remember.
@@ -89,7 +108,12 @@
         _ (when (.exists target)
             (throw (ex-info "breach id already recorded; history is append-only"
                             {:breach/id (:breach/id b) :path (str target)})))
-        ^File tmp (io/file (.getParentFile target) (str (.getName target) ".tmp"))]
+        ;; Unique per attempt. A deterministic <id>.edn.tmp lets two
+        ;; writers of the same id trample each other before the move,
+        ;; and leaves a lingering partial that reads like evidence
+        ;; during manual inspection.
+        ^File tmp (io/file (.getParentFile target)
+                           (str (.getName target) "." (random-uuid) ".tmp"))]
     (spit tmp (pr-str (->wire b)) :encoding "UTF-8")
     ;; ATOMIC_MOVE WITHOUT REPLACE_EXISTING. Append-only has to be
     ;; enforced by the filesystem, not asserted in a docstring: with
