@@ -1,0 +1,101 @@
+;; =============================================================================
+;; Spec: Ariadne step 2f — grant issuance, the missing link
+;; =============================================================================
+;;
+;; Normative refs: docs/architecture/rfc-ariadne-adoption.md (adoption
+;; step 2); Ariadne §13.5 (ExecutionGrant lifecycle). This spec exists
+;; because the step-2 wave planned in #1574 specified the grant OBJECT
+;; (2a), CHECKING grants (2b), transacted effects (2c), migrating call
+;; sites (2d), and REVOKING grants (2e) — and never specified who
+;; ISSUES one. That omission is a planning gap, not a discovery.
+
+{:spec/title "Ariadne step 2f: grant issuance - who may authorize an irreversible effect, and on what basis"
+
+ :spec/description
+ "Specify and build the path that puts an ExecutionGrant into
+  existence in production.
+
+  WHY THIS BLOCKS 2d's SECOND HALF. `execution-grant` (2a) has
+  `issue`, `delegate`, and `revoke`. Nothing in components/ or bases/
+  calls any of them — verified: the only consumers of
+  `execution-grant.interface` are effect-transaction's own namespaces.
+  So 2d's acceptance criterion 'merge-pr! with no active :effect/merge
+  grant denies and fires no gh command' would, if landed as written,
+  deny EVERY merge and EVERY deploy permanently. Miniforge merges its
+  own PRs many times a day; that is not a migration, it is an outage.
+
+  2d part 1 therefore migrated the call sites onto the transaction
+  coordinator WITHOUT grant enforcement — honest outcomes now,
+  authority when there is authority to check. This spec supplies it.
+
+  GROUP 1: The issuance decision
+  What is the basis for issuing? Candidate inputs, to be settled by
+  this spec rather than assumed:
+    * the Spec/workflow-run the effect serves (scope)
+    * the phase or FSM position that legitimizes it
+    * the operator or automation that stands behind it (principal)
+    * the ceilings — from where? `budget->constraints` (2b) maps
+      today's scattered budget keys, but SOMETHING must choose the
+      numbers per effect rather than inheriting a role default.
+
+  GROUP 2: Where issuance happens
+  Options, with the tradeoff each carries:
+    * at workflow start — one grant per run, broad scope, long TTL;
+      simple, but a long-lived broad grant is the thing grants exist
+      to avoid.
+    * at phase entry — narrower, still automatic.
+    * at the decide() call that authorizes the effect — narrowest and
+      most defensible, but requires the issuer to know the effect's
+      shape before the effect is proposed.
+  This spec MUST pick one and say why; leaving it open is how the
+  ambient authority that Ariadne removes comes back in under a new
+  name.
+
+  GROUP 3: Delegation to inner orchestrators
+  2a built `delegate` with attenuation precisely for the nested-agent
+  case (T3 contradiction 6: 'stop restraining, start fencing'). Nothing
+  exercises it. This spec should say whether a spawned agent receives a
+  delegated grant and who cuts it.
+
+  GROUP 4: The eligibility hook
+  2e's breach history exposes 'may this principal be granted this
+  effect class at this ceiling'. Issuance is its only intended call
+  site. Wire it here.
+
+  GROUP 5: Then, and only then, 2d part 2
+  With an issuer live, the call sites can require a grant and the
+  deferred acceptance criteria from 2d become testable:
+    * merge-pr! with no active grant denies and fires no gh command
+    * kustomize-apply! with no active grant denies and runs no kubectl"
+
+ :spec/intent {:type :feature
+               :scope ["components/execution-grant/"
+                       "components/workflow/src/ai/miniforge/workflow/"
+                       "specs/normative/"]}
+
+ :spec/constraints
+ ["This spec MUST choose an issuance site and record the rejected alternatives - an open question here re-creates ambient authority under a new name"
+  "Issuance is runtime-only; no agent-supplied path may produce a grant (the 2a rule)"
+  "Ceilings come from an explicit decision per effect class, not from a role default inherited by accident"
+  "Consult 2e's eligibility predicate before issuing"
+  "Do not widen 2d part 1's migration; this spec adds authority, it does not re-open honesty"]
+
+ :spec/acceptance-criteria
+ ["A production code path calls execution-grant/issue - grep for the interface returns callers outside effect-transaction"
+  "An issued grant's scope names the workflow-run or PR it authorizes, not the whole repo"
+  "An issued grant's TTL is bounded and justified in the spec text"
+  "A principal with a disqualifying breach history is refused issuance"
+  "A spawned inner agent receives a DELEGATED grant, attenuated from its parent, or the spec states why it does not"
+  "merge-pr! with no active :effect/merge grant denies and fires no gh command"
+  "kustomize-apply! with no active :effect/deploy grant denies and runs no kubectl command"
+  "full bb test green"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :policy-enforcement :governance-credibility}
+  :theme :ariadne-grants
+  :rationale "Without an issuer the grant machinery is inert; with one, 2d part 2 and 2e's eligibility hook both become reachable. High rather than blocker because 2d part 1 already delivered the honesty half."
+  :blocks []
+  :blocked-by ["ariadne-revocation-for-cause.spec.edn"]}
+
+ :spec/workflow-type :canonical-sdlc}
