@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.release-executor.artifact-validation-integration-test
   "Project-level integration tests for artifact validation in the release executor.
 
@@ -23,17 +22,19 @@
   Exercises the release-executor component through its public interface."
   (:require
    [clojure.test :refer [deftest testing is use-fixtures]]
+   [clojure.string :as str]
    [babashka.fs :as fs]
    [babashka.process :as process]
    [ai.miniforge.release-executor.interface :as release-executor]
    [ai.miniforge.dag-executor.protocols.executor :as executor-proto]
    [ai.miniforge.logging.interface :as log]))
 
+;------------------------------------------------------------------------------ Layer 0
+
 ;------------------------------------------------------------------------------ Fixtures
+(def ^{:stratum 0} ^:dynamic *temp-dir* nil)
 
-(def ^:dynamic *temp-dir* nil)
-
-(defn temp-dir-fixture [f]
+(defn ^{:stratum 0} temp-dir-fixture [f]
   (let [dir (fs/create-temp-dir {:prefix "artifact-val-test-"})]
     (process/shell {:dir (str dir)} "git init")
     (process/shell {:dir (str dir)} "git config user.email" "test@example.com")
@@ -48,17 +49,14 @@
       (try (f)
            (finally (fs/delete-tree dir))))))
 
-(use-fixtures :each temp-dir-fixture)
-
 ;------------------------------------------------------------------------------ Helpers
-
-(defn make-workflow-state [artifacts]
+(defn ^{:stratum 0} make-workflow-state [artifacts]
   {:workflow/id (random-uuid)
    :workflow/phase :release
    :workflow/spec {:spec/description "test"}
    :workflow/artifacts artifacts})
 
-(defn make-stub-executor
+(defn ^{:stratum 0} make-stub-executor
   "Create a stub executor that runs shell commands in the temp dir.
    Satisfies the TaskExecutor protocol so the release pipeline passes
    input validation and can execute git operations on the test repo."
@@ -72,8 +70,14 @@
     (execute! [_ _env-id command opts]
       (try
         (let [workdir (or (:workdir opts) (str worktree-dir))
+              ;; TaskExecutor/execute! takes "string or vector"; sandbox.clj
+              ;; uses both forms. Join vectors the way the real worktree
+              ;; executor does (dag_executor/protocols/impl/worktree.clj's
+              ;; execute-command) — passing the vector straight to `sh -c`
+              ;; would run its .toString, i.e. `sh: [git: command not found`.
+              cmd-str (if (string? command) command (str/join " " command))
               result (process/shell {:dir workdir :out :string :err :string :continue true}
-                                    "sh" "-c" command)]
+                                    "sh" "-c" cmd-str)]
           {:ok? true :data {:exit-code (:exit result)
                             :stdout (or (:out result) "")
                             :stderr (or (:err result) "")}})
@@ -90,16 +94,23 @@
     (persist-workspace! [_ _env-id _opts]
       {:ok? true :data {:persisted? true}})))
 
-(defn make-context []
-  {:worktree-path *temp-dir*
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} make-context []
+  ;; `fs/create-temp-dir` returns a java.nio.file.Path; the release context's
+  ;; :worktree-path is contractually a String (see workspace/core.clj, the
+  ;; blessed execution-workdir resolver). Coerce at this boundary, as the
+  ;; other helpers here already do for :dir and :workdir.
+  {:worktree-path (str *temp-dir*)
    :create-pr? false
    :executor (make-stub-executor *temp-dir*)
    :environment-id "test-env-001"
    :logger (log/create-logger {:min-level :warn})})
 
-;------------------------------------------------------------------------------ Tests
+;------------------------------------------------------------------------------ Layer 2
 
-(deftest nil-artifacts-rejected-test
+;------------------------------------------------------------------------------ Tests
+(deftest ^{:stratum 2} nil-artifacts-rejected-test
   (testing "release executor pipeline fails with nil artifact content"
     (let [state (make-workflow-state [{:artifact/type :code
                                        :artifact/content nil}])
@@ -117,7 +128,7 @@
       (is (seq (:errors result))
           "Should have downstream pipeline errors"))))
 
-(deftest empty-files-rejected-test
+(deftest ^{:stratum 2} empty-files-rejected-test
   (testing "release executor pipeline fails with zero-file artifacts"
     (let [state (make-workflow-state [{:artifact/type :code
                                        :artifact/content {:code/id (random-uuid)
@@ -135,7 +146,7 @@
       (is (seq (:errors result))
           "Should have downstream pipeline errors"))))
 
-(deftest valid-artifacts-pass-validation-test
+(deftest ^{:stratum 2} valid-artifacts-pass-validation-test
   (testing "release executor passes validation for valid artifacts with files"
     (let [state (make-workflow-state
                  [{:artifact/type :code
@@ -152,7 +163,7 @@
       (is (not (contains? (set (map :type (:errors result))) :no-files-to-write))
           "Should not fail with no-files-to-write for valid artifact"))))
 
-(deftest mixed-nil-and-valid-artifacts-test
+(deftest ^{:stratum 2} mixed-nil-and-valid-artifacts-test
   (testing "release executor filters out nil artifacts and processes valid ones"
     (let [state (make-workflow-state
                  [{:artifact/type :code
@@ -168,3 +179,5 @@
           "Should not fail with no-code-artifacts — nil was filtered, valid remained")
       (is (not (contains? (set (map :type (:errors result))) :no-code-files))
           "Should not fail with no-code-files — valid artifact has files"))))
+
+(use-fixtures :each temp-dir-fixture)
