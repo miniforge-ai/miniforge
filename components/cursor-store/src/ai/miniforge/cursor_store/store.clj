@@ -4,7 +4,8 @@
    Stratification (intra-namespace):
    Layer 0 — no in-ns deps: cursor-file, normalize-for-storage,
              read-edn, write-edn.
-   Layer 1 — public I/O (save-cursors, load-cursors). Both at L1 to
+   Layer 1 — file access (existing-cursors) and the public I/O
+             (save-cursors, load-cursors) that shares it. All at L1 to
              keep the persistence API at one stratum."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -89,29 +90,52 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Public I/O.
-(defn ^{:stratum 1} save-cursors
+;; File access, and the public I/O that shares it.
+(defn- ^{:stratum 1} existing-cursors
+  "Cursors already persisted for this pipeline, or nil when no file
+   exists yet. Throws on a malformed file; both callers turn that into
+   a schema/failure."
+  [^java.io.File file]
+  (when (.exists file)
+    (read-edn (slurp file))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} save-cursors
   "Persist connector cursors to <pipeline-dir>/.cursors/<pipeline-filename>.
    cursor-map is the raw {stage-uuid → cursor-entry} map from
-   :pipeline-run/connector-cursors, re-keyed for cross-run lookup.
-   Returns schema/success or schema/failure."
+   :pipeline-run/connector-cursors, re-keyed for cross-run lookup and
+   merged over what is already on disk.
+
+   Merged rather than replaced, because a stage that produced no cursor
+   this run has not invalidated the one it produced last run. A source
+   with nothing new returns no cursor at all — `connector-http`'s
+   `last-record-cursor` is nil for an empty result set — so replacing
+   the file would erase that stage's watermark and re-ingest its whole
+   history next run, while every other stage in the same pipeline
+   carried on advancing normally.
+
+   Returns schema/success with the full persisted map, or schema/failure."
   [logger pipeline-path cursor-map]
   (try
     (let [normalized (normalize-for-storage logger cursor-map)
-          file       (cursor-file pipeline-path)]
+          file       (cursor-file pipeline-path)
+          persisted  (merge (existing-cursors file) normalized)]
       (if (empty? normalized)
         (do (when logger
               (log/info logger :cursor-store :cursor-store/no-cursors
                         {:message "No cursors to save — no ingest stages completed with cursors"}))
-            (schema/success :cursors normalized))
+            (schema/success :cursors persisted))
         (let [dir (.getParentFile file)]
           (.mkdirs dir)
-          (spit file (write-edn normalized))
+          (spit file (write-edn persisted))
           (when logger
             (log/info logger :cursor-store :cursor-store/saved
                       {:message (str "Saved " (count normalized) " cursor(s)")
-                       :data {:count (count normalized) :path (str file)}}))
-          (schema/success :cursors normalized))))
+                       :data {:count     (count normalized)
+                              :persisted (count persisted)
+                              :path      (str file)}}))
+          (schema/success :cursors persisted))))
     (catch Exception e
       (when logger
         (log/error logger :cursor-store :cursor-store/write-failed
@@ -119,7 +143,7 @@
                     :data {:path pipeline-path :error (.getMessage e)}}))
       (schema/failure :cursors (.getMessage e)))))
 
-(defn ^{:stratum 1} load-cursors
+(defn ^{:stratum 2} load-cursors
   "Load persisted cursors for a pipeline. Returns schema/success with
    :cursors key (map keyed by [stage-name schema-name]).
    Returns schema/success with {} on first run (no file yet).
@@ -129,14 +153,14 @@
    callers must not treat a read failure here as impossible."
   [logger pipeline-path]
   (try
-    (let [file (cursor-file pipeline-path)]
-      (if (.exists file)
-        (let [cursors (read-edn (slurp file))]
-          (when logger
-            (log/info logger :cursor-store :cursor-store/loaded
-                      {:message (str "Loaded " (count cursors) " cursor(s)")
-                       :data {:count (count cursors) :path (str file)}}))
-          (schema/success :cursors cursors))
+    (let [file    (cursor-file pipeline-path)
+          cursors (existing-cursors file)]
+      (if cursors
+        (do (when logger
+              (log/info logger :cursor-store :cursor-store/loaded
+                        {:message (str "Loaded " (count cursors) " cursor(s)")
+                         :data {:count (count cursors) :path (str file)}}))
+            (schema/success :cursors cursors))
         (do (when logger
               (log/info logger :cursor-store :cursor-store/first-run
                         {:message "No prior cursors found — starting fresh"}))

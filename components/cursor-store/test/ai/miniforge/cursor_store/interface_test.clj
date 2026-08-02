@@ -39,6 +39,16 @@
 (defn- ^{:stratum 0} record-timestamp [record]
   (or (:updated_at record) (:created_at record)))
 
+(defn- ^{:stratum 0} stage-cursor
+  "One run's cursor map for a single stage, with the per-run
+   identifiers a real run would generate."
+  [stage-name value]
+  {(random-uuid) {:stage/name          stage-name
+                  :stage/connector-ref (random-uuid)
+                  :stage/schema-name   stage-name
+                  :cursor {:cursor/type :offset :cursor/value value}
+                  :cursor/updated-at   (Instant/now)}})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; ---------------------------------------------------------------------------
@@ -172,6 +182,36 @@
       (let [loaded (:cursors (sut/load-cursors logger path))]
         (is (= 1 (count loaded)))
         (is (= 20 (get-in loaded [[stage schema] :cursor :cursor/value])))))))
+
+(deftest ^{:stratum 1} save-preserves-stages-absent-from-this-run-test
+  (testing "a stage that produced no cursor this run keeps its previous one"
+    ;; A source with nothing new returns no cursor at all, so its stage
+    ;; is simply missing from the run's cursor map. Replacing the file
+    ;; rather than merging would erase that stage's watermark and
+    ;; re-ingest its whole history next run, while the stages that did
+    ;; report kept advancing — a partial regression nothing would flag.
+    (let [path (tmp-pipeline-path)]
+      (sut/save-cursors logger path (merge (stage-cursor "Ingest PRs" 10)
+                                           (stage-cursor "Ingest Issues" 20)))
+      ;; Second run: only "Ingest PRs" had new records.
+      (sut/save-cursors logger path (stage-cursor "Ingest PRs" 11))
+      (let [loaded (:cursors (sut/load-cursors logger path))]
+        (is (= 2 (count loaded)))
+        (is (= 11 (get-in loaded [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))
+            "the reporting stage advances")
+        (is (= 20 (get-in loaded [["Ingest Issues" "Ingest Issues"] :cursor :cursor/value]))
+            "the quiet stage holds its watermark")))))
+
+(deftest ^{:stratum 1} save-with-no-cursors-leaves-the-file-alone-test
+  (testing "a run where nothing reported a cursor does not clear the file"
+    (let [path (tmp-pipeline-path)]
+      (sut/save-cursors logger path (stage-cursor "Ingest PRs" 10))
+      (let [result (sut/save-cursors logger path {})]
+        (is (:success? result))
+        (is (= 10 (get-in (:cursors result)
+                          [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))))
+      (is (= 10 (get-in (:cursors (sut/load-cursors logger path))
+                        [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))))))
 
 (deftest ^{:stratum 1} inst-tagged-cursor-file-loads-as-string-test
   (testing "a cursor file containing #inst still yields a filterable watermark"
