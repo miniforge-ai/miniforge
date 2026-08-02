@@ -83,6 +83,15 @@
    `delegate` checks."
   [:map-of :keyword any?])
 
+(def ^{:stratum 0} detections
+  "How a breach came to light (Ariadne 2e).
+
+   `:prevented` — a gate refused before the effect happened.
+   `:detected`  — reconciliation found it afterwards; the effect already
+                  occurred. Recording this as `:prevented` would claim a
+                  gate that does not exist."
+  [:prevented :detected])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 ;; The grant
@@ -111,3 +120,16 @@
    [:grant/expires-at inst?]
    [:grant/revoked-at [:maybe inst?]]
    [:grant/revocation-reason [:maybe (into [:enum] revocation-reasons)]]])
+
+(def ^{:stratum 1} Breach
+  "CLOSED record of one ceiling a principal exceeded (Ariadne 2e)."
+  [:map {:closed true}
+   [:breach/id :uuid]
+   [:breach/principal :string]
+   [:breach/grant-id :uuid]
+   [:breach/effect-class (into [:enum] effect-classes)]
+   [:breach/axis (into [:enum] constraint-axes)]
+   [:breach/limit number?]
+   [:breach/observed number?]
+   [:breach/detection (into [:enum] detections)]
+   [:breach/at inst?]])

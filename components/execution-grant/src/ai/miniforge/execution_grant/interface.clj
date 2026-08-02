@@ -25,6 +25,8 @@
    liveness over lineage."
   (:require
    [ai.miniforge.execution-grant.attenuation :as attenuation]
+   [ai.miniforge.execution-grant.breach :as breach]
+   [ai.miniforge.execution-grant.eligibility :as eligibility]
    [ai.miniforge.execution-grant.constraints :as constraints]
    [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.lineage :as lineage]
@@ -108,3 +110,34 @@
 (def ^{:stratum 0} budget->constraints
   "Translate a legacy budget map into `:grant/constraints`."
   constraints/budget->constraints)
+
+(def ^{:stratum 0} Breach
+  "Closed Malli schema for a recorded breach."
+  schema/Breach)
+
+(def ^{:stratum 0} detections
+  "How a breach came to light: :prevented (a gate refused first) or
+   :detected (reconciliation found it after the effect)."
+  schema/detections)
+
+(def ^{:stratum 0} record-breach!
+  "Append one breach to the history. One file per breach, never
+   rewritten — append-only by construction."
+  breach/record!)
+
+(def ^{:stratum 0} breach-history
+  "Every recorded breach, optionally narrowed to one principal."
+  breach/history)
+
+(def ^{:stratum 0} permitted-ceiling
+  "The highest ceiling a principal may now be granted on an axis, or nil
+   for unbounded."
+  eligibility/permitted-ceiling)
+
+(def ^{:stratum 0} eligible?
+  "May this principal be granted this effect class at these ceilings?"
+  eligibility/eligible?)
+
+(def ^{:stratum 0} revoke-for-cause!
+  "Revoke a grant AND record the breach that caused it."
+  eligibility/revoke-for-cause!)
