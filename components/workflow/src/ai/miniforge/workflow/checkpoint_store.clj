@@ -16,7 +16,20 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.workflow.checkpoint-store
-  "Durable execution-machine snapshots and phase checkpoints."
+  "Durable execution-machine snapshots and phase checkpoints.
+
+   Strata, bottom-up: filenames, key lists and path normalization (0);
+   the per-run paths, the atomic write, and the snapshot/phase-record
+   builders (1); `resolve-checkpoint-root` and `phase-checkpoint-path`
+   (2); `build-manifest` and `load-checkpoint-data` (3);
+   `persist-execution-state!`, which drives all of it (4).
+
+   Five, two over the budget — SL003 fires here and fired identically
+   before this file carried any stratum metadata. The chain is real
+   (persist → manifest → per-phase path → atomic write → path
+   normalization), so closing it means splitting the namespace along
+   the path-resolution / record-building / persistence seam, not
+   renumbering what is here."
   (:require
    [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.config.interface :as config]
