@@ -95,19 +95,27 @@
         (is (= 5 (get-in loaded [[:conn/gitlab "merge-requests"] :cursor :cursor/value])))))))
 
 (defn- ^{:stratum 1} persisted-cursor
-  "Save `cursor-value` as a timestamp watermark, then load it back."
+  "Save `cursor-value` as a timestamp watermark, then load it back.
+
+   Both I/O results are asserted here. `save-cursors` and
+   `load-cursors` report failure as a `schema/failure` map rather than
+   throwing, so an unchecked write or read error would reach the
+   caller as a nil cursor and fail some later assertion with a
+   misleading `(not (string? nil))` instead of naming the real
+   problem."
   [cursor-value]
-  (let [path (tmp-pipeline-path)]
-    (sut/save-cursors logger path
-                      {(random-uuid) {:stage/connector-ref :conn/gitlab
-                                      :stage/schema-name   "issues"
-                                      :cursor {:cursor/type  :timestamp-watermark
-                                               :cursor/value cursor-value}
-                                      :cursor/updated-at (Instant/now)}})
-    (-> (sut/load-cursors logger path)
-        :cursors
-        (get [:conn/gitlab "issues"])
-        :cursor)))
+  (let [path   (tmp-pipeline-path)
+        saved  (sut/save-cursors
+                logger path
+                {(random-uuid) {:stage/connector-ref :conn/gitlab
+                                :stage/schema-name   "issues"
+                                :cursor {:cursor/type  :timestamp-watermark
+                                         :cursor/value cursor-value}
+                                :cursor/updated-at (Instant/now)}})
+        loaded (sut/load-cursors logger path)]
+    (is (:success? saved) (str "save-cursors failed: " (:error saved)))
+    (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
+    (-> loaded :cursors (get [:conn/gitlab "issues"]) :cursor)))
 
 ;; ---------------------------------------------------------------------------
 ;; normalization
