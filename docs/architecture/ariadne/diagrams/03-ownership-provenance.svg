@@ -50,11 +50,11 @@
   <text class="h" x="58" y="268">Personal drop folder / self-import</text>
   <text class="s" x="58" y="286">resume · portfolio · personal projects — no</text>
   <text class="s" x="58" y="300">employer claim exists on this route</text>
-  <rect class="rec" x="58" y="314" width="196" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="156" y="329" text-anchor="middle" fill="#3a6a34">owner: tenant:chris (personal)</text>
+  <rect class="rec" x="58" y="314" width="196" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="156" y="329" text-anchor="middle" fill="#3a6a34">owner: tenant:alice (personal)</text>
 
   <rect class="ext" x="44" y="374" width="312" height="120" rx="8"/>
   <text class="h" x="58" y="398">Licensed feed</text>
-  <text class="s" x="58" y="416">e.g. market data (EODHD pattern) — custodian</text>
+  <text class="s" x="58" y="416">e.g. market data (licensed-feed pattern) — custodian</text>
   <text class="s" x="58" y="430">owns the manifest; the PAYLOAD rights are the licensor's</text>
   <rect class="rec" x="58" y="444" width="150" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="133" y="459" text-anchor="middle" fill="#3a6a34">custodian: intake tenant</text>
   <rect class="dis" x="218" y="444" width="124" height="22" rx="11"/><text class="s" x="280" y="459" text-anchor="middle">rights: licensed [TTL]</text>
@@ -124,7 +124,7 @@
   <rect class="note" x="854" y="494" width="292" height="120" rx="6"/>
   <text class="h" x="868" y="516">Rights inheritance (licensed sources)</text>
   <text class="t" x="868" y="538">Term-driven, not automatic: the license's</text>
-  <text class="t" x="868" y="554">derivation clause decides. EODHD pattern:</text>
+  <text class="t" x="868" y="554">derivation clause decides. licensed-feed pattern:</text>
   <text class="t" x="868" y="572">raw series → licensed [TTL] · derived</text>
   <text class="t" x="868" y="588">analytics → owned. No terms? third-party.</text>
 
@@ -145,11 +145,11 @@
   <rect class="pt" x="1214" y="272" width="320" height="220" rx="8"/>
   <text class="h" x="1228" y="296">Commissioned projections</text>
   <rect class="rec" x="1228" y="308" width="292" height="26" rx="4"/><text class="t" x="1238" y="325">review run under acme's cycle</text>
-  <rect class="rec" x="1228" y="344" width="252" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="1354" y="359" text-anchor="middle" fill="#3a6a34">owner: tenant:chris (subject) — the DEFAULT</text>
+  <rect class="rec" x="1228" y="344" width="252" height="22" rx="11" fill="#d5e8d4"/><text class="own" x="1354" y="359" text-anchor="middle" fill="#3a6a34">owner: tenant:alice (subject) — the DEFAULT</text>
   <text class="s" x="1228" y="386" font-weight="bold">commissioning tenant gets relations, not ownership:</text>
   <rect class="rel" x="1228" y="396" width="292" height="24" rx="5"/><text class="m" x="1238" y="412">review:V#commissioner@tenant:acme</text>
   <rect class="rel" x="1228" y="426" width="292" height="24" rx="5"/><text class="m" x="1238" y="442">review:V#viewer@tenant:acme</text>
-  <text class="m" x="1228" y="470">review:V#engagement@engagement:chris-acme</text>
+  <text class="m" x="1228" y="470">review:V#engagement@engagement:alice-acme</text>
   <text class="s" x="1228" y="484" font-style="italic">visibility granted, property kept — bounded by the engagement</text>
 
   <rect class="dis" x="1214" y="516" width="320" height="96" rx="8"/>

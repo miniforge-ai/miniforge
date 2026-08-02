@@ -74,10 +74,10 @@
   <!-- context -->
   <rect class="rel" x="684" y="120" width="272" height="220" rx="8"/>
   <text class="h" x="698" y="144">InvocationContext</text>
-  <text class="m" x="698" y="170">:tenant/id      "chris"</text>
+  <text class="m" x="698" y="170">:tenant/id      "alice"</text>
   <text class="m" x="698" y="190">:workspace/id   "workspace/default"</text>
-  <text class="m" x="698" y="210">:principal/id   "chris"</text>
-  <text class="m" x="698" y="230">:subject/id     "chris"</text>
+  <text class="m" x="698" y="210">:principal/id   "alice"</text>
+  <text class="m" x="698" y="230">:subject/id     "alice"</text>
   <text class="m" x="698" y="250">:run/id         (optional, explicit)</text>
   <text class="m" x="698" y="270">:purpose (+ :purpose-basis)</text>
   <text class="m" x="698" y="290">+ relation/policy revision pins</text>

@@ -34,14 +34,14 @@
   <rect class="zone" x="1670" y="62" width="230" height="800" rx="6"/>
   <text class="zoneT" x="1686" y="84">NON-RESIDENT AUTHORITIES</text>
 
-  <!-- tenant:chris -->
+  <!-- tenant:alice -->
   <rect class="pt" x="44" y="104" width="270" height="380" rx="8"/>
-  <text class="h" x="60" y="128">tenant:chris</text>
+  <text class="h" x="60" y="128">tenant:alice</text>
   <text class="s" x="60" y="144">personal · exactly one person</text>
   <rect class="pr" x="60" y="156" width="238" height="34" rx="6"/>
-  <text class="h" x="72" y="177" font-size="12">principal:chris</text>
+  <text class="h" x="72" y="177" font-size="12">principal:alice</text>
   <text class="s" x="176" y="177">#controller (may be several)</text>
-  <text class="s" x="60" y="212" font-weight="bold">owns (owner_tenant_id = tenant:chris)</text>
+  <text class="s" x="60" y="212" font-weight="bold">owns (owner_tenant_id = tenant:alice)</text>
   <rect class="rec" x="60" y="222" width="238" height="30" rx="4"/>
   <text class="t" x="70" y="241">evidence: resume, portfolio</text>
   <rect class="dis" x="232" y="227" width="58" height="18" rx="9"/><text class="s" x="261" y="240" text-anchor="middle">:private</text>
@@ -53,7 +53,7 @@
   <rect class="rec" x="60" y="330" width="238" height="30" rx="4"/>
   <text class="t" x="70" y="349">commissioned review (default)</text>
   <text class="s" x="60" y="382">* inherited from :confidential org sources —</text>
-  <text class="s" x="60" y="396">restriction is the imposer's, record is chris's</text>
+  <text class="s" x="60" y="396">restriction is the imposer's, record is alice's</text>
   <text class="s" x="60" y="424" font-style="italic">subject-id ≡ personal-tenant id.</text>
   <text class="s" x="60" y="438" font-style="italic">No separate user / subject layer.</text>
   <text class="s" x="60" y="452" font-style="italic">B2C = this box alone; human-owner checks</text>
@@ -113,22 +113,22 @@
   <!-- tuples -->
   <text class="s" x="680" y="196" font-weight="bold">relation tuples — object#relation@subject</text>
   <rect class="rel" x="664" y="208" width="512" height="30" rx="5"/>
-  <text class="m" x="676" y="227">tenant:acme#employee@tenant:chris</text>
+  <text class="m" x="676" y="227">tenant:acme#employee@tenant:alice</text>
   <text class="s" x="1000" y="227">employment</text>
   <rect class="rel" x="664" y="244" width="512" height="30" rx="5"/>
-  <text class="m" x="676" y="263">engagement:chris-acme#manager@principal:dana</text>
+  <text class="m" x="676" y="263">engagement:alice-acme#manager@principal:dana</text>
   <text class="s" x="1000" y="263">role scoped to engagement</text>
   <rect class="rel" x="664" y="280" width="512" height="30" rx="5"/>
-  <text class="m" x="676" y="299">tenant:chris#coach@principal:sam</text>
+  <text class="m" x="676" y="299">tenant:alice#coach@principal:sam</text>
   <text class="s" x="1000" y="299">Studio / Coach shape</text>
   <rect class="rel" x="664" y="316" width="512" height="30" rx="5"/>
-  <text class="m" x="676" y="335">assessment:A#engagement@engagement:chris-acme</text>
+  <text class="m" x="676" y="335">assessment:A#engagement@engagement:alice-acme</text>
   <text class="s" x="1000" y="335">record hangs off the engagement</text>
   <rect class="rel" x="664" y="352" width="512" height="30" rx="5"/>
   <text class="m" x="676" y="371">rubric:R#viewer@tenant:acme#employee</text>
   <text class="s" x="1000" y="371">userset: all employees</text>
   <rect class="rel" x="664" y="388" width="512" height="30" rx="5"/>
-  <text class="m" x="676" y="407">evidence:E#owner@tenant:chris</text>
+  <text class="m" x="676" y="407">evidence:E#owner@tenant:alice</text>
   <text class="s" x="1000" y="407">materialized from owner col.</text>
   <rect class="rel" x="664" y="424" width="512" height="30" rx="5"/>
   <text class="m" x="676" y="443">license:L#holder@tenant:dana · license:L#seat@tenant:alex</text>
@@ -185,7 +185,7 @@
   <!-- commissioning note -->
   <rect class="note" x="1244" y="544" width="382" height="120" rx="6"/>
   <text class="h" x="1260" y="568">Commissioning = visibility, not ownership</text>
-  <text class="t" x="1260" y="590">A review run under acme's cycle: chris keeps the record;</text>
+  <text class="t" x="1260" y="590">A review run under acme's cycle: alice keeps the record;</text>
   <text class="t" x="1260" y="606">acme holds #commissioner / #viewer relations.</text>
   <text class="t" x="1260" y="626">Official-record semantics only by explicit org policy</text>
   <text class="t" x="1260" y="642">flip at onboarding — a named opt-in, never the default.</text>
@@ -194,16 +194,16 @@
   <rect class="note" x="1244" y="680" width="382" height="160" rx="6"/>
   <text class="h" x="1260" y="704">Offboarding (§7)</text>
   <text class="t" x="1260" y="726">Delete employment + seat tuples →</text>
-  <text class="t" x="1260" y="742">· acme's relations into tenant:chris revoked</text>
-  <text class="t" x="1260" y="758">· chris's access to acme-owned intake revoked</text>
-  <text class="t" x="1260" y="774">· tenant:chris and everything it owns: untouched</text>
+  <text class="t" x="1260" y="742">· acme's relations into tenant:alice revoked</text>
+  <text class="t" x="1260" y="758">· alice's access to acme-owned intake revoked</text>
+  <text class="t" x="1260" y="774">· tenant:alice and everything it owns: untouched</text>
   <text class="t" x="1260" y="794">Entitlement gates compute, never data. Takeaway</text>
   <text class="t" x="1260" y="810">export: always available, hard policy, no off switch.</text>
 
   <!-- NON-RESIDENT -->
   <rect class="ext" x="1690" y="104" width="192" height="240" rx="8"/>
   <text class="h" x="1702" y="128">licensor</text>
-  <text class="mS" x="1702" y="146">license:eodhd</text>
+  <text class="mS" x="1702" y="146">license:market-data</text>
   <text class="s" x="1702" y="168">imposes terms on payloads</text>
   <text class="s" x="1702" y="182">that ride its feed (§12)</text>
   <text class="s" x="1702" y="204">not in the tuple store —</text>

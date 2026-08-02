@@ -37,14 +37,14 @@
 
   <!-- DELEGATION -->
   <rect class="pr" x="44" y="104" width="392" height="60" rx="8"/>
-  <text class="h" x="58" y="128">principal:chris (human)</text>
+  <text class="h" x="58" y="128">principal:alice (human)</text>
   <text class="s" x="58" y="146">delegates — is never impersonated by the agent</text>
 
   <rect class="rel" x="44" y="180" width="392" height="150" rx="8"/>
   <text class="h" x="58" y="204">delegation:D — a first-class grant object</text>
-  <text class="mS" x="58" y="224">delegation:D#grantor@principal:chris</text>
+  <text class="mS" x="58" y="224">delegation:D#grantor@principal:alice</text>
   <text class="mS" x="58" y="240">delegation:D#grantee@principal:agent-a</text>
-  <text class="mS" x="58" y="256">delegation:D#basis@engagement:chris-acme</text>
+  <text class="mS" x="58" y="256">delegation:D#basis@engagement:alice-acme</text>
   <text class="mS" x="58" y="272">run:R#delegation@delegation:D</text>
   <text class="s" x="58" y="292">record: scope · purpose · argument constraints ·</text>
   <text class="s" x="58" y="306">allowed capability versions · :delegable? · TTL ·</text>

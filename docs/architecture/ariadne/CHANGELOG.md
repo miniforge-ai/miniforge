@@ -9,6 +9,29 @@
 Bump types are defined in [VERSIONING.md](VERSIONING.md). Entries above
 PATCH state what an adopter has to do about the change.
 
+## v1.6.1 — 2026-07-29 (PATCH)
+
+Nothing to adopt. Worked examples only; no axiom, interface,
+vocabulary, or section changed.
+
+v1.6.0 scrubbed the spec's prose but not its diagrams, so the published
+unit was internally inconsistent: the spec said `alice` and
+`license:market-data` while five diagrams and one explainer
+illustration still carried a real person's name and a named commercial
+vendor. Fixed:
+
+- Example principal is `alice` throughout the diagrams and the
+  doorkeeper illustration (and its published HTML twin), matching the
+  spec.
+- The licensed-feed examples use the generic `license:market-data` and
+  "licensed-feed pattern" in the diagrams, matching the spec. The named
+  vendor stays with the product that holds that licence.
+- Diagram 5's licence tuple drops a redundant `[TTL]` annotation that
+  no longer fit the lane once the generic licensor id replaced the
+  shorter vendor name. The lane is titled "license expiry /
+  invalidation" and the panel states the TTL semantics twice more, so
+  no information was lost.
+
 ## v1.6.0 — 2026-07-28 (MINOR)
 
 First tagged and publicly published version. Ariadne moves here from
