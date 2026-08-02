@@ -14,7 +14,10 @@
    [ai.miniforge.pipeline-pack.messages :as msg]
    [ai.miniforge.metric-registry.interface :as metric-registry]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [clojure.edn :as edn])
+  (:import
+   [java.time Instant]
+   [java.util Date]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -29,16 +32,42 @@
     (catch Exception e
       {:success? false :data nil :error (.getMessage e)})))
 
+;; Timestamp wire form
+(defn ^{:stratum 0} map-instant-keys
+  "Apply `f` to every timestamp key PRESENT in `manifest`. Both are
+   declared `inst?`, which admits BOTH `java.time.Instant` and
+   `java.util.Date`, so either type can reach `f` from a valid manifest.
+
+   A missing timestamp stays missing so `validate-manifest` reports it,
+   rather than this function inventing one."
+  [manifest f]
+  (reduce (fn [acc k]
+            (if (contains? acc k)
+              (assoc acc k (f (get acc k)))
+              acc))
+          manifest
+          [:pack/created-at :pack/updated-at]))
+
 (defn ^{:stratum 0} ensure-instant
-  "Convert timestamp representations to Instant."
+  "Wire timestamp -> Instant, or nil when the value is not a readable one.
+
+   Returns nil rather than the old fail-soft `Instant/now`. A manifest
+   whose created-at cannot be read is corrupt, and stamping the current
+   time hides that at exactly the moment it should surface — the pack
+   loads clean, dated today, and nothing downstream can tell.
+
+   nil fails the schema's `inst?` on the very next step, so the corruption
+   is reported through the loader's own `{:success? false}` channel: one
+   entry in `load-all-packs`' `:failed`, not an exception that aborts
+   every other pack in the directory."
   [value]
   (cond
-    (inst? value) value
+    (instance? Instant value) value
+    (instance? Date value) (.toInstant ^Date value)
     (string? value) (try
-                      (java.time.Instant/parse value)
-                      (catch Exception _
-                        (java.time.Instant/now)))
-    :else (java.time.Instant/now)))
+                      (Instant/parse value)
+                      (catch Exception _ nil))
+    :else nil))
 
 ;; Path helpers
 (defn- ^{:stratum 0} resolve-relative-path
@@ -88,8 +117,7 @@
       (update :pack/pipelines #(or % []))
       (update :pack/envs #(or % []))
       (update :pack/extends #(or % []))
-      (update :pack/created-at ensure-instant)
-      (update :pack/updated-at ensure-instant)
+      (map-instant-keys ensure-instant)
       (cond->
         (and (:pack/connector-types manifest)
              (not (set? (:pack/connector-types manifest))))
