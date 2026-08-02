@@ -44,9 +44,18 @@
    cursor-map))
 
 (defn- ^{:stratum 0} read-edn
-  "Parse an EDN string."
+  "Parse an EDN string, normalizing instants exactly as the write side
+   does.
+
+   EDN's `#inst` reader produces a `java.util.Date`, so a cursor file
+   containing `#inst \"…\"` loads a Date no matter how careful the
+   writer was — a hand-edited file is enough, and `#inst` is the
+   obvious thing for a human to type. Reading through the same
+   normalizer makes the store's guarantee a property of the store
+   rather than of whoever last wrote the file: a timestamp read out of
+   here is an ISO-8601 string."
   [s]
-  (edn/read-string s))
+  (coerce/stringify-instants (edn/read-string s)))
 
 (defn- ^{:stratum 0} write-edn
   "Render a value to a pretty-printed EDN string, with every instant

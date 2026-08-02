@@ -16,7 +16,8 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.cursor-store.interface-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
             [ai.miniforge.connector-http.interface :as connector-http]
             [ai.miniforge.cursor-store.interface :as sut]
             [ai.miniforge.logging.interface :as log])
@@ -153,6 +154,31 @@
       (sut/save-cursors logger path run2)
       (let [loaded (:cursors (sut/load-cursors logger path))]
         (is (= 20 (get-in loaded [[conn-ref schema] :cursor :cursor/value])))))))
+
+(deftest ^{:stratum 1} inst-tagged-cursor-file-loads-as-string-test
+  (testing "a cursor file containing #inst still yields a filterable watermark"
+    ;; `#inst` is the obvious literal for a human editing a cursor file by
+    ;; hand, and EDN's reader turns it into a java.util.Date — which
+    ;; parse-timestamp rejects. The read path normalizes, so the store's
+    ;; guarantee holds regardless of who wrote the file.
+    (let [path (tmp-pipeline-path)
+          file (io/file (.getParentFile (io/file path))
+                        ".cursors" (.getName (io/file path)))]
+      (io/make-parents file)
+      (spit file (pr-str {[:conn/gitlab "issues"]
+                          {:stage/connector-ref :conn/gitlab
+                           :stage/schema-name   "issues"
+                           :cursor {:cursor/type  :timestamp-watermark
+                                    :cursor/value (Date/from
+                                                   (Instant/parse watermark-iso))}}}))
+      (let [loaded (sut/load-cursors logger path)
+            cursor (get-in (:cursors loaded) [[:conn/gitlab "issues"] :cursor])]
+        (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
+        (is (= watermark-iso (:cursor/value cursor)))
+        (is (false? (connector-http/after-cursor?
+                     record-timestamp cursor {:updated_at "2024-01-14T00:00:00Z"})))
+        (is (true? (connector-http/after-cursor?
+                    record-timestamp cursor {:updated_at "2024-01-16T00:00:00Z"})))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
