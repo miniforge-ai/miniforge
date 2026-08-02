@@ -101,19 +101,21 @@
 
 (defn- ^{:stratum 0} regular-files-under
   "Recursively list regular files under `dir` as a lazy seq of
-   `java.io.File`. Never follows a symlink -- a symlinked entry
-   (whether it points at a file or a directory) is skipped outright,
-   so traversal itself can never leave `dir`; this is enforced at
-   the walk, not by filtering results afterward."
+   `java.io.File`. Never follows a symlink -- including `dir` itself,
+   not just the entries under it, so a symlinked scan root is skipped
+   outright rather than silently traversed. Traversal itself can never
+   leave the real (non-symlinked) directory tree rooted at `dir`; this
+   is enforced at the walk, not by filtering results afterward."
   [^java.io.File dir]
   (lazy-seq
-   (mapcat (fn [^java.io.File f]
-             (cond
-               (java.nio.file.Files/isSymbolicLink (.toPath f)) nil
-               (.isDirectory f) (regular-files-under f)
-               (.isFile f)      [f]
-               :else            nil))
-           (or (.listFiles dir) []))))
+   (when-not (java.nio.file.Files/isSymbolicLink (.toPath dir))
+     (mapcat (fn [^java.io.File f]
+               (cond
+                 (java.nio.file.Files/isSymbolicLink (.toPath f)) nil
+                 (.isDirectory f) (regular-files-under f)
+                 (.isFile f)      [f]
+                 :else            nil))
+             (or (.listFiles dir) [])))))
 
 (defn ^{:stratum 0} format-violation
   "Build a public Violation map (per compliance-scanner schema) from an
@@ -206,26 +208,24 @@
 
    Traversal is pruned to those two top-level directories rather than
    the whole repo (skips `.git/`, `node_modules/`, `target/`, etc.).
-   `regular-files-under` never follows a symlink, so a symlinked
-   directory can't pull enumeration outside `repo-root` in the first
-   place — this isn't a post-hoc filter on the results, it's enforced
-   at the walk itself.
+   `regular-files-under` never follows a symlink -- not even for a
+   symlinked `components/`/`bases/` itself -- so a symlink can't pull
+   enumeration outside `repo-root` in the first place; this isn't a
+   post-hoc filter on the results, it's enforced at the walk itself.
 
-   Paths are normalized to forward-slash separators so `target-file?`
-   matches consistently on Windows and POSIX hosts."
+   Repo-relative paths are computed via `Path/relativize` against
+   `repo-root` rather than a length-based substring, and normalized to
+   forward-slash separators so `target-file?` matches consistently on
+   Windows and POSIX hosts."
   [repo-root]
-  (let [root       (io/file repo-root)
-        root-len   (inc (count (.getAbsolutePath root)))
+  (let [root       (.getAbsoluteFile (io/file repo-root))
+        root-path  (.toPath root)
         scan-roots (->> ["components" "bases"]
                         (map #(io/file root %))
                         (filter #(.isDirectory ^java.io.File %)))]
     (->> scan-roots
          (mapcat regular-files-under)
          (map (fn [^java.io.File f]
-                (let [abs (.getAbsolutePath f)
-                      rel (if (>= (count abs) root-len)
-                            (subs abs root-len)
-                            abs)]
-                  (normalize-separators rel))))
+                (normalize-separators (str (.relativize root-path (.toPath f))))))
          (filter target-file?)
          vec)))
