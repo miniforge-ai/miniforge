@@ -447,8 +447,11 @@
               enable! (fn []
                         (let [r (merge-pr! worktree-path pr-number :policy policy)]
                           {:ok? (dag/ok? r) :error (:error r)}))
-              proposed (merge-transaction/propose! context pr-number
-                                                   (:pr/repo context) now)
+              ;; The method is known from policy; the proposal must record
+              ;; what was actually requested, not nil.
+              proposed (merge-transaction/propose!
+                        (assoc context :merge/method (:method policy))
+                        pr-number (:pr/repo context) now)
               settled (merge-transaction/commit! context proposed pr-number
                                                  now enable! run-gh)
               merge-sha (merge-transaction/substantiated-sha settled)]
