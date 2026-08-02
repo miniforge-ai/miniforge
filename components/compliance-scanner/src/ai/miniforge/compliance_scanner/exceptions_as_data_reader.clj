@@ -99,6 +99,30 @@
     (str/replace path "\\" "/")
     path))
 
+(defn ^{:stratum 0} within-root?
+  "Return true iff the canonical path of `candidate` starts with the
+   canonical path of `root` followed by the system file separator.
+   Uses canonical paths to resolve symlinks and `..` segments before
+   the comparison, preventing path-traversal via relative-path inputs.
+   Used by `analyze-file`'s single-path traversal guard (a different
+   concern from `list-target-files`'s bulk walk, which never follows a
+   symlink in the first place rather than checking after the fact).
+
+   Returns false (safe default) when .getCanonicalPath throws
+   IOException or SecurityException so the caller's exceptions-as-data
+   contract is preserved."
+  [^java.io.File root ^java.io.File candidate]
+  (try
+    (let [canonical-root      (.getCanonicalPath root)
+          canonical-candidate (.getCanonicalPath candidate)
+          sep                 java.io.File/separator
+          prefix              (if (str/ends-with? canonical-root sep)
+                                canonical-root
+                                (str canonical-root sep))]
+      (str/starts-with? canonical-candidate prefix))
+    (catch java.io.IOException _ false)
+    (catch SecurityException _ false)))
+
 (defn- ^{:stratum 0} regular-files-under
   "Recursively list regular files under `dir` as a lazy seq of
    `java.io.File`. Never follows a symlink -- including `dir` itself,
