@@ -4,9 +4,11 @@
    Stratification (intra-namespace):
    Layer 0 — no in-ns deps: cursor-file, normalize-for-storage,
              read-edn, write-edn.
-   Layer 1 — file access (existing-cursors) and the public I/O
-             (save-cursors, load-cursors) that shares it. All at L1 to
-             keep the persistence API at one stratum."
+   Layer 1 — existing-cursors, the single read of the file both public
+             calls need.
+   Layer 2 — the public I/O (save-cursors, load-cursors). Both sit here
+             so the persistence API stays at one stratum; save reads
+             the file too, since it merges over what is already there."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
