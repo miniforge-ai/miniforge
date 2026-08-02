@@ -54,6 +54,26 @@
     (is (thrown? clojure.lang.ExceptionInfo
                  (grant/record-breach! dir {:breach/id (random-uuid)})))))
 
+(deftest ^{:stratum 1} a-reused-breach-id-cannot-overwrite-history-test
+  ;; Append-only must be enforced by the filesystem, not asserted in a
+  ;; docstring. A reused id silently replacing an earlier breach is the
+  ;; exact edit this record exists to make impossible.
+  (let [dir (tmp-dir)
+        b {:breach/id (random-uuid)
+           :breach/principal "agent:x"
+           :breach/grant-id (random-uuid)
+           :breach/effect-class :effect/spend
+           :breach/axis :constraint/max-cost-usd
+           :breach/limit 5.0
+           :breach/observed 9.0
+           :breach/detection :detected
+           :breach/at now}]
+    (grant/record-breach! dir b)
+    (is (thrown? clojure.lang.ExceptionInfo
+                 (grant/record-breach! dir (assoc b :breach/observed 1.0))))
+    (testing "the original survives untouched"
+      (is (= 9.0 (:breach/observed (first (grant/breach-history dir "agent:x"))))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} revoke-for-cause-ends-the-grant-and-remembers-test

@@ -29,7 +29,6 @@
    Append-only by construction: one file per breach, never rewritten.
    A history you can edit is a history that stops being evidence."
   (:require
-   [ai.miniforge.execution-grant.core :as core]
    [ai.miniforge.execution-grant.schema :as schema]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
@@ -82,10 +81,23 @@
     (throw (ex-info "breach record failed validation" {:breach b})))
   (let [^File target (io/file dir (str (:breach/id b) ".edn"))
         _ (io/make-parents target)
+        ;; Checked explicitly rather than left to the move. ATOMIC_MOVE
+        ;; without REPLACE_EXISTING is documented as implementation-
+        ;; specific when the target exists, and on POSIX it lowers to
+        ;; rename(2), which overwrites silently. Append-only cannot rest
+        ;; on a guarantee the platform does not actually make.
+        _ (when (.exists target)
+            (throw (ex-info "breach id already recorded; history is append-only"
+                            {:breach/id (:breach/id b) :path (str target)})))
         ^File tmp (io/file (.getParentFile target) (str (.getName target) ".tmp"))]
     (spit tmp (pr-str (->wire b)) :encoding "UTF-8")
+    ;; ATOMIC_MOVE WITHOUT REPLACE_EXISTING. Append-only has to be
+    ;; enforced by the filesystem, not asserted in a docstring: with
+    ;; REPLACE_EXISTING a reused :breach/id would silently overwrite an
+    ;; earlier breach, which is precisely the edit this record exists to
+    ;; make impossible. The move throws FileAlreadyExistsException
+    ;; instead, and the caller learns rather than losing evidence.
     (Files/move (.toPath tmp) (.toPath target)
                 (into-array java.nio.file.CopyOption
-                            [StandardCopyOption/ATOMIC_MOVE
-                             StandardCopyOption/REPLACE_EXISTING]))
+                            [StandardCopyOption/ATOMIC_MOVE]))
     b))
