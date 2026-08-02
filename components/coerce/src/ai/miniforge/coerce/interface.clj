@@ -26,10 +26,15 @@
    web-dashboard, workflow-security-compliance, policy-pack,
    connector-sarif, and the cli base — and the duplicated
    Instant-only instant walker that grew up across cursor-store,
-   workflow's checkpoint-store, and the etl base."
-  (:require [clojure.walk :as walk])
-  (:import [java.time Instant]
-           [java.util Date]))
+   workflow's checkpoint-store, and the etl base.
+
+   NOTE: `safe-parse-int` / `-long` / `-double` are implemented here
+   rather than passed through to an implementation namespace, which
+   predates this file's current form and does not match the
+   interface.clj rule in `languages/clojure.mdc`. New additions do not
+   follow them — see `stringify-instants` below. Migrating the three
+   parsers is left to its own change."
+  (:require [ai.miniforge.coerce.instant :as instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -77,24 +82,11 @@
   "Walk `v`, replacing every instant with its ISO-8601 string.
    Non-instant values are returned unchanged.
 
-   Dispatches on the ACTUAL type. `clojure.core/inst?` admits BOTH
+   Normalizes by ACTUAL type. `clojure.core/inst?` admits BOTH
    `java.time.Instant` and `java.util.Date`, so a walker that tests
-   only `(instance? Instant x)` lets a Date past untouched. That is
-   the harder failure to notice, because a Date has a print form
-   (`#inst`) that survives an EDN round-trip: nothing throws, the
-   file is valid EDN, and the value simply arrives at the reader as
-   a Date where the reader expected a string. Connector cursor
-   watermarks were being silently dropped exactly that way.
-
-   Unlike the strict `->iso` helpers at single-key write boundaries
-   (effect-transaction, knowledge), this cannot throw on unrecognized
-   input — it walks whole payloads in which most values are
-   legitimately not timestamps."
+   only `(instance? Instant x)` lets a Date past untouched — and a
+   Date is the harder failure to notice, because its `#inst` print
+   form survives an EDN round-trip without anything throwing. Use
+   this at any boundary where instants are serialized."
   [v]
-  (walk/postwalk
-   (fn [x]
-     (cond
-       (instance? Instant x) (.toString ^Instant x)
-       (instance? Date x)    (.toString (.toInstant ^Date x))
-       :else                 x))
-   v))
+  (instant/stringify-instants v))
