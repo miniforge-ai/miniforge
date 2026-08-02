@@ -18,163 +18,20 @@
 (ns ai.miniforge.compliance-scanner.plan
   "Plan phase: generate DAG task defs and markdown work spec from violations.
 
-   Layer 0: DAG topology helpers
-   Layer 1: Markdown work-spec builder
-   Layer 2: Top-level plan entry point"
-  (:require [ai.miniforge.coerce.interface             :as coerce]
-            [ai.miniforge.compliance-scanner.factory   :as factory]
-            [ai.miniforge.compliance-scanner.messages  :as msg]
-            [clojure.string                            :as str]))
+   DAG-task assembly, per-rule section rendering, and markdown work-spec
+   assembly live in `plan-dag`, `plan-rule-section`, and `plan-work-spec`
+   respectively (rule 210: a fifth real layer here is the signal to
+   split it).
+
+   Layer 0: Top-level plan entry point"
+  (:require [ai.miniforge.compliance-scanner.factory        :as factory]
+            [ai.miniforge.compliance-scanner.plan-dag        :as plan-dag]
+            [ai.miniforge.compliance-scanner.plan-work-spec  :as work-spec]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; DAG topology helpers
-(defn- ^{:stratum 0} group-by-file-rule
-  "Group violations by [file rule-id].
-   Returns map of [file rule-id] -> [violation ...]."
-  [violations]
-  (group-by (fn [v] [(get v :file) (get v :rule/id)]) violations))
-
-(defn- ^{:stratum 0} dewey-order
-  "Numeric sort key for a Dewey code string."
-  [dewey-str]
-  (coerce/safe-parse-int dewey-str 0))
-
-(defn- ^{:stratum 0} key->uuid-entry
-  "Return [k (random-uuid)] for use in building a key->id map."
-  [k]
-  [k (random-uuid)])
-
-(defn- ^{:stratum 0} key->category-entry
-  "Return [k category-string] for a [file rule-id] key and its violations."
-  [[k vs]]
-  [k (get (first vs) :rule/category "0")])
-
-;; Markdown work-spec builder
-(defn- ^{:stratum 0} violation->md-row
-  "Render a single violation as a markdown list item."
-  [v]
-  (let [tag (if (get v :auto-fixable?) (msg/t :plan/tag-auto) (msg/t :plan/tag-review))]
-    (str "- **L" (get v :line) "** `" (get v :current) "`"
-         (when-let [s (get v :suggested)]
-           (str " → `" s "`"))
-         " [" tag "]")))
-
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} file->ordered-rule-ids-entry
-  "Return [file ordered-rule-ids] sorted by Dewey category ascending.
-   ks is a seq of [file rule-id] keys; the result extracts just the rule-ids."
-  [key->cat [file ks]]
-  [file (->> ks
-             (sort-by #(dewey-order (get key->cat %)))
-             (mapv second))])
-
-(defn- ^{:stratum 1} build-task
-  "Build a PlanTask for a [file rule-id] group, resolving intra-file deps."
-  [key->id key->cat file->rule-ids [[file rule-id] viols]]
-  (let [id        (get key->id [file rule-id])
-        prior-ids (take-while
-                   #(< (dewey-order (get key->cat [file %]))
-                       (dewey-order (get key->cat [file rule-id])))
-                   (get file->rule-ids file []))
-        deps      (into #{} (map #(get key->id [file %]) prior-ids))]
-    (factory/->plan-task id deps file rule-id viols)))
-
-(defn- ^{:stratum 1} render-violation-group
-  "Render a labeled group of violations as markdown lines, or nil if empty."
-  [label viols]
-  (when (seq viols)
-    (concat [label ""]
-            (map violation->md-row viols)
-            [""])))
-
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} build-dag-tasks
-  "Build PlanTask records with intra-file ordering deps.
-
-   Within a file, a task for a rule with a higher Dewey category depends on all
-   tasks for rules with lower Dewey categories in that same file."
-  [violations]
-  (let [groups         (group-by-file-rule violations)
-        key->id        (into {} (map key->uuid-entry (keys groups)))
-        key->cat       (into {} (map key->category-entry groups))
-        file->rule-ids (into {} (map (partial file->ordered-rule-ids-entry key->cat)
-                                     (group-by first (keys groups))))]
-    (mapv (partial build-task key->id key->cat file->rule-ids) groups)))
-
-(defn- ^{:stratum 2} section-for-rule
-  "Render a markdown section for all violations of one rule."
-  [_rule-id viols]
-  (let [rule-title (get (first viols) :rule/title (str _rule-id))
-        rule-cat   (get (first viols) :rule/category "?")
-        auto       (filter :auto-fixable? viols)
-        needs      (remove :auto-fixable? viols)]
-    (str/join "\n"
-      (concat
-       [(msg/t :plan/rule-section-header {:category rule-cat :title rule-title})
-        ""]
-       (render-violation-group (msg/t :plan/auto-fixable-label) auto)
-       (render-violation-group (msg/t :plan/needs-review-label) needs)))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} build-work-spec
-  "Build the full markdown work spec string from classified violations."
-  [violations summary]
-  (let [by-rule      (group-by :rule/id violations)
-        review-viols (remove :auto-fixable? violations)]
-    (str/join "\n"
-      [(msg/t :plan/title)
-       ""
-       (msg/t :plan/exec-summary)
-       ""
-       (msg/t :plan/table-header)
-       (msg/t :plan/table-separator)
-       (msg/t :plan/metric-total        {:n (get summary :total-violations)})
-       (msg/t :plan/metric-auto         {:n (get summary :auto-fixable)})
-       (msg/t :plan/metric-needs-review {:n (get summary :needs-review)})
-       (msg/t :plan/metric-files        {:n (get summary :files-affected)})
-       (msg/t :plan/metric-rules        {:n (get summary :rules-violated)})
-       ""
-       (msg/t :plan/violations-by-rule)
-       ""
-       (str/join "\n\n"
-         (map (fn [[rule-id viols]]
-                (section-for-rule rule-id viols))
-              (sort-by #(dewey-order (get (first (second %)) :rule/category "0"))
-                       by-rule)))
-       ""
-       (msg/t :plan/needs-review-summary)
-       ""
-       (if (seq review-viols)
-         (str/join "\n\n"
-           (map (fn [v]
-                  (str "**[" (str/upper-case (name (get v :rule/severity :info)))
-                       "]** Rule: " (get v :rule/title (name (get v :rule/id :unknown)))
-                       "\n\n"
-                       "  Problem: " (get v :rationale) "\n"
-                       "  Location: `" (get v :file) ":" (get v :line) "`\n"
-                       "  Current: `" (get v :current "") "`\n"
-                       (when-let [suggested (get v :suggested)]
-                         (str "  Fix: `" suggested "`\n"))
-                       (when-let [refs (get v :rule/references)]
-                         (str "  Docs: " (str/join ", " refs) "\n"))))
-                review-viols))
-         (msg/t :plan/no-review))
-       ""
-       (msg/t :plan/exec-instructions)
-       ""
-       (msg/t :plan/instr-1)
-       (msg/t :plan/instr-2)
-       (msg/t :plan/instr-3)
-       ""])))
-
-;------------------------------------------------------------------------------ Layer 4
-
 ;; Top-level entry point
-(defn ^{:stratum 4} plan
+(defn ^{:stratum 0} plan
   "Generate DAG task defs and markdown work spec from violations.
 
    Arguments:
@@ -183,10 +40,10 @@
 
    Returns Plan map."
   [violations _repo-path]
-  (let [dag-tasks (build-dag-tasks violations)
-        summary   (factory/->plan-summary violations)
-        work-spec (build-work-spec violations summary)]
-    (factory/->plan dag-tasks work-spec summary)))
+  (let [dag-tasks    (plan-dag/build-dag-tasks violations)
+        summary      (factory/->plan-summary violations)
+        work-spec-md (work-spec/build-work-spec violations summary)]
+    (factory/->plan dag-tasks work-spec-md summary)))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
