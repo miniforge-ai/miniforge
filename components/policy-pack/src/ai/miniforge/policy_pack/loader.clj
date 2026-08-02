@@ -271,7 +271,7 @@
    - file-path - Output file path
 
    Returns:
-   - {:success? bool :error string}"
+   - {:success? bool :error string-or-nil} — :error is nil on success"
   [pack file-path]
   (try
     (let [content (with-out-str

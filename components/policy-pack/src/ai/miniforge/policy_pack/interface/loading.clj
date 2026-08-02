@@ -65,5 +65,6 @@
   "Serialize a PackManifest to an EDN file via pprint, with its timestamps
    normalized to ISO-8601 strings so the file reads back; a timestamp that is
    neither an Instant nor a Date is refused and nothing is written.
-   (write-pack-to-file pack file-path) returns {:success? bool :error string}."
+   (write-pack-to-file pack file-path) returns {:success? bool :error
+   string-or-nil} — nil on success."
   loader/write-pack-to-file)
