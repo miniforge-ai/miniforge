@@ -101,9 +101,18 @@
   (str (fs/path checkpoint-root (str workflow-run-id))))
 
 (defn- ^{:stratum 0} read-edn-file
+  "Read a checkpoint EDN file, normalizing instants the same way the
+   write side does.
+
+   Checkpoints already on disk were written before this normalization
+   existed, so a `java.util.Date` in one of them was persisted as
+   `#inst` — and EDN's reader hands that back as a Date, which is
+   exactly the mixed-type restore this file is trying to stop. Reading
+   through the same normalizer makes the guarantee a property of the
+   store rather than of whichever version wrote the file."
   [path]
   (when (fs/exists? path)
-    (edn/read-string (slurp path))))
+    (coerce/stringify-instants (edn/read-string (slurp path)))))
 
 (defn ^{:stratum 0} ordered-phase-ids
   "Phase ids in workflow pipeline order, filtered to checkpointed phases."

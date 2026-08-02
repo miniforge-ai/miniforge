@@ -210,3 +210,29 @@
         (is (= handoff
                (get-in checkpoint-data
                        [:phase-results :review :phase/handoff])))))))
+
+(deftest ^{:stratum 1} inst-tagged-checkpoint-loads-as-string-test
+  (testing "a checkpoint written before normalization restores as a string"
+    ;; Checkpoints already on disk predate the write-side normalization, so
+    ;; a Date in one of them was persisted as `#inst` — and EDN's reader
+    ;; hands that back as a Date, which is the mixed-type restore this
+    ;; change exists to stop. Written here by hand because the current
+    ;; write path can no longer produce it.
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [run-id (random-uuid)
+              snapshot-path (checkpoint-store/machine-snapshot-path
+                             checkpoint-root run-id)]
+          (io/make-parents snapshot-path)
+          ;; :started-at as the old writer left it (#inst), :ended-at as the
+          ;; new writer produces it — the mixed file an upgrade actually meets.
+          (spit snapshot-path
+                (pr-str {:execution/id run-id
+                         :execution/started-at (java.util.Date/from instant-stamp)
+                         :execution/ended-at (str instant-stamp)}))
+          (let [snapshot (:machine-snapshot
+                          (checkpoint-store/load-checkpoint-data
+                           run-id {:checkpoint/root checkpoint-root}))]
+            (is (string? (:execution/started-at snapshot)))
+            (is (= (:execution/ended-at snapshot)
+                   (:execution/started-at snapshot)))))))))
