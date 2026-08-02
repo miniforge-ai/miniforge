@@ -69,7 +69,7 @@
            :breach/detection :detected
            :breach/at now}]
     (grant/record-breach! dir b)
-    (is (thrown? clojure.lang.ExceptionInfo
+    (is (thrown? java.nio.file.FileAlreadyExistsException
                  (grant/record-breach! dir (assoc b :breach/observed 1.0))))
     (testing "the original survives untouched"
       (is (= 9.0 (:breach/observed (first (grant/breach-history dir "agent:x"))))))))
