@@ -123,7 +123,10 @@
   "Load persisted cursors for a pipeline. Returns schema/success with
    :cursors key (map keyed by [stage-name schema-name]).
    Returns schema/success with {} on first run (no file yet).
-   Returns schema/failure only on parse errors."
+   Returns schema/failure when a file that does exist cannot be read.
+   The try covers the slurp as well as the parse, so a permissions or
+   other I/O failure surfaces the same way a malformed file does —
+   callers must not treat a read failure here as impossible."
   [logger pipeline-path]
   (try
     (let [file (cursor-file pipeline-path)]

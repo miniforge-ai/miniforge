@@ -81,8 +81,9 @@
      (group-by :stage/name (vals cursors)))))
 
 (defn- ^{:stratum 0} load-failure
-  "A cursor file that exists but will not parse. Nothing has executed
-   yet, so there is no run to attach."
+  "A cursor file that exists but cannot be read — malformed, or an I/O
+   failure the store surfaces the same way. Nothing has executed yet,
+   so there is no run to attach."
   [error]
   (schema/failure :pipeline-run (msg/t :run/cursor-load-failed {:error error})))
 
@@ -112,11 +113,12 @@
    `(schema/success :context …)`; a non-incremental pipeline gets its
    context back untouched.
 
-   A cursor file that will not parse fails the run instead of starting
-   fresh. An ingest stage with no cursor admits every record, so
-   treating a read error as `no watermark` would quietly re-ingest the
-   entire source — the exact outcome this store exists to prevent, and
-   one that reports itself as a successful run.
+   A cursor file that exists but cannot be read — malformed, or
+   unreadable for any other reason the store reports — fails the run
+   instead of starting fresh. An ingest stage with no cursor admits
+   every record, so treating a read error as `no watermark` would
+   quietly re-ingest the entire source — the exact outcome this store
+   exists to prevent, and one that reports itself as a successful run.
 
    For an incremental pipeline the persisted file is the sole source of
    prior cursors: a `:pipeline-run/connector-cursors` entry already in
