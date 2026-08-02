@@ -166,12 +166,23 @@
    component exists to make impossible. Refused, and the effect does not
    fire.
 
+   Passing `:authority/unenforced` in place of a grant skips every
+   authority check and stamps `:effect/authority :unenforced` on the
+   record. That is the honest state of the world today: nothing in
+   production ISSUES a grant (see
+   `work/ariadne-grant-issuance.spec.edn`), so requiring one would deny
+   every merge and deploy permanently. It is spelled out rather than
+   accepted as a silent nil so it greps, and so the record says plainly
+   that no authority was checked instead of leaving a blank that later
+   reads as approval. Remove it when issuance lands.
+
    JVM `Error`s are NOT caught. An OutOfMemoryError is not an effect
    outcome, and the record is already `:committing` on disk before
    `effect-fn` runs, so letting it propagate leaves precisely the state
    reconciliation is built for."
   [dir t grant-record usage ^Instant now effect-fn]
-  (let [auth (grant/authorize grant-record usage now)]
+  (let [unenforced? (= :authority/unenforced grant-record)
+        auth (when-not unenforced? (grant/authorize grant-record usage now))]
     (cond
       (not= :proposed (:effect/state t))
       (wrong-state "only a :proposed record may be committed"
@@ -182,27 +193,31 @@
       ;; proposal never claimed — propose under a narrow grant, commit
       ;; under a broad one, and the audit trail records a lie. The
       ;; re-check is only worth anything if it re-checks the SAME grant.
-      (not= (:effect/grant-id t) (:grant/id grant-record))
+      (and (not unenforced?) (not= (:effect/grant-id t) (:grant/id grant-record)))
       (wrong-state "grant does not match the one recorded on the proposal"
                    {:effect/id (:effect/id t)
                     :effect/grant-id (:effect/grant-id t)
                     :grant/id (:grant/id grant-record)})
 
       ;; Likewise the class: a merge grant must not authorize a deploy.
-      (not= (:effect/class t) (:grant/effect-class grant-record))
+      (and (not unenforced?) (not= (:effect/class t) (:grant/effect-class grant-record)))
       (wrong-state "grant effect-class does not match the proposed effect"
                    {:effect/id (:effect/id t)
                     :effect/class (:effect/class t)
                     :grant/effect-class (:grant/effect-class grant-record)})
 
-      (not (grant/authorized? auth))
+      (and (not unenforced?) (not (grant/authorized? auth)))
       (advance! dir t {:effect/state :failed
                        :effect/failure (str "grant re-check failed at commit: "
                                             (name (:grant/outcome auth)))}
                 now)
 
       :else
-      (let [committing (advance! dir t {:effect/state :committing} now)]
+      (let [committing (advance! dir t {:effect/state :committing
+                                        :effect/authority (if unenforced?
+                                                            :unenforced
+                                                            :granted)}
+                                 now)]
         (if (anomaly/anomaly? committing)
           committing
           (let [reported (try

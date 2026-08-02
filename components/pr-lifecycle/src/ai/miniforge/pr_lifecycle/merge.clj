@@ -24,12 +24,15 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.dag-executor.interface :as dag]
    [ai.miniforge.pr-lifecycle.conflict-resolution :as conflict-resolution]
+   [ai.miniforge.pr-lifecycle.merge-transaction :as merge-transaction]
    [ai.miniforge.pr-lifecycle.events :as events]
    [ai.miniforge.logging.interface :as log]
    [ai.miniforge.response.interface :as response]
    [babashka.process :as process]
    [cheshire.core :as json]
-   [clojure.string :as str]))
+   [clojure.string :as str])
+  (:import
+   [java.time Instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -432,35 +435,68 @@
     (let [readiness (evaluate-merge-readiness worktree-path pr-number policy)]
       (if (:ready? readiness)
         ;; Ready to merge - attempt it
-        (let [merge-result (merge-pr! worktree-path pr-number :policy policy)]
-          (if (dag/ok? merge-result)
+        ;; Transacted (Ariadne 2d): the intent is recorded BEFORE any gh
+        ;; command, enabling auto-merge is recorded as a request accepted
+        ;; rather than a merge performed, and the merged event fires only
+        ;; against a merge GitHub actually reports — carrying GitHub's
+        ;; mergeCommit, never a SHA read from the local worktree.
+        (let [now (Instant/now)
+              run-gh (fn [args]
+                       (let [r (run-gh-command args worktree-path)]
+                         {:ok? (dag/ok? r) :output (:output (:data r))}))
+              enable! (fn []
+                        (let [r (merge-pr! worktree-path pr-number :policy policy)]
+                          {:ok? (dag/ok? r) :error (:error r)}))
+              ;; The method is known from policy; the proposal must record
+              ;; what was actually requested, not nil.
+              proposed (merge-transaction/propose!
+                        (assoc context :merge/method (:method policy))
+                        pr-number (:pr/repo context) now)
+              settled (merge-transaction/commit! context proposed pr-number
+                                                 now enable! run-gh)
+              merge-sha (merge-transaction/substantiated-sha settled)]
+          (cond
+            (= :failed (:effect/state settled))
+            (dag/err :merge-failed
+                     "Merge command failed"
+                     {:gh-error (:effect/failure settled)})
+
+            merge-sha
             (do
               ;; Publish merged event with the PR's labels so downstream
               ;; watchers (label-actions M2) can match without re-querying
               ;; GitHub. Label fetch is best-effort — missing labels
               ;; default to #{}, never block the merge event.
               (when event-bus
-                (let [sha-result (run-gh-command
-                                  ["git" "rev-parse" "HEAD"]
-                                  worktree-path)
-                      merge-sha (when (dag/ok? sha-result)
-                                  (:output (:data sha-result)))
-                      labels (fetch-pr-labels! worktree-path pr-number)]
-                  (events/publish! event-bus
-                                   (events/merged dag-id run-id task-id pr-id
-                                                  merge-sha labels)
-                                   logger)))
+                (events/publish! event-bus
+                                 (events/merged dag-id run-id task-id pr-id
+                                                merge-sha
+                                                (fetch-pr-labels! worktree-path pr-number))
+                                 logger))
               (when logger
                 (log/info logger :pr-lifecycle :merge/success
                           {:message "PR merged successfully"
-                           :data {:pr-number pr-number}}))
+                           :data {:pr-number pr-number :merge/sha merge-sha}}))
               (dag/ok {:merged? true
-                       :method (:method policy)}))
+                       :method (:method policy)
+                       :merge/sha merge-sha
+                       :effect/id (:effect/id settled)}))
 
-            ;; Merge failed
-            (dag/err :merge-failed
-                     "Merge command failed"
-                     {:gh-error (:error merge-result)})))
+            :else
+            ;; Auto-merge is enabled and GitHub has not reported a merge.
+            ;; Saying {:merged? true} here is the specific lie this
+            ;; change removes; the record stays reconcilable and a later
+            ;; pass asks again.
+            (do
+              (when logger
+                (log/info logger :pr-lifecycle :merge/auto-merge-pending
+                          {:message "Auto-merge enabled; merge not yet observed"
+                           :data {:pr-number pr-number
+                                  :effect/state (:effect/state settled)}}))
+              (dag/ok {:merged? false
+                       :auto-merge/enabled? true
+                       :method (:method policy)
+                       :effect/id (:effect/id settled)}))))
 
         ;; Not ready — branch-not-up-to-date may mean either
         ;; CONFLICTING (Stage 3 §6.4 hook engages) or BEHIND (auto-

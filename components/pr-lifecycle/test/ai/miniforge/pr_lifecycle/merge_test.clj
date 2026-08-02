@@ -154,17 +154,46 @@
       (is (empty? (:blocking result))))))
 
 ;------------------------------------------------------------------------------ Attempt Merge with Mocks
-(deftest ^{:stratum 0} attempt-merge-ready-and-succeeds-test
-  (testing "Merge succeeds when ready"
+(deftest ^{:stratum 0} attempt-merge-enabled-but-unobserved-is-not-merged-test
+  ;; Ariadne 2d. merge-pr! passes --auto unconditionally, so a zero exit
+  ;; means auto-merge was ENABLED. Until GitHub reports a merge, claiming
+  ;; {:merged? true} is a claim the code cannot substantiate.
+  (testing "auto-merge enabled, GitHub still OPEN"
     (with-redefs [merge/evaluate-merge-readiness
                   (fn [_ _ _] {:ready? true :checks {} :blocking []})
                   merge/merge-pr!
-                  (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))]
+                  (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))
+                  merge/run-gh-command
+                  (fn [_ _] (dag/ok {:output "{\"state\":\"OPEN\",\"mergeCommit\":null}"}))]
       (let [context {:dag-id (random-uuid) :run-id (random-uuid)
                      :task-id (random-uuid) :pr-id 123}
             result (merge/attempt-merge "/tmp" 123 merge/default-merge-policy context)]
         (is (dag/ok? result))
-        (is (true? (:merged? (:data result))))))))
+        (is (false? (:merged? (:data result)))
+            "enabling auto-merge is not merging")
+        (is (true? (:auto-merge/enabled? (:data result))))
+        (is (nil? (:merge/sha (:data result)))
+            "no SHA is published for a merge nobody observed")))))
+
+(deftest ^{:stratum 0} attempt-merge-observed-merge-publishes-githubs-sha-test
+  (testing "GitHub reports MERGED"
+    (with-redefs [merge/evaluate-merge-readiness
+                  (fn [_ _ _] {:ready? true :checks {} :blocking []})
+                  merge/merge-pr!
+                  (fn [_ _ & _] (dag/ok {:merged? true :method :squash}))
+                  merge/run-gh-command
+                  (fn [args _]
+                    (if (some #{"--json"} args)
+                      (dag/ok {:output "{\"state\":\"MERGED\",\"mergeCommit\":{\"oid\":\"real-squash-sha\"}}"})
+                      (dag/ok {:output "local-branch-tip"})))]
+      (let [context {:dag-id (random-uuid) :run-id (random-uuid)
+                     :task-id (random-uuid) :pr-id 123}
+            result (merge/attempt-merge "/tmp" 123 merge/default-merge-policy context)]
+        (is (dag/ok? result))
+        (is (true? (:merged? (:data result))))
+        (is (= "real-squash-sha" (:merge/sha (:data result)))
+            "the SHA is GitHub's mergeCommit, not the local branch tip")
+        (is (not= "local-branch-tip" (:merge/sha (:data result))))))))
 
 (deftest ^{:stratum 0} attempt-merge-not-ready-no-rebase-test
   (testing "Merge blocked without auto-rebase yields error"
