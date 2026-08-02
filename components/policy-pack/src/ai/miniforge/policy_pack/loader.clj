@@ -245,7 +245,6 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-;; Directory structure loader
 (defn ^{:stratum 1} normalize-pack
   "Normalize a pack, ensuring required fields and types."
   [pack]
@@ -258,6 +257,7 @@
       (update :pack/authority #(or % :authority/data))
       (update :pack/dependencies #(or % []))))
 
+;; Pack writing
 (defn ^{:stratum 1} write-pack-to-file
   "Write a pack manifest to a single EDN file.
 
@@ -281,6 +281,7 @@
     (catch Exception e
       (schema-validation/failure nil (.getMessage e)))))
 
+;; Directory structure loader
 (defn ^{:stratum 1} load-rule-file
   "Load a single rule from an EDN file."
   [file]
@@ -381,7 +382,6 @@
 
 ;------------------------------------------------------------------------------ Layer 2
 
-;; Pack writing
 ;; Single file loader
 (defn ^{:stratum 2} load-pack-from-file
   "Load a policy pack from a single EDN file.
