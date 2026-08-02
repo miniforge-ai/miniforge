@@ -15,16 +15,18 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.etl.main
   "JVM entry point for `mf etl` subcommands. Shelled out to from the
    Babashka CLI because the concrete source connectors depend on hato
    and Apache POI, which aren't BB-compatible.
 
-   The entry point and subcommand handlers share the top stratum; serialization
-   and value-normalization remain below them."
+   The entry point and subcommand handlers share the top stratum;
+   serialization remains below them. Value-normalization is no longer
+   local — instants go through `coerce/stringify-instants`, shared
+   with cursor-store and the workflow checkpoint store."
   {:miniforge/runtime :jvm-only}
   (:require
+   [ai.miniforge.coerce.interface :as coerce]
    [ai.miniforge.etl.messages :as msg]
    [ai.miniforge.etl.registry :as registry]
    [ai.miniforge.etl.runner :as runner]
@@ -32,35 +34,25 @@
    [ai.miniforge.schema.interface :as schema]
    [babashka.cli :as cli]
    [cheshire.core :as cheshire]
-   [clojure.string :as str]
-   [clojure.walk :as walk])
-  (:import [java.time Instant])
+   [clojure.string :as str])
   (:gen-class))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
 
-(def ^:private successful-exit-code
+;; No in-namespace dependencies.
+(def ^{:stratum 0} ^:private successful-exit-code
   "POSIX status returned after a command completes successfully."
   0)
 
-(def ^:private failed-exit-code
+(def ^{:stratum 0} ^:private failed-exit-code
   "POSIX status returned when a command cannot complete."
   1)
 
-(def ^:private usage-exit-code
+(def ^{:stratum 0} ^:private usage-exit-code
   "POSIX status reserved for help/usage text output."
   2)
 
-(defn- stringify-instants
-  "Walk `v` converting every `java.time.Instant` to its ISO-8601 string
-   representation. Required because Instants round-trip through neither
-   plain `pr-str` (emits `#object[...]`) nor `cheshire/generate-string`
-   (throws without an encoder). Same pattern as `cursor-store`."
-  [v]
-  (walk/postwalk (fn [x] (if (instance? Instant x) (str x) x)) v))
-
-(defn- print-run-summary!
+(defn- ^{:stratum 0} print-run-summary!
   "Human-readable line summary of a pipeline-runner result."
   [result]
   (let [run (:pipeline-run result)]
@@ -74,36 +66,39 @@
           (when-let [error (:error result)]
             (println (msg/t :run/error {:value error})))))))
 
-(defn- exit! [code] (System/exit (or code successful-exit-code)))
+(defn- ^{:stratum 0} get-opts [m] (if (contains? m :opts) (:opts m) m))
 
-(defn- get-opts [m] (if (contains? m :opts) (:opts m) m))
-
-(defn- projectable-run?
+(defn- ^{:stratum 0} projectable-run?
   "Whether a runner result carries enough execution state for a snapshot.
    Stage failures retain :pipeline-run and remain projectable; failures before
    execution begins do not."
   [result]
   (some? (:pipeline-run result)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Composes Layer 0.
-
-(defn- emit-result!
+(defn- ^{:stratum 0} emit-result!
   "Write the pipeline-runner result to `out-path`. Writes JSON when the
    path ends in `.json`; EDN otherwise. Instants are stringified first
-   so both formats remain round-trippable."
+   because they round-trip through neither `pr-str` (emits
+   `#object[...]`) nor `cheshire/generate-string` (throws without an
+   encoder) — and a `java.util.Date` is normalized by the same call,
+   so a JSON consumer never sees the two shapes a run summary could
+   otherwise carry for the same field."
   [result out-path]
-  (let [normalized (stringify-instants result)
+  (let [normalized (coerce/stringify-instants result)
         body       (if (str/ends-with? out-path ".json")
                      (cheshire/generate-string normalized {:pretty true})
                      (pr-str normalized))]
     (spit out-path body)
     (println (msg/t :run/wrote {:path out-path}))))
 
-;------------------------------------------------------------------------------ Layer 2
-;; Subcommand handlers — compose Layer 1.
+;------------------------------------------------------------------------------ Layer 1
 
-(defn- run-cmd
+(defn- ^{:stratum 1} exit! [code] (System/exit (or code successful-exit-code)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; Subcommand handlers — compose Layer 1.
+(defn- ^{:stratum 2} run-cmd
   [m]
   (let [{:keys [pipeline env out workbench-out source-hash]
          :as opts} (get-opts m)
@@ -151,7 +146,7 @@
                  successful-exit-code
                  failed-exit-code))))))
 
-(defn- list-cmd
+(defn- ^{:stratum 2} list-cmd
   [m]
   (let [path   (:path (get-opts m) ".")
         result (runner/list-pipelines [path])]
@@ -167,7 +162,7 @@
                            :version (or (some->> (:version p) (#(msg/t :list/entry-version {:value %}))) "")})))
         (exit! successful-exit-code)))))
 
-(defn- validate-cmd
+(defn- ^{:stratum 2} validate-cmd
   [m]
   (let [{:keys [pipeline env]} (get-opts m)]
     (cond
@@ -185,7 +180,7 @@
               (when-let [e (:error result)] (println (msg/t :validate/error {:value e})))
               (exit! failed-exit-code)))))))
 
-(defn- registry-cmd
+(defn- ^{:stratum 2} registry-cmd
   [m]
   (let [{:keys [out]} (get-opts m)]
     (cond
@@ -199,7 +194,7 @@
       (do (emit-result! (workbench/state-var-registry) out)
           (exit! successful-exit-code)))))
 
-(defn- help-cmd
+(defn- ^{:stratum 2} help-cmd
   [_m]
   (println (msg/t :help/usage))
   (println)
@@ -213,7 +208,9 @@
     (println (msg/t :help/connector-entry {:value t})))
   (exit! usage-exit-code))
 
-(defn -main
+;------------------------------------------------------------------------------ Layer 3
+
+(defn ^{:stratum 3} -main
   [& args]
   (cli/dispatch
    [{:cmds ["run"]      :fn run-cmd      :args->opts [:pipeline]}
