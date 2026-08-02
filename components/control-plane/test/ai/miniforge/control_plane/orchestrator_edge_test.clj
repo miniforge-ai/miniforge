@@ -11,50 +11,11 @@
    [ai.miniforge.control-plane.registry :as registry]
    [ai.miniforge.control-plane.decision-queue :as dq]
    [ai.miniforge.control-plane.async-test-support :as support]
-   [ai.miniforge.control-plane-adapter.protocol :as adapter]
+   [ai.miniforge.control-plane.orchestrator-test-support
+    :refer [base-opts make-mock-adapter register-running-agent!]]
    [ai.miniforge.event-stream.interface.stream :as stream]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;; ---------------------------------------------------------------------------
-;; Test helpers
-;; ---------------------------------------------------------------------------
-(defn ^{:stratum 0} make-mock-adapter
-  "Create a mock adapter implementing ControlPlaneAdapter."
-  [overrides]
-  (let [id (get overrides :adapter-id :test-adapter)]
-    (reify adapter/ControlPlaneAdapter
-      (adapter-id [_] id)
-      (discover-agents [_ config]
-        (if-let [f (:discover-agents overrides)]
-          (f config)
-          []))
-      (poll-agent-status [_ agent-record]
-        (if-let [f (:poll-agent-status overrides)]
-          (f agent-record)
-          nil))
-      (deliver-decision [_ agent-record decision]
-        (if-let [f (:deliver-decision overrides)]
-          (f agent-record decision)
-          {:delivered? true}))
-      (send-command [_ agent-record command]
-        (if-let [f (:send-command overrides)]
-          (f agent-record command)
-          {:success? true})))))
-
-(defn ^{:stratum 0} base-opts
-  [& [overrides]]
-  (merge {:adapters []
-          :discovery-interval-ms 50
-          :poll-interval-ms 50}
-         overrides))
-
-(defn ^{:stratum 0} register-running-agent!
-  "Helper: register an agent and transition to :running."
-  [reg agent-info]
-  (let [rec (registry/register-agent! reg agent-info)]
-    (registry/transition-agent! reg (:agent/id rec) :running)
-    (registry/get-agent reg (:agent/id rec))))
 
 ;; ---------------------------------------------------------------------------
 ;; create-orchestrator: nil adapters normalizes to empty vector
@@ -73,12 +34,10 @@
     (let [orch (sut/create-orchestrator {})]
       (is (nil? (:event-stream orch))))))
 
-;------------------------------------------------------------------------------ Layer 1
-
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: no matching adapter for agent's vendor
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-no-matching-adapter-test
+(deftest ^{:stratum 0} resolve-and-deliver-no-matching-adapter-test
   (testing "resolve-and-deliver! returns delivered?=false when no adapter matches vendor"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -106,7 +65,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: no adapters at all
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-no-adapters-test
+(deftest ^{:stratum 0} resolve-and-deliver-no-adapters-test
   (testing "resolve-and-deliver! works with zero adapters (delivered?=false)"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -128,7 +87,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: nonexistent decision-id
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-nonexistent-decision-test
+(deftest ^{:stratum 0} resolve-and-deliver-nonexistent-decision-test
   (testing "resolve-and-deliver! returns nil for a nonexistent decision-id"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -142,7 +101,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: with a string comment
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-with-comment-test
+(deftest ^{:stratum 0} resolve-and-deliver-with-comment-test
   (testing "resolve-and-deliver! passes comment through to resolved decision"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -167,7 +126,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: adapter returns delivered?=false
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-adapter-returns-not-delivered-test
+(deftest ^{:stratum 0} resolve-and-deliver-adapter-returns-not-delivered-test
   (testing "resolve-and-deliver! surfaces delivered?=false from adapter"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -193,7 +152,7 @@
 ;; ---------------------------------------------------------------------------
 ;; submit-decision-from-agent!: without event-stream (nil)
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} submit-decision-no-event-stream-test
+(deftest ^{:stratum 0} submit-decision-no-event-stream-test
   (testing "submit-decision-from-agent! works fine without event-stream"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -215,7 +174,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: without event-stream (nil)
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-no-event-stream-test
+(deftest ^{:stratum 0} resolve-and-deliver-no-event-stream-test
   (testing "resolve-and-deliver! works fine without event-stream"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -239,7 +198,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Discovery pass: no adapters configured
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} run-discovery-pass-no-adapters-test
+(deftest ^{:stratum 0} run-discovery-pass-no-adapters-test
   (testing "discovery pass with no adapters is a no-op"
     (let [reg (registry/create-registry)
           orch (sut/create-orchestrator
@@ -250,7 +209,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: no agents registered
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} run-poll-pass-no-agents-test
+(deftest ^{:stratum 0} run-poll-pass-no-agents-test
   (testing "poll pass with no agents registered is a no-op"
     (let [reg (registry/create-registry)
           adapter (make-mock-adapter {})
@@ -261,7 +220,7 @@
 ;; ---------------------------------------------------------------------------
 ;; submit then resolve full round-trip with callbacks
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} full-decision-round-trip-callbacks-test
+(deftest ^{:stratum 0} full-decision-round-trip-callbacks-test
   (testing "decision round-trip fires on-decision-created callback"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -293,7 +252,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: adapter returns map without :delivered? key
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-adapter-missing-delivered-key-test
+(deftest ^{:stratum 0} resolve-and-deliver-adapter-missing-delivered-key-test
   (testing "resolve-and-deliver! defaults to delivered?=false when key is missing"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -317,7 +276,7 @@
 ;; ---------------------------------------------------------------------------
 ;; start!/stop!: watchdog key is present after start
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} start-returns-orchestrator-map-with-all-keys-test
+(deftest ^{:stratum 0} start-returns-orchestrator-map-with-all-keys-test
   (testing "start! returns orchestrator with all expected keys including :watchdog"
     (let [orch (sut/create-orchestrator (base-opts))
           started (sut/start! orch)]
@@ -331,7 +290,7 @@
 ;; ---------------------------------------------------------------------------
 ;; submit-decision-from-agent!: decision has correct priority default
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} submit-decision-default-priority-test
+(deftest ^{:stratum 0} submit-decision-default-priority-test
   (testing "submit-decision-from-agent! without priority opts uses default"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -349,7 +308,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Multiple decisions from same agent
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} multiple-decisions-same-agent-test
+(deftest ^{:stratum 0} multiple-decisions-same-agent-test
   (testing "an agent can submit multiple decisions (second while already blocked)"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -375,7 +334,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: adapter returns nil for some agents, status for others
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} run-poll-pass-mixed-nil-and-status-test
+(deftest ^{:stratum 0} run-poll-pass-mixed-nil-and-status-test
   (testing "poll handles mix of nil and valid status from adapter"
     (let [reg (registry/create-registry)
           _ (registry/register-agent! reg
@@ -400,7 +359,7 @@
 ;; ---------------------------------------------------------------------------
 ;; stop!: returns the orchestrator
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} stop-returns-orchestrator-test
+(deftest ^{:stratum 0} stop-returns-orchestrator-test
   (testing "stop! returns the orchestrator map"
     (let [orch (sut/create-orchestrator (base-opts))
           started (sut/start! orch)
@@ -412,7 +371,7 @@
 ;; ---------------------------------------------------------------------------
 ;; resolve-and-deliver!: emits decision-resolved event
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} resolve-and-deliver-emits-decision-resolved-event-test
+(deftest ^{:stratum 0} resolve-and-deliver-emits-decision-resolved-event-test
   (testing "resolve-and-deliver! emits :control-plane/decision-resolved event"
     (let [reg (registry/create-registry)
           dm (dq/create-decision-manager)
@@ -443,7 +402,7 @@
 ;; ---------------------------------------------------------------------------
 ;; Poll pass: uses :status key from status-update (not :agent/status)
 ;; ---------------------------------------------------------------------------
-(deftest ^{:stratum 1} run-poll-pass-uses-status-key-test
+(deftest ^{:stratum 0} run-poll-pass-uses-status-key-test
   (testing "poll pass extracts new-status from :status key in status-update"
     (let [reg (registry/create-registry)
           es (stream/create-event-stream {:sinks []})
