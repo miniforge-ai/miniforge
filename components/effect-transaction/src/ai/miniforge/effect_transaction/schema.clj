@@ -75,6 +75,12 @@
    [:effect/envelope-id {:optional true} [:maybe :uuid]]
    [:effect/proposal [:map-of :keyword any?]]
    [:effect/state (into [:enum] states)]
+   ;; Whether authority was CHECKED for this effect. `:unenforced` is
+   ;; the honest record that it was not — nothing in production issues
+   ;; grants yet (see work/ariadne-grant-issuance.spec.edn), so an
+   ;; effect performed today carries no authority claim. Recording that
+   ;; in the data beats a silent nil-skip that later reads as approval.
+   [:effect/authority {:optional true} [:enum :granted :unenforced]]
    [:effect/observed {:optional true} any?]
    [:effect/matched? {:optional true} [:maybe :boolean]]
    [:effect/failure {:optional true} [:maybe :string]]
