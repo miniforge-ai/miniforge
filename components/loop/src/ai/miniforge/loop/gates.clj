@@ -151,7 +151,8 @@
                  (seq content))
           (do
             #_{:clj-kondo/ignore [:unused-value]}
-            (read-string content)  ; Parse to check syntax; result intentionally unused
+            (binding [*read-eval* false]
+              (read-string content))  ; Parse to check syntax; result intentionally unused
             (pass-result id :syntax
                          :duration-ms (clock/elapsed-since start)))
           ;; For non-code artifacts, pass by default
