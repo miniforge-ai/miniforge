@@ -15,25 +15,35 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.cursor-store.interface-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.java.io :as io]
+            [clojure.test :refer [deftest is testing]]
+            [ai.miniforge.connector-http.interface :as connector-http]
             [ai.miniforge.cursor-store.interface :as sut]
             [ai.miniforge.logging.interface :as log])
-  (:import [java.time Instant]))
+  (:import [java.time Instant]
+           [java.util Date]))
 
-(defn- tmp-pipeline-path []
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} tmp-pipeline-path []
   (str (System/getProperty "java.io.tmpdir")
        "/cursor-store-test-"
        (random-uuid)
        "/pipelines/pipeline.edn"))
 
-(def ^:private logger (log/create-logger {:min-level :debug :output :human}))
+(def ^{:stratum 0} ^:private logger (log/create-logger {:min-level :debug :output :human}))
+
+(def ^{:stratum 0} ^:private watermark-iso "2024-01-15T10:00:00Z")
+
+(defn- ^{:stratum 0} record-timestamp [record]
+  (or (:updated_at record) (:created_at record)))
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; ---------------------------------------------------------------------------
 ;; load-cursors
-
-(deftest load-cursors-first-run-test
+(deftest ^{:stratum 1} load-cursors-first-run-test
   (testing "Returns empty map when no cursor file exists yet"
     (let [result (sut/load-cursors logger (tmp-pipeline-path))]
       (is (:success? result))
@@ -41,8 +51,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; round-trip
-
-(deftest round-trip-test
+(deftest ^{:stratum 1} round-trip-test
   (testing "save then load preserves cursor data with stable key"
     (let [path      (tmp-pipeline-path)
           stage-id  (random-uuid)
@@ -67,7 +76,7 @@
           (is (string? (:cursor/updated-at loaded)))
           (is (= (str instant) (:cursor/updated-at loaded))))))))
 
-(deftest multi-stage-round-trip-test
+(deftest ^{:stratum 1} multi-stage-round-trip-test
   (testing "Multiple stages produce multiple entries keyed by connector/schema"
     (let [path  (tmp-pipeline-path)
           id-1  (random-uuid)
@@ -86,10 +95,32 @@
         (is (= 10 (get-in loaded [[:conn/gitlab "issues"] :cursor :cursor/value])))
         (is (= 5 (get-in loaded [[:conn/gitlab "merge-requests"] :cursor :cursor/value])))))))
 
+(defn- ^{:stratum 1} persisted-cursor
+  "Save `cursor-value` as a timestamp watermark, then load it back.
+
+   Both I/O results are asserted here. `save-cursors` and
+   `load-cursors` report failure as a `schema/failure` map rather than
+   throwing, so an unchecked write or read error would reach the
+   caller as a nil cursor and fail some later assertion with a
+   misleading `(not (string? nil))` instead of naming the real
+   problem."
+  [cursor-value]
+  (let [path   (tmp-pipeline-path)
+        saved  (sut/save-cursors
+                logger path
+                {(random-uuid) {:stage/connector-ref :conn/gitlab
+                                :stage/schema-name   "issues"
+                                :cursor {:cursor/type  :timestamp-watermark
+                                         :cursor/value cursor-value}
+                                :cursor/updated-at (Instant/now)}})
+        loaded (sut/load-cursors logger path)]
+    (is (:success? saved) (str "save-cursors failed: " (:error saved)))
+    (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
+    (-> loaded :cursors (get [:conn/gitlab "issues"]) :cursor)))
+
 ;; ---------------------------------------------------------------------------
 ;; normalization
-
-(deftest normalization-drops-incomplete-entries-test
+(deftest ^{:stratum 1} normalization-drops-incomplete-entries-test
   (testing "Entries without connector-ref or schema-name are excluded"
     (let [path     (tmp-pipeline-path)
           good-id  (random-uuid)
@@ -108,8 +139,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; idempotency — second save overwrites first
-
-(deftest overwrite-test
+(deftest ^{:stratum 1} overwrite-test
   (testing "Saving again overwrites prior cursor with updated value"
     (let [path     (tmp-pipeline-path)
           conn-ref :conn/gitlab
@@ -124,3 +154,64 @@
       (sut/save-cursors logger path run2)
       (let [loaded (:cursors (sut/load-cursors logger path))]
         (is (= 20 (get-in loaded [[conn-ref schema] :cursor :cursor/value])))))))
+
+(deftest ^{:stratum 1} inst-tagged-cursor-file-loads-as-string-test
+  (testing "a cursor file containing #inst still yields a filterable watermark"
+    ;; `#inst` is the obvious literal for a human editing a cursor file by
+    ;; hand, and EDN's reader turns it into a java.util.Date — which
+    ;; parse-timestamp rejects. The read path normalizes, so the store's
+    ;; guarantee holds regardless of who wrote the file.
+    (let [path (tmp-pipeline-path)
+          file (io/file (.getParentFile (io/file path))
+                        ".cursors" (.getName (io/file path)))]
+      (io/make-parents file)
+      (spit file (pr-str {[:conn/gitlab "issues"]
+                          {:stage/connector-ref :conn/gitlab
+                           :stage/schema-name   "issues"
+                           :cursor {:cursor/type  :timestamp-watermark
+                                    :cursor/value (Date/from
+                                                   (Instant/parse watermark-iso))}}}))
+      (let [loaded (sut/load-cursors logger path)
+            cursor (get-in (:cursors loaded) [[:conn/gitlab "issues"] :cursor])]
+        (is (:success? loaded) (str "load-cursors failed: " (:error loaded)))
+        (is (= watermark-iso (:cursor/value cursor)))
+        (is (false? (connector-http/after-cursor?
+                     record-timestamp cursor {:updated_at "2024-01-14T00:00:00Z"})))
+        (is (true? (connector-http/after-cursor?
+                    record-timestamp cursor {:updated_at "2024-01-16T00:00:00Z"})))))))
+
+;------------------------------------------------------------------------------ Layer 2
+
+;; ---------------------------------------------------------------------------
+;; instant normalization — a persisted watermark the consumer can honour
+;;
+;; `clojure.core/inst?` admits java.util.Date as readily as
+;; java.time.Instant, and a Date has a print form (#inst) that survives
+;; the EDN round-trip intact — so a Date-valued watermark used to reach
+;; disk and come back unchanged with nothing throwing anywhere. The
+;; damage was downstream and silent: connector-http's parse-timestamp
+;; requires a string, returned nil for the Date, and after-cursor? fell
+;; through to its no-watermark branch — admitting EVERY record and
+;; re-ingesting the whole source on every run.
+;;
+;; Asserting the serialized shape alone would not have caught that. The
+;; filtering assertions below are the ones that fail on the unfixed
+;; store.
+(deftest ^{:stratum 2} date-watermark-round-trip-test
+  (testing "a java.util.Date watermark persists as an ISO-8601 string"
+    (let [cursor (persisted-cursor (Date/from (Instant/parse watermark-iso)))]
+      (is (string? (:cursor/value cursor)))
+      (is (= watermark-iso (:cursor/value cursor)))))
+
+  (testing "the loaded cursor actually filters — records at or before it are excluded"
+    (let [cursor (persisted-cursor (Date/from (Instant/parse watermark-iso)))]
+      (is (false? (connector-http/after-cursor?
+                   record-timestamp cursor {:updated_at "2024-01-14T00:00:00Z"})))
+      (is (false? (connector-http/after-cursor?
+                   record-timestamp cursor {:updated_at watermark-iso})))
+      (is (true? (connector-http/after-cursor?
+                  record-timestamp cursor {:updated_at "2024-01-16T00:00:00Z"})))))
+
+  (testing "an Instant watermark is indistinguishable once persisted"
+    (is (= (:cursor/value (persisted-cursor (Instant/parse watermark-iso)))
+           (:cursor/value (persisted-cursor (Date/from (Instant/parse watermark-iso))))))))

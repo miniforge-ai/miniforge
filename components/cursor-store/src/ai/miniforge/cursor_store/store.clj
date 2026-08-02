@@ -3,22 +3,21 @@
 
    Stratification (intra-namespace):
    Layer 0 — no in-ns deps: cursor-file, normalize-for-storage,
-             stringify-instants, read-edn.
-   Layer 1 — write-edn (composes Layer 0's stringify-instants).
-   Layer 2 — public I/O (save-cursors, load-cursors). Both at L2 to
+             read-edn, write-edn.
+   Layer 1 — public I/O (save-cursors, load-cursors). Both at L1 to
              keep the persistence API at one stratum."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
-            [clojure.walk :as walk]
+            [ai.miniforge.coerce.interface :as coerce]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.schema.interface :as schema])
-  (:import [java.io StringWriter]
-           [java.time Instant]))
+  (:import [java.io StringWriter]))
 
-;;------------------------------------------------------------------------------ Layer 0 — pure helpers
+;------------------------------------------------------------------------------ Layer 0
 
-(defn- cursor-file
+;; Pure helpers.
+(defn- ^{:stratum 0} cursor-file
   "Derive cursor EDN file from a pipeline file path.
    <pipeline-dir>/.cursors/<pipeline-filename>"
   [pipeline-path]
@@ -26,7 +25,7 @@
         dir (or (.getParentFile f) (io/file "."))]
     (io/file dir ".cursors" (.getName f))))
 
-(defn- normalize-for-storage
+(defn- ^{:stratum 0} normalize-for-storage
   "Re-key {stage-uuid → cursor-entry} to {[connector-ref schema-name] → cursor-entry}.
    Entries missing connector-ref or schema-name are dropped with a warning."
   [logger cursor-map]
@@ -44,31 +43,42 @@
    {}
    cursor-map))
 
-(defn- stringify-instants
-  "Convert all java.time.Instant values to ISO-8601 strings.
-   Clojure's pprint emits #object[java.time.Instant ...] which is not valid EDN;
-   storing as a plain string keeps the file fully EDN-readable.
-   :cursor/updated-at is audit metadata — it is not used in cursor lookup logic."
-  [v]
-  (walk/postwalk (fn [x] (if (instance? Instant x) (str x) x)) v))
+(defn- ^{:stratum 0} read-edn
+  "Parse an EDN string, normalizing instants exactly as the write side
+   does.
 
-(defn- read-edn
-  "Parse an EDN string."
+   EDN's `#inst` reader produces a `java.util.Date`, so a cursor file
+   containing `#inst \"…\"` loads a Date no matter how careful the
+   writer was — a hand-edited file is enough, and `#inst` is the
+   obvious thing for a human to type. Reading through the same
+   normalizer makes the store's guarantee a property of the store
+   rather than of whoever last wrote the file: a timestamp read out of
+   here is an ISO-8601 string."
   [s]
-  (edn/read-string s))
+  (coerce/stringify-instants (edn/read-string s)))
 
-;;------------------------------------------------------------------------------ Layer 1 — composes Layer 0
+(defn- ^{:stratum 0} write-edn
+  "Render a value to a pretty-printed EDN string, with every instant
+   normalized to an ISO-8601 string first.
 
-(defn- write-edn
-  "Render a value to a pretty-printed EDN string."
+   Both halves of that matter. pprint emits
+   `#object[java.time.Instant ...]` for an Instant, which is not
+   readable EDN at all. A `java.util.Date` is the quieter problem: it
+   pprints as `#inst` and reads back as a Date, so the file is valid
+   and nothing fails — but `connector-http`'s `parse-timestamp`
+   requires a string, returns nil for a Date, and `after-cursor?`
+   then falls through to its no-watermark branch and re-ingests
+   every record. Normalizing by type is what keeps a persisted
+   cursor readable by the connector that has to honour it."
   [v]
   (let [sw (StringWriter.)]
-    (pp/pprint (stringify-instants v) sw)
+    (pp/pprint (coerce/stringify-instants v) sw)
     (str sw)))
 
-;;------------------------------------------------------------------------------ Layer 2 — public I/O
+;------------------------------------------------------------------------------ Layer 1
 
-(defn save-cursors
+;; Public I/O.
+(defn ^{:stratum 1} save-cursors
   "Persist connector cursors to <pipeline-dir>/.cursors/<pipeline-filename>.
    cursor-map is the raw {stage-uuid → cursor-entry} map from
    :pipeline-run/connector-cursors. Returns schema/success or schema/failure."
@@ -96,7 +106,7 @@
                     :data {:path pipeline-path :error (.getMessage e)}}))
       (schema/failure :cursors (.getMessage e)))))
 
-(defn load-cursors
+(defn ^{:stratum 1} load-cursors
   "Load persisted cursors for a pipeline. Returns schema/success with
    :cursors key (map keyed by [connector-ref schema-name]).
    Returns schema/success with {} on first run (no file yet).
