@@ -360,6 +360,20 @@
    scan and the no-artifact-found diagnostic."
   [:plan :implement :verify :review :release])
 
+(def ^{:stratum 0} ^:private capsule-output-boundary
+  "Sentinel line separating the concatenated session-output files in the
+   single `read-capsule-session-outputs` executor round-trip.
+
+   Collision assumption: the first two segments (context-misses.edn,
+   context-reads.edn) are written by our own MCP server and contain
+   record maps (paths, keywords, timestamps), so this sentinel is not
+   expected to occur in them — a pathological workspace path containing
+   it would corrupt the split. The artifact segment CAN contain arbitrary
+   agent-authored strings, which is why it is deliberately placed LAST in
+   the cat chain: the bounded `str/split` keeps any embedded occurrence
+   inside the final segment intact."
+  "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
+
 (defn- ^{:stratum 0} read-role-entry
   "Read the worktree artifact for `role` via `read-role-artifact` and
    return a `[role artifact]` map entry, or nil if the role file was
@@ -906,6 +920,62 @@
                            :warn/capsule-worktree-artifact-parse
                            path)))))
 
+(defn ^{:stratum 3} read-capsule-session-outputs
+  "Read artifact.edn, context-misses.edn, and context-reads.edn from a
+   capsule session in a SINGLE executor round-trip.
+
+   The three files are concatenated by one `cat` chain with
+   `capsule-output-boundary` sentinel lines between them, then split back
+   apart here. This is how capsule sessions surface `:context-misses` and
+   `:context-reads` (Codex SPEC §7.4.2 recorded flows) without adding
+   per-file executor round-trips — the batched read costs the same one
+   exec call the artifact read already paid.
+
+   Missing files contribute empty segments (`cat` failures are sent to
+   /dev/null and the `;` chain continues), which parse to nil. Malformed
+   segments emit the same parse WARNs as the host-mode readers.
+
+   The artifact segment is deliberately LAST in the chain: its content is
+   agent-authored and may contain arbitrary strings, and the bounded
+   split keeps an embedded boundary occurrence inside that final segment
+   rather than corrupting the earlier server-written segments — see
+   `capsule-output-boundary` for the collision assumption.
+
+   Returns: {:artifact <map-or-nil>
+             :context-misses <vector-or-nil>
+             :context-reads <vector-or-nil>}"
+  [session]
+  (let [dir         (:dir session)
+        misses-path (str dir "/context-misses.edn")
+        reads-path  (str dir "/context-reads.edn")
+        sep         (str "; echo; echo " capsule-output-boundary "; ")
+        cmd         (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
+                         sep
+                         "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
+                         sep
+                         "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
+        result      ((:exec! session) (:executor session) (:environment-id session)
+                     cmd {:workdir (:workdir session)})
+        stdout      (get-in result [:data :stdout] "")
+        ;; Full-line anchor: the echoed sentinel always stands alone on its
+        ;; own line, so a boundary substring embedded mid-line in EDN
+        ;; content never splits a segment.
+        boundary-re (re-pattern (str "(?m)^"
+                                     (java.util.regex.Pattern/quote capsule-output-boundary)
+                                     "$"))
+        [misses-part reads-part artifact-part] (mapv str/trim (str/split stdout boundary-re 3))]
+    {:artifact       (when (seq artifact-part)
+                       (parse-edn-content artifact-part
+                                          (comp parse-uuid-strings edn/read-string)
+                                          :warn/artifact-parse
+                                          (:artifact-path session)))
+     :context-misses (when (seq misses-part)
+                       (parse-edn-content misses-part edn/read-string
+                                          :warn/context-misses-parse misses-path))
+     :context-reads  (when (seq reads-part)
+                       (parse-edn-content reads-part edn/read-string
+                                          :warn/context-reads-parse reads-path))}))
+
 (defmacro ^{:stratum 3} with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
    Like with-artifact-session but session files live inside the task capsule.
@@ -1017,11 +1087,10 @@
    'did this agent consult its pinned codex landings' an answerable
    question (Codex SPEC §7.4.2).
 
-   HOST MODE ONLY, same as `read-context-misses`: in capsule mode the
-   server writes the file inside the container and surfacing it needs an
-   executor round-trip (the same trade-off already accepted for capsule
-   worktree artifacts). Until that lands, capsule sessions return nil here
-   — absent data, not evidence the agent read nothing.
+   Reads the host-local session directory, same as `read-context-misses`.
+   Capsule sessions surface the same file through
+   `read-capsule-session-outputs`, which batches it into the artifact
+   read's single executor round-trip.
 
    Returns: vector of read records, or nil if no reads file."
   [session]
@@ -1063,6 +1132,16 @@
         (run session cleanup-session!)))))
 
 ;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} read-host-session-outputs
+  "Read artifact + context-misses + context-reads from a host session's
+   local directory. Host-mode counterpart of `read-capsule-session-outputs`
+   — same return shape, plain filesystem reads instead of an executor
+   round-trip."
+  [session]
+  {:artifact       (read-artifact session)
+   :context-misses (read-context-misses session)
+   :context-reads  (read-context-reads session)})
 
 (defmacro ^{:stratum 5} with-artifact-session
   "Execute body with an artifact session, returning the artifact if found.
@@ -1109,6 +1188,12 @@
   "Execute body-fn with session, read artifacts, and clean up.
    Shared lifecycle for both host and capsule sessions.
 
+   `read-outputs-fn` is the mode-specific session-outputs reader
+   (`read-host-session-outputs` or `read-capsule-session-outputs`) and
+   must return {:artifact :context-misses :context-reads}. Both modes
+   surface all three — the capsule reader batches them into one executor
+   round-trip rather than dropping the context files.
+
    `:worktree-artifacts` is a map from role keyword to parsed artifact,
    read from <workdir>/.miniforge/<role>.edn. Container-promotion pattern —
    agents write their artifact into the worktree and the runtime picks it
@@ -1138,7 +1223,7 @@
    is the machine-readable signal that no artifact was produced. Callers
    that key on phase output MUST treat this combination as a workflow fault
    - no artifact means the implementing agent did not deliver work product."
-  [session body-fn read-artifact-fn cleanup-fn mode]
+  [session body-fn read-outputs-fn cleanup-fn mode]
   (try
     (let [result              (body-fn session)
           workdir             (:workdir session)
@@ -1146,7 +1231,7 @@
           worktree-artifacts  (if (:explicit-workdir? session)
                                 (collect-worktree-artifacts read-role-artifact workdir)
                                 {})
-          artifact            (read-artifact-fn session)
+          {:keys [artifact context-misses context-reads]} (read-outputs-fn session)
           ;; Track whether any .miniforge/<role>.edn files existed on disk,
           ;; independent of parse success. A file that exists but contains
           ;; malformed EDN returns nil from read-role-artifact (and emits
@@ -1190,8 +1275,8 @@
       {:llm-result           result
        :artifact             artifact
        :worktree-artifacts   worktree-artifacts
-       :context-misses       (when (= :host mode) (read-context-misses session))
-       :context-reads        (when (= :host mode) (read-context-reads session))
+       :context-misses       context-misses
+       :context-reads        context-reads
        :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode         mode})
     (finally
@@ -1212,7 +1297,8 @@
    - body-fn - (fn [session] ...) that receives the session and returns LLM result
 
    Returns normalized map:
-   {:llm-result :artifact :context-misses :pre-session-snapshot :session-mode}"
+   {:llm-result :artifact :worktree-artifacts :context-misses :context-reads
+    :pre-session-snapshot :session-mode}"
   [context body-fn]
     (if (governed? context)
       (let [executor (:execution/executor context)
@@ -1221,14 +1307,14 @@
             exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
             session  (-> (create-capsule-session! executor env-id workdir exec!)
                        write-capsule-mcp-config!)]
-      (run-session session body-fn read-capsule-artifact cleanup-capsule-session! :capsule))
+      (run-session session body-fn read-capsule-session-outputs cleanup-capsule-session! :capsule))
     (let [workdir (:execution/worktree-path context)
           session (-> (if workdir
                         (create-session! {:workdir workdir
                                           :source-root (:source-root context)})
                         (create-session! {:source-root (:source-root context)}))
                       write-mcp-config!)]
-      (run-session session body-fn read-artifact cleanup-session! :host))))
+      (run-session session body-fn read-host-session-outputs cleanup-session! :host))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
