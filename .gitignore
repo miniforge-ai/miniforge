@@ -71,3 +71,9 @@ work/*-local.spec.edn
 work/*-wip.edn
 .miniforge/
 .worktrees/
+
+# ETL cross-run cursor watermarks. cursor-store writes these next to the
+# pipeline EDN they belong to (<pipeline-dir>/.cursors/<pipeline>.edn), which
+# for a shipped pack is a tracked path — the watermark is per-checkout runtime
+# state and must never be committed.
+**/.cursors/

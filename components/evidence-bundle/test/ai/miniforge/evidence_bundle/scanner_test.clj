@@ -15,13 +15,14 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.scanner-test
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.scanner :as scanner]))
 
-(deftest scan-artifact-reports-finding-types-only
+;------------------------------------------------------------------------------ Layer 0
+
+(deftest ^{:stratum 0} scan-artifact-reports-finding-types-only
   (testing "sensitive values are detected but not copied into evidence"
     (let [result (scanner/scan-artifact
                   {:evidence/intent
@@ -32,13 +33,13 @@
               :compliance/sensitive-findings [{:finding/type :email}]}
              metadata)))))
 
-(deftest compliance-metadata-is-empty-without-findings
+(deftest ^{:stratum 0} compliance-metadata-is-empty-without-findings
   (testing "absence of findings does not overwrite caller-provided compliance flags"
     (is (= {} (scanner/compliance-metadata (scanner/scan-artifact
                                             {:evidence/intent
                                              {:intent/description "No sensitive data"}}))))))
 
-(deftest compliance-metadata-keeps-secrets-separate-from-pii
+(deftest ^{:stratum 0} compliance-metadata-keeps-secrets-separate-from-pii
   (testing "secret findings do not imply personal information"
     (let [result (scanner/scan-artifact
                   {:evidence/intent

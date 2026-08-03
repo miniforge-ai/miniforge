@@ -21,6 +21,7 @@
         ai.miniforge/algorithms {:local/root "../../components/algorithms"}
         ai.miniforge/anomaly {:local/root "../../components/anomaly"}
         ai.miniforge/clock {:local/root "../../components/clock"}
+        ai.miniforge/codex {:local/root "../../components/codex"}
         ai.miniforge/coerce {:local/root "../../components/coerce"}
         ai.miniforge/content-hash {:local/root "../../components/content-hash"}
         ai.miniforge/logging {:local/root "../../components/logging"}

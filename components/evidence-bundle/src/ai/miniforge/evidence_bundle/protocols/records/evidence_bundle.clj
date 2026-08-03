@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.protocols.records.evidence-bundle
   "Record implementations for EvidenceBundle protocol."
   (:require
@@ -25,7 +24,9 @@
    [ai.miniforge.evidence-bundle.protocols.impl.provenance-tracer :as prov]
    [ai.miniforge.logging.interface :as log]))
 
-(defrecord EvidenceBundleManager [bundles artifact-store logger]
+;------------------------------------------------------------------------------ Layer 0
+
+(defrecord ^{:stratum 0} EvidenceBundleManager [bundles artifact-store logger]
   p/EvidenceBundle
 
   (create-bundle [_this workflow-id opts]
@@ -72,7 +73,9 @@
   (analyze-kubernetes-manifest [_this manifest-artifact]
     (sem-val/analyze-kubernetes-manifest-impl manifest-artifact)))
 
-(defn create-evidence-bundle-manager
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-evidence-bundle-manager
   "Create an EvidenceBundleManager instance.
    Options:
    - :artifact-store - Artifact store instance (required)

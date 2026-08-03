@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.coerce.interface
   "Tiny safe-coercion helpers shared across the OSS components.
 
@@ -25,12 +24,22 @@
 
    pattern that grew up across compliance-scanner, pr-sync, tui-views,
    web-dashboard, workflow-security-compliance, policy-pack,
-   connector-sarif, and the cli base.")
+   connector-sarif, and the cli base — and the duplicated
+   Instant-only instant walker that grew up across cursor-store,
+   workflow's checkpoint-store, and the etl base.
+
+   NOTE: `safe-parse-int` / `-long` / `-double` are implemented here
+   rather than passed through to an implementation namespace, which
+   predates this file's current form and does not match the
+   interface.clj rule in `languages/clojure.mdc`. New additions do not
+   follow them — see `stringify-instants` below. Migrating the three
+   parsers is left to its own change."
+  (:require [ai.miniforge.coerce.instant :as instant]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; No in-namespace dependencies.
 
-(defn safe-parse-int
+;; No in-namespace dependencies.
+(defn ^{:stratum 0} safe-parse-int
   "Parse `s` as a 32-bit integer. Returns `default` when `s` is nil,
    non-string, non-numeric, or out of range. The default `default` is
    `nil` so callers can pattern-match on the parsed-or-not distinction;
@@ -47,7 +56,7 @@
      (try (Integer/parseInt ^String s)
           (catch NumberFormatException _ default)))))
 
-(defn safe-parse-long
+(defn ^{:stratum 0} safe-parse-long
   "Parse `s` as a 64-bit integer. Returns `default` when `s` is nil,
    non-string, non-numeric, or out of range. See [[safe-parse-int]] for
    the rationale on the up-front nil check and narrowed catch."
@@ -58,7 +67,7 @@
      (try (Long/parseLong ^String s)
           (catch NumberFormatException _ default)))))
 
-(defn safe-parse-double
+(defn ^{:stratum 0} safe-parse-double
   "Parse `s` as a double. Returns `default` when `s` is nil, non-string,
    or non-numeric. See [[safe-parse-int]] for the rationale on the
    up-front nil check and narrowed catch."
@@ -68,3 +77,16 @@
      default
      (try (Double/parseDouble ^String s)
           (catch NumberFormatException _ default)))))
+
+(defn ^{:stratum 0} stringify-instants
+  "Walk `v`, replacing every instant with its ISO-8601 string.
+   Non-instant values are returned unchanged.
+
+   Normalizes by ACTUAL type. `clojure.core/inst?` admits BOTH
+   `java.time.Instant` and `java.util.Date`, so a walker that tests
+   only `(instance? Instant x)` lets a Date past untouched — and a
+   Date is the harder failure to notice, because its `#inst` print
+   form survives an EDN round-trip without anything throwing. Use
+   this at any boundary where instants are serialized."
+  [v]
+  (instant/stringify-instants v))

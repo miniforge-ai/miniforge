@@ -1,5 +1,10 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/schema   {:local/root "../schema"}
-        ai.miniforge/logging  {:local/root "../logging"}}
+        ai.miniforge/logging  {:local/root "../logging"}
+        ai.miniforge/coerce   {:local/root "../coerce"}}
  :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}
+                  ;; Test-only: the round-trip test asserts that what this
+                  ;; store persists is a value connector-http can actually
+                  ;; filter with. Nothing in src depends on connector-http.
+                  :extra-deps {ai.miniforge/connector-http
+                               {:local/root "../connector-http"}}}}}

@@ -15,22 +15,22 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.chain-evidence-test
   "Tests for chain-level evidence aggregation."
   (:require
    [clojure.test :refer [deftest is testing]]
    [ai.miniforge.evidence-bundle.interface :as evidence]))
 
-;------------------------------------------------------------------------------ Test Data
+;------------------------------------------------------------------------------ Layer 0
 
-(def test-chain-def
+;------------------------------------------------------------------------------ Test Data
+(def ^{:stratum 0} test-chain-def
   {:chain/id :test-chain
    :chain/version "1.0.0"
    :chain/steps [{:step/id :plan :step/workflow-id :planning}
                  {:step/id :implement :step/workflow-id :implementation}]})
 
-(def test-chain-result
+(def ^{:stratum 0} test-chain-result
   {:chain/id :test-chain
    :chain/status :completed
    :chain/duration-ms 5000
@@ -43,7 +43,7 @@
                          :step/status :completed
                          :step/output nil}]})
 
-(def test-failed-chain-result
+(def ^{:stratum 0} test-failed-chain-result
   {:chain/id :test-chain
    :chain/status :failed
    :chain/duration-ms 2000
@@ -56,37 +56,8 @@
                          :step/status :failed
                          :step/output nil}]})
 
-;------------------------------------------------------------------------------ create-chain-evidence Tests
-
-(deftest create-chain-evidence-success-test
-  (testing "Creates evidence with all required fields for successful chain"
-    (let [ev (evidence/create-chain-evidence test-chain-def test-chain-result)]
-      (is (uuid? (:chain-evidence/id ev)))
-      (is (= :test-chain (:chain-evidence/chain-id ev)))
-      (is (= "1.0.0" (:chain-evidence/chain-version ev)))
-      (is (= 2 (:chain-evidence/step-count ev)))
-      (is (= :completed (:chain-evidence/status ev)))
-      (is (= 5000 (:chain-evidence/duration-ms ev)))
-      (is (= 2 (count (:chain-evidence/step-summaries ev))))
-      (is (inst? (:chain-evidence/created-at ev))))))
-
-(deftest create-chain-evidence-failed-test
-  (testing "Creates evidence with :failed status for failed chain"
-    (let [ev (evidence/create-chain-evidence test-chain-def test-failed-chain-result)]
-      (is (= :failed (:chain-evidence/status ev)))
-      (is (= 2000 (:chain-evidence/duration-ms ev))))))
-
-(deftest create-chain-evidence-step-bundles-test
-  (testing "Includes step-bundles when provided in opts"
-    (let [bundle-ids [#uuid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-                      #uuid "11111111-2222-3333-4444-555555555555"]
-          ev (evidence/create-chain-evidence test-chain-def test-chain-result
-                                             {:step-bundles bundle-ids})]
-      (is (= bundle-ids (:chain-evidence/step-bundles ev))))))
-
 ;------------------------------------------------------------------------------ summarize-step Tests
-
-(deftest summarize-step-with-output-test
+(deftest ^{:stratum 0} summarize-step-with-output-test
   (testing "Step with output has :step/has-output? true"
     (let [step-result {:step/id :plan
                        :step/workflow-id :planning
@@ -99,7 +70,7 @@
       (is (= :completed (:step/status summary)))
       (is (true? (:step/has-output? summary))))))
 
-(deftest summarize-step-without-output-test
+(deftest ^{:stratum 0} summarize-step-without-output-test
   (testing "Step without output has :step/has-output? false"
     (let [step-result {:step/id :implement
                        :step/workflow-id :implementation
@@ -109,8 +80,7 @@
       (is (false? (:step/has-output? summary))))))
 
 ;------------------------------------------------------------------------------ aggregate-metrics Tests
-
-(deftest aggregate-metrics-mixed-test
+(deftest ^{:stratum 0} aggregate-metrics-mixed-test
   (testing "Correctly counts completed, failed, and output steps"
     (let [step-results [{:step/id :a :step/status :completed :step/output {:x 1}}
                         {:step/id :b :step/status :completed :step/output nil}
@@ -120,3 +90,32 @@
       (is (= 2 (:completed-steps metrics)))
       (is (= 1 (:failed-steps metrics)))
       (is (= 1 (:steps-with-output metrics))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;------------------------------------------------------------------------------ create-chain-evidence Tests
+(deftest ^{:stratum 1} create-chain-evidence-success-test
+  (testing "Creates evidence with all required fields for successful chain"
+    (let [ev (evidence/create-chain-evidence test-chain-def test-chain-result)]
+      (is (uuid? (:chain-evidence/id ev)))
+      (is (= :test-chain (:chain-evidence/chain-id ev)))
+      (is (= "1.0.0" (:chain-evidence/chain-version ev)))
+      (is (= 2 (:chain-evidence/step-count ev)))
+      (is (= :completed (:chain-evidence/status ev)))
+      (is (= 5000 (:chain-evidence/duration-ms ev)))
+      (is (= 2 (count (:chain-evidence/step-summaries ev))))
+      (is (inst? (:chain-evidence/created-at ev))))))
+
+(deftest ^{:stratum 1} create-chain-evidence-failed-test
+  (testing "Creates evidence with :failed status for failed chain"
+    (let [ev (evidence/create-chain-evidence test-chain-def test-failed-chain-result)]
+      (is (= :failed (:chain-evidence/status ev)))
+      (is (= 2000 (:chain-evidence/duration-ms ev))))))
+
+(deftest ^{:stratum 1} create-chain-evidence-step-bundles-test
+  (testing "Includes step-bundles when provided in opts"
+    (let [bundle-ids [#uuid "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+                      #uuid "11111111-2222-3333-4444-555555555555"]
+          ev (evidence/create-chain-evidence test-chain-def test-chain-result
+                                             {:step-bundles bundle-ids})]
+      (is (= bundle-ids (:chain-evidence/step-bundles ev))))))

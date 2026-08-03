@@ -300,7 +300,20 @@
   (testing "a blank :worktree-path is not host-mode (babashka :dir \"\" = cwd)"
     (let [r (core/step-validate-inputs {:worktree-path "  " :create-pr? true})]
       (is (not (:host-mode? r)))
-      (is (core/failed? r)))))
+      (is (core/failed? r))))
+  ;; A java.nio.file.Path — what babashka.fs returns — used to reach
+  ;; clojure.string/blank? and throw ClassCastException on the CharSequence
+  ;; cast, so validation crashed instead of failing. :worktree-path is
+  ;; contractually a String (workspace/core.clj accepts only string?), so a
+  ;; Path is rejected the same way a missing one is.
+  (testing "a non-string :worktree-path fails validation rather than throwing"
+    (let [r (core/step-validate-inputs
+             {:worktree-path (java.nio.file.Path/of "/tmp/wt" (into-array String []))
+              :create-pr? true})]
+      (is (not (:host-mode? r)))
+      (is (core/failed? r))
+      (is (= :missing-worktree-path (:type (:failure r)))
+          "reports the typed missing-worktree-path failure"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 

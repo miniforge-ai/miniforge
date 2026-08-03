@@ -570,6 +570,7 @@
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
    :extra-paths ["bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
+                 "components/codex/src"
                  "components/messages/src"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
@@ -717,6 +718,7 @@
                  "components/context-pack/resources"
                  "bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
+                 "components/codex/src"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/compliance-scanner/src"
