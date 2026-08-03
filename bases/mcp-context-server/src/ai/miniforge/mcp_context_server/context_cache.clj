@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.mcp-context-server.context-cache
   "Read-through context cache for MCP file exploration tools.
 
@@ -32,20 +31,13 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Pure helpers
 
-(def ^:private chars-per-token
+;; Pure helpers
+(def ^{:stratum 0} ^:private chars-per-token
   "Approximate characters per token for estimation."
   4)
 
-(defn estimate-tokens
-  "Estimate token count from a string (~4 chars per token)."
-  [s]
-  (if (string? s)
-    (int (Math/ceil (/ (count s) chars-per-token)))
-    0))
-
-(defn apply-offset-limit
+(defn ^{:stratum 0} apply-offset-limit
   "Apply line-based offset and limit to content string.
    offset is 0-based line index; limit is max lines to return."
   [content offset limit]
@@ -55,7 +47,7 @@
         limited (if limit (take limit sliced) sliced)]
     (str/join "\n" limited)))
 
-(defn glob-matches?
+(defn ^{:stratum 0} glob-matches?
   "Check if a path matches a glob pattern.
    Supports * (single segment) and ** (any depth)."
   [pattern path]
@@ -69,7 +61,7 @@
         regex (re-pattern (str "^" regex-str "$"))]
     (boolean (re-matches regex path))))
 
-(defn grep-file
+(defn ^{:stratum 0} grep-file
   "Search a file's content for a regex pattern.
    Returns vector of {:path :line-number :text} for matching lines."
   [path content pattern-str]
@@ -84,7 +76,7 @@
            vec))
     (catch Exception _e [])))
 
-(defn format-grep-results
+(defn ^{:stratum 0} format-grep-results
   "Format grep results as path:line:text lines."
   [results]
   (->> results
@@ -92,13 +84,153 @@
               (str path ":" line-number ":" text)))
        (str/join "\n")))
 
-;------------------------------------------------------------------------------ Layer 0
-;; Shell fallbacks
+;; Stateful cache operations
+;; Cache atom holding :files (path → content), :mtimes (path → epoch-ms of the
+;; file when its content was cached, for write-invalidation), :misses
+;; (recorded cache misses), and :reads (every context_read resolution, hit or
+;; miss — the recorded-flows half of the Codex SPEC §7.4 blackboard contract:
+;; whether an agent consulted a pinned artifact must be an answerable
+;; question).
+(defonce ^{:stratum 0} cache-state
+  (atom {:files {} :mtimes {} :misses [] :reads []
+         :source-root nil :artifact-dir nil :workdir nil}))
 
-(declare source-root)
-(declare file-mtime)
+(def ^{:stratum 0} ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
 
-(defn shell-grep
+(defn- ^{:stratum 0} read-cache-edn
+  "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
+  [path]
+  (let [f (and path (io/file path))]
+    (when (and f (.exists f))
+      (try (edn/read-string (slurp f))
+           (catch Exception _ nil)))))
+
+;; MCP response helpers
+(defn- ^{:stratum 0} text-response
+  "Wrap a string in the MCP tool response shape."
+  [text]
+  {:content [{:type "text" :text text}]})
+
+(defn- ^{:stratum 0} error-response
+  "Wrap an error message in the MCP tool error shape."
+  [text]
+  {:content [{:type "text" :text text}] :isError true})
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} estimate-tokens
+  "Estimate token count from a string (~4 chars per token)."
+  [s]
+  (if (string? s)
+    (int (Math/ceil (/ (count s) chars-per-token)))
+    0))
+
+(defn ^{:stratum 1} reset-state!
+  "Reset cache state. Intended for test isolation."
+  []
+  (reset! cache-state {:files {} :mtimes {} :misses [] :reads []
+                       :source-root nil :artifact-dir nil :workdir nil}))
+
+(defn ^{:stratum 1} set-workdir!
+  "Set the write target for context_write — the agent's worktree, distinct from
+   `:source-root` (the read reference). Reads resolve against source-root;
+   writes land in the worktree where the run collects the diff. Agent-agnostic:
+   every backend's context server is launched with the same command, so this
+   applies to Claude/Codex/Cursor alike."
+  [workdir]
+  (swap! cache-state assoc :workdir workdir))
+
+(defn- ^{:stratum 1} source-root
+  []
+  (or (:source-root @cache-state) "."))
+
+(defn- ^{:stratum 1} persistent-cache-path
+  "Worktree-resident cross-phase cache file, or nil when there's no
+   source-root. Under .miniforge/ (gitignored) so it rides workspace
+   persistence into containers across phases."
+  [source-root]
+  (when-not (str/blank? source-root)
+    (str source-root "/" persistent-cache-relpath)))
+
+(defn ^{:stratum 1} flush-misses!
+  "Write accumulated cache misses to context-misses.edn in artifact-dir."
+  [artifact-dir]
+  (let [misses (:misses @cache-state)]
+    (when (seq misses)
+      (let [path (str artifact-dir "/context-misses.edn")]
+        (spit path (pr-str misses))
+        (binding [*out* *err*]
+          (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
+
+(defn ^{:stratum 1} flush-reads!
+  "Write every recorded context_read resolution to context-reads.edn in
+   artifact-dir — the recorded flows a §7.4.3 gate condition reads."
+  [artifact-dir]
+  (let [reads (:reads @cache-state)]
+    (when (seq reads)
+      (spit (str artifact-dir "/context-reads.edn") (pr-str reads)))))
+
+;; `handle-submit` (the artifact.edn metadata channel) removed: the artifact is
+;; the worktree/container diff (promotion); the curator derives the summary.
+;; Models ignored the opt-in submit tool anyway. See artifact_session/mcp-tools.
+(defn- ^{:stratum 1} record-miss!
+  "Record a cache miss for meta-loop learning."
+  [tool-name params tokens]
+  (swap! cache-state update :misses conj
+         (merge {:tool tool-name
+                 :tokens tokens
+                 :timestamp (str (java.time.Instant/now))}
+                params)))
+
+(defn- ^{:stratum 1} record-read!
+  "Record every context_read resolution — hit AND miss. `source` is
+   :cache | :filesystem | :refresh | :absent. Misses track what the
+   pre-load lacked; reads answer the different question of what the agent
+   actually consulted (Codex SPEC §7.4.2)."
+  [path source]
+  (swap! cache-state update :reads conj
+         {:path path
+          :source source
+          :timestamp (str (java.time.Instant/now))}))
+
+(defn- ^{:stratum 1} cache-get
+  "Get cached content for a path, or nil if not cached."
+  [path]
+  (get-in @cache-state [:files path]))
+
+(defn- ^{:stratum 1} cached-files
+  "Return the current files map from the cache."
+  []
+  (:files @cache-state))
+
+(defn- ^{:stratum 1} grep-response
+  "Build MCP response from grep results. Returns formatted matches or
+   a no-matches message when empty."
+  [results]
+  (text-response
+    (if (seq results)
+      (format-grep-results results)
+      (msg/t :context/no-grep-matches))))
+
+;; Grep helpers: file selection and fallback
+(defn ^{:stratum 1} filter-cached-files
+  "Select which cached files to search based on path or glob filter.
+   Returns a {path → content} map."
+  [files target-path glob-filter]
+  (cond
+    target-path  (select-keys files [target-path])
+    glob-filter  (into {} (filter (fn [[p _]] (glob-matches? glob-filter p))) files)
+    :else        files))
+
+(defn- ^{:stratum 1} search-cached-files
+  "Grep across a map of {path → content} for a pattern.
+   Returns a flat vector of grep result maps."
+  [files-map pattern-str]
+  (into [] (mapcat (fn [[path content]] (grep-file path content pattern-str))) files-map))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} shell-grep
   "Fall back to ripgrep for files not in cache.
    Returns vector of {:path :line-number :text} or nil."
   [pattern-str path-or-glob]
@@ -119,7 +251,7 @@
              vec)))
     (catch Exception _e nil)))
 
-(defn shell-glob
+(defn ^{:stratum 2} shell-glob
   "Fall back to filesystem glob by walking source-root.
    Returns vector of relative file paths or nil."
   [pattern]
@@ -144,46 +276,38 @@
         matches))
     (catch Exception _e nil)))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Stateful cache operations
-
-;; Cache atom holding :files (path → content), :mtimes (path → epoch-ms of the
-;; file when its content was cached, for write-invalidation), and :misses
-;; (recorded cache misses).
-(defonce cache-state
-  (atom {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil :workdir nil}))
-
-(defn reset-state!
-  "Reset cache state. Intended for test isolation."
-  []
-  (reset! cache-state {:files {} :mtimes {} :misses [] :source-root nil :artifact-dir nil :workdir nil}))
-
-(defn set-workdir!
-  "Set the write target for context_write — the agent's worktree, distinct from
-   `:source-root` (the read reference). Reads resolve against source-root;
-   writes land in the worktree where the run collects the diff. Agent-agnostic:
-   every backend's context server is launched with the same command, so this
-   applies to Claude/Codex/Cursor alike."
-  [workdir]
-  (swap! cache-state assoc :workdir workdir))
-
-(defn- source-root
-  []
-  (or (:source-root @cache-state) "."))
-
-(defn- write-root
+(defn- ^{:stratum 2} write-root
   "Root for context_write: the worktree (`:workdir`) when set, else source-root."
   []
   (or (:workdir @cache-state) (source-root)))
 
-(defn- resolve-source-path
+(defn- ^{:stratum 2} resolve-source-path
   [path]
   (let [f (io/file path)]
     (if (.isAbsolute f)
       (.getPath f)
       (.getPath (io/file (source-root) path)))))
 
-(defn- resolve-write-path
+(defn ^{:stratum 2} save-cache!
+  "Persist the accumulated in-memory cache (pre-populated + read-through
+   additions, with mtimes) to the worktree-resident cross-phase cache file so
+   the NEXT phase's server loads it. No-ops without a source-root or when
+   nothing is cached. Best-effort: a write failure is logged, not thrown."
+  []
+  (let [{:keys [source-root files mtimes]} @cache-state]
+    (when-let [path (and (seq files) (persistent-cache-path source-root))]
+      (try
+        (io/make-parents path)
+        (spit path (pr-str {:files files :mtimes mtimes}))
+        (binding [*out* *err*]
+          (println (msg/t :cache/saved {:count (count files) :path path})))
+        (catch Exception e
+          (binding [*out* *err*]
+            (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} resolve-write-path
   "Resolve a write path against write-root (the worktree)."
   [path]
   (let [f (io/file path)]
@@ -191,25 +315,42 @@
       (.getPath f)
       (.getPath (io/file (write-root) path)))))
 
-(def ^:private persistent-cache-relpath ".miniforge/context-cache.edn")
-
-(defn- persistent-cache-path
-  "Worktree-resident cross-phase cache file, or nil when there's no
-   source-root. Under .miniforge/ (gitignored) so it rides workspace
-   persistence into containers across phases."
-  [source-root]
-  (when-not (str/blank? source-root)
-    (str source-root "/" persistent-cache-relpath)))
-
-(defn- read-cache-edn
-  "Read {:files .. :mtimes ..} from an EDN cache file, or nil on missing/bad."
+(defn- ^{:stratum 3} file-mtime
+  "Last-modified epoch-ms of the resolved source file, or nil if absent."
   [path]
-  (let [f (and path (io/file path))]
-    (when (and f (.exists f))
-      (try (edn/read-string (slurp f))
-           (catch Exception _ nil)))))
+  (let [f (io/file (resolve-source-path path))]
+    (when (.exists f)
+      (.lastModified f))))
 
-(defn load-cache!
+;; Glob helpers
+(defn- ^{:stratum 3} glob-with-union
+  "Match cached paths, union with filesystem glob, record misses for
+   files found only on disk. Returns a sequence of matched paths."
+  [pattern]
+  (let [files         (cached-files)
+        cache-matches (sort (filter #(glob-matches? pattern %) (keys files)))
+        fs-matches    (or (shell-glob pattern) [])
+        cache-set     (set cache-matches)
+        new-from-fs   (remove cache-set fs-matches)]
+    (when (seq new-from-fs)
+      (record-miss! "context_glob"
+                    {:pattern pattern :fs-only-count (count new-from-fs)}
+                    0))
+    (concat cache-matches new-from-fs)))
+
+(defn- ^{:stratum 3} within-write-root?
+  "True when the resolved target canonicalizes to a path inside write-root.
+   Blocks absolute paths and `..` traversal that would let an MCP client
+   overwrite files outside the worktree."
+  [target]
+  (let [root-c   (.getCanonicalPath (io/file (write-root)))
+        target-c (.getCanonicalPath (io/file target))]
+    (or (= target-c root-c)
+        (str/starts-with? target-c (str root-c java.io.File/separator)))))
+
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} load-cache!
   "Load the context cache from two sources (freshest wins):
 
    1. the cross-phase PERSISTENT cache at <source-root>/.miniforge/
@@ -239,59 +380,7 @@
        (binding [*out* *err*]
          (println (msg/t :cache/load-failed {:error (ex-message e)})))))))
 
-(defn save-cache!
-  "Persist the accumulated in-memory cache (pre-populated + read-through
-   additions, with mtimes) to the worktree-resident cross-phase cache file so
-   the NEXT phase's server loads it. No-ops without a source-root or when
-   nothing is cached. Best-effort: a write failure is logged, not thrown."
-  []
-  (let [{:keys [source-root files mtimes]} @cache-state]
-    (when-let [path (and (seq files) (persistent-cache-path source-root))]
-      (try
-        (io/make-parents path)
-        (spit path (pr-str {:files files :mtimes mtimes}))
-        (binding [*out* *err*]
-          (println (msg/t :cache/saved {:count (count files) :path path})))
-        (catch Exception e
-          (binding [*out* *err*]
-            (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
-
-(defn flush-misses!
-  "Write accumulated cache misses to context-misses.edn in artifact-dir."
-  [artifact-dir]
-  (let [misses (:misses @cache-state)]
-    (when (seq misses)
-      (let [path (str artifact-dir "/context-misses.edn")]
-        (spit path (pr-str misses))
-        (binding [*out* *err*]
-          (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
-
-;; `handle-submit` (the artifact.edn metadata channel) removed: the artifact is
-;; the worktree/container diff (promotion); the curator derives the summary.
-;; Models ignored the opt-in submit tool anyway. See artifact_session/mcp-tools.
-
-(defn- record-miss!
-  "Record a cache miss for meta-loop learning."
-  [tool-name params tokens]
-  (swap! cache-state update :misses conj
-         (merge {:tool tool-name
-                 :tokens tokens
-                 :timestamp (str (java.time.Instant/now))}
-                params)))
-
-(defn- cache-get
-  "Get cached content for a path, or nil if not cached."
-  [path]
-  (get-in @cache-state [:files path]))
-
-(defn- file-mtime
-  "Last-modified epoch-ms of the resolved source file, or nil if absent."
-  [path]
-  (let [f (io/file (resolve-source-path path))]
-    (when (.exists f)
-      (.lastModified f))))
-
-(defn- cache-put!
+(defn- ^{:stratum 4} cache-put!
   "Store content in the cache for a path, stamping the file's current mtime so
    `cache-stale?` can later detect on-disk changes (write-invalidation)."
   [path content]
@@ -299,7 +388,7 @@
                           (assoc-in [:files path] content)
                           (assoc-in [:mtimes path] (file-mtime path)))))
 
-(defn- cache-stale?
+(defn- ^{:stratum 4} cache-stale?
   "True only when the cached entry can be PROVEN out of date: we recorded an
    mtime for it, the file still exists, and it was modified after we cached.
    When there's no recorded mtime or no on-disk file, staleness cannot be
@@ -312,145 +401,7 @@
         disk   (file-mtime path)]
     (boolean (and cached disk (> disk cached)))))
 
-(defn- cached-files
-  "Return the current files map from the cache."
-  []
-  (:files @cache-state))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Read-through cache: resolve content from cache or filesystem
-
-(defn- read-through
-  "Resolve file content. Fresh cache hit returns instantly. A miss — or a
-   cached entry whose file changed on disk since it was cached — reads from
-   disk, re-caches (with the new mtime), and returns the current content.
-   Records a miss only on a GENUINE miss (never cached), not on a
-   staleness-driven refresh. Returns content string or nil."
-  [path]
-  (let [cached (cache-get path)]
-    (if (and cached (not (cache-stale? path)))
-      cached
-      (try
-        (let [content (slurp (resolve-source-path path))]
-          (cache-put! path content)
-          (when (nil? cached)
-            (record-miss! "context_read" {:path path} (estimate-tokens content)))
-          content)
-        (catch Exception _ nil)))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; MCP response helpers
-
-(defn- text-response
-  "Wrap a string in the MCP tool response shape."
-  [text]
-  {:content [{:type "text" :text text}]})
-
-(defn- error-response
-  "Wrap an error message in the MCP tool error shape."
-  [text]
-  {:content [{:type "text" :text text}] :isError true})
-
-(defn- grep-response
-  "Build MCP response from grep results. Returns formatted matches or
-   a no-matches message when empty."
-  [results]
-  (text-response
-    (if (seq results)
-      (format-grep-results results)
-      (msg/t :context/no-grep-matches))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Grep helpers: file selection and fallback
-
-(defn filter-cached-files
-  "Select which cached files to search based on path or glob filter.
-   Returns a {path → content} map."
-  [files target-path glob-filter]
-  (cond
-    target-path  (select-keys files [target-path])
-    glob-filter  (into {} (filter (fn [[p _]] (glob-matches? glob-filter p))) files)
-    :else        files))
-
-(defn- search-cached-files
-  "Grep across a map of {path → content} for a pattern.
-   Returns a flat vector of grep result maps."
-  [files-map pattern-str]
-  (into [] (mapcat (fn [[path content]] (grep-file path content pattern-str))) files-map))
-
-(defn- cache-new-files!
-  "Cache files discovered by shell grep that aren't already cached.
-   Records a miss for each newly cached file."
-  [results pattern-str known-files]
-  (doseq [path (distinct (map :path results))
-          :when (not (contains? known-files path))]
-    (try
-      (let [content (slurp (resolve-source-path path))]
-        (cache-put! path content)
-        (record-miss! "context_grep" {:path path :pattern pattern-str}
-                      (estimate-tokens content)))
-      (catch Exception _ nil))))
-
-(defn- grep-with-fallback
-  "Search cached files first. On cache miss, fall back to ripgrep,
-   cache any newly discovered files, and record misses."
-  [pattern-str target-path glob-filter]
-  (let [files         (cached-files)
-        searchable    (filter-cached-files files target-path glob-filter)
-        cache-results (search-cached-files searchable pattern-str)]
-    (if (seq cache-results)
-      cache-results
-      (let [rg-results (or (shell-grep pattern-str (or target-path glob-filter)) [])]
-        (if (seq rg-results)
-          (do (cache-new-files! rg-results pattern-str files)
-              rg-results)
-          (do (record-miss! "context_grep"
-                            {:pattern pattern-str :path target-path
-                             :glob glob-filter :hit false}
-                            0)
-              []))))))
-
-;------------------------------------------------------------------------------ Layer 1
-;; Glob helpers
-
-(defn- glob-with-union
-  "Match cached paths, union with filesystem glob, record misses for
-   files found only on disk. Returns a sequence of matched paths."
-  [pattern]
-  (let [files         (cached-files)
-        cache-matches (sort (filter #(glob-matches? pattern %) (keys files)))
-        fs-matches    (or (shell-glob pattern) [])
-        cache-set     (set cache-matches)
-        new-from-fs   (remove cache-set fs-matches)]
-    (when (seq new-from-fs)
-      (record-miss! "context_glob"
-                    {:pattern pattern :fs-only-count (count new-from-fs)}
-                    0))
-    (concat cache-matches new-from-fs)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Tool handler functions (compose Layer 0 + Layer 1)
-
-(defn handle-context-read
-  "Handler for context_read MCP tool."
-  [params]
-  (let [path    (get params "path")
-        offset  (get params "offset")
-        limit   (get params "limit")
-        content (read-through path)]
-    (if content
-      (text-response (apply-offset-limit content offset limit))
-      (error-response (msg/t :context/read-error {:path path})))))
-
-(defn handle-context-grep
-  "Handler for context_grep MCP tool."
-  [params]
-  (grep-response
-    (grep-with-fallback (get params "pattern")
-                        (get params "path")
-                        (get params "glob"))))
-
-(defn handle-context-glob
+(defn ^{:stratum 4} handle-context-glob
   "Handler for context_glob MCP tool."
   [params]
   (let [matches (glob-with-union (get params "pattern"))]
@@ -459,17 +410,7 @@
         (str/join "\n" matches)
         (msg/t :context/no-glob-matches)))))
 
-(defn- within-write-root?
-  "True when the resolved target canonicalizes to a path inside write-root.
-   Blocks absolute paths and `..` traversal that would let an MCP client
-   overwrite files outside the worktree."
-  [target]
-  (let [root-c   (.getCanonicalPath (io/file (write-root)))
-        target-c (.getCanonicalPath (io/file target))]
-    (or (= target-c root-c)
-        (str/starts-with? target-c (str root-c java.io.File/separator)))))
-
-(defn handle-context-write
+(defn ^{:stratum 4} handle-context-write
   "Handler for the context_write MCP tool. Writes the full file content to the
    worktree (write-root) and refreshes the cache so a later context_read returns
    the new content. Agent-agnostic edit path — works for any MCP client and,
@@ -502,3 +443,89 @@
         (catch Exception e
           (error-response (msg/t :context/write-failed
                                  {:path path :error (ex-message e)})))))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+;; Read-through cache: resolve content from cache or filesystem
+(defn- ^{:stratum 5} read-through
+  "Resolve file content. Fresh cache hit returns instantly. A miss — or a
+   cached entry whose file changed on disk since it was cached — reads from
+   disk, re-caches (with the new mtime), and returns the current content.
+   Records a miss only on a GENUINE miss (never cached), not on a
+   staleness-driven refresh. Returns content string or nil."
+  [path]
+  (let [cached (cache-get path)]
+    (if (and cached (not (cache-stale? path)))
+      (do (record-read! path :cache)
+          cached)
+      (try
+        (let [content (slurp (resolve-source-path path))]
+          (cache-put! path content)
+          (when (nil? cached)
+            (record-miss! "context_read" {:path path} (estimate-tokens content)))
+          (record-read! path (if cached :refresh :filesystem))
+          content)
+        (catch Exception _
+          (record-read! path :absent)
+          nil)))))
+
+(defn- ^{:stratum 5} cache-new-files!
+  "Cache files discovered by shell grep that aren't already cached.
+   Records a miss for each newly cached file."
+  [results pattern-str known-files]
+  (doseq [path (distinct (map :path results))
+          :when (not (contains? known-files path))]
+    (try
+      (let [content (slurp (resolve-source-path path))]
+        (cache-put! path content)
+        (record-miss! "context_grep" {:path path :pattern pattern-str}
+                      (estimate-tokens content)))
+      (catch Exception _ nil))))
+
+;------------------------------------------------------------------------------ Layer 6
+
+(defn- ^{:stratum 6} grep-with-fallback
+  "Search cached files first. On cache miss, fall back to ripgrep,
+   cache any newly discovered files, and record misses."
+  [pattern-str target-path glob-filter]
+  (let [files         (cached-files)
+        searchable    (filter-cached-files files target-path glob-filter)
+        cache-results (search-cached-files searchable pattern-str)]
+    (if (seq cache-results)
+      cache-results
+      (let [rg-results (or (shell-grep pattern-str (or target-path glob-filter)) [])]
+        (if (seq rg-results)
+          (do (cache-new-files! rg-results pattern-str files)
+              rg-results)
+          (do (record-miss! "context_grep"
+                            {:pattern pattern-str :path target-path
+                             :glob glob-filter :hit false}
+                            0)
+              []))))))
+
+;; Tool handler functions (compose Layer 0 + Layer 1)
+(defn ^{:stratum 6} handle-context-read
+  "Handler for context_read MCP tool."
+  [params]
+  (let [path    (get params "path")
+        offset  (get params "offset")
+        limit   (get params "limit")
+        content (read-through path)]
+    (if content
+      (text-response (apply-offset-limit content offset limit))
+      (error-response (msg/t :context/read-error {:path path})))))
+
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} handle-context-grep
+  "Handler for context_grep MCP tool."
+  [params]
+  (grep-response
+    (grep-with-fallback (get params "pattern")
+                        (get params "path")
+                        (get params "glob"))))
+
+;; Shell fallbacks
+(declare source-root)
+
+(declare file-mtime)
