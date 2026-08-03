@@ -6,7 +6,9 @@
 
 ## Overview
 
-The evidence-bundle component implements the N6 Evidence & Provenance Standard, providing comprehensive audit trails for autonomous workflow execution. This component enables traceability, compliance, and semantic intent validation for all workflows.
+The evidence-bundle component implements the N6 Evidence & Provenance Standard, providing comprehensive audit trails for
+autonomous workflow execution. This component enables traceability, compliance, and semantic intent validation for all
+workflows.
 
 ## Implementation Status
 
@@ -242,7 +244,7 @@ The implementation follows established patterns from recent PRs:
 
 ```clojure
 (def wf (-> (workflow/create-workflow)
-            (integration/create-and-attach-evidence-collector artifact-store)))
+            (integration-factory/create-and-attach-evidence-collector artifact-store)))
 ;; Bundle created automatically on workflow completion
 ```
 
@@ -270,7 +272,7 @@ The implementation follows established patterns from recent PRs:
 
 ## File Structure
 
-```
+```text
 components/evidence-bundle/
 ├── deps.edn                                           # Component dependencies
 ├── README.md                                          # Component documentation
@@ -375,4 +377,5 @@ The evidence-bundle component is **complete and ready for integration**. It prov
 4. **Debugging**: Phase evidence linked to event streams
 5. **Trust**: Policy checks and semantic validation results
 
-The component is fully conformant with the N6 Evidence & Provenance Standard (sections 2-7) and follows all established development patterns and guidelines.
+The component is fully conformant with the N6 Evidence & Provenance Standard (sections 2-7) and follows all established
+development patterns and guidelines.
