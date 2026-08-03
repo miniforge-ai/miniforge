@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.mcp-context-server.context-cache-test
   "Unit tests for context cache pure helpers and tool handlers."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
@@ -24,15 +23,13 @@
             [ai.miniforge.mcp-context-server.context-cache :as cache]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Test fixtures
 
-(defn with-clean-cache [f]
+;; Test fixtures
+(defn ^{:stratum 0} with-clean-cache [f]
   (cache/reset-state!)
   (try (f) (finally (cache/reset-state!))))
 
-(use-fixtures :each with-clean-cache)
-
-(defn with-temp-dir [f]
+(defn ^{:stratum 0} with-temp-dir [f]
   (let [dir (str (java.nio.file.Files/createTempDirectory
                    "ctx-cache-test-"
                    (into-array java.nio.file.attribute.FileAttribute [])))]
@@ -42,10 +39,8 @@
         (doseq [file (reverse (file-seq (io/file dir)))]
           (.delete ^java.io.File file))))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Pure helper tests
-
-(deftest estimate-tokens-test
+(deftest ^{:stratum 0} estimate-tokens-test
   (testing "estimates ~4 chars per token"
     (is (= 3 (cache/estimate-tokens "hello world!")))
     (is (= 1 (cache/estimate-tokens "abc"))))
@@ -55,7 +50,7 @@
     (is (= 0 (cache/estimate-tokens nil)))
     (is (= 0 (cache/estimate-tokens 42)))))
 
-(deftest apply-offset-limit-test
+(deftest ^{:stratum 0} apply-offset-limit-test
   (let [content "line0\nline1\nline2\nline3\nline4"]
 
     (testing "no offset or limit returns all lines"
@@ -73,7 +68,7 @@
     (testing "nil content returns empty"
       (is (= "" (cache/apply-offset-limit nil nil nil))))))
 
-(deftest glob-matches?-test
+(deftest ^{:stratum 0} glob-matches?-test
   (testing "single star matches one segment"
     (is (cache/glob-matches? "src/*.clj" "src/core.clj"))
     (is (not (cache/glob-matches? "src/*.clj" "src/nested/core.clj"))))
@@ -89,7 +84,7 @@
   (testing "dots are literal"
     (is (not (cache/glob-matches? "src/*.clj" "src/corexclj")))))
 
-(deftest grep-file-test
+(deftest ^{:stratum 0} grep-file-test
   (let [content "(ns core)\n\n(defn greet [name]\n  (str \"Hello, \" name))"]
 
     (testing "finds matching lines with line numbers"
@@ -104,30 +99,103 @@
     (testing "returns empty on invalid regex"
       (is (empty? (cache/grep-file "src/core.clj" content "[invalid"))))))
 
-(deftest format-grep-results-test
+(deftest ^{:stratum 0} format-grep-results-test
   (testing "formats as path:line:text"
     (is (= "a.clj:1:hello\nb.clj:5:world"
            (cache/format-grep-results
              [{:path "a.clj" :line-number 1 :text "hello"}
               {:path "b.clj" :line-number 5 :text "world"}])))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Tool handler tests
-
-(deftest handle-context-read-cache-hit-test
+(deftest ^{:stratum 0} handle-context-read-cache-hit-test
   (testing "returns cached content"
     (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(ns core)\n(defn hello [])")
     (let [result (cache/handle-context-read {"path" "src/core.clj"})]
       (is (= "(ns core)\n(defn hello [])" (get-in result [:content 0 :text])))
       (is (not (:isError result))))))
 
-(deftest handle-context-read-offset-limit-test
+(deftest ^{:stratum 0} handle-context-read-offset-limit-test
   (testing "applies offset and limit on cache hit"
     (swap! cache/cache-state assoc-in [:files "src/core.clj"] "line0\nline1\nline2\nline3")
     (let [result (cache/handle-context-read {"path" "src/core.clj" "offset" 1 "limit" 2})]
       (is (= "line1\nline2" (get-in result [:content 0 :text]))))))
 
-(deftest handle-context-read-cache-miss-test
+(deftest ^{:stratum 0} handle-context-read-nonexistent-test
+  (testing "returns error for nonexistent file"
+    (let [result (cache/handle-context-read {"path" "/nonexistent/path.clj"})]
+      (is (:isError result))
+      (is (re-find #"Error reading" (get-in result [:content 0 :text]))))))
+
+(deftest ^{:stratum 0} handle-context-grep-cache-hit-test
+  (testing "finds pattern in cached files"
+    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"]
+           "(ns alpha)\n\n(defn greet [name]\n  (str name))")
+    (swap! cache/cache-state assoc-in [:files "src/beta.clj"]
+           "(ns beta)\n\n(defn process [x]\n  (inc x))")
+    (let [result (cache/handle-context-grep {"pattern" "defn greet"})]
+      (is (re-find #"alpha\.clj" (get-in result [:content 0 :text])))
+      (is (re-find #"defn greet" (get-in result [:content 0 :text]))))))
+
+(deftest ^{:stratum 0} handle-context-grep-specific-file-test
+  (testing "path restricts search to one file"
+    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"]
+           "(defn greet [name] name)")
+    (swap! cache/cache-state assoc-in [:files "src/beta.clj"]
+           "(defn greet [user] user)")
+    (let [result (cache/handle-context-grep {"pattern" "defn" "path" "src/beta.clj"})]
+      (is (re-find #"beta\.clj" (get-in result [:content 0 :text])))
+      (is (not (re-find #"alpha\.clj" (get-in result [:content 0 :text])))))))
+
+(deftest ^{:stratum 0} handle-context-grep-glob-filter-test
+  (testing "glob filter restricts search"
+    (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(defn foo [])")
+    (swap! cache/cache-state assoc-in [:files "test/core_test.clj"] "(deftest foo-test)")
+    (let [result (cache/handle-context-grep {"pattern" "def" "glob" "test/*.clj"})]
+      (is (re-find #"core_test\.clj" (get-in result [:content 0 :text])))
+      (is (not (re-find #"src/" (get-in result [:content 0 :text])))))))
+
+(deftest ^{:stratum 0} handle-context-grep-no-match-test
+  (testing "returns no matches message"
+    (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(ns core)")
+    (let [result (cache/handle-context-grep {"pattern" "zzz_nonexistent_zzz"})]
+      (is (re-find #"[Nn]o matches" (get-in result [:content 0 :text]))))))
+
+(deftest ^{:stratum 0} handle-context-glob-cached-paths-test
+  (testing "matches cached file paths"
+    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"] "a")
+    (swap! cache/cache-state assoc-in [:files "src/beta.clj"] "b")
+    (swap! cache/cache-state assoc-in [:files "test/alpha_test.clj"] "t")
+    (let [result (cache/handle-context-glob {"pattern" "src/*.clj"})
+          text (get-in result [:content 0 :text])]
+      (is (re-find #"alpha\.clj" text))
+      (is (re-find #"beta\.clj" text))
+      (is (not (re-find #"test/" text))))))
+
+(deftest ^{:stratum 0} handle-context-glob-no-match-test
+  (testing "returns no files matched message"
+    (let [result (cache/handle-context-glob {"pattern" "nonexistent/**/*.xyz"})]
+      (is (re-find #"[Nn]o files matched" (get-in result [:content 0 :text]))))))
+
+;------------------------------------------------------------------------------ Write-invalidation + cross-phase persistence (Fable #4)
+(defn- ^{:stratum 0} read-text [result]
+  (get-in result [:content 0 :text]))
+
+(deftest ^{:stratum 0} save-cache-noop-without-source-root-test
+  (testing "save-cache! is a safe no-op when there's no source-root"
+    (cache/reset-state!)
+    (swap! cache/cache-state assoc :files {"x" "y"})
+    (is (nil? (cache/save-cache!)) "no throw, nothing to persist without a worktree")))
+
+(deftest ^{:stratum 0} handle-context-write-rejects-bad-input-test
+  (cache/reset-state!)
+  (is (:isError (cache/handle-context-write {"path" "" "content" "x"}))
+      "blank path rejected")
+  (is (:isError (cache/handle-context-write {"path" "f" "content" nil}))
+      "nil content rejected"))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} handle-context-read-cache-miss-test
   (testing "falls back to filesystem and records miss"
     (with-temp-dir
       (fn [dir]
@@ -141,66 +209,8 @@
             (is (= 1 (count (:misses @cache/cache-state))))
             (is (= "context_read" (:tool (first (:misses @cache/cache-state)))))))))))
 
-(deftest handle-context-read-nonexistent-test
-  (testing "returns error for nonexistent file"
-    (let [result (cache/handle-context-read {"path" "/nonexistent/path.clj"})]
-      (is (:isError result))
-      (is (re-find #"Error reading" (get-in result [:content 0 :text]))))))
-
-(deftest handle-context-grep-cache-hit-test
-  (testing "finds pattern in cached files"
-    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"]
-           "(ns alpha)\n\n(defn greet [name]\n  (str name))")
-    (swap! cache/cache-state assoc-in [:files "src/beta.clj"]
-           "(ns beta)\n\n(defn process [x]\n  (inc x))")
-    (let [result (cache/handle-context-grep {"pattern" "defn greet"})]
-      (is (re-find #"alpha\.clj" (get-in result [:content 0 :text])))
-      (is (re-find #"defn greet" (get-in result [:content 0 :text]))))))
-
-(deftest handle-context-grep-specific-file-test
-  (testing "path restricts search to one file"
-    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"]
-           "(defn greet [name] name)")
-    (swap! cache/cache-state assoc-in [:files "src/beta.clj"]
-           "(defn greet [user] user)")
-    (let [result (cache/handle-context-grep {"pattern" "defn" "path" "src/beta.clj"})]
-      (is (re-find #"beta\.clj" (get-in result [:content 0 :text])))
-      (is (not (re-find #"alpha\.clj" (get-in result [:content 0 :text])))))))
-
-(deftest handle-context-grep-glob-filter-test
-  (testing "glob filter restricts search"
-    (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(defn foo [])")
-    (swap! cache/cache-state assoc-in [:files "test/core_test.clj"] "(deftest foo-test)")
-    (let [result (cache/handle-context-grep {"pattern" "def" "glob" "test/*.clj"})]
-      (is (re-find #"core_test\.clj" (get-in result [:content 0 :text])))
-      (is (not (re-find #"src/" (get-in result [:content 0 :text])))))))
-
-(deftest handle-context-grep-no-match-test
-  (testing "returns no matches message"
-    (swap! cache/cache-state assoc-in [:files "src/core.clj"] "(ns core)")
-    (let [result (cache/handle-context-grep {"pattern" "zzz_nonexistent_zzz"})]
-      (is (re-find #"[Nn]o matches" (get-in result [:content 0 :text]))))))
-
-(deftest handle-context-glob-cached-paths-test
-  (testing "matches cached file paths"
-    (swap! cache/cache-state assoc-in [:files "src/alpha.clj"] "a")
-    (swap! cache/cache-state assoc-in [:files "src/beta.clj"] "b")
-    (swap! cache/cache-state assoc-in [:files "test/alpha_test.clj"] "t")
-    (let [result (cache/handle-context-glob {"pattern" "src/*.clj"})
-          text (get-in result [:content 0 :text])]
-      (is (re-find #"alpha\.clj" text))
-      (is (re-find #"beta\.clj" text))
-      (is (not (re-find #"test/" text))))))
-
-(deftest handle-context-glob-no-match-test
-  (testing "returns no files matched message"
-    (let [result (cache/handle-context-glob {"pattern" "nonexistent/**/*.xyz"})]
-      (is (re-find #"[Nn]o files matched" (get-in result [:content 0 :text]))))))
-
-;------------------------------------------------------------------------------ Layer 2
 ;; Lifecycle tests
-
-(deftest load-cache-roundtrip-test
+(deftest ^{:stratum 1} load-cache-roundtrip-test
   (testing "load-cache! reads context-cache.edn and populates atom"
     (with-temp-dir
       (fn [dir]
@@ -214,8 +224,7 @@
 ;; The submit/artifact.edn tests were removed with the submit tool — the
 ;; artifact is now the worktree/container diff (promotion), not an agent
 ;; metadata channel.
-
-(deftest handle-context-read-source-root-fallback-test
+(deftest ^{:stratum 1} handle-context-read-source-root-fallback-test
   (testing "relative file reads resolve from source-root when cache is empty"
     (with-temp-dir
       (fn [dir]
@@ -229,7 +238,7 @@
             (is (= "(ns demo.core)"
                    (get-in @cache/cache-state [:files "components/demo/core.clj"])))))))))
 
-(deftest handle-context-glob-source-root-fallback-test
+(deftest ^{:stratum 1} handle-context-glob-source-root-fallback-test
   (testing "relative glob fallback searches from source-root"
     (with-temp-dir
       (fn [dir]
@@ -241,7 +250,7 @@
             (is (re-find #"components/alpha/src/demo/core\.clj"
                          (get-in result [:content 0 :text])))))))))
 
-(deftest handle-context-glob-source-root-fallback-prunes-git-test
+(deftest ^{:stratum 1} handle-context-glob-source-root-fallback-prunes-git-test
   (testing "filesystem glob fallback ignores .git contents"
     (with-temp-dir
       (fn [dir]
@@ -256,7 +265,7 @@
             (is (re-find #"components/alpha/src/demo/core\.clj" text))
             (is (not (re-find #"\.git/objects/aa/hidden\.clj" text)))))))))
 
-(deftest flush-misses-roundtrip-test
+(deftest ^{:stratum 1} flush-misses-roundtrip-test
   (testing "flush-misses! writes misses to context-misses.edn"
     (with-temp-dir
       (fn [dir]
@@ -269,19 +278,14 @@
           (is (= "context_read" (:tool (first misses))))
           (is (= "src/x.clj" (:path (first misses)))))))))
 
-(deftest flush-misses-noop-when-empty-test
+(deftest ^{:stratum 1} flush-misses-noop-when-empty-test
   (testing "flush-misses! does not write file when no misses"
     (with-temp-dir
       (fn [dir]
         (cache/flush-misses! dir)
         (is (not (.exists (io/file (str dir "/context-misses.edn")))))))))
 
-;------------------------------------------------------------------------------ Write-invalidation + cross-phase persistence (Fable #4)
-
-(defn- read-text [result]
-  (get-in result [:content 0 :text]))
-
-(deftest read-through-invalidates-on-disk-change-test
+(deftest ^{:stratum 1} read-through-invalidates-on-disk-change-test
   (testing "a cached read is re-read when the file changes on disk — no stale
             content after a write (the safety guard for forcing write-heavy
             agents onto context_read, and for cross-phase persistence)"
@@ -299,7 +303,7 @@
           (is (= "V2" (read-text (cache/handle-context-read {"path" "src/a.clj"})))
               "second read returns fresh V2, not the stale cached V1"))))))
 
-(deftest save-cache-persists-across-phases-test
+(deftest ^{:stratum 1} save-cache-persists-across-phases-test
   (testing "save-cache! writes the accumulated cache to <source-root>/.miniforge,
             and a fresh load (next phase) picks it up"
     (with-temp-dir
@@ -320,16 +324,8 @@
           (is (contains? (:mtimes @cache/cache-state) "src/b.clj")
               "its mtime is restored so staleness is still detectable"))))))
 
-(deftest save-cache-noop-without-source-root-test
-  (testing "save-cache! is a safe no-op when there's no source-root"
-    (cache/reset-state!)
-    (swap! cache/cache-state assoc :files {"x" "y"})
-    (is (nil? (cache/save-cache!)) "no throw, nothing to persist without a worktree")))
-
-;------------------------------------------------------------------------------ Layer 3
 ;; context_write handler
-
-(deftest handle-context-write-writes-to-workdir-and-caches-test
+(deftest ^{:stratum 1} handle-context-write-writes-to-workdir-and-caches-test
   (with-temp-dir
     (fn [dir]
       (cache/reset-state!)
@@ -342,7 +338,7 @@
           (let [read-resp (cache/handle-context-read {"path" "src/new.clj"})]
             (is (= "(ns new)" (-> read-resp :content first :text)))))))))
 
-(deftest handle-context-write-overwrites-existing-test
+(deftest ^{:stratum 1} handle-context-write-overwrites-existing-test
   (with-temp-dir
     (fn [dir]
       (cache/reset-state!)
@@ -354,14 +350,7 @@
         (is (= "(ns a-v2)" (-> (cache/handle-context-read {"path" "a.clj"}) :content first :text))
             "an existing file is edited and the cache reflects it")))))
 
-(deftest handle-context-write-rejects-bad-input-test
-  (cache/reset-state!)
-  (is (:isError (cache/handle-context-write {"path" "" "content" "x"}))
-      "blank path rejected")
-  (is (:isError (cache/handle-context-write {"path" "f" "content" nil}))
-      "nil content rejected"))
-
-(deftest handle-context-write-rejects-path-escapes-test
+(deftest ^{:stratum 1} handle-context-write-rejects-path-escapes-test
   (with-temp-dir
     (fn [dir]
       (cache/reset-state!)
@@ -374,3 +363,28 @@
         (is (:isError (cache/handle-context-write
                        {"path" "/tmp/abs-escape.clj" "content" "x"})))
         (is (not (.exists (io/file "/tmp/abs-escape.clj"))))))))
+
+(deftest ^{:stratum 1} context-reads-are-recorded-hits-and-misses-test
+  (cache/reset-state!)
+  ;; A virtual pin path: present in the cache, no file on disk. cache-stale?
+  ;; never fires for it, so it resolves as a :cache hit forever — the pin
+  ;; primitive the Codex SPEC §7.4 blackboard pin relies on.
+  (swap! cache/cache-state assoc-in
+         [:files ".miniforge/codex-consider.md"] "pinned landings")
+  (cache/handle-context-read {"path" ".miniforge/codex-consider.md"})
+  (cache/handle-context-read {"path" "no/such/file.txt"})
+  (let [reads (:reads @cache/cache-state)]
+    (is (= [{:path ".miniforge/codex-consider.md" :source :cache}
+            {:path "no/such/file.txt" :source :absent}]
+           (mapv #(select-keys % [:path :source]) reads))
+        "every resolution recorded, hit and miss (§7.4.2)")
+    (is (every? :timestamp reads)))
+  (testing "flush writes context-reads.edn"
+    (with-temp-dir
+      (fn [dir]
+        (cache/flush-reads! dir)
+        (let [f (io/file (str dir "/context-reads.edn"))]
+          (is (.exists f))
+          (is (= 2 (count (edn/read-string (slurp f))))))))))
+
+(use-fixtures :each with-clean-cache)
