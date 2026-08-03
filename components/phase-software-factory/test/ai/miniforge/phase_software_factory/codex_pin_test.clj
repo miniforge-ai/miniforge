@@ -21,7 +21,7 @@
    (ai.miniforge.codex.render-test/pin-entry-builds-a-prompt-ready-file);
    these cover the phase-side skip conditions."
   (:require [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -45,3 +45,26 @@
       (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
     (is (re-find #"WARN: codex pin skipped for implement" (str err))
         "a nil logger must not turn a configured-codex failure silent")))
+
+(deftest ^{:stratum 0} pin-outcome-states
+  (is (= {:entry nil :status :unconfigured :anomaly nil}
+         (codex-pin/pin-outcome :implement nil nil)))
+  (is (= {:entry nil :status :unmapped :anomaly nil}
+         (codex-pin/pin-outcome :verify nil "/anywhere")))
+  (is (= :skipped
+         (:status (codex-pin/pin-outcome :implement nil "/nonexistent/codex")))))
+
+(deftest ^{:stratum 0} consultation-summary-distinguishes-unknown-from-unread
+  (let [pinned {:entry {:path codex-pin/pin-path} :status :pinned :anomaly nil}]
+    (testing "nil reads log means UNKNOWN, not false — absence of the record is not absence of the read"
+      (is (nil? (:pin-read? (codex-pin/consultation-summary pinned nil)))))
+    (testing "reads log without the pin path means false"
+      (is (false? (:pin-read? (codex-pin/consultation-summary
+                                pinned [{:path "src/a.clj" :source :cache}])))))
+    (testing "reads log with the pin path means true"
+      (is (true? (:pin-read? (codex-pin/consultation-summary
+                               pinned [{:path codex-pin/pin-path :source :cache}])))))
+    (testing "skipped consultation carries its anomaly"
+      (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable :pin-read? nil}
+             (codex-pin/consultation-summary
+               {:entry nil :status :skipped :anomaly :codex-unreadable} nil))))))
