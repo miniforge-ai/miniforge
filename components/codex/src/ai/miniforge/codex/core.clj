@@ -24,6 +24,7 @@
    with :codex/anomaly, never an empty success — an empty answer that looks
    like a clean answer is the exact failure the codex exists to prevent."
   (:require [ai.miniforge.codex.graph :as graph]
+            [ai.miniforge.codex.messages :as msg]
             [ai.miniforge.codex.node :as node]
             [clojure.string :as str]))
 
@@ -48,7 +49,7 @@
         (cond
           (empty? matches)
           {:codex/anomaly :situation-unmatched
-           :codex/reason (str "no situation matches '" situation-text "'")
+           :codex/reason (msg/t :anomaly/unmatched {:text situation-text})
            ;; sorted: (vals nodes) order is map-order, and an anomaly that
            ;; lists candidates should list them stably
            :codex/available (->> (vals nodes)
@@ -58,8 +59,8 @@
 
           (< 1 (count matches))
           {:codex/anomaly :situation-ambiguous
-           :codex/reason (str "'" situation-text "' matches "
-                              (count matches) " situations")
+           :codex/reason (msg/t :anomaly/ambiguous
+                                {:text situation-text :count (count matches)})
            :codex/matches (->> matches
                                (sort-by :id)
                                (mapv (juxt :id :title)))}

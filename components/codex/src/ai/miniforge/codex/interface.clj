@@ -26,7 +26,9 @@
    Read-only by design: the codex is generated from data-as-source
    elsewhere (SPEC §8.1); this component never writes it."
   (:require [ai.miniforge.codex.core :as core]
-            [ai.miniforge.codex.node :as node]))
+            [ai.miniforge.codex.messages :as msg]
+            [ai.miniforge.codex.node :as node]
+            [ai.miniforge.codex.render :as render]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -47,3 +49,40 @@
    empty success."
   [codex-dir situation-text]
   (core/consider codex-dir situation-text))
+
+(defn ^{:stratum 0} render-response
+  "Render a `consider` response (or anomaly) as the canonical consultation
+   body text. The consider_situation MCP tool (pull) returns this body
+   verbatim; the phase-start blackboard pin (push, SPEC §7.4) wraps the
+   SAME body in a pin header comment — one renderer, so the two surfaces
+   can never drift apart in content."
+  [resp]
+  (render/render-response resp))
+
+(defn ^{:stratum 0} pin-entry
+  "Build the per-run blackboard pin (SPEC §7.4): consult the codex for
+   `situation` and return {:path pin-path :content rendered} suitable as a
+   `:task/existing-files` entry — prompt-visible AND cache-fetchable.
+
+   The pinned artifact is the consultation RESULT, ephemeral and per-run;
+   the codex itself is durable and is never cached onto the blackboard
+   (§7.4.1). On any anomaly the anomaly map comes back instead, so the
+   caller decides whether to pin nothing or pin the anomaly — a silent
+   default here would be false coverage."
+  [codex-dir situation pin-path]
+  (let [resp (core/consider codex-dir situation)]
+    (if (:codex/anomaly resp)
+      resp
+      {:path pin-path
+       :content (str (msg/t :pin/header)
+                     "\n\n"
+                     (render/render-response resp)
+                     "\n")})))
+
+(defn ^{:stratum 0} unconfigured-anomaly
+  "The anomaly returned when no codex location is configured at all.
+   Lives here so consumers (e.g. the MCP tool) fail closed with the
+   catalog's wording rather than hardcoding their own."
+  []
+  {:codex/anomaly :codex-unconfigured
+   :codex/reason (msg/t :anomaly/unconfigured)})

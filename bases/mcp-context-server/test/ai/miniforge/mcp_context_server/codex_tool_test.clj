@@ -16,53 +16,17 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.mcp-context-server.codex-tool-test
-  "The response-map shapes rendered here are pinned by the codex component's
-   own tests (ai.miniforge.codex.interface-test) against generator-produced
-   fixtures; these tests cover the base's rendering and fail-closed paths."
+  "Rendering itself is pinned by the codex component's tests
+   (ai.miniforge.codex.render-test) — these cover the tool's fail-closed
+   paths and param handling only."
   (:require [ai.miniforge.mcp-context-server.codex-tool :as codex-tool]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn- ^{:stratum 0} text-of [result]
   (-> result :content first :text))
-
-(deftest ^{:stratum 0} render-orders-and-flags
-  (let [resp {:situation "s1"
-              :situation-title "A situation"
-              :landings [{:id "p-strategic" :type "problem" :title "Big one"
-                          :horizon "strategic" :confidence "high"
-                          :open [] :scars [] :escalations []}
-                         {:id "p-op" :type "problem" :title "Runs the system"
-                          :horizon "operational" :confidence "high"
-                          :open ["still open"]
-                          :scars [{:id "scar-1" :date "2026-01" :cost "an outage"
-                                   :cost-horizon "strategic" :origin "owned"}]
-                          :escalations ["scar-1"]}]
-              :coverage {:landing-count 2 :unanchored-count 1
-                         :horizon-mix {"strategic" 1 "operational" 1}
-                         :no-strategic-coverage? false
-                         :newest-scar-date "2026-01"}}
-        text (codex-tool/render-response resp)]
-    (testing "strategic renders before operational (§7.6.1)"
-      (is (< (str/index-of text "p-strategic") (str/index-of text "p-op"))))
-    (testing "escalation and unanchored are flagged inline (§7.6.3)"
-      (is (str/includes? text "ESCALATION: scar-1"))
-      (is (str/includes? text "unanchored — reasoned, not survived")))
-    (testing "coverage line leads with counts (§7.5)"
-      (is (str/includes? text "coverage: 2 landings, 1 unanchored")))))
-
-(deftest ^{:stratum 0} render-says-when-strategic-coverage-is-absent
-  (let [resp {:situation "s1" :situation-title "t"
-              :landings [{:id "p" :type "problem" :title "t" :horizon "tactical"
-                          :confidence "high" :open [] :scars [] :escalations []}]
-              :coverage {:landing-count 1 :unanchored-count 1
-                         :horizon-mix {"tactical" 1}
-                         :no-strategic-coverage? true
-                         :newest-scar-date nil}}
-        text (codex-tool/render-response resp)]
-    (is (str/includes? text "NO STRATEGIC COVERAGE"))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -73,6 +37,12 @@
                           {"situation" "an agent needs to act"}))]
       (is (str/includes? text "codex anomaly: codex-unconfigured"))
       (is (str/includes? text "MINIFORGE_CODEX_PATH")))))
+
+(deftest ^{:stratum 1} non-string-codex-path-is-treated-as-absent
+  (when-not (System/getenv "MINIFORGE_CODEX_PATH")
+    (let [text (text-of (codex-tool/handle-consider-situation
+                          {"situation" "anything" "codex_path" 42}))]
+      (is (str/includes? text "codex anomaly: codex-unconfigured")))))
 
 (deftest ^{:stratum 1} unreadable-codex-is-an-anomaly-not-an-empty-answer
   (let [text (text-of (codex-tool/handle-consider-situation
