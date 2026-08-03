@@ -30,6 +30,8 @@
                        "components/clock/src"
                        "components/codex/src"
                        "components/codex/resources"
+                       "components/codex-gap/src"
+                       "components/codex-gap/resources"
                        "components/coerce/src"
                        "components/response-chain/src"
                        "components/boundary/src"
@@ -225,6 +227,7 @@
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
                       ai.miniforge/codex {:local/root "components/codex"}
+                      ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}
@@ -353,6 +356,8 @@
                        "components/clock/test"
                        "components/codex/test"
                        "components/codex/test-resources"
+                       "components/codex-gap/test"
+                       "components/codex-gap/test-resources"
                        "components/coerce/test"
                        "components/response-chain/test"
                        "components/boundary/test"
@@ -489,6 +494,7 @@
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
                       ai.miniforge/codex {:local/root "components/codex"}
+                      ai.miniforge/codex-gap {:local/root "components/codex-gap"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}

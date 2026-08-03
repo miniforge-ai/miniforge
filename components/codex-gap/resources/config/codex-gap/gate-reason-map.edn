@@ -1,0 +1,8 @@
+;; Mechanical attribution map (codex-gap spec, Task 1): decision-envelope
+;; gate-failure reasons -> codex problem ids. Data, not code — entries
+;; accrue as gate reasons prove attributable. Keys are
+;; [:reason/code :reason/rule-id] pairs; :reason/rule-id may be nil for
+;; code-wide mappings. A lookup miss falls through to similarity
+;; attribution.
+{[:reason/grant-absent nil]   "fail-closed-by-default"
+ [:reason/grant-exceeded nil] "authority-outside-the-model"}
