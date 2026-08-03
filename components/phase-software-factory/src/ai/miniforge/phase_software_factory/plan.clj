@@ -116,9 +116,9 @@
   (let [exploration-files (:exploration/files explore-result)
         ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
         ;; worries render before the content they apply to.
-        codex-pin-file (codex-pin/pin-file :plan nil)
-        existing-files (if codex-pin-file
-                         (into [codex-pin-file] (or exploration-files []))
+        codex-outcome (codex-pin/pin-outcome :plan nil)
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] (or exploration-files []))
                          exploration-files)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
@@ -137,7 +137,8 @@
                behavior-addendum
                (assoc :task/behavior-addendum behavior-addendum))]
     {:task task
-     :rules-manifest manifest}))
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 (defn ^{:stratum 0} create-streaming-callback
   "Create a streaming callback for agent output, if event-stream is available."
@@ -204,23 +205,29 @@
    Returns {:result agent-result :rules-manifest manifest-or-nil}."
   [ctx input]
   (let [explore-result (get-in ctx [:execution/phase-results :explore :result :output])
-        {:keys [task rules-manifest]} (build-planner-task input explore-result (:knowledge-store ctx))
+        {:keys [task rules-manifest codex-outcome]} (build-planner-task input explore-result (:knowledge-store ctx))
         on-chunk (create-streaming-callback ctx)
         agent-ctx (cond-> ctx on-chunk (assoc :on-chunk on-chunk))
         planner-agent (agent/create-planner {})]
-    {:result (validate-dag-readiness
-              (try
-                (agent/invoke planner-agent task agent-ctx)
-                (catch Exception e
-                  ;; Preserve the spent-token count from the agent's failure
-                  ;; anomaly (planner tags ex-data with :tokens) into the
-                  ;; failure result's :metrics, so leave-plan still merges the
-                  ;; real cost into :execution/metrics instead of reporting $0.
-                  (let [ed   (ex-data e)
-                        toks (get ed :tokens 0)]
-                    (response/failure e {:data ed
-                                         :tokens toks
-                                         :metrics {:tokens toks}})))))
+    {:result (let [r (validate-dag-readiness
+                       (try
+                         (agent/invoke planner-agent task agent-ctx)
+                         (catch Exception e
+                           ;; Preserve the spent-token count from the agent's failure
+                           ;; anomaly (planner tags ex-data with :tokens) into the
+                           ;; failure result's :metrics, so leave-plan still merges the
+                           ;; real cost into :execution/metrics instead of reporting $0.
+                           (let [ed   (ex-data e)
+                                 toks (get ed :tokens 0)]
+                             (response/failure e {:data ed
+                                                  :tokens toks
+                                                  :metrics {:tokens toks}})))))]
+               ;; SPEC §7.4.3 consultation provenance. The planner session does
+               ;; not surface :context-reads yet, so :pin-read? is nil (unknown).
+               (if (map? (:output r))
+                 (assoc-in r [:output :codex/consultation]
+                           (codex-pin/consultation-summary codex-outcome nil))
+                 r))
      :rules-manifest rules-manifest}))
 
 ;------------------------------------------------------------------------------ Layer 2

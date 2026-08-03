@@ -36,6 +36,7 @@
    [ai.miniforge.gate.pre-verify-lint]
    [ai.miniforge.gate.test]
    [ai.miniforge.gate.policy]
+   [ai.miniforge.gate.codex-consultation]
    [ai.miniforge.gate.precommit-discipline]
    [ai.miniforge.gate.behavioral]
    ;; Phase-scoped pack gates (:policy-verify / :policy-review), registered

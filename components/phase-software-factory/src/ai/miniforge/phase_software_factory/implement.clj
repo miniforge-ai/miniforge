@@ -464,10 +464,15 @@
                      (build-context-pack worktree-path files-in-scope))
         existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
         ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
-        ;; worries render before the content they apply to.
-        codex-pin-file (codex-pin/pin-file :implement (get-in ctx [:execution/logger]))
-        existing-files (if codex-pin-file
-                         (into [codex-pin-file] (or existing-files []))
+        ;; worries render before the content they apply to. Retry iterations
+        ;; reuse :execution/cached-files which already contains the previous
+        ;; pin — drop it so the fresh consultation replaces it instead of
+        ;; rendering twice.
+        codex-outcome (codex-pin/pin-outcome :implement (get-in ctx [:execution/logger]))
+        existing-files (vec (remove #(= codex-pin/pin-path (:path %))
+                                    (or existing-files [])))
+        existing-files (if-let [pin (:entry codex-outcome)]
+                         (into [pin] existing-files)
                          existing-files)
         behavior-addendum (phase/load-guidance-addendum
                             :implement {:task {:task/intent (:intent input)}})
@@ -501,7 +506,8 @@
                        :prior-error    (or last-error (messages/t :implement/prior-error-default))
                        :instruction    (messages/t :implement/retry-instruction)}))]
     {:task task
-     :rules-manifest manifest}))
+     :rules-manifest manifest
+     :codex-outcome codex-outcome}))
 
 (defn ^{:stratum 3} leave-implement
   "Post-processing for implementation phase.
@@ -721,7 +727,7 @@
         logger (or (get-in ctx [:execution/logger])
                    (log/create-logger {:min-level :info :output :human}))
         implementer-agent (agent/create-implementer {:logger logger})
-        {:keys [task rules-manifest]} (build-implement-task ctx)
+        {:keys [task rules-manifest codex-outcome]} (build-implement-task ctx)
         ;; Cache loaded files and context pack for subsequent retries
         ctx (cond-> ctx
               (not (get-in ctx [:execution/cached-files]))
@@ -892,7 +898,17 @@
                  ;; something non-success (shouldn't happen outside no-files;
                  ;; defensive fallback).
                  :else
-                 curator-result)]
+                 curator-result)
+        ;; SPEC §7.4.3: mark the result with consultation provenance BEFORE
+        ;; enter-context stores it — gates run between enter and leave and
+        ;; read [:result :output]. Reads come from the agent result's
+        ;; :context-reads (host-mode sessions); curator-result branches drop
+        ;; that key, so read it off impl-result directly.
+        result (if (map? (:output result))
+                 (assoc-in result [:output :codex/consultation]
+                           (codex-pin/consultation-summary
+                             codex-outcome (:context-reads impl-result)))
+                 result)]
     (-> (phase/enter-context ctx :implement :implementer gates budget start-time result)
         (assoc-in [:phase :rules-manifest] rules-manifest)
         (assoc-in [:phase :watchdog-state]

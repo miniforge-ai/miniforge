@@ -58,26 +58,58 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} pin-file
-  "The pin for `phase` as an existing-files entry {:path :content}, or nil
-   when the codex is unconfigured, the phase has no mapped situation, or
-   the consultation failed. A configured codex that cannot answer is worth
-   a warning, ALWAYS: through the logger when one is given, else stderr —
-   a nil logger must not turn the failure silent (plan has no logger)."
-  ([phase logger] (pin-file phase logger (configured-codex-dir)))
+(defn ^{:stratum 1} pin-outcome
+  "The pin attempt for `phase`, fully described:
+   {:entry {:path :content}-or-nil
+    :status :pinned | :unconfigured | :unmapped | :skipped
+    :anomaly keyword-or-nil}
+   :unconfigured (no MINIFORGE_CODEX_PATH) and :unmapped (phase not in
+   phase->situation) mean the capability is off — no noise. :skipped means a
+   CONFIGURED codex failed to answer, which always warns: through the logger
+   when one is given, else stderr — a nil logger must not turn the failure
+   silent (plan has no logger)."
+  ([phase logger] (pin-outcome phase logger (configured-codex-dir)))
   ([phase logger codex-dir]
-   (when codex-dir
-     (when-let [situation (get phase->situation phase)]
-       (let [entry (codex/pin-entry codex-dir situation pin-path)]
-         (if (:codex/anomaly entry)
-           (do (if logger
-                 (log/warn logger phase :codex/pin-skipped
-                           {:data {:anomaly (:codex/anomaly entry)
-                                   :reason  (:codex/reason entry)}})
-                 (binding [*out* *err*]
-                   (println (messages/t :codex/pin-skipped-warn
-                                        {:phase (name phase)
-                                         :anomaly (name (:codex/anomaly entry))
-                                         :reason (:codex/reason entry)}))))
-               nil)
-           entry))))))
+   (cond
+     (nil? codex-dir)
+     {:entry nil :status :unconfigured :anomaly nil}
+
+     (nil? (get phase->situation phase))
+     {:entry nil :status :unmapped :anomaly nil}
+
+     :else
+     (let [entry (codex/pin-entry codex-dir (get phase->situation phase) pin-path)]
+       (if-let [anomaly (:codex/anomaly entry)]
+         (do (if logger
+               (log/warn logger phase :codex/pin-skipped
+                         {:data {:anomaly anomaly
+                                 :reason  (:codex/reason entry)}})
+               (binding [*out* *err*]
+                 (println (messages/t :codex/pin-skipped-warn
+                                      {:phase (name phase)
+                                       :anomaly (name anomaly)
+                                       :reason (:codex/reason entry)}))))
+             {:entry nil :status :skipped :anomaly anomaly})
+         {:entry entry :status :pinned :anomaly nil})))))
+
+(defn ^{:stratum 1} consultation-summary
+  "The SPEC §7.4.3 distinct-object marker: a proposal from an agent that
+   never saw its pinned landings must be distinguishable from one that did.
+   `context-reads` is the session's recorded context_read log (§7.4.2), or
+   nil when the session did not surface one — then :pin-read? is nil
+   (unknown), not false; absence of the record is not evidence of absence
+   of the read."
+  [outcome context-reads]
+  {:pinned?   (= :pinned (:status outcome))
+   :status    (:status outcome)
+   :anomaly   (:anomaly outcome)
+   :pin-read? (when (some? context-reads)
+                (boolean (some #(= pin-path (:path %)) context-reads)))})
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} pin-file
+  "The pin for `phase` as an existing-files entry {:path :content}, or nil.
+   Thin wrapper over pin-outcome for callers that only want the entry."
+  ([phase logger] (:entry (pin-outcome phase logger)))
+  ([phase logger codex-dir] (:entry (pin-outcome phase logger codex-dir))))
