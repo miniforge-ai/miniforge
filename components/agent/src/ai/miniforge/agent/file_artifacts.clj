@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.file-artifacts
   "Fallback artifact collection from files written in the working tree."
   (:require
@@ -27,84 +26,51 @@
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Porcelain parsing and artifact shaping
 
-(def ^:private artifact-manifest-name
+;; Porcelain parsing and artifact shaping
+(def ^{:stratum 0} ^:private artifact-manifest-name
   "Optional metadata manifest written by the agent."
   "miniforge-artifact.edn")
 
-(def ^:private failed-exit-code
+(def ^{:stratum 0} ^:private failed-exit-code
   "Default process exit code for missing executor status."
   1)
 
-(def ^:private empty-changed-paths
+(def ^{:stratum 0} ^:private empty-changed-paths
   {:create #{} :modify #{} :delete #{}})
 
-(defn- shell-quote
-  "Quote a value for a POSIX shell command string."
+(defn ^{:stratum 0} shell-quote
+  "Quote a value for a POSIX shell command string.
+
+   Public so sibling namespaces that build executor command strings
+   (e.g. artifact-session's capsule reads) quote paths the same way."
   [value]
   (str "'" (str/replace (str value) #"'" "'\"'\"'") "'"))
 
-(defn- valid-base-ref?
+(defn- ^{:stratum 0} valid-base-ref?
   "True when `base-ref` can be used as a git diff base candidate."
   [base-ref]
   (and (string? base-ref) (not (str/blank? base-ref))))
 
-(defn- successful-exec?
-  "True when executor result reports success and a zero exit code."
-  [result]
-  (let [exit-code (get-in result [:data :exit-code] failed-exit-code)]
-    (and (:ok? result)
-         (zero? exit-code))))
-
-(defn- normalize-base-refs
+(defn- ^{:stratum 0} normalize-base-refs
   [base-refs]
   (if (sequential? base-refs)
     base-refs
     [base-refs]))
 
-(defn- tracked-addition?
+(defn- ^{:stratum 0} tracked-addition?
   "Return true when the porcelain status indicates a newly added tracked file."
   [status]
   (or (= \A (nth status 0))
       (= \A (nth status 1))))
 
-(defn- deleted?
+(defn- ^{:stratum 0} deleted?
   "Return true when the porcelain status indicates deletion."
   [status]
   (or (= \D (nth status 0))
       (= \D (nth status 1))))
 
-(defn- modified?
-  "Return true when the porcelain status indicates a tracked file change."
-  [status]
-  (or (= \M (nth status 0))
-      (= \M (nth status 1))
-      (= \R (nth status 0))
-      (= \R (nth status 1))
-      (= \C (nth status 0))
-      (= \C (nth status 1))
-      (= \T (nth status 0))
-      (= \T (nth status 1))
-      (tracked-addition? status)))
-
-(defn- porcelain-entry
-  "Parse a single git status --porcelain=v1 line."
-  [line]
-  (when (>= (count line) 3)
-    (let [status (subs line 0 2)
-          raw-path (subs line 3)
-          path (if (str/includes? raw-path " -> ")
-                 (second (str/split raw-path #" -> " 2))
-                 raw-path)]
-      (cond
-        (= status "??") {:bucket :untracked :path path}
-        (deleted? status) {:bucket :deleted :path path}
-        (tracked-addition? status) {:bucket :added :path path}
-        (modified? status) {:bucket :modified :path path}
-        :else nil))))
-
-(defn- name-status-entries
+(defn- ^{:stratum 0} name-status-entries
   "Parse one `git diff --name-status` line into action/path entries."
   [line]
   (let [[status old-path new-path] (str/split line #"\t")
@@ -119,7 +85,7 @@
       \T [{:action :modify :path old-path}]
       [])))
 
-(defn empty-snapshot
+(defn ^{:stratum 0} empty-snapshot
   "Return an empty working tree snapshot."
   []
   {:untracked #{}
@@ -127,34 +93,85 @@
    :deleted #{}
    :added #{}})
 
-(defn- add-entry
+(defn- ^{:stratum 0} add-entry
   "Add a parsed porcelain entry into the snapshot."
   [snapshot {:keys [bucket path]}]
   (update snapshot bucket conj path))
 
-(defn- manifest-path
-  "Return the manifest file path for a working dir."
-  [working-dir]
-  (str (io/file working-dir artifact-manifest-name)))
-
-(defn- read-manifest
-  "Read optional artifact metadata from the working directory."
-  [working-dir]
-  (let [path (manifest-path working-dir)
-        file (io/file path)]
-    (when (.exists file)
-      (-> (slurp file)
-          edn/read-string
-          (select-keys [:code/summary :code/tests-needed?])))))
-
-(defn- file-entry
+(defn- ^{:stratum 0} file-entry
   "Build a synthetic artifact entry for a written file."
   [working-dir action path]
   {:path path
    :content (if (= :delete action) "" (slurp (io/file working-dir path)))
    :action action})
 
-(defn- changed-paths
+(defn- ^{:stratum 0} add-diff-entry
+  "Add a parsed name-status entry into changed path sets."
+  [changed {:keys [action path]}]
+  (if (and action path)
+    (update changed action conj path)
+    changed))
+
+(defn- ^{:stratum 0} merge-changed
+  "Union changed path maps."
+  [& changeds]
+  (apply merge-with set/union changeds))
+
+(defn- ^{:stratum 0} has-changed-paths?
+  "True when a diff changed-path map contains at least one path."
+  [changed]
+  (boolean (some seq (vals changed))))
+
+(defn- ^{:stratum 0} safe-resolve
+  "Resolve `path` under `working-dir` defensively. Returns a regular-file
+   `java.io.File` when:
+   - `path` is non-blank
+   - the canonical target stays inside `working-dir` (rejects absolute
+     paths, `..` escapes, and symlinks pointing outside)
+   - the target exists and is a regular file (not a directory)
+   Returns nil otherwise. Paths come from agent-produced artifacts, so
+   this is a real boundary check, not paranoia."
+  [working-dir path]
+  (try
+    (when (and (string? path) (not (str/blank? path)))
+      (let [base   (.getCanonicalFile (io/file working-dir))
+            target (.getCanonicalFile (io/file working-dir path))]
+        (when (and (.exists target)
+                   (.isFile target)
+                   (.startsWith (.toPath target) (.toPath base)))
+          target)))
+    (catch java.io.IOException _ nil)
+    (catch SecurityException _ nil)
+    (catch IllegalArgumentException _ nil)))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} successful-exec?
+  "True when executor result reports success and a zero exit code."
+  [result]
+  (let [exit-code (get-in result [:data :exit-code] failed-exit-code)]
+    (and (:ok? result)
+         (zero? exit-code))))
+
+(defn- ^{:stratum 1} modified?
+  "Return true when the porcelain status indicates a tracked file change."
+  [status]
+  (or (= \M (nth status 0))
+      (= \M (nth status 1))
+      (= \R (nth status 0))
+      (= \R (nth status 1))
+      (= \C (nth status 0))
+      (= \C (nth status 1))
+      (= \T (nth status 0))
+      (= \T (nth status 1))
+      (tracked-addition? status)))
+
+(defn- ^{:stratum 1} manifest-path
+  "Return the manifest file path for a working dir."
+  [working-dir]
+  (str (io/file working-dir artifact-manifest-name)))
+
+(defn- ^{:stratum 1} changed-paths
   "Compute created/modified/deleted paths attributable to the current session."
   [pre post]
   (let [dirty-before (apply set/union (map #(get pre % #{})
@@ -171,24 +188,7 @@
      :modify (disj modified artifact-manifest-name)
      :delete (disj deleted artifact-manifest-name)}))
 
-(defn- add-diff-entry
-  "Add a parsed name-status entry into changed path sets."
-  [changed {:keys [action path]}]
-  (if (and action path)
-    (update changed action conj path)
-    changed))
-
-(defn- merge-changed
-  "Union changed path maps."
-  [& changeds]
-  (apply merge-with set/union changeds))
-
-(defn- has-changed-paths?
-  "True when a diff changed-path map contains at least one path."
-  [changed]
-  (boolean (some seq (vals changed))))
-
-(defn- snapshot->changed-paths
+(defn- ^{:stratum 1} snapshot->changed-paths
   "Convert a current dirty snapshot into changed path sets."
   [snapshot]
   {:create (disj (set/union (:untracked snapshot #{})
@@ -197,7 +197,7 @@
    :modify (disj (:modified snapshot #{}) artifact-manifest-name)
    :delete (disj (:deleted snapshot #{}) artifact-manifest-name)})
 
-(defn- diff-against-ref
+(defn- ^{:stratum 1} diff-against-ref
   "Return changed paths between `base-ref` and the current working tree."
   [working-dir base-ref]
   (when (and working-dir (valid-base-ref? base-ref))
@@ -208,7 +208,55 @@
                 empty-changed-paths
                 (mapcat name-status-entries (str/split-lines out)))))))
 
-(defn- first-diff-against-ref
+(defn- ^{:stratum 1} read-rehydrated-file
+  "Read one rehydration entry. Returns the file map or nil for any
+   failure (path traversal, missing/non-regular file, permissions,
+   read errors). Skipping unreadable paths is preferable to bubbling
+   an exception that fails the entire review phase."
+  [working-dir path action]
+  (if (= :delete action)
+    {:path path :content "" :action :delete}
+    (when-let [file (safe-resolve working-dir path)]
+      (try
+        {:path path :content (slurp file) :action action}
+        (catch java.io.IOException _ nil)
+        (catch SecurityException _ nil)))))
+
+(defn- ^{:stratum 1} read-file-via-executor
+  "Read a file's content from the capsule. Returns empty string on failure."
+  [exec! executor env-id working-dir path]
+  (let [r (exec! executor env-id (str "cat " (shell-quote path)) {:workdir working-dir})]
+    (get-in r [:data :stdout] "")))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} porcelain-entry
+  "Parse a single git status --porcelain=v1 line."
+  [line]
+  (when (>= (count line) 3)
+    (let [status (subs line 0 2)
+          raw-path (subs line 3)
+          path (if (str/includes? raw-path " -> ")
+                 (second (str/split raw-path #" -> " 2))
+                 raw-path)]
+      (cond
+        (= status "??") {:bucket :untracked :path path}
+        (deleted? status) {:bucket :deleted :path path}
+        (tracked-addition? status) {:bucket :added :path path}
+        (modified? status) {:bucket :modified :path path}
+        :else nil))))
+
+(defn- ^{:stratum 2} read-manifest
+  "Read optional artifact metadata from the working directory."
+  [working-dir]
+  (let [path (manifest-path working-dir)
+        file (io/file path)]
+    (when (.exists file)
+      (-> (slurp file)
+          edn/read-string
+          (select-keys [:code/summary :code/tests-needed?])))))
+
+(defn- ^{:stratum 2} first-diff-against-ref
   "Try base refs in order and return the first non-empty successful diff."
   [working-dir base-refs]
   (loop [[base-ref & remaining] (filter valid-base-ref? base-refs)
@@ -221,7 +269,55 @@
         (recur remaining empty-diff))
       empty-diff)))
 
-(defn- worktree-changed-paths
+(defn- ^{:stratum 2} rehydration-entry
+  "Build one `:code/files` entry for `path` under `working-dir`,
+   honoring the action recorded in `action-by-path` (defaulting to
+   `:modify`). Named so callers can pass it via `partial` instead of
+   hoisting the closure into an inline `fn`."
+  [working-dir action-by-path path]
+  (read-rehydrated-file working-dir
+                        path
+                        (get action-by-path path :modify)))
+
+(defn- ^{:stratum 2} read-manifest-via-executor
+  "Read the artifact manifest from the capsule, if present."
+  [exec! executor env-id working-dir]
+  (let [r (exec! executor env-id
+                 (str "cat " (shell-quote artifact-manifest-name))
+                 {:workdir working-dir})]
+    (when (successful-exec? r)
+      (try (-> (get-in r [:data :stdout])
+               edn/read-string
+               (select-keys [:code/summary :code/tests-needed?]))
+           (catch Exception _ nil)))))
+
+(defn- ^{:stratum 2} changed-path->file-entry
+  "Build a file entry map for a changed path, reading content via executor."
+  [exec! executor env-id working-dir action path]
+  {:path path
+   :content (if (= :delete action)
+              ""
+              (read-file-via-executor exec! executor env-id working-dir path))
+   :action action})
+
+(defn- ^{:stratum 2} diff-against-ref-via-executor
+  "Return changed paths between `base-ref` and the capsule working tree."
+  [exec! executor env-id working-dir base-ref]
+  (when (valid-base-ref? base-ref)
+    (let [result (exec! executor env-id
+                        (str "git diff --name-status "
+                             (shell-quote base-ref)
+                             " --")
+                        {:workdir working-dir})]
+      (when (successful-exec? result)
+        (reduce add-diff-entry
+                empty-changed-paths
+                (mapcat name-status-entries
+                        (str/split-lines (get-in result [:data :stdout] ""))))))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} worktree-changed-paths
   "Merge committed task diff and current dirty snapshot paths."
   [working-dir base-refs snapshot]
   (merge-changed
@@ -229,7 +325,7 @@
        empty-changed-paths)
    (snapshot->changed-paths snapshot)))
 
-(defn- synthetic-artifact
+(defn- ^{:stratum 3} synthetic-artifact
   "Build a synthetic code artifact from written file sets."
   [working-dir changed]
   (let [files (->> [[:create (:create changed)]
@@ -246,10 +342,8 @@
               :code/tests-needed? true}
              (read-manifest working-dir)))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Working tree snapshot and fallback artifact collection
-
-(defn snapshot-working-dir
+(defn ^{:stratum 3} snapshot-working-dir
   "Capture the current git dirty state for a working directory.
 
    Returns sets of paths relative to working-dir. Paths already staged
@@ -281,7 +375,7 @@
                         :exit exit
                         :stderr err}))))
 
-(defn snapshot-via-executor
+(defn ^{:stratum 3} snapshot-via-executor
   "Capture git dirty state inside a capsule via the executor.
 
    Like snapshot-working-dir but runs git status through the executor
@@ -296,98 +390,7 @@
               (keep porcelain-entry (str/split-lines (get-in result [:data :stdout] ""))))
       (empty-snapshot))))
 
-(defn collect-written-files
-  "Collect files written during the agent session into a synthetic code artifact.
-
-   Uses the pre-session snapshot to exclude files that were already dirty before
-   the session started.
-
-   `snapshot-working-dir` is anomaly-returning; we treat any anomaly
-   the same way we treat a thrown exception — return nil so a broken
-   working tree never aborts the review phase. The `try/catch` covers
-   non-anomaly throws from downstream IO (e.g. `synthetic-artifact`
-   reading file content)."
-  [pre-snapshot working-dir]
-  (when pre-snapshot
-    (try
-      (let [snap (snapshot-working-dir working-dir)]
-        (when-not (anomaly/anomaly? snap)
-          (->> snap
-               (changed-paths pre-snapshot)
-               (synthetic-artifact working-dir))))
-      (catch Exception _
-        nil))))
-
-(defn collect-worktree-files
-  "Collect the promoted worktree artifact.
-
-   Unlike `collect-written-files`, this is not limited to the current
-   LLM session. It compares the current worktree against the task base
-   ref when one is known, then merges in untracked dirty files. This is
-   the environment-promotion path: previously committed repair work is
-   still part of the artifact even when the current session only touched
-   one follow-up file or wrote nothing new."
-  ([working-dir]
-   (collect-worktree-files working-dir nil))
-  ([working-dir base-refs]
-   (when working-dir
-     (try
-       (let [snap (snapshot-working-dir working-dir)]
-         (when-not (anomaly/anomaly? snap)
-           (synthetic-artifact working-dir
-                               (worktree-changed-paths working-dir
-                                                       base-refs
-                                                       snap))))
-       (catch Exception _
-         nil)))))
-
-(defn- safe-resolve
-  "Resolve `path` under `working-dir` defensively. Returns a regular-file
-   `java.io.File` when:
-   - `path` is non-blank
-   - the canonical target stays inside `working-dir` (rejects absolute
-     paths, `..` escapes, and symlinks pointing outside)
-   - the target exists and is a regular file (not a directory)
-   Returns nil otherwise. Paths come from agent-produced artifacts, so
-   this is a real boundary check, not paranoia."
-  [working-dir path]
-  (try
-    (when (and (string? path) (not (str/blank? path)))
-      (let [base   (.getCanonicalFile (io/file working-dir))
-            target (.getCanonicalFile (io/file working-dir path))]
-        (when (and (.exists target)
-                   (.isFile target)
-                   (.startsWith (.toPath target) (.toPath base)))
-          target)))
-    (catch java.io.IOException _ nil)
-    (catch SecurityException _ nil)
-    (catch IllegalArgumentException _ nil)))
-
-(defn- read-rehydrated-file
-  "Read one rehydration entry. Returns the file map or nil for any
-   failure (path traversal, missing/non-regular file, permissions,
-   read errors). Skipping unreadable paths is preferable to bubbling
-   an exception that fails the entire review phase."
-  [working-dir path action]
-  (if (= :delete action)
-    {:path path :content "" :action :delete}
-    (when-let [file (safe-resolve working-dir path)]
-      (try
-        {:path path :content (slurp file) :action action}
-        (catch java.io.IOException _ nil)
-        (catch SecurityException _ nil)))))
-
-(defn- rehydration-entry
-  "Build one `:code/files` entry for `path` under `working-dir`,
-   honoring the action recorded in `action-by-path` (defaulting to
-   `:modify`). Named so callers can pass it via `partial` instead of
-   hoisting the closure into an inline `fn`."
-  [working-dir action-by-path path]
-  (read-rehydrated-file working-dir
-                        path
-                        (get action-by-path path :modify)))
-
-(defn rehydrate-files
+(defn ^{:stratum 3} rehydrate-files
   "Read file content from `working-dir` for each path in `paths`,
    producing the `:code/files` vector callers expect.
 
@@ -423,34 +426,7 @@
             (keep (partial rehydration-entry working-dir action-by-path))
             vec)))))
 
-(defn- read-file-via-executor
-  "Read a file's content from the capsule. Returns empty string on failure."
-  [exec! executor env-id working-dir path]
-  (let [r (exec! executor env-id (str "cat " (shell-quote path)) {:workdir working-dir})]
-    (get-in r [:data :stdout] "")))
-
-(defn- read-manifest-via-executor
-  "Read the artifact manifest from the capsule, if present."
-  [exec! executor env-id working-dir]
-  (let [r (exec! executor env-id
-                 (str "cat " (shell-quote artifact-manifest-name))
-                 {:workdir working-dir})]
-    (when (successful-exec? r)
-      (try (-> (get-in r [:data :stdout])
-               edn/read-string
-               (select-keys [:code/summary :code/tests-needed?]))
-           (catch Exception _ nil)))))
-
-(defn- changed-path->file-entry
-  "Build a file entry map for a changed path, reading content via executor."
-  [exec! executor env-id working-dir action path]
-  {:path path
-   :content (if (= :delete action)
-              ""
-              (read-file-via-executor exec! executor env-id working-dir path))
-   :action action})
-
-(defn- changed-paths->file-entries
+(defn- ^{:stratum 3} changed-paths->file-entries
   "Convert changed-paths result to a flat vector of file entry maps."
   [changed exec! executor env-id working-dir]
   (->> [[:create (:create changed)]
@@ -461,22 +437,7 @@
                       (sort paths))))
        vec))
 
-(defn- diff-against-ref-via-executor
-  "Return changed paths between `base-ref` and the capsule working tree."
-  [exec! executor env-id working-dir base-ref]
-  (when (valid-base-ref? base-ref)
-    (let [result (exec! executor env-id
-                        (str "git diff --name-status "
-                             (shell-quote base-ref)
-                             " --")
-                        {:workdir working-dir})]
-      (when (successful-exec? result)
-        (reduce add-diff-entry
-                empty-changed-paths
-                (mapcat name-status-entries
-                        (str/split-lines (get-in result [:data :stdout] ""))))))))
-
-(defn- first-diff-against-ref-via-executor
+(defn- ^{:stratum 3} first-diff-against-ref-via-executor
   "Try base refs in order inside the capsule."
   [exec! executor env-id working-dir base-refs]
   (loop [[base-ref & remaining] (filter valid-base-ref? base-refs)
@@ -490,7 +451,54 @@
         (recur remaining empty-diff))
       empty-diff)))
 
-(defn- worktree-changed-paths-via-executor
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} collect-written-files
+  "Collect files written during the agent session into a synthetic code artifact.
+
+   Uses the pre-session snapshot to exclude files that were already dirty before
+   the session started.
+
+   `snapshot-working-dir` is anomaly-returning; we treat any anomaly
+   the same way we treat a thrown exception — return nil so a broken
+   working tree never aborts the review phase. The `try/catch` covers
+   non-anomaly throws from downstream IO (e.g. `synthetic-artifact`
+   reading file content)."
+  [pre-snapshot working-dir]
+  (when pre-snapshot
+    (try
+      (let [snap (snapshot-working-dir working-dir)]
+        (when-not (anomaly/anomaly? snap)
+          (->> snap
+               (changed-paths pre-snapshot)
+               (synthetic-artifact working-dir))))
+      (catch Exception _
+        nil))))
+
+(defn ^{:stratum 4} collect-worktree-files
+  "Collect the promoted worktree artifact.
+
+   Unlike `collect-written-files`, this is not limited to the current
+   LLM session. It compares the current worktree against the task base
+   ref when one is known, then merges in untracked dirty files. This is
+   the environment-promotion path: previously committed repair work is
+   still part of the artifact even when the current session only touched
+   one follow-up file or wrote nothing new."
+  ([working-dir]
+   (collect-worktree-files working-dir nil))
+  ([working-dir base-refs]
+   (when working-dir
+     (try
+       (let [snap (snapshot-working-dir working-dir)]
+         (when-not (anomaly/anomaly? snap)
+           (synthetic-artifact working-dir
+                               (worktree-changed-paths working-dir
+                                                       base-refs
+                                                       snap))))
+       (catch Exception _
+         nil)))))
+
+(defn- ^{:stratum 4} worktree-changed-paths-via-executor
   "Merge committed task diff and current dirty snapshot paths in a capsule."
   [exec! executor env-id working-dir base-refs snapshot]
   (merge-changed
@@ -499,7 +507,7 @@
        empty-changed-paths)
    (snapshot->changed-paths snapshot)))
 
-(defn- worktree-artifact-via-executor
+(defn- ^{:stratum 4} worktree-artifact-via-executor
   [exec! executor env-id working-dir changed]
   (let [files (changed-paths->file-entries changed exec! executor env-id working-dir)]
     (when (seq files)
@@ -509,7 +517,7 @@
               :code/tests-needed? true}
              (read-manifest-via-executor exec! executor env-id working-dir)))))
 
-(defn collect-written-files-via-executor
+(defn ^{:stratum 4} collect-written-files-via-executor
   "Like collect-written-files but runs git status inside a capsule via executor.
    Reads file contents from the capsule for the synthetic artifact."
   [pre-snapshot exec! executor env-id working-dir]
@@ -527,7 +535,9 @@
       (catch Exception _
         nil))))
 
-(defn collect-worktree-files-via-executor
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} collect-worktree-files-via-executor
   "Like collect-worktree-files but reads git state and content in a capsule."
   ([exec! executor env-id working-dir]
    (collect-worktree-files-via-executor exec! executor env-id working-dir nil))
