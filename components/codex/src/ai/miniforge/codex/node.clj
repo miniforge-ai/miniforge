@@ -22,7 +22,8 @@
    generated elsewhere (data-as-source, Codex SPEC T1 §8.1). This namespace
    only parses and loads; it never writes. An unreadable codex is data
    (:codex/anomaly), never an empty success."
-  (:require [clojure.java.io :as io]
+  (:require [ai.miniforge.codex.messages :as msg]
+            [clojure.java.io :as io]
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -94,7 +95,7 @@
   (let [nodes-dir (io/file codex-dir "nodes")]
     (if-not (.isDirectory nodes-dir)
       {:codex/anomaly :codex-unreadable
-       :codex/reason (str "no nodes/ directory under " codex-dir)}
+       :codex/reason (msg/t :anomaly/no-nodes-dir {:dir codex-dir})}
       (try
         {:nodes (into {}
                       (comp (filter #(and (.isFile ^java.io.File %)
@@ -110,9 +111,9 @@
         ;; catch would also eat InterruptedException.
         (catch java.io.IOException e
           {:codex/anomaly :codex-unreadable
-           :codex/reason (str "failed reading a node under " nodes-dir ": "
-                              (ex-message e))})
+           :codex/reason (msg/t :anomaly/read-failed
+                                {:dir (str nodes-dir) :error (ex-message e)})})
         (catch SecurityException e
           {:codex/anomaly :codex-unreadable
-           :codex/reason (str "access denied under " nodes-dir ": "
-                              (ex-message e))})))))
+           :codex/reason (msg/t :anomaly/access-denied
+                                {:dir (str nodes-dir) :error (ex-message e)})})))))

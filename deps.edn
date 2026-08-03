@@ -29,6 +29,7 @@
                        "components/progress-detector/resources"
                        "components/clock/src"
                        "components/codex/src"
+                       "components/codex/resources"
                        "components/coerce/src"
                        "components/response-chain/src"
                        "components/boundary/src"

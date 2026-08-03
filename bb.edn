@@ -571,6 +571,7 @@
    :extra-paths ["bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
                  "components/codex/src"
+                 "components/codex/resources"
                  "components/messages/src"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
@@ -719,6 +720,7 @@
                  "bases/mcp-context-server/src"
                  "bases/mcp-context-server/resources"
                  "components/codex/src"
+                 "components/codex/resources"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/compliance-scanner/src"
