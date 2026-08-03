@@ -22,7 +22,9 @@
    logger         — logger instance (or nil)
    pipeline-path  — path to the pipeline EDN file (cursor path is derived from it)
    cursor-map     — {stage-uuid → cursor-entry} as returned in :pipeline-run/connector-cursors
-   Returns schema/success with :cursors (normalized map) or schema/failure."
+   Returns schema/success with :cursors — the full persisted map, this
+   run's entries merged over what was already on disk, so it includes
+   stages that reported no cursor this run — or schema/failure."
   [logger pipeline-path cursor-map]
   (store/save-cursors logger pipeline-path cursor-map))
 

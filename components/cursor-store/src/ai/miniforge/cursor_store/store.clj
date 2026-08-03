@@ -13,6 +13,7 @@
             [clojure.java.io :as io]
             [clojure.pprint :as pp]
             [ai.miniforge.coerce.interface :as coerce]
+            [ai.miniforge.cursor-store.messages :as msg]
             [ai.miniforge.logging.interface :as log]
             [ai.miniforge.schema.interface :as schema])
   (:import [java.io StringWriter]))
@@ -52,7 +53,7 @@
          (assoc acc [sname schema] entry)
          (do (when logger
                (log/warn logger :cursor-store :cursor-store/entry-dropped
-                         {:message "Cursor entry dropped — missing stage-name or schema-name"
+                         {:message (msg/t :store/entry-dropped)
                           :data {:stage/name (get entry :stage/name "unknown")}}))
              acc))))
    {}
@@ -95,11 +96,22 @@
 ;; File access, and the public I/O that shares it.
 (defn- ^{:stratum 1} existing-cursors
   "Cursors already persisted for this pipeline, or nil when no file
-   exists yet. Throws on a malformed file; both callers turn that into
-   a schema/failure."
+   exists yet. Both callers turn a throw from here into a
+   schema/failure.
+
+   A file that exists but does not hold a map is a failure, not an
+   empty one. `edn/read-string` returns nil for an empty file, and a
+   run killed mid-write leaves exactly that — so reading nil as `no
+   cursors yet` would restart every stage from scratch and report the
+   run a success, which is the silent full re-ingest this store exists
+   to prevent."
   [^java.io.File file]
   (when (.exists file)
-    (read-edn (slurp file))))
+    (let [value (read-edn (slurp file))]
+      (if (map? value)
+        value
+        (throw (ex-info (msg/t :store/not-a-map {:path (str file)})
+                        {:path (str file) :type (type value)}))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -126,14 +138,15 @@
       (if (empty? normalized)
         (do (when logger
               (log/info logger :cursor-store :cursor-store/no-cursors
-                        {:message "No cursors to save — no ingest stages completed with cursors"}))
+                        {:message (msg/t :store/no-cursors)}))
             (schema/success :cursors persisted))
         (let [dir (.getParentFile file)]
           (.mkdirs dir)
           (spit file (write-edn persisted))
           (when logger
             (log/info logger :cursor-store :cursor-store/saved
-                      {:message (str "Saved " (count normalized) " cursor(s)")
+                      {:message (msg/t :store/saved {:count     (count normalized)
+                                                      :persisted (count persisted)})
                        :data {:count     (count normalized)
                               :persisted (count persisted)
                               :path      (str file)}}))
@@ -141,7 +154,7 @@
     (catch Exception e
       (when logger
         (log/error logger :cursor-store :cursor-store/write-failed
-                   {:message (str "Failed to write cursor file: " (.getMessage e))
+                   {:message (msg/t :store/write-failed {:error (.getMessage e)})
                     :data {:path pipeline-path :error (.getMessage e)}}))
       (schema/failure :cursors (.getMessage e)))))
 
@@ -160,16 +173,16 @@
       (if cursors
         (do (when logger
               (log/info logger :cursor-store :cursor-store/loaded
-                        {:message (str "Loaded " (count cursors) " cursor(s)")
+                        {:message (msg/t :store/loaded {:count (count cursors)})
                          :data {:count (count cursors) :path (str file)}}))
             (schema/success :cursors cursors))
         (do (when logger
               (log/info logger :cursor-store :cursor-store/first-run
-                        {:message "No prior cursors found — starting fresh"}))
+                        {:message (msg/t :store/first-run)}))
             (schema/success :cursors {}))))
     (catch Exception e
       (when logger
         (log/error logger :cursor-store :cursor-store/read-failed
-                   {:message (str "Failed to read cursor file: " (.getMessage e))
+                   {:message (msg/t :store/read-failed {:error (.getMessage e)})
                     :data {:path pipeline-path :error (.getMessage e)}}))
       (schema/failure :cursors (.getMessage e)))))

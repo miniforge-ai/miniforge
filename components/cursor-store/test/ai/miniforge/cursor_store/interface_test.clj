@@ -213,6 +213,25 @@
       (is (= 10 (get-in (:cursors (sut/load-cursors logger path))
                         [["Ingest PRs" "Ingest PRs"] :cursor :cursor/value]))))))
 
+(deftest ^{:stratum 1} non-map-cursor-file-fails-loudly-test
+  (testing "a file that does not hold a map is a failure, not a fresh start"
+    ;; `edn/read-string` returns nil for an empty file, and a run killed
+    ;; mid-write leaves exactly that. Reading it as "no cursors yet"
+    ;; would restart every stage from scratch and still report success.
+    (doseq [content ["" "nil" "[1 2 3]"]]
+      (let [path (tmp-pipeline-path)
+            file (io/file (.getParentFile (io/file path))
+                          ".cursors" (.getName (io/file path)))]
+        (io/make-parents file)
+        (spit file content)
+        (let [loaded (sut/load-cursors logger path)]
+          (is (false? (:success? loaded))
+              (str "content " (pr-str content) " should fail the load")))
+        (let [saved (sut/save-cursors logger path
+                                      (stage-cursor "Ingest PRs" 10))]
+          (is (false? (:success? saved))
+              (str "content " (pr-str content) " should fail the save")))))))
+
 (deftest ^{:stratum 1} inst-tagged-cursor-file-loads-as-string-test
   (testing "a cursor file containing #inst still yields a filterable watermark"
     ;; `#inst` is the obvious literal for a human editing a cursor file by
