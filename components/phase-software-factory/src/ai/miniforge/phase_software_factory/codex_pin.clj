@@ -61,10 +61,10 @@
    else stderr — a nil logger must not turn the failure silent."
   [phase logger anomaly reason]
   (if logger
-    (log/warn logger phase :codex/pin-skipped
+    (log/warn logger phase :codex/consultation-skipped
               {:data {:anomaly anomaly :reason reason}})
     (binding [*out* *err*]
-      (println (messages/t :codex/pin-skipped-warn
+      (println (messages/t :codex/consultation-skipped-warn
                            {:phase (name phase)
                             :anomaly (name anomaly)
                             :reason reason})))))

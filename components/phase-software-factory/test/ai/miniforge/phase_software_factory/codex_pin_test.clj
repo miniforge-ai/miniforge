@@ -49,7 +49,7 @@
   (let [err (java.io.StringWriter.)]
     (binding [*err* err]
       (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
-    (is (re-find #"WARN: codex pin skipped for implement" (str err))
+    (is (re-find #"WARN: codex consultation skipped for implement" (str err))
         "a nil logger must not turn a configured-codex failure silent")))
 
 (deftest ^{:stratum 0} pin-outcome-states

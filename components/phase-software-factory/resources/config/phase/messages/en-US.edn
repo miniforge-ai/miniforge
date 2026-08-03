@@ -3,7 +3,7 @@
   :default/task-description "implement changes"
 
   ;; Thesium Codex blackboard pin (SPEC §7.4)
-  :codex/pin-skipped-warn "WARN: codex pin skipped for {phase} — {anomaly}: {reason}"
+  :codex/consultation-skipped-warn "WARN: codex consultation skipped for {phase} — {anomaly}: {reason}"
 
   ;; Implementation phase
   :implement/agent-error           "Agent returned error status"
