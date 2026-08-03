@@ -167,6 +167,7 @@
 
 (comment
   (require '[ai.miniforge.evidence-bundle.workflow-integration :as integration]
+           '[ai.miniforge.evidence-bundle.workflow-integration-factory :as integration-factory]
            '[ai.miniforge.workflow.interface :as workflow])
 
   (def artifact-store (artifact/create-transit-store))
@@ -174,7 +175,7 @@
   ;; Method 1: Manual setup
   (def evidence-mgr (evidence/create-evidence-manager
                      {:artifact-store artifact-store}))
-  (def collector (integration/create-evidence-collector
+  (def collector (integration-factory/create-evidence-collector
                   {:evidence-manager evidence-mgr
                    :artifact-store artifact-store}))
 
@@ -183,7 +184,7 @@
 
   ;; Method 2: Convenience function
   (def wf2 (-> (workflow/create-workflow)
-               (integration/create-and-attach-evidence-collector artifact-store)))
+               (integration-factory/create-and-attach-evidence-collector artifact-store)))
 
   ;; Now run workflow - evidence bundle created automatically on completion
   (def example-spec {:spec/title "Example workflow"})
