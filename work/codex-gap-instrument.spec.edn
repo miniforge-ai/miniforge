@@ -88,7 +88,7 @@
 
  :spec/constraints
  ["Ledger entries are DATA appended at phase leave; recording must never fail a phase (best-effort, logged)"
-  "Ledger storage is gitignored runtime state (.miniforge/ or the evidence-bundle store) — never git-tracked"
+  "Ledger storage is gitignored runtime state under the run checkpoint dir — never git-tracked, never evidence-bundle (see preamble resolution)"
   "Classification order is normative: first leaking rung wins (T2 §3.3); a later rung must never be blamed when an earlier one leaked"
   "Non-mechanical attributions carry :attribution/method and :attribution/confidence; below-threshold entries land in a review queue, never silently in a bucket"
   "The gap report is a vector with per-bucket member lists; no scalar summary may be derived or printed (T2 §4.1, same rationale as T1 §7.5)"
