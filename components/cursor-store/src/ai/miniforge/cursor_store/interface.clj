@@ -4,12 +4,20 @@
    Cursors are stored as EDN at:
      <pipeline-dir>/.cursors/<pipeline-filename>
 
-   The on-disk map is keyed by [connector-ref schema-name] for stable
-   identity across runs (stage UUIDs are regenerated each run).
-   prior-cursor in pipeline-runner looks up by this composite key."
+   The on-disk map is keyed by [stage-name schema-name] — the only
+   identity a cursor entry carries that survives between runs. Both
+   `:stage/id` and `:stage/connector-ref` are freshly generated UUIDs
+   on every run (see `store/normalize-for-storage`).
+
+   That key is this store's own; nothing downstream reads it directly.
+   `pipeline-runner`'s prior-cursor resolves a stage's cursor by the
+   `:stage/id` it was scheduled with, so a caller translates between
+   the two — `etl.cursors/by-stage-id` is the one that does today."
   (:require [ai.miniforge.cursor-store.store :as store]))
 
-(defn save-cursors
+;------------------------------------------------------------------------------ Layer 0
+
+(defn ^{:stratum 0} save-cursors
   "Persist connector cursors after a pipeline run.
    logger         — logger instance (or nil)
    pipeline-path  — path to the pipeline EDN file (cursor path is derived from it)
@@ -18,12 +26,13 @@
   [logger pipeline-path cursor-map]
   (store/save-cursors logger pipeline-path cursor-map))
 
-(defn load-cursors
+(defn ^{:stratum 0} load-cursors
   "Load persisted cursors for a pipeline.
    logger         — logger instance (or nil)
    pipeline-path  — path to the pipeline EDN file
-   Returns schema/success with :cursors key ({[conn-ref schema-name] → cursor-entry}).
-   Returns schema/success with empty map on first run.
-   Returns schema/failure only on parse errors."
+   Returns schema/success with :cursors key ({[stage-name schema-name] → cursor-entry}).
+   Returns schema/success with empty map on first run (no file yet).
+   Returns schema/failure when a file that does exist cannot be read —
+   a parse error, but equally a permissions or other I/O failure."
   [logger pipeline-path]
   (store/load-cursors logger pipeline-path))
