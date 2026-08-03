@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.artifact-session
   "MCP artifact session management.
 
@@ -40,16 +39,16 @@
    [java.nio.file.attribute FileAttribute]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Schema & session lifecycle
 
-(def Session
+;; Schema & session lifecycle
+(def ^{:stratum 0} Session
   "Schema for an artifact session map."
   [:map
    [:dir [:string {:min 1}]]
    [:mcp-config-path [:string {:min 1}]]
    [:artifact-path [:string {:min 1}]]])
 
-(def ^:private system-message-templates
+(def ^{:stratum 0} ^:private system-message-templates
   "System-localized stderr message templates for artifact-session I/O."
   {:warn/worktree-artifact-parse
    "WARN: failed to parse worktree artifact at %s — %s"
@@ -66,20 +65,13 @@
    :warn/context-misses-parse
    "WARN: failed to parse context misses at %s — %s"
 
+   :warn/context-reads-parse
+   "WARN: failed to parse context reads at %s — %s"
+
    :info/mcp-artifact-skipped
    "INFO: MCP artifact not submitted — worktree-promotion succeeded (workdir: %s)"})
 
-(defn validate-session
-  "Validate a session map against the Session schema.
-
-   Returns {:valid? true} or {:valid? false :errors ...}."
-  [session]
-  (if (m/validate Session session)
-    {:valid? true}
-    {:valid? false
-     :errors (m/explain Session session)}))
-
-(defn command-on-path?
+(defn ^{:stratum 0} command-on-path?
   "Check if a command exists on PATH."
   [cmd]
   (try
@@ -87,7 +79,7 @@
       (zero? (.waitFor proc)))
     (catch Exception _ false)))
 
-(defn- find-bb-root
+(defn- ^{:stratum 0} find-bb-root
   "Find the nearest ancestor directory containing bb.edn."
   []
   (loop [dir (.getCanonicalFile (io/file (System/getProperty "user.dir")))]
@@ -97,99 +89,18 @@
         (nil? (.getParentFile dir)) nil
         :else (recur (.getParentFile dir))))))
 
-(defn resolve-miniforge-command
-  "Resolve the miniforge command to use for spawning subprocesses.
-
-   Resolution order:
-   1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
-   2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
-      (dev mode — location-independent bb.edn task)
-   3. \"miniforge\" on PATH (installed binary)
-   4. [\"bb\" \"miniforge\"] as a final fallback"
-  []
-  (let [bb-root (find-bb-root)]
-    (cond
-      ;; 1. Explicit override
-      (System/getenv "MINIFORGE_CMD")
-      [(System/getenv "MINIFORGE_CMD")]
-
-      ;; 2. Prefer the current workspace in development and tests.
-      bb-root
-      ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
-
-      ;; 3. Installed binary on PATH
-      (command-on-path? "miniforge")
-      ["miniforge"]
-
-      ;; 4. Last-resort fallback
-      :else
-      ["bb" "miniforge"])))
-
-(defn- emit-system-message!
-  "Render a system-scoped stderr message from a shared template."
-  [message-key & args]
-  (binding [*out* *err*]
-    (println (apply format (get system-message-templates message-key) args))))
-
-(defn- artifact-filename
+(defn- ^{:stratum 0} artifact-filename
   "Canonical filename for a role artifact in .miniforge/."
   [role]
   (str (name role) ".edn"))
 
-(defn- worktree-artifact-file
-  "Resolve the canonical .miniforge artifact file for a role."
-  [workdir role]
-  (io/file workdir ".miniforge" (artifact-filename role)))
-
-(defn- parse-edn-content
-  "Parse EDN content with a transform, logging failures as system messages."
-  [content transform warning-key path]
-  (try
-    (-> content
-        transform)
-    (catch Exception e
-      (emit-system-message! warning-key path (ex-message e))
-      nil)))
-
-(defn- parse-edn-file
-  "Read and parse an EDN file with a transform, logging failures consistently."
-  [f transform warning-key]
-  (parse-edn-content (slurp f) transform warning-key (.getPath f)))
-
-(def ^:private codex-artifact-table-pattern
+(def ^{:stratum 0} ^:private codex-artifact-table-pattern
   #"^\[mcp_servers\.artifact(?:\..+)?\]\s*$")
 
-(def ^:private toml-table-pattern
+(def ^{:stratum 0} ^:private toml-table-pattern
   #"^\[[^]]+\]\s*$")
 
-(defn- strip-codex-artifact-config
-  "Remove the full mcp_servers.artifact subtree from a Codex TOML config.
-
-   This strips both the root server block and any nested tables such as
-   [mcp_servers.artifact.tools.context_read], which newer Codex builds treat
-   as invalid if the parent server definition has already been removed."
-  [content]
-  (let [lines (str/split-lines content)]
-    (loop [remaining lines
-           cleaned []
-           skipping? false]
-      (if-let [line (first remaining)]
-        (let [trimmed (str/trim line)]
-          (cond
-            (re-matches codex-artifact-table-pattern trimmed)
-            (recur (rest remaining) cleaned true)
-
-            (and skipping? (re-matches toml-table-pattern trimmed))
-            (recur remaining cleaned false)
-
-            skipping?
-            (recur (rest remaining) cleaned true)
-
-            :else
-            (recur (rest remaining) (conj cleaned line) false)))
-        (str/join "\n" cleaned)))))
-
-(defn create-session!
+(defn ^{:stratum 0} create-session!
   "Create a new artifact session with a temporary directory.
 
    Optionally accepts a workdir override (e.g., a git worktree path) for
@@ -230,10 +141,313 @@
                                 (file-artifacts/empty-snapshot)
                                 snap))})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; MCP server command
+(defn ^{:stratum 0} write-cursor-mcp-config!
+  "Write or update .cursor/mcp.json with mcpServers.artifact entry.
 
-(defn server-command
+   If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
+
+   Returns the path to the config file."
+  [config-root server-cmd]
+  (let [{:keys [command args]} server-cmd
+        root (or config-root (System/getProperty "user.dir"))
+        dir (io/file root ".cursor")
+        config-file (io/file dir "mcp.json")
+        entry {"command" command "args" args}
+        existing (when (.exists config-file)
+                   (try (json/parse-string (slurp config-file))
+                        (catch Exception _ {})))
+        config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
+    (.mkdirs dir)
+    (spit config-file (json/generate-string config {:pretty true}))
+    (str config-file)))
+
+(defn- ^{:stratum 0} mcp-tool->cursor-permission
+  "Translate one agent-agnostic `mcp-tools` entry into a Cursor permission
+   rule string (https://cursor.com/docs/cli/reference/permissions).
+
+     {:mcp/server S :mcp/tool T} -> \"Mcp(S:T)\"
+     :Write / :Edit / :MultiEdit -> \"Write(**)\"  (Cursor models all edits
+                                                    as writes; no Edit primitive)
+
+   Returns nil for entries with no Cursor analog."
+  [tool]
+  (cond
+    (map? tool)
+    (format "Mcp(%s:%s)" (name (:mcp/server tool)) (name (:mcp/tool tool)))
+
+    (#{:Write :Edit :MultiEdit} tool)
+    "Write(**)"
+
+    :else nil))
+
+(def ^{:stratum 0} cursor-permission-deny
+  "Hard denials applied regardless of the allowlist. Deny takes precedence
+   over allow in Cursor, so these block secret writes even when Write(**) is
+   allowed. Globs follow Cursor's documented Write(pathOrGlob) form."
+  ["Write(**/.env*)" "Write(**/*.key)" "Write(**/*.pem)"])
+
+(def ^{:stratum 0} ^:private cursor-write-tools
+  "Native tools that Cursor collapses into the single Write(**) permission.
+   Cursor cannot express a partial write restriction, so disallowing any one
+   of these drops the whole write permission."
+  #{:Write :Edit :MultiEdit})
+
+(def ^{:stratum 0} ^:private cursor-permissions-backup-suffix
+  "Suffix for the pre-session .cursor/cli.json snapshot used to restore the
+   user's exact file on cleanup."
+  ".mf-bak")
+
+(def ^{:stratum 0} mcp-tools
+  "Tools the inner agent is auto-approved to call, as generic data.
+
+   Each backend adapter (claude, codex, cursor-agent, …) translates
+   this into the allowlist / approval shape its CLI expects. Keep
+   agent-CLI-agnostic — the structured form is the source of truth.
+
+   Two entry shapes:
+   - `{:mcp/server :mcp/tool}` — a tool exposed by an MCP server
+   - plain keyword — a native tool from the agent CLI (e.g. `:Write`,
+     needed for plan.edn / code container-promotion writes)
+
+   Example wire formats per backend:
+     claude  → --allowedTools \"mcp__context__context_read,Write,...\"
+     cursor  → --approve-mcps  (blanket approve; no names needed)
+     codex   → (currently unused; codex uses its own MCP config)
+
+   Iter-10 failure — bare names like `context_read` were passed to
+   --allowedTools without the `mcp__<server>__` prefix, so every MCP
+   call got permission-denied. Iter-15 follow-on — `Write` wasn't in
+   the allowlist at all, so the planner's `.miniforge/plan.edn`
+   Write was silently denied (model then narrated 'let me try Edit'
+   and stalled). 2026-05-04 follow-on — `Edit` / `MultiEdit` were
+   never added either; the implementer in the
+   event-log-tool-visibility dogfood spent five repair iters
+   producing patch text the CLI refused to apply, then a sixth
+   iter discovered Write worked while Edit did not. Both issues trace
+   back to keeping the structured form honest and adapters translating
+   at the CLI boundary."
+  ;; No `:submit` — the artifact is the worktree/container diff (promotion),
+  ;; the definitive channel. Models trained to their native tools ignore an
+  ;; opt-in submit tool anyway (84:0 in dogfood), and a submit-without-files
+  ;; turn is exactly the empty-disk failure we want to eliminate. Files are
+  ;; the def; the curator derives the summary from the diff.
+  [{:mcp/server :context :mcp/tool :context_read}
+   {:mcp/server :context :mcp/tool :context_grep}
+   {:mcp/server :context :mcp/tool :context_glob}
+   ;; Thesium Codex pull surface (SPEC §7.1). Push delivery is the
+   ;; phase-start pin (phase-software-factory codex-pin); this lets an
+   ;; agent RE-consult mid-run for a different situation.
+   {:mcp/server :context :mcp/tool :consider_situation}
+   ;; Agent-agnostic edit path: writes to the worktree + refreshes the cache,
+   ;; needs no prior native Read. The reliable way to modify EXISTING files
+   ;; across Claude/Codex/Cursor (native Write/Edit require a prior Read, which
+   ;; the implementer disallows to force the cache).
+   {:mcp/server :context :mcp/tool :context_write}
+   ;; Native write tools: implementer needs all three patch shapes.
+   ;; `Write` for full-file rewrites (planner's plan.edn, implementer
+   ;; new files, releaser PR drafts). `Edit` for single-region patches.
+   ;; `MultiEdit` for batched edits within one file. Roles that shouldn't
+   ;; modify files filter via :disallowed-tools separately.
+   :Write
+   :Edit
+   :MultiEdit])
+
+(defn ^{:stratum 0} write-context-cache!
+  "Write context cache EDN to the session directory.
+
+   The MCP artifact server loads this on startup and uses it as
+   a read-through cache for context_read/context_grep/context_glob tools.
+
+   Arguments:
+   - session - Session map from create-session!
+   - files   - Map of {relative-path content-string}
+
+   Returns: session (for threading)"
+  [session files]
+  (when (seq files)
+    (let [path (str (:dir session) "/context-cache.edn")]
+      (spit path (pr-str {:files files}))))
+  session)
+
+(defn ^{:stratum 0} write-capsule-context-cache!
+  "Write context cache EDN inside the capsule via executor.
+   Capsule variant of write-context-cache! for governed mode."
+  [session files]
+  (when (seq files)
+    (let [path    (str (:dir session) "/context-cache.edn")
+          content (pr-str {:files files})]
+      ((:exec! session) (:executor session) (:environment-id session)
+                        (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
+                        {:workdir (:workdir session)})))
+  session)
+
+;; Artifact reading
+(defn ^{:stratum 0} uuid-str?
+  "Check if a value is a UUID-shaped string."
+  [v]
+  (and (string? v)
+       (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" v)))
+
+(defn ^{:stratum 0} instant-str?
+  "Check if a value looks like an ISO instant string."
+  [v]
+  (and (string? v)
+       (re-matches #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*" v)))
+
+(defn ^{:stratum 0} key-ends-with?
+  "Check if a namespaced keyword ends with the given suffix."
+  [k suffix]
+  (and (keyword? k)
+       (str/ends-with? (name k) suffix)))
+
+(defn ^{:stratum 0} cleanup-cursor-mcp-config!
+  "Remove artifact key from .cursor/mcp.json.
+   Deletes the file if mcpServers becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (try
+        (let [config (json/parse-string (slurp f))
+              servers (dissoc (get config "mcpServers" {}) "artifact")
+              config' (if (empty? servers)
+                        (dissoc config "mcpServers")
+                        (assoc config "mcpServers" servers))]
+          (if (empty? config')
+            (.delete f)
+            (spit f (json/generate-string config' {:pretty true}))))
+        (catch Exception _ nil)))))
+
+;------------------------------------------------------------------------------ Layer 2.5
+;; Capsule-aware session lifecycle (N11 §6.3-6.4)
+(defn- ^{:stratum 0} missing-execute-fn!
+  []
+  (throw (ex-info "Capsule artifact sessions require :execution/execute-fn"
+                  {:missing :execution/execute-fn
+                   :component :agent/artifact-session})))
+
+(defn ^{:stratum 0} cleanup-capsule-session!
+  "Remove the session directory inside the capsule."
+  [session]
+  (try
+    ((:exec! session) (:executor session) (:environment-id session)
+                      (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
+    (catch Exception _ nil)))
+
+;------------------------------------------------------------------------------ Layer 2.75
+;; Session → MCP opts
+(defn ^{:stratum 0} session->mcp-opts
+  "Build the base MCP options map from a session for LLM chat calls.
+   Callers merge role-specific keys (e.g. :model, :disallowed-tools, :workdir)."
+  [session budget-usd max-turns]
+  {:mcp-config        (:mcp-config-path session)
+   :mcp-allowed-tools (:mcp-allowed-tools session)
+   :supervision       (:supervision session)
+   :budget-usd        budget-usd
+   :max-turns         max-turns})
+
+;; Unified session dispatch (N11 §6.3)
+(defn ^{:stratum 0} governed?
+  "True when the execution context requires governed (capsule) mode.
+   Checks :execution/mode is :governed and executor + environment-id are present."
+  [context]
+  (and (= :governed (:execution/mode context))
+       (some? (:execution/executor context))
+       (some? (:execution/environment-id context))))
+
+(def ^{:stratum 0} ^:private worktree-roles
+  "Roles whose `.miniforge/<role>.edn` files `run-session` probes for
+   worktree-promoted artifacts. Single source of truth for both the
+   scan and the no-artifact-found diagnostic."
+  [:plan :implement :verify :review :release])
+
+(defn- ^{:stratum 0} read-role-entry
+  "Read the worktree artifact for `role` via `read-role-artifact` and
+   return a `[role artifact]` map entry, or nil if the role file was
+   absent (so callers can use `keep` to drop misses)."
+  [read-role-artifact role]
+  (when-let [a (read-role-artifact role)]
+    [role a]))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} validate-session
+  "Validate a session map against the Session schema.
+
+   Returns {:valid? true} or {:valid? false :errors ...}."
+  [session]
+  (if (m/validate Session session)
+    {:valid? true}
+    {:valid? false
+     :errors (m/explain Session session)}))
+
+(defn ^{:stratum 1} resolve-miniforge-command
+  "Resolve the miniforge command to use for spawning subprocesses.
+
+   Resolution order:
+   1. MINIFORGE_CMD env var (explicit override, e.g. \"/usr/local/bin/mf\")
+   2. [\"bb\" \"--config\" <root>/bb.edn \"--deps-root\" <root> \"miniforge\"]
+      (dev mode — location-independent bb.edn task)
+   3. \"miniforge\" on PATH (installed binary)
+   4. [\"bb\" \"miniforge\"] as a final fallback"
+  []
+  (let [bb-root (find-bb-root)]
+    (cond
+      ;; 1. Explicit override
+      (System/getenv "MINIFORGE_CMD")
+      [(System/getenv "MINIFORGE_CMD")]
+
+      ;; 2. Prefer the current workspace in development and tests.
+      bb-root
+      ["bb" "--config" (str bb-root "/bb.edn") "--deps-root" bb-root "miniforge"]
+
+      ;; 3. Installed binary on PATH
+      (command-on-path? "miniforge")
+      ["miniforge"]
+
+      ;; 4. Last-resort fallback
+      :else
+      ["bb" "miniforge"])))
+
+(defn- ^{:stratum 1} emit-system-message!
+  "Render a system-scoped stderr message from a shared template."
+  [message-key & args]
+  (binding [*out* *err*]
+    (println (apply format (get system-message-templates message-key) args))))
+
+(defn- ^{:stratum 1} worktree-artifact-file
+  "Resolve the canonical .miniforge artifact file for a role."
+  [workdir role]
+  (io/file workdir ".miniforge" (artifact-filename role)))
+
+(defn- ^{:stratum 1} strip-codex-artifact-config
+  "Remove the full mcp_servers.artifact subtree from a Codex TOML config.
+
+   This strips both the root server block and any nested tables such as
+   [mcp_servers.artifact.tools.context_read], which newer Codex builds treat
+   as invalid if the parent server definition has already been removed."
+  [content]
+  (let [lines (str/split-lines content)]
+    (loop [remaining lines
+           cleaned []
+           skipping? false]
+      (if-let [line (first remaining)]
+        (let [trimmed (str/trim line)]
+          (cond
+            (re-matches codex-artifact-table-pattern trimmed)
+            (recur (rest remaining) cleaned true)
+
+            (and skipping? (re-matches toml-table-pattern trimmed))
+            (recur remaining cleaned false)
+
+            skipping?
+            (recur (rest remaining) cleaned true)
+
+            :else
+            (recur (rest remaining) (conj cleaned line) false)))
+        (str/join "\n" cleaned)))))
+
+;; MCP server command
+(defn ^{:stratum 1} server-command
   "Build the MCP context server command for a given session directory.
 
    Returns {:command <string> :args [<string> ...]} suitable for MCP config JSON.
@@ -273,10 +487,189 @@
       :else
       {:command "miniforge" :args (into ["context-server"] mcp-args)}))))
 
-;------------------------------------------------------------------------------ Layer 1
-;; MCP config generation
+(defn ^{:stratum 1} cursor-permission-allow
+  "Cursor `allow` rules for a session: the auto-approved `mcp-tools`, minus
+   any native tool the role disallows, translated to Cursor rule strings.
 
-(defn write-codex-mcp-config!
+   Default-deny: Cursor sees only this allowlist, so shell, arbitrary file
+   reads, and other MCP servers are denied by omission — no wildcard needed.
+
+   Cursor maps Write/Edit/MultiEdit onto one Write(**) rule, so disallowing
+   ANY of them drops Write(**) entirely (a finer-grained Claude distinction
+   like 'Edit-but-not-Write' cannot be represented here)."
+  [allowed-tools disallowed-tools]
+  (let [disallowed     (set (map name disallowed-tools))
+        write-blocked? (some #(contains? disallowed (name %)) cursor-write-tools)
+        keep?          (fn [tool]
+                         (cond
+                           (map? tool)               true
+                           (cursor-write-tools tool) (not write-blocked?)
+                           :else                     (not (contains? disallowed (name tool)))))]
+    (->> allowed-tools
+         (filter keep?)
+         (keep mcp-tool->cursor-permission)
+         distinct
+         vec)))
+
+(defn ^{:stratum 1} backup-cursor-permissions!
+  "Snapshot a pre-existing .cursor/cli.json once, before miniforge mutates
+   it, so cleanup can restore it byte-for-byte.
+
+   No-op when the file is absent (cleanup then just deletes the file we
+   generate) or when a snapshot already exists (so mid-session rewrites never
+   clobber the original). Returns the backup path or nil."
+  [config-root]
+  (let [root        (or config-root (System/getProperty "user.dir"))
+        config-file (io/file root ".cursor" "cli.json")
+        backup-file (io/file root ".cursor" (str "cli.json" cursor-permissions-backup-suffix))]
+    (when (and (.exists config-file) (not (.exists backup-file)))
+      (io/copy config-file backup-file)
+      (str backup-file))))
+
+(defn ^{:stratum 1} write-context-cache-for-session!
+  "Write context cache to the appropriate location based on session type.
+   Dispatches to capsule or host variant based on :capsule? flag."
+  [session files]
+  (if (:capsule? session)
+    (write-capsule-context-cache! session files)
+    (write-context-cache! session files)))
+
+(defn ^{:stratum 1} parse-uuid-strings
+  "Convert string UUIDs and ISO instant strings in an artifact map.
+   The MCP server writes UUIDs and instants as strings since it runs in babashka.
+
+   Pattern-based detection:
+   - Any key ending in `/id` with a UUID-shaped string → java.util.UUID
+   - Any key ending in `/created-at` with an ISO instant string → java.util.Date
+   - Any vector of maps containing `:task/id` → recurse into those maps"
+  [m]
+  (cond
+    (map? m)
+    (into {}
+          (map (fn [[k v]]
+                 [k (cond
+                      ;; Any key ending in /id with a UUID string
+                      (and (key-ends-with? k "id") (uuid-str? v))
+                      (java.util.UUID/fromString v)
+
+                      ;; Any key ending in /created-at with an instant string
+                      (and (key-ends-with? k "created-at") (instant-str? v))
+                      (try (java.util.Date/from (java.time.Instant/parse v))
+                           (catch Exception _ (java.util.Date.)))
+
+                      ;; Vector of maps that may contain nested UUIDs/instants
+                      (and (vector? v) (seq v) (map? (first v)))
+                      (mapv (fn [item]
+                              (parse-uuid-strings item))
+                            v)
+
+                      :else v)]))
+          m)
+
+    :else m))
+
+(defn ^{:stratum 1} cleanup-cursor-permissions!
+  "Restore .cursor/cli.json to its exact pre-session contents.
+
+   If `backup-cursor-permissions!` captured a snapshot (the file pre-existed),
+   move it back over our generated file; otherwise delete the file miniforge
+   created. Fully non-destructive — user/project rules are byte-preserved
+   regardless of any overlap with managed rules."
+  [path]
+  (try
+    (let [config-file (io/file path)
+          backup-file (io/file (str path cursor-permissions-backup-suffix))]
+      (cond
+        (.exists backup-file)
+        (do (io/copy backup-file config-file)
+            (.delete backup-file))
+
+        (.exists config-file)
+        (.delete config-file)))
+    (catch Exception _ nil)))
+
+(defn ^{:stratum 1} create-capsule-session!
+  "Create an artifact session inside a task capsule.
+   Session directory is created inside the capsule's workspace via executor.
+   Returns session map with capsule-relative paths and resolved exec! fn.
+
+   Three-arity form fails with a configuration error because agent must not
+   reach upward into dag-executor. Four-arity form accepts the execute-fn
+   injected by workflow."
+  ([executor env-id workdir]
+   (create-capsule-session! executor env-id workdir (missing-execute-fn!)))
+  ([executor env-id workdir execute-fn]
+   (let [exec!       execute-fn
+         session-dir (str workdir "/.miniforge-session")
+         _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
+     {:dir               session-dir
+      :mcp-config-path   (str session-dir "/mcp-config.json")
+      :artifact-path     (str session-dir "/artifact.edn")
+      :capsule?          true
+      :explicit-workdir? true
+      :exec!             exec!
+      :executor          executor
+      :environment-id    env-id
+      :workdir           workdir
+      :pre-session-snapshot (try
+                              (file-artifacts/snapshot-via-executor
+                               exec! executor env-id workdir)
+                              (catch Exception _
+                                (file-artifacts/empty-snapshot)))})))
+
+(defn ^{:stratum 1} write-capsule-mcp-config!
+  "Write MCP config and Claude settings inside the capsule.
+   The server command resolves to capsule-local bb/miniforge binary."
+  [session]
+  (let [exec!       (:exec! session)
+        executor    (:executor session)
+        env-id      (:environment-id session)
+        session-dir (:dir session)
+        ;; Inside the capsule, bb and miniforge are available directly
+        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
+                                          "--artifact-dir" session-dir]}
+        mcp-config  (json/generate-string
+                     {"mcpServers" {"context" {"command" (:command srv-cmd)
+                                               "args"    (:args srv-cmd)}}}
+                     {:pretty true})
+        hook-cmd    "bb miniforge hook-eval"
+        settings    (json/generate-string
+                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
+                     {:pretty true})]
+    ;; Write configs inside capsule
+    (exec! executor env-id (str "cat > " (:mcp-config-path session) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
+           {:workdir (:workdir session)})
+    (exec! executor env-id (str "cat > " session-dir "/claude-settings.json << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
+           {:workdir (:workdir session)})
+    (assoc session
+           :mcp-allowed-tools mcp-tools
+           :supervision {:hook-eval-cmd hook-cmd
+                         :settings-path (str session-dir "/claude-settings.json")
+                         :policy :workspace-write})))
+
+(defn- ^{:stratum 1} collect-worktree-artifacts
+  "Build the `:worktree-artifacts` map by probing every role file under
+   `workdir`/.miniforge/. Returns nil when `workdir` is absent so callers
+   can distinguish 'no worktree was threaded through' from 'worktree had
+   no role files'."
+  [read-role-artifact workdir]
+  (when workdir
+    (into {} (keep #(read-role-entry read-role-artifact %)) worktree-roles)))
+
+;------------------------------------------------------------------------------ Layer 2
+
+(defn- ^{:stratum 2} parse-edn-content
+  "Parse EDN content with a transform, logging failures as system messages."
+  [content transform warning-key path]
+  (try
+    (-> content
+        transform)
+    (catch Exception e
+      (emit-system-message! warning-key path (ex-message e))
+      nil)))
+
+;; MCP config generation
+(defn ^{:stratum 2} write-codex-mcp-config!
   "Write or update .codex/config.toml with [mcp_servers.artifact] block.
 
    If the file exists and already has an [mcp_servers.artifact] block,
@@ -310,82 +703,7 @@
       (spit config-file block))
     (str config-file)))
 
-(defn write-cursor-mcp-config!
-  "Write or update .cursor/mcp.json with mcpServers.artifact entry.
-
-   If the file exists, merges into existing JSON. Creates .cursor/ dir if needed.
-
-   Returns the path to the config file."
-  [config-root server-cmd]
-  (let [{:keys [command args]} server-cmd
-        root (or config-root (System/getProperty "user.dir"))
-        dir (io/file root ".cursor")
-        config-file (io/file dir "mcp.json")
-        entry {"command" command "args" args}
-        existing (when (.exists config-file)
-                   (try (json/parse-string (slurp config-file))
-                        (catch Exception _ {})))
-        config (assoc-in (or existing {}) ["mcpServers" "artifact"] entry)]
-    (.mkdirs dir)
-    (spit config-file (json/generate-string config {:pretty true}))
-    (str config-file)))
-
-(defn- mcp-tool->cursor-permission
-  "Translate one agent-agnostic `mcp-tools` entry into a Cursor permission
-   rule string (https://cursor.com/docs/cli/reference/permissions).
-
-     {:mcp/server S :mcp/tool T} -> \"Mcp(S:T)\"
-     :Write / :Edit / :MultiEdit -> \"Write(**)\"  (Cursor models all edits
-                                                    as writes; no Edit primitive)
-
-   Returns nil for entries with no Cursor analog."
-  [tool]
-  (cond
-    (map? tool)
-    (format "Mcp(%s:%s)" (name (:mcp/server tool)) (name (:mcp/tool tool)))
-
-    (#{:Write :Edit :MultiEdit} tool)
-    "Write(**)"
-
-    :else nil))
-
-(def cursor-permission-deny
-  "Hard denials applied regardless of the allowlist. Deny takes precedence
-   over allow in Cursor, so these block secret writes even when Write(**) is
-   allowed. Globs follow Cursor's documented Write(pathOrGlob) form."
-  ["Write(**/.env*)" "Write(**/*.key)" "Write(**/*.pem)"])
-
-(def ^:private cursor-write-tools
-  "Native tools that Cursor collapses into the single Write(**) permission.
-   Cursor cannot express a partial write restriction, so disallowing any one
-   of these drops the whole write permission."
-  #{:Write :Edit :MultiEdit})
-
-(defn cursor-permission-allow
-  "Cursor `allow` rules for a session: the auto-approved `mcp-tools`, minus
-   any native tool the role disallows, translated to Cursor rule strings.
-
-   Default-deny: Cursor sees only this allowlist, so shell, arbitrary file
-   reads, and other MCP servers are denied by omission — no wildcard needed.
-
-   Cursor maps Write/Edit/MultiEdit onto one Write(**) rule, so disallowing
-   ANY of them drops Write(**) entirely (a finer-grained Claude distinction
-   like 'Edit-but-not-Write' cannot be represented here)."
-  [allowed-tools disallowed-tools]
-  (let [disallowed     (set (map name disallowed-tools))
-        write-blocked? (some #(contains? disallowed (name %)) cursor-write-tools)
-        keep?          (fn [tool]
-                         (cond
-                           (map? tool)               true
-                           (cursor-write-tools tool) (not write-blocked?)
-                           :else                     (not (contains? disallowed (name tool)))))]
-    (->> allowed-tools
-         (filter keep?)
-         (keep mcp-tool->cursor-permission)
-         distinct
-         vec)))
-
-(defn write-cursor-permissions!
+(defn ^{:stratum 2} write-cursor-permissions!
   "Write .cursor/cli.json with a default-deny permission allowlist.
 
    `allowed-tools` is the agent-agnostic auto-approve set (`mcp-tools`);
@@ -418,39 +736,7 @@
     (spit config-file (json/generate-string config {:pretty true}))
     (str config-file)))
 
-(def ^:private cursor-permissions-backup-suffix
-  "Suffix for the pre-session .cursor/cli.json snapshot used to restore the
-   user's exact file on cleanup."
-  ".mf-bak")
-
-(defn backup-cursor-permissions!
-  "Snapshot a pre-existing .cursor/cli.json once, before miniforge mutates
-   it, so cleanup can restore it byte-for-byte.
-
-   No-op when the file is absent (cleanup then just deletes the file we
-   generate) or when a snapshot already exists (so mid-session rewrites never
-   clobber the original). Returns the backup path or nil."
-  [config-root]
-  (let [root        (or config-root (System/getProperty "user.dir"))
-        config-file (io/file root ".cursor" "cli.json")
-        backup-file (io/file root ".cursor" (str "cli.json" cursor-permissions-backup-suffix))]
-    (when (and (.exists config-file) (not (.exists backup-file)))
-      (io/copy config-file backup-file)
-      (str backup-file))))
-
-(defn write-cursor-permissions-for-session!
-  "Rewrite the session's .cursor/cli.json allowlist with a role's
-   `disallowed-tools` applied (e.g. a reviewer that must not Write).
-
-   No-op for capsule sessions — Cursor configs are host-only. Returns the
-   path, or nil when skipped."
-  [session disallowed-tools]
-  (when-not (:capsule? session)
-    (write-cursor-permissions! (:config-root session)
-                               (:mcp-allowed-tools session)
-                               disallowed-tools)))
-
-(defn write-claude-settings!
+(defn ^{:stratum 2} write-claude-settings!
   "Write Claude CLI settings JSON with PreToolUse hook for supervision.
 
    The hook invokes `bb miniforge hook-eval` which reads the tool request
@@ -468,58 +754,100 @@
     (spit path (json/generate-string settings {:pretty true}))
     path))
 
-(def mcp-tools
-  "Tools the inner agent is auto-approved to call, as generic data.
+;; High-level session helpers
+(defn ^{:stratum 2} cleanup-codex-mcp-config!
+  "Remove [mcp_servers.artifact] block from .codex/config.toml.
+   Deletes the file if it becomes empty."
+  [path]
+  (let [f (io/file path)]
+    (when (.exists f)
+      (let [cleaned (-> (slurp f) strip-codex-artifact-config str/trim)]
+        (if (str/blank? cleaned)
+          (.delete f)
+          (spit f (str cleaned "\n")))))))
 
-   Each backend adapter (claude, codex, cursor-agent, …) translates
-   this into the allowlist / approval shape its CLI expects. Keep
-   agent-CLI-agnostic — the structured form is the source of truth.
+(defn ^{:stratum 2} read-capsule-artifact
+  "Read artifact EDN from inside the capsule via executor.
+   Applies parse-uuid-strings to match host read-artifact behavior."
+  [session]
+  (let [exec!    (:exec! session)
+        result   (exec! (:executor session) (:environment-id session)
+                        (str "cat " (:artifact-path session)) {:workdir (:workdir session)})
+        content  (get-in result [:data :stdout] "")]
+    (when (seq content)
+      (try
+        (-> content
+            clojure.edn/read-string
+            parse-uuid-strings)
+        (catch Exception _ nil)))))
 
-   Two entry shapes:
-   - `{:mcp/server :mcp/tool}` — a tool exposed by an MCP server
-   - plain keyword — a native tool from the agent CLI (e.g. `:Write`,
-     needed for plan.edn / code container-promotion writes)
+(defn- ^{:stratum 2} any-worktree-files-exist?
+  "Check if any .miniforge/<role>.edn file exists under workdir without parsing.
 
-   Example wire formats per backend:
-     claude  → --allowedTools \"mcp__context__context_read,Write,...\"
-     cursor  → --approve-mcps  (blanket approve; no names needed)
-     codex   → (currently unused; codex uses its own MCP config)
+   Used in host-mode sessions to distinguish 'truly no files' from 'files existed
+   but all failed to parse'. A parse failure emits :warn/worktree-artifact-parse and
+   returns nil from read-role-artifact, which causes collect-worktree-artifacts to
+   yield an empty map indistinguishable from the no-files case. This function
+   inspects the filesystem directly so run-session can suppress the redundant
+   :warn/no-artifact-found message when files were present but malformed.
 
-   Iter-10 failure — bare names like `context_read` were passed to
-   --allowedTools without the `mcp__<server>__` prefix, so every MCP
-   call got permission-denied. Iter-15 follow-on — `Write` wasn't in
-   the allowlist at all, so the planner's `.miniforge/plan.edn`
-   Write was silently denied (model then narrated 'let me try Edit'
-   and stalled). 2026-05-04 follow-on — `Edit` / `MultiEdit` were
-   never added either; the implementer in the
-   event-log-tool-visibility dogfood spent five repair iters
-   producing patch text the CLI refused to apply, then a sixth
-   iter discovered Write worked while Edit did not. Both issues trace
-   back to keeping the structured form honest and adapters translating
-   at the CLI boundary."
-  ;; No `:submit` — the artifact is the worktree/container diff (promotion),
-  ;; the definitive channel. Models trained to their native tools ignore an
-  ;; opt-in submit tool anyway (84:0 in dogfood), and a submit-without-files
-  ;; turn is exactly the empty-disk failure we want to eliminate. Files are
-  ;; the def; the curator derives the summary from the diff.
-  [{:mcp/server :context :mcp/tool :context_read}
-   {:mcp/server :context :mcp/tool :context_grep}
-   {:mcp/server :context :mcp/tool :context_glob}
-   ;; Agent-agnostic edit path: writes to the worktree + refreshes the cache,
-   ;; needs no prior native Read. The reliable way to modify EXISTING files
-   ;; across Claude/Codex/Cursor (native Write/Edit require a prior Read, which
-   ;; the implementer disallows to force the cache).
-   {:mcp/server :context :mcp/tool :context_write}
-   ;; Native write tools: implementer needs all three patch shapes.
-   ;; `Write` for full-file rewrites (planner's plan.edn, implementer
-   ;; new files, releaser PR drafts). `Edit` for single-region patches.
-   ;; `MultiEdit` for batched edits within one file. Roles that shouldn't
-   ;; modify files filter via :disallowed-tools separately.
-   :Write
-   :Edit
-   :MultiEdit])
+   Not used in capsule mode — the executor would require an additional exec call
+   per role to check existence, which is deferred to a future iteration."
+  [workdir]
+  (boolean
+   (when workdir
+     (some #(.exists (worktree-artifact-file workdir %))
+           worktree-roles))))
 
-(defn write-mcp-config!
+(defn- ^{:stratum 2} emit-no-artifact-warning!
+  "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
+   both the MCP path and the worktree role files came up empty. Separate fn
+   so `run-session` reads as a sequence of named steps and the diagnostic
+   stays testable.
+
+   AUDIT NOTE (2026-05-21): An audit of bases/cli/src, components/workflow/src,
+   and components/phase-software-factory/src confirmed that no code re-renders
+   this WARN at ERROR level in terminal output. The message is emitted to stderr
+   via `emit-system-message!` at WARN severity and is passed through as-is by
+   the CLI rendering pipeline (workflow_runner/display.clj applies no
+   artifact-specific coloring or severity amplification). The plan phase
+   delegates artifact handling entirely to `agent/invoke` → `with-session` →
+   `run-session`; there is no redundant artifact-presence check at the phase
+   layer.
+
+   However, because this message goes to stderr it may be perceived as a
+   terminal-level error by users even though it is diagnostic WARN output.
+   If the cause is not actionable by the user (e.g. the agent simply used the
+   Write-based worktree submission path instead of the MCP submit_artifact
+   tool), callers SHOULD suppress this warning — see the `any-file-existed?`
+   and `(seq worktree-artifacts)` guards in `run-session` for the suppression
+   logic already in place."
+  [session workdir]
+  (emit-system-message! :warn/no-artifact-found
+                        (:artifact-path session)
+                        (str (or workdir "<no-workdir>") "/.miniforge/")
+                        (str/join ", " (map name worktree-roles))))
+
+;------------------------------------------------------------------------------ Layer 3
+
+(defn- ^{:stratum 3} parse-edn-file
+  "Read and parse an EDN file with a transform, logging failures consistently."
+  [f transform warning-key]
+  (parse-edn-content (slurp f) transform warning-key (.getPath f)))
+
+(defn ^{:stratum 3} write-cursor-permissions-for-session!
+  "Rewrite the session's .cursor/cli.json allowlist with a role's
+   `disallowed-tools` applied (e.g. a reviewer that must not Write).
+
+   No-op for capsule sessions — Cursor configs are host-only. Returns the
+   path, or nil when skipped."
+  [session disallowed-tools]
+  (when-not (:capsule? session)
+    (write-cursor-permissions! (:config-root session)
+                               (:mcp-allowed-tools session)
+                               disallowed-tools)))
+
+(defn ^{:stratum 3} write-mcp-config!
   "Write session config files for all supported CLI backends.
 
    Writes config files:
@@ -561,121 +889,7 @@
                          :task-context (:task-context session)
                          :phase (:phase session)})))
 
-(defn write-context-cache!
-  "Write context cache EDN to the session directory.
-
-   The MCP artifact server loads this on startup and uses it as
-   a read-through cache for context_read/context_grep/context_glob tools.
-
-   Arguments:
-   - session - Session map from create-session!
-   - files   - Map of {relative-path content-string}
-
-   Returns: session (for threading)"
-  [session files]
-  (when (seq files)
-    (let [path (str (:dir session) "/context-cache.edn")]
-      (spit path (pr-str {:files files}))))
-  session)
-
-(defn write-capsule-context-cache!
-  "Write context cache EDN inside the capsule via executor.
-   Capsule variant of write-context-cache! for governed mode."
-  [session files]
-  (when (seq files)
-    (let [path    (str (:dir session) "/context-cache.edn")
-          content (pr-str {:files files})]
-      ((:exec! session) (:executor session) (:environment-id session)
-                        (str "cat > " path " << 'CACHEEOF'\n" content "\nCACHEEOF")
-                        {:workdir (:workdir session)})))
-  session)
-
-(defn write-context-cache-for-session!
-  "Write context cache to the appropriate location based on session type.
-   Dispatches to capsule or host variant based on :capsule? flag."
-  [session files]
-  (if (:capsule? session)
-    (write-capsule-context-cache! session files)
-    (write-context-cache! session files)))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Artifact reading
-
-(defn uuid-str?
-  "Check if a value is a UUID-shaped string."
-  [v]
-  (and (string? v)
-       (re-matches #"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}" v)))
-
-(defn instant-str?
-  "Check if a value looks like an ISO instant string."
-  [v]
-  (and (string? v)
-       (re-matches #"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*" v)))
-
-(defn key-ends-with?
-  "Check if a namespaced keyword ends with the given suffix."
-  [k suffix]
-  (and (keyword? k)
-       (str/ends-with? (name k) suffix)))
-
-(defn parse-uuid-strings
-  "Convert string UUIDs and ISO instant strings in an artifact map.
-   The MCP server writes UUIDs and instants as strings since it runs in babashka.
-
-   Pattern-based detection:
-   - Any key ending in `/id` with a UUID-shaped string → java.util.UUID
-   - Any key ending in `/created-at` with an ISO instant string → java.util.Date
-   - Any vector of maps containing `:task/id` → recurse into those maps"
-  [m]
-  (cond
-    (map? m)
-    (into {}
-          (map (fn [[k v]]
-                 [k (cond
-                      ;; Any key ending in /id with a UUID string
-                      (and (key-ends-with? k "id") (uuid-str? v))
-                      (java.util.UUID/fromString v)
-
-                      ;; Any key ending in /created-at with an instant string
-                      (and (key-ends-with? k "created-at") (instant-str? v))
-                      (try (java.util.Date/from (java.time.Instant/parse v))
-                           (catch Exception _ (java.util.Date.)))
-
-                      ;; Vector of maps that may contain nested UUIDs/instants
-                      (and (vector? v) (seq v) (map? (first v)))
-                      (mapv (fn [item]
-                              (parse-uuid-strings item))
-                            v)
-
-                      :else v)]))
-          m)
-
-    :else m))
-
-(defn read-worktree-artifact
-  "Read a role artifact from <workdir>/.miniforge/<role>.edn if present.
-
-   Container-promotion pattern: an agent submits its phase artifact by
-   writing a file into the worktree, and the runtime reads that file
-   after the LLM invocation. This lives alongside the MCP-based
-   artifact path (`read-artifact`) — the caller decides precedence.
-
-   Arguments:
-   - workdir — absolute path to the worktree (may be nil)
-   - role    — keyword or string naming the artifact (e.g. :plan → plan.edn)
-
-   Returns: parsed artifact map with UUID types, or nil (missing,
-   unreadable, or parse failure — all logged to stderr, never thrown)."
-  [workdir role]
-  (when (and workdir role)
-    (let [f (worktree-artifact-file workdir role)]
-      (when (.exists f)
-        (parse-edn-file f
-                        (comp parse-uuid-strings edn/read-string)
-                        :warn/worktree-artifact-parse)))))
-
-(defn read-capsule-worktree-artifact
+(defn ^{:stratum 3} read-capsule-worktree-artifact
   "Read a role artifact from <workdir>/.miniforge/<role>.edn inside a capsule.
 
   Returns the parsed artifact map or nil. Missing files and parse failures are
@@ -692,184 +906,7 @@
                            :warn/capsule-worktree-artifact-parse
                            path)))))
 
-(defn read-artifact
-  "Read the artifact EDN file from a session directory.
-
-   The MCP artifact is now an optional submission channel. A missing file
-   is not an error on its own — the worktree-promoted path
-   (.miniforge/<role>.edn) is the primary channel and is checked separately
-   by run-session. Returns nil silently when the file is absent so callers
-   (result-boundary/normalize-llm-result) can handle nil gracefully.
-
-   Arguments:
-   - session - Session map from create-session!
-
-   Returns:
-   - Parsed artifact map with proper UUID types, or nil if not found.
-     Parse failures (malformed EDN) are still logged via :warn/artifact-parse."
-  [session]
-  (let [f (io/file (:artifact-path session))]
-    (when (.exists f)
-      (parse-edn-file f
-                      (comp parse-uuid-strings edn/read-string)
-                      :warn/artifact-parse))))
-
-(defn read-context-misses
-  "Read context cache misses from the session directory.
-
-   The MCP server writes context-misses.edn on exit with records of
-   every cache miss (files the agent needed but weren't pre-loaded).
-
-   Returns: vector of miss records, or nil if no misses file."
-  [session]
-  (let [path (str (:dir session) "/context-misses.edn")
-        f (io/file path)]
-    (when (.exists f)
-      (parse-edn-file f edn/read-string :warn/context-misses-parse))))
-
-;------------------------------------------------------------------------------ Layer 3
-;; High-level session helpers
-
-(defn cleanup-codex-mcp-config!
-  "Remove [mcp_servers.artifact] block from .codex/config.toml.
-   Deletes the file if it becomes empty."
-  [path]
-  (let [f (io/file path)]
-    (when (.exists f)
-      (let [cleaned (-> (slurp f) strip-codex-artifact-config str/trim)]
-        (if (str/blank? cleaned)
-          (.delete f)
-          (spit f (str cleaned "\n")))))))
-
-(defn cleanup-cursor-mcp-config!
-  "Remove artifact key from .cursor/mcp.json.
-   Deletes the file if mcpServers becomes empty."
-  [path]
-  (let [f (io/file path)]
-    (when (.exists f)
-      (try
-        (let [config (json/parse-string (slurp f))
-              servers (dissoc (get config "mcpServers" {}) "artifact")
-              config' (if (empty? servers)
-                        (dissoc config "mcpServers")
-                        (assoc config "mcpServers" servers))]
-          (if (empty? config')
-            (.delete f)
-            (spit f (json/generate-string config' {:pretty true}))))
-        (catch Exception _ nil)))))
-
-(defn cleanup-cursor-permissions!
-  "Restore .cursor/cli.json to its exact pre-session contents.
-
-   If `backup-cursor-permissions!` captured a snapshot (the file pre-existed),
-   move it back over our generated file; otherwise delete the file miniforge
-   created. Fully non-destructive — user/project rules are byte-preserved
-   regardless of any overlap with managed rules."
-  [path]
-  (try
-    (let [config-file (io/file path)
-          backup-file (io/file (str path cursor-permissions-backup-suffix))]
-      (cond
-        (.exists backup-file)
-        (do (io/copy backup-file config-file)
-            (.delete backup-file))
-
-        (.exists config-file)
-        (.delete config-file)))
-    (catch Exception _ nil)))
-
-;------------------------------------------------------------------------------ Layer 2.5
-;; Capsule-aware session lifecycle (N11 §6.3-6.4)
-
-(defn- missing-execute-fn!
-  []
-  (throw (ex-info "Capsule artifact sessions require :execution/execute-fn"
-                  {:missing :execution/execute-fn
-                   :component :agent/artifact-session})))
-
-(defn create-capsule-session!
-  "Create an artifact session inside a task capsule.
-   Session directory is created inside the capsule's workspace via executor.
-   Returns session map with capsule-relative paths and resolved exec! fn.
-
-   Three-arity form fails with a configuration error because agent must not
-   reach upward into dag-executor. Four-arity form accepts the execute-fn
-   injected by workflow."
-  ([executor env-id workdir]
-   (create-capsule-session! executor env-id workdir (missing-execute-fn!)))
-  ([executor env-id workdir execute-fn]
-   (let [exec!       execute-fn
-         session-dir (str workdir "/.miniforge-session")
-         _           (exec! executor env-id (str "mkdir -p " session-dir) {:workdir workdir})]
-     {:dir               session-dir
-      :mcp-config-path   (str session-dir "/mcp-config.json")
-      :artifact-path     (str session-dir "/artifact.edn")
-      :capsule?          true
-      :explicit-workdir? true
-      :exec!             exec!
-      :executor          executor
-      :environment-id    env-id
-      :workdir           workdir
-      :pre-session-snapshot (try
-                              (file-artifacts/snapshot-via-executor
-                               exec! executor env-id workdir)
-                              (catch Exception _
-                                (file-artifacts/empty-snapshot)))})))
-
-(defn write-capsule-mcp-config!
-  "Write MCP config and Claude settings inside the capsule.
-   The server command resolves to capsule-local bb/miniforge binary."
-  [session]
-  (let [exec!       (:exec! session)
-        executor    (:executor session)
-        env-id      (:environment-id session)
-        session-dir (:dir session)
-        ;; Inside the capsule, bb and miniforge are available directly
-        srv-cmd     {:command "bb" :args ["miniforge" "mcp-context-server"
-                                          "--artifact-dir" session-dir]}
-        mcp-config  (json/generate-string
-                     {"mcpServers" {"context" {"command" (:command srv-cmd)
-                                               "args"    (:args srv-cmd)}}}
-                     {:pretty true})
-        hook-cmd    "bb miniforge hook-eval"
-        settings    (json/generate-string
-                     {"hooks" {"PreToolUse" [{"type" "command" "command" hook-cmd}]}}
-                     {:pretty true})]
-    ;; Write configs inside capsule
-    (exec! executor env-id (str "cat > " (:mcp-config-path session) " << 'MCPEOF'\n" mcp-config "\nMCPEOF")
-           {:workdir (:workdir session)})
-    (exec! executor env-id (str "cat > " session-dir "/claude-settings.json << 'SETTINGSEOF'\n" settings "\nSETTINGSEOF")
-           {:workdir (:workdir session)})
-    (assoc session
-           :mcp-allowed-tools mcp-tools
-           :supervision {:hook-eval-cmd hook-cmd
-                         :settings-path (str session-dir "/claude-settings.json")
-                         :policy :workspace-write})))
-
-(defn read-capsule-artifact
-  "Read artifact EDN from inside the capsule via executor.
-   Applies parse-uuid-strings to match host read-artifact behavior."
-  [session]
-  (let [exec!    (:exec! session)
-        result   (exec! (:executor session) (:environment-id session)
-                        (str "cat " (:artifact-path session)) {:workdir (:workdir session)})
-        content  (get-in result [:data :stdout] "")]
-    (when (seq content)
-      (try
-        (-> content
-            clojure.edn/read-string
-            parse-uuid-strings)
-        (catch Exception _ nil)))))
-
-(defn cleanup-capsule-session!
-  "Remove the session directory inside the capsule."
-  [session]
-  (try
-    ((:exec! session) (:executor session) (:environment-id session)
-                      (str "rm -rf " (:dir session)) {:workdir (:workdir session)})
-    (catch Exception _ nil)))
-
-(defmacro with-capsule-artifact-session
+(defmacro ^{:stratum 3} with-capsule-artifact-session
   "Execute body with a capsule-aware artifact session (N11 §6.3).
    Like with-artifact-session but session files live inside the task capsule.
    Binding form: [session executor env-id workdir execute-fn]."
@@ -889,7 +926,7 @@
          (finally
            (cleanup-capsule-session! session#))))))
 
-(defn cleanup-session!
+(defn ^{:stratum 3} cleanup-session!
   "Delete the temporary session directory and clean up injected configs.
 
    Removes the [mcp_servers.artifact] block from .codex/config.toml and the
@@ -913,7 +950,115 @@
         (.delete ^java.io.File f)))
     (catch Exception _ nil)))
 
-(defmacro with-artifact-session
+;------------------------------------------------------------------------------ Layer 4
+
+(defn ^{:stratum 4} read-worktree-artifact
+  "Read a role artifact from <workdir>/.miniforge/<role>.edn if present.
+
+   Container-promotion pattern: an agent submits its phase artifact by
+   writing a file into the worktree, and the runtime reads that file
+   after the LLM invocation. This lives alongside the MCP-based
+   artifact path (`read-artifact`) — the caller decides precedence.
+
+   Arguments:
+   - workdir — absolute path to the worktree (may be nil)
+   - role    — keyword or string naming the artifact (e.g. :plan → plan.edn)
+
+   Returns: parsed artifact map with UUID types, or nil (missing,
+   unreadable, or parse failure — all logged to stderr, never thrown)."
+  [workdir role]
+  (when (and workdir role)
+    (let [f (worktree-artifact-file workdir role)]
+      (when (.exists f)
+        (parse-edn-file f
+                        (comp parse-uuid-strings edn/read-string)
+                        :warn/worktree-artifact-parse)))))
+
+(defn ^{:stratum 4} read-artifact
+  "Read the artifact EDN file from a session directory.
+
+   The MCP artifact is now an optional submission channel. A missing file
+   is not an error on its own — the worktree-promoted path
+   (.miniforge/<role>.edn) is the primary channel and is checked separately
+   by run-session. Returns nil silently when the file is absent so callers
+   (result-boundary/normalize-llm-result) can handle nil gracefully.
+
+   Arguments:
+   - session - Session map from create-session!
+
+   Returns:
+   - Parsed artifact map with proper UUID types, or nil if not found.
+     Parse failures (malformed EDN) are still logged via :warn/artifact-parse."
+  [session]
+  (let [f (io/file (:artifact-path session))]
+    (when (.exists f)
+      (parse-edn-file f
+                      (comp parse-uuid-strings edn/read-string)
+                      :warn/artifact-parse))))
+
+(defn ^{:stratum 4} read-context-misses
+  "Read context cache misses from the session directory.
+
+   The MCP server writes context-misses.edn on exit with records of
+   every cache miss (files the agent needed but weren't pre-loaded).
+
+   Returns: vector of miss records, or nil if no misses file."
+  [session]
+  (let [path (str (:dir session) "/context-misses.edn")
+        f (io/file path)]
+    (when (.exists f)
+      (parse-edn-file f edn/read-string :warn/context-misses-parse))))
+
+(defn ^{:stratum 4} read-context-reads
+  "Read recorded context_read resolutions from the session directory.
+
+   The MCP server writes context-reads.edn on exit with a record of every
+   context_read the agent made, hit or miss — the recorded flows that make
+   'did this agent consult its pinned codex landings' an answerable
+   question (Codex SPEC §7.4.2).
+
+   Returns: vector of read records, or nil if no reads file."
+  [session]
+  (let [path (str (:dir session) "/context-reads.edn")
+        f (io/file path)]
+    (when (.exists f)
+      (parse-edn-file f edn/read-string :warn/context-reads-parse))))
+
+(defn ^{:stratum 4} with-readonly-session
+  "Like `with-session`, but for READ-ONLY agents (e.g. the reviewer) that
+   consume the MCP context cache but produce NO worktree artifact.
+
+   Sets up the session + MCP config (host or governed/capsule, mirroring
+   `with-session`), runs `body-fn`, and cleans up — but skips the artifact
+   read + the nothing-found WARN that `run-session` does, since a reviewer
+   has no work product to promote. Returns the `body-fn` result directly
+   (the LLM result), not a normalized artifact map.
+
+   Use when an agent needs cached reads (context_read/grep/glob) for
+   exploration but does not write files."
+  [context body-fn]
+  (let [run (fn [session cleanup-fn]
+              (try (body-fn session)
+                   (finally (cleanup-fn session))))]
+    (if (governed? context)
+      (let [executor (:execution/executor context)
+            env-id   (:execution/environment-id context)
+            workdir  (or (:execution/worktree-path context) "/workspace")
+            exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
+            session  (-> (create-capsule-session! executor env-id workdir exec!)
+                         write-capsule-mcp-config!)]
+        (run session cleanup-capsule-session!))
+      (let [workdir (:execution/worktree-path context)
+            session (-> (if workdir
+                          (create-session! {:workdir workdir
+                                            :source-root (:source-root context)})
+                          (create-session! {:source-root (:source-root context)}))
+                        write-mcp-config!)]
+        (run session cleanup-session!)))))
+
+;------------------------------------------------------------------------------ Layer 5
+
+(defmacro ^{:stratum 5} with-artifact-session
   "Execute body with an artifact session, returning the artifact if found.
 
    Binds `session` in the body. After body completes, reads the artifact
@@ -942,37 +1087,7 @@
        (finally
          (cleanup-session! session#)))))
 
-;------------------------------------------------------------------------------ Layer 2.75
-;; Session → MCP opts
-
-(defn session->mcp-opts
-  "Build the base MCP options map from a session for LLM chat calls.
-   Callers merge role-specific keys (e.g. :model, :disallowed-tools, :workdir)."
-  [session budget-usd max-turns]
-  {:mcp-config        (:mcp-config-path session)
-   :mcp-allowed-tools (:mcp-allowed-tools session)
-   :supervision       (:supervision session)
-   :budget-usd        budget-usd
-   :max-turns         max-turns})
-
-;------------------------------------------------------------------------------ Layer 3
-;; Unified session dispatch (N11 §6.3)
-
-(defn governed?
-  "True when the execution context requires governed (capsule) mode.
-   Checks :execution/mode is :governed and executor + environment-id are present."
-  [context]
-  (and (= :governed (:execution/mode context))
-       (some? (:execution/executor context))
-       (some? (:execution/environment-id context))))
-
-(def ^:private worktree-roles
-  "Roles whose `.miniforge/<role>.edn` files `run-session` probes for
-   worktree-promoted artifacts. Single source of truth for both the
-   scan and the no-artifact-found diagnostic."
-  [:plan :implement :verify :review :release])
-
-(defn- role-reader-for-mode
+(defn- ^{:stratum 5} role-reader-for-mode
   "Return a 1-arg fn from role keyword to parsed worktree artifact, picked
    by execution mode. Capsule mode reads through the executor; host mode
    reads directly from `workdir`; an unknown mode yields a no-op reader."
@@ -982,71 +1097,9 @@
     :host    #(read-worktree-artifact workdir %)
     (constantly nil)))
 
-(defn- read-role-entry
-  "Read the worktree artifact for `role` via `read-role-artifact` and
-   return a `[role artifact]` map entry, or nil if the role file was
-   absent (so callers can use `keep` to drop misses)."
-  [read-role-artifact role]
-  (when-let [a (read-role-artifact role)]
-    [role a]))
+;------------------------------------------------------------------------------ Layer 6
 
-(defn- collect-worktree-artifacts
-  "Build the `:worktree-artifacts` map by probing every role file under
-   `workdir`/.miniforge/. Returns nil when `workdir` is absent so callers
-   can distinguish 'no worktree was threaded through' from 'worktree had
-   no role files'."
-  [read-role-artifact workdir]
-  (when workdir
-    (into {} (keep #(read-role-entry read-role-artifact %)) worktree-roles)))
-
-(defn- any-worktree-files-exist?
-  "Check if any .miniforge/<role>.edn file exists under workdir without parsing.
-
-   Used in host-mode sessions to distinguish 'truly no files' from 'files existed
-   but all failed to parse'. A parse failure emits :warn/worktree-artifact-parse and
-   returns nil from read-role-artifact, which causes collect-worktree-artifacts to
-   yield an empty map indistinguishable from the no-files case. This function
-   inspects the filesystem directly so run-session can suppress the redundant
-   :warn/no-artifact-found message when files were present but malformed.
-
-   Not used in capsule mode — the executor would require an additional exec call
-   per role to check existence, which is deferred to a future iteration."
-  [workdir]
-  (boolean
-   (when workdir
-     (some #(.exists (worktree-artifact-file workdir %))
-           worktree-roles))))
-
-(defn- emit-no-artifact-warning!
-  "Emit `:warn/no-artifact-found` after an explicit worktree scan confirms
-   both the MCP path and the worktree role files came up empty. Separate fn
-   so `run-session` reads as a sequence of named steps and the diagnostic
-   stays testable.
-
-   AUDIT NOTE (2026-05-21): An audit of bases/cli/src, components/workflow/src,
-   and components/phase-software-factory/src confirmed that no code re-renders
-   this WARN at ERROR level in terminal output. The message is emitted to stderr
-   via `emit-system-message!` at WARN severity and is passed through as-is by
-   the CLI rendering pipeline (workflow_runner/display.clj applies no
-   artifact-specific coloring or severity amplification). The plan phase
-   delegates artifact handling entirely to `agent/invoke` → `with-session` →
-   `run-session`; there is no redundant artifact-presence check at the phase
-   layer.
-
-   However, because this message goes to stderr it may be perceived as a
-   terminal-level error by users even though it is diagnostic WARN output.
-   If the cause is not actionable by the user (e.g. the agent simply used the
-   Write-based worktree submission path instead of the MCP submit_artifact
-   tool), callers SHOULD suppress this warning — see the `any-file-existed?`
-   and `(seq worktree-artifacts)` guards in `run-session` for the suppression
-   logic already in place."
-  [session workdir]
-  (emit-system-message! :warn/no-artifact-found
-                        (:artifact-path session)
-                        (str (or workdir "<no-workdir>") "/.miniforge/")
-                        (str/join ", " (map name worktree-roles))))
-
-(defn- run-session
+(defn- ^{:stratum 6} run-session
   "Execute body-fn with session, read artifacts, and clean up.
    Shared lifecycle for both host and capsule sessions.
 
@@ -1132,12 +1185,15 @@
        :artifact             artifact
        :worktree-artifacts   worktree-artifacts
        :context-misses       (when (= :host mode) (read-context-misses session))
+       :context-reads        (when (= :host mode) (read-context-reads session))
        :pre-session-snapshot (:pre-session-snapshot session)
        :session-mode         mode})
     (finally
       (cleanup-fn session))))
 
-(defn with-session
+;------------------------------------------------------------------------------ Layer 7
+
+(defn ^{:stratum 7} with-session
   "Execute body-fn with the appropriate artifact session for the execution mode.
 
    In governed mode (context has :execution/executor, :execution/environment-id,
@@ -1167,38 +1223,6 @@
                         (create-session! {:source-root (:source-root context)}))
                       write-mcp-config!)]
       (run-session session body-fn read-artifact cleanup-session! :host))))
-
-(defn with-readonly-session
-  "Like `with-session`, but for READ-ONLY agents (e.g. the reviewer) that
-   consume the MCP context cache but produce NO worktree artifact.
-
-   Sets up the session + MCP config (host or governed/capsule, mirroring
-   `with-session`), runs `body-fn`, and cleans up — but skips the artifact
-   read + the nothing-found WARN that `run-session` does, since a reviewer
-   has no work product to promote. Returns the `body-fn` result directly
-   (the LLM result), not a normalized artifact map.
-
-   Use when an agent needs cached reads (context_read/grep/glob) for
-   exploration but does not write files."
-  [context body-fn]
-  (let [run (fn [session cleanup-fn]
-              (try (body-fn session)
-                   (finally (cleanup-fn session))))]
-    (if (governed? context)
-      (let [executor (:execution/executor context)
-            env-id   (:execution/environment-id context)
-            workdir  (or (:execution/worktree-path context) "/workspace")
-            exec!    (or (:execution/execute-fn context) (missing-execute-fn!))
-            session  (-> (create-capsule-session! executor env-id workdir exec!)
-                         write-capsule-mcp-config!)]
-        (run session cleanup-capsule-session!))
-      (let [workdir (:execution/worktree-path context)
-            session (-> (if workdir
-                          (create-session! {:workdir workdir
-                                            :source-root (:source-root context)})
-                          (create-session! {:source-root (:source-root context)}))
-                        write-mcp-config!)]
-        (run session cleanup-session!)))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

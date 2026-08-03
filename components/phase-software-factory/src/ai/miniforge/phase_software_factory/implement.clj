@@ -26,6 +26,7 @@
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.agent.interface.protocols.messaging :as messaging]
@@ -462,6 +463,12 @@
         pack-ctx (or (get-in ctx [:execution/pack-context])
                      (build-context-pack worktree-path files-in-scope))
         existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to.
+        codex-pin (codex-pin/pin-file :implement (get-in ctx [:execution/logger]))
+        existing-files (if codex-pin
+                         (into [codex-pin] (or existing-files []))
+                         existing-files)
         behavior-addendum (phase/load-guidance-addendum
                             :implement {:task {:task/intent (:intent input)}})
         review-feedback (resolve-review-feedback ctx)
