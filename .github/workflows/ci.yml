@@ -7,6 +7,10 @@ name: CI
 # would otherwise needlessly re-trigger the expensive jobs below.
 # All output is captured in log files and uploaded as artifacts for debugging.
 # Logs are retained for 7 days and can be downloaded from the Actions UI.
+#
+# A failed push run on main additionally opens (or updates) a `ci-main-red`
+# tracking issue -- see the `main-status` job at the bottom of this file, and
+# docs/development/ci-debugging.md.
 
 on:
   push:
@@ -375,3 +379,113 @@ jobs:
           name: miniforge-cli-${{ github.sha }}
           path: dist/miniforge.jar
           retention-days: 7
+
+  # Alerting for a red `main`. Until this existed, a failing push run
+  # produced no signal at all: the Test job was red across six consecutive
+  # merges (runs 30734048427 through 30735684110), for two independent
+  # reasons, and the second went unnoticed until someone looked by hand.
+  #
+  # The channel is a GitHub issue because there is no chat webhook secret on
+  # this repo or the org -- only the CI-bot app credentials. Repo watchers
+  # already get notified on issue creation, and the push author is mentioned
+  # in the body.
+  #
+  # No checkout and no toolchain setup, deliberately: the alerter has to
+  # survive the failure it reports. A bb- or Clojure-based alerter would be
+  # taken out by exactly the deps/toolchain breakage it exists to announce.
+  # `gh` is preinstalled on GitHub-hosted runners.
+  main-status:
+    name: Alert on main status
+    runs-on: ubuntu-latest
+    needs: [structure, lint, test, test-windows, build]
+    # Push-to-main only: PR failures are already visible on the PR itself.
+    # `!cancelled()` keeps a manual cancellation from being reported as
+    # breakage. Green runs are included so the tracking issue gets closed.
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      issues: write
+      actions: read
+    # Serializes alert jobs across overlapping main runs so two failures
+    # landing together cannot each decide no issue exists and file one.
+    concurrency:
+      group: main-status-alert
+      cancel-in-progress: false
+    steps:
+      - name: Open, update, or close the red-main tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # No checkout, so gh cannot infer the repo from a git remote.
+          GH_REPO: ${{ github.repository }}
+          JOB_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          set -euo pipefail
+
+          label='ci-main-red'
+          body_file="${RUNNER_TEMP}/main-status-body.md"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          # Any failed dependency means red, whatever else happened. A run
+          # with no failure but a non-success result (cancelled, skipped) is
+          # not evidence that main is healthy, so it is left alone.
+          outcome=green
+          for result in ${JOB_RESULTS}; do
+            case "${result}" in
+              success) ;;
+              failure) outcome=red; break ;;
+              *)       outcome=inconclusive ;;
+            esac
+          done
+
+          # Reuse an open tracking issue instead of filing one per run.
+          # Queried through the REST list endpoint rather than `gh issue
+          # list --search`: the search index is eventually consistent, so a
+          # freshly created issue can be invisible to the next run's lookup.
+          # `/issues` also returns pull requests -- filter them out.
+          issue=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=${label}&per_page=100" \
+            --jq 'map(select(.pull_request == null)) | .[0].number // empty')
+
+          if [ "${outcome}" = 'green' ]; then
+            if [ -n "${issue}" ]; then
+              gh issue close "${issue}" \
+                --comment "\`main\` is green again as of ${GITHUB_SHA}. Run: ${run_url}"
+            fi
+            exit 0
+          fi
+
+          if [ "${outcome}" != 'red' ]; then
+            echo "Inconclusive run (${JOB_RESULTS}); not alerting."
+            exit 0
+          fi
+
+          # Best-effort detail. Losing it must not lose the alert.
+          failed_jobs=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/jobs?per_page=100" \
+            --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")' \
+            || true)
+
+          cat > "${body_file}" <<EOF
+          CI failed on a push to \`main\`.
+
+          - Run: ${run_url}
+          - Commit: ${GITHUB_SHA}
+          - Pushed by: @${GITHUB_ACTOR}
+          - Failed jobs: ${failed_jobs:-unknown, see the run}
+
+          One issue is reused for every consecutive red run on \`main\`; each
+          further failure lands here as a comment. It closes automatically on
+          the next fully green \`main\` push.
+          EOF
+
+          if [ -n "${issue}" ]; then
+            gh issue comment "${issue}" --body-file "${body_file}"
+          else
+            # Idempotent: the label survives from earlier breaks.
+            gh label create "${label}" \
+              --color b60205 \
+              --description 'CI is failing on main' >/dev/null 2>&1 || true
+            gh issue create \
+              --title 'CI is red on main' \
+              --label "${label}" \
+              --body-file "${body_file}"
+          fi
