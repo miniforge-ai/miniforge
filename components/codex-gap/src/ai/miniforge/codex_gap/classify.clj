@@ -77,10 +77,24 @@
                                                         (attribute/load-gate-reason-map))))
                             (attribute/similarity (signal-text signal) problems))
             confident? (and attribution (>= (:confidence attribution) threshold))
-            landing-ids (set (map :id (:landings consider-resp)))]
+            ;; Landings unavailable (nil resp, or a codex anomaly at classify
+            ;; time) means rung 2 is UNPROVABLE — an empty landing set would
+            ;; convict every confident attribution of :misrouted, which is
+            ;; exactly the false blame first-leak-wins forbids. Unprovable
+            ;; holds in the queue; it does not classify.
+            landings-known? (and (map? consider-resp)
+                                 (nil? (:codex/anomaly consider-resp))
+                                 (contains? consider-resp :landings))
+            landing-ids (when landings-known?
+                          (set (map :id (:landings consider-resp))))]
         (cond
           (not confident?)
-          {:bucket :review-queue :attribution attribution}
+          {:bucket :review-queue :attribution attribution
+           :queue-reason :below-threshold}
+
+          (not landings-known?)
+          {:bucket :review-queue :attribution attribution
+           :queue-reason :landings-unavailable}
 
           (not (contains? landing-ids (:problem attribution)))
           {:bucket :misrouted :attribution attribution}

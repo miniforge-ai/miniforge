@@ -110,6 +110,19 @@
     (is (some? attribution) "the best candidate travels with the queued entry")
     (is (< (:confidence attribution) 0.5))))
 
+(deftest ^{:stratum 1} unavailable-landings-queue-instead-of-convicting-misrouted
+  ;; nil or anomaly consider-resp makes rung 2 UNPROVABLE — an empty landing
+  ;; set must not convict a confident attribution of :misrouted.
+  (doseq [resp [nil {:codex/anomaly :codex-unreadable :codex/reason "gone"}]]
+    (let [{:keys [bucket queue-reason attribution]}
+          (gap/classify (entry "changing-one-side-of-a-boundary"
+                               {:status :pinned :pinned? true :pin-read? true}
+                               drift-signal)
+                        resp problems {})]
+      (is (= :review-queue bucket))
+      (is (= :landings-unavailable queue-reason))
+      (is (= "contract-drift-is-silent" (:problem attribution))))))
+
 (deftest ^{:stratum 1} mechanical-attribution-wins-for-typed-gate-reasons
   (let [signal {:type :gate-failure
                 :payload {:reason/code :reason/grant-absent
