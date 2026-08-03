@@ -38,3 +38,10 @@
   ;; review's task builder has no :task/existing-files channel yet; a mapping
   ;; without a wire would be a defined-but-unreachable capability.
   (is (= #{:implement :plan} (set (keys codex-pin/phase->situation)))))
+
+(deftest ^{:stratum 0} anomaly-with-nil-logger-warns-on-stderr
+  (let [err (java.io.StringWriter.)]
+    (binding [*err* err]
+      (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
+    (is (re-find #"WARN: codex pin skipped for implement" (str err))
+        "a nil logger must not turn a configured-codex failure silent")))

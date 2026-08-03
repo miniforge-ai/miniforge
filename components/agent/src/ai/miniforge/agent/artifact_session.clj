@@ -1017,6 +1017,12 @@
    'did this agent consult its pinned codex landings' an answerable
    question (Codex SPEC §7.4.2).
 
+   HOST MODE ONLY, same as `read-context-misses`: in capsule mode the
+   server writes the file inside the container and surfacing it needs an
+   executor round-trip (the same trade-off already accepted for capsule
+   worktree artifacts). Until that lands, capsule sessions return nil here
+   — absent data, not evidence the agent read nothing.
+
    Returns: vector of read records, or nil if no reads file."
   [session]
   (let [path (str (:dir session) "/context-reads.edn")

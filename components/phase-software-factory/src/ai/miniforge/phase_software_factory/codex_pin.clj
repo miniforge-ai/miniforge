@@ -60,17 +60,22 @@
 (defn ^{:stratum 1} pin-file
   "The pin for `phase` as an existing-files entry {:path :content}, or nil
    when the codex is unconfigured, the phase has no mapped situation, or
-   the consultation failed (logged as :codex/pin-skipped when a logger is
-   given — a configured codex that cannot answer is worth a warning)."
+   the consultation failed. A configured codex that cannot answer is worth
+   a warning, ALWAYS: through the logger when one is given, else stderr —
+   a nil logger must not turn the failure silent (plan has no logger)."
   ([phase logger] (pin-file phase logger (configured-codex-dir)))
   ([phase logger codex-dir]
    (when codex-dir
      (when-let [situation (get phase->situation phase)]
        (let [entry (codex/pin-entry codex-dir situation pin-path)]
          (if (:codex/anomaly entry)
-           (do (when logger
+           (do (if logger
                  (log/warn logger phase :codex/pin-skipped
                            {:data {:anomaly (:codex/anomaly entry)
-                                   :reason  (:codex/reason entry)}}))
+                                   :reason  (:codex/reason entry)}})
+                 (binding [*out* *err*]
+                   (println "WARN: codex pin skipped for" (name phase) "—"
+                            (name (:codex/anomaly entry)) ":"
+                            (:codex/reason entry))))
                nil)
            entry))))))
