@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.workflow.checkpoint-store-test
   (:require
    [clojure.java.io :as io]
@@ -24,7 +23,9 @@
    [ai.miniforge.workflow.context :as ctx]
    [ai.miniforge.workflow.interface :as workflow]))
 
-(defn- with-temp-checkpoint-root
+;------------------------------------------------------------------------------ Layer 0
+
+(defn- ^{:stratum 0} with-temp-checkpoint-root
   [f]
   (let [root (doto (io/file (System/getProperty "java.io.tmpdir")
                             (str "mf-checkpoint-test-" (random-uuid)))
@@ -35,7 +36,41 @@
         (doseq [file (reverse (file-seq root))]
           (.delete ^java.io.File file))))))
 
-(deftest persist-and-load-checkpoint-data-test
+(def ^{:stratum 0} ^:private instant-stamp
+  "One instant, written twice — once as an Instant, once as the Date
+   `clojure.core/inst?` admits just as readily — so the snapshot can be
+   asserted to type them the same way on the way back out."
+  (java.time.Instant/parse "2026-04-24T00:00:00.123Z"))
+
+(deftest ^{:stratum 0} load-checkpoint-data-validates-at-interface-boundary-test
+  (testing "invalid checkpoint payloads are rejected at the public interface"
+    (with-redefs [checkpoint-store/load-checkpoint-data
+                  (fn [_workflow-run-id _opts]
+                    {:checkpoint/root "/tmp/checkpoints"
+                     :manifest {:workflow/id (random-uuid)
+                                :workflow/workflow-id :canonical-sdlc
+                                :workflow/workflow-version "1.0.0"
+                                :workflow/phases-completed [:plan]
+                                :workflow/machine-snapshot-path "/tmp/checkpoints/run/machine-snapshot.edn"
+                                :workflow/phase-checkpoints {:plan "/tmp/checkpoints/run/phases/plan.edn"}
+                                :workflow/last-checkpoint-at "2026-04-24T00:00:00Z"}
+                     :machine-snapshot {:execution/id (random-uuid)
+                                        :execution/workflow-id :canonical-sdlc
+                                        :execution/workflow-version "1.0.0"
+                                        :execution/status :running
+                                        :execution/fsm-state {:_state :running}
+                                        :execution/response-chain {}
+                                        :execution/errors []
+                                        :execution/artifacts []
+                                        :execution/metrics {}}
+                     :phase-results {:plan :invalid-phase-result}})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid checkpoint data"
+                            (workflow/load-checkpoint-data (random-uuid) {}))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(deftest ^{:stratum 1} persist-and-load-checkpoint-data-test
   (with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
@@ -52,7 +87,9 @@
                                       :artifacts [{:artifact/id "art-1"}]
                                       :pause-reason :rate-limit})
                               (assoc :execution/current-phase :done
-                                     :execution/started-at (java.time.Instant/now)
+                                     :execution/started-at instant-stamp
+                                     :execution/ended-at (java.util.Date/from
+                                                          instant-stamp)
                                      :execution/output
                                      {:status :running
                                       :finished-at (java.time.Instant/now)}))
@@ -78,11 +115,21 @@
                                [:machine-snapshot
                                 :execution/output
                                 :finished-at]))))
+        (testing "a Date is typed the same as an Instant across a restore"
+          ;; Pre-fix the walker matched java.time.Instant only, so a Date
+          ;; kept its #inst print form and came back a Date — leaving
+          ;; :execution/started-at a String and :execution/ended-at a Date
+          ;; on the same restored snapshot, decided by which writer stamped
+          ;; them.
+          (is (string? (get-in checkpoint-data
+                               [:machine-snapshot :execution/ended-at])))
+          (is (= (get-in checkpoint-data [:machine-snapshot :execution/started-at])
+                 (get-in checkpoint-data [:machine-snapshot :execution/ended-at]))))
         (testing "manifest tracks checkpointed phases"
           (is (= [:done]
                  (get-in checkpoint-data [:manifest :workflow/phases-completed]))))))))
 
-(deftest persist-execution-state-validates-before-saving-test
+(deftest ^{:stratum 1} persist-execution-state-validates-before-saving-test
   (with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [workflow {:workflow/id :test
@@ -95,7 +142,7 @@
                               #"Invalid checkpoint data"
                               (checkpoint-store/persist-execution-state! invalid-ctx)))))))
 
-(deftest persist-execution-state-preserves-existing-phase-checkpoints-test
+(deftest ^{:stratum 1} persist-execution-state-preserves-existing-phase-checkpoints-test
   (testing "a resumed partial pipeline does not shrink the checkpoint manifest"
     (with-temp-checkpoint-root
       (fn [checkpoint-root]
@@ -137,7 +184,7 @@
             (is (= {:status :failed}
                    (get-in checkpoint-data [:phase-results :release])))))))))
 
-(deftest persist-execution-state-preserves-phase-handoffs-test
+(deftest ^{:stratum 1} persist-execution-state-preserves-phase-handoffs-test
   (with-temp-checkpoint-root
     (fn [checkpoint-root]
       (let [handoff {:frame/kind :repair-request
@@ -164,28 +211,28 @@
                (get-in checkpoint-data
                        [:phase-results :review :phase/handoff])))))))
 
-(deftest load-checkpoint-data-validates-at-interface-boundary-test
-  (testing "invalid checkpoint payloads are rejected at the public interface"
-    (with-redefs [checkpoint-store/load-checkpoint-data
-                  (fn [_workflow-run-id _opts]
-                    {:checkpoint/root "/tmp/checkpoints"
-                     :manifest {:workflow/id (random-uuid)
-                                :workflow/workflow-id :canonical-sdlc
-                                :workflow/workflow-version "1.0.0"
-                                :workflow/phases-completed [:plan]
-                                :workflow/machine-snapshot-path "/tmp/checkpoints/run/machine-snapshot.edn"
-                                :workflow/phase-checkpoints {:plan "/tmp/checkpoints/run/phases/plan.edn"}
-                                :workflow/last-checkpoint-at "2026-04-24T00:00:00Z"}
-                     :machine-snapshot {:execution/id (random-uuid)
-                                        :execution/workflow-id :canonical-sdlc
-                                        :execution/workflow-version "1.0.0"
-                                        :execution/status :running
-                                        :execution/fsm-state {:_state :running}
-                                        :execution/response-chain {}
-                                        :execution/errors []
-                                        :execution/artifacts []
-                                        :execution/metrics {}}
-                     :phase-results {:plan :invalid-phase-result}})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid checkpoint data"
-                            (workflow/load-checkpoint-data (random-uuid) {}))))))
+(deftest ^{:stratum 1} inst-tagged-checkpoint-loads-as-string-test
+  (testing "a checkpoint written before normalization restores as a string"
+    ;; Checkpoints already on disk predate the write-side normalization, so
+    ;; a Date in one of them was persisted as `#inst` — and EDN's reader
+    ;; hands that back as a Date, which is the mixed-type restore this
+    ;; change exists to stop. Written here by hand because the current
+    ;; write path can no longer produce it.
+    (with-temp-checkpoint-root
+      (fn [checkpoint-root]
+        (let [run-id (random-uuid)
+              snapshot-path (checkpoint-store/machine-snapshot-path
+                             checkpoint-root run-id)]
+          (io/make-parents snapshot-path)
+          ;; :started-at as the old writer left it (#inst), :ended-at as the
+          ;; new writer produces it — the mixed file an upgrade actually meets.
+          (spit snapshot-path
+                (pr-str {:execution/id run-id
+                         :execution/started-at (java.util.Date/from instant-stamp)
+                         :execution/ended-at (str instant-stamp)}))
+          (let [snapshot (:machine-snapshot
+                          (checkpoint-store/load-checkpoint-data
+                           run-id {:checkpoint/root checkpoint-root}))]
+            (is (string? (:execution/started-at snapshot)))
+            (is (= (:execution/ended-at snapshot)
+                   (:execution/started-at snapshot)))))))))

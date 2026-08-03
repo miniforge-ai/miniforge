@@ -50,4 +50,10 @@
   ;; determine-phase-event and apply-phase-transition is pinned here;
   ;; both functions had zero direct test coverage before this addition.
   "ai.miniforge.workflow.phase-transitions-test"
-  "ai.miniforge.phase.interface-test"]}
+  "ai.miniforge.phase.interface-test"
+  ;; Pins the commit-budget gate's path-exclusion set (which staged
+  ;; files count toward the 200-line ceiling). The gate itself runs in
+  ;; this same pre-commit chain — a drifted exclusion regex should fail
+  ;; here, not by silently blocking (or waving through) commits. Pure
+  ;; regex assertions, no subprocess, sub-second.
+  "commit-budget-test"]}

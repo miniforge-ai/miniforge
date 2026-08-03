@@ -68,4 +68,19 @@
      "content" {:type "string" :description "Complete file contents to write"}}}}
   :required-params
   {"path"    {:check :non-blank :msg "path is required"}
-   "content" {:check :string    :msg "content is required (string)"}}}}
+   "content" {:check :string    :msg "content is required (string)"}}}
+
+ ;; ------------------------------------------------------------------------- Thesium Codex
+ "consider_situation"
+ {:handler :consider-situation
+  :tool-def
+  {:name "consider_situation"
+   :description "Consult the Thesium Codex BEFORE acting: route your current situation to the problems worth attending to, each anchored to a failure that actually happened. Returns landings ordered strategic-first with a coverage statement. Call this when about to take actions in the world, when a process is stuck or slow, when about to trust a quality signal, when about to commit to something consequential, or when changing one side of a producer/consumer boundary."
+   :inputSchema
+   {:type "object"
+    :required ["situation"]
+    :properties
+    {"situation"  {:type "string" :description "What you are doing, phrased as a situation (e.g. \"an agent needs to act in the world\"). Substring of a situation id or title also works."}
+     "codex_path" {:type "string" :description "Codex directory (optional; defaults to MINIFORGE_CODEX_PATH)"}}}}
+  :required-params
+  {"situation" {:check :non-blank :msg "situation is required"}}}}
