@@ -1,6 +1,7 @@
 {:paths ["src" "resources"]
  :deps {ai.miniforge/schema   {:local/root "../schema"}
         ai.miniforge/logging  {:local/root "../logging"}
+        ai.miniforge/messages {:local/root "../messages"}
         ai.miniforge/coerce   {:local/root "../coerce"}}
  :aliases {:test {:extra-paths ["test"]
                   ;; Test-only: the round-trip test asserts that what this
