@@ -51,9 +51,11 @@
   (core/consider codex-dir situation-text))
 
 (defn ^{:stratum 0} render-response
-  "Render a `consider` response (or anomaly) as the canonical text form.
-   Used by both the consider_situation MCP tool (pull) and the phase-start
-   blackboard pin (push, SPEC §7.4) so the two forms are identical."
+  "Render a `consider` response (or anomaly) as the canonical consultation
+   body text. The consider_situation MCP tool (pull) returns this body
+   verbatim; the phase-start blackboard pin (push, SPEC §7.4) wraps the
+   SAME body in a pin header comment — one renderer, so the two surfaces
+   can never drift apart in content."
   [resp]
   (render/render-response resp))
 

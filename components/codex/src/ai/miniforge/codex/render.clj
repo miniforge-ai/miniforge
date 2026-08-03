@@ -18,9 +18,10 @@
 (ns ai.miniforge.codex.render
   "Text rendering of a `consider` response. Lives in the component — not the
    MCP base — so the pulled form (consider_situation tool) and the pushed
-   form (the phase-start blackboard pin, SPEC §7.4) are byte-identical.
-   All prose comes from the component message catalog (messages/t), never
-   hardcoded.
+   form (the phase-start blackboard pin, SPEC §7.4) share one renderer:
+   the pin wraps this same body in a header comment, and the content can
+   never drift between the two surfaces. All prose comes from the
+   component message catalog (messages/t), never hardcoded.
 
    Rendering rules come from the spec, not taste: landings arrive ordered
    strategic → operational → tactical (§7.6.1); the coverage statement leads

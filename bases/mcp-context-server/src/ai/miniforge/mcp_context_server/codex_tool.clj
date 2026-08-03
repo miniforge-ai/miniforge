@@ -18,8 +18,10 @@
 (ns ai.miniforge.mcp-context-server.codex-tool
   "The consider_situation MCP tool — the PULL side of the Thesium Codex
    consumption surface (Codex SPEC T1 §7.1). Rendering lives in the codex
-   component (ai.miniforge.codex.render) so this tool's output and the
-   phase-start blackboard pin (§7.4, the PUSH side) are byte-identical.
+   component (ai.miniforge.codex.render): this tool returns the rendered
+   consultation body verbatim, and the phase-start blackboard pin (§7.4,
+   the PUSH side) wraps that same body in a pin header — one renderer, no
+   content drift between the surfaces.
 
    Fails closed: no configured codex path, an unreadable codex, or an
    unmatched situation renders as an anomaly with a reason — never an
