@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.chain-evidence
   "Chain-level evidence aggregation.
 
@@ -24,9 +23,9 @@
   (:require [ai.miniforge.phase.interface :as phase]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Step Summarization
 
-(defn summarize-step
+;; Step Summarization
+(defn ^{:stratum 0} summarize-step
   "Create a summary of a single chain step for inclusion in chain evidence.
 
    Arguments:
@@ -46,10 +45,8 @@
    :step/status (:step/status step-result)
    :step/has-output? (some? (:step/output step-result))})
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Metrics Aggregation
-
-(defn aggregate-metrics
+(defn ^{:stratum 0} aggregate-metrics
   "Aggregate timing and count metrics across chain steps.
 
    Arguments:
@@ -70,22 +67,24 @@
      :failed-steps failed
      :steps-with-output with-output}))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; Chain Evidence Creation
-
-(defn derive-chain-status
+(defn ^{:stratum 0} derive-chain-status
   "Derive chain evidence status from the chain result."
   [chain-result]
   (if (phase/succeeded? chain-result)
     :completed
     :failed))
 
-(defn build-step-summaries
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} build-step-summaries
   "Build step summaries from chain step results."
   [step-results]
   (vec (map-indexed (fn [idx sr] (summarize-step sr idx)) step-results)))
 
-(defn create-chain-evidence
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} create-chain-evidence
   "Create a chain-level evidence record from chain execution results.
 
    Arguments:
