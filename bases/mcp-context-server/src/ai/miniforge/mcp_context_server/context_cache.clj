@@ -157,10 +157,17 @@
   [artifact-dir]
   (let [misses (:misses @cache-state)]
     (when (seq misses)
-      (let [path (str artifact-dir "/context-misses.edn")]
-        (spit path (pr-str misses))
-        (binding [*out* *err*]
-          (println (msg/t :cache/misses-written {:count (count misses) :path path})))))))
+      ;; best-effort: this runs in the server's shutdown `finally`, and a
+      ;; throw here would skip save-cache! — losing the cross-phase cache
+      ;; over a diagnostics write
+      (try
+        (let [path (str artifact-dir "/context-misses.edn")]
+          (spit path (pr-str misses))
+          (binding [*out* *err*]
+            (println (msg/t :cache/misses-written {:count (count misses) :path path}))))
+        (catch Exception e
+          (binding [*out* *err*]
+            (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
 
 (defn ^{:stratum 1} flush-reads!
   "Write every recorded context_read resolution to context-reads.edn in
@@ -168,7 +175,12 @@
   [artifact-dir]
   (let [reads (:reads @cache-state)]
     (when (seq reads)
-      (spit (str artifact-dir "/context-reads.edn") (pr-str reads)))))
+      ;; best-effort, same rationale as flush-misses!
+      (try
+        (spit (str artifact-dir "/context-reads.edn") (pr-str reads))
+        (catch Exception e
+          (binding [*out* *err*]
+            (println (msg/t :cache/save-failed {:error (ex-message e)}))))))))
 
 ;; `handle-submit` (the artifact.edn metadata channel) removed: the artifact is
 ;; the worktree/container diff (promotion); the curator derives the summary.
