@@ -195,7 +195,11 @@
       (is (= 1 (get-in r [:review-queue :count]))))
     (testing "every slot links member miss ids (T2 §4.2)"
       (is (= 1 (count (get-in r [:coverage :misses]))))
-      (is (= 2 (count (get-in r [:attention :misses])))))
+      (is (= 1 (count (get-in r [:routing :misses]))))
+      (is (= 1 (count (get-in r [:delivery :misses]))))
+      (is (= 2 (count (get-in r [:attention :misses]))))
+      (is (= 2 (count (get-in r [:learning :misses]))))
+      (is (= 1 (count (get-in r [:review-queue :misses])))))
     (testing "no scalar rollup key exists"
       (is (nil? (:score r)))
       (is (nil? (:health r))))

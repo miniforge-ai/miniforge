@@ -570,7 +570,7 @@
   ;; ──────────────────────────────────────────────────────────────────────────
 
   codex-gap-report
-  {:doc "Render the Codex gap report (T2 s4) from run ledgers. Usage: bb codex-gap-report [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
+  {:doc "Render the Codex gap report (T2 §4) from run ledgers. Usage: bb codex-gap-report [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
    :extra-paths ["components/codex-gap/src"
                  "components/codex-gap/resources"
                  "components/codex/src"
@@ -583,7 +583,7 @@
                         (str (fs/path (System/getProperty "user.home")
                                       ".miniforge" "checkpoints")))
                dirs (when (fs/directory? root)
-                      (filter fs/directory? (fs/list-dir root)))
+                      (sort (filter fs/directory? (fs/list-dir root))))
                reads (map (fn [d] (codex-gap/read-ledger (str d))) dirs)
                entries (vec (mapcat :entries reads))
                skipped (reduce + 0 (keep :skipped reads))

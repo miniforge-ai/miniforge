@@ -77,7 +77,10 @@
      :learning {:status :not-instrumented
                 :open (+ (count (get by-bucket :uncovered []))
                          (count (get by-bucket :review-queue []))
-                         (count (get by-bucket :novel [])))}
+                         (count (get by-bucket :novel [])))
+                :misses (vec (concat (ids :uncovered)
+                                     (ids :review-queue)
+                                     (ids :novel)))}
      :review-queue {:count (count (get by-bucket :review-queue []))
                     :misses (ids :review-queue)}}))
 
@@ -118,5 +121,6 @@
      (msg/t :report/attention {:unheeded (:unheeded attention)})
      (members-line :unheeded (:misses attention))
      (msg/t :report/learning {:open (:open learning)})
+     (members-line :learning (:misses learning))
      (msg/t :report/review-queue {:count (:count review-queue)})
      (members-line :review-queue (:misses review-queue))]))
