@@ -27,6 +27,7 @@
    [ai.miniforge.phase-software-factory.messages :as messages]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+   [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
    [ai.miniforge.agent.interface :as agent]
    [ai.miniforge.agent.interface.protocols.messaging :as messaging]
@@ -514,6 +515,9 @@
 
    Records metrics, captures code artifacts."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures.
+  (gap-wiring/record-phase-misses! ctx :implement)
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (if start-time (- end-time start-time) 0)
