@@ -465,9 +465,9 @@
         existing-files (resolve-existing-files ctx pack-ctx worktree-path files-in-scope)
         ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
         ;; worries render before the content they apply to.
-        codex-pin (codex-pin/pin-file :implement (get-in ctx [:execution/logger]))
-        existing-files (if codex-pin
-                         (into [codex-pin] (or existing-files []))
+        codex-pin-file (codex-pin/pin-file :implement (get-in ctx [:execution/logger]))
+        existing-files (if codex-pin-file
+                         (into [codex-pin-file] (or existing-files []))
                          existing-files)
         behavior-addendum (phase/load-guidance-addendum
                             :implement {:task {:task/intent (:intent input)}})

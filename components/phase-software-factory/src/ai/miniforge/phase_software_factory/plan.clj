@@ -116,9 +116,9 @@
   (let [exploration-files (:exploration/files explore-result)
         ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
         ;; worries render before the content they apply to.
-        codex-pin (codex-pin/pin-file :plan nil)
-        existing-files (if codex-pin
-                         (into [codex-pin] (or exploration-files []))
+        codex-pin-file (codex-pin/pin-file :plan nil)
+        existing-files (if codex-pin-file
+                         (into [codex-pin-file] (or exploration-files []))
                          exploration-files)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
