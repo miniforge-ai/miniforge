@@ -59,13 +59,17 @@
 (defn ^{:stratum 0} terminal-signal
   "The phase's terminal anomaly as a miss signal, normalized here (the
    writer) onto :anomaly/category — [:phase :error] shapes are
-   inconsistent across producers (sub-anomaly records vs hand-rolled
-   maps), and readers must not each re-solve that."
+   inconsistent across producers (anomaly/sub-anomaly maps carrying
+   :anomaly/subtype + :anomaly/type vs hand-rolled maps carrying
+   :anomaly/category), and readers must not each re-solve that. The
+   sub-anomaly :anomaly/subtype IS the domain category (the :anomalies.*
+   vocabulary) and maps first; its generic :anomaly/type is the fallback."
   [phase-map]
   (when-let [err (:error phase-map)]
     {:type :terminal-anomaly
      :payload {:anomaly/category (or (:anomaly/category err)
-                                     (get-in err [:anomaly :category]))
+                                     (:anomaly/subtype err)
+                                     (:anomaly/type err))
                :anomaly/message (or (:anomaly/message err) (:message err))}}))
 
 (defn- ^{:stratum 0} ledger-dir

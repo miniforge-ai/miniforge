@@ -20,7 +20,8 @@
    decision-envelope Reason maps, the namespaced [:phase :phase/...] keys
    the gate runner writes, and the [:phase :error] variants review/
    implement attach."
-  (:require [ai.miniforge.codex-gap.interface :as gap]
+  (:require [ai.miniforge.anomaly.interface :as anomaly]
+            [ai.miniforge.codex-gap.interface :as gap]
             [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [clojure.test :refer [deftest is testing]]))
 
@@ -63,7 +64,14 @@
   (testing "implement's plain error map (no category)"
     (is (= {:type :terminal-anomaly
             :payload {:anomaly/category nil :anomaly/message "agent failed"}}
-           (gap-wiring/terminal-signal {:error {:message "agent failed"}})))))
+           (gap-wiring/terminal-signal {:error {:message "agent failed"}}))))
+  (testing "the canonical anomaly/sub-anomaly shape (review stagnation path)"
+    (let [err (anomaly/sub-anomaly :exhausted :anomalies.review/stagnation
+                                   "no movement" {:review/fingerprint-history []})]
+      (is (= {:type :terminal-anomaly
+              :payload {:anomaly/category :anomalies.review/stagnation
+                        :anomaly/message "no movement"}}
+             (gap-wiring/terminal-signal {:error err}))))))
 
 (deftest ^{:stratum 0} recording-is-a-no-op-without-a-configured-codex
   (let [dir (str (java.nio.file.Files/createTempDirectory
