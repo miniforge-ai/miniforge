@@ -957,7 +957,12 @@
         result      ((:exec! session) (:executor session) (:environment-id session)
                      cmd {:workdir (:workdir session)})
         stdout      (get-in result [:data :stdout] "")
-        boundary-re (re-pattern (java.util.regex.Pattern/quote capsule-output-boundary))
+        ;; Full-line anchor: the echoed sentinel always stands alone on its
+        ;; own line, so a boundary substring embedded mid-line in EDN
+        ;; content never splits a segment.
+        boundary-re (re-pattern (str "(?m)^"
+                                     (java.util.regex.Pattern/quote capsule-output-boundary)
+                                     "$"))
         [misses-part reads-part artifact-part] (mapv str/trim (str/split stdout boundary-re 3))]
     {:artifact       (when (seq artifact-part)
                        (parse-edn-content artifact-part

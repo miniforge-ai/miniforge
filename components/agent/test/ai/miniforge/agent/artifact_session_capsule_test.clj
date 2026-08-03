@@ -64,9 +64,11 @@
     (result/ok {:stdout "" :stderr "" :exit-code 0})))
 
 (def ^{:stratum 0} ^:private capsule-boundary
-  "Mirror of the private boundary sentinel in artifact-session's batched
-   session-outputs read (misses, reads, artifact — artifact last)."
-  "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
+  "The production boundary sentinel for the batched session-outputs read
+   (misses, reads, artifact — artifact last), resolved from
+   artifact-session's private var so the mock always frames stdout with
+   the real boundary (white-box access, same pattern as run-session*)."
+  @(ns-resolve 'ai.miniforge.agent.artifact-session 'capsule-output-boundary))
 
 (def ^{:stratum 0} ^:private artifact-edn-stdout
   "{:code/id \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\" :code/description \"test\"}")

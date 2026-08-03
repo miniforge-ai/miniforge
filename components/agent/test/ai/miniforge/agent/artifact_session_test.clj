@@ -417,9 +417,10 @@
 ;; context-reads.edn into ONE executor round-trip — these tests pin both the
 ;; parsing and the round-trip count.
 (def ^{:stratum 0} ^:private capsule-boundary
-  "Mirror of the private boundary sentinel in artifact-session. The cat-chain
-   command embeds it verbatim, so tests reproduce the stdout it yields."
-  "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
+  "The production boundary sentinel, resolved from artifact-session's
+   private var so these tests always exercise the real split boundary
+   (white-box access, same pattern as run-session in the capsule tests)."
+  @(ns-resolve 'ai.miniforge.agent.artifact-session 'capsule-output-boundary))
 
 (defn- ^{:stratum 0} outputs-read?
   "True when `cmd` is the batched session-outputs read (the only command
