@@ -1,0 +1,10 @@
+{:paths ["src" "resources"]
+ ;; No component deps yet: the classifier consumes codex data (landings,
+ ;; problems) as arguments, and no operator prose exists in this slice —
+ ;; the gap-report task adds ai.miniforge/codex + ai.miniforge/messages
+ ;; when it arrives.
+ :deps {}
+ :aliases
+ {:test {:extra-paths ["test" "test-resources"]
+         :extra-deps {io.github.cognitect-labs/test-runner
+                      {:git/tag "v0.5.1" :git/sha "dfb30dd"}}}}}
