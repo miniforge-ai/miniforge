@@ -1,0 +1,39 @@
+name: expr-probe
+
+# Throwaway probe branch: settles whether a job-level `if` using
+# `!cancelled()` still runs when a `needs` dependency fails, and whether
+# `join(needs.*.result, ' ')` evaluates. Deleted once observed.
+on:
+  push:
+    branches: [ci-expr-probe]
+
+permissions:
+  contents: read
+
+jobs:
+  boom:
+    runs-on: ubuntu-latest
+    steps:
+      - run: exit 1
+
+  guard-not-cancelled:
+    runs-on: ubuntu-latest
+    needs: [boom]
+    if: ${{ !cancelled() }}
+    steps:
+      - env:
+          JOB_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: echo "RAN not-cancelled results=[${JOB_RESULTS}]"
+
+  guard-always:
+    runs-on: ubuntu-latest
+    needs: [boom]
+    if: ${{ always() }}
+    steps:
+      - run: echo "RAN always"
+
+  guard-default:
+    runs-on: ubuntu-latest
+    needs: [boom]
+    steps:
+      - run: echo "RAN default (expected: never)"
