@@ -39,6 +39,38 @@
 ;;   - the seeded-trap bench (T2 §5) — separate spec once the ledger lands
 ;;   - post-merge miss sources (T2 §7.1) — in-run signals only here
 ;;   - judge-based attribution (T2 §7.3) — similarity + review queue only
+;;
+;; Implementation-survey resolutions (2026-08-03, integration survey):
+;;   - STORAGE: standalone `codex-gap-ledger.edn` under the run's checkpoint
+;;     dir (<checkpoint-root>/<execution-id>/), append-only, one pr-str'd
+;;     entry per line. Evidence-bundle REJECTED: it is a terminal,
+;;     whole-workflow, closed-schema artifact with zero runtime writers
+;;     today; attaching per-phase records would be net-new surface in a
+;;     compliance component and drags artifact-store into the phase-leave
+;;     path. If a compliance tie-in is wanted later, the terminal-state
+;;     collector can slurp the finished ledger.
+;;   - codex-gap takes the resolved checkpoint dir as a PARAMETER; the
+;;     phase wiring reads :execution/checkpoint-root + :execution/id off
+;;     ctx (avoids a codex-gap -> workflow dependency cycle).
+;;   - consultation-summary widens to carry :situation (the entered
+;;     situation string) so the ledger needs no re-derivation; review gains
+;;     a consultation attach via a status-returning landings-text variant —
+;;     without it every review miss is structurally stuck at :undelivered.
+;;   - review signals: prefer the map-shaped [:result :output :review/issues]
+;;     (severity/file/description) filtered to :blocking; fall back to the
+;;     string vector :review/blocking-issues (gate-only and parse-failure
+;;     paths populate only the strings).
+;;   - gate failures: read [:phase :phase/status] (namespaced; the bare
+;;     :status is clobbered at leave) and [:phase :phase/gate-errors]
+;;     (decision-envelope Reason maps); mechanical attribution keys on
+;;     [:reason/code :reason/rule-id].
+;;   - implement terminal typing via phase-terminal/derive-termination-reason
+;;     (pure fn over result + [:phase :watchdog-state]).
+;;   - [:phase :error] shapes are inconsistent (one sub-anomaly record, two
+;;     hand-rolled maps) — the ledger WRITER normalizes on :anomaly/category.
+;;   - similarity corpus is landing :title + :open items (landing-view
+;;     carries no :forces); :pin-read? tri-state preserved verbatim — nil is
+;;     unknown, and collapsing it to false would manufacture :unheeded.
 
 {:spec/title "Codex gap instrument: miss ledger, bucket attribution, gap report"
  :spec/description
@@ -52,7 +84,6 @@
  :spec/intent {:type   :feature
                :scope  ["components/codex/src"
                         "components/phase-software-factory/src"
-                        "components/evidence-bundle/src"
                         "tasks"]}
 
  :spec/constraints
@@ -95,14 +126,16 @@
     :mechanical|:similarity :confidence double}}.
 
     Attribution: mechanical for typed gate failures (declared mapping
-    gate-failure-type -> problem id, data not code); similarity (normalized
-    text vs problem titles+forces, port of the zk admit §6.3 matcher) for
-    review findings; entries under the confidence threshold get
-    :bucket :review-queue instead of a real bucket.
+    [:reason/code :reason/rule-id] -> problem id, data not code);
+    similarity (normalized text vs landing :title + :open items, port of
+    the zk admit §6.3 matcher) for review findings; entries under the
+    confidence threshold get :bucket :review-queue instead of a real
+    bucket. Reachability = membership in (consider ...) :landings — the
+    public interface, no new exports.
 
-    Storage: EDN append log under the run's gitignored state dir; decide
-    evidence-bundle attachment vs standalone file during implementation and
-    document the choice. Reader (misses store) -> seq of entries.
+    Storage (resolved, see preamble): append-only codex-gap-ledger.edn
+    under the run's checkpoint dir, one pr-str'd entry per line, dir
+    passed in as a parameter. Reader -> seq of entries.
 
     Tests: classifier bucket ordering (a miss that is BOTH unmatched and
     undelivered classifies :uncovered); mechanical vs similarity paths;
