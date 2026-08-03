@@ -28,6 +28,7 @@
                        "components/progress-detector/src"
                        "components/progress-detector/resources"
                        "components/clock/src"
+                       "components/codex/src"
                        "components/coerce/src"
                        "components/response-chain/src"
                        "components/boundary/src"
@@ -222,6 +223,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}
@@ -348,6 +350,8 @@
                        "components/anomaly/test"
                        "components/progress-detector/test"
                        "components/clock/test"
+                       "components/codex/test"
+                       "components/codex/test-resources"
                        "components/coerce/test"
                        "components/response-chain/test"
                        "components/boundary/test"
@@ -483,6 +487,7 @@
                       ai.miniforge/anomaly {:local/root "components/anomaly"}
                       ai.miniforge/progress-detector {:local/root "components/progress-detector"}
                       ai.miniforge/clock {:local/root "components/clock"}
+                      ai.miniforge/codex {:local/root "components/codex"}
                       ai.miniforge/coerce {:local/root "components/coerce"}
                       ai.miniforge/response-chain {:local/root "components/response-chain"}
                       ai.miniforge/boundary {:local/root "components/boundary"}
