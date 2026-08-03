@@ -32,10 +32,13 @@
 
 ;; Codex location
 (defn ^{:stratum 0} codex-path
-  "Codex directory: explicit param wins, else MINIFORGE_CODEX_PATH."
+  "Codex directory: explicit param wins, else MINIFORGE_CODEX_PATH.
+   A non-string param is treated as absent — this tool fails closed with a
+   codex anomaly, never a JSON-RPC error from str/trim on a number."
   [params]
-  (or (some-> (get params "codex_path") str/trim not-empty)
-      (some-> (System/getenv "MINIFORGE_CODEX_PATH") str/trim not-empty)))
+  (let [p (get params "codex_path")]
+    (or (when (string? p) (not-empty (str/trim p)))
+        (some-> (System/getenv "MINIFORGE_CODEX_PATH") str/trim not-empty))))
 
 ;; Rendering
 (defn- ^{:stratum 0} render-landing [{:keys [id type title horizon confidence open scars escalations]}]
@@ -61,9 +64,14 @@
            no-strategic-coverage? newest-scar-date]}]
   (str/join "\n"
     (concat
+      ;; horizon mix rendered in the §7.6.1 order, not map order
       [(str "coverage: " landing-count " landings, "
             unanchored-count " unanchored, newest scar " (or newest-scar-date "none")
-            ", horizon mix " (pr-str horizon-mix))]
+            ", horizon mix "
+            (str/join " · " (for [h ["strategic" "operational" "tactical"]
+                                  :let [n (get horizon-mix h)]
+                                  :when n]
+                              (str h " " n))))]
       (when no-strategic-coverage?
         ["NO STRATEGIC COVERAGE: every landing is tactical/operational. The codex has nothing strategic-horizon for this situation — that absence is a gap in the codex, not evidence the situation carries no strategic risk."]))))
 
