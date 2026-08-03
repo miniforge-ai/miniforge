@@ -23,6 +23,7 @@
    Default gates: [:plan-complete]"
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
+            [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.agent.interface :as agent]
@@ -112,7 +113,13 @@
 
    Returns {:task task-map :rules-manifest manifest-or-nil}."
   [input explore-result knowledge-store]
-  (let [existing-files (:exploration/files explore-result)
+  (let [exploration-files (:exploration/files explore-result)
+        ;; Thesium Codex blackboard pin (SPEC §7.4): pinned FIRST so the
+        ;; worries render before the content they apply to.
+        codex-pin (codex-pin/pin-file :plan nil)
+        existing-files (if codex-pin
+                         (into [codex-pin] (or exploration-files []))
+                         exploration-files)
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        knowledge-store :planner (get input :tags []))
         behavior-addendum (phase/load-guidance-addendum
