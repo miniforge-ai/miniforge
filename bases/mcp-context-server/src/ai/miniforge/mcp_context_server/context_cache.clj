@@ -524,8 +524,3 @@
     (grep-with-fallback (get params "pattern")
                         (get params "path")
                         (get params "glob"))))
-
-;; Shell fallbacks
-(declare source-root)
-
-(declare file-mtime)
