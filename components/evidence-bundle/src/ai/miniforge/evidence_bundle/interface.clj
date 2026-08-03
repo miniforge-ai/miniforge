@@ -23,6 +23,7 @@
    [ai.miniforge.evidence-bundle.chain-evidence :as chain-evidence]
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
+   [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
@@ -406,7 +407,7 @@
                                    :content \"(ns foo)\"
                                    :action :create}]})"
   [artifact]
-  (extraction/extract-files artifact))
+  (extraction-bulk/extract-files artifact))
 
 (defn ^{:stratum 0} load-artifact
   "Load artifact from an EDN file.
@@ -434,7 +435,7 @@
    Example:
      (extract-artifact-from-file \"/tmp/artifact.edn\")"
   [artifact-path]
-  (extraction/extract-artifact-from-file artifact-path))
+  (extraction-bulk/extract-artifact-from-file artifact-path))
 
 (defn ^{:stratum 0} validate-artifact
   "Validate artifact structure for extraction.

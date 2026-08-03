@@ -514,9 +514,9 @@
   extract:artifact
   {:doc "Extract files from a code artifact EDN file and write them to disk"
    :extra-paths ["components/evidence-bundle/src"]
-   :requires ([ai.miniforge.evidence-bundle.extraction :as extraction])
+   :requires ([ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk])
    :task (if-let [artifact-file (first *command-line-args*)]
-           (let [result (extraction/extract-artifact-from-file artifact-file)]
+           (let [result (extraction-bulk/extract-artifact-from-file artifact-file)]
              (doseq [r (:results result)]
                (if (:success r)
                  (println (case (:action r)

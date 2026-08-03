@@ -15,19 +15,24 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.extraction
   "Utilities for extracting and materializing artifacts from evidence bundles.
-   Handles writing code artifacts to disk."
+   Handles writing code artifacts to disk. Bulk extraction
+   (extract-files) and the load+extract convenience wrapper live in
+   `extraction-bulk` (rule 210: a fourth real layer here is the signal
+   to split it).
+
+   Layer 0: File write/delete/load primitives + validation error helper
+   Layer 1: Single-file extraction + artifact validation"
   (:require
    [clojure.java.io :as io]
    [clojure.edn :as edn]
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; File Operations
 
-(defn write-file
+;; File Operations
+(defn ^{:stratum 0} write-file
   "Write content to a file path.
    Creates parent directories if needed.
 
@@ -40,7 +45,7 @@
     (catch Exception e
       {:path path :action action :success false :error (.getMessage e)})))
 
-(defn delete-file-safe
+(defn ^{:stratum 0} delete-file-safe
   "Delete a file if it exists.
 
    Returns: {:path path :action :delete :success true/false :error optional}"
@@ -51,10 +56,32 @@
     (catch Exception e
       {:path path :action :delete :success false :error (.getMessage e)})))
 
-;------------------------------------------------------------------------------ Layer 1
-;; Artifact File Extraction
+;; Artifact Loading and Extraction
+(defn ^{:stratum 0} load-artifact
+  "Load artifact from an EDN file.
 
-(defn extract-file
+   Arguments:
+   - artifact-path: Path to EDN file containing artifact
+
+   Returns artifact map or throws exception if file cannot be read.
+
+   Example:
+     (load-artifact \"/tmp/artifact.edn\")"
+  [artifact-path]
+  (-> artifact-path slurp edn/read-string))
+
+;; Validation
+(defn ^{:stratum 0} add-error
+  "Add an error to the errors vector if condition is true."
+  [errors condition message]
+  (if condition
+    (conj errors message)
+    errors))
+
+;------------------------------------------------------------------------------ Layer 1
+
+;; Artifact File Extraction
+(defn ^{:stratum 1} extract-file
   "Extract a single file from artifact and write to disk.
 
    File map should contain:
@@ -82,81 +109,7 @@
     {:path path :action action :success false
      :error (str "Unknown action: " action)}))
 
-(defn extract-files
-  "Extract multiple files from artifact and write to disk.
-
-   Artifact should be a map containing:
-   - :code/files - Vector of file maps (see extract-file for structure)
-
-   Returns map with:
-   - :total - Total number of files processed
-   - :successful - Number of successful operations
-   - :failed - Number of failed operations
-   - :results - Vector of individual file results
-   - :summary - Summary string from artifact (if present)
-
-   Example:
-     (extract-files {:code/files [{:path \"src/foo.clj\"
-                                   :content \"(ns foo)\"
-                                   :action :create}
-                                  {:path \"src/bar.clj\"
-                                   :content \"(ns bar)\"
-                                   :action :modify}]
-                     :code/summary \"Added foo and updated bar\"})"
-  [artifact]
-  (let [files (:code/files artifact)
-        results (mapv extract-file files)
-        successful (count (filter :success results))
-        failed (count (remove :success results))]
-    {:total (count files)
-     :successful successful
-     :failed failed
-     :results results
-     :summary (:code/summary artifact)}))
-
-;------------------------------------------------------------------------------ Layer 2
-;; Artifact Loading and Extraction
-
-(defn load-artifact
-  "Load artifact from an EDN file.
-
-   Arguments:
-   - artifact-path: Path to EDN file containing artifact
-
-   Returns artifact map or throws exception if file cannot be read.
-
-   Example:
-     (load-artifact \"/tmp/artifact.edn\")"
-  [artifact-path]
-  (-> artifact-path slurp edn/read-string))
-
-(defn extract-artifact-from-file
-  "Load artifact from file and extract all files to disk.
-
-   This is a convenience function that combines load-artifact and extract-files.
-
-   Arguments:
-   - artifact-path: Path to EDN file containing artifact
-
-   Returns extraction results map (see extract-files).
-
-   Example:
-     (extract-artifact-from-file \"/tmp/artifact.edn\")"
-  [artifact-path]
-  (let [artifact (load-artifact artifact-path)]
-    (extract-files artifact)))
-
-;------------------------------------------------------------------------------ Layer 3
-;; Validation
-
-(defn add-error
-  "Add an error to the errors vector if condition is true."
-  [errors condition message]
-  (if condition
-    (conj errors message)
-    errors))
-
-(defn validate-artifact
+(defn ^{:stratum 1} validate-artifact
   "Validate that an artifact has the required structure for extraction.
 
    Returns map with:
@@ -182,32 +135,3 @@
                                    (not (vector? (:code/files artifact))))
                              ":code/files must be a vector"))]
     (response/validation-result errors)))
-
-;------------------------------------------------------------------------------ Rich Comment
-
-(comment
-  ;; Extract a single file
-  (extract-file {:path "test.txt"
-                 :content "Hello, world!"
-                 :action :create})
-
-  ;; Extract multiple files from artifact
-  (def artifact
-    {:code/files [{:path "src/foo.clj"
-                   :content "(ns foo)"
-                   :action :create}
-                  {:path "src/bar.clj"
-                   :content "(ns bar)"
-                   :action :modify}]
-     :code/summary "Added foo and updated bar"})
-
-  (extract-files artifact)
-
-  ;; Load and extract from file
-  (extract-artifact-from-file "/tmp/artifact.edn")
-
-  ;; Validate artifact
-  (validate-artifact artifact)
-  (validate-artifact {})
-
-  :end)
