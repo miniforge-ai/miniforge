@@ -85,7 +85,7 @@
 (deftest ^{:stratum 0} default-config-test
   (testing "implement phase has correct default configuration"
     (is (= :implementer (:agent implement/default-config)))
-    (is (= [:syntax :format :lint] (:gates implement/default-config)))
+    (is (= [:syntax :format :lint :codex-consultation] (:gates implement/default-config)))
     (is (map? (:budget implement/default-config)))
     (is (= 30000 (get-in implement/default-config [:budget :tokens])))
     (is (= 8 (get-in implement/default-config [:budget :iterations])))
@@ -96,7 +96,7 @@
     (let [defaults (phase/phase-defaults :implement)]
       (is (some? defaults))
       (is (= :implementer (:agent defaults)))
-      (is (= [:syntax :format :lint] (:gates defaults))))))
+      (is (= [:syntax :format :lint :codex-consultation] (:gates defaults))))))
 
 (deftest ^{:stratum 0} base-ref-candidates-include-resume-merge-base-ranges-test
   (testing "resumed workspaces diff from the original spec base to restored HEAD"

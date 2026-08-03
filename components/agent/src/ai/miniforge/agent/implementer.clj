@@ -913,10 +913,12 @@
                      (result-boundary/error-response final
                                                      (messages/t :error/llm-failed)))]
         ;; Session channel: which files the agent actually read (Codex SPEC
-        ;; §7.4.2). The phase layer turns this into consultation provenance;
-        ;; without it, "did the agent read its pinned landings" is unknowable.
+        ;; §7.4.2). The phase layer turns this into consultation provenance.
+        ;; some?, not seq: an EMPTY reads log is "known: nothing was read",
+        ;; which is a different fact from "no log surfaced" (capsule mode) —
+        ;; dropping it would turn a real unread into unknown downstream.
         (cond-> result
-          (seq context-reads) (assoc :context-reads context-reads))))))
+          (some? context-reads) (assoc :context-reads context-reads))))))
 
 ;------------------------------------------------------------------------------ Layer 7
 

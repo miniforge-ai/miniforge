@@ -72,3 +72,6 @@
    :description "Validates the agent ran with its Thesium Codex consultation (SPEC §7.4.3)"
    :check check-codex-consultation
    :repair nil})
+
+;; Registry
+(registry/register-gate! :codex-consultation)
