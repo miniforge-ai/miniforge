@@ -409,6 +409,43 @@
       (session/cleanup-session! s)
       (is (not (.exists (io/file (:dir s))))))))
 
+;------------------------------------------------------------------------------ Layer 3.6
+;; Capsule session-outputs surfacing (Codex SPEC §7.4.2 recorded flows)
+;;
+;; Capsule sessions must surface :context-misses and :context-reads like host
+;; sessions do. The reader batches artifact.edn + context-misses.edn +
+;; context-reads.edn into ONE executor round-trip — these tests pin both the
+;; parsing and the round-trip count.
+(def ^{:stratum 0} ^:private capsule-boundary
+  "Mirror of the private boundary sentinel in artifact-session. The cat-chain
+   command embeds it verbatim, so tests reproduce the stdout it yields."
+  "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
+
+(defn- ^{:stratum 0} outputs-read?
+  "True when `cmd` is the batched session-outputs read (the only command
+   that references the context files)."
+  [cmd]
+  (str/includes? cmd "context-misses.edn"))
+
+(defn- ^{:stratum 0} context-miss-record
+  "Fixture matching the real producer (`record-miss!` in the
+   mcp-context-server context-cache): the base {:tool :tokens :timestamp}
+   map merged with the tool params, which carry :path."
+  [path]
+  {:tool      "context_read"
+   :tokens    120
+   :timestamp "2026-08-02T12:00:00Z"
+   :path      path})
+
+(defn- ^{:stratum 0} context-read-record
+  "Fixture matching the real producer (`record-read!` in the
+   mcp-context-server context-cache): {:path :source :timestamp}, where
+   :source is :cache | :filesystem | :refresh | :absent."
+  [path source]
+  {:path      path
+   :source    source
+   :timestamp "2026-08-02T12:00:00Z"})
+
 (deftest ^{:stratum 0} with-readonly-session-test
   (testing "runs body-fn with a configured session and returns its result
             directly (no artifact-promotion map), for read-only agents"
@@ -484,6 +521,25 @@
         (finally
           (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
             (.delete f)))))))
+
+(defn- ^{:stratum 1} capsule-outputs-stdout
+  "Assemble the stdout the batched cat chain produces for the given
+   artifact/misses/reads segments. Empty string = missing file (cat wrote
+   nothing; the echoed boundary lines remain)."
+  [artifact misses reads]
+  (str artifact "\n" capsule-boundary "\n"
+       misses "\n" capsule-boundary "\n"
+       reads "\n"))
+
+(defn- ^{:stratum 1} capsule-exec-stub
+  "Executor stub for capsule-session tests. Returns `outputs-stdout` for the
+   batched session-outputs read and empty stdout for everything else
+   (mkdir, config writes, snapshot, role-file cats, cleanup). Records every
+   command in `calls`."
+  [calls outputs-stdout]
+  (fn [_executor _env-id cmd _opts]
+    (swap! calls conj cmd)
+    {:data {:stdout (if (outputs-read? cmd) outputs-stdout "")}}))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -717,6 +773,90 @@
         (finally
           (doseq [^java.io.File f (reverse (file-seq (io/file wt)))]
             (.delete f)))))))
+
+(deftest ^{:stratum 2} read-capsule-session-outputs-test
+  (testing "parses all three session files from a single executor round-trip"
+    (let [calls   (atom [])
+          stdout  (capsule-outputs-stdout
+                   (pr-str (code-artifact))
+                   (pr-str [(context-miss-record "src/a.clj")])
+                   (pr-str [(context-read-record "src/a.clj" :cache)]))
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls stdout)}
+          result  (session/read-capsule-session-outputs session)]
+      (is (= 1 (count @calls))
+          "all three files must ride one executor round-trip, not three")
+      (is (str/includes? (first @calls) "artifact.edn"))
+      (is (str/includes? (first @calls) "context-misses.edn"))
+      (is (str/includes? (first @calls) "context-reads.edn"))
+      (is (= (java.util.UUID/fromString default-uuid-str)
+             (get-in result [:artifact :code/id]))
+          "artifact segment must go through parse-uuid-strings like host mode")
+      (is (= [(context-miss-record "src/a.clj")] (:context-misses result)))
+      (is (= [(context-read-record "src/a.clj" :cache)] (:context-reads result)))))
+
+  (testing "missing files yield nils, not errors"
+    (let [calls   (atom [])
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls (capsule-outputs-stdout "" "" ""))}
+          result  (session/read-capsule-session-outputs session)]
+      (is (nil? (:artifact result)))
+      (is (nil? (:context-misses result)))
+      (is (nil? (:context-reads result)))))
+
+  (testing "malformed segment emits parse WARN and yields nil for that file only"
+    (let [calls   (atom [])
+          stdout  (capsule-outputs-stdout
+                   ""
+                   "{{{not edn"
+                   (pr-str [(context-read-record "b.clj" :filesystem)]))
+          session {:dir            "/workspace/.miniforge-session"
+                   :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                   :workdir        "/workspace"
+                   :executor       :fake-executor
+                   :environment-id "env-1"
+                   :exec!          (capsule-exec-stub calls stdout)}
+          err     (java.io.StringWriter.)
+          result  (binding [*err* err]
+                    (session/read-capsule-session-outputs session))]
+      (is (nil? (:context-misses result)))
+      (is (= [(context-read-record "b.clj" :filesystem)] (:context-reads result))
+          "a malformed sibling segment must not poison the others")
+      (is (str/includes? (str err) "WARN")))))
+
+(deftest ^{:stratum 2} with-session-capsule-surfaces-context-files-test
+  (testing "governed with-session returns :context-misses and :context-reads"
+    ;; The regression this pins: capsule run-session used to gate both keys
+    ;; on :host mode, silently dropping the recorded flows the MCP server
+    ;; wrote inside the container.
+    (let [calls  (atom [])
+          stdout (capsule-outputs-stdout
+                  (pr-str (code-artifact))
+                  (pr-str [(context-miss-record "src/x.clj")])
+                  (pr-str [(context-read-record "src/x.clj" :absent)]))
+          ctx    {:execution/mode           :governed
+                  :execution/executor       :fake-executor
+                  :execution/environment-id "env-1"
+                  :execution/execute-fn     (capsule-exec-stub calls stdout)}
+          result (session/with-session ctx (constantly :llm-done))]
+      (is (= :capsule (:session-mode result)))
+      (is (= :llm-done (:llm-result result)))
+      (is (= (java.util.UUID/fromString default-uuid-str)
+             (get-in result [:artifact :code/id])))
+      (is (= [(context-miss-record "src/x.clj")] (:context-misses result))
+          "capsule sessions must surface context misses")
+      (is (= [(context-read-record "src/x.clj" :absent)] (:context-reads result))
+          "capsule sessions must surface recorded context reads (SPEC §7.4.2)")
+      (is (= 1 (count (filter outputs-read? @calls)))
+          "context files must not add executor round-trips beyond the batched read"))))
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment
