@@ -95,6 +95,14 @@
   (let [f (io/file pipeline-path)]
     (io/file (.getParentFile f) ".cursors" (.getName f))))
 
+(defn- ^{:stratum 0} persisted
+  "One run's cursor map for a stage, as pipeline-runner reports it —
+   keyed by stage id, which the store re-keys on save."
+  [stage-name schema-name value]
+  {(random-uuid) {:stage/name        stage-name
+                  :stage/schema-name schema-name
+                  :cursor {:cursor/type :offset :cursor/value value}}})
+
 (defn- ^{:stratum 0} run-result
   "A pipeline-runner result of the given status, shaped as
    execute-pipeline returns it — a stage failure keeps :pipeline-run."
@@ -242,10 +250,7 @@
     (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
           stage-id (random-uuid)
           keyed    (stage-id-keyed pipeline-path stage-id
-                                   {(random-uuid)
-                                    {:stage/name        ingest-stage-name
-                                     :stage/schema-name ingest-stage-name
-                                     :cursor {:cursor/type :offset :cursor/value 3}}})]
+                                   (persisted ingest-stage-name ingest-stage-name 3))]
       (is (= [stage-id] (keys keyed)))
       (is (= 3 (get-in keyed [stage-id :cursor :cursor/value])))))
 
@@ -256,10 +261,7 @@
     ;; were never read; the stage starts fresh instead.
     (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
           keyed (stage-id-keyed pipeline-path (random-uuid)
-                                {(random-uuid)
-                                 {:stage/name        ingest-stage-name
-                                  :stage/schema-name "issues"
-                                  :cursor {:cursor/type :offset :cursor/value 3}}}
+                                (persisted ingest-stage-name "issues" 3)
                                 {:github/resource "pulls"})]
       (is (= {} keyed))))
 
@@ -267,39 +269,23 @@
     (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
           stage-id (random-uuid)
           keyed    (stage-id-keyed pipeline-path stage-id
-                                   {(random-uuid)
-                                    {:stage/name        ingest-stage-name
-                                     :stage/schema-name "pulls"
-                                     :cursor {:cursor/type :offset :cursor/value 4}}}
+                                   (persisted ingest-stage-name "pulls" 4)
                                    {:github/resource "pulls"})]
       (is (= 4 (get-in keyed [stage-id :cursor :cursor/value])))))
 
   (testing "a stage name with two persisted entries takes neither by accident"
-    ;; Two entries mean the stage's resource changed between runs, so the
-    ;; older watermark describes a different source. Starting fresh
-    ;; re-reads records; picking the wrong entry skips records that were
-    ;; never read at all.
+    ;; Neither schema matches the one this run will extract under, so
+    ;; both are left behind rather than one being picked arbitrarily.
     (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
-          issues-id (random-uuid)
-          merges-id (random-uuid)
           keyed (stage-id-keyed pipeline-path (random-uuid)
-                                {issues-id
-                                 {:stage/name        ingest-stage-name
-                                  :stage/schema-name "issues"
-                                  :cursor {:cursor/type :offset :cursor/value 3}}
-                                 merges-id
-                                 {:stage/name        ingest-stage-name
-                                  :stage/schema-name "merge-requests"
-                                  :cursor {:cursor/type :offset :cursor/value 9}}})]
+                                (merge (persisted ingest-stage-name "issues" 3)
+                                       (persisted ingest-stage-name "merge-requests" 9)))]
       (is (= {} keyed))))
 
   (testing "a persisted stage that no longer exists in the pipeline is dropped"
     (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
           keyed (stage-id-keyed pipeline-path (random-uuid)
-                                {(random-uuid)
-                                 {:stage/name        "Removed Stage"
-                                  :stage/schema-name "gone"
-                                  :cursor {:cursor/type :offset :cursor/value 3}}})]
+                                (persisted "Removed Stage" "gone" 3))]
       (is (= {} keyed)))))
 
 ;; ---------------------------------------------------------------------------
