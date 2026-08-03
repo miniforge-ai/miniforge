@@ -25,6 +25,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.phase.interface :as phase]
    [ai.miniforge.phase-software-factory.messages :as messages]
+   [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
    [ai.miniforge.phase-software-factory.phase-config :as phase-config]
    [ai.miniforge.phase-software-factory.phase-handoff :as phase-handoff]
    [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
@@ -331,6 +332,10 @@
         {:keys [formatted manifest]} (kb-helpers/inject-with-manifest
                                        (:knowledge-store ctx) :reviewer (get input :tags []))
         artifact (resolve-implement-artifact implement-phase-result ctx)
+        ;; Thesium Codex push delivery for the reviewer (SPEC §7.3): rendered
+        ;; landings as a prompt section — the quality-signals board, because a
+        ;; reviewer IS a quality signal deciding whether to trust itself.
+        codex-landings (codex-pin/landings-text :review (get-in ctx [:execution/logger]))
         behavior-addendum (phase/load-and-filter-behaviors
                             :review {:task {:task/intent (:intent input)}})
         task (cond-> {:task/id (random-uuid)
@@ -352,7 +357,9 @@
                formatted
                (assoc :task/knowledge-context formatted)
                behavior-addendum
-               (assoc :task/behavior-addendum behavior-addendum))]
+               (assoc :task/behavior-addendum behavior-addendum)
+               codex-landings
+               (assoc :task/codex-landings codex-landings))]
     {:task task
      :rules-manifest manifest}))
 
