@@ -212,6 +212,19 @@
                :intervention/target-id (random-uuid)}))
       "mismatched known targets must not be deferred as unowned"))
 
+(deftest ^{:stratum 0} retry-verbs-are-owned-without-a-live-runner
+  ;; The consumer wires this predicate as `:accept?`. A retry's canonical
+  ;; target type is `:workflow`, but the run it restarts has no live
+  ;; runner by definition — gating retries on one deferred them on every
+  ;; pass forever, never reaching the launcher-missing failure. They must
+  ;; be claimable regardless of runner registration.
+  (doseq [verb [:retry :retry-from-phase]]
+    (is (true? (application/live-intervention-target?
+                {:intervention/type verb
+                 :intervention/target-type :workflow
+                 :intervention/target-id (random-uuid)}))
+        (str verb " must be owned even with no live runner for its target"))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} stage-golden!
@@ -558,6 +571,62 @@
               "the fixture's `phase` detail survives the wire round-trip")
           (is (= [:approved :dispatched :applied :verified]
                  (state-trail stream))))))))
+
+(deftest ^{:stratum 2} retry-passes-the-production-ownership-gate
+  ;; Regression: the runner wires `:accept? live-intervention-target?`,
+  ;; but every other consume-pass! test omits `:accept?` and so runs the
+  ;; accept-everything default — the ownership gate the runner actually
+  ;; uses was never exercised in the consume path. A retry's runner is
+  ;; gone by definition, so the gate deferred it on every pass and it
+  ;; never reached the launcher. Drive the real gate here.
+  (testing "with the launcher registered the retry is claimed and verified"
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)
+          resumed-id (random-uuid)
+          captured (atom nil)]
+      (stage-golden! events-dir "retry-from-phase.transit.json")
+      (stage-workflow-history!
+       events-dir golden-pause-target-id
+       [(workflow-event (parse-uuid golden-pause-target-id) :workflow/started
+                        {:workflow/spec {:workflow-type :canonical-sdlc}})
+        (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
+                        {:workflow/phase :explore :phase/outcome :success})
+        (workflow-event (parse-uuid golden-pause-target-id) :workflow/phase-completed
+                        {:workflow/phase :implement :phase/outcome :failure})])
+      (stage-two-phase-run! events-dir resumed-id)
+      (with-resume-launcher
+        (assoc (recording-launcher captured resumed-id) :events-dir events-dir)
+        (fn []
+          (is (= {:routed 1 :skipped 0 :anomalies 0}
+                 (consumer/consume-pass!
+                  {:events-dir events-dir
+                   :stream stream
+                   :apply! application/apply-intervention!
+                   :accept? application/live-intervention-target?}))
+              "the ownership gate must claim the retry, not defer it")
+          (is (= [:approved :dispatched :applied :verified]
+                 (state-trail stream)))))))
+  (testing "with no launcher the retry is still claimed and fails typed, never parks"
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)]
+      (stage-golden! events-dir "retry-from-phase.transit.json")
+      (with-resume-launcher
+        nil
+        (fn []
+          (is (= {:routed 1 :skipped 0 :anomalies 0}
+                 (consumer/consume-pass!
+                  {:events-dir events-dir
+                   :stream stream
+                   :apply! application/apply-intervention!
+                   :accept? application/live-intervention-target?}))
+              "a launcher-less retry is claimed and resolved, not parked forever")
+          (is (= :no-resume-launcher
+                 (get-in (last (filterv #(= consumer/state-changed-event-type
+                                            (:event/type %))
+                                        (es/get-events stream)))
+                         [:intervention/details :failure/code]))
+              "the claimed retry ends in a typed failure, a visible red chip")
+          (is (= [:approved :dispatched :failed] (state-trail stream))))))))
 
 (deftest ^{:stratum 2} re-evaluate-without-an-evaluator-fails-typed
   (with-policy-evaluator

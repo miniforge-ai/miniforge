@@ -178,19 +178,38 @@
     (if-let [ns (namespace pack)] (str ns "/" (name pack)) (name pack))
     :else (str pack)))
 
-(defn ^{:stratum 0} valid-evaluation?
-  "A usable evaluator result: a map carrying a boolean
-   `:evaluation/passed?`. Anything else — nil, a non-map, or a map
-   whose verdict is missing or non-boolean — is NOT an evaluation and
-   must never be published as one. Without this check a nil/garbage
-   result coerces to `passed? false` and mints a bogus `:gate/failed`
-   PolicyEvaluation, breaking the \"never publishes a verdict it did
-   not receive\" guarantee."
-  [evaluation]
-  (and (map? evaluation)
-       (boolean? (:evaluation/passed? evaluation))))
+(defn- ^{:stratum 0} evaluation-list-field-ok?
+  "A `:evaluation/violations` / `:evaluation/packs-applied` field is
+   usable when it is absent or sequential. `evaluation-gate-event`
+   `(vec violations)`s and `pack-ids` `(mapv pack-id …)`s these, which
+   throw on a non-seqable scalar (a number, a keyword) — a throw the
+   application layer only catches as the generic `:application-error`,
+   losing the specific `:invalid-policy-evaluation` this predicate
+   exists to surface. Rejecting the shape here keeps the failure typed
+   and lands it before any gate event is published."
+  [v]
+  (or (nil? v) (sequential? v)))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} valid-evaluation?
+  "A usable evaluator result: a map carrying a boolean
+   `:evaluation/passed?`, with `:evaluation/violations` and
+   `:evaluation/packs-applied` each absent or sequential. Anything
+   else — nil, a non-map, a map whose verdict is missing or
+   non-boolean, or one whose violation/pack fields are a non-seqable
+   scalar — is NOT an evaluation and must never be published as one.
+   Without the verdict check a nil/garbage result coerces to
+   `passed? false` and mints a bogus `:gate/failed` PolicyEvaluation,
+   breaking the \"never publishes a verdict it did not receive\"
+   guarantee; without the list-field checks a scalar there throws deep
+   in `evaluation-gate-event` and surfaces as `:application-error`
+   rather than `:invalid-policy-evaluation`."
+  [evaluation]
+  (and (map? evaluation)
+       (boolean? (:evaluation/passed? evaluation))
+       (evaluation-list-field-ok? (:evaluation/violations evaluation))
+       (evaluation-list-field-ok? (:evaluation/packs-applied evaluation))))
 
 (defn ^{:stratum 1} requested-phase
   "The phase an intervention's `:intervention/details` targets, as a
@@ -237,9 +256,35 @@
            :resume/intervention-id (:intervention/id interv)}
     from-phase (assoc :resume/from-phase from-phase)))
 
-(defn- ^{:stratum 1} pack-ids
-  [packs]
-  (mapv pack-id (or packs [])))
+(defn ^{:stratum 1} evaluation-gate-event
+  "The `:gate/passed` / `:gate/failed` event that materializes a new
+   PolicyEvaluation for `interv`'s target.
+
+   Going through a gate event rather than writing a
+   `:supervisory/policy-evaluated` snapshot keeps the producer/
+   materializer direction intact: producers emit gate outcomes,
+   `supervisory-state` derives the record. Its `:policy-eval/id` is this
+   event's `:event/id`, so every re-evaluation is a fresh, immutable
+   record per N5-delta-1 §12.2 — never a mutation of a prior one.
+
+   The pack coercion is `mapv pack-id` inline rather than a `pack-ids`
+   helper: threading it through one more stratum-1 function would push
+   `record-policy-evaluation!` to a fourth layer and over the file's
+   budget for no readability gain."
+  [stream interv evaluation]
+  (let [passed? (true? (:evaluation/passed? evaluation))
+        target-id (str (:intervention/target-id interv))]
+    (-> (es/create-envelope stream
+                            (if passed? :gate/passed :gate/failed)
+                            nil
+                            (messages/t :application/policy-re-evaluated
+                                        {:target target-id
+                                         :result (if passed? "pass" "fail")}))
+        (assoc :gate/id re-evaluation-gate-id
+               :gate/target-type :pr
+               :gate/target-id target-id
+               :gate/packs (mapv pack-id (or (:evaluation/packs-applied evaluation) []))
+               :gate/violations (vec (:evaluation/violations evaluation))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -275,34 +320,7 @@
               {:resume/plan (resume-plan interv context workflow-identity
                                          from-phase)})))))))
 
-(defn ^{:stratum 2} evaluation-gate-event
-  "The `:gate/passed` / `:gate/failed` event that materializes a new
-   PolicyEvaluation for `interv`'s target.
-
-   Going through a gate event rather than writing a
-   `:supervisory/policy-evaluated` snapshot keeps the producer/
-   materializer direction intact: producers emit gate outcomes,
-   `supervisory-state` derives the record. Its `:policy-eval/id` is this
-   event's `:event/id`, so every re-evaluation is a fresh, immutable
-   record per N5-delta-1 §12.2 — never a mutation of a prior one."
-  [stream interv evaluation]
-  (let [passed? (true? (:evaluation/passed? evaluation))
-        target-id (str (:intervention/target-id interv))]
-    (-> (es/create-envelope stream
-                            (if passed? :gate/passed :gate/failed)
-                            nil
-                            (messages/t :application/policy-re-evaluated
-                                        {:target target-id
-                                         :result (if passed? "pass" "fail")}))
-        (assoc :gate/id re-evaluation-gate-id
-               :gate/target-type :pr
-               :gate/target-id target-id
-               :gate/packs (pack-ids (:evaluation/packs-applied evaluation))
-               :gate/violations (vec (:evaluation/violations evaluation))))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn ^{:stratum 3} record-policy-evaluation!
+(defn ^{:stratum 2} record-policy-evaluation!
   "Publish the evaluator's verdict and read the entity table back.
    Caller MUST gate on [[valid-evaluation?]] first — this fn assumes a
    well-formed evaluation and does not re-check.
