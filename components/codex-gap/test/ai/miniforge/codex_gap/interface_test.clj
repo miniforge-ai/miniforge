@@ -53,6 +53,11 @@
 (deftest ^{:stratum 0} missing-ledger-reads-as-empty-not-error
   (is (= {:entries [] :skipped 0} (gap/read-ledger "/nonexistent/run/dir"))))
 
+(deftest ^{:stratum 0} gap-report-confesses-unavailable-anchoring
+  (let [r (gap/build-report [] {})]
+    (is (= :codex-unavailable (:anchoring r)))
+    (is (re-find #"anchoring: codex unavailable" (gap/render-report r)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} no-situation-classifies-uncovered-first
@@ -169,3 +174,39 @@
                                                      :consultation nil :bucket :uncovered
                                                      :attribution nil}))]
     (is (= :ledger-write-failed (:codex-gap/anomaly r)))))
+
+(deftest ^{:stratum 1} gap-report-is-a-vector-with-member-ids-and-no-scalar
+  (let [mk (fn [bucket pin-read]
+             (gap/build-entry {:run-id "r" :phase :implement
+                               :signal drift-signal
+                               :situation "s" :consultation {:status :pinned :pin-read? pin-read}
+                               :bucket bucket :attribution nil}))
+        entries [(mk :uncovered nil) (mk :misrouted nil) (mk :undelivered nil)
+                 (mk :unheeded true) (mk :unheeded nil) (mk :review-queue nil)]
+        r (gap/build-report entries {:skipped 1 :run-count 2 :anchoring
+                                     {:problems 22 :unanchored 4 :speculative 5}})]
+    (testing "slot counts"
+      (is (= {:covered 5 :total 6} (select-keys (:coverage r) [:covered :total])))
+      (is (= 1 (get-in r [:routing :misrouted])))
+      (is (= 4 (get-in r [:routing :attributed])))
+      (is (= {:read 1 :unread 0 :unknown 1} (get-in r [:delivery :pin-read])))
+      (is (= 2 (get-in r [:attention :unheeded])))
+      (is (= 2 (get-in r [:learning :open])))
+      (is (= 1 (get-in r [:review-queue :count]))))
+    (testing "every slot links member miss ids (T2 §4.2)"
+      (is (= 1 (count (get-in r [:coverage :misses]))))
+      (is (= 1 (count (get-in r [:routing :misses]))))
+      (is (= 1 (count (get-in r [:delivery :misses]))))
+      (is (= 2 (count (get-in r [:attention :misses]))))
+      (is (= 2 (count (get-in r [:learning :misses]))))
+      (is (= 1 (count (get-in r [:review-queue :misses])))))
+    (testing "no scalar rollup key exists"
+      (is (nil? (:score r)))
+      (is (nil? (:health r))))
+    (testing "renders through the catalog with slots and members"
+      (let [text (gap/render-report r)]
+        (is (re-find #"Codex gap report — 6 misses across 2 run" text))
+        (is (re-find #"coverage: 5 of 6" text))
+        (is (re-find #"routing: 1 of 4" text))
+        (is (re-find #"anchoring: 22 problems, 4 unanchored, 5 speculative" text))
+        (is (re-find #"review queue: 1" text))))))

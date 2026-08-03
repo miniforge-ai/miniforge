@@ -569,6 +569,32 @@
   ;; MCP Context Server
   ;; ──────────────────────────────────────────────────────────────────────────
 
+  codex-gap-report
+  {:doc "Render the Codex gap report (T2 §4) from run ledgers. Usage: bb codex-gap-report [checkpoint-root]; codex from MINIFORGE_CODEX_PATH"
+   :extra-paths ["components/codex-gap/src"
+                 "components/codex-gap/resources"
+                 "components/codex/src"
+                 "components/codex/resources"
+                 "components/messages/src"
+                 "components/messages/resources"]
+   :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
+              [babashka.fs :as fs])
+   :task (let [root (or (first *command-line-args*)
+                        (str (fs/path (System/getProperty "user.home")
+                                      ".miniforge" "checkpoints")))
+               dirs (when (fs/directory? root)
+                      (sort (filter fs/directory? (fs/list-dir root))))
+               reads (map (fn [d] (codex-gap/read-ledger (str d))) dirs)
+               entries (vec (mapcat :entries reads))
+               skipped (reduce + 0 (keep :skipped reads))
+               anchoring (some-> (System/getenv "MINIFORGE_CODEX_PATH")
+                                 codex-gap/codex-anchoring-stats)]
+           (println (codex-gap/render-report
+                     (codex-gap/build-report
+                      entries {:skipped skipped
+                               :run-count (count (filter (fn [r] (seq (:entries r))) reads))
+                               :anchoring anchoring}))))}
+
   mcp-context-server
   {:doc     "Run MCP context server (JSON-RPC 2.0 over stdin/stdout)"
    :extra-paths ["bases/mcp-context-server/src"
