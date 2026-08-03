@@ -91,7 +91,7 @@
   "Ledger storage is gitignored runtime state under the run checkpoint dir — never git-tracked, never evidence-bundle (see preamble resolution)"
   "Classification order is normative: first leaking rung wins (T2 §3.3); a later rung must never be blamed when an earlier one leaked"
   "Non-mechanical attributions carry :attribution/method and :attribution/confidence; below-threshold entries land in a review queue, never silently in a bucket"
-  "The gap report is a vector with per-bucket member lists; no scalar summary may be derived or printed (T2 §4.1, same rationale as T1 §7.5)"
+  "The gap report is a vector with per-bucket member lists. Per-rung rates ARE components of that vector and always ship beside their member lists; what is prohibited is any SINGLE cross-bucket rollup (one codex-health number) — that is the scalar T2 §4.1 bans, same rationale as T1 §7.5"
   "Codex graph access goes through ai.miniforge.codex.interface only — no new parsing"
   "All new prose through message catalogs; anomalies as data; no new Throwable/blanket-Exception catches"
   "One canonical location per ledger entry — writers normalize, readers do not"]
@@ -119,7 +119,12 @@
       1. no situation matched or problem class absent      -> :uncovered
       2. problem present, unreachable from the situation   -> :misrouted
          (reachability via codex interface, NOT reimplemented)
-      3. consultation status :skipped or no pin/section    -> :undelivered
+      3. consultation :skipped, or consultation nil/absent while the
+         phase HAS a mapped situation                       -> :undelivered
+         (nil at this rung can only mean the delivery plumbing did not
+         run: a missing situation already classified :uncovered at rung 1;
+         the ledger records go-forward runs only, no back-classification
+         of pre-instrument history)
       4. failure attributes to a delivered landing         -> :unheeded
       5. otherwise                                          -> :novel
     Returns {:bucket kw :attribution {:problem id-or-nil :method
@@ -130,8 +135,12 @@
     similarity (normalized text vs landing :title + :open items, port of
     the zk admit §6.3 matcher) for review findings; entries under the
     confidence threshold get :bucket :review-queue instead of a real
-    bucket. Reachability = membership in (consider ...) :landings — the
-    public interface, no new exports.
+    bucket. :review-queue is NOT a rung bucket: it is a holding state for
+    unresolved attribution — queued entries are excluded from every rate
+    until resolved, and the queue size is itself a slot in the gap vector
+    (an unresolved-attribution backlog is a gap too). Reachability =
+    membership in (consider ...) :landings — the public interface, no new
+    exports.
 
     Storage (resolved, see preamble): append-only codex-gap-ledger.edn
     under the run's checkpoint dir, one pr-str'd entry per line, dir
