@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns commit-budget
   "Hard ceiling on staged-diff size at commit time — the fix for agents
    producing 4k-line monoliths. Counts insertions+deletions across
@@ -39,10 +38,10 @@
   (:require [babashka.process :as p]
             [clojure.string :as str]))
 
-;; ----------------------------------------------------------------- Layer 0
-;; pure helpers (no in-namespace deps)
+;------------------------------------------------------------------------------ Layer 0
 
-(def default-budget
+;; pure helpers (no in-namespace deps)
+(def ^{:stratum 0} default-budget
   "Hard ceiling on insertions+deletions per commit. 200 lines is the
    lower bound from review-throughput research (`Smartbear 2010`,
    replicated in `Cisco code review study 2018`): reviewer
@@ -50,7 +49,7 @@
    400. Picking the lower bound forces small slices."
   200)
 
-(def excluded-path-patterns
+(def ^{:stratum 0} excluded-path-patterns
   "Regex patterns for files whose line-count should NOT count against
    the budget. Generated content, audit trails, lockfiles, submodule
    pointers, and bulk data resources don't benefit from human review."
@@ -63,10 +62,11 @@
    #"(?i)(^|/)work/(done|archive)/.*"            ; archived work specs
    #"(?i)\.miniforge/.*"                         ; runtime cache
    #"(?i)\.claude/worktrees/.*"                  ; nested worktree dirs
-   ;; Data-file extensions in resources/, messages/, fixtures/, etc.
-   ;; — bulk data, not reviewed line-by-line. Code-shaped EDN
-   ;; (deps.edn, bb.edn, workspace.edn, *.spec.edn) is NOT data and
-   ;; stays in the budget. The `(^|/)` anchor matches both nested
+   ;; Data-file extensions in resources/, test-resources/, messages/,
+   ;; fixtures/, *-fixture(s)/, etc. — bulk data, not reviewed
+   ;; line-by-line. Code-shaped EDN (deps.edn, bb.edn, workspace.edn,
+   ;; *.spec.edn) lives OUTSIDE these dirs and stays in the budget.
+   ;; The `(^|/)` anchor matches both nested
    ;; (`components/X/resources/…`) and top-level (`resources/…`)
    ;; layouts — without it, root-level resource files would silently
    ;; count against the budget.
@@ -76,14 +76,15 @@
    ;; tsconfig.json, and other behavior-as-data files reviewers DO
    ;; need to look at. Stick with the resource/message/fixture/seed
    ;; gate.
-   #"(?i)(^|/)(resources|messages|fixtures|fixture|seeds)/.*\.(edn|json|yaml|yml|csv|tsv)$"])
+   #"(?i)(^|/)((test-)?resources|messages|([^/]+-)?fixtures?|seeds)/.*\.(edn|json|yaml|yml|csv|tsv)$"
+   ;; Markdown fixtures: .md is reviewable prose everywhere EXCEPT
+   ;; under fixture-data dirs (test-resources/, fixtures/, *-fixture/,
+   ;; seeds/) where it's verbatim generator output pinned for tests.
+   ;; Deliberately narrower than the extension list above — resources/
+   ;; and messages/ .md files stay in the budget.
+   #"(?i)(^|/)(test-resources|([^/]+-)?fixtures?|seeds)/.*\.md$"])
 
-(defn excluded?
-  "True when `path` matches any pattern in `excluded-path-patterns`."
-  [path]
-  (boolean (some #(re-find % path) excluded-path-patterns)))
-
-(def code-extension->comment-prefix
+(def ^{:stratum 0} code-extension->comment-prefix
   "Single-line comment marker per source-file extension. Lines that
    start (after whitespace) with the prefix are excluded from the
    budget — the file-header copyright block and per-function
@@ -94,23 +95,13 @@
    ".js"   "//"  ".ts"   "//" ".tsx"  "//" ".jsx" "//"
    ".rs"   "//"  ".go"   "//" ".java" "//"})
 
-(defn path-extension
+(defn ^{:stratum 0} path-extension
   "Lowercase file extension (with dot) for `path`, or nil."
   [^String path]
   (let [i (.lastIndexOf path ".")]
     (when (pos? i) (str/lower-case (subs path i)))))
 
-(defn comment-or-blank?
-  "True when `line` is blank OR a single-line comment in the syntax of
-   the file at `path`. Used to drop comment/blank lines from the
-   reportable count."
-  [line path]
-  (let [trimmed (str/triml line)]
-    (or (str/blank? trimmed)
-        (when-let [prefix (code-extension->comment-prefix (path-extension path))]
-          (str/starts-with? trimmed prefix)))))
-
-(defn classify-line
+(defn ^{:stratum 0} classify-line
   "Tag a diff payload line as `:added` / `:deleted` / `:other`.
 
    The unified diff prefixes added lines with `+`, deleted with `-`.
@@ -123,7 +114,54 @@
     (str/starts-with? line "-") :deleted
     :else :other))
 
-(defn parse-diff
+(defn ^{:stratum 0} total-lines
+  "Sum reportable counts across `annotated-entries`."
+  [annotated-entries]
+  (reduce + 0 (map :reportable annotated-entries)))
+
+(defn ^{:stratum 0} override-rationale
+  "Read the override rationale from the env var, or nil when none set."
+  []
+  (some-> (System/getenv "MINIFORGE_COMMIT_BUDGET_OVERRIDE")
+          str/trim
+          not-empty))
+
+;; report (composes Layer 1)
+(defn ^{:stratum 0} print-report!
+  "Emit a human-readable summary of which files contributed to the
+   total + which were excluded. The `(reportable / raw)` column makes
+   it visible when blank/comment filtering pulled a file under
+   budget."
+  [annotated total]
+  (let [{counted true zero false} (group-by #(pos? (:reportable %)) annotated)]
+    (println (format "  Reportable lines: %d (after blank/comment + path filters)" total))
+    (when (seq counted)
+      (println "  Files counted (reportable / raw):")
+      (doseq [{:keys [path reportable raw]} (sort-by (comp - :reportable) counted)]
+        (println (format "    %5d / %-5d  %s" reportable raw path))))
+    (when (seq zero)
+      (println "  Files at zero reportable (excluded path or comments-only):")
+      (doseq [{:keys [path raw]} (sort-by (comp - :raw) zero)]
+        (println (format "          %-5d  %s" raw path))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} excluded?
+  "True when `path` matches any pattern in `excluded-path-patterns`."
+  [path]
+  (boolean (some #(re-find % path) excluded-path-patterns)))
+
+(defn ^{:stratum 1} comment-or-blank?
+  "True when `line` is blank OR a single-line comment in the syntax of
+   the file at `path`. Used to drop comment/blank lines from the
+   reportable count."
+  [line path]
+  (let [trimmed (str/triml line)]
+    (or (str/blank? trimmed)
+        (when-let [prefix (code-extension->comment-prefix (path-extension path))]
+          (str/starts-with? trimmed prefix)))))
+
+(defn ^{:stratum 1} parse-diff
   "Parse `git diff --cached -U0 --no-color` into a vector of per-file
    maps `{:path :added [\"line\" …] :deleted [\"line\" …]}`.
 
@@ -168,7 +206,9 @@
           :else
           (recur (rest lines) pending-old current out))))))
 
-(defn file-reportable-count
+;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} file-reportable-count
   "Count budget-impacting lines in one file entry. File-level
    exclusion → 0. Otherwise drop blank/comment lines and sum
    added+deleted."
@@ -179,26 +219,8 @@
       (+ (count (filter code? added))
          (count (filter code? deleted))))))
 
-(defn reportable-changes
-  "Per-file annotated counts: `{:path :reportable :raw}`. `:raw` is the
-   full insertions+deletions; `:reportable` is what counts toward
-   budget after blank/comment filtering and path exclusions."
-  [entries]
-  (mapv (fn [{:keys [path added deleted] :as e}]
-          {:path       path
-           :reportable (file-reportable-count e)
-           :raw        (+ (count added) (count deleted))})
-        entries))
-
-(defn total-lines
-  "Sum reportable counts across `annotated-entries`."
-  [annotated-entries]
-  (reduce + 0 (map :reportable annotated-entries)))
-
-;; ----------------------------------------------------------------- Layer 1
 ;; git wrapper (composes Layer 0)
-
-(defn staged-diff
+(defn ^{:stratum 2} staged-diff
   "Return the parsed `git diff --cached -U0` for the current index, as
    per-file diff maps. Empty vec when nothing is staged.
 
@@ -219,37 +241,23 @@
               (println (str/trim err))))
           (System/exit 1)))))
 
-(defn override-rationale
-  "Read the override rationale from the env var, or nil when none set."
-  []
-  (some-> (System/getenv "MINIFORGE_COMMIT_BUDGET_OVERRIDE")
-          str/trim
-          not-empty))
+;------------------------------------------------------------------------------ Layer 3
 
-;; ----------------------------------------------------------------- Layer 2
-;; report (composes Layer 1)
+(defn ^{:stratum 3} reportable-changes
+  "Per-file annotated counts: `{:path :reportable :raw}`. `:raw` is the
+   full insertions+deletions; `:reportable` is what counts toward
+   budget after blank/comment filtering and path exclusions."
+  [entries]
+  (mapv (fn [{:keys [path added deleted] :as e}]
+          {:path       path
+           :reportable (file-reportable-count e)
+           :raw        (+ (count added) (count deleted))})
+        entries))
 
-(defn print-report!
-  "Emit a human-readable summary of which files contributed to the
-   total + which were excluded. The `(reportable / raw)` column makes
-   it visible when blank/comment filtering pulled a file under
-   budget."
-  [annotated total]
-  (let [{counted true zero false} (group-by #(pos? (:reportable %)) annotated)]
-    (println (format "  Reportable lines: %d (after blank/comment + path filters)" total))
-    (when (seq counted)
-      (println "  Files counted (reportable / raw):")
-      (doseq [{:keys [path reportable raw]} (sort-by (comp - :reportable) counted)]
-        (println (format "    %5d / %-5d  %s" reportable raw path))))
-    (when (seq zero)
-      (println "  Files at zero reportable (excluded path or comments-only):")
-      (doseq [{:keys [path raw]} (sort-by (comp - :raw) zero)]
-        (println (format "          %-5d  %s" raw path))))))
+;------------------------------------------------------------------------------ Layer 4
 
-;; ----------------------------------------------------------------- Layer 3
 ;; CLI entry (composes Layer 2)
-
-(defn check-commit-budget!
+(defn ^{:stratum 4} check-commit-budget!
   "Pre-commit gate. Returns nil when within budget; calls
    `(System/exit 1)` only on hard failure so it composes inside the
    `bb pre-commit` `:depends` chain (a `(System/exit 0)` here would
@@ -305,5 +313,7 @@
           (println "")
           (System/exit 1)))))
 
-(defn run [_opts]
+;------------------------------------------------------------------------------ Layer 5
+
+(defn ^{:stratum 5} run [_opts]
   (check-commit-budget! default-budget))
