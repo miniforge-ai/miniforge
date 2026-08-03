@@ -26,16 +26,15 @@
    prior cursors from, write the new one back once the run has
    succeeded.
 
-   It is its own namespace rather than a handful of helpers inside
-   `etl.runner` because the two policy questions it answers — which
-   execution modes carry a watermark, and which run outcomes may
-   advance one — belong in one stated place, and folding them into the
-   runner would push that file past its stratum budget.
+   Its own namespace rather than helpers inside `etl.runner`: the two
+   policy questions it answers — which execution modes carry a
+   watermark, which run outcomes may advance one — belong in one stated
+   place, and folding them into the runner would push that file past
+   its stratum budget.
 
-   Strata: mode policy, key translation, and the failure constructors
-   (0); the mode predicate over that policy (1); the pair of entry
-   points `etl.runner` calls (2). Strata are per-file, so these numbers
-   say nothing about `etl.runner`'s own."
+   Strata are per-file, so the numbers here say nothing about
+   `etl.runner`'s own: policy, key translation and failure
+   constructors (0); the mode predicate (1); the entry points (2)."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.cursor-store.interface :as cursor-store]
@@ -92,19 +91,16 @@
 (defn- ^{:stratum 1} by-stage-id
   "Re-key a persisted cursor map onto this run's stage ids.
 
-   `cursor-store` keys by [stage-name schema-name], the identity that
-   survives between runs. `pipeline-runner` looks a stage's cursor up
-   first by the `:stage/id` it was scheduled with, which is minted
-   fresh every run. Translating here means durable identity stays in
-   the store, run identity stays in the runner, and neither has to know
-   the other's key space.
+   The store keys by [stage-name schema-name] because that survives
+   between runs; `pipeline-runner` resolves a cursor by the `:stage/id`
+   it scheduled, which is minted fresh each run. Translating here keeps
+   each identity on its own side.
 
    An entry transfers only when its schema name matches the one this
    run will extract the stage under. Repointing a stage at a different
-   resource leaves its old entry in the file under the old schema, and
-   that watermark describes a different source — resuming from it would
-   skip records that were never read. A stage with no matching entry
-   starts fresh, which re-reads."
+   resource leaves its old entry under the old schema, describing a
+   different source — resuming from it would skip records that were
+   never read. No match means start fresh, which re-reads."
   [pipeline cursors]
   (reduce
    (fn [acc stage]
