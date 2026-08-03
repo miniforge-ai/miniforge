@@ -136,6 +136,42 @@ the actual arity mismatch errors.
 
 **Solution**: Download compile.log and build-cli.log to see exact compilation errors
 
+## Alerting on a red `main`
+
+Pull request failures are visible on the PR. Failures on a push to `main` are
+not visible anywhere unless someone looks, so the `main-status` job in
+`ci.yml` reports them.
+
+On a push to `main`:
+
+- **Any job failed** — the job opens an issue titled "CI is red on main",
+  labelled `ci-main-red`, containing the run URL, the commit, the pusher, and
+  the names of the failed jobs. If such an issue is already open, the failure
+  is added to it as a comment instead. One issue covers a whole red streak.
+- **Every job succeeded** — the open `ci-main-red` issue, if any, is closed
+  with a comment naming the commit that fixed it.
+- **Anything else** (a cancelled run, a job skipped for an unrelated reason,
+  with no outright failure) — nothing happens, and an open issue stays open.
+  An inconclusive run is not evidence that `main` is healthy.
+
+Pull request runs never trigger it.
+
+To find the current state:
+
+```bash
+gh issue list --repo miniforge-ai/miniforge --label ci-main-red --state open
+```
+
+Closing the issue by hand is safe — the next red run reopens the alert as a
+new issue. Do not remove the `ci-main-red` label from an open issue that is
+still tracking a real failure: the label is how the job finds it, and without
+it the next failure files a duplicate.
+
+The job runs no checkout and installs no toolchain. That is deliberate: it has
+to survive the failure it reports, so it depends on nothing but `gh`, which is
+preinstalled on GitHub-hosted runners. Keep it that way — an alerter that
+needs `bb` cannot report a broken `bb`.
+
 ## Log Retention
 
 - **Retention period**: 7 days
