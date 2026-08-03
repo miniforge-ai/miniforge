@@ -53,9 +53,10 @@
         "a nil logger must not turn a configured-codex failure silent")))
 
 (deftest ^{:stratum 0} pin-outcome-states
-  (is (= {:entry nil :status :unconfigured :anomaly nil}
+  (is (= {:entry nil :status :unconfigured :anomaly nil
+          :situation "changing-one-side-of-a-boundary"}
          (codex-pin/pin-outcome :implement nil nil)))
-  (is (= {:entry nil :status :unmapped :anomaly nil}
+  (is (= {:entry nil :status :unmapped :anomaly nil :situation nil}
          (codex-pin/pin-outcome :verify nil "/anywhere")))
   (is (= :skipped
          (:status (codex-pin/pin-outcome :implement nil "/nonexistent/codex")))))
@@ -71,6 +72,7 @@
       (is (true? (:pin-read? (codex-pin/consultation-summary
                                pinned [{:path codex-pin/pin-path :source :cache}])))))
     (testing "skipped consultation carries its anomaly"
-      (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable :pin-read? nil}
+      (is (= {:pinned? false :status :skipped :anomaly :codex-unreadable
+              :situation nil :pin-read? nil}
              (codex-pin/consultation-summary
                {:entry nil :status :skipped :anomaly :codex-unreadable} nil))))))

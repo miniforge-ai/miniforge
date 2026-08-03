@@ -53,7 +53,9 @@
    :plan      "about-to-commit-consequential"
    :review    "quality-signal-might-be-lying"})
 
-(defn- ^{:stratum 0} configured-codex-dir []
+(defn ^{:stratum 0} configured-codex-dir
+  "MINIFORGE_CODEX_PATH, trimmed, or nil — nil means the capability is off."
+  []
   (some-> (System/getenv "MINIFORGE_CODEX_PATH") str/trim not-empty))
 
 (defn- ^{:stratum 0} warn-skip!
@@ -83,35 +85,44 @@
    silent (plan has no logger)."
   ([phase logger] (pin-outcome phase logger (configured-codex-dir)))
   ([phase logger codex-dir]
-   (cond
-     (nil? codex-dir)
-     {:entry nil :status :unconfigured :anomaly nil}
+   (let [situation (get phase->situation phase)]
+     (cond
+       (nil? codex-dir)
+       {:entry nil :status :unconfigured :anomaly nil :situation situation}
 
-     (nil? (get phase->situation phase))
-     {:entry nil :status :unmapped :anomaly nil}
+       (nil? situation)
+       {:entry nil :status :unmapped :anomaly nil :situation nil}
 
-     :else
-     (let [entry (codex/pin-entry codex-dir (get phase->situation phase) pin-path)]
-       (if-let [anomaly (:codex/anomaly entry)]
-         (do (warn-skip! phase logger anomaly (:codex/reason entry))
-             {:entry nil :status :skipped :anomaly anomaly})
-         {:entry entry :status :pinned :anomaly nil})))))
+       :else
+       (let [entry (codex/pin-entry codex-dir situation pin-path)]
+         (if-let [anomaly (:codex/anomaly entry)]
+           (do (warn-skip! phase logger anomaly (:codex/reason entry))
+               {:entry nil :status :skipped :anomaly anomaly :situation situation})
+           {:entry entry :status :pinned :anomaly nil :situation situation}))))))
 
-(defn ^{:stratum 1} landings-text
-  "Rendered consultation body for phases that deliver via a prompt section
-   rather than a pinned file — the reviewer has no existing-files channel.
-   Returns the rendered text, or nil when the capability is off
-   (unconfigured/unmapped) or a configured codex failed to answer (which
-   warns, same policy as pin-outcome)."
-  ([phase logger] (landings-text phase logger (configured-codex-dir)))
+(defn ^{:stratum 1} landings-outcome
+  "Prompt-section delivery outcome for phases with no existing-files
+   channel (the reviewer): {:text rendered-or-nil :status :anomaly
+   :situation} — same status vocabulary as pin-outcome, with :pinned
+   meaning DELIVERED (the section is the pin's prompt-only analog), so
+   consultation-summary works on either outcome unchanged."
+  ([phase logger] (landings-outcome phase logger (configured-codex-dir)))
   ([phase logger codex-dir]
-   (when codex-dir
-     (when-let [situation (get phase->situation phase)]
+   (let [situation (get phase->situation phase)]
+     (cond
+       (nil? codex-dir)
+       {:text nil :status :unconfigured :anomaly nil :situation situation}
+
+       (nil? situation)
+       {:text nil :status :unmapped :anomaly nil :situation nil}
+
+       :else
        (let [resp (codex/consider codex-dir situation)]
          (if-let [anomaly (:codex/anomaly resp)]
            (do (warn-skip! phase logger anomaly (:codex/reason resp))
-               nil)
-           (codex/render-response resp)))))))
+               {:text nil :status :skipped :anomaly anomaly :situation situation})
+           {:text (codex/render-response resp) :status :pinned :anomaly nil
+            :situation situation}))))))
 
 (defn ^{:stratum 1} consultation-summary
   "The SPEC §7.4.3 distinct-object marker: a proposal from an agent that
@@ -124,10 +135,17 @@
   {:pinned?   (= :pinned (:status outcome))
    :status    (:status outcome)
    :anomaly   (:anomaly outcome)
+   :situation (:situation outcome)
    :pin-read? (when (some? context-reads)
                 (boolean (some #(= pin-path (:path %)) context-reads)))})
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(defn ^{:stratum 2} landings-text
+  "Rendered consultation body, or nil. Thin wrapper over landings-outcome
+   for callers that only want the text."
+  ([phase logger] (:text (landings-outcome phase logger)))
+  ([phase logger codex-dir] (:text (landings-outcome phase logger codex-dir))))
 
 (defn ^{:stratum 2} pin-file
   "The pin for `phase` as an existing-files entry {:path :content}, or nil.

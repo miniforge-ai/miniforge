@@ -24,6 +24,7 @@
   (:require [ai.miniforge.phase.interface :as phase]
             [ai.miniforge.phase-software-factory.phase-config :as phase-config]
             [ai.miniforge.phase-software-factory.codex-pin :as codex-pin]
+            [ai.miniforge.phase-software-factory.gap-wiring :as gap-wiring]
             [ai.miniforge.phase-software-factory.knowledge-helpers :as kb-helpers]
             [ai.miniforge.phase-software-factory.phase-terminal :as phase-terminal]
             [ai.miniforge.agent.interface :as agent]
@@ -150,6 +151,9 @@
 
    Records metrics and updates execution state."
   [ctx]
+  ;; Gap-instrument miss recording (T2 s3): best-effort, opt-in, and it
+  ;; must never change the outcome it measures.
+  (gap-wiring/record-phase-misses! ctx :plan)
   (let [start-time (get-in ctx [:phase :started-at])
         end-time (System/currentTimeMillis)
         duration-ms (- end-time start-time)

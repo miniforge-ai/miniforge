@@ -7,6 +7,7 @@
         ai.miniforge/schema {:local/root "../schema"}
         ai.miniforge/agent {:local/root "../agent"}
         ai.miniforge/codex {:local/root "../codex"}
+        ai.miniforge/codex-gap {:local/root "../codex-gap"}
         ai.miniforge/knowledge {:local/root "../knowledge"}
         ai.miniforge/repo-index {:local/root "../repo-index"}
         ai.miniforge/context-pack {:local/root "../context-pack"}
