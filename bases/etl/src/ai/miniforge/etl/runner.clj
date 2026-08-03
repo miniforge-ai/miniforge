@@ -107,8 +107,11 @@
    that it owns `:pipeline-run/connector-cursors` in the context it
    hands the runner.
 
-   Returns the pipeline-runner result map (schema/success or
-   schema/failure with `:pipeline-run`)."
+   Returns the pipeline-runner result map: schema/success, or
+   schema/failure carrying `:pipeline-run` when execution began. A
+   failure raised before that — bad inputs, an unsupported connector
+   type, an unreadable cursor file — has no run to report and leaves
+   `:pipeline-run` nil."
   ([pipeline-path env-path]
    (run-pack pipeline-path env-path {}))
   ([pipeline-path env-path context]

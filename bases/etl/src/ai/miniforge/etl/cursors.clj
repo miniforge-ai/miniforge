@@ -32,8 +32,10 @@
    advance one — belong in one stated place, and folding them into the
    runner would push that file past its stratum budget.
 
-   Strata: mode policy and the failure constructors (0); the pair of
-   entry points `etl.runner` calls (1)."
+   Strata: mode policy, key translation, and the failure constructors
+   (0); the mode predicate over that policy (1); the pair of entry
+   points `etl.runner` calls (2). Strata are per-file, so these numbers
+   say nothing about `etl.runner`'s own."
   {:miniforge/runtime :jvm-only}
   (:require
    [ai.miniforge.cursor-store.interface :as cursor-store]
@@ -54,31 +56,21 @@
    between."
   #{:incremental})
 
-(defn- ^{:stratum 0} by-stage-id
-  "Re-key a persisted cursor map onto this run's stage ids.
+(defn- ^{:stratum 0} run-schema-name
+  "The schema name this run will extract `stage` under.
 
-   `cursor-store` keys by [stage-name schema-name], the identity that
-   survives between runs. `pipeline-runner` looks a stage's cursor up
-   first by the `:stage/id` it was scheduled with, which is minted
-   fresh every run. Translating here means durable identity stays in
-   the store, run identity stays in the runner, and neither has to know
-   the other's key space.
-
-   A stage name carrying more than one persisted entry is dropped
-   rather than guessed at. Two entries mean the stage's resource
-   changed between runs, so the older watermark describes a different
-   source: starting that stage fresh re-reads records, picking the
-   wrong entry skips records that were never read at all."
-  [pipeline cursors]
-  (let [name->id (into {} (map (juxt :stage/name :stage/id)) (:pipeline/stages pipeline))]
-    (reduce-kv
-     (fn [acc stage-name entries]
-       (let [id (get name->id stage-name)]
-         (if (and id (= 1 (count entries)))
-           (assoc acc id (first entries))
-           acc)))
-     {}
-     (group-by :stage/name (vals cursors)))))
+   Mirrors `pipeline-runner`'s own `resolve-schema-name`, which is
+   private to `run.clj`: a connector takes a resource key (\"issues\",
+   \"pulls\") where the stage config names one, and the stage name
+   otherwise. Duplicated rather than shared because reaching it would
+   mean widening pipeline-runner's interface — but the two must agree,
+   because a cursor is only valid for the resource it was read from. If
+   that fallback chain changes there, it changes here."
+  [{:stage/keys [config name]}]
+  (or (:github/resource config)
+      (:gitlab/resource config)
+      (:resource config)
+      name))
 
 (defn- ^{:stratum 0} load-failure
   "A cursor file that exists but cannot be read — malformed, or an I/O
@@ -96,6 +88,31 @@
                   {:pipeline-run run}))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} by-stage-id
+  "Re-key a persisted cursor map onto this run's stage ids.
+
+   `cursor-store` keys by [stage-name schema-name], the identity that
+   survives between runs. `pipeline-runner` looks a stage's cursor up
+   first by the `:stage/id` it was scheduled with, which is minted
+   fresh every run. Translating here means durable identity stays in
+   the store, run identity stays in the runner, and neither has to know
+   the other's key space.
+
+   An entry transfers only when its schema name matches the one this
+   run will extract the stage under. Repointing a stage at a different
+   resource leaves its old entry in the file under the old schema, and
+   that watermark describes a different source — resuming from it would
+   skip records that were never read. A stage with no matching entry
+   starts fresh, which re-reads."
+  [pipeline cursors]
+  (reduce
+   (fn [acc stage]
+     (if-let [entry (get cursors [(:stage/name stage) (run-schema-name stage)])]
+       (assoc acc (:stage/id stage) entry)
+       acc))
+   {}
+   (:pipeline/stages pipeline)))
 
 (defn- ^{:stratum 1} incremental?
   "Whether `pipeline` runs in a mode that carries a cross-run cursor.

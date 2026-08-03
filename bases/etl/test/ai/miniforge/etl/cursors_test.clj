@@ -139,14 +139,17 @@
 (defn- ^{:stratum 1} stage-id-keyed
   "The cursor map prime-context hands the runner, for a pipeline whose
    single stage carries `stage-id`."
-  [pipeline-path stage-id persisted]
-  (let [pipeline {:pipeline/mode   :incremental
-                  :pipeline/stages [{:stage/id   stage-id
-                                     :stage/name ingest-stage-name}]}]
-    (cursor-store/save-cursors nil pipeline-path persisted)
-    (-> (cursors/prime-context nil pipeline-path pipeline {})
-        :context
-        :pipeline-run/connector-cursors)))
+  ([pipeline-path stage-id persisted]
+   (stage-id-keyed pipeline-path stage-id persisted nil))
+  ([pipeline-path stage-id persisted stage-config]
+   (let [pipeline {:pipeline/mode   :incremental
+                   :pipeline/stages [{:stage/id     stage-id
+                                      :stage/name   ingest-stage-name
+                                      :stage/config stage-config}]}]
+     (cursor-store/save-cursors nil pipeline-path persisted)
+     (-> (cursors/prime-context nil pipeline-path pipeline {})
+         :context
+         :pipeline-run/connector-cursors))))
 
 (def ^{:stratum 1} ^:private one-cursor
   "One run's cursor map for the ingest stage, keyed by stage id as
@@ -246,7 +249,32 @@
       (is (= [stage-id] (keys keyed)))
       (is (= 3 (get-in keyed [stage-id :cursor :cursor/value])))))
 
-  (testing "a stage name with two persisted entries is dropped, not guessed at"
+  (testing "an entry whose schema no longer matches the stage is not applied"
+    ;; Repointing a stage at a different resource leaves its old entry
+    ;; in the file under the old schema. That watermark describes a
+    ;; different source, so resuming from it would skip records that
+    ;; were never read; the stage starts fresh instead.
+    (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
+          keyed (stage-id-keyed pipeline-path (random-uuid)
+                                {(random-uuid)
+                                 {:stage/name        ingest-stage-name
+                                  :stage/schema-name "issues"
+                                  :cursor {:cursor/type :offset :cursor/value 3}}}
+                                {:github/resource "pulls"})]
+      (is (= {} keyed))))
+
+  (testing "an entry matching the stage's configured resource is applied"
+    (let [{:keys [pipeline-path]} (write-pack! :incremental 1)
+          stage-id (random-uuid)
+          keyed    (stage-id-keyed pipeline-path stage-id
+                                   {(random-uuid)
+                                    {:stage/name        ingest-stage-name
+                                     :stage/schema-name "pulls"
+                                     :cursor {:cursor/type :offset :cursor/value 4}}}
+                                   {:github/resource "pulls"})]
+      (is (= 4 (get-in keyed [stage-id :cursor :cursor/value])))))
+
+  (testing "a stage name with two persisted entries takes neither by accident"
     ;; Two entries mean the stage's resource changed between runs, so the
     ;; older watermark describes a different source. Starting fresh
     ;; re-reads records; picking the wrong entry skips records that were
