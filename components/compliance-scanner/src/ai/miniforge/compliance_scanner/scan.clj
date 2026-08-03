@@ -60,17 +60,27 @@
         since-ref  (get opts :since)
         plan-text  (get opts :terraform-plan)
 
-        ;; Resolve all rule configs (now including diff/plan rules)
-        all-cfgs   (or (scan-rules/get-rule-configs opts standards-path) [])
+        ;; Compile the standards pack once and reuse it for both the
+        ;; content-scan detection-config path below and the diff/plan
+        ;; pack-rule path -- opts may already carry a pre-compiled
+        ;; pack (e.g. a caller batching multiple scans), in which case
+        ;; that one is reused instead of compiling again.
+        compiled-pack (or (get opts :pack)
+                          (when-let [r (policy-pack/compile-standards-pack standards-path)]
+                            (when (:success? r) (:pack r))))
+        opts+pack     (cond-> opts compiled-pack (assoc :pack compiled-pack))
+
+        ;; Resolve all rule configs (content-scan detection configs;
+        ;; diff/plan rules are resolved separately below from the same
+        ;; compiled pack via pack-rules)
+        all-cfgs   (or (scan-rules/get-rule-configs opts+pack standards-path) [])
 
         ;; Content-scan rules use the detection config format (from pack-rule->detection-config)
         content-cfgs (filterv #(contains? % :detect-mode) all-cfgs)
 
         ;; Diff/plan rules use pack rule format directly
-        pack-rules   (when-let [pack (or (get opts :pack)
-                                         (when-let [r (policy-pack/compile-standards-pack standards-path)]
-                                           (when (:success? r) (:pack r))))]
-                       (pack-config/filter-pack-rules (:pack/rules pack) opts))
+        pack-rules   (when compiled-pack
+                       (pack-config/filter-pack-rules (:pack/rules compiled-pack) opts))
         diff-rules   (filterv #(= :diff-analysis (get-in % [:rule/detection :type])) (or pack-rules []))
         plan-rules   (filterv #(= :plan-output (get-in % [:rule/detection :type])) (or pack-rules []))
 
