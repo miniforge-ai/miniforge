@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.artifact-session-extended-test
   "Extended tests for artifact-session: unit-level coverage of parsing helpers,
    context cache, context misses, and command resolution."
@@ -28,9 +27,9 @@
    [clojure.test :refer [deftest testing is]]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; uuid-str? tests
 
-(deftest uuid-str?-test
+;; uuid-str? tests
+(deftest ^{:stratum 0} uuid-str?-test
   (testing "valid UUID strings"
     (is (session/uuid-str? "550e8400-e29b-41d4-a716-446655440000"))
     (is (session/uuid-str? "00000000-0000-0000-0000-000000000000"))
@@ -49,10 +48,8 @@
     (is (not (session/uuid-str? :keyword)))
     (is (not (session/uuid-str? (java.util.UUID/randomUUID))))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; instant-str? tests
-
-(deftest instant-str?-test
+(deftest ^{:stratum 0} instant-str?-test
   (testing "valid ISO instant strings"
     (is (session/instant-str? "2026-02-28T12:00:00Z"))
     (is (session/instant-str? "2026-02-28T12:00:00.123Z"))
@@ -69,10 +66,8 @@
     (is (not (session/instant-str? 12345)))
     (is (not (session/instant-str? (java.util.Date.))))))
 
-;------------------------------------------------------------------------------ Layer 0
 ;; key-ends-with? tests
-
-(deftest key-ends-with?-test
+(deftest ^{:stratum 0} key-ends-with?-test
   (testing "matching namespaced keywords"
     (is (session/key-ends-with? :code/id "id"))
     (is (session/key-ends-with? :plan/id "id"))
@@ -92,30 +87,28 @@
     (is (not (session/key-ends-with? nil "id")))
     (is (not (session/key-ends-with? 42 "id")))))
 
-;------------------------------------------------------------------------------ Layer 1
 ;; parse-uuid-strings edge cases
-
-(deftest parse-uuid-strings-empty-map-test
+(deftest ^{:stratum 0} parse-uuid-strings-empty-map-test
   (testing "empty map returns empty map"
     (is (= {} (session/parse-uuid-strings {})))))
 
-(deftest parse-uuid-strings-non-map-test
+(deftest ^{:stratum 0} parse-uuid-strings-non-map-test
   (testing "non-map values pass through unchanged"
     (is (= "hello" (session/parse-uuid-strings "hello")))
     (is (= 42 (session/parse-uuid-strings 42)))
     (is (nil? (session/parse-uuid-strings nil)))))
 
-(deftest parse-uuid-strings-non-uuid-in-id-key-test
+(deftest ^{:stratum 0} parse-uuid-strings-non-uuid-in-id-key-test
   (testing "non-UUID string in /id key is preserved"
     (let [result (session/parse-uuid-strings {:code/id "not-a-uuid-string"})]
       (is (= "not-a-uuid-string" (:code/id result))))))
 
-(deftest parse-uuid-strings-non-instant-in-created-at-key-test
+(deftest ^{:stratum 0} parse-uuid-strings-non-instant-in-created-at-key-test
   (testing "non-instant string in /created-at key is preserved"
     (let [result (session/parse-uuid-strings {:code/created-at "not-a-date"})]
       (is (= "not-a-date" (:code/created-at result))))))
 
-(deftest parse-uuid-strings-preserves-already-typed-values-test
+(deftest ^{:stratum 0} parse-uuid-strings-preserves-already-typed-values-test
   (testing "already-typed UUID passes through"
     (let [uuid (java.util.UUID/randomUUID)
           result (session/parse-uuid-strings {:code/id uuid})]
@@ -126,7 +119,7 @@
           result (session/parse-uuid-strings {:code/created-at date})]
       (is (= date (:code/created-at result))))))
 
-(deftest parse-uuid-strings-mixed-keys-test
+(deftest ^{:stratum 0} parse-uuid-strings-mixed-keys-test
   (testing "only /id and /created-at keys are transformed"
     (let [uuid-str "550e8400-e29b-41d4-a716-446655440000"
           result (session/parse-uuid-strings
@@ -141,20 +134,18 @@
       (is (= "clojure" (:code/language result)))
       (is (true? (:code/tests-needed? result))))))
 
-(deftest parse-uuid-strings-empty-vector-of-maps-test
+(deftest ^{:stratum 0} parse-uuid-strings-empty-vector-of-maps-test
   (testing "empty vector of maps remains empty"
     (let [result (session/parse-uuid-strings {:plan/tasks []})]
       (is (= [] (:plan/tasks result))))))
 
-(deftest parse-uuid-strings-vector-of-non-maps-test
+(deftest ^{:stratum 0} parse-uuid-strings-vector-of-non-maps-test
   (testing "vector of non-maps is preserved"
     (let [result (session/parse-uuid-strings {:code/files ["a.clj" "b.clj"]})]
       (is (= ["a.clj" "b.clj"] (:code/files result))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; write-context-cache! tests
-
-(deftest write-context-cache-writes-edn-test
+(deftest ^{:stratum 0} write-context-cache-writes-edn-test
   (testing "writes files map as EDN to context-cache.edn"
     (let [s (session/create-session!)]
       (try
@@ -168,7 +159,7 @@
         (finally
           (session/cleanup-session! s))))))
 
-(deftest write-context-cache-empty-files-test
+(deftest ^{:stratum 0} write-context-cache-empty-files-test
   (testing "does not write file when files map is empty"
     (let [s (session/create-session!)]
       (try
@@ -178,7 +169,7 @@
         (finally
           (session/cleanup-session! s))))))
 
-(deftest write-context-cache-nil-files-test
+(deftest ^{:stratum 0} write-context-cache-nil-files-test
   (testing "does not write file when files is nil"
     (let [s (session/create-session!)]
       (try
@@ -188,7 +179,7 @@
         (finally
           (session/cleanup-session! s))))))
 
-(deftest write-context-cache-returns-session-test
+(deftest ^{:stratum 0} write-context-cache-returns-session-test
   (testing "returns session for threading"
     (let [s (session/create-session!)]
       (try
@@ -197,10 +188,8 @@
         (finally
           (session/cleanup-session! s))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; read-context-misses tests
-
-(deftest read-context-misses-with-data-test
+(deftest ^{:stratum 0} read-context-misses-with-data-test
   (testing "reads context-misses.edn when present"
     (let [s (session/create-session!)
           misses [{:type :read :path "src/missing.clj"}
@@ -213,7 +202,7 @@
         (finally
           (session/cleanup-session! s))))))
 
-(deftest read-context-misses-no-file-test
+(deftest ^{:stratum 0} read-context-misses-no-file-test
   (testing "returns nil when no misses file exists"
     (let [s (session/create-session!)]
       (try
@@ -221,7 +210,7 @@
         (finally
           (session/cleanup-session! s))))))
 
-(deftest read-context-misses-invalid-edn-test
+(deftest ^{:stratum 0} read-context-misses-invalid-edn-test
   (testing "returns nil for invalid EDN in misses file"
     (let [s (session/create-session!)]
       (try
@@ -230,10 +219,8 @@
         (finally
           (session/cleanup-session! s))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; server-command tests
-
-(deftest server-command-test
+(deftest ^{:stratum 0} server-command-test
   (testing "returns a map with :command and :args including --artifact-dir"
     (let [result (session/server-command "/tmp/artifacts" "/tmp/source-root")]
       (is (map? result))
@@ -245,16 +232,14 @@
       (is (some #(= "/tmp/source-root" %) (:args result)))
       (is (some #(= "mcp-context-server" %) (:args result))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; resolve-miniforge-command tests
-
-(deftest resolve-miniforge-command-returns-vector-test
+(deftest ^{:stratum 0} resolve-miniforge-command-returns-vector-test
   (testing "always returns a vector"
     (let [result (session/resolve-miniforge-command)]
       (is (vector? result))
       (is (pos? (count result))))))
 
-(deftest resolve-miniforge-command-env-override-test
+(deftest ^{:stratum 0} resolve-miniforge-command-env-override-test
   (testing "MINIFORGE_CMD env var takes priority when set"
     (with-redefs [session/resolve-miniforge-command
                   (fn []
@@ -265,10 +250,8 @@
       (let [result (session/resolve-miniforge-command)]
         (is (vector? result))))))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; mcp-tools tests
-
-(deftest mcp-tools-test
+(deftest ^{:stratum 0} mcp-tools-test
   (testing "carries generic, agent-CLI-agnostic tool data"
     ;; Structured form is the canonical representation. Each backend
     ;; adapter (claude/codex/cursor/…) maps it to its own wire format.
@@ -285,9 +268,10 @@
   (testing "context-server MCP tools are present"
     (let [mcp-entries (filter map? session/mcp-tools)]
       (is (every? #(= :context (:mcp/server %)) mcp-entries))
-      (is (= #{:context_read :context_grep :context_glob :context_write}
+      (is (= #{:context_read :context_grep :context_glob :context_write
+               :consider_situation}
              (into #{} (map :mcp/tool) mcp-entries))
-          "submit removed; context_write is the worktree write path")))
+          "submit removed; context_write is the worktree write path; consider_situation is the codex consultation surface")))
 
   (testing "native Write is auto-approved — plan.edn submission path"
     ;; Iter 15 dogfood regression — Write wasn't in --allowedTools,
@@ -313,10 +297,8 @@
       (is (not (string? t))
           "mcp-tools entries should be maps or keywords, not strings"))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; write-claude-settings! tests
-
-(deftest write-claude-settings-test
+(deftest ^{:stratum 0} write-claude-settings-test
   (testing "writes a valid JSON settings file with hook"
     (let [s (session/create-session!)]
       (try
@@ -331,10 +313,8 @@
         (finally
           (session/cleanup-session! s))))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Cleanup edge cases
-
-(deftest cleanup-codex-empty-file-deletion-test
+(deftest ^{:stratum 0} cleanup-codex-empty-file-deletion-test
   (testing "deletes config.toml if only artifact block remains"
     (let [tmp (io/file (System/getProperty "java.io.tmpdir")
                        (str "codex-empty-test-" (random-uuid)))
@@ -350,7 +330,7 @@
           (doseq [f (reverse (file-seq tmp))]
             (.delete ^java.io.File f)))))))
 
-(deftest cleanup-cursor-empty-servers-deletion-test
+(deftest ^{:stratum 0} cleanup-cursor-empty-servers-deletion-test
   (testing "deletes mcp.json when artifact is the only server"
     (let [tmp (io/file (System/getProperty "java.io.tmpdir")
                        (str "cursor-empty-test-" (random-uuid)))
@@ -365,18 +345,16 @@
           (doseq [f (reverse (file-seq tmp))]
             (.delete ^java.io.File f)))))))
 
-(deftest cleanup-cursor-nonexistent-file-test
+(deftest ^{:stratum 0} cleanup-cursor-nonexistent-file-test
   (testing "cleanup is a no-op for nonexistent file"
     (@#'session/cleanup-cursor-mcp-config! "/tmp/nonexistent-file.json")))
 
-(deftest cleanup-codex-nonexistent-file-test
+(deftest ^{:stratum 0} cleanup-codex-nonexistent-file-test
   (testing "cleanup is a no-op for nonexistent file"
     (@#'session/cleanup-codex-mcp-config! "/tmp/nonexistent-file.toml")))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; write-mcp-config! populates supervision
-
-(deftest write-mcp-config-supervision-test
+(deftest ^{:stratum 0} write-mcp-config-supervision-test
   (testing "session includes :supervision after write-mcp-config!"
     (let [s (-> (session/create-session!) (session/write-mcp-config!))]
       (try
