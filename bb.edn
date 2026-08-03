@@ -513,7 +513,10 @@
 
   extract:artifact
   {:doc "Extract files from a code artifact EDN file and write them to disk"
-   :extra-paths ["components/evidence-bundle/src"]
+   :extra-paths ["components/evidence-bundle/src"
+                 "components/response/src"
+                 "components/messages/src"]
+   :extra-deps {slingshot/slingshot {:mvn/version "0.12.2"}}
    :requires ([ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk])
    :task (if-let [artifact-file (first *command-line-args*)]
            (let [result (extraction-bulk/extract-artifact-from-file artifact-file)]
