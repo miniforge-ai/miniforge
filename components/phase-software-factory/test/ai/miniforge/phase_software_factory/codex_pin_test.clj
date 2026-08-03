@@ -35,15 +35,21 @@
   (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
 
 (deftest ^{:stratum 0} only-wired-phases-are-mapped
-  ;; review's task builder has no :task/existing-files channel yet; a mapping
-  ;; without a wire would be a defined-but-unreachable capability.
-  (is (= #{:implement :plan} (set (keys codex-pin/phase->situation)))))
+  ;; implement/plan wire via pin-outcome (existing-files); review wires via
+  ;; landings-text (prompt section). A mapping without a wire would be a
+  ;; defined-but-unreachable capability.
+  (is (= #{:implement :plan :review} (set (keys codex-pin/phase->situation)))))
+
+(deftest ^{:stratum 0} landings-text-skip-conditions
+  (is (nil? (codex-pin/landings-text :review nil nil)))
+  (is (nil? (codex-pin/landings-text :verify nil "/anywhere")))
+  (is (nil? (codex-pin/landings-text :review nil "/nonexistent/codex"))))
 
 (deftest ^{:stratum 0} anomaly-with-nil-logger-warns-on-stderr
   (let [err (java.io.StringWriter.)]
     (binding [*err* err]
       (is (nil? (codex-pin/pin-file :implement nil "/nonexistent/codex"))))
-    (is (re-find #"WARN: codex pin skipped for implement" (str err))
+    (is (re-find #"WARN: codex consultation skipped for implement" (str err))
         "a nil logger must not turn a configured-codex failure silent")))
 
 (deftest ^{:stratum 0} pin-outcome-states

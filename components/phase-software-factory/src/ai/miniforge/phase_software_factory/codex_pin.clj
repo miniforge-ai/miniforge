@@ -46,15 +46,28 @@
 (def ^{:stratum 0} phase->situation
   "Which codex situation each phase enters at. This map IS the push
    mechanism's routing: the orchestrator supplies the situation, the codex
-   supplies the worries. Only phases whose task builders actually carry
-   `:task/existing-files` are listed — review's channel is `:task/artifact`,
-   so its pin (situation: quality-signal-might-be-lying) waits until the
-   reviewer prompt assembly grows a slot for it."
+   supplies the worries. implement/plan deliver via the pinned
+   existing-files entry (pin-outcome); review has no existing-files
+   channel and delivers via a rendered prompt section (landings-text)."
   {:implement "changing-one-side-of-a-boundary"
-   :plan      "about-to-commit-consequential"})
+   :plan      "about-to-commit-consequential"
+   :review    "quality-signal-might-be-lying"})
 
 (defn- ^{:stratum 0} configured-codex-dir []
   (some-> (System/getenv "MINIFORGE_CODEX_PATH") str/trim not-empty))
+
+(defn- ^{:stratum 0} warn-skip!
+  "A CONFIGURED codex that fails to answer always warns: logger when given,
+   else stderr — a nil logger must not turn the failure silent."
+  [phase logger anomaly reason]
+  (if logger
+    (log/warn logger phase :codex/consultation-skipped
+              {:data {:anomaly anomaly :reason reason}})
+    (binding [*out* *err*]
+      (println (messages/t :codex/consultation-skipped-warn
+                           {:phase (name phase)
+                            :anomaly (name anomaly)
+                            :reason reason})))))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -80,17 +93,25 @@
      :else
      (let [entry (codex/pin-entry codex-dir (get phase->situation phase) pin-path)]
        (if-let [anomaly (:codex/anomaly entry)]
-         (do (if logger
-               (log/warn logger phase :codex/pin-skipped
-                         {:data {:anomaly anomaly
-                                 :reason  (:codex/reason entry)}})
-               (binding [*out* *err*]
-                 (println (messages/t :codex/pin-skipped-warn
-                                      {:phase (name phase)
-                                       :anomaly (name anomaly)
-                                       :reason (:codex/reason entry)}))))
+         (do (warn-skip! phase logger anomaly (:codex/reason entry))
              {:entry nil :status :skipped :anomaly anomaly})
          {:entry entry :status :pinned :anomaly nil})))))
+
+(defn ^{:stratum 1} landings-text
+  "Rendered consultation body for phases that deliver via a prompt section
+   rather than a pinned file — the reviewer has no existing-files channel.
+   Returns the rendered text, or nil when the capability is off
+   (unconfigured/unmapped) or a configured codex failed to answer (which
+   warns, same policy as pin-outcome)."
+  ([phase logger] (landings-text phase logger (configured-codex-dir)))
+  ([phase logger codex-dir]
+   (when codex-dir
+     (when-let [situation (get phase->situation phase)]
+       (let [resp (codex/consider codex-dir situation)]
+         (if-let [anomaly (:codex/anomaly resp)]
+           (do (warn-skip! phase logger anomaly (:codex/reason resp))
+               nil)
+           (codex/render-response resp)))))))
 
 (defn ^{:stratum 1} consultation-summary
   "The SPEC §7.4.3 distinct-object marker: a proposal from an agent that

@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.agent.reviewer.prompts
   "Reviewer prompt assembly.
 
@@ -44,35 +43,25 @@
             [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Prompt resource loading
 
-(def reviewer-system-prompt
+;; Prompt resource loading
+(def ^{:stratum 0} reviewer-system-prompt
   "System prompt for the reviewer agent."
   (delay (prompts/load-prompt :reviewer)))
 
-(def reviewer-prompt-data
+(def ^{:stratum 0} reviewer-prompt-data
   "Full prompt data map for the reviewer agent.
    Exposes knobs like :prompt/progress-monitor that gate stream supervision."
   (delay (prompts/load-prompt-data :reviewer)))
 
-(defn create-reviewer-progress-monitor
-  "Reviewer main-turn progress monitor. Thresholds live in
-   resources/prompts/reviewer.edn (:prompt/progress-monitor). Falls
-   back to the framework default when the EDN omits the block."
-  []
-  (prompts/load-progress-monitor @reviewer-prompt-data
-                                 :prompt/progress-monitor))
-
-(def default-reviewer-max-turns
+(def ^{:stratum 0} default-reviewer-max-turns
   "Fallback when reviewer.edn omits :prompt/max-turns. Authority is
    the EDN; this constant only protects against malformed prompt
    resources."
   20)
 
-;------------------------------------------------------------------------------ Layer 1
 ;; Artifact rendering
-
-(defn format-artifact-for-review
+(defn ^{:stratum 0} format-artifact-for-review
   "Format a code artifact into a readable string for the LLM prompt."
   [artifact]
   (cond
@@ -92,7 +81,17 @@
     :else
     (pr-str artifact)))
 
-(defn format-artifact-manifest
+;------------------------------------------------------------------------------ Layer 1
+
+(defn ^{:stratum 1} create-reviewer-progress-monitor
+  "Reviewer main-turn progress monitor. Thresholds live in
+   resources/prompts/reviewer.edn (:prompt/progress-monitor). Falls
+   back to the framework default when the EDN omits the block."
+  []
+  (prompts/load-progress-monitor @reviewer-prompt-data
+                                 :prompt/progress-monitor))
+
+(defn ^{:stratum 1} format-artifact-manifest
   "Compact manifest of the artifact-under-review for the shed path (N12 §5):
    each file's path, action, and size — not its inlined body. The reviewer
    runs read-only with native Read/Grep disallowed, so it fetches any file
@@ -115,10 +114,8 @@
                         (:code/files artifact))))
     (format-artifact-for-review artifact)))
 
-;------------------------------------------------------------------------------ Layer 2
 ;; User-prompt assembly
-
-(defn build-review-prompt
+(defn ^{:stratum 1} build-review-prompt
   "Construct the user prompt for LLM review from task data.
 
    `artifact-fmt` selects how the artifact-under-review is rendered: full
@@ -133,6 +130,7 @@
          intent (or (:task/intent input) "")
          constraints (or (:task/constraints input) "")
          tests (:task/tests input)
+         codex-landings (:task/codex-landings input)
          review-scope (scope/effective-review-scope input)
          artifact-text (artifact-fmt artifact)]
      (prompts/render-template
@@ -149,12 +147,12 @@
        "artifact_text" artifact-text
        "has_tests" (some? tests)
        "tests" (when (some? tests)
-                 (if (string? tests) tests (pr-str tests)))}))))
+                 (if (string? tests) tests (pr-str tests)))
+       "has_codex" (not (str/blank? (str codex-landings)))
+       "codex_landings" (str codex-landings)}))))
 
-;------------------------------------------------------------------------------ Layer 3
 ;; Enumeration retry
-
-(defn enumeration-retry-prompt
+(defn ^{:stratum 1} enumeration-retry-prompt
   "Build the enumeration-retry prompt: the ORIGINAL review user-prompt (so the
    retry has the same artifact/diff evidence the first call had — `llm/chat`
    is single-turn with no history) followed by the retry instruction with the
