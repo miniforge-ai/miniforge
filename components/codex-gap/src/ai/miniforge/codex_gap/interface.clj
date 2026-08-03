@@ -48,14 +48,18 @@
 (defn ^{:stratum 0} record-miss!
   "Append an entry to the run's ledger file under `dir` (the run's
    checkpoint directory, passed in by the caller — this component never
-   derives it). Returns the entry, or a {:codex-gap/anomaly ...} map;
-   never throws — a ledger write must never take a phase down."
+   derives it). Environmental failures return {:codex-gap/anomaly
+   :ledger-write-failed ...} data rather than throwing — a ledger write
+   must never take a phase down. A nil/blank `dir` IS a throw
+   (IllegalArgumentException): that is a caller bug, not an environment."
   [dir entry]
   (ledger/append! dir entry))
 
 (defn ^{:stratum 0} read-ledger
   "All ledger entries under `dir`, oldest first:
-   {:entries [..] :skipped n-unreadable-lines}."
+   {:entries [..] :skipped n-unreadable-lines}, or
+   {:codex-gap/anomaly :ledger-read-failed ...} on an environmental read
+   failure. Same nil/blank-dir programmer-error contract as record-miss!."
   [dir]
   (ledger/read-ledger dir))
 

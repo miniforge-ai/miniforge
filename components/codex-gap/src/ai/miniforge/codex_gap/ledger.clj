@@ -80,6 +80,8 @@
    Returns {:entries [..] :skipped n}; missing file = no entries, which is
    a true statement about an instrument that has not run."
   [dir]
+  (when (or (nil? dir) (and (string? dir) (str/blank? dir)))
+    (throw (IllegalArgumentException. "ledger dir must be non-blank")))
   (let [f (io/file dir ledger-filename)]
     (if-not (.exists f)
       {:entries [] :skipped 0}
@@ -97,6 +99,10 @@
                   {:entries [] :skipped 0}
                   (line-seq r)))
         (catch java.io.IOException e
+          {:codex-gap/anomaly :ledger-read-failed
+           :codex-gap/reason (ex-message e)
+           :codex-gap/dir (str dir)})
+        (catch SecurityException e
           {:codex-gap/anomaly :ledger-read-failed
            :codex-gap/reason (ex-message e)
            :codex-gap/dir (str dir)})))))
