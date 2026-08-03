@@ -157,12 +157,16 @@
    :task/title "Record misses at phase leave for implement/plan/review"
    :task/phase :implement
    :task/description
-   "leave-implement / leave-plan / leave-review: when the phase result
-    carries failure signals (review :review/blocking-issues, gate failures
-    from [:phase :status]/gate errors, terminal anomalies), append ledger
-    entries via codex-gap, carrying the phase's :codex/consultation and
-    entered situation. Best-effort: recording failures log and continue —
-    a ledger write must never change phase outcome.
+   "leave-implement / leave-plan / leave-review: when the phase carries
+    failure signals — review findings from [:result :output :review/issues]
+    filtered to :blocking (falling back to the :review/blocking-issues
+    string vector), gate failures from [:phase :phase/status] +
+    [:phase :phase/gate-errors] (the namespaced keys; bare :status is
+    clobbered at leave), and terminal anomalies from [:phase :error]
+    normalized on :anomaly/category — append ledger entries via codex-gap,
+    carrying the phase's :codex/consultation and entered situation.
+    Best-effort: recording failures log and continue — a ledger write must
+    never change phase outcome.
 
     Note the known trap from #1630: gates run between enter and leave, and
     the consultation lives on [:result :output] — read it from there, not
