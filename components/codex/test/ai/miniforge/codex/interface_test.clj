@@ -85,6 +85,10 @@
   (let [resp (codex/consider fixture-dir "stuck")]
     (is (= "process-stuck-or-slow" (:situation resp)))))
 
+(deftest ^{:stratum 1} exact-id-match-is-case-insensitive
+  (let [resp (codex/consider fixture-dir "Process-Stuck-Or-Slow")]
+    (is (= "process-stuck-or-slow" (:situation resp)))))
+
 (deftest ^{:stratum 1} unmatched-situation-is-an-answer-not-an-empty-list
   (let [resp (codex/consider fixture-dir "planning a birthday party")]
     (is (= :situation-unmatched (:codex/anomaly resp)))

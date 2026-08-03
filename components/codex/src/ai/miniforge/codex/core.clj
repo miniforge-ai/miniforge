@@ -49,15 +49,20 @@
           (empty? matches)
           {:codex/anomaly :situation-unmatched
            :codex/reason (str "no situation matches '" situation-text "'")
+           ;; sorted: (vals nodes) order is map-order, and an anomaly that
+           ;; lists candidates should list them stably
            :codex/available (->> (vals nodes)
                                  (filter #(= "situation" (:type %)))
+                                 (sort-by :id)
                                  (mapv (juxt :id :title)))}
 
           (< 1 (count matches))
           {:codex/anomaly :situation-ambiguous
            :codex/reason (str "'" situation-text "' matches "
                               (count matches) " situations")
-           :codex/matches (mapv (juxt :id :title) matches)}
+           :codex/matches (->> matches
+                               (sort-by :id)
+                               (mapv (juxt :id :title)))}
 
           :else
           (let [situation (first matches)

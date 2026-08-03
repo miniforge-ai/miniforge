@@ -86,18 +86,33 @@
 
 (defn ^{:stratum 2} load-graph
   "Read every node under `codex-dir`/nodes/**. Returns
-   {:nodes {id node-map}} or {:codex/anomaly :codex-unreadable ...}."
+   {:nodes {id node-map}} or {:codex/anomaly :codex-unreadable ...} —
+   including when a node file cannot be read mid-walk. IO failure is data
+   here, never a throw: an exception escaping this boundary would crash the
+   consumer instead of lowering its confidence."
   [codex-dir]
   (let [nodes-dir (io/file codex-dir "nodes")]
     (if-not (.isDirectory nodes-dir)
       {:codex/anomaly :codex-unreadable
        :codex/reason (str "no nodes/ directory under " codex-dir)}
-      {:nodes (into {}
-                    (comp (filter #(and (.isFile ^java.io.File %)
-                                        (str/ends-with? (.getName ^java.io.File %) ".md")))
-                          (keep (fn [f]
-                                  (let [{:keys [meta body]} (parse-frontmatter (slurp f))]
-                                    (when (:id meta)
-                                      (assoc meta :title (title-of body))))))
-                          (map (juxt :id identity)))
-                    (file-seq nodes-dir))})))
+      (try
+        {:nodes (into {}
+                      (comp (filter #(and (.isFile ^java.io.File %)
+                                          (str/ends-with? (.getName ^java.io.File %) ".md")))
+                            (keep (fn [f]
+                                    (let [{:keys [meta body]} (parse-frontmatter (slurp f))]
+                                      (when (:id meta)
+                                        (assoc meta :title (title-of body))))))
+                            (map (juxt :id identity)))
+                      (file-seq nodes-dir))}
+        ;; IOException + SecurityException, deliberately not Exception: these
+        ;; are the failures a filesystem walk can produce, and a blanket
+        ;; catch would also eat InterruptedException.
+        (catch java.io.IOException e
+          {:codex/anomaly :codex-unreadable
+           :codex/reason (str "failed reading a node under " nodes-dir ": "
+                              (ex-message e))})
+        (catch SecurityException e
+          {:codex/anomaly :codex-unreadable
+           :codex/reason (str "access denied under " nodes-dir ": "
+                              (ex-message e))})))))

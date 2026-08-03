@@ -44,7 +44,7 @@
   [nodes text]
   (let [situations (filter #(= "situation" (:type %)) (vals nodes))
         norm (str/lower-case (str/trim text))]
-    (or (seq (filter #(= (:id %) norm) situations))
+    (or (seq (filter #(= (str/lower-case (str (:id %))) norm) situations))
         (seq (filter #(or (str/includes? (str/lower-case (str (:id %))) norm)
                           (str/includes? (str/lower-case (str (:title %))) norm))
                      situations)))))
