@@ -362,8 +362,16 @@
 
 (def ^{:stratum 0} ^:private capsule-output-boundary
   "Sentinel line separating the concatenated session-output files in the
-   single `read-capsule-session-outputs` executor round-trip. Never appears
-   in the EDN the MCP server writes (paths and keywords, not file bodies)."
+   single `read-capsule-session-outputs` executor round-trip.
+
+   Collision assumption: the first two segments (context-misses.edn,
+   context-reads.edn) are written by our own MCP server and contain
+   record maps (paths, keywords, timestamps), so this sentinel is not
+   expected to occur in them — a pathological workspace path containing
+   it would corrupt the split. The artifact segment CAN contain arbitrary
+   agent-authored strings, which is why it is deliberately placed LAST in
+   the cat chain: the bounded `str/split` keeps any embedded occurrence
+   inside the final segment intact."
   "===MINIFORGE-SESSION-OUTPUT-BOUNDARY===")
 
 (defn- ^{:stratum 0} read-role-entry
@@ -927,6 +935,12 @@
    /dev/null and the `;` chain continues), which parse to nil. Malformed
    segments emit the same parse WARNs as the host-mode readers.
 
+   The artifact segment is deliberately LAST in the chain: its content is
+   agent-authored and may contain arbitrary strings, and the bounded
+   split keeps an embedded boundary occurrence inside that final segment
+   rather than corrupting the earlier server-written segments — see
+   `capsule-output-boundary` for the collision assumption.
+
    Returns: {:artifact <map-or-nil>
              :context-misses <vector-or-nil>
              :context-reads <vector-or-nil>}"
@@ -935,16 +949,16 @@
         misses-path (str dir "/context-misses.edn")
         reads-path  (str dir "/context-reads.edn")
         sep         (str "; echo; echo " capsule-output-boundary "; ")
-        cmd         (str "cat " (:artifact-path session) " 2>/dev/null"
+        cmd         (str "cat " (file-artifacts/shell-quote misses-path) " 2>/dev/null"
                          sep
-                         "cat " misses-path " 2>/dev/null"
+                         "cat " (file-artifacts/shell-quote reads-path) " 2>/dev/null"
                          sep
-                         "cat " reads-path " 2>/dev/null")
+                         "cat " (file-artifacts/shell-quote (:artifact-path session)) " 2>/dev/null")
         result      ((:exec! session) (:executor session) (:environment-id session)
                      cmd {:workdir (:workdir session)})
         stdout      (get-in result [:data :stdout] "")
         boundary-re (re-pattern (java.util.regex.Pattern/quote capsule-output-boundary))
-        [artifact-part misses-part reads-part] (mapv str/trim (str/split stdout boundary-re 3))]
+        [misses-part reads-part artifact-part] (mapv str/trim (str/split stdout boundary-re 3))]
     {:artifact       (when (seq artifact-part)
                        (parse-edn-content artifact-part
                                           (comp parse-uuid-strings edn/read-string)

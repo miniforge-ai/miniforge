@@ -524,12 +524,14 @@
 
 (defn- ^{:stratum 1} capsule-outputs-stdout
   "Assemble the stdout the batched cat chain produces for the given
-   artifact/misses/reads segments. Empty string = missing file (cat wrote
+   misses/reads/artifact segments (chain order: the agent-authored
+   artifact rides last so an embedded boundary cannot corrupt the
+   server-written segments). Empty string = missing file (cat wrote
    nothing; the echoed boundary lines remain)."
-  [artifact misses reads]
-  (str artifact "\n" capsule-boundary "\n"
-       misses "\n" capsule-boundary "\n"
-       reads "\n"))
+  [misses reads artifact]
+  (str misses "\n" capsule-boundary "\n"
+       reads "\n" capsule-boundary "\n"
+       artifact "\n"))
 
 (defn- ^{:stratum 1} capsule-exec-stub
   "Executor stub for capsule-session tests. Returns `outputs-stdout` for the
@@ -778,9 +780,9 @@
   (testing "parses all three session files from a single executor round-trip"
     (let [calls   (atom [])
           stdout  (capsule-outputs-stdout
-                   (pr-str (code-artifact))
                    (pr-str [(context-miss-record "src/a.clj")])
-                   (pr-str [(context-read-record "src/a.clj" :cache)]))
+                   (pr-str [(context-read-record "src/a.clj" :cache)])
+                   (pr-str (code-artifact)))
           session {:dir            "/workspace/.miniforge-session"
                    :artifact-path  "/workspace/.miniforge-session/artifact.edn"
                    :workdir        "/workspace"
@@ -815,9 +817,9 @@
   (testing "malformed segment emits parse WARN and yields nil for that file only"
     (let [calls   (atom [])
           stdout  (capsule-outputs-stdout
-                   ""
                    "{{{not edn"
-                   (pr-str [(context-read-record "b.clj" :filesystem)]))
+                   (pr-str [(context-read-record "b.clj" :filesystem)])
+                   "")
           session {:dir            "/workspace/.miniforge-session"
                    :artifact-path  "/workspace/.miniforge-session/artifact.edn"
                    :workdir        "/workspace"
@@ -830,7 +832,29 @@
       (is (nil? (:context-misses result)))
       (is (= [(context-read-record "b.clj" :filesystem)] (:context-reads result))
           "a malformed sibling segment must not poison the others")
-      (is (str/includes? (str err) "WARN")))))
+      (is (str/includes? (str err) "WARN"))))
+
+  (testing "artifact containing the boundary string parses intact"
+    ;; The artifact segment is agent-authored and rides LAST in the cat
+    ;; chain; the bounded split must keep an embedded boundary occurrence
+    ;; inside that final segment instead of corrupting the split.
+    (let [calls    (atom [])
+          summary  (str "mentions " capsule-boundary " inline")
+          stdout   (capsule-outputs-stdout
+                    (pr-str [(context-miss-record "src/a.clj")])
+                    ""
+                    (pr-str (code-artifact :code/summary summary)))
+          session  {:dir            "/workspace/.miniforge-session"
+                    :artifact-path  "/workspace/.miniforge-session/artifact.edn"
+                    :workdir        "/workspace"
+                    :executor       :fake-executor
+                    :environment-id "env-1"
+                    :exec!          (capsule-exec-stub calls stdout)}
+          result   (session/read-capsule-session-outputs session)]
+      (is (= summary (get-in result [:artifact :code/summary]))
+          "bounded split keeps the embedded boundary inside the final segment")
+      (is (= [(context-miss-record "src/a.clj")] (:context-misses result))
+          "server-written segments stay intact"))))
 
 (deftest ^{:stratum 2} with-session-capsule-surfaces-context-files-test
   (testing "governed with-session returns :context-misses and :context-reads"
@@ -839,9 +863,9 @@
     ;; wrote inside the container.
     (let [calls  (atom [])
           stdout (capsule-outputs-stdout
-                  (pr-str (code-artifact))
                   (pr-str [(context-miss-record "src/x.clj")])
-                  (pr-str [(context-read-record "src/x.clj" :absent)]))
+                  (pr-str [(context-read-record "src/x.clj" :absent)])
+                  (pr-str (code-artifact)))
           ctx    {:execution/mode           :governed
                   :execution/executor       :fake-executor
                   :execution/environment-id "env-1"
