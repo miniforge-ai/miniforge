@@ -27,7 +27,8 @@
    plumbing, :unheeded -> delivery form / landing actionability."
   (:require [ai.miniforge.codex-gap.attribute :as attribute]
             [ai.miniforge.codex-gap.classify :as classify]
-            [ai.miniforge.codex-gap.ledger :as ledger]))
+            [ai.miniforge.codex-gap.ledger :as ledger]
+            [ai.miniforge.codex-gap.report :as report]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -68,3 +69,20 @@
    -> problem id) from the classpath resource."
   []
   (attribute/load-gate-reason-map))
+
+(defn ^{:stratum 0} build-report
+  "Ledger entries + {:skipped :run-count :anchoring} -> the T2 §4 gap
+   VECTOR. Every slot carries its member miss ids; no scalar rollup
+   exists or may be derived."
+  [entries opts]
+  (report/build-report entries opts))
+
+(defn ^{:stratum 0} render-report
+  "The gap vector as catalog-backed text."
+  [report-map]
+  (report/render-report report-map))
+
+(defn ^{:stratum 0} codex-anchoring-stats
+  "The §4.1.3 anchoring slot from the codex graph, or nil when unreadable."
+  [codex-dir]
+  (report/codex-anchoring-stats codex-dir))
