@@ -15,7 +15,6 @@
 ;; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
-
 (ns ai.miniforge.evidence-bundle.outcome-anomaly-shape-test
   "Lock the dual-shape anomaly detection in `build-outcome-evidence`
    after the W2 anomaly convergence flip.
@@ -33,9 +32,9 @@
    [ai.miniforge.response.interface :as response]))
 
 ;------------------------------------------------------------------------------ Layer 0
-;; Fixtures + factories
 
-(defn- workflow-state-with-error [error]
+;; Fixtures + factories
+(defn- ^{:stratum 0} workflow-state-with-error [error]
   {:workflow/id (random-uuid)
    :workflow/status :failed
    :workflow/spec {}
@@ -44,9 +43,9 @@
    :workflow/error error})
 
 ;------------------------------------------------------------------------------ Layer 1
-;; Canonical anomaly shape (post-W2 producers)
 
-(deftest canonical-anomaly-at-error-info-routes-through-outcome
+;; Canonical anomaly shape (post-W2 producers)
+(deftest ^{:stratum 1} canonical-anomaly-at-error-info-routes-through-outcome
   (testing "a canonical anomaly map as :workflow/error is detected"
     (let [a       (anomaly/anomaly :fault "Compilation error" {})
           outcome (collector/build-outcome-evidence
@@ -54,7 +53,7 @@
       (is (false? (:outcome/success outcome)))
       (is (= "Compilation error" (:outcome/error-message outcome))))))
 
-(deftest canonical-anomaly-nested-under-anomaly-routes-through-outcome
+(deftest ^{:stratum 1} canonical-anomaly-nested-under-anomaly-routes-through-outcome
   (testing "a canonical anomaly under {:anomaly a} is also detected"
     (let [a       (anomaly/anomaly :timeout "agent timed out" {})
           outcome (collector/build-outcome-evidence
@@ -63,8 +62,7 @@
       (is (= "agent timed out" (:outcome/error-message outcome))))))
 
 ;; Legacy anomaly shape (pre-W2 producers)
-
-(deftest legacy-anomaly-at-error-info-still-detected
+(deftest ^{:stratum 1} legacy-anomaly-at-error-info-still-detected
   (testing "a legacy :anomaly/category map as :workflow/error is detected"
     (let [a       (response/make-anomaly :anomalies/fault "boom")
           outcome (collector/build-outcome-evidence
@@ -72,7 +70,7 @@
       (is (false? (:outcome/success outcome)))
       (is (= "boom" (:outcome/error-message outcome))))))
 
-(deftest legacy-anomaly-nested-under-anomaly-still-detected
+(deftest ^{:stratum 1} legacy-anomaly-nested-under-anomaly-still-detected
   (testing "a legacy anomaly under {:anomaly a} is still detected"
     (let [a       (response/make-anomaly :anomalies/timeout "slow")
           outcome (collector/build-outcome-evidence
@@ -81,8 +79,7 @@
       (is (= "slow" (:outcome/error-message outcome))))))
 
 ;; Non-anomaly fallback (legacy shape error map)
-
-(deftest non-anomaly-error-falls-back-to-legacy-shape
+(deftest ^{:stratum 1} non-anomaly-error-falls-back-to-legacy-shape
   (testing "a plain error map (no :anomaly/type, no :anomaly/category)
             is preserved via the legacy non-anomaly fall-through"
     (let [outcome (collector/build-outcome-evidence
