@@ -48,13 +48,11 @@
 ;; Fleet commands
 (defn ^{:stratum 0} fleet-start-cmd
   [_opts]
-  (display/print-info (messages/t :fleet/starting-daemon))
-  (println (messages/t :fleet/daemon-todo)))
+  (display/print-error (messages/t :fleet/daemon-not-available)))
 
 (defn ^{:stratum 0} fleet-stop-cmd
   [_opts]
-  (display/print-info (messages/t :fleet/stopping-daemon))
-  (println (messages/t :fleet/daemon-todo)))
+  (display/print-error (messages/t :fleet/daemon-not-available)))
 
 (def ^{:stratum 0} ^:private fleet-status-spec
   {:header :fleet/status-header
