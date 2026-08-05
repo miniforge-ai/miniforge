@@ -78,6 +78,21 @@
     {:passed? true :reason-code :within-threshold}
     {:passed? false :reason-code :threshold-exceeded}))
 
+(def ^{:stratum 0} apply-decision
+  {:requested-actuation-mode :apply-allowed
+   :verification-passed? true
+   :gate-results [{:gate/id :instrumentation :gate/passed? true}
+                  {:gate/id :environment :gate/passed? true}
+                  {:gate/id :blast-radius :gate/passed? true}
+                  {:gate/id :abort :gate/passed? true}
+                  {:gate/id :actuation :gate/passed? true}
+                  {:gate/id :evidence-completeness :gate/passed? true}]
+   :safe-mode? false
+   :pr-capability-valid? true
+   :apply-capability-valid? true
+   :rollback-verified? true
+   :postconditions-configured? true})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-assess-risk-is-additive-and-explainable
@@ -184,3 +199,56 @@
                            (fn [_criterion _observed] {:passed? true})
                            :high
                            []))))
+
+(deftest ^{:stratum 1} test-effective-actuation-requires-every-apply-precondition
+  (is (= :apply-allowed (opsv/effective-actuation apply-decision)))
+  (doseq [field [:verification-passed?
+                 :apply-capability-valid?
+                 :rollback-verified?
+                 :postconditions-configured?]]
+    (is (not= :apply-allowed
+              (opsv/effective-actuation (assoc apply-decision field false)))
+        (str "apply blocked by " field)))
+  (is (not= :apply-allowed
+            (opsv/effective-actuation
+             (assoc-in apply-decision [:gate-results 0 :gate/passed?] false)))))
+
+(deftest ^{:stratum 1} test-effective-actuation-degrades-without-promotion
+  (is (= :recommend-only
+         (opsv/effective-actuation
+          (assoc apply-decision :requested-actuation-mode :recommend-only))))
+  (is (= :pr-only
+         (opsv/effective-actuation
+          (assoc apply-decision :requested-actuation-mode :pr-only))))
+  (is (= :pr-only
+         (opsv/effective-actuation
+          (assoc apply-decision :apply-capability-valid? false))))
+  (is (= :recommend-only
+         (opsv/effective-actuation
+          (assoc apply-decision
+                 :apply-capability-valid? false
+                 :pr-capability-valid? false))))
+  (is (= :recommend-only
+         (opsv/effective-actuation
+          (assoc apply-decision
+                 :requested-actuation-mode :pr-only
+                 :pr-capability-valid? false)))))
+
+(deftest ^{:stratum 1} test-safe-mode-forces-no-actuation
+  (doseq [requested opsv/requested-actuation-modes]
+    (is (= :none
+           (opsv/effective-actuation
+            (assoc apply-decision
+                   :requested-actuation-mode requested
+                   :safe-mode? true))))))
+
+(deftest ^{:stratum 1} test-effective-actuation-validates-gate-evidence
+  (is (anomaly/anomaly?
+       (opsv/effective-actuation (assoc apply-decision :gate-results []))))
+  (is (anomaly/anomaly?
+       (opsv/effective-actuation
+        (update apply-decision :gate-results pop))))
+  (is (anomaly/anomaly?
+       (opsv/effective-actuation
+        (update apply-decision :gate-results
+                conj {:gate/id :rollback})))))

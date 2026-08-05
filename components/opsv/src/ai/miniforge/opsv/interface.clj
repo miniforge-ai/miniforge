@@ -19,6 +19,7 @@
   "Public API for canonical OPSV contracts and Experiment Pack hashing."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.opsv.actuation :as actuation]
    [ai.miniforge.opsv.convergence :as convergence]
    [ai.miniforge.opsv.core :as core]
    [ai.miniforge.opsv.risk :as risk]
@@ -45,6 +46,10 @@
 (def ^{:stratum 0} rollback-statuses
   "Canonical N6 OPSV rollback dispositions."
   schema/rollback-statuses)
+
+(def ^{:stratum 0} opsv-gate-ids
+  "The complete N7 section 5.2 gate vocabulary."
+  schema/opsv-gate-ids)
 
 (def ^{:stratum 0} ExperimentPack
   "Closed Malli schema for an N1/N7 Experiment Pack."
@@ -105,6 +110,10 @@
 (def ^{:stratum 0} ActuationRecord
   "Closed Malli schema for requested/effective actuation and effects."
   schema/ActuationRecord)
+
+(def ^{:stratum 0} EffectiveActuationInput
+  "Closed Malli schema for an N4/N7/N8/N10 authority decision."
+  schema/EffectiveActuationInput)
 
 (def ^{:stratum 0} ^:private invalid-domain-value-message
   "Stable programmer-facing message for OPSV contract violations."
@@ -217,6 +226,17 @@
                          :opsv/verification-result
                          schema/VerificationResult
                          (verification/verify-policy-impl validated)))))
+
+(defn ^{:stratum 1} effective-actuation
+  "Reduce requested autonomy according to verification and authority gates."
+  [decision-input]
+  (let [validated (validation-result invalid-domain-value-message
+                                     :opsv/effective-actuation-input
+                                     schema/EffectiveActuationInput
+                                     decision-input)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (actuation/effective-actuation-impl validated))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

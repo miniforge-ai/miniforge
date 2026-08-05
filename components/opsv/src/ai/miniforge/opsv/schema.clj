@@ -33,6 +33,14 @@
 (def ^{:stratum 0} rollback-statuses
   [:not-required :not-triggered :succeeded :failed])
 
+(def ^{:stratum 0} opsv-gate-ids
+  [:instrumentation
+   :environment
+   :blast-radius
+   :abort
+   :actuation
+   :evidence-completeness])
+
 (def ^{:stratum 0} convergence-terminal-reasons
   [:success-criteria-satisfied
    :guardrail-abort
@@ -113,6 +121,17 @@
    [:repetitions [:int {:min 0}]]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} GateResult
+  [:map {:closed true}
+   [:gate/id (into [:enum] opsv-gate-ids)]
+   [:gate/passed? :boolean]])
+
+(defn ^{:stratum 1} complete-gate-results?
+  [gate-results]
+  (let [gate-ids (map :gate/id gate-results)]
+    (and (= (count gate-ids) (count (distinct gate-ids)))
+         (every? (set gate-ids) opsv-gate-ids))))
 
 (def ^{:stratum 1} RiskLevelThresholds
   [:and
@@ -196,6 +215,21 @@
    [:evaluation ConvergenceEvaluation]])
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} EffectiveActuationInput
+  [:map {:closed true}
+   [:requested-actuation-mode (into [:enum] requested-actuation-modes)]
+   [:verification-passed? :boolean]
+   [:gate-results
+    [:and
+     [:vector {:min 6} GateResult]
+     [:fn {:error/message "all OPSV gates must occur exactly once"}
+      complete-gate-results?]]]
+   [:safe-mode? :boolean]
+   [:pr-capability-valid? :boolean]
+   [:apply-capability-valid? :boolean]
+   [:rollback-verified? :boolean]
+   [:postconditions-configured? :boolean]])
 
 (def ^{:stratum 2} RiskAssessment
   "Transparent N7 factor contributions and policy-owned level thresholds."
