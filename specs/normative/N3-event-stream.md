@@ -96,8 +96,12 @@ Envelope field types are fixed across every event family:
 | `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1) |
 | `:message` | string | MUST | Human-renderable summary |
 
-A _Conditional_ field is REQUIRED when it is the event's scope key per §2.3 and
-OPTIONAL otherwise, where it serves only as a cross-reference.
+A _Conditional_ field is REQUIRED whenever it is the event's scope key per
+§2.3. Where it is not the scope key it serves as a cross-reference and is
+OPTIONAL by default, but a family MAY raise it to REQUIRED for its own members
+— §3.10 does exactly this, requiring `:pr/id` on Workflow-scoped PR lifecycle
+events so they correlate with the N9 family (§3.16). A family MUST NOT lower a
+scope key below REQUIRED.
 
 Event families MUST NOT redefine an envelope field with a different type or
 meaning. In particular:
@@ -2417,6 +2421,10 @@ view of the same contract: the set of `:event/type` values an implementation
 may emit, and the properties every consumer needs before it has parsed a
 payload.
 
+Registry entries are written without the leading colon for table density —
+`workflow/started` denotes the keyword `:workflow/started`, not the string.
+The wire form of a keyword under JSON serialization is covered by §5.3.7.
+
 An `:event/type` MUST appear in this registry to be emitted. An implementation
 that emits an unregistered type is non-conformant, and a consumer MUST treat an
 unregistered type per the unknown-type rule of §7.3.
@@ -2432,33 +2440,33 @@ span two each.
 
 | § | Family | Scope | Retention | Event types |
 |---|--------|-------|-----------|-------------|
-| 3.1 | Workflow lifecycle | workflow | durable | `workflow/started`, `workflow/phase-started`, `workflow/phase-completed`, `workflow/completed`, `workflow/failed` |
-| 3.2 | Agent lifecycle | workflow | durable | `agent/started`, `agent/completed`, `agent/failed` |
-| 3.3 | Agent status | workflow | ephemeral | `agent/status` |
-| 3.4 | Subagent | workflow | operational | `subagent/spawned` |
-| 3.5 | Tool use | workflow | operational | `tool/invoked`, `tool/completed` |
-| 3.6 | LLM calls | workflow | ephemeral | `llm/request`, `llm/response` |
-| 3.7 | Inter-agent messages | workflow | operational | `agent/message-sent`, `agent/message-received` |
-| 3.7b | Meta-loop halt | workflow | audit | `meta-loop/halt-requested` |
-| 3.8 | Milestones | workflow | operational | `milestone/reached` |
-| 3.9 | Gates | workflow | durable | `gate/started`, `gate/passed`, `gate/failed` |
-| 3.10 | PR lifecycle (DAG) | workflow | durable | `pr/opened`, `pr/ci-passed`, `pr/ci-failed`, `pr/review-approved`, `pr/review-changes-requested`, `pr/comment-actionable`, `pr/fix-pushed`, `pr/merged`, `pr/closed` |
-| 3.11 | ETL | workflow | durable | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated` |
-| 3.11 | Pack promotion | workflow | audit | `pack/promoted` |
-| 3.12 | Pack lifecycle | pack | durable | `pack/installed`, `pack/updated`, `pack/removed` |
-| 3.12 | Pack Runs and chains | workflow | durable | `pack.run/started`, `pack.run/completed`, `pack.run/failed`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
-| 3.12 | Capability denial | workflow | audit | `capability/denied` |
-| 3.13 | Task lifecycle | workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
-| 3.13 | Task scope violation | workflow | audit | `task/scope-violation` |
-| 3.14 | OPSV (N7) | workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
-| 3.15 | Listeners and annotations (N8) | workflow | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
-| 3.15 | Control actions (N8) | workflow | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
-| 3.16 | External PR (N9) | pr | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
-| 3.17 | Reliability metrics | deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
-| 3.18 | Repository intelligence | repo | operational | `repo-index/quality-computed`, `repo-index/canary-failed` |
-| 3.19 | Supervisory snapshots | supervisory entity | durable | `supervisory/workflow-upserted`, `supervisory/agent-upserted`, `supervisory/pr-upserted`, `supervisory/policy-evaluated`, `supervisory/attention-derived`, `supervisory/intervention-upserted`, `supervisory/evidence-upserted`, `supervisory/artifact-upserted`, `supervisory/task-node-upserted`, `supervisory/decision-upserted`, `supervisory/pack-manifest-upserted`, `supervisory/automation-edge-upserted` |
-| 3.20 | Data Foundry | workflow | durable | `data-foundry/pipeline-started`, `data-foundry/stage-completed`, `data-foundry/pipeline-completed`, `data-foundry/pipeline-failed`, `data-foundry/quality-evaluated`, `data-foundry/lineage-edge-created`, `data-foundry/freshness-sla-breach`, `data-foundry/schema-drift-detected` |
-| 3.21 | Workflow control | workflow | durable | `workflow/cancelled`, `workflow/checkpoint-written`, `workflow/checkpoint-write-failed`, `workflow/machine-snapshot-written`, `workflow/machine-snapshot-write-failed`, `workflow/resumed`, `workflow/spec-hash-mismatch` |
+| 3.1 | Workflow lifecycle | Workflow | durable | `workflow/started`, `workflow/phase-started`, `workflow/phase-completed`, `workflow/completed`, `workflow/failed` |
+| 3.2 | Agent lifecycle | Workflow | durable | `agent/started`, `agent/completed`, `agent/failed` |
+| 3.3 | Agent status | Workflow | ephemeral | `agent/status` |
+| 3.4 | Subagent | Workflow | operational | `subagent/spawned` |
+| 3.5 | Tool use | Workflow | operational | `tool/invoked`, `tool/completed` |
+| 3.6 | LLM calls | Workflow | ephemeral | `llm/request`, `llm/response` |
+| 3.7 | Inter-agent messages | Workflow | operational | `agent/message-sent`, `agent/message-received` |
+| 3.7b | Meta-loop halt | Workflow | audit | `meta-loop/halt-requested` |
+| 3.8 | Milestones | Workflow | operational | `milestone/reached` |
+| 3.9 | Gates | Workflow | durable | `gate/started`, `gate/passed`, `gate/failed` |
+| 3.10 | PR lifecycle (DAG) | Workflow | durable | `pr/opened`, `pr/ci-passed`, `pr/ci-failed`, `pr/review-approved`, `pr/review-changes-requested`, `pr/comment-actionable`, `pr/fix-pushed`, `pr/merged`, `pr/closed` |
+| 3.11 | ETL | Workflow | durable | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated` |
+| 3.11 | Pack promotion | Workflow | audit | `pack/promoted` |
+| 3.12 | Pack lifecycle | Pack | durable | `pack/installed`, `pack/updated`, `pack/removed` |
+| 3.12 | Pack Runs and chains | Workflow | durable | `pack.run/started`, `pack.run/completed`, `pack.run/failed`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
+| 3.12 | Capability denial | Workflow | audit | `capability/denied` |
+| 3.13 | Task lifecycle | Workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
+| 3.13 | Task scope violation | Workflow | audit | `task/scope-violation` |
+| 3.14 | OPSV (N7) | Workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
+| 3.15 | Listeners and annotations (N8) | Workflow | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
+| 3.15 | Control actions (N8) | Workflow | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
+| 3.16 | External PR (N9) | PR Work Item | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
+| 3.17 | Reliability metrics | Deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
+| 3.18 | Repository intelligence | Repository | operational | `repo-index/quality-computed`, `repo-index/canary-failed` |
+| 3.19 | Supervisory snapshots | Supervisory entity | durable | `supervisory/workflow-upserted`, `supervisory/agent-upserted`, `supervisory/pr-upserted`, `supervisory/policy-evaluated`, `supervisory/attention-derived`, `supervisory/intervention-upserted`, `supervisory/evidence-upserted`, `supervisory/artifact-upserted`, `supervisory/task-node-upserted`, `supervisory/decision-upserted`, `supervisory/pack-manifest-upserted`, `supervisory/automation-edge-upserted` |
+| 3.20 | Data Foundry | Workflow | durable | `data-foundry/pipeline-started`, `data-foundry/stage-completed`, `data-foundry/pipeline-completed`, `data-foundry/pipeline-failed`, `data-foundry/quality-evaluated`, `data-foundry/lineage-edge-created`, `data-foundry/freshness-sla-breach`, `data-foundry/schema-drift-detected` |
+| 3.21 | Workflow control | Workflow | durable | `workflow/cancelled`, `workflow/checkpoint-written`, `workflow/checkpoint-write-failed`, `workflow/machine-snapshot-written`, `workflow/machine-snapshot-write-failed`, `workflow/resumed`, `workflow/spec-hash-mismatch` |
 
 ### 6.1 Registry Maintenance
 
