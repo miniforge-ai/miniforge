@@ -25,22 +25,27 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/instrumentation-gate [_]
-  (opsv/gate-definition :instrumentation opsv/check-instrumentation))
+  (opsv/gate-definition :opsv/instrumentation-gate :instrumentation
+                        opsv/check-instrumentation))
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/environment-gate [_]
-  (opsv/gate-definition :environment opsv/check-environment))
+  (opsv/gate-definition :opsv/environment-gate :environment
+                        opsv/check-environment))
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/blast-radius-gate [_]
-  (opsv/gate-definition :blast-radius opsv/check-blast-radius))
+  (opsv/gate-definition :opsv/blast-radius-gate :blast-radius
+                        opsv/check-blast-radius))
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/abort-gate [_]
-  (opsv/gate-definition :abort opsv/check-abort))
+  (opsv/gate-definition :opsv/abort-gate :abort opsv/check-abort))
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/actuation-gate [_]
-  (opsv/gate-definition :actuation opsv/check-actuation))
+  (opsv/gate-definition :opsv/actuation-gate :actuation
+                        opsv/check-actuation))
 
 (defmethod ^{:stratum 0} registry/get-gate :opsv/evidence-completeness-gate [_]
-  (opsv/gate-definition :evidence-completeness
+  (opsv/gate-definition :opsv/evidence-completeness-gate
+                        :evidence-completeness
                         opsv/check-evidence-completeness))
 
 (defn- ^{:stratum 0} detector

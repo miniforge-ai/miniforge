@@ -96,8 +96,8 @@
     {:passed? true :errors []}))
 
 (defn ^{:stratum 1} gate-definition
-  [gate-id check]
-  {:name gate-id
+  [gate-key gate-id check]
+  {:name gate-key
    :description (msg/t (get-in gate-copy [gate-id :description]))
    :check check
    :repair nil})

@@ -196,4 +196,5 @@
 
 (deftest ^{:stratum 2} opsv-gates-are-registered
   (doseq [[gate-key] passing-cases]
-    (is (contains? (gate/list-gates) gate-key))))
+    (is (contains? (gate/list-gates) gate-key))
+    (is (= gate-key (:name (gate/get-gate gate-key))))))
