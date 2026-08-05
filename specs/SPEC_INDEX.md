@@ -375,10 +375,10 @@ These documents provide guidance, examples, and context but do NOT define contra
 - [informative/I-DAG-ORCHESTRATION.md](informative/I-DAG-ORCHESTRATION.md) - DAG executor with PR lifecycle
 - [informative/I-DAG-MULTI-PARENT-MERGE.md](informative/I-DAG-MULTI-PARENT-MERGE.md) - v2 of per-task base
   chaining: deterministic octopus merge of multi-parent task bases
-- [informative/I-PHASE-HANDOFF-ENVELOPES.md](informative/I-PHASE-HANDOFF-ENVELOPES.md) - Typed phase-transition
-  envelopes for durable repair and context handoffs
 - [informative/I-GOVERNANCE-PROVENANCE-GRAPH.md](informative/I-GOVERNANCE-PROVENANCE-GRAPH.md) - Versioned,
   evidence-bearing projection across code, policy, decisions, incidents, claims, and data lineage
+- [informative/I-PHASE-HANDOFF-ENVELOPES.md](informative/I-PHASE-HANDOFF-ENVELOPES.md) - Typed phase-transition
+  envelopes for durable repair and context handoffs
 - [informative/I-TASK-EXECUTOR.md](informative/I-TASK-EXECUTOR.md) - DAG-to-PR lifecycle integration
 
 ### Operational Workflows (N10 Extensions)
