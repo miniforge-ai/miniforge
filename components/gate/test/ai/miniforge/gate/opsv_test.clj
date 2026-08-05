@@ -59,6 +59,14 @@
   (-> "policy_pack/packs/opsv-governance-1.0.0.pack.edn"
       io/resource slurp edn/read-string))
 
+(def ^{:stratum 0} policy-rule-phases
+  {:opsv/instrumentation-gate :discover
+   :opsv/environment-gate :plan
+   :opsv/blast-radius-gate :plan
+   :opsv/abort-gate :plan
+   :opsv/actuation-gate :actuate
+   :opsv/evidence-completeness-gate :verify})
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} passing-cases
@@ -122,8 +130,20 @@
                          :opsv/abort-gate
                          (assoc-in pack
                                    [:experiment-pack/guardrails
-                                    :abort-thresholds :tail-latency]
+                                   :abort-thresholds :tail-latency]
                                    ##NaN)
+                         context))))
+  (is (false? (:passed? (gate/check-gate
+                         :opsv/abort-gate
+                         (assoc-in pack
+                                   [:experiment-pack/guardrails
+                                    :abort-thresholds :saturation]
+                                   -0.1)
+                         context))))
+  (is (false? (:passed? (gate/check-gate
+                         :opsv/evidence-completeness-gate
+                         (assoc evidence :opsv/metric-snapshot-artifact-refs
+                                ["not-an-artifact-id"])
                          context)))))
 
 (deftest ^{:stratum 1} safer-actuation-does-not-require-apply-authority
@@ -140,19 +160,18 @@
                            :opsv/evidence-completeness-gate
                            incomplete {}))))))
 
-(deftest ^{:stratum 1} policy-pack-rules-run-the-mechanical-gates
-  (let [invalid-context (assoc-in context
-                                  [:opsv/instrumentation-status
-                                   :latency :available?]
-                                  false)
-        result (policy-pack/check-artifact opsv-policy-pack pack
-                                           (assoc invalid-context
-                                                  :phase :discover))]
-    (is (false? (:passed? result)))
-    (is (= :opsv/instrumentation-gate
-           (-> result :blocking first :code)))))
-
 ;------------------------------------------------------------------------------ Layer 2
+
+(deftest ^{:stratum 2} policy-pack-rules-run-the-mechanical-gates
+  (doseq [[gate-key _gate-id artifact ctx] failing-cases]
+    (let [rule (->> (:pack/rules opsv-policy-pack)
+                    (filter #(= gate-key (:rule/id %))) first)
+          single-rule-pack (assoc opsv-policy-pack :pack/rules [rule])
+          result (policy-pack/check-artifact
+                  single-rule-pack artifact
+                  (assoc ctx :phase (get policy-rule-phases gate-key)))]
+      (is (false? (:passed? result)))
+      (is (= gate-key (-> result :blocking first :code))))))
 
 (deftest ^{:stratum 2} all-opsv-gates-pass-compliant-input
   (doseq [[gate-key _gate-id artifact ctx] passing-cases]

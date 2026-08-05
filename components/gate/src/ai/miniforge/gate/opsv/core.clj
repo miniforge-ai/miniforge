@@ -174,7 +174,9 @@
   (let [configured (get-in pack [:experiment-pack/guardrails
                                  :abort-thresholds])
         missing (->> abort-thresholds
-                     (remove #(finite-number (get configured %))) vec)]
+                     (remove #(let [threshold (finite-number (get configured %))]
+                                (and threshold (not (neg? threshold)))))
+                     vec)]
     (gate-result :abort
                  (when (seq missing)
                    {:reason-code :abort-thresholds-missing
@@ -199,6 +201,7 @@
 (defn ^{:stratum 2} check-evidence-completeness
   [artifact ctx]
   (let [evidence (or (:opsv/evidence ctx) artifact)
+        snapshot-refs (:opsv/metric-snapshot-artifact-refs evidence)
         missing (cond-> []
                   (not (and (string? (:opsv/experiment-pack-hash evidence))
                             (not (str/blank?
@@ -207,7 +210,9 @@
                   (not (and (map? (:opsv/environment-fingerprint evidence))
                             (seq (:opsv/environment-fingerprint evidence))))
                   (conj :opsv/environment-fingerprint)
-                  (not (seq (:opsv/metric-snapshot-artifact-refs evidence)))
+                  (not (and (collection-value? snapshot-refs)
+                            (seq snapshot-refs)
+                            (every? uuid? snapshot-refs)))
                   (conj :opsv/metric-snapshot-artifact-refs))]
     (gate-result :evidence-completeness
                  (when (seq missing)
