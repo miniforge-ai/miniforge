@@ -56,7 +56,8 @@
    :operational-policy/verification-summary
    {:passed? true :confidence :high :caveats []}
    :operational-policy/rollback-plan {:action :restore-manifest}
-   :operational-policy/evidence-refs [(random-uuid)]})
+   :operational-policy/evidence-refs
+   [#uuid "00000000-0000-0000-0000-000000000001"]})
 
 (def ^{:stratum 0} valid-risk
   {:score 0.35
@@ -81,8 +82,8 @@
   {:requested-actuation-mode :pr-only
    :effective-actuation-mode :pr-only
    :governed-effects
-   [{:evidence/intent-id (random-uuid)
-     :evidence/oir-id (random-uuid)
+   [{:evidence/intent-id #uuid "00000000-0000-0000-0000-000000000002"
+     :evidence/oir-id #uuid "00000000-0000-0000-0000-000000000003"
      :evidence/capability-id "grant-123"}]
    :pr-refs ["https://example.test/pr/1"]
    :apply-refs []

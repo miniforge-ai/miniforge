@@ -34,7 +34,7 @@
   [:not-required :not-triggered :succeeded :failed])
 
 (def ^{:stratum 0} KeywordMap
-  "Extensible, namespaced detail whose keys remain data rather than contract fields."
+  "Extensible keyword-keyed detail whose entries remain domain data."
   [:map-of :keyword any?])
 
 (def ^{:stratum 0} Targets
