@@ -87,6 +87,16 @@
    [:criterion/expected any?]
    [:criterion/reason-code :keyword]])
 
+(def ^{:stratum 0} VerificationCriterion
+  [:map {:closed true}
+   [:criterion/id :string]
+   [:criterion/expected any?]])
+
+(def ^{:stratum 0} CriterionEvaluation
+  [:map {:closed true}
+   [:passed? :boolean]
+   [:reason-code :keyword]])
+
 (def ^{:stratum 0} GovernedEffect
   [:map {:closed true}
    [:evidence/intent-id :uuid]
@@ -167,6 +177,14 @@
   [:map {:closed true}
    [:passed? :boolean]
    [:criteria-evaluation [:vector CriterionResult]]
+   [:confidence :keyword]
+   [:caveats [:vector :string]]])
+
+(def ^{:stratum 1} VerificationRequest
+  [:map {:closed true}
+   [:criteria [:vector {:min 1} VerificationCriterion]]
+   [:observations [:map-of :string any?]]
+   [:evaluate-fn ifn?]
    [:confidence :keyword]
    [:caveats [:vector :string]]])
 

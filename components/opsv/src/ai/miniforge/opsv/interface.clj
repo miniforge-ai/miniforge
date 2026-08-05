@@ -23,6 +23,7 @@
    [ai.miniforge.opsv.core :as core]
    [ai.miniforge.opsv.risk :as risk]
    [ai.miniforge.opsv.schema :as schema]
+   [ai.miniforge.opsv.verification :as verification]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -88,6 +89,10 @@
 (def ^{:stratum 0} VerificationResult
   "Closed Malli schema for per-criterion OPSV verification."
   schema/VerificationResult)
+
+(def ^{:stratum 0} VerificationCriterion
+  "Closed Malli schema for an OPSV success criterion."
+  schema/VerificationCriterion)
 
 (def ^{:stratum 0} GovernedEffect
   "Closed Malli schema correlating an N10 intent, OIR, and capability."
@@ -193,6 +198,25 @@
                :state next-state
                :evaluation evaluation}
               (recur next-state (inc iteration)))))))))
+
+(defn ^{:stratum 1} verify-policy
+  "Evaluate every declared criterion and return the aggregate result."
+  [criteria observations evaluate-fn confidence caveats]
+  (let [request {:criteria criteria
+                 :observations observations
+                 :evaluate-fn evaluate-fn
+                 :confidence confidence
+                 :caveats caveats}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/verification-request
+                                     schema/VerificationRequest
+                                     request)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (validation-result invalid-domain-value-message
+                         :opsv/verification-result
+                         schema/VerificationResult
+                         (verification/verify-policy-impl validated)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -65,6 +65,19 @@
           :repetitions 2}
          overrides))
 
+(def ^{:stratum 0} verification-criteria
+  [{:criterion/id "latency-p95" :criterion/expected 200}
+   {:criterion/id "error-rate" :criterion/expected 0.01}])
+
+(def ^{:stratum 0} verification-observations
+  {"latency-p95" 175 "error-rate" 0.02})
+
+(defn ^{:stratum 0} threshold-evaluator
+  [criterion observed]
+  (if (<= observed (:criterion/expected criterion))
+    {:passed? true :reason-code :within-threshold}
+    {:passed? false :reason-code :threshold-exceeded}))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-assess-risk-is-additive-and-explainable
@@ -147,3 +160,27 @@
                       increment-state
                       (fn [_state _iteration _config]
                         {:guardrail-abort? true})))))
+
+(deftest ^{:stratum 1} test-verify-policy-emits-every-criterion
+  (let [result (opsv/verify-policy verification-criteria
+                                   verification-observations
+                                   threshold-evaluator
+                                   :medium
+                                   ["Dependency noise"])]
+    (is (false? (:passed? result)))
+    (is (= ["latency-p95" "error-rate"]
+           (mapv :criterion/id (:criteria-evaluation result))))
+    (is (= [true false]
+           (mapv :criterion/passed? (:criteria-evaluation result))))
+    (is (= :medium (:confidence result)))
+    (is (= ["Dependency noise"] (:caveats result)))))
+
+(deftest ^{:stratum 1} test-verify-policy-validates-input-and-evaluator-output
+  (is (anomaly/anomaly?
+       (opsv/verify-policy [] {} threshold-evaluator :low [])))
+  (is (anomaly/anomaly?
+       (opsv/verify-policy verification-criteria
+                           verification-observations
+                           (fn [_criterion _observed] {:passed? true})
+                           :high
+                           []))))
