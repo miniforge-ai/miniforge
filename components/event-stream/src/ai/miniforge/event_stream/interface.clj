@@ -26,6 +26,7 @@
    [ai.miniforge.event-stream.interface.control-state :as control-state]
    [ai.miniforge.event-stream.interface.events :as events]
    [ai.miniforge.event-stream.interface.listeners :as listeners]
+   [ai.miniforge.event-stream.interface.opsv :as opsv]
    [ai.miniforge.event-stream.interface.stream :as stream]
    [ai.miniforge.event-stream.digest :as digest]
    [ai.miniforge.event-stream.heartbeat :as heartbeat]
@@ -200,6 +201,24 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
+(def ^{:stratum 0} experiment-planned opsv/experiment-planned)
+
+(def ^{:stratum 0} experiment-started opsv/experiment-started)
+
+(def ^{:stratum 0} load-step opsv/load-step)
+
+(def ^{:stratum 0} guardrail-abort opsv/guardrail-abort)
+
+(def ^{:stratum 0} convergence-iteration opsv/convergence-iteration)
+
+(def ^{:stratum 0} policy-proposed opsv/policy-proposed)
+
+(def ^{:stratum 0} verification-result opsv/verification-result)
+
+(def ^{:stratum 0} actuation-emitted opsv/actuation-emitted)
+
+(def ^{:stratum 0} drift-detected opsv/drift-detected)
+
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity
    for the legacy 2/3-arg call shape; the opts arity may carry

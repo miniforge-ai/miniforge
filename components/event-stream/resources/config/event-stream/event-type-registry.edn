@@ -382,4 +382,25 @@
  {:constructor "repo-index-coverage-changed"
   :event-type  :repo-index/coverage-changed
   :json-string "repo-index/coverage-changed"
-  :browser?    false}]
+  :browser?    false}
+
+ ;; ── Operational Policy Synthesis events (N3 §3.14) ────────────────
+
+ {:constructor "experiment-planned" :event-type :opsv.experiment/planned
+  :json-string "opsv.experiment/planned" :browser? false}
+ {:constructor "experiment-started" :event-type :opsv.experiment/started
+  :json-string "opsv.experiment/started" :browser? false}
+ {:constructor "load-step" :event-type :opsv/load-step
+  :json-string "opsv/load-step" :browser? false}
+ {:constructor "guardrail-abort" :event-type :opsv.guardrail/abort
+  :json-string "opsv.guardrail/abort" :browser? false}
+ {:constructor "convergence-iteration" :event-type :opsv.convergence/iteration
+  :json-string "opsv.convergence/iteration" :browser? false}
+ {:constructor "policy-proposed" :event-type :opsv.policy/proposed
+  :json-string "opsv.policy/proposed" :browser? false}
+ {:constructor "verification-result" :event-type :opsv.verification/result
+  :json-string "opsv.verification/result" :browser? false}
+ {:constructor "actuation-emitted" :event-type :opsv.actuation/emitted
+  :json-string "opsv.actuation/emitted" :browser? false}
+ {:constructor "drift-detected" :event-type :opsv.drift/detected
+  :json-string "opsv.drift/detected" :browser? false}]
