@@ -1088,10 +1088,10 @@ event types:
 {:event/type :opsv.experiment/planned
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
- :opsv/pack-hash string              ; Experiment Pack content hash
+ :opsv/experiment-pack-hash string   ; Experiment Pack content hash
  :opsv/targets {:services [...] :environments [...]}
  :opsv/risk-score {:score double :level keyword :factors [...]}
- :message "OPSV experiment planned: {pack-hash}"}
+ :message "OPSV experiment planned: {experiment-pack-hash}"}
 ```
 
 #### opsv.experiment/started
@@ -1100,9 +1100,9 @@ event types:
 {:event/type :opsv.experiment/started
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
- :opsv/pack-hash string
+ :opsv/experiment-pack-hash string
  :opsv/environment-fingerprint {...} ; Cluster, node pool, image digests, config
- :message "OPSV experiment started in {environment}"}
+ :message "OPSV experiment started in {environment-fingerprint}"}
 ```
 
 #### opsv/load-step
@@ -1114,7 +1114,7 @@ event types:
  :opsv/step-id string
  :opsv/intended-load {...}
  :opsv/observed-load {...}
- :message "OPSV load step {step-id}: {intended} → {observed}"}
+ :message "OPSV load step {step-id}: {intended-load} → {observed-load}"}
 ```
 
 #### opsv.guardrail/abort
