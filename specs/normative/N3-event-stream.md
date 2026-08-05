@@ -164,6 +164,11 @@ Rules:
   be present; the event remains Workflow-scoped.
 - A family that fits no row above MUST NOT be added to §3 until this table is
   amended. An event with no scope cannot be ordered, subscribed to, or replayed.
+- Two families take an **inherited** scope rather than a fixed one: the
+  `listener/*` lifecycle events take the scope of the stream they annotate, and
+  the `control-action/*` and `annotation/created` events take the scope of
+  their target (§3.15). An inherited scope is still exactly one scope per
+  event — it is chosen at emission, not left open.
 
 ---
 
@@ -1330,7 +1335,21 @@ workflow and bundle for the monitored policy.
 ### 3.15 Observability Control Interface Events (N8)
 
 For the Observability Control Interface (see N8), implementations MUST emit these
-event types:
+event types.
+
+**Scope.** The `listener/*` lifecycle events describe a stream, and a stream is
+opened on exactly one scope (§5.3.1). They therefore take **the scope of the
+stream they annotate**, not a fixed scope: a listener attached to
+`/api/streams/pack/acme-terraform` emits `listener/attached` carrying
+`:pack/id`, not `:workflow/id`. Writing `:workflow/id` into these events would
+make N3.API.7 — every stream MUST open with `listener/attached` — unsatisfiable
+on the five non-workflow scopes.
+
+The examples below show `:workflow/id` because that is the common case. Read it
+as _the scope key of the stream_, per §2.3.
+
+`annotation/created` and the `control-action/*` events likewise carry the scope
+key of their target. A control action targeting a pack carries `:pack/id`.
 
 #### listener/attached
 
@@ -1339,7 +1358,8 @@ event types:
  :listener/id uuid
  :listener/type keyword              ; :watcher, :dashboard, :fleet, :enterprise
  :listener/capability keyword        ; :observe, :advise, :control
- :workflow/id uuid
+ :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3) —
+                                     ; :pack/id, :repo/id etc. on other scopes
  :message "Listener attached: {type} with {capability} capability"}
 ```
 
@@ -1348,7 +1368,7 @@ event types:
 ```clojure
 {:event/type :listener/detached
  :listener/id uuid
- :workflow/id uuid
+ :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3)
  :listener/reason keyword            ; :disconnect, :timeout, :revoked
  :message "Listener detached: {reason}"}
 ```
@@ -1362,7 +1382,7 @@ listener; it does not imply the events were lost from storage (§9.4).
 ```clojure
 {:event/type :listener/overflow
  :listener/id uuid
- :workflow/id uuid
+ :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3)
  :overflow/dropped-count long        ; REQUIRED: events dropped for this listener
  :overflow/oldest-dropped-sequence long ; REQUIRED: first sequence number dropped
  :overflow/newest-dropped-sequence long ; REQUIRED: last sequence number dropped
@@ -2502,6 +2522,10 @@ belongs to exactly one class). A family whose members differ in scope or class
 occupies more than one row — §3.12 spans three, and §3.11, §3.13, and §3.15
 span two each.
 
+Two §3.15 rows name an inherited scope (§2.3) rather than one of the six fixed
+scopes: the stream's for `listener/*`, the target's for `control-action/*` and
+`annotation/created`. Each emission still resolves to exactly one scope.
+
 | § | Family | Scope | Retention | Event types |
 |---|--------|-------|-----------|-------------|
 | 3.1 | Workflow lifecycle | Workflow | durable | `workflow/started`, `workflow/phase-started`, `workflow/phase-completed`, `workflow/completed`, `workflow/failed` |
@@ -2523,8 +2547,8 @@ span two each.
 | 3.13 | Task lifecycle | Workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
 | 3.13 | Task scope violation | Workflow | audit | `task/scope-violation` |
 | 3.14 | OPSV (N7) | Workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
-| 3.15 | Listeners and annotations (N8) | Workflow | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
-| 3.15 | Control actions (N8) | Workflow | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
+| 3.15 | Listeners and annotations (N8) | stream's scope | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
+| 3.15 | Control actions (N8) | target's scope | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
 | 3.16 | External PR (N9) | PR Work Item | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
 | 3.17 | Reliability metrics | Deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
 | 3.18 | Repository intelligence | Repository | operational | `repo-index/quality-computed`, `repo-index/canary-failed` |
