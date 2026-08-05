@@ -59,8 +59,19 @@
   [:map {:closed true}
    [:factor :keyword]
    [:input any?]
-   [:contribution :double]
+   [:contribution [:double {:min 0.0 :max 1.0}]]
    [:rationale :string]])
+
+(defn ^{:stratum 0} required-risk-factors?
+  [factors]
+  (let [factor-names (map :factor factors)]
+    (and (= (count factor-names) (count (distinct factor-names)))
+         (every? (set factor-names)
+                 [:environment-class :blast-radius :actuation-requested]))))
+
+(defn ^{:stratum 0} ordered-risk-thresholds?
+  [{:keys [medium high critical]}]
+  (<= 0.0 medium high critical 1.0))
 
 (def ^{:stratum 0} CriterionResult
   [:map {:closed true}
@@ -77,6 +88,15 @@
    [:evidence/capability-id :string]])
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} RiskLevelThresholds
+  [:and
+   [:map {:closed true}
+    [:medium [:double {:min 0.0 :max 1.0}]]
+    [:high [:double {:min 0.0 :max 1.0}]]
+    [:critical [:double {:min 0.0 :max 1.0}]]]
+   [:fn {:error/message "risk thresholds must be ordered"}
+    ordered-risk-thresholds?]])
 
 (def ^{:stratum 1} RollbackResult
   [:map {:closed true}
@@ -128,6 +148,16 @@
    [:caveats [:vector :string]]])
 
 ;------------------------------------------------------------------------------ Layer 2
+
+(def ^{:stratum 2} RiskAssessment
+  "Transparent N7 factor contributions and policy-owned level thresholds."
+  [:map {:closed true}
+   [:factors
+    [:and
+     [:vector {:min 3} RiskFactor]
+     [:fn {:error/message "required risk factors must occur exactly once"}
+      required-risk-factors?]]]
+   [:level-thresholds RiskLevelThresholds]])
 
 (def ^{:stratum 2} ActuationRecord
   "Requested/effective actuation and correlated governed N10 effects."

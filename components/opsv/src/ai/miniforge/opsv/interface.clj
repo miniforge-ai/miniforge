@@ -20,6 +20,7 @@
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.opsv.core :as core]
+   [ai.miniforge.opsv.risk :as risk]
    [ai.miniforge.opsv.schema :as schema]
    [malli.core :as m]
    [malli.error :as me]))
@@ -62,6 +63,10 @@
 (def ^{:stratum 0} RiskResult
   "Closed Malli schema for normalized explainable OPSV risk."
   schema/RiskResult)
+
+(def ^{:stratum 0} RiskAssessment
+  "Closed Malli schema for transparent OPSV risk inputs and thresholds."
+  schema/RiskAssessment)
 
 (def ^{:stratum 0} CriterionResult
   "Closed Malli schema for one verification criterion result."
@@ -129,6 +134,18 @@
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/actuation-record schema/ActuationRecord value))
+
+(defn ^{:stratum 1} assess-risk
+  "Sum explicit factor contributions and classify the normalized score."
+  [factors level-thresholds]
+  (let [assessment {:factors factors :level-thresholds level-thresholds}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/risk-assessment
+                                     schema/RiskAssessment
+                                     assessment)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (risk/assess-risk-impl validated))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
