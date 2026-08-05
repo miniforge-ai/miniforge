@@ -112,8 +112,8 @@
                                          :environments]))
         allowed (value-set (:opsv/allowed-environments ctx))
         open (value-set (:opsv/time-window-open-environments ctx))
-        production (value-set (or (:opsv/production-environments ctx)
-                                  ["production"]))
+        production (conj (value-set (:opsv/production-environments ctx))
+                         "production")
         production-allowlist (value-set (:opsv/production-allowlist ctx))
         disallowed (set/difference targets allowed)
         outside-window (set/difference targets open)
@@ -185,7 +185,7 @@
                             (not (str/blank?
                                   (:opsv/experiment-pack-hash evidence)))))
                   (conj :opsv/experiment-pack-hash)
-                  (not (map? (:opsv/environment-fingerprint evidence)))
+                  (not (seq (:opsv/environment-fingerprint evidence)))
                   (conj :opsv/environment-fingerprint)
                   (not (seq (:opsv/metric-snapshot-artifact-refs evidence)))
                   (conj :opsv/metric-snapshot-artifact-refs))]

@@ -78,6 +78,46 @@
    [:opsv/evidence-completeness-gate :evidence-completeness
     (assoc evidence :opsv/metric-snapshot-artifact-refs []) context]])
 
+(deftest ^{:stratum 1} production-always-requires-explicit-allowlisting
+  (let [production-pack (assoc-in pack
+                                  [:experiment-pack/targets :environments]
+                                  ["production"])
+        production-context (assoc context
+                                  :opsv/allowed-environments #{"production"}
+                                  :opsv/time-window-open-environments
+                                  #{"production"}
+                                  :opsv/production-environments #{})
+        result (gate/check-gate :opsv/environment-gate production-pack
+                                production-context)]
+    (is (false? (:passed? result)))
+    (is (= ["production"]
+           (get-in result [:errors 0 :remediation :details
+                           :production-not-allowlisted])))))
+
+(deftest ^{:stratum 1} blast-radius-enforces-each-policy-axis
+  (doseq [ctx [(assoc-in context
+                         [:opsv/blast-radius-limits :max-replica-delta] 1)
+               (assoc-in context
+                         [:opsv/blast-radius-limits :max-node-delta] 0)
+               (assoc-in context
+                         [:opsv/blast-radius-limits :allowed-namespaces] #{})]]
+    (is (false? (:passed? (gate/check-gate :opsv/blast-radius-gate
+                                           pack ctx))))))
+
+(deftest ^{:stratum 1} safer-actuation-does-not-require-apply-authority
+  (let [recommendation (assoc pack :experiment-pack/actuation-intent
+                              :recommend-only)]
+    (is (true? (:passed? (gate/check-gate :opsv/actuation-gate
+                                          recommendation {}))))))
+
+(deftest ^{:stratum 1} evidence-gate-requires-each-n4-field
+  (doseq [incomplete [(dissoc evidence :opsv/experiment-pack-hash)
+                      (assoc evidence :opsv/environment-fingerprint {})
+                      (assoc evidence :opsv/metric-snapshot-artifact-refs [])]]
+    (is (false? (:passed? (gate/check-gate
+                           :opsv/evidence-completeness-gate
+                           incomplete {}))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (deftest ^{:stratum 2} all-opsv-gates-pass-compliant-input
