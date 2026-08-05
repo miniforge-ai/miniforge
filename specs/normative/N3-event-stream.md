@@ -2424,6 +2424,12 @@ unregistered type per the unknown-type rule of §7.3.
 **Columns.** _Scope_ is the scope key of §2.3. _Retention_ is the class of
 §4.3.1. Both are properties of the type, not of a particular emission.
 
+Every row carries exactly one scope and exactly one retention class, so a
+type's class is readable without parsing prose (§4.3.1: every event type
+belongs to exactly one class). A family whose members differ in scope or class
+occupies more than one row — §3.12 spans three, and §3.11, §3.13, and §3.15
+span two each.
+
 | § | Family | Scope | Retention | Event types |
 |---|--------|-------|-----------|-------------|
 | 3.1 | Workflow lifecycle | workflow | durable | `workflow/started`, `workflow/phase-started`, `workflow/phase-completed`, `workflow/completed`, `workflow/failed` |
@@ -2437,16 +2443,20 @@ unregistered type per the unknown-type rule of §7.3.
 | 3.8 | Milestones | workflow | operational | `milestone/reached` |
 | 3.9 | Gates | workflow | durable | `gate/started`, `gate/passed`, `gate/failed` |
 | 3.10 | PR lifecycle (DAG) | workflow | durable | `pr/opened`, `pr/ci-passed`, `pr/ci-failed`, `pr/review-approved`, `pr/review-changes-requested`, `pr/comment-actionable`, `pr/fix-pushed`, `pr/merged`, `pr/closed` |
-| 3.11 | ETL and pack promotion | workflow | durable; `pack/promoted` is audit | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated`, `pack/promoted` |
+| 3.11 | ETL | workflow | durable | `etl/started`, `etl/sources-classified`, `etl/safety-scan-completed`, `etl/completed`, `etl/failed`, `pack/generated` |
+| 3.11 | Pack promotion | workflow | audit | `pack/promoted` |
 | 3.12 | Pack lifecycle | pack | durable | `pack/installed`, `pack/updated`, `pack/removed` |
-| 3.12 | Pack Runs and chains | workflow | durable; `capability/denied` is audit | `pack.run/started`, `pack.run/completed`, `pack.run/failed`, `capability/denied`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
-| 3.13 | Task lifecycle | workflow | operational; `task/scope-violation` is audit | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/scope-violation`, `task/skip-propagated` |
+| 3.12 | Pack Runs and chains | workflow | durable | `pack.run/started`, `pack.run/completed`, `pack.run/failed`, `chain.edge/started`, `chain.edge/completed`, `chain.edge/failed` |
+| 3.12 | Capability denial | workflow | audit | `capability/denied` |
+| 3.13 | Task lifecycle | workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
+| 3.13 | Task scope violation | workflow | audit | `task/scope-violation` |
 | 3.14 | OPSV (N7) | workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
-| 3.15 | Observability control (N8) | workflow | operational; `control-action/*` is audit | `listener/attached`, `listener/detached`, `listener/overflow`, `control-action/requested`, `control-action/executed`, `control-action/approval-required`, `annotation/created` |
+| 3.15 | Listeners and annotations (N8) | workflow | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
+| 3.15 | Control actions (N8) | workflow | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
 | 3.16 | External PR (N9) | pr | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
 | 3.17 | Reliability metrics | deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
 | 3.18 | Repository intelligence | repo | operational | `repo-index/quality-computed`, `repo-index/canary-failed` |
-| 3.19 | Supervisory snapshots | supervisory entity | durable | The twelve types enumerated in §3.19.1 |
+| 3.19 | Supervisory snapshots | supervisory entity | durable | `supervisory/workflow-upserted`, `supervisory/agent-upserted`, `supervisory/pr-upserted`, `supervisory/policy-evaluated`, `supervisory/attention-derived`, `supervisory/intervention-upserted`, `supervisory/evidence-upserted`, `supervisory/artifact-upserted`, `supervisory/task-node-upserted`, `supervisory/decision-upserted`, `supervisory/pack-manifest-upserted`, `supervisory/automation-edge-upserted` |
 | 3.20 | Data Foundry | workflow | durable | `data-foundry/pipeline-started`, `data-foundry/stage-completed`, `data-foundry/pipeline-completed`, `data-foundry/pipeline-failed`, `data-foundry/quality-evaluated`, `data-foundry/lineage-edge-created`, `data-foundry/freshness-sla-breach`, `data-foundry/schema-drift-detected` |
 | 3.21 | Workflow control | workflow | durable | `workflow/cancelled`, `workflow/checkpoint-written`, `workflow/checkpoint-write-failed`, `workflow/machine-snapshot-written`, `workflow/machine-snapshot-write-failed`, `workflow/resumed`, `workflow/spec-hash-mismatch` |
 

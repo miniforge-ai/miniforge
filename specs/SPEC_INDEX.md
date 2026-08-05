@@ -119,7 +119,7 @@ Defines:
 Defines:
 
 - Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
-  workflow, PR Work Item, pack, repo, deployment (§2.3)
+  workflow, PR Work Item, pack, repo, supervisory entity, deployment (§2.3)
 - Required event types (workflow, agent, status, subagent, tool, LLM, messages,
   milestone, gate, pack lifecycle, pack run, chain edge)
 - Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
