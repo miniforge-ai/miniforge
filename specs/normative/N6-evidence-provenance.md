@@ -338,6 +338,14 @@ preserve every referenced event, artifact, capability, and governed effect.
    :image-digests {...}
    :config-hash string}
 
+  :opsv/risk-score
+  {:score double                      ; [0.0, 1.0]
+   :level keyword                     ; :low, :medium, :high, :critical
+   :factors [{:factor keyword
+              :input any
+              :contribution double
+              :rationale string}]}
+
   :opsv/convergence-iterations long   ; Number of convergence iterations
   :opsv/policy-proposals              ; Proposed operational policies
   [{:policy-hash string
@@ -348,7 +356,12 @@ preserve every referenced event, artifact, capability, and governed effect.
 
   :opsv/verification
   {:passed? boolean
-   :criteria-evaluation [...]         ; Per-criterion results
+   :criteria-evaluation
+   [{:criterion/id string
+     :criterion/passed? boolean
+     :criterion/observed any
+     :criterion/expected any
+     :criterion/reason-code keyword}]
    :confidence keyword
    :caveats [string ...]}
 
@@ -1101,8 +1114,9 @@ Fleet-wide evidence will enable:
 **Version History:**
 
 - 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
-  correlation, content-addressed inputs, requested/effective actuation,
-  correlated N10 effects, postconditions, rollback, and diff/metric artifacts
+  correlation, content-addressed inputs, explainable risk, per-criterion
+  verification, requested/effective actuation, correlated N10 effects,
+  postconditions, rollback, and diff/metric artifacts
 - 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
   artifact type registered in §3.1.1 with full content schema. PR Context Packs are
   the normalized PR snapshot that reviewer, meta, and governance workflow packs

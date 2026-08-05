@@ -121,6 +121,7 @@ An OPSV run MUST produce:
 - **Evidence Bundle** per N6, including:
   - Experiment Pack hash and content
   - environment fingerprint (cluster, node pool, image digests, config)
+  - normalized risk score and explainable factor records
   - metric queries and snapshots used for conclusions
   - artifacts emitted and diffs
 - **Remediation Artifacts** depending on actuation mode (none, PRs, or applied changes)
@@ -256,7 +257,7 @@ OPSV SHALL emit these event types with required minimal payloads:
 - `:opsv.guardrail/abort` (trigger, threshold, observed, rollback action)
 - `:opsv.convergence/iteration` (iteration id, params, observed metrics summary)
 - `:opsv.policy/proposed` (policy hash, diff refs, confidence)
-- `:opsv.verification/result` (pass/fail, criteria evaluation)
+- `:opsv.verification/result` (pass/fail, criteria evaluation, confidence, caveats)
 - `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
 - `:opsv.drift/detected` (signal, deviation, suggested re-run)
 

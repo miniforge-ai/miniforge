@@ -1106,7 +1106,11 @@ event types:
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
  :opsv/experiment-pack-hash string
- :opsv/environment-fingerprint {...} ; Cluster, node pool, image digests, config
+ :opsv/environment-fingerprint
+ {:cluster string
+  :node-pools [string ...]
+  :image-digests {...}
+  :config-hash string}
  :message "OPSV experiment started in {environment-fingerprint}"}
 ```
 
@@ -1166,7 +1170,14 @@ event types:
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
  :opsv/passed? boolean
- :opsv/criteria-evaluation [...]
+ :opsv/criteria-evaluation
+ [{:criterion/id string
+   :criterion/passed? boolean
+   :criterion/observed any
+   :criterion/expected any
+   :criterion/reason-code keyword}]
+ :opsv/confidence keyword
+ :opsv/caveats [string ...]
  :message "OPSV verification {passed?}: {summary}"}
 ```
 
@@ -2247,8 +2258,8 @@ Event stream will extend to:
 **Version History:**
 
 - 0.9.0-draft (2026-08-04): OPSV events now share a preallocated evidence-bundle
-  identifier, canonical Experiment Pack hash key, requested/effective actuation
-  modes, and correlated N10 governed-effect records
+  identifier, canonical Experiment Pack/environment/verification/risk shapes,
+  requested/effective actuation modes, and correlated N10 governed-effect records
 - 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments — §5.3
   expanded from a one-line SSE sketch to a complete contract for the per-workflow
   stream: authentication via bearer token (with browser-friendly query-param
