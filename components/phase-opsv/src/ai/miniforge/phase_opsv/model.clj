@@ -150,8 +150,8 @@
                      adapter (:experiment-pack/targets pack))]
         (if (anomaly/anomaly? drivers)
           drivers
-          (assoc pack :opsv/experiment-pack pack
-                 :opsv/candidate-drivers drivers))))))
+          {:opsv/experiment-pack pack
+           :opsv/candidate-drivers drivers})))))
 
 (defn ^{:stratum 1} execute
   [ctx]

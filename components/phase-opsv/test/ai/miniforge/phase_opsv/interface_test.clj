@@ -43,6 +43,8 @@
         verification (support/phase-output result :opsv/verify)
         actuation (support/phase-output result :opsv/actuate)]
     (testing "adapter observations flow through bounded convergence"
+      (is (= #{:opsv/experiment-pack :opsv/candidate-drivers}
+             (set (keys discovery))))
       (is (= #{:cpu :backlog}
              (set (map :driver (:opsv/candidate-drivers discovery)))))
       (is (= :success-criteria-satisfied
