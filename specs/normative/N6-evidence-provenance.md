@@ -6,8 +6,8 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.6.0-draft
-**Date:** 2026-03-08
+**Version:** 0.7.0-draft
+**Date:** 2026-08-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -1100,6 +1100,9 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
+  correlation, content-addressed inputs, requested/effective actuation,
+  correlated N10 effects, postconditions, rollback, and diff/metric artifacts
 - 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
   artifact type registered in §3.1.1 with full content schema. PR Context Packs are
   the normalized PR snapshot that reviewer, meta, and governance workflow packs

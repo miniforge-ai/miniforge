@@ -6,14 +6,13 @@
 
 # N3 — Event Stream & Observability Contract
 
-**Version:** 0.8.0-draft
-**Date:** 2026-04-17
+**Version:** 0.9.0-draft
+**Date:** 2026-08-04
 **Status:** Draft
 **Conformance:** MUST
 
-_v0.7.0 adds §3.19 supervisory snapshot event family
-(`:supervisory/*-upserted`) as the consumer-facing surface for canonical
-supervisory entities defined in N5-delta-supervisory-control-plane §3._
+_v0.9.0 reconciles the §3.14 OPSV event family with N6 evidence correlation
+and N10 governed-effect identifiers._
 
 ---
 
@@ -2232,15 +2231,18 @@ Event stream will extend to:
 - N2 (Workflow Execution): Workflow engine emits lifecycle events
 - N5 (CLI/TUI/API): UI consumes event stream via subscription API
 - N6 (Evidence & Provenance): Evidence bundles reference event streams
-- N7 (Operational Policy Synthesis): OPSV event types (§3.13)
-- N8 (Observability Control Interface): Listener/control action event types (§3.14)
-- N9 (External PR Integration): Provider/PR/train event types (§3.15)
+- N7 (Operational Policy Synthesis): OPSV event types (§3.14)
+- N8 (Observability Control Interface): Listener/control action event types (§3.15)
+- N9 (External PR Integration): Provider/PR/train event types (§3.16)
 - I-DAG-ORCHESTRATION: DAG executor with PR lifecycle (Section 12: PR Lifecycle Events)
 
 ---
 
 **Version History:**
 
+- 0.9.0-draft (2026-08-04): OPSV events now share a preallocated evidence-bundle
+  identifier, canonical Experiment Pack hash key, requested/effective actuation
+  modes, and correlated N10 governed-effect records
 - 0.8.0-draft (2026-04-23): Per-workflow streaming wire-contract amendments — §5.3
   expanded from a one-line SSE sketch to a complete contract for the per-workflow
   stream: authentication via bearer token (with browser-friendly query-param
@@ -2249,6 +2251,8 @@ Event stream will extend to:
   buffer-overflow behavior, SSE wire format (event/id/data/retry + heartbeats),
   optional WebSocket wire format, rate limiting. Cross-workflow aggregation
   endpoints remain out of OSS scope
+- 0.7.0-draft (2026-04-17): Added the §3.19 supervisory snapshot event family
+  (`:supervisory/*-upserted`) for canonical N5 supervisory entities
 - 0.6.0-draft (2026-03-08): Reliability Nines amendments — `:failure/class` enum on all
   failure events, reliability metric events (§3.17), repository intelligence events (§3.18)
 - 0.5.0-draft (2026-02-16): Added pack lifecycle, Pack Run, capability denial, and chain

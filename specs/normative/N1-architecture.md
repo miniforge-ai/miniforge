@@ -6,8 +6,8 @@
 
 # N1 — Core Architecture & Concepts
 
-**Version:** 0.6.0-draft
-**Date:** 2026-04-22
+**Version:** 0.7.0-draft
+**Date:** 2026-08-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -2794,6 +2794,9 @@ conformance checklist.
 
 **Version History:**
 
+- 0.7.0-draft (2026-08-04): Clarified OPSV requested actuation as intent rather
+  than authority; added rollback and required-instrumentation fields to the N7
+  specializations and linked governed effects to N10
 - 0.6.0-draft (2026-04-23): Pack interchange and tool registry amendments — Pack Signature
   Format (§2.10.4.1) defining detached-signature wire format and verification API so
   signed packs are portable between OSS implementations; Pack Bundle Format (§2.10.6)
