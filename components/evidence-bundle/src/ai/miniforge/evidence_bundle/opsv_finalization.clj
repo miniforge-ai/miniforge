@@ -23,7 +23,7 @@
    [ai.miniforge.evidence-bundle.protocols.impl.evidence-bundle :as bundle]
    [ai.miniforge.evidence-bundle.schema.opsv :as schema]
    [ai.miniforge.response.interface :as response]
-   [clojure.set :as set]
+   [clojure.set :as cset]
    [malli.core :as m]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -68,14 +68,14 @@
       (conj {:code :capability-reference-mismatch})
       (not= (:opsv/governed-effects record) effects)
       (conj {:code :governed-effect-mismatch})
-      (not (set/subset? (detailed-artifact-refs evidence) artifact-refs))
+      (not (cset/subset? (detailed-artifact-refs evidence) artifact-refs))
       (conj {:code :detailed-artifact-reference-missing})
-      (not (set/subset? artifact-refs (set available-artifact-ids)))
+      (not (cset/subset? artifact-refs (set available-artifact-ids)))
       (conj {:code :referenced-artifact-not-found
-             :missing (vec (sort (set/difference
+             :missing (vec (sort (cset/difference
                                   artifact-refs
                                   (set available-artifact-ids))))})
-      (not (set/subset? effect-capabilities capability-refs))
+      (not (cset/subset? effect-capabilities capability-refs))
       (conj {:code :uncorrelated-governed-effect}))))
 
 ;------------------------------------------------------------------------------ Layer 2
