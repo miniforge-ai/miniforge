@@ -21,8 +21,8 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.opsv.interface :as opsv]
+   [ai.miniforge.phase-opsv.adapter :as adapter]
    [ai.miniforge.phase-opsv.evaluation :as evaluation]
-   [ai.miniforge.phase-opsv.messages :as msg]
    [ai.miniforge.phase-opsv.protocol :as port]
    [ai.miniforge.phase-opsv.risk :as risk]))
 
@@ -42,30 +42,7 @@
     value
     (continue value)))
 
-(defn- ^{:stratum 0} invalid-ramp-anomaly
-  [ramp]
-  (cond
-    (not (seq (:steps ramp)))
-    (anomaly/anomaly :invalid-input (msg/ts :adapter/empty-ramp)
-                     {:adapter/result-keys (vec (sort (keys ramp)))})
-
-    (not (and (map? (:environment-fingerprint ramp))
-              (seq (:environment-fingerprint ramp))))
-    (anomaly/anomaly :invalid-input (msg/ts :adapter/missing-fingerprint)
-                     {:adapter/result-keys (vec (sort (keys ramp)))})))
-
 ;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} adapter-anomaly
-  [ctx]
-  (when-not (satisfies? port/OPSVAdapter (input-value ctx :opsv/adapter))
-    (anomaly/anomaly :invalid-input (msg/ts :adapter/missing)
-                     {:input/key :opsv/adapter})))
-
-(defn- ^{:stratum 1} ramp-shape-anomaly
-  [ramp]
-  (when-not (anomaly/anomaly? ramp)
-    (invalid-ramp-anomaly ramp)))
 
 (defn- ^{:stratum 1} operational-policy
   [ctx convergence]
@@ -117,7 +94,9 @@
   (preserve-anomaly
    (phase-output ctx :opsv/execute)
    (fn [executed]
-     (let [config (:experiment-pack/convergence executed)
+     (let [config (get-in executed
+                          [:opsv/experiment-pack
+                           :experiment-pack/convergence])
            initial-state {:steps (:opsv/ramp-steps executed) :history []}
            result (opsv/converge config initial-state
                                  evaluation/convergence-step
@@ -156,13 +135,12 @@
                     (input-value ctx
                                  :opsv/metric-snapshot-artifact-refs)))))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn ^{:stratum 2} discover
+(defn ^{:stratum 1} discover
   [ctx]
   (let [pack (opsv/validate-experiment-pack
               (input-value ctx :opsv/experiment-pack))
-        invalid-adapter (adapter-anomaly ctx)]
+        invalid-adapter (adapter/adapter-anomaly
+                         (input-value ctx :opsv/adapter))]
     (cond
       (anomaly/anomaly? pack) pack
       invalid-adapter invalid-adapter
@@ -175,17 +153,18 @@
           (assoc pack :opsv/experiment-pack pack
                  :opsv/candidate-drivers drivers))))))
 
-(defn ^{:stratum 2} execute
+(defn ^{:stratum 1} execute
   [ctx]
   (preserve-anomaly
    (phase-output ctx :opsv/plan)
    (fn [planned]
-     (if-let [invalid (adapter-anomaly ctx)]
+     (if-let [invalid (adapter/adapter-anomaly
+                       (input-value ctx :opsv/adapter))]
        invalid
        (let [adapter (input-value ctx :opsv/adapter)
              ramp (port/run-guarded-ramp
                    adapter (:opsv/experiment-pack planned))
-             empty-ramp (ramp-shape-anomaly ramp)]
+             empty-ramp (adapter/ramp-shape-anomaly ramp)]
          (cond
            (anomaly/anomaly? ramp) ramp
            empty-ramp empty-ramp
@@ -193,6 +172,8 @@
                         {:opsv/environment-fingerprint
                          (:environment-fingerprint ramp)
                          :opsv/ramp-steps (:steps ramp)})))))))
+
+;------------------------------------------------------------------------------ Layer 2
 
 (defn ^{:stratum 2} synthesize
   [ctx]

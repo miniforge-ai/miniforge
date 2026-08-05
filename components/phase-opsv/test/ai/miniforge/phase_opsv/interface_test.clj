@@ -90,6 +90,14 @@
           planned (support/run-transformation
                    discovered (second support/handlers))]
       (is (anomaly/anomaly? (opsv-phase/execute planned)))))
+  (testing "execute rejects a non-map adapter result as anomaly data"
+    (let [adapter (support/test-adapter-result [])
+          discovered (support/run-transformation
+                      (support/execution-context adapter)
+                      (first support/handlers))
+          planned (support/run-transformation
+                   discovered (second support/handlers))]
+      (is (anomaly/anomaly? (opsv-phase/execute planned)))))
   (testing "risk classification fails when policy thresholds are absent"
     (let [ctx (update (support/execution-context
                        (support/test-adapter support/ramp-steps))

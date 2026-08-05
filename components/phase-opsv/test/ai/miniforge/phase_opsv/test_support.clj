@@ -47,6 +47,14 @@
      (run-guarded-ramp [_ _pack]
        {:environment-fingerprint fingerprint :steps steps}))))
 
+(defn ^{:stratum 0} test-adapter-result
+  [result]
+  (reify port/OPSVAdapter
+    (discover-signals [_ _targets]
+      [{:driver :cpu} {:driver :backlog}])
+    (run-guarded-ramp [_ _pack]
+      result)))
+
 (defn ^{:stratum 0} run-transformation
   [ctx [phase-key handler]]
   (assoc-in ctx [:execution/phase-results phase-key :result :output]
