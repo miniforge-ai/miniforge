@@ -257,7 +257,7 @@ OPSV SHALL emit these event types with required minimal payloads:
 - `:opsv.convergence/iteration` (iteration id, params, observed metrics summary)
 - `:opsv.policy/proposed` (policy hash, diff refs, confidence)
 - `:opsv.verification/result` (pass/fail, criteria evaluation)
-- `:opsv.actuation/emitted` (requested/effective mode and governed-action references)
+- `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
 - `:opsv.drift/detected` (signal, deviation, suggested re-run)
 
 Every event MUST include `:opsv/evidence-bundle-id` for the preallocated OPSV
@@ -395,5 +395,5 @@ A minimal compliant OPSV implementation MUST:
 - produce explainable risk and per-criterion verification results
 - emit the §4.3 events and a complete N6 §2.8 evidence bundle
 - emit PRs as N10-governed actions with provenance
-- default effective actuation to `RECOMMEND_ONLY`
+- default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence

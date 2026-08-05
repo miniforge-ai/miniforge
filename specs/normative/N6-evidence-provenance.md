@@ -355,8 +355,10 @@ preserve every referenced event, artifact, capability, and governed effect.
   :opsv/actuation
   {:requested-mode keyword            ; :recommend-only, :pr-only, :apply-allowed
    :effective-mode keyword            ; :none or never more autonomous than requested
-   :capability-refs [string ...]       ; N10 bounded-authority references
-   :governed-action-refs [uuid ...]    ; N10 action/audit references
+   :governed-effects                   ; One correlated record per N10 effect
+   [{:evidence/intent-id uuid
+     :evidence/oir-id uuid
+     :evidence/capability-id string}]
    :pr-refs [string ...]              ; PR URLs if PR_ONLY
    :apply-refs [string ...]           ; Applied resource refs if APPLY_ALLOWED
    :postcondition-artifact-refs [uuid ...]

@@ -1173,8 +1173,10 @@ event types:
  :opsv/evidence-bundle-id uuid
  :opsv/requested-actuation-mode keyword
  :opsv/effective-actuation-mode keyword ; :none or no more autonomous than requested
- :opsv/capability-refs [string ...]
- :opsv/governed-action-refs [uuid ...]
+ :opsv/governed-effects              ; Correlates each N10 intent, OIR, and capability
+ [{:evidence/intent-id uuid
+   :evidence/oir-id uuid
+   :evidence/capability-id string}]
  :opsv/pr-refs [string ...]          ; PR URLs if PR_ONLY
  :opsv/apply-refs [string ...]       ; Applied resource refs if APPLY_ALLOWED
  :message "OPSV actuation emitted: {effective-mode}"}
