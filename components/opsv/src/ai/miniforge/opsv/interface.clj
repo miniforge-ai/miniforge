@@ -27,33 +27,61 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 ;; Contract and vocabulary re-exports
-(def ^{:stratum 0} requested-actuation-modes schema/requested-actuation-modes)
+(def ^{:stratum 0} requested-actuation-modes
+  "Canonical N7 intent modes, ordered from least to most autonomous."
+  schema/requested-actuation-modes)
 
-(def ^{:stratum 0} effective-actuation-modes schema/effective-actuation-modes)
+(def ^{:stratum 0} effective-actuation-modes
+  "Canonical N7 effective modes, including the N8-safe :none posture."
+  schema/effective-actuation-modes)
 
-(def ^{:stratum 0} risk-levels schema/risk-levels)
+(def ^{:stratum 0} risk-levels
+  "Canonical N7 explainable-risk levels."
+  schema/risk-levels)
 
-(def ^{:stratum 0} rollback-statuses schema/rollback-statuses)
+(def ^{:stratum 0} rollback-statuses
+  "Canonical N6 OPSV rollback dispositions."
+  schema/rollback-statuses)
 
-(def ^{:stratum 0} ExperimentPack schema/ExperimentPack)
+(def ^{:stratum 0} ExperimentPack
+  "Closed Malli schema for an N1/N7 Experiment Pack."
+  schema/ExperimentPack)
 
-(def ^{:stratum 0} OperationalPolicy schema/OperationalPolicy)
+(def ^{:stratum 0} OperationalPolicy
+  "Closed Malli schema for an N1/N7 Operational Policy Proposal."
+  schema/OperationalPolicy)
 
-(def ^{:stratum 0} VerificationSummary schema/VerificationSummary)
+(def ^{:stratum 0} VerificationSummary
+  "Closed Malli schema for an Operational Policy verification summary."
+  schema/VerificationSummary)
 
-(def ^{:stratum 0} RiskFactor schema/RiskFactor)
+(def ^{:stratum 0} RiskFactor
+  "Closed Malli schema for one explainable risk contribution."
+  schema/RiskFactor)
 
-(def ^{:stratum 0} RiskResult schema/RiskResult)
+(def ^{:stratum 0} RiskResult
+  "Closed Malli schema for normalized explainable OPSV risk."
+  schema/RiskResult)
 
-(def ^{:stratum 0} CriterionResult schema/CriterionResult)
+(def ^{:stratum 0} CriterionResult
+  "Closed Malli schema for one verification criterion result."
+  schema/CriterionResult)
 
-(def ^{:stratum 0} VerificationResult schema/VerificationResult)
+(def ^{:stratum 0} VerificationResult
+  "Closed Malli schema for per-criterion OPSV verification."
+  schema/VerificationResult)
 
-(def ^{:stratum 0} GovernedEffect schema/GovernedEffect)
+(def ^{:stratum 0} GovernedEffect
+  "Closed Malli schema correlating an N10 intent, OIR, and capability."
+  schema/GovernedEffect)
 
-(def ^{:stratum 0} RollbackResult schema/RollbackResult)
+(def ^{:stratum 0} RollbackResult
+  "Closed Malli schema for the OPSV rollback disposition and evidence."
+  schema/RollbackResult)
 
-(def ^{:stratum 0} ActuationRecord schema/ActuationRecord)
+(def ^{:stratum 0} ActuationRecord
+  "Closed Malli schema for requested/effective actuation and effects."
+  schema/ActuationRecord)
 
 (def ^{:stratum 0} ^:private invalid-domain-value-message
   "Stable programmer-facing message for OPSV contract violations."
@@ -73,26 +101,31 @@
 
 ;; Public validation boundary
 (defn ^{:stratum 1} validate-experiment-pack
+  "Return the pack unchanged when valid, otherwise an :invalid-input anomaly."
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/experiment-pack schema/ExperimentPack value))
 
 (defn ^{:stratum 1} validate-operational-policy
+  "Return the policy unchanged when valid, otherwise an :invalid-input anomaly."
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/operational-policy schema/OperationalPolicy value))
 
 (defn ^{:stratum 1} validate-risk
+  "Return the risk result unchanged when valid, otherwise an anomaly."
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/risk-result schema/RiskResult value))
 
 (defn ^{:stratum 1} validate-verification
+  "Return the verification unchanged when valid, otherwise an anomaly."
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/verification-result schema/VerificationResult value))
 
 (defn ^{:stratum 1} validate-actuation
+  "Return the actuation record unchanged when valid, otherwise an anomaly."
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/actuation-record schema/ActuationRecord value))
@@ -101,6 +134,7 @@
 
 ;; Canonical content identity
 (defn ^{:stratum 2} experiment-pack-hash
+  "Return a canonical SHA-256 hash for a valid pack, or a validation anomaly."
   [pack]
   (let [validated (validate-experiment-pack pack)]
     (if (anomaly/anomaly? validated)

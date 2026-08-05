@@ -41,7 +41,7 @@ Foundations — domain contracts and pure hashing composition.
 - Run Polylith structure, Clojure lint, stratum lint, and the full pre-commit gate.
 - Verify all acceptance criteria from `work/n07-opsv-contracts.spec.edn`.
 
-Focused result: 8 tests, 48 assertions, 0 failures, 0 errors. The repository
+Focused result: 8 tests, 57 assertions, 0 failures, 0 errors. The repository
 pre-commit gate also passes, including Polylith structure, staged clj-kondo,
 stratum lint, smoke tests, and GraalVM/Babashka compatibility.
 

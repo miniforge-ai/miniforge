@@ -144,9 +144,22 @@
 
 (deftest ^{:stratum 1} test-correlated-actuation-contract
   (is (= valid-actuation (opsv/validate-actuation valid-actuation)))
+  (doseq [mode opsv/requested-actuation-modes]
+    (is (= mode
+           (:requested-actuation-mode
+            (opsv/validate-actuation
+             (assoc valid-actuation :requested-actuation-mode mode))))))
+  (doseq [mode opsv/effective-actuation-modes]
+    (is (= mode
+           (:effective-actuation-mode
+            (opsv/validate-actuation
+             (assoc valid-actuation :effective-actuation-mode mode))))))
   (doseq [mode [:none :apply :automatic]]
     (is (invalid? (opsv/validate-actuation
                    (assoc valid-actuation :requested-actuation-mode mode)))))
+  (doseq [mode [:apply :automatic]]
+    (is (invalid? (opsv/validate-actuation
+                   (assoc valid-actuation :effective-actuation-mode mode)))))
   (is (= (assoc valid-actuation :effective-actuation-mode :none)
          (opsv/validate-actuation
           (assoc valid-actuation :effective-actuation-mode :none))))
