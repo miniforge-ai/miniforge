@@ -21,6 +21,7 @@
    [ai.miniforge.anomaly.interface :as anomaly]
    [ai.miniforge.content-hash.interface :as content-hash]
    [ai.miniforge.phase-opsv.interface :as opsv-phase]
+   [ai.miniforge.phase-opsv.risk :as risk]
    [ai.miniforge.phase-opsv.test-support :as support]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -30,6 +31,13 @@
     (is (= [:opsv/discover :opsv/plan :opsv/execute :opsv/converge
             :opsv/synthesize :opsv/verify :opsv/actuate]
            opsv-phase/phase-keys))))
+
+(deftest ^{:stratum 0} non-finite-blast-risk-test
+  (let [pack (-> (support/execution-context nil)
+                 (get-in [:execution/input :opsv/experiment-pack])
+                 (assoc-in [:experiment-pack/guardrails :blast-radius
+                            :replica-delta] Double/NaN))]
+    (is (= 0.25 (:contribution (second (risk/factors pack nil)))))))
 
 (deftest ^{:stratum 0} seven-phase-value-flow-test
   (let [result (reduce support/run-transformation

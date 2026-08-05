@@ -32,7 +32,8 @@
 
 (defn- ^{:stratum 0} numeric-contribution
   [value multiplier]
-  (if (and (number? value) (not (neg? value)))
+  (if (and (number? value) (Double/isFinite (double value))
+           (not (neg? value)))
     (* multiplier (double value))
     0.25))
 
