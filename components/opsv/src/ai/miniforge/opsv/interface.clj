@@ -19,6 +19,7 @@
   "Public API for canonical OPSV contracts and Experiment Pack hashing."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.opsv.convergence :as convergence]
    [ai.miniforge.opsv.core :as core]
    [ai.miniforge.opsv.risk :as risk]
    [ai.miniforge.opsv.schema :as schema]
@@ -67,6 +68,18 @@
 (def ^{:stratum 0} RiskAssessment
   "Closed Malli schema for transparent OPSV risk inputs and thresholds."
   schema/RiskAssessment)
+
+(def ^{:stratum 0} convergence-terminal-reasons
+  "Canonical bounded-loop terminal reasons from N7 section 3.4."
+  schema/convergence-terminal-reasons)
+
+(def ^{:stratum 0} ConvergenceConfig
+  "Closed Malli schema for bounded and stabilized convergence."
+  schema/ConvergenceConfig)
+
+(def ^{:stratum 0} ConvergenceResult
+  "Closed Malli schema for a terminal convergence result."
+  schema/ConvergenceResult)
 
 (def ^{:stratum 0} CriterionResult
   "Closed Malli schema for one verification criterion result."
@@ -146,6 +159,40 @@
     (if (anomaly/anomaly? validated)
       validated
       (risk/assess-risk-impl validated))))
+
+(defn ^{:stratum 1} converge
+  "Run a bounded deterministic convergence loop over trusted pure callbacks.
+
+   Both callbacks receive state, the one-based iteration, and config. The step
+   callback returns the next state; the evaluator returns a ConvergenceEvaluation."
+  [config initial-state step-fn evaluate-fn]
+  (let [request {:config config
+                 :initial-state initial-state
+                 :step-fn step-fn
+                 :evaluate-fn evaluate-fn}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/convergence-request
+                                     schema/ConvergenceRequest
+                                     request)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (loop [state initial-state
+             iteration 1]
+        (let [next-state (step-fn state iteration config)
+              evaluation (validation-result
+                          invalid-domain-value-message
+                          :opsv/convergence-evaluation
+                          schema/ConvergenceEvaluation
+                          (evaluate-fn next-state iteration config))]
+          (if (anomaly/anomaly? evaluation)
+            evaluation
+            (if-let [reason (convergence/terminal-reason
+                             config evaluation iteration)]
+              {:terminal-reason reason
+               :iterations iteration
+               :state next-state
+               :evaluation evaluation}
+              (recur next-state (inc iteration)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 

@@ -44,6 +44,27 @@
 (def ^{:stratum 0} risk-thresholds
   {:medium 0.25 :high 0.5 :critical 0.75})
 
+(def ^{:stratum 0} convergence-config
+  {:parameters {:load-step 10 :config-step 1}
+   :iteration-limit 3
+   :confidence-threshold 0.8
+   :minimum-measurement-window-seconds 30
+   :required-repetitions 2})
+
+(defn ^{:stratum 0} increment-state
+  [state _iteration _config]
+  (update state :value inc))
+
+(defn ^{:stratum 0} convergence-evaluation
+  [overrides]
+  (merge {:success-criteria-satisfied? false
+          :headroom-satisfied? false
+          :guardrail-abort? false
+          :confidence 0.2
+          :measurement-window-seconds 30
+          :repetitions 2}
+         overrides))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} test-assess-risk-is-additive-and-explainable
@@ -73,3 +94,56 @@
     (is (anomaly/anomaly?
          (opsv/assess-risk risk-factors
                            {:medium 0.5 :high 0.25 :critical 0.75})))))
+
+(deftest ^{:stratum 1} test-converge-stops-on-every-terminal-condition
+  (doseq [[expected evaluation]
+          [[:success-criteria-satisfied
+            (convergence-evaluation
+             {:success-criteria-satisfied? true :headroom-satisfied? true})]
+           [:guardrail-abort
+            (convergence-evaluation {:guardrail-abort? true})]
+           [:confidence-threshold-reached
+            (convergence-evaluation {:confidence 0.8})]]]
+    (let [result (opsv/converge convergence-config
+                                {:value 0}
+                                increment-state
+                                (fn [_state _iteration _config] evaluation))]
+      (is (= expected (:terminal-reason result)))
+      (is (= 1 (:iterations result)))))
+  (let [result (opsv/converge
+                convergence-config
+                {:value 0}
+                increment-state
+                (fn [_state _iteration _config]
+                  (convergence-evaluation {})))]
+    (is (= :iteration-limit-reached (:terminal-reason result)))
+    (is (= 3 (:iterations result)))
+    (is (= {:value 3} (:state result)))))
+
+(deftest ^{:stratum 1} test-converge-enforces-stabilization
+  (let [result (opsv/converge
+                convergence-config
+                {:value 0}
+                increment-state
+                (fn [_state iteration _config]
+                  (convergence-evaluation
+                   {:success-criteria-satisfied? true
+                    :headroom-satisfied? true
+                    :measurement-window-seconds (* iteration 15)
+                    :repetitions iteration})))]
+    (is (= :success-criteria-satisfied (:terminal-reason result)))
+    (is (= 2 (:iterations result)))))
+
+(deftest ^{:stratum 1} test-converge-validates-boundary-contracts
+  (is (anomaly/anomaly?
+       (opsv/converge (assoc convergence-config :iteration-limit 0)
+                      {:value 0}
+                      increment-state
+                      (fn [_state _iteration _config]
+                        (convergence-evaluation {})))))
+  (is (anomaly/anomaly?
+       (opsv/converge convergence-config
+                      {:value 0}
+                      increment-state
+                      (fn [_state _iteration _config]
+                        {:guardrail-abort? true})))))

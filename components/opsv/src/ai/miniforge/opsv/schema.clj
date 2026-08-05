@@ -33,6 +33,12 @@
 (def ^{:stratum 0} rollback-statuses
   [:not-required :not-triggered :succeeded :failed])
 
+(def ^{:stratum 0} convergence-terminal-reasons
+  [:success-criteria-satisfied
+   :guardrail-abort
+   :confidence-threshold-reached
+   :iteration-limit-reached])
+
 (def ^{:stratum 0} KeywordMap
   "Extensible keyword-keyed detail whose entries remain domain data."
   [:map-of :keyword any?])
@@ -87,6 +93,15 @@
    [:evidence/oir-id :uuid]
    [:evidence/capability-id :string]])
 
+(def ^{:stratum 0} ConvergenceEvaluation
+  [:map {:closed true}
+   [:success-criteria-satisfied? :boolean]
+   [:headroom-satisfied? :boolean]
+   [:guardrail-abort? :boolean]
+   [:confidence [:double {:min 0.0 :max 1.0}]]
+   [:measurement-window-seconds [:int {:min 0}]]
+   [:repetitions [:int {:min 0}]]])
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} RiskLevelThresholds
@@ -97,6 +112,14 @@
     [:critical [:double {:min 0.0 :max 1.0}]]]
    [:fn {:error/message "risk thresholds must be ordered"}
     ordered-risk-thresholds?]])
+
+(def ^{:stratum 1} ConvergenceConfig
+  [:map {:closed true}
+   [:parameters KeywordMap]
+   [:iteration-limit [:int {:min 1}]]
+   [:confidence-threshold [:double {:min 0.0 :max 1.0}]]
+   [:minimum-measurement-window-seconds [:int {:min 0}]]
+   [:required-repetitions [:int {:min 1}]]])
 
 (def ^{:stratum 1} RollbackResult
   [:map {:closed true}
@@ -147,6 +170,13 @@
    [:confidence :keyword]
    [:caveats [:vector :string]]])
 
+(def ^{:stratum 1} ConvergenceResult
+  [:map {:closed true}
+   [:terminal-reason (into [:enum] convergence-terminal-reasons)]
+   [:iterations [:int {:min 1}]]
+   [:state any?]
+   [:evaluation ConvergenceEvaluation]])
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (def ^{:stratum 2} RiskAssessment
@@ -158,6 +188,13 @@
      [:fn {:error/message "required risk factors must occur exactly once"}
       required-risk-factors?]]]
    [:level-thresholds RiskLevelThresholds]])
+
+(def ^{:stratum 2} ConvergenceRequest
+  [:map {:closed true}
+   [:config ConvergenceConfig]
+   [:initial-state any?]
+   [:step-fn ifn?]
+   [:evaluate-fn ifn?]])
 
 (def ^{:stratum 2} ActuationRecord
   "Requested/effective actuation and correlated governed N10 effects."
