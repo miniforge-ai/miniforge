@@ -381,7 +381,7 @@ artifact, capability, and governed effect accumulated during the run.
               :artifact-refs [uuid ...]}}
 
   :opsv/metric-query-artifact-refs [uuid ...]
-  :opsv/metric-snapshots [uuid ...]   ; Links to :opsv-metric-snapshot artifacts
+  :opsv/metric-snapshot-artifact-refs [uuid ...]
   :opsv/diff-artifact-refs [uuid ...]}}
 ```
 
