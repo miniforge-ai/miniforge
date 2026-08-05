@@ -12,8 +12,9 @@
           "components/opsv/test/**"]}
 
  :normative-refs
- ["specs/normative/N7-Operational-Policy-Synthesis.md"
-  "specs/normative/N8-Observability-Control-Interface.md"
+ ["specs/normative/N4-policy-packs.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N8-observability-control-interface.md"
   "specs/normative/N10-governed-tool-execution.md"]
 
  :spec/constraints

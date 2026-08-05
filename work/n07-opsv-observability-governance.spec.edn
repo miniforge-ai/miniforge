@@ -18,7 +18,8 @@
  :normative-refs
  ["specs/normative/N3-event-stream.md"
   "specs/normative/N4-policy-packs.md"
-  "specs/normative/N6-evidence-provenance.md"]
+  "specs/normative/N6-evidence-provenance.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"]
 
  :spec/constraints
  ["Every OPSV event MUST carry the preallocated evidence bundle identifier"
