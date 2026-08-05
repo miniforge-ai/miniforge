@@ -52,7 +52,7 @@ All events MUST conform to this base envelope:
 
  ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
  ;; five scopes carry their own key here instead.
- :workflow/id uuid              ; REQUIRED and non-nil for Workflow-scoped
+ :workflow/id uuid or nil       ; REQUIRED and non-nil for Workflow-scoped
                                 ; events; nil only under §2.3
  :workflow/phase keyword        ; OPTIONAL: current phase (:plan, :implement, etc.)
 
@@ -1737,7 +1737,7 @@ Rules:
   `[string long]`, encoded per §5.1.1).
 - A `:supervisory/*` event SHOULD be emitted at most once per state-change
   burst (coalesce bursts within ≤ 100 ms into a single emission).
-- `:attention/resolved? = true` SHALL be encoded as a standard upsert rather
+- `:attention/resolved? = true` MUST be encoded as a standard upsert rather
   than a separate deletion event; consumers observe the transition via the
   `:attention/resolved?` field.
 - The supervisory-state component reads its own emitted events on startup to
