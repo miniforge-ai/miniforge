@@ -118,6 +118,36 @@
   (vals (:policy-evals (supervisory/apply-events supervisory/empty-table
                                                  (es/get-events stream)))))
 
+(deftest ^{:stratum 0} valid-evaluation-requires-a-verdict-and-sequential-lists
+  (testing "a well-formed verdict, with or without list fields, is valid"
+    (is (true? (mechanism/valid-evaluation? {:evaluation/passed? true})))
+    (is (true? (mechanism/valid-evaluation?
+                {:evaluation/passed? false
+                 :evaluation/packs-applied ["core"]
+                 :evaluation/violations [{:rule-id :r}]})))
+    (is (true? (mechanism/valid-evaluation?
+                {:evaluation/passed? true
+                 :evaluation/violations '()
+                 :evaluation/packs-applied nil}))
+        "absent (nil) list fields are fine — the gate builder defaults them"))
+  (testing "a missing or non-boolean verdict is not an evaluation"
+    (is (false? (mechanism/valid-evaluation? nil)))
+    (is (false? (mechanism/valid-evaluation? :not-a-map)))
+    (is (false? (mechanism/valid-evaluation? {})))
+    (is (false? (mechanism/valid-evaluation? {:evaluation/passed? "true"}))))
+  (testing "a non-sequential violations / packs field is rejected here, not as a throw later"
+    ;; The predicate requires `sequential?` (nil or a list/vector/seq),
+    ;; so a set is rejected too even though it is seqable. The scalars
+    ;; below (`(vec :kw)` / `(vec 3)`) throw downstream and degrade to the
+    ;; generic `:application-error`; rejecting the shape here keeps the
+    ;; failure the specific `:invalid-policy-evaluation`.
+    (is (false? (mechanism/valid-evaluation?
+                 {:evaluation/passed? true :evaluation/violations 3})))
+    (is (false? (mechanism/valid-evaluation?
+                 {:evaluation/passed? true :evaluation/violations :nope})))
+    (is (false? (mechanism/valid-evaluation?
+                 {:evaluation/passed? true :evaluation/packs-applied :core})))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} plain-retry-keeps-the-fsm-snapshot
