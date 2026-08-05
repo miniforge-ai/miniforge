@@ -97,6 +97,7 @@ Envelope field types are fixed across every event family:
 | `:repo/id` | string | Conditional | Repository scope key (§2.3) |
 | `:deployment/id` | string | Conditional | Deployment scope key (§2.3) |
 | `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1) |
+| `:scope/type` | keyword | Conditional | REQUIRED on inherited-scope families (§2.3, §3.15) |
 | `:message` | string | MUST | Human-renderable summary |
 
 A _Conditional_ field is REQUIRED whenever it is the event's scope key per
@@ -164,11 +165,13 @@ Rules:
   be present; the event remains Workflow-scoped.
 - A family that fits no row above MUST NOT be added to §3 until this table is
   amended. An event with no scope cannot be ordered, subscribed to, or replayed.
-- Two families take an **inherited** scope rather than a fixed one: the
+- Some families take an **inherited** scope rather than a fixed one: the
   `listener/*` lifecycle events take the scope of the stream they annotate, and
-  the `control-action/*` and `annotation/created` events take the scope of
-  their target (§3.15). An inherited scope is still exactly one scope per
-  event — it is chosen at emission, not left open.
+  `annotation/created` and `control-action/*` take the scope of their target
+  (§3.15). An inherited-scope event MUST carry `:scope/type` naming which row
+  of this table it resolved to, plus that row's scope key. It resolves to
+  exactly one scope — chosen at emission, not left open — and MUST NOT
+  substitute one scope's key for another's.
 
 ---
 
@@ -1339,17 +1342,25 @@ event types.
 
 **Scope.** The `listener/*` lifecycle events describe a stream, and a stream is
 opened on exactly one scope (§5.3.1). They therefore take **the scope of the
-stream they annotate**, not a fixed scope: a listener attached to
-`/api/streams/pack/acme-terraform` emits `listener/attached` carrying
-`:pack/id`, not `:workflow/id`. Writing `:workflow/id` into these events would
-make N3.API.7 — every stream MUST open with `listener/attached` — unsatisfiable
-on the five non-workflow scopes.
+stream they annotate**; `annotation/created` and the `control-action/*` events
+take the scope of their target. Fixing either family to `:workflow/id` would
+make N3.API.7 — every stream MUST open with `listener/attached` —
+unsatisfiable on the five non-workflow scopes.
 
-The examples below show `:workflow/id` because that is the common case. Read it
-as _the scope key of the stream_, per §2.3.
+An inherited-scope event MUST carry:
 
-`annotation/created` and the `control-action/*` events likewise carry the scope
-key of their target. A control action targeting a pack carries `:pack/id`.
+- `:scope/type` — one of `:workflow :pr :pack :repo :supervisory-entity
+  :deployment`, naming which §2.3 scope this emission resolved to; and
+- the scope key field that §2.3 pairs with that type, non-nil.
+
+`:workflow/id` keeps the meaning §2.1.1 gives it — a workflow uuid or nil — and
+MUST NOT be overloaded to carry a pack, repo, entity, or deployment
+identifier. A listener attached to `/api/streams/pack/acme-terraform` emits
+`listener/attached` with `:scope/type :pack` and `:pack/id
+"acme-terraform"`, and no `:workflow/id` at all.
+
+The examples below show the workflow case. On any other scope, substitute the
+matching `:scope/type` and scope key.
 
 #### listener/attached
 
@@ -1358,8 +1369,8 @@ key of their target. A control action targeting a pack carries `:pack/id`.
  :listener/id uuid
  :listener/type keyword              ; :watcher, :dashboard, :fleet, :enterprise
  :listener/capability keyword        ; :observe, :advise, :control
- :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3) —
-                                     ; :pack/id, :repo/id etc. on other scopes
+ :scope/type :workflow               ; REQUIRED: which §2.3 scope this stream is on
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :message "Listener attached: {type} with {capability} capability"}
 ```
 
@@ -1368,7 +1379,8 @@ key of their target. A control action targeting a pack carries `:pack/id`.
 ```clojure
 {:event/type :listener/detached
  :listener/id uuid
- :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3)
+ :scope/type :workflow               ; REQUIRED: which §2.3 scope this stream is on
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :listener/reason keyword            ; :disconnect, :timeout, :revoked
  :message "Listener detached: {reason}"}
 ```
@@ -1382,7 +1394,8 @@ listener; it does not imply the events were lost from storage (§9.4).
 ```clojure
 {:event/type :listener/overflow
  :listener/id uuid
- :workflow/id uuid                   ; REQUIRED: the stream's scope key (§2.3)
+ :scope/type :workflow               ; REQUIRED: which §2.3 scope this stream is on
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :overflow/dropped-count long        ; REQUIRED: events dropped for this listener
  :overflow/oldest-dropped-sequence long ; REQUIRED: first sequence number dropped
  :overflow/newest-dropped-sequence long ; REQUIRED: last sequence number dropped
@@ -2519,12 +2532,13 @@ unregistered type per the unknown-type rule of §7.3.
 Every row carries exactly one scope and exactly one retention class, so a
 type's class is readable without parsing prose (§4.3.1: every event type
 belongs to exactly one class). A family whose members differ in scope or class
-occupies more than one row — §3.12 spans three, and §3.11, §3.13, and §3.15
-span two each.
+occupies more than one row — §3.12 and §3.15 span three each, §3.11 and §3.13
+two each.
 
-Two §3.15 rows name an inherited scope (§2.3) rather than one of the six fixed
-scopes: the stream's for `listener/*`, the target's for `control-action/*` and
-`annotation/created`. Each emission still resolves to exactly one scope.
+Two of the three §3.15 rows name an inherited scope (§2.3) rather than one of
+the six fixed scopes: the stream's for `listener/*`, the target's for
+`annotation/created` and `control-action/*`. Each emission still resolves to
+exactly one scope, named by its `:scope/type` field.
 
 | § | Family | Scope | Retention | Event types |
 |---|--------|-------|-----------|-------------|
@@ -2547,7 +2561,8 @@ scopes: the stream's for `listener/*`, the target's for `control-action/*` and
 | 3.13 | Task lifecycle | Workflow | operational | `task/frontier-entered`, `task/claimed`, `task/capability-bound`, `task/skip-propagated` |
 | 3.13 | Task scope violation | Workflow | audit | `task/scope-violation` |
 | 3.14 | OPSV (N7) | Workflow | durable | `opsv.experiment/planned`, `opsv.experiment/started`, `opsv/load-step`, `opsv.guardrail/abort`, `opsv.convergence/iteration`, `opsv.policy/proposed`, `opsv.verification/result`, `opsv.actuation/emitted`, `opsv.drift/detected` |
-| 3.15 | Listeners and annotations (N8) | stream's scope | operational | `listener/attached`, `listener/detached`, `listener/overflow`, `annotation/created` |
+| 3.15 | Listener lifecycle (N8) | stream's scope | operational | `listener/attached`, `listener/detached`, `listener/overflow` |
+| 3.15 | Annotations (N8) | target's scope | operational | `annotation/created` |
 | 3.15 | Control actions (N8) | target's scope | audit | `control-action/requested`, `control-action/executed`, `control-action/approval-required` |
 | 3.16 | External PR (N9) | PR Work Item | durable | `provider/event-received`, `pr.readiness/changed`, `pr.risk/changed`, `pr.policy/changed`, `pr.state/changed`, `train/changed` |
 | 3.17 | Reliability metrics | Deployment | operational | `reliability/sli-computed`, `reliability/slo-breach`, `reliability/error-budget-update`, `reliability/degradation-mode-changed` |
