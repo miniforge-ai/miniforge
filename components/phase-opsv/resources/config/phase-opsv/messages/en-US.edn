@@ -1,0 +1,5 @@
+{:phase-opsv/messages
+ {:risk/environment-class "The target environment class contributes to operational risk."
+  :risk/blast-radius "The declared blast radius contributes to operational risk."
+  :risk/actuation "The requested actuation mode contributes to operational risk."
+  :risk/service-criticality "The service criticality label contributes to operational risk."}}

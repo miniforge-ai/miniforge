@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {ai.miniforge/anomaly {:local/root "../anomaly"}
+        ai.miniforge/content-hash {:local/root "../content-hash"}
+        ai.miniforge/messages {:local/root "../messages"}
+        ai.miniforge/opsv {:local/root "../opsv"}}
+ :aliases {:test {:extra-paths ["test" "test-resources"]
+                  :extra-deps {}}}}
