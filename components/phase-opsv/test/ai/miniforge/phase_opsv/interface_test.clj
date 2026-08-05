@@ -35,8 +35,8 @@
 (deftest ^{:stratum 0} non-finite-blast-risk-test
   (let [pack (-> (support/execution-context nil)
                  (get-in [:execution/input :opsv/experiment-pack])
-                 (assoc-in [:experiment-pack/guardrails :blast-radius
-                            :replica-delta] Double/NaN))]
+                 (assoc-in [:experiment-pack/guardrails :blast-radius :replica-delta]
+                           Double/NaN))]
     (is (= 0.25 (:contribution (second (risk/factors pack nil)))))))
 
 (deftest ^{:stratum 0} seven-phase-value-flow-test
@@ -129,8 +129,9 @@
                                               (second support/handlers))]
       (is (= 0.4 (get-in (support/phase-output planned :opsv/plan)
                          [:opsv/risk-result :factors 0 :contribution])))))
-  (testing "missing or empty gate results cannot promote a requested PR"
-    (doseq [gate-results [::missing nil [] :invalid]]
+  (testing "missing or invalid gate results cannot promote a requested PR"
+    (doseq [gate-results [::missing nil [] :invalid
+                          [{:gate/id :instrumentation :gate/passed? true}]]]
       (let [ctx (cond->
                  (-> (support/execution-context
                       (support/test-adapter support/ramp-steps))
@@ -142,8 +143,7 @@
             result (reduce support/run-transformation ctx support/handlers)]
         (is (= :recommend-only
                (get-in (support/phase-output result :opsv/actuate)
-                       [:opsv/actuation-record
-                        :effective-actuation-mode]))))))
+                       [:opsv/actuation-record :effective-actuation-mode]))))))
   (testing "every downstream transformation preserves its upstream anomaly"
     (let [upstream (anomaly/anomaly :invalid-input "upstream failed" {})]
       (doseq [[[upstream-key _] [phase-key handler]]
@@ -159,12 +159,10 @@
   (let [ctx (assoc-in
              (support/execution-context
               (support/test-adapter support/ramp-steps))
-             [:execution/input :opsv/experiment-pack
-              :experiment-pack/success-criteria]
+             [:execution/input :opsv/experiment-pack :experiment-pack/success-criteria]
              {:cpu-utilization 0.7 :backlog-per-replica 100.0})
         result (reduce support/run-transformation ctx support/handlers)
         evaluations (get-in (support/phase-output result :opsv/verify)
-                            [:opsv/verification-result
-                             :criteria-evaluation])]
+                            [:opsv/verification-result :criteria-evaluation])]
     (is (= #{"cpu-utilization" "backlog-per-replica"}
            (set (map :criterion/id evaluations))))))

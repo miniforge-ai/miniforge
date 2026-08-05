@@ -43,7 +43,14 @@
     {:requested-actuation-mode (:experiment-pack/actuation-intent pack)
      :verification-passed? (:passed? verification)
      :gate-results (let [results (input-value ctx :opsv/gate-results)]
-                     (if (and (vector? results) (seq results))
+                     (if (and (vector? results)
+                              (= (count opsv/opsv-gate-ids) (count results))
+                              (= (set opsv/opsv-gate-ids) (set (map :gate/id results)))
+                              (every? #(and (map? %)
+                                            (= #{:gate/id :gate/passed?}
+                                               (set (keys %)))
+                                            (boolean? (:gate/passed? %)))
+                                      results))
                        results
                        default-gate-results))
      :safe-mode? (true? (input-value ctx :opsv/safe-mode?))
