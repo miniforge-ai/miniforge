@@ -84,14 +84,15 @@
   "Publish one immutable N6 bundle using the preallocated identifier."
   [store bundle-id base-bundle evidence available-artifact-ids]
   (let [record (assembly/get-assembly store bundle-id)
+        schema-valid? (m/validate schema/OpsvEvidence evidence)
         errors (cond-> []
-                 (not (m/validate schema/OpsvEvidence evidence))
+                 (not schema-valid?)
                  (conj {:code :invalid-opsv-evidence})
                  (and record
                       (not= (:evidence-bundle/workflow-id record)
                             (:evidence-bundle/workflow-id base-bundle)))
                  (conj {:code :workflow-reference-mismatch})
-                 record
+                 (and record schema-valid?)
                  (into (reference-errors record evidence
                                          available-artifact-ids)))
         candidate (-> base-bundle

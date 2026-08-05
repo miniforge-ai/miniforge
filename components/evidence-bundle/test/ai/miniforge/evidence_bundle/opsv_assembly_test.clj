@@ -35,18 +35,13 @@
         assembly (evidence/allocate-opsv-assembly! store f/workflow-id)
         bundle-id (:evidence-bundle/id assembly)]
     (evidence/accumulate-opsv-evidence!
-     store bundle-id
-     (select-keys evidence-value
-                  [:opsv/event-refs :opsv/artifact-refs
-                   :opsv/capability-refs :opsv/governed-effects]))
+     store bundle-id evidence-value)
     [store bundle-id]))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} finalize-preserves-preallocated-identity-once
-  (let [[store bundle-id] (accumulated-store
-                           (assoc f/opsv-evidence
-                                  :opsv/governed-effects [f/governed-effect]))
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
         result (evidence/finalize-opsv-evidence!
                 store bundle-id f/base-bundle f/opsv-evidence
                 (set f/artifact-ids))]
@@ -67,9 +62,7 @@
               (evidence/accumulate-opsv-evidence! store bundle-id {})))))))
 
 (deftest ^{:stratum 1} finalize-rejects-missing-artifact
-  (let [[store bundle-id] (accumulated-store
-                           (assoc f/opsv-evidence
-                                  :opsv/governed-effects [f/governed-effect]))
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
         result (evidence/finalize-opsv-evidence!
                 store bundle-id f/base-bundle f/opsv-evidence
                 (disj (set f/artifact-ids) f/diff-artifact-id))]
@@ -84,8 +77,7 @@
 (deftest ^{:stratum 1} finalize-rejects-uncorrelated-governed-effect
   (let [uncorrelated (assoc f/opsv-evidence :opsv/capability-refs [])
         [store bundle-id] (accumulated-store
-                           (assoc uncorrelated
-                                  :opsv/governed-effects [f/governed-effect]))
+                           uncorrelated)
         result (evidence/finalize-opsv-evidence!
                 store bundle-id f/base-bundle uncorrelated
                 (set f/artifact-ids))]
@@ -93,9 +85,7 @@
     (is (contains? (error-codes result) :uncorrelated-governed-effect))))
 
 (deftest ^{:stratum 1} finalize-rejects-reference-loss
-  (let [[store bundle-id] (accumulated-store
-                           (assoc f/opsv-evidence
-                                  :opsv/governed-effects [f/governed-effect]))
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
         incomplete (update f/opsv-evidence :opsv/event-refs pop)
         result (evidence/finalize-opsv-evidence!
                 store bundle-id f/base-bundle incomplete
@@ -110,11 +100,20 @@
     (let [duplicate-evidence
           (update f/opsv-evidence reference-key #(conj % (first %)))
           [store bundle-id]
-          (accumulated-store
-           (assoc duplicate-evidence
-                  :opsv/governed-effects [f/governed-effect]))
+          (accumulated-store duplicate-evidence)
           result (evidence/finalize-opsv-evidence!
                   store bundle-id f/base-bundle duplicate-evidence
                   (set f/artifact-ids))]
       (is (response/anomaly-map? result))
       (is (contains? (error-codes result) :invalid-opsv-evidence)))))
+
+(deftest ^{:stratum 1} malformed-reference-type-returns-anomaly
+  (let [store (evidence/create-opsv-assembly-store)
+        bundle-id (:evidence-bundle/id
+                   (evidence/allocate-opsv-assembly! store f/workflow-id))
+        malformed (assoc f/opsv-evidence :opsv/event-refs f/workflow-id)
+        result (evidence/finalize-opsv-evidence!
+                store bundle-id f/base-bundle malformed
+                (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result) :invalid-opsv-evidence))))
