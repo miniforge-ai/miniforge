@@ -147,6 +147,14 @@
                                     :blast-radius :replica-delta]
                                    -1)
                          context))))
+  (doseq [invalid-namespaces [nil {:catalog true}]]
+    (is (false? (:passed? (gate/check-gate
+                           :opsv/blast-radius-gate
+                           (assoc-in pack
+                                     [:experiment-pack/guardrails
+                                      :blast-radius :namespaces]
+                                     invalid-namespaces)
+                           context)))))
   (is (false? (:passed? (gate/check-gate
                          :opsv/evidence-completeness-gate
                          (assoc evidence :opsv/metric-snapshot-artifact-refs

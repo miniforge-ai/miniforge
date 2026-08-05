@@ -153,10 +153,13 @@
         node-delta (nonnegative-number (:node-delta proposed))
         max-replicas (finite-number (:max-replica-delta limits))
         max-nodes (finite-number (:max-node-delta limits))
-        namespaces (value-set (:namespaces proposed))
+        configured-namespaces (:namespaces proposed)
+        namespaces (value-set configured-namespaces)
         allowed-namespaces (value-set (:allowed-namespaces limits))
         invalid? (or (some nil? [replica-delta node-delta
                                  max-replicas max-nodes])
+                     (not (collection-value? configured-namespaces))
+                     (empty? namespaces)
                      (and max-replicas (neg? max-replicas))
                      (and max-nodes (neg? max-nodes)))
         unauthorized (set/difference namespaces allowed-namespaces)]
