@@ -6,7 +6,7 @@
 
 # N7 — Operational Policy Synthesis With Verification
 
-**Version:** 0.2.0
+**Version:** 0.2.0-draft
 **Date:** 2026-08-04
 **Status:** Complete
 **Conformance:** MUST
@@ -398,3 +398,11 @@ A minimal compliant OPSV implementation MUST:
 - emit PRs as N10-governed actions with provenance
 - default effective actuation to `:recommend-only`
 - honor N8 emergency stop and record rollback/disposition evidence
+
+---
+
+**Version History:**
+
+- 0.2.0-draft (2026-08-04): Reconciled canonical schemas, events, evidence,
+  requested/effective actuation, verification blocking, N8 safe mode, and N10 effects
+- 0.1.0-draft (2026-02-01): Initial OPSV extension specification
