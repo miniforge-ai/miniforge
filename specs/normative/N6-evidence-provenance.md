@@ -353,8 +353,8 @@ preserve every referenced event, artifact, capability, and governed effect.
    :caveats [string ...]}
 
   :opsv/actuation
-  {:requested-mode keyword            ; :recommend-only, :pr-only, :apply-allowed
-   :effective-mode keyword            ; :none, :recommend-only, :pr-only, :apply-allowed
+  {:requested-actuation-mode keyword  ; :recommend-only, :pr-only, :apply-allowed
+   :effective-actuation-mode keyword  ; :none, :recommend-only, :pr-only, :apply-allowed
    :governed-effects                   ; One correlated record per N10 effect
    [{:evidence/intent-id uuid
      :evidence/oir-id uuid

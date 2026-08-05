@@ -516,6 +516,9 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.9.0-draft** (2026-08-04) - Indexed every normative amendment and extension with explicit
+  product applicability; reconciled N7 requested/effective actuation, OPSV event/evidence
+  correlation, and N8/N10 governance semantics
 - **0.8.0-draft** (2026-07-23) - Added N14 (Shared Deliberation Workspace) and N15 (Collective-Cognition
   Evaluation Harness). N14 is a speculative spec: conformance binds experimental implementations pre-gate and
   the spec demotes to Informative as a recorded negative result if N15 Gate G0 fails. N15's core protocol
