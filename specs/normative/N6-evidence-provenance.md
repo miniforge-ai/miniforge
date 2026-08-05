@@ -324,8 +324,10 @@ For tasks reaching `:merged` terminal state:
 For Operational Policy Synthesis workflows (see N7), evidence bundles MUST include:
 
 The workflow MUST allocate the evidence bundle identifier before emitting its
-first OPSV event and update the bundle throughout the run. Finalization MUST
-preserve every referenced event, artifact, capability, and governed effect.
+first OPSV event and accumulate material in a run-scoped assembly record. At
+terminal disposition it MUST publish one immutable bundle whose identifier is
+the preallocated value. Finalization MUST preserve references to every event,
+artifact, capability, and governed effect accumulated during the run.
 
 ```clojure
 {:evidence/opsv
