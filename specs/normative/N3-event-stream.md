@@ -1688,9 +1688,12 @@ Emitted when index canary queries detect a recall regression.
 
 ### 3.19 Supervisory Snapshot Events
 
-The supervisory-state component (N5-delta-supervisory-control-plane §3.4) emits
-entity-snapshot events whenever a canonical supervisory entity is inserted or
-updated. These events carry the **full entity** as specified in
+The supervisory snapshot family carries an entity-snapshot event whenever a
+canonical supervisory entity is inserted or updated. The supervisory-state
+component (N5-delta-supervisory-control-plane §3.4) emits every member except
+`:supervisory/automation-edge-upserted`, which the automation-edge-correlator
+owns; §3.19.1 is normative on emitter ownership. These events carry the
+**full entity** as specified in
 N5-delta-supervisory-control-plane §3 and serve as the single source of
 supervisory truth for external consumers (the Rust control console, native
 app, web dashboard).
@@ -1702,9 +1705,10 @@ fine-grained events directly.
 
 Rules:
 
-- Each entity MUST be keyed by its canonical ID (`:workflow-run/id`,
-  `:agent/id`, `[:repo :number]` for PRs, `:policy-eval/id`,
-  `:attention/id`).
+- Each entity MUST be keyed by its canonical ID — the _value_ of
+  `:workflow-run/id`, of `:agent/id`, of `:policy-eval/id`, of
+  `:attention/id`, and the composite `[repo number]` for PRs (typed
+  `[string long]`, encoded per §5.1.1).
 - A `:supervisory/*` event SHOULD be emitted at most once per state-change
   burst (coalesce bursts within ≤ 100 ms into a single emission).
 - `:attention/resolved? = true` SHALL be encoded as a standard upsert rather
@@ -3221,6 +3225,12 @@ resolution is an N3 amendment per §6.1, not silent acceptance.
 - **Separate bus.** `pr-lifecycle` runs its own in-process event bus rather
   than the N3 stream. Events on it are not sequenced, retained, or replayable
   per §2.2 and §4.3. §3.10 assumes a single stream.
+- **Single-scope endpoint not implemented.** The HTTP surface exposes only
+  `/api/workflows/:id/stream` (`bases/cli/src/ai/miniforge/cli/web.clj:68`).
+  The `/api/streams/:scope-type/:scope-id` endpoint of §5.3.1, and with it the
+  subscribe and query surfaces for the five non-workflow scopes (N3.API.1),
+  have no implementation. The four scopes introduced in this revision are
+  therefore specified but unobservable over HTTP.
 - **`:supervisory/schema-version`.** Already emitted by `supervisory-state`;
   §3.19 now requires it, so this row is closed on the next spec sync rather
   than being a code change.

@@ -181,7 +181,7 @@ that do not exist yet. They are the follow-on implementation work, listed below.
 
 ## Review Rounds
 
-Five Copilot rounds; every finding was real and is fixed. Recorded here because
+Eleven Copilot rounds; every finding was real and is fixed. Recorded here because
 the pattern is informative — most findings were consequences of the §2.3 scope
 generalization not being carried through the rest of the document.
 
@@ -202,6 +202,31 @@ generalization not being carried through the rest of the document.
 5. §5.1/§5.2/§5.3 still workflow-only after §2.3 went multi-scope, leaving four
    scopes unobservable and unrecoverable; N3.ST.4 narrower than the §4.3.2 rule
    it cites.
+6. `workflow/completed` carried a `:workflow/status` admitting `:failure`
+   while failure has its own event; `workflow/cancelled` required
+   `:action/id` in prose but never declared it; `:pr/repo` missing from all
+   nine §3.10 examples.
+7. `listener/*` fixed to `:workflow/id` though §5.3.1 now streams six scope
+   types and N3.API.7 requires every stream to open with `listener/attached`.
+8. Round 7's fix overloaded `:workflow/id` to mean "the scope key",
+   contradicting §2.1.1. Replaced with an explicit `:scope/type` field;
+   `annotation/created` split onto its own registry row.
+9. Cross-scope delivery was incoherent with per-scope sequencing — it would
+   interleave two counters and make resume ambiguous. Delivery is now
+   strictly by scope. Supervisory family glob was `:supervisory/*-upserted`
+   though two of twelve members are not `*-upserted`.
+10. The §2 base envelope still said `:workflow/id` REQUIRED and sequencing
+    per-workflow; `control-action/*` and `annotation/created` examples
+    omitted the now-required `:scope/type`.
+11. §3.19's intro attributed every emission to supervisory-state though
+    §3.19.1 gives `automation-edge-upserted` a different sole emitter;
+    composite-key notation `[:repo :number]` read as keywords; Annex A did
+    not record that §5.3.1's endpoint is unimplemented.
+
+The last five rounds trace to one decision — generalizing §2.3 from
+PR-only to six scopes — and its consequences through §3.15, §5, and the
+registry. Worth noting for the next amendment: a scope-model change is not
+local to the section that defines it.
 
 ## Deployment Plan
 
