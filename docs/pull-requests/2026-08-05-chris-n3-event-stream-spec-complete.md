@@ -53,9 +53,10 @@ repo-intelligence, and pack-lifecycle events have no workflow either.
 
 ### New normative sections
 
-- **§6 Event Type Registry** — flat enumeration of every emittable
-  `:event/type` with its scope and retention class. §6.1 requires §3, §4.1, and
-  §6 to agree and recommends enforcing it mechanically. §6.2 fixes naming rules
+- **§6 Event Type Registry** — flat enumeration of all 107 emittable
+  `:event/type` values with scope and retention class, one class per row so the
+  table is mechanically readable. §6.1 requires §3, §4.1, and §6 to agree and
+  recommends enforcing it mechanically. §6.2 fixes naming rules
   (subject-namespaced, past-tense, dotted namespaces not truncatable for
   filtering).
 - **§7 Schema Evolution & Compatibility** — what `:event/version` versions
@@ -105,8 +106,12 @@ repo-intelligence, and pack-lifecycle events have no workflow either.
   a shape change without it.
 - §4.3 retention expanded into four classes with minimums, prefix-only expiry,
   and the interaction with the §5.3.5 replay horizon.
-- §5.1 and §5.2 gained the `:pr/id` subscription and query surfaces that §2.3
-  already required.
+- §5.1, §5.2, and §5.3.1 generalized from workflow-only to every scope in the
+  §2.3 table: `subscribe-to-scope`, `get-events-for-scope`, and a single-scope
+  stream endpoint `/api/streams/:scope-type/:scope-id`. Without these, pack,
+  repository, supervisory-entity, and deployment scopes had no way to be
+  observed or recovered after a reconnect. §5.1.1 adds the canonical encoding
+  for composite scope ids (`[repo number]` → `miniforge-ai%2Fminiforge:1641`).
 - §2.1.1 added: fixed envelope field types, so families stop redefining them.
 - §10.4 conformance requirement IDs (`N3.EV.*`, `N3.EM.*`, `N3.ST.*`,
   `N3.API.*`, `N3.CP.*`, `N3.SD.*`, `N3.EF.*`) and §10.5 test obligations.
@@ -158,7 +163,7 @@ This is a specification change; no runtime code is touched.
 
 Validation performed:
 
-- `markdownlint` clean on both changed files.
+- `markdownlint` clean on all three changed Markdown files (N3, SPEC_INDEX, this PR doc).
 - All 98 Clojure example blocks verified brace-balanced by script, before and
   after each structural edit. One unbalanced block introduced mid-edit (the
   §3.13 common-fields block lost its closing brace when the `:timestamp` line
@@ -173,6 +178,30 @@ Validation performed:
 
 The §6.1 registry-agreement check and the §10.5 test obligations describe tests
 that do not exist yet. They are the follow-on implementation work, listed below.
+
+## Review Rounds
+
+Five Copilot rounds; every finding was real and is fixed. Recorded here because
+the pattern is informative — most findings were consequences of the §2.3 scope
+generalization not being carried through the rest of the document.
+
+1. `:pr/number` typed `int` in one supervisory example against `long`
+   everywhere else; `:durable` retention defined against "the workflow record"
+   though the class covers non-workflow scopes; Annex A.1 ambiguous about which
+   registry lists `pr/created`.
+2. §6 supervisory row was prose ("the twelve types enumerated in §3.19.1"),
+   defeating the section's purpose; rows carrying two retention classes
+   contradicted §4.3.1's "exactly one class per type"; SPEC_INDEX omitted the
+   supervisory entity scope.
+3. §2.1.1 defined Conditional fields as OPTIONAL unless a scope key while
+   §3.10 requires `:pr/id` on Workflow-scoped events; registry entries omit the
+   leading colon and read as strings; scope labels diverged from §2.3.
+4. §4.3.1's Members column redefined class membership and contradicted §6;
+   `workflow/completed` still admitted `:cancelled` while §3.21 forbids it;
+   `:workflow/id` typed `uuid` while marked nilable.
+5. §5.1/§5.2/§5.3 still workflow-only after §2.3 went multi-scope, leaving four
+   scopes unobservable and unrecoverable; N3.ST.4 narrower than the §4.3.2 rule
+   it cites.
 
 ## Deployment Plan
 

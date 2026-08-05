@@ -2203,16 +2203,17 @@ payload it would have been required to redact on the wire.
 Implementations MUST provide:
 
 ```clojure
-;; Subscribe to workflow events
+;; Subscribe to one scope. REQUIRED for every scope type in the §2.3 table:
+;; :workflow, :pr, :pack, :repo, :supervisory-entity, :deployment.
+(subscribe-to-scope scope-type scope-id callback-fn)
+;; Returns: subscription handle
+
+;; Named conveniences over subscribe-to-scope. OPTIONAL, but where provided
+;; they MUST behave identically to the generic form.
 (subscribe-to-workflow workflow-id callback-fn)
-;; Returns: subscription handle
-
-;; Subscribe to events for a PR Work Item (§2.3 scope key).
-;; REQUIRED: this is the only way to observe events with a nil :workflow/id.
 (subscribe-to-pr pr-id callback-fn)
-;; Returns: subscription handle
 
-;; Subscribe to all fleet events
+;; Subscribe to all fleet events across every scope
 (subscribe-to-fleet callback-fn)
 ;; Returns: subscription handle
 
@@ -2220,26 +2221,49 @@ Implementations MUST provide:
 (unsubscribe subscription-handle)
 ```
 
-A Miniforge-originated PR emits events carrying both `:workflow/id` and
-`:pr/id` (§2.3). Such an event MUST be delivered to subscribers on both scopes.
+Subscribing by scope is the only way to observe events with a nil
+`:workflow/id` — pack, repository, supervisory-entity, and deployment scopes
+have no workflow to subscribe through.
+
+An event MUST be delivered to subscribers on its own scope, and to subscribers
+on any scope whose key it carries as a cross-reference. A Miniforge-originated
+PR carries both `:workflow/id` and `:pr/id` (§2.3) and so reaches both.
 Implementations MUST NOT deliver it twice to a subscriber holding both handles
 for the same underlying consumer — de-duplication is by `:event/id`.
+
+#### 5.1.1 Scope Identifier Encoding
+
+`scope-id` is the value of the scope key. Most are a uuid or a string. The
+supervisory-entity scope admits a composite key (`[repo number]` for PRs,
+§3.19.1), so a canonical string form is REQUIRED wherever a scope id crosses a
+text boundary — an HTTP path, a query parameter, a log line:
+
+- A scalar id is its own printed form.
+- A composite id is its components joined by `:` in the order §3.19.1 lists
+  them, each component percent-encoded so that no component contains `:` or
+  `/`.
+
+Example: entity key `["miniforge-ai/miniforge" 1641]` encodes as
+`miniforge-ai%2Fminiforge:1641`. Implementations MUST round-trip this
+encoding — a decoded id MUST equal the original key.
 
 ### 5.2 Query API
 
 Implementations MUST support:
 
 ```clojure
-;; Get events for workflow
+;; Get events for any scope in the §2.3 table.
+;; REQUIRED for every scope type — this is what makes a non-workflow scope
+;; recoverable after a reconnect or an overflow (§5.3.6).
+(get-events-for-scope scope-type scope-id {:offset long :limit long})
+;; Returns: sequence of events, ordered per scope
+
+;; Get events by type within a scope
+(get-events-by-type scope-type scope-id event-type {:offset long :limit long})
+
+;; Named conveniences over get-events-for-scope. OPTIONAL.
 (get-events workflow-id {:offset long :limit long})
-;; Returns: sequence of events
-
-;; Get events for a PR Work Item (§2.3 scope key)
 (get-events-for-pr pr-id {:offset long :limit long})
-;; Returns: sequence of events, ordered per PR Work Item
-
-;; Get events by type
-(get-events-by-type workflow-id event-type {:offset long :limit long})
 
 ;; Get latest status
 (get-latest-status workflow-id agent-id)
@@ -2255,16 +2279,30 @@ a truncated range.
 
 Implementations MUST provide a Server-Sent Events (SSE) endpoint and MAY
 provide a WebSocket endpoint. Both carry the same event envelope (§2) and
-the same ordering guarantees (§2.2). This section is the wire contract for
-the per-workflow stream; cross-workflow aggregation endpoints are out of
-scope for OSS and defined by downstream products.
+the same ordering guarantees (§2.2). This section is the wire contract for a
+**single-scope stream** — one scope per connection, per §2.3. Cross-scope
+aggregation endpoints are out of scope for OSS and defined by downstream
+products.
 
 #### 5.3.1 Endpoint
 
 ```http
-GET  /api/workflows/:id/stream          ; per-workflow SSE
-WS   /api/workflows/:id/stream          ; OPTIONAL WebSocket alternative
+GET  /api/streams/:scope-type/:scope-id ; single-scope SSE
+WS   /api/streams/:scope-type/:scope-id ; OPTIONAL WebSocket alternative
+
+GET  /api/workflows/:id/stream          ; OPTIONAL alias for scope-type=workflow
+WS   /api/workflows/:id/stream
 ```
+
+`:scope-type` is one of `workflow`, `pr`, `pack`, `repo`,
+`supervisory-entity`, `deployment`. `:scope-id` is the scope identifier
+encoded per §5.1.1 and occupies exactly one path segment — a composite key is
+percent-encoded, never split across segments.
+
+Everything in the rest of §5.3 — authentication, the attach handshake,
+filters, resume, backpressure, wire formats, rate limits — applies to every
+scope type, not only to `workflow`. Resume (§5.3.5) is per scope, because
+sequence numbers are (§2.2).
 
 #### 5.3.2 Authentication
 
@@ -2793,7 +2831,7 @@ withdrawn, not deleted.
 | N3.ST.1 | MUST | Events persist across process restarts (§4.3). |
 | N3.ST.2 | MUST | Storage preserves sequence numbers and supports ordered replay (§4.3). |
 | N3.ST.3 | MUST NOT | Expire an event before its retention-class minimum (§4.3.1). |
-| N3.ST.4 | MUST NOT | Expire `:durable` or `:audit` events while a workflow in scope is non-terminal (§4.3.2). |
+| N3.ST.4 | MUST NOT | Expire `:durable` or `:audit` events while their scope is still live — non-terminal workflow, open PR Work Item, installed pack, tracked repository, current entity, running deployment (§4.3.2). |
 | N3.ST.5 | MUST | Expire whole prefixes only; never from the middle of a sequence (§4.3.2). |
 | N3.ST.6 | MUST | Expose the oldest retained sequence number per scope (§4.3.2, §5.3.5). |
 
@@ -2801,9 +2839,9 @@ withdrawn, not deleted.
 
 | ID | Level | Requirement |
 |----|-------|-------------|
-| N3.API.1 | MUST | Provide subscription by every scope key of §2.3 (§5.1). |
-| N3.API.2 | MUST | Deliver dual-scoped events on both scopes, de-duplicated by `:event/id` (§5.1). |
-| N3.API.3 | MUST | Provide the query API of §5.2, ordered by sequence ascending. |
+| N3.API.1 | MUST | Provide subscription and query by every scope type of §2.3 (§5.1, §5.2), and a single-scope stream endpoint for each (§5.3.1). |
+| N3.API.2 | MUST | Deliver an event to its own scope and to every scope whose key it cross-references, de-duplicated by `:event/id` (§5.1). |
+| N3.API.3 | MUST | Provide the query API of §5.2, ordered by sequence ascending, and round-trip composite scope ids per §5.1.1. |
 | N3.API.4 | MUST | Provide an SSE endpoint per §5.3; WebSocket is OPTIONAL. |
 | N3.API.5 | MUST | Authenticate per §5.3.2 and fail 401 in any network-exposed deployment. |
 | N3.API.6 | MUST | Validate declared listener capability against RBAC; 403 on mismatch (§5.3.3). |
