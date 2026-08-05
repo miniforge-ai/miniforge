@@ -6,8 +6,8 @@
 
 # miniforge Specification Index
 
-**Version:** 0.9.0-draft
-**Date:** 2026-08-04
+**Version:** 0.10.0-draft
+**Date:** 2026-08-05
 **Status:** Living specification during OSS development
 
 ---
@@ -118,15 +118,26 @@ Defines:
 
 Defines:
 
-- Event envelope fields; required event types (workflow, agent, status, subagent, tool,
-  LLM, messages, milestone, gate, pack lifecycle, pack run, chain edge)
-- Ordering guarantees (per-workflow sequence, causal ordering, replay determinism)
+- Event envelope fields and fixed envelope field types (§2.1.1); scope keys —
+  workflow, PR Work Item, pack, repo, deployment (§2.3)
+- Required event types (workflow, agent, status, subagent, tool, LLM, messages,
+  milestone, gate, pack lifecycle, pack run, chain edge)
+- Ordering guarantees (per-scope sequence, causal ordering, replay determinism)
 - Streaming API (SSE/WebSocket) with subscription protocol
 - Throttling and performance requirements
 - Minimal fields needed to render "live" progress and drill-down
 - **Reliability metric events:** SLI computation, SLO breach, error budget, degradation mode (§3.17)
 - **Repository intelligence events:** Index quality, canary failure (§3.18)
+- **Supervisory snapshot family:** twelve `:supervisory/*` types, entity shapes owned by the N5 deltas (§3.19.1)
+- **Workflow control events:** cancellation, checkpoint write, machine snapshot, resume (§3.21)
+- **Event type registry:** the flat enumeration of every emittable `:event/type`, with scope and retention class (§6)
+- **Schema evolution:** what `:event/version` versions, change classification, consumer obligations (§7)
+- **Sensitive data & redaction:** never-emitted values, redaction marker, truncation, field classes (§8)
+- **Emission failure semantics:** fail-closed for durable/audit classes, sequence integrity (§9)
+- **Conformance requirement IDs** (`N3.EV.*`, `N3.EM.*`, `N3.ST.*`, `N3.API.*`, `N3.CP.*`,
+  `N3.SD.*`, `N3.EF.*`) and test obligations (§10.4–§10.5)
 - **Failure class enum** on all failure events (`:failure/class`, see N1 §5.3.3)
+- **Annex A (informative):** implementation conformance status — name divergences, unimplemented and unspecified event types
 
 ### N4 — Policy Packs & Gates Standard ✅
 
@@ -516,6 +527,16 @@ Normative specs are enforced by:
 
 ## Version History
 
+- **0.10.0-draft** (2026-08-05) - N3 spec-completion pass. **N3**: canonical event type registry (§6),
+  schema evolution and consumer compatibility rules (§7), sensitive-data and redaction contract (§8),
+  emission-failure semantics with fail-closed durable/audit classes (§9), conformance requirement IDs
+  and test obligations (§10.4–§10.5), workflow control and checkpoint event family (§3.21) sourced from
+  N2 §5 and N2-delta §9, `listener/overflow` defined (§3.15), supervisory family enumerated at twelve
+  members (§3.19.1), retention classes (§4.3.1–§4.3.3), scope-key table generalized beyond PR-only
+  (§2.3). Contract fixes: `:pr/id` unified as PR Work Item UUID with `:pr/number` for provider numbers,
+  bare `:timestamp` removed, `:event/sequence-number` unified on `long`, duplicate §3.17 resolved
+  (Data Foundry → §3.20). Annex A records implementation divergence as tracked work.
+  Per-spec bumps: N3 0.9→0.10
 - **0.9.0-draft** (2026-08-04) - Indexed every normative amendment and extension with explicit
   product applicability; reconciled N7 requested/effective actuation, OPSV event/evidence
   correlation, and N8/N10 governance semantics
