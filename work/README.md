@@ -84,8 +84,8 @@ Specs are archived into subdirectories when they are no longer active:
 
 ### Normative Spec Gap Coverage (n0X-*)
 
-Specs created 2026-04-13 to close identified gaps between work specs and
-normative spec requirements (see `docs/progress-review-2026-04-13.md`):
+Gap-coverage specs originated in the 2026-04-13 progress review and are updated
+as normative contracts change (see `docs/progress-review-2026-04-13.md`):
 
 | Spec | Normative | Description | Priority |
 |------|-----------|-------------|----------|

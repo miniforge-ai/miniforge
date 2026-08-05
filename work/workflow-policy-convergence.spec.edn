@@ -22,7 +22,7 @@
   :axes #{:workflow-orchestration :governance :reliability}
   ;; :operational-policy-synthesis is the cataloged theme for OPSV-style
   ;; convergence work in work/themes.edn. Workflow Policy Convergence is
-  ;; OPSV's CONVERGE/VERIFY/ACTUATE pattern applied to the
+  ;; OPSV's domain-policy and governed-effect services applied to the
   ;; workflow-selection axis — same theme.
   :theme :operational-policy-synthesis
   :rationale "Governed outcome evidence can replace hand-tuned workflow selection only after the OPSV control path exists."
