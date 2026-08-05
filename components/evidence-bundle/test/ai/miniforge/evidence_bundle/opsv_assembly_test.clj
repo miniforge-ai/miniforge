@@ -74,7 +74,12 @@
                 store bundle-id f/base-bundle f/opsv-evidence
                 (disj (set f/artifact-ids) f/diff-artifact-id))]
     (is (response/anomaly-map? result))
-    (is (contains? (error-codes result) :referenced-artifact-not-found))))
+    (is (contains? (error-codes result) :referenced-artifact-not-found))
+    (is (= [f/diff-artifact-id]
+           (->> (:opsv.validation/errors result)
+                (filter #(= :referenced-artifact-not-found (:code %)))
+                first
+                :missing)))))
 
 (deftest ^{:stratum 1} finalize-rejects-uncorrelated-governed-effect
   (let [uncorrelated (assoc f/opsv-evidence :opsv/capability-refs [])
@@ -97,3 +102,19 @@
                 (set f/artifact-ids))]
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :event-reference-mismatch))))
+
+(deftest ^{:stratum 1} finalize-rejects-duplicate-aggregate-references
+  (doseq [reference-key [:opsv/event-refs
+                         :opsv/artifact-refs
+                         :opsv/capability-refs]]
+    (let [duplicate-evidence
+          (update f/opsv-evidence reference-key #(conj % (first %)))
+          [store bundle-id]
+          (accumulated-store
+           (assoc duplicate-evidence
+                  :opsv/governed-effects [f/governed-effect]))
+          result (evidence/finalize-opsv-evidence!
+                  store bundle-id f/base-bundle duplicate-evidence
+                  (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (contains? (error-codes result) :invalid-opsv-evidence)))))

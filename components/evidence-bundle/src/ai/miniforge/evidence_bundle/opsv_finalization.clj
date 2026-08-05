@@ -72,8 +72,9 @@
       (conj {:code :detailed-artifact-reference-missing})
       (not (set/subset? artifact-refs (set available-artifact-ids)))
       (conj {:code :referenced-artifact-not-found
-             :missing (vec (set/difference artifact-refs
-                                           (set available-artifact-ids)))})
+             :missing (vec (sort (set/difference
+                                  artifact-refs
+                                  (set available-artifact-ids))))})
       (not (set/subset? effect-capabilities capability-refs))
       (conj {:code :uncorrelated-governed-effect}))))
 

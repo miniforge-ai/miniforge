@@ -22,6 +22,10 @@
 
 (def ^{:stratum 0} KeywordMap [:map-of :keyword :any])
 
+(defn ^{:stratum 0} unique-values?
+  [values]
+  (= (count values) (count (set values))))
+
 (def ^{:stratum 0} EnvironmentFingerprint
   [:map {:closed true}
    [:cluster string?]
@@ -98,9 +102,12 @@
    [:opsv/experiment-pack-id string?]
    [:opsv/experiment-pack-artifact-id uuid?]
    [:opsv/environment-fingerprint EnvironmentFingerprint]
-   [:opsv/event-refs [:vector {:min 1} uuid?]]
-   [:opsv/artifact-refs [:vector {:min 1} uuid?]]
-   [:opsv/capability-refs [:vector string?]]
+   [:opsv/event-refs
+    [:and [:vector {:min 1} uuid?] [:fn unique-values?]]]
+   [:opsv/artifact-refs
+    [:and [:vector {:min 1} uuid?] [:fn unique-values?]]]
+   [:opsv/capability-refs
+    [:and [:vector string?] [:fn unique-values?]]]
    [:opsv/risk-score RiskResult]
    [:opsv/convergence-iterations [:int {:min 0}]]
    [:opsv/policy-proposals [:vector PolicyProposal]]
