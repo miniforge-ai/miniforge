@@ -79,7 +79,14 @@
   200)
 
 (def ^{:stratum 0} default-dashboard-requester
-  "Default requester identity when none is provided in the request body."
+  "The requester identity the dashboard stamps on every control action.
+   NOT a fallback for a missing body field: a body-supplied requester is
+   ignored outright, never preferred — see `command-requester` and
+   `build-control-action` (miniforge#1460), where honouring it would let
+   an unauthenticated caller poison the audit trail or self-authorize.
+   The surface itself is the only honest attribution until an
+   authenticated session identity is threaded through, at which point
+   this constant gives way to that identity."
   {:principal "dashboard" :role :operator})
 
 ;; Filter helpers

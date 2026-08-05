@@ -171,6 +171,37 @@
       (is (= 1 (count changes)))
       (is (= :pending-human (:intervention/state (first changes)))))))
 
+(deftest ^{:stratum 1} request-source-determines-the-approval-gate
+  ;; The runner wires this gate: a request's source decides whether it
+  ;; auto-approves (the human already performed the gesture — approving
+  ;; it again would approve the approver) or parks at :pending-human for
+  ;; a human. D-4 added :cli and :dashboard to the auto-approve set
+  ;; alongside :tui / :native-app; delegated sources (:api, :meta-agent)
+  ;; still park. Assert every arm — the earlier golden test only exercises
+  ;; :tui / :native-app, and the park test only :api.
+  (doseq [[source expected suffix]
+          [[:cli :approved "c1"]
+           [:dashboard :approved "d1"]
+           [:tui :approved "71"]
+           [:native-app :approved "a1"]
+           [:api :pending-human "e1"]
+           [:meta-agent :pending-human "e2"]]]
+    (let [events-dir (temp-events-dir)
+          stream (memory-stream)]
+      (stage-operator-file!
+       events-dir (str "req-" (name source) ".json")
+       (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
+            "\"~:intervention/id\":\"~u00000000-0000-4000-8000-0000000000" suffix "\","
+            "\"~:intervention/type\":\"~:pause\","
+            "\"~:intervention/target-id\":\"00000000-0000-4000-8000-0000000000aa\","
+            "\"~:intervention/requested-by\":\"caller@example.invalid\","
+            "\"~:intervention/request-source\":\"~:" (name source) "\"}"))
+      (consumer/consume-pass! {:events-dir events-dir :stream stream})
+      (let [changes (events-of-type stream consumer/state-changed-event-type)]
+        (is (= 1 (count changes)) (str source " routes exactly one transition"))
+        (is (= expected (:intervention/state (first changes)))
+            (str source " must gate to " expected))))))
+
 ;------------------------------------------------------------------------------ Layer 2
 
 (defn- ^{:stratum 2} golden-dir
