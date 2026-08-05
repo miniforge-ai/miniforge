@@ -47,12 +47,12 @@ All events MUST conform to this base envelope:
 ```clojure
 {:event/type keyword           ; REQUIRED: namespaced event type identifier
  :event/id uuid                ; REQUIRED: unique event ID
- :event/timestamp inst          ; REQUIRED: ISO-8601 timestamp
+ :event/timestamp inst          ; REQUIRED: instant, ISO-8601 in the JSON wire form
  :event/version string          ; REQUIRED: event schema version (e.g., "1.0.0")
 
  ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
  ;; five scopes carry their own key here instead.
- :workflow/id uuid-or-nil       ; REQUIRED and non-nil for Workflow-scoped
+ :workflow/id uuid              ; REQUIRED and non-nil for Workflow-scoped
                                 ; events; nil only under §2.3
  :workflow/phase keyword        ; OPTIONAL: current phase (:plan, :implement, etc.)
 
