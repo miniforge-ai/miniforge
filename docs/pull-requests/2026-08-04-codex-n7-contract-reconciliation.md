@@ -45,6 +45,11 @@ Foundations — normative contracts only.
 - Adversarially trace recommend-only, PR-only, direct-apply, verification
   failure, guardrail abort, and emergency-stop paths.
 
+`bb pre-commit` passes for every commit slice (338 smoke tests / 1,281
+assertions and 8 GraalVM/Babashka compatibility tests / 572 assertions).
+Local-link validation reports no missing targets, and every file under
+`specs/normative/` appears in `SPEC_INDEX.md`.
+
 ## Deployment Plan
 
 Merge before replacing the stale N7 work specs or implementing OPSV components.
@@ -55,7 +60,7 @@ Merge before replacing the stale N7 work specs or implementing OPSV components.
 
 ## Checklist
 
-- [ ] Core and extension contracts agree
-- [ ] Unsafe override paths are eliminated
-- [ ] Specification catalog is complete
-- [ ] Repository checks pass
+- [x] Core and extension contracts agree
+- [x] Unsafe override paths are eliminated
+- [x] Specification catalog is complete
+- [x] Repository checks pass
