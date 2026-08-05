@@ -131,13 +131,15 @@
 
 ;; Evidence/Artifact id helper (N5)
 (defn ^{:stratum 0} artifact-id-value
-  "Normalize URI artifact ids for artifact stores that key by UUID."
+  "Normalize a URI artifact id for the artifact store: a UUID-shaped
+   string becomes a UUID (stores that key by UUID need the typed value),
+   any other string is passed through unchanged so a string-keyed store
+   can still find it. `parse-uuid` returns nil — it does NOT throw — on a
+   non-UUID string, so `or` preserves the original id rather than
+   collapsing it to nil."
   [artifact-id]
   (if (string? artifact-id)
-    (try
-      (parse-uuid artifact-id)
-      (catch Exception _
-        artifact-id))
+    (or (parse-uuid artifact-id) artifact-id)
     artifact-id))
 
 ;------------------------------------------------------------------------------ Layer 1
