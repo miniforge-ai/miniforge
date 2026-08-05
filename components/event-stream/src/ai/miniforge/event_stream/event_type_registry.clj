@@ -64,7 +64,7 @@
      :constructor  — var name in `interface/events.clj` / `core.clj`
      :event-type   — Clojure keyword set on `:event/type`
      :json-string  — string the browser receives in `event['event/type']`
-     :browser?     — true iff `handleWorkflowEvent` in `app.js` has a case"
+     :browser?     — true iff `handleWorkflowEvent` in `app.js` has a case."
   data/event-type-registry)
 
 (def ^{:stratum 0} audit-summary
