@@ -13,6 +13,9 @@
           "components/evidence-bundle/src/**"
           "components/evidence-bundle/test/**"
           "components/gate/src/**"
+          "components/gate/resources/**"
+          "components/gate/test/**"
+          "components/policy-pack/test/**"
           "components/policy-pack/resources/policy_pack/packs/opsv-governance-1.0.0.pack.edn"]}
 
  :normative-refs
