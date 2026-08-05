@@ -4,7 +4,7 @@
   Copyright 2025-2026 Christopher Lester. Licensed under Apache 2.0.
 -->
 
-# docs: N3 event stream spec completion (0.8.0 → 0.9.0-draft)
+# docs: N3 event stream spec completion (0.9.0 → 0.10.0-draft)
 
 ## Overview
 
@@ -247,9 +247,26 @@ Not in this PR — each is an implementation change that Annex A now tracks:
 5. Implement the §10.5 conformance suite, particularly the forward-compatibility
    and fail-closed-emission cases.
 
+## Rebase
+
+Rebased onto `main` after PR #1639 (OPSV contract reconciliation) landed, which
+also bumped N3 to 0.9.0-draft. Three conflicts, all in version metadata:
+
+- Header version — this pass becomes **0.10.0-draft**; #1639 keeps 0.9.0.
+- Version history — both entries retained, ordered 0.10.0 then 0.9.0.
+- Both branches independently noticed the missing 0.7.0 entry and wrote one.
+  Kept `main`'s wording.
+
+No content conflict: #1639 rewrote §3.14 OPSV payloads, this PR touched §2, §3.10,
+§3.13, §3.15, §3.19–§3.21, §4–§10, and the annex. Verified after rebase that
+PR #1639's `:opsv/evidence-bundle-id` and `:opsv/experiment-pack-hash` work
+is intact alongside the new sections, and that §3/§6 still enumerate the same 107
+event types.
+
 ## Related Issues/PRs
 
-- Amends: N3 0.8.0-draft (#647, per-workflow streaming wire contract)
+- Amends: N3 0.9.0-draft (#1639, OPSV contract reconciliation); builds on
+  0.8.0-draft (#647, per-workflow streaming wire contract)
 - Sources: N2 §5, N2-delta-phase-checkpoint-and-resume §9,
   N5-delta-supervisory-control-plane §3, N5-delta-2 §4.2, N5-delta-3 §4,
   N5-delta-4 §4.1, N1 §2.27.9–2.27.10, N1 §5.3.3, N1 §5.5.2
