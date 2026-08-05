@@ -52,7 +52,8 @@ All events MUST conform to this base envelope:
 
  ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
  ;; five scopes carry their own key here instead.
- :workflow/id uuid              ; REQUIRED for Workflow-scoped events
+ :workflow/id uuid-or-nil       ; REQUIRED and non-nil for Workflow-scoped
+                                ; events; nil only under §2.3
  :workflow/phase keyword        ; OPTIONAL: current phase (:plan, :implement, etc.)
 
  :agent/id keyword              ; OPTIONAL: agent that emitted event
@@ -60,6 +61,8 @@ All events MUST conform to this base envelope:
 
  :event/sequence-number long   ; REQUIRED: monotonic sequence within the event's scope
  :event/parent-id uuid          ; OPTIONAL: parent event ID (for causality)
+
+ :message string                ; REQUIRED: human-renderable summary
 
  ;; Event-specific payload
  ...
@@ -77,6 +80,7 @@ All events MUST conform to this base envelope:
   Workflow (§2.3); where present on such an event it is a cross-reference and
   MUST still reference a valid workflow.
 - **event/sequence-number** - MUST be monotonically increasing within the event's scope (§2.3)
+- **message** - MUST be a human-renderable summary (design principle 5, §1.1)
 
 #### 2.1.1 Envelope Field Types
 
