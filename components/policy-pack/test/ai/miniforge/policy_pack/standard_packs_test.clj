@@ -50,6 +50,14 @@
     (when-let [resource (io/resource path)]
       (edn/read-string (slurp resource)))))
 
+(def ^{:stratum 0} ^:private opsv-rule-phases
+  {:opsv/instrumentation-gate #{:discover :execute}
+   :opsv/environment-gate #{:plan :execute}
+   :opsv/blast-radius-gate #{:plan :execute}
+   :opsv/abort-gate #{:plan :execute}
+   :opsv/actuation-gate #{:actuate}
+   :opsv/evidence-completeness-gate #{:verify :actuate}})
+
 (deftest ^{:stratum 0} compiled-standards-pack-is-valid-edn-test
   ;; Regression guard for the corruption that made policy unloadable: the
   ;; compiled standards pack (a phase resource produced by `bb standards:pack`)
@@ -103,6 +111,15 @@
                                (count (:pack/rules pack)))))
                      (reduce + 0))]
       (is (>= total 53) (str "Expected at least 53 rules, got " total)))))
+
+(deftest ^{:stratum 1} opsv-pack-uses-canonical-gates-and-phases
+  (let [pack (load-pack-resource "opsv-governance-1.0.0.pack.edn")
+        actual (into {} (map (juxt :rule/id
+                                   #(get-in % [:rule/applies-to :phases])))
+                     (:pack/rules pack))]
+    (is (= opsv-rule-phases actual))
+    (is (= (set (keys opsv-rule-phases))
+           (set (get-in pack [:pack/categories 0 :category/rules]))))))
 
 ;; Finding 7: no-hardcoded-secrets FP/FN. The original single regex was an FN
 ;; sieve (missed provider key shapes, unquoted values) and an FP generator.
