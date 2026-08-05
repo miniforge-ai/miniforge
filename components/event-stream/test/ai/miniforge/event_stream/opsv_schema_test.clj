@@ -75,7 +75,7 @@
 
 (def ^{:stratum 1} event-base
   {:event/id #uuid "00000000-0000-0000-0000-000000000002"
-   :event/timestamp #inst "2026-08-05T00:00:00.000-00:00"
+   :event/timestamp #inst "2026-08-05T00:00:00.000Z"
    :event/version "1.0"
    :event/sequence-number 0
    :workflow/id #uuid "00000000-0000-0000-0000-000000000003"

@@ -45,6 +45,8 @@
 
 (defn ^{:stratum 2} experiment-started
   [stream workflow-id evidence-id data]
+  ;; N3 section 3.14 deliberately includes the complete fingerprint value in
+  ;; this canonical message as well as in the structured internal payload.
   (opsv-event stream workflow-id evidence-id :opsv.experiment/started
               [:opsv/experiment-pack-hash :opsv/environment-fingerprint]
               (str "OPSV experiment started in "
@@ -53,6 +55,8 @@
 
 (defn ^{:stratum 2} load-step
   [stream workflow-id evidence-id data]
+  ;; N3 section 3.14 deliberately includes both load values in the canonical
+  ;; message; consumers that need structure should still use the payload keys.
   (opsv-event stream workflow-id evidence-id :opsv/load-step
               [:opsv/step-id :opsv/intended-load :opsv/observed-load]
               (str "OPSV load step " (:opsv/step-id data) ": "

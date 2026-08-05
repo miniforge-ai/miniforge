@@ -75,7 +75,7 @@
 
 ;; Derived views
 (def ^{:stratum 1} browser-handled-events
-  "The 6 event types currently handled in `handleWorkflowEvent` in app.js.
+  "Event types currently handled in `handleWorkflowEvent` in app.js.
    All strings confirmed correct — no mismatches."
   (->> event-type-registry
        (filter :browser?)
