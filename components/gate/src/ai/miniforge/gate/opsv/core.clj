@@ -59,15 +59,27 @@
 (def ^{:stratum 0} ^:private abort-thresholds
   [:error-budget-burn :saturation :tail-latency])
 
-(defn- ^{:stratum 0} value-set
-  [value]
-  (if (coll? value) (set value) #{}))
+(def ^{:stratum 0} ^:private default-production-environment "production")
 
-(defn- ^{:stratum 0} magnitude
+(defn- ^{:stratum 0} collection-value?
   [value]
-  (when (number? value) (Math/abs (double value))))
+  (or (sequential? value) (set? value)))
+
+(defn- ^{:stratum 0} finite-number
+  [value]
+  (when (number? value)
+    (let [number (double value)]
+      (when (Double/isFinite number) number))))
 
 ;------------------------------------------------------------------------------ Layer 1
+
+(defn- ^{:stratum 1} value-set
+  [value]
+  (if (collection-value? value) (set value) #{}))
+
+(defn- ^{:stratum 1} magnitude
+  [value]
+  (some-> (finite-number value) Math/abs))
 
 (defn- ^{:stratum 1} gate-result
   [gate-id result]
@@ -94,7 +106,8 @@
 
 (defn ^{:stratum 2} check-instrumentation
   [pack ctx]
-  (let [required (value-set (:experiment-pack/required-instrumentation pack))
+  (let [configured (:experiment-pack/required-instrumentation pack)
+        required (value-set configured)
         status (:opsv/instrumentation-status ctx)
         unhealthy (->> required
                        (remove #(let [signal (get status %)]
@@ -102,9 +115,12 @@
                                        (true? (:reliable? signal)))))
                        sort vec)]
     (gate-result :instrumentation
-                 (when (seq unhealthy)
+                 (when (or (not (collection-value? configured))
+                           (seq unhealthy))
                    {:reason-code :signals-unavailable-or-unreliable
-                    :details {:signals unhealthy}}))))
+                    :details {:signals unhealthy
+                              :invalid-required-instrumentation?
+                              (not (collection-value? configured))}}))))
 
 (defn ^{:stratum 2} check-environment
   [pack ctx]
@@ -113,7 +129,7 @@
         allowed (value-set (:opsv/allowed-environments ctx))
         open (value-set (:opsv/time-window-open-environments ctx))
         production (conj (value-set (:opsv/production-environments ctx))
-                         "production")
+                         default-production-environment)
         production-allowlist (value-set (:opsv/production-allowlist ctx))
         disallowed (set/difference targets allowed)
         outside-window (set/difference targets open)
@@ -134,11 +150,14 @@
         limits (:opsv/blast-radius-limits ctx)
         replica-delta (magnitude (:replica-delta proposed))
         node-delta (magnitude (:node-delta proposed))
-        max-replicas (magnitude (:max-replica-delta limits))
-        max-nodes (magnitude (:max-node-delta limits))
+        max-replicas (finite-number (:max-replica-delta limits))
+        max-nodes (finite-number (:max-node-delta limits))
         namespaces (value-set (:namespaces proposed))
         allowed-namespaces (value-set (:allowed-namespaces limits))
-        invalid? (some nil? [replica-delta node-delta max-replicas max-nodes])
+        invalid? (or (some nil? [replica-delta node-delta
+                                 max-replicas max-nodes])
+                     (and max-replicas (neg? max-replicas))
+                     (and max-nodes (neg? max-nodes)))
         unauthorized (set/difference namespaces allowed-namespaces)]
     (gate-result :blast-radius
                  (when (or invalid? (and (not invalid?)
@@ -155,7 +174,7 @@
   (let [configured (get-in pack [:experiment-pack/guardrails
                                  :abort-thresholds])
         missing (->> abort-thresholds
-                     (remove #(number? (get configured %))) vec)]
+                     (remove #(finite-number (get configured %))) vec)]
     (gate-result :abort
                  (when (seq missing)
                    {:reason-code :abort-thresholds-missing
@@ -185,7 +204,8 @@
                             (not (str/blank?
                                   (:opsv/experiment-pack-hash evidence)))))
                   (conj :opsv/experiment-pack-hash)
-                  (not (seq (:opsv/environment-fingerprint evidence)))
+                  (not (and (map? (:opsv/environment-fingerprint evidence))
+                            (seq (:opsv/environment-fingerprint evidence))))
                   (conj :opsv/environment-fingerprint)
                   (not (seq (:opsv/metric-snapshot-artifact-refs evidence)))
                   (conj :opsv/metric-snapshot-artifact-refs))]

@@ -47,18 +47,20 @@
    :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:phases #{:discover :execute}}
-   :rule/detection   {:type :custom}
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/instrumentation-detector}
    :rule/enforcement {:action :hard-halt
                       :message "Target environment lacks required instrumentation. Deploy observability infrastructure before applying changes."
                       :remediation "Ensure metrics, logging, and tracing are configured and healthy in the target environment."}}
 
   {:rule/id          :opsv/environment-gate
-   :rule/title       "Environment Promotion Gate"
+   :rule/title       "Environment Gate"
    :rule/description "Requires target environments to be allowed, inside configured time windows, and explicitly allowlisted when production is targeted."
    :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:phases #{:plan :execute}}
-   :rule/detection   {:type :custom}
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/environment-detector}
    :rule/enforcement {:action :hard-halt
                       :message "Target environment or execution window is not authorized."
                       :remediation "Select an allowed environment and time window; obtain explicit allowlisting for production."}}
@@ -69,20 +71,21 @@
    :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:phases #{:plan :execute}}
-   :rule/detection   {:type :custom}
-   :rule/enforcement {:action :require-approval
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/blast-radius-detector}
+   :rule/enforcement {:action :hard-halt
                       :message "Proposed replica, node, or namespace scope exceeds policy."
-                      :approvers [:senior-engineer]
                       :remediation "Reduce the experiment to the configured replica, node, and namespace limits."}}
 
   {:rule/id          :opsv/abort-gate
    :rule/title       "Abort Condition Gate"
    :rule/description "Requires error-budget burn, saturation, and tail-latency abort thresholds before experiment execution."
-   :rule/severity    :high
+   :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:phases #{:plan :execute}}
-   :rule/detection   {:type :custom}
-   :rule/enforcement {:action :require-approval
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/abort-detector}
+   :rule/enforcement {:action :hard-halt
                       :message "Experiment is missing one or more required abort thresholds."
                       :remediation "Configure error-budget burn, saturation, and tail-latency rollback triggers."}}
 
@@ -92,7 +95,8 @@
    :rule/severity    :critical
    :rule/category    "500"
    :rule/applies-to  {:phases #{:actuate}}
-   :rule/detection   {:type :custom}
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/actuation-detector}
    :rule/enforcement {:action :hard-halt
                       :message "APPLY_ALLOWED is not explicitly authorized for every target service."
                       :remediation "Enable apply in policy and allowlist every target service, or use a safer actuation mode."}}
@@ -103,8 +107,9 @@
    :rule/severity    :high
    :rule/category    "500"
    :rule/applies-to  {:phases #{:verify :actuate}}
-   :rule/detection   {:type :custom}
-   :rule/enforcement {:action :require-approval
+   :rule/detection   {:type :custom
+                      :custom-fn ai.miniforge.gate.opsv/evidence-completeness-detector}
+   :rule/enforcement {:action :hard-halt
                       :message "OPSV evidence is missing required actuation inputs."
                       :remediation "Attach the Experiment Pack hash, environment fingerprint, and metric snapshots."}}]
 

@@ -114,12 +114,16 @@
 
 (deftest ^{:stratum 1} opsv-pack-uses-canonical-gates-and-phases
   (let [pack (load-pack-resource "opsv-governance-1.0.0.pack.edn")
+        rules (:pack/rules pack)
         actual (into {} (map (juxt :rule/id
                                    #(get-in % [:rule/applies-to :phases])))
-                     (:pack/rules pack))]
+                     rules)]
     (is (= opsv-rule-phases actual))
     (is (= (set (keys opsv-rule-phases))
-           (set (get-in pack [:pack/categories 0 :category/rules]))))))
+           (set (get-in pack [:pack/categories 0 :category/rules]))))
+    (is (every? symbol? (map #(get-in % [:rule/detection :custom-fn]) rules)))
+    (is (= #{:hard-halt}
+           (set (map #(get-in % [:rule/enforcement :action]) rules))))))
 
 ;; Finding 7: no-hardcoded-secrets FP/FN. The original single regex was an FN
 ;; sieve (missed provider key shapes, unquoted values) and an FP generator.

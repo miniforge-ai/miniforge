@@ -19,7 +19,8 @@
   "Registry adapter for the six N4 OPSV gates."
   (:require
    [ai.miniforge.gate.opsv.core :as opsv]
-   [ai.miniforge.gate.registry :as registry]))
+   [ai.miniforge.gate.registry :as registry]
+   [ai.miniforge.policy-pack.interface :as policy-pack]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -42,7 +43,32 @@
   (opsv/gate-definition :evidence-completeness
                         opsv/check-evidence-completeness))
 
+(defn- ^{:stratum 0} detector
+  [check]
+  (fn [artifact ctx]
+    (let [result (check artifact ctx)]
+      (when-not (:passed? result) (first (:errors result))))))
+
+;------------------------------------------------------------------------------ Layer 1
+
+(def ^{:stratum 1} ^:private policy-detectors
+  {'ai.miniforge.gate.opsv/instrumentation-detector
+   (detector opsv/check-instrumentation)
+   'ai.miniforge.gate.opsv/environment-detector
+   (detector opsv/check-environment)
+   'ai.miniforge.gate.opsv/blast-radius-detector
+   (detector opsv/check-blast-radius)
+   'ai.miniforge.gate.opsv/abort-detector
+   (detector opsv/check-abort)
+   'ai.miniforge.gate.opsv/actuation-detector
+   (detector opsv/check-actuation)
+   'ai.miniforge.gate.opsv/evidence-completeness-detector
+   (detector opsv/check-evidence-completeness)})
+
 (doseq [gate-key [:opsv/instrumentation-gate :opsv/environment-gate
                   :opsv/blast-radius-gate :opsv/abort-gate
                   :opsv/actuation-gate :opsv/evidence-completeness-gate]]
   (registry/register-gate! gate-key))
+
+(doseq [[detector-symbol check] policy-detectors]
+  (policy-pack/register-custom-fn! detector-symbol check))

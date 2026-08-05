@@ -18,6 +18,9 @@
 (ns ai.miniforge.gate.opsv-test
   (:require
    [ai.miniforge.gate.interface :as gate]
+   [ai.miniforge.policy-pack.interface :as policy-pack]
+   [clojure.edn :as edn]
+   [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]]))
 
 ;------------------------------------------------------------------------------ Layer 0
@@ -51,6 +54,10 @@
    :opsv/environment-fingerprint {:cluster "staging"}
    :opsv/metric-snapshot-artifact-refs
    [#uuid "00000000-0000-0000-0000-000000000201"]})
+
+(def ^{:stratum 0} opsv-policy-pack
+  (-> "policy_pack/packs/opsv-governance-1.0.0.pack.edn"
+      io/resource slurp edn/read-string))
 
 ;------------------------------------------------------------------------------ Layer 1
 
@@ -100,9 +107,24 @@
                (assoc-in context
                          [:opsv/blast-radius-limits :max-node-delta] 0)
                (assoc-in context
+                         [:opsv/blast-radius-limits :max-node-delta] -1)
+               (assoc-in context
                          [:opsv/blast-radius-limits :allowed-namespaces] #{})]]
     (is (false? (:passed? (gate/check-gate :opsv/blast-radius-gate
                                            pack ctx))))))
+
+(deftest ^{:stratum 1} malformed-safety-inputs-fail-closed
+  (is (false? (:passed? (gate/check-gate
+                         :opsv/instrumentation-gate
+                         (dissoc pack :experiment-pack/required-instrumentation)
+                         context))))
+  (is (false? (:passed? (gate/check-gate
+                         :opsv/abort-gate
+                         (assoc-in pack
+                                   [:experiment-pack/guardrails
+                                    :abort-thresholds :tail-latency]
+                                   ##NaN)
+                         context)))))
 
 (deftest ^{:stratum 1} safer-actuation-does-not-require-apply-authority
   (let [recommendation (assoc pack :experiment-pack/actuation-intent
@@ -117,6 +139,18 @@
     (is (false? (:passed? (gate/check-gate
                            :opsv/evidence-completeness-gate
                            incomplete {}))))))
+
+(deftest ^{:stratum 1} policy-pack-rules-run-the-mechanical-gates
+  (let [invalid-context (assoc-in context
+                                  [:opsv/instrumentation-status
+                                   :latency :available?]
+                                  false)
+        result (policy-pack/check-artifact opsv-policy-pack pack
+                                           (assoc invalid-context
+                                                  :phase :discover))]
+    (is (false? (:passed? result)))
+    (is (= :opsv/instrumentation-gate
+           (-> result :blocking first :code)))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
