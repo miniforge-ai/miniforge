@@ -1087,9 +1087,10 @@ event types:
 ```clojure
 {:event/type :opsv.experiment/planned
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/pack-hash string              ; Experiment Pack content hash
  :opsv/targets {:services [...] :environments [...]}
- :opsv/risk-score {:level keyword :factors [...]}
+ :opsv/risk-score {:score double :level keyword :factors [...]}
  :message "OPSV experiment planned: {pack-hash}"}
 ```
 
@@ -1098,6 +1099,7 @@ event types:
 ```clojure
 {:event/type :opsv.experiment/started
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/pack-hash string
  :opsv/environment-fingerprint {...} ; Cluster, node pool, image digests, config
  :message "OPSV experiment started in {environment}"}
@@ -1108,6 +1110,7 @@ event types:
 ```clojure
 {:event/type :opsv/load-step
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/step-id string
  :opsv/intended-load {...}
  :opsv/observed-load {...}
@@ -1119,6 +1122,7 @@ event types:
 ```clojure
 {:event/type :opsv.guardrail/abort
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/trigger keyword               ; Abort trigger type
  :opsv/threshold {...}
  :opsv/observed {...}
@@ -1131,6 +1135,7 @@ event types:
 ```clojure
 {:event/type :opsv.convergence/iteration
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/iteration-id string
  :opsv/params {...}
  :opsv/observed-metrics-summary {...}
@@ -1142,6 +1147,7 @@ event types:
 ```clojure
 {:event/type :opsv.policy/proposed
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/policy-hash string
  :opsv/diff-refs [uuid ...]          ; N6 artifact references
  :opsv/confidence keyword
@@ -1153,9 +1159,9 @@ event types:
 ```clojure
 {:event/type :opsv.verification/result
  :workflow/id uuid
+ :opsv/evidence-bundle-id uuid
  :opsv/passed? boolean
  :opsv/criteria-evaluation [...]
- :opsv/evidence-bundle-id uuid
  :message "OPSV verification {passed?}: {summary}"}
 ```
 
@@ -1164,24 +1170,32 @@ event types:
 ```clojure
 {:event/type :opsv.actuation/emitted
  :workflow/id uuid
- :opsv/actuation-mode keyword        ; :pr-only or :apply-allowed
+ :opsv/evidence-bundle-id uuid
+ :opsv/requested-actuation-mode keyword
+ :opsv/effective-actuation-mode keyword ; :none or no more autonomous than requested
+ :opsv/capability-refs [string ...]
+ :opsv/governed-action-refs [uuid ...]
  :opsv/pr-refs [string ...]          ; PR URLs if PR_ONLY
  :opsv/apply-refs [string ...]       ; Applied resource refs if APPLY_ALLOWED
- :message "OPSV actuation emitted: {mode}"}
+ :message "OPSV actuation emitted: {effective-mode}"}
 ```
 
 #### opsv.drift/detected
 
 ```clojure
 {:event/type :opsv.drift/detected
- :workflow/id uuid                   ; OPTIONAL: may be nil if detected by monitoring
+ :workflow/id uuid                   ; Originating OPSV workflow for the monitored policy
+ :opsv/evidence-bundle-id uuid
  :opsv/signal keyword
  :opsv/deviation {...}
  :opsv/suggested-rerun? boolean
  :message "OPSV drift detected: {signal}"}
 ```
 
-All OPSV events MUST link to the corresponding evidence bundle id per N6.
+All OPSV events MUST include `:opsv/evidence-bundle-id`. The OPSV workflow
+MUST allocate that identifier before `:opsv.experiment/planned` and finalize
+the corresponding bundle per N6. Drift events reference the originating
+workflow and bundle for the monitored policy.
 
 ### 3.15 Observability Control Interface Events (N8)
 

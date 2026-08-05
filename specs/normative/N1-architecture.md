@@ -788,6 +788,7 @@ with provenance per N6.
   :confidence keyword
   :caveats [string ...]}
 
+ :operational-policy/rollback-plan {...} ; N10-governed rollback action
  :operational-policy/evidence-refs [uuid ...]} ; N6 evidence artifacts
 ```
 
@@ -816,7 +817,8 @@ Experiment Packs are specializations of Packs (§2.10.3).
  :experiment-pack/success-criteria {...}
  :experiment-pack/guardrails {...}
  :experiment-pack/convergence {...}
- :experiment-pack/actuation-intent keyword} ; :recommend-only, :pr-only, :apply-allowed
+ :experiment-pack/actuation-intent keyword  ; :recommend-only, :pr-only, :apply-allowed
+ :experiment-pack/required-instrumentation [...]}
 ```
 
 Experiment Packs SHALL be hash-addressed and recorded in the event stream and evidence bundle.
@@ -825,13 +827,16 @@ See N7 for detailed Experiment Pack specification.
 ### 2.13 Actuation Mode (N7)
 
 An **Actuation Mode** governs whether OPSV workflows produce recommendations, PRs, or
-direct changes:
+request direct changes:
 
 - **RECOMMEND_ONLY**: produce policy proposals and evidence; no changes emitted.
 - **PR_ONLY**: produce changes as PRs against declared repos.
-- **APPLY_ALLOWED**: apply changes directly when permitted by policy packs and gates.
+- **APPLY_ALLOWED**: request direct apply eligibility when permitted by policy packs and gates.
 
-`APPLY_ALLOWED` MUST be disabled by default. See N7 §1.4.
+An Actuation Mode expresses intent and MUST NOT be treated as an authority grant.
+PR creation and direct apply require a valid N10 capability at execution time;
+the effective mode may be less autonomous than requested. `APPLY_ALLOWED` MUST
+be disabled by default. See N7 §1.4 and §5.4.
 
 ### 2.14 Verification (N7)
 
@@ -2721,12 +2726,14 @@ conformance checklist.
 - N7 (Operational Policy Synthesis): Defines OPSV workflow, Experiment Packs, Operational Policies
 - N8 (Observability Control Interface): Defines Listeners, Capability Levels, Control Actions
 - N9 (External PR Integration): Defines PR Work Items, Providers, PR Trains, Readiness
+- N10 (Governed Tool Execution): Defines bounded capabilities, governed actions, rollback, and postconditions
 
 ---
 
 ## 13. Glossary
 
-- **Actuation Mode** - Governance mode for OPSV outputs: RECOMMEND_ONLY, PR_ONLY, or APPLY_ALLOWED (N7)
+- **Actuation Mode** - Requested OPSV output intent: RECOMMEND_ONLY, PR_ONLY, or APPLY_ALLOWED; authority is evaluated
+  separately (N7)
 - **Advisory Annotation** - Non-blocking message attached to a workflow or event by a Listener (N8)
 - **Agent** - Autonomous software entity that executes workflow phases
 - **Artifact** - Work product created during workflow execution

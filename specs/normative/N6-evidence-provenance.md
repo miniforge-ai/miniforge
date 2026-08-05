@@ -323,14 +323,20 @@ For tasks reaching `:merged` terminal state:
 
 For Operational Policy Synthesis workflows (see N7), evidence bundles MUST include:
 
+The workflow MUST allocate the evidence bundle identifier before emitting its
+first OPSV event and update the bundle throughout the run. Finalization MUST
+preserve every referenced event, artifact, capability, and governed effect.
+
 ```clojure
 {:evidence/opsv
  {:opsv/experiment-pack-hash string   ; Content hash of Experiment Pack used
   :opsv/experiment-pack-id string
+  :opsv/experiment-pack-artifact-id uuid ; Content-addressed pack artifact
   :opsv/environment-fingerprint       ; Cluster, node pool, image digests, config
   {:cluster string
    :node-pools [string ...]
-   :image-digests {...}}
+   :image-digests {...}
+   :config-hash string}
 
   :opsv/convergence-iterations long   ; Number of convergence iterations
   :opsv/policy-proposals              ; Proposed operational policies
@@ -347,11 +353,19 @@ For Operational Policy Synthesis workflows (see N7), evidence bundles MUST inclu
    :caveats [string ...]}
 
   :opsv/actuation
-  {:mode keyword                      ; :recommend-only, :pr-only, :apply-allowed
+  {:requested-mode keyword            ; :recommend-only, :pr-only, :apply-allowed
+   :effective-mode keyword            ; :none or never more autonomous than requested
+   :capability-refs [string ...]       ; N10 bounded-authority references
+   :governed-action-refs [uuid ...]    ; N10 action/audit references
    :pr-refs [string ...]              ; PR URLs if PR_ONLY
-   :apply-refs [string ...]}          ; Applied resource refs if APPLY_ALLOWED
+   :apply-refs [string ...]           ; Applied resource refs if APPLY_ALLOWED
+   :postcondition-artifact-refs [uuid ...]
+   :rollback {:status keyword         ; :not-required, :not-triggered, :succeeded, :failed
+              :artifact-refs [uuid ...]}}
 
-  :opsv/metric-snapshots [uuid ...]}} ; Links to :opsv-metric-snapshot artifacts
+  :opsv/metric-query-artifact-refs [uuid ...]
+  :opsv/metric-snapshots [uuid ...]   ; Links to :opsv-metric-snapshot artifacts
+  :opsv/diff-artifact-refs [uuid ...]}}
 ```
 
 ### 2.9 Control Action Evidence (N8)
