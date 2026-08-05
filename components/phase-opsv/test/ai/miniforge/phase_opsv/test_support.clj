@@ -33,17 +33,18 @@
    [:opsv/actuate opsv-phase/actuate]])
 
 (defn ^{:stratum 0} test-adapter
-  [steps]
-  (reify opsv-phase/OPSVAdapter
-    (discover-signals [_ _targets]
-      [{:driver :cpu} {:driver :backlog}])
-    (run-guarded-ramp [_ _pack]
-      {:environment-fingerprint
-       {:cluster "staging-1"
-        :node-pools ["general"]
-        :image-digests {"catalog" "sha256:abc"}
-        :config-hash "config-1"}
-       :steps steps})))
+  ([steps]
+   (test-adapter steps
+                 {:cluster "staging-1"
+                  :node-pools ["general"]
+                  :image-digests {"catalog" "sha256:abc"}
+                  :config-hash "config-1"}))
+  ([steps fingerprint]
+   (reify opsv-phase/OPSVAdapter
+     (discover-signals [_ _targets]
+       [{:driver :cpu} {:driver :backlog}])
+     (run-guarded-ramp [_ _pack]
+       {:environment-fingerprint fingerprint :steps steps}))))
 
 (defn ^{:stratum 0} run-transformation
   [ctx [phase-key handler]]

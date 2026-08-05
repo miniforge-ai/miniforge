@@ -82,6 +82,14 @@
           planned (support/run-transformation
                    discovered (second support/handlers))]
       (is (anomaly/anomaly? (opsv-phase/execute planned)))))
+  (testing "execute rejects an adapter ramp without a fingerprint"
+    (let [adapter (support/test-adapter support/ramp-steps nil)
+          discovered (support/run-transformation
+                      (support/execution-context adapter)
+                      (first support/handlers))
+          planned (support/run-transformation
+                   discovered (second support/handlers))]
+      (is (anomaly/anomaly? (opsv-phase/execute planned)))))
   (testing "risk classification fails when policy thresholds are absent"
     (let [ctx (update (support/execution-context
                        (support/test-adapter support/ramp-steps))
@@ -110,4 +118,10 @@
       (is (= :recommend-only
              (get-in (support/phase-output result :opsv/actuate)
                      [:opsv/actuation-record
-                      :effective-actuation-mode]))))))
+                      :effective-actuation-mode])))))
+  (testing "actuation preserves an upstream verification anomaly"
+    (let [upstream (anomaly/anomaly :invalid-input "verification failed" {})
+          ctx (assoc-in (support/execution-context nil)
+                        [:execution/phase-results :opsv/verify :result :output]
+                        upstream)]
+      (is (= upstream (opsv-phase/actuate ctx))))))

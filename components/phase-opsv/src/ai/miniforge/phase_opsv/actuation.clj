@@ -55,20 +55,23 @@
 
 (defn ^{:stratum 2} actuate
   [ctx verified]
-  (let [verification (:opsv/verification-result verified)
-        effective-mode (opsv/effective-actuation
-                        (decision-input ctx verification))]
-    (if (anomaly/anomaly? effective-mode)
-      effective-mode
-      (let [record {:requested-actuation-mode
-                    (:experiment-pack/actuation-intent verified)
-                    :effective-actuation-mode effective-mode
-                    :governed-effects []
-                    :pr-refs []
-                    :apply-refs []
-                    :postcondition-artifact-refs []
-                    :rollback {:status :not-required :artifact-refs []}}
-            validated (opsv/validate-actuation record)]
-        (if (anomaly/anomaly? validated)
-          validated
-          (assoc verified :opsv/actuation-record validated))))))
+  (if (anomaly/anomaly? verified)
+    verified
+    (let [verification (:opsv/verification-result verified)
+          effective-mode (opsv/effective-actuation
+                          (decision-input ctx verification))]
+      (if (anomaly/anomaly? effective-mode)
+        effective-mode
+        (let [record {:requested-actuation-mode
+                      (get-in ctx [:execution/input :opsv/experiment-pack
+                                   :experiment-pack/actuation-intent])
+                      :effective-actuation-mode effective-mode
+                      :governed-effects []
+                      :pr-refs []
+                      :apply-refs []
+                      :postcondition-artifact-refs []
+                      :rollback {:status :not-required :artifact-refs []}}
+              validated (opsv/validate-actuation record)]
+          (if (anomaly/anomaly? validated)
+            validated
+            (assoc verified :opsv/actuation-record validated)))))))

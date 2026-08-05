@@ -36,10 +36,16 @@
   [ctx key]
   (get-in ctx [:execution/input key]))
 
-(defn- ^{:stratum 0} empty-ramp-anomaly
+(defn- ^{:stratum 0} invalid-ramp-anomaly
   [ramp]
-  (when-not (seq (:steps ramp))
+  (cond
+    (not (seq (:steps ramp)))
     (anomaly/anomaly :invalid-input (msg/ts :adapter/empty-ramp)
+                     {:adapter/result-keys (vec (sort (keys ramp)))})
+
+    (not (and (map? (:environment-fingerprint ramp))
+              (seq (:environment-fingerprint ramp))))
+    (anomaly/anomaly :invalid-input (msg/ts :adapter/missing-fingerprint)
                      {:adapter/result-keys (vec (sort (keys ramp)))})))
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -53,7 +59,7 @@
 (defn- ^{:stratum 1} ramp-shape-anomaly
   [ramp]
   (when-not (anomaly/anomaly? ramp)
-    (empty-ramp-anomaly ramp)))
+    (invalid-ramp-anomaly ramp)))
 
 (defn- ^{:stratum 1} operational-policy
   [ctx convergence]
