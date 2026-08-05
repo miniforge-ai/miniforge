@@ -52,8 +52,9 @@ All events MUST conform to this base envelope:
 
  ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
  ;; five scopes carry their own key here instead.
- :workflow/id uuid or nil       ; REQUIRED and non-nil for Workflow-scoped
-                                ; events; nil only under §2.3
+ :workflow/id uuid or nil       ; REQUIRED and non-nil on Workflow-scoped
+                                ; events; on other scopes omit it, or
+                                ; carry a workflow id as a cross-reference
  :workflow/phase keyword        ; OPTIONAL: current phase (:plan, :implement, etc.)
 
  :agent/id keyword              ; OPTIONAL: agent that emitted event
@@ -105,6 +106,12 @@ Envelope field types are fixed across every event family:
 | `:supervisory/entity-key` | any | Conditional | Supervisory entity scope key (§2.3, §3.19.1) |
 | `:scope/type` | keyword | Conditional | REQUIRED on inherited-scope families (§2.3, §3.15) |
 | `:message` | string | MUST | Human-renderable summary |
+
+**Absent and nil are equivalent.** For any field not marked MUST, omitting the
+key and writing `nil` mean the same thing, and implementations MAY do either.
+A consumer MUST treat them identically. So "`:workflow/id` is `uuid or nil`"
+and "a pack-scoped event carries no `:workflow/id`" describe the same event —
+the field is simply not populated.
 
 A _Conditional_ field is REQUIRED whenever it is the event's scope key per
 §2.3. Where it is not the scope key it serves as a cross-reference and is
