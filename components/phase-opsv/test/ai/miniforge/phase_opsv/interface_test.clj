@@ -98,8 +98,11 @@
                       (support/execution-context adapter)
                       (first support/handlers))
           planned (support/run-transformation
-                   discovered (second support/handlers))]
-      (is (anomaly/anomaly? (opsv-phase/execute planned)))))
+                   discovered (second support/handlers))
+          result (opsv-phase/execute planned)]
+      (is (anomaly/anomaly? result))
+      (is (= "clojure.lang.PersistentVector"
+             (get-in result [:anomaly/data :adapter/result-type])))))
   (testing "risk classification fails when policy thresholds are absent"
     (let [ctx (update (support/execution-context
                        (support/test-adapter support/ramp-steps))

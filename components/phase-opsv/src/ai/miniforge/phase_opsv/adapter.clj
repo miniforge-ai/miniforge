@@ -41,6 +41,10 @@
 (defn- ^{:stratum 1} invalid-ramp-anomaly
   [ramp]
   (cond
+    (not (map? ramp))
+    (anomaly/anomaly :invalid-input (msg/ts :adapter/invalid-result)
+                     {:adapter/result-type (some-> ramp class .getName)})
+
     (not (seq (:steps ramp)))
     (anomaly/anomaly :invalid-input (msg/ts :adapter/empty-ramp)
                      {:adapter/result-keys (result-keys ramp)})
