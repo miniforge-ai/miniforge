@@ -31,6 +31,8 @@ Planning — one work spec and its generated queue row.
 - Preserve the registered-workflow selection outcome and heuristic fallback.
 - Make offline evidence, frozen-holdout verification, and N10 publication gates
   explicit.
+- Cite N10 directly so the publication-path constraint is traceable to its
+  governing contract.
 - Leave workflow synthesis out of scope rather than embedding deferred tasks.
 - Remove volatile file-location and implementation-step instructions.
 

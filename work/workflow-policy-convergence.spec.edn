@@ -18,7 +18,8 @@
  :normative-refs
  ["specs/normative/N1-architecture.md"
   "specs/normative/N2-workflows.md"
-  "specs/normative/N7-Operational-Policy-Synthesis.md"]
+  "specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N10-governed-tool-execution.md"]
 
  :spec/constraints
  ["Rubric scoring and convergence MUST be deterministic pure functions"
