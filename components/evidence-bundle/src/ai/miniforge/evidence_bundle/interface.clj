@@ -24,13 +24,46 @@
    [ai.miniforge.evidence-bundle.collector :as collector]
    [ai.miniforge.evidence-bundle.extraction :as extraction]
    [ai.miniforge.evidence-bundle.extraction-bulk :as extraction-bulk]
+   [ai.miniforge.evidence-bundle.opsv-assembly :as opsv-assembly]
+   [ai.miniforge.evidence-bundle.opsv-finalization :as opsv-finalization]
    [ai.miniforge.evidence-bundle.schema :as schema]
    [ai.miniforge.evidence-bundle.schema.compliance :as compliance]
    [ai.miniforge.evidence-bundle.schema.domain :as domain]
+   [ai.miniforge.evidence-bundle.schema.opsv :as opsv-schema]
    [ai.miniforge.evidence-bundle.interface.protocols.evidence-bundle :as p]
    [ai.miniforge.evidence-bundle.protocols.records.evidence-bundle :as records]))
 
 ;------------------------------------------------------------------------------ Layer 0
+
+(def ^{:stratum 0} OpsvEvidence
+  "Canonical N6 section 2.8 OPSV evidence schema."
+  opsv-schema/OpsvEvidence)
+
+(defn ^{:stratum 0} create-opsv-assembly-store
+  "Create a run-scoped store for OPSV evidence assembly records."
+  []
+  (opsv-assembly/create-store))
+
+(defn ^{:stratum 0} allocate-opsv-assembly!
+  "Preallocate an evidence bundle identifier before the first OPSV event."
+  [store workflow-id]
+  (opsv-assembly/allocate! store workflow-id))
+
+(defn ^{:stratum 0} accumulate-opsv-evidence!
+  "Accumulate OPSV event, artifact, capability, and governed-effect references."
+  [store bundle-id material]
+  (opsv-assembly/accumulate! store bundle-id material))
+
+(defn ^{:stratum 0} get-opsv-assembly
+  "Retrieve an active or finalized OPSV assembly record."
+  [store bundle-id]
+  (opsv-assembly/get-assembly store bundle-id))
+
+(defn ^{:stratum 0} finalize-opsv-evidence!
+  "Finalize an OPSV assembly exactly once as an immutable N6 bundle."
+  [store bundle-id base-bundle evidence available-artifact-ids]
+  (opsv-finalization/finalize! store bundle-id base-bundle evidence
+                               available-artifact-ids))
 
 ;; Protocol re-exports
 (def ^{:stratum 0} EvidenceBundle
