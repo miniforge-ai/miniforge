@@ -16,8 +16,11 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.phase-opsv.interface
-  "Public OPSV application vocabulary and adapter port."
-  (:require [ai.miniforge.phase-opsv.protocol :as protocol]))
+  "Public OPSV application transformations and adapter port."
+  (:require
+   [ai.miniforge.phase-opsv.actuation :as actuation]
+   [ai.miniforge.phase-opsv.model :as model]
+   [ai.miniforge.phase-opsv.protocol :as protocol]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -30,3 +33,20 @@
 (def ^{:stratum 0} phase-keys
   [:opsv/discover :opsv/plan :opsv/execute :opsv/converge
    :opsv/synthesize :opsv/verify :opsv/actuate])
+
+(def ^{:stratum 0} discover model/discover)
+
+(def ^{:stratum 0} plan model/plan)
+
+(def ^{:stratum 0} execute model/execute)
+
+(def ^{:stratum 0} converge model/converge)
+
+(def ^{:stratum 0} synthesize model/synthesize)
+
+(def ^{:stratum 0} verify model/verify)
+
+(defn ^{:stratum 0} actuate
+  [ctx]
+  (actuation/actuate
+   ctx (get-in ctx [:execution/phase-results :opsv/verify :result :output])))
