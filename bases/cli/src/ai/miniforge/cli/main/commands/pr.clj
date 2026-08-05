@@ -84,8 +84,12 @@
   [opts]
   (let [{:keys [url]} opts]
     (if-not url
-      (display/print-error (messages/t :pr/merge-usage {:command (app-config/command-string "pr merge <pr-url>")}))
-      (display/print-error (messages/t :pr/merge-not-available {:hint (str "gh pr merge " url)})))))
+      (do
+        (display/print-error (messages/t :pr/merge-usage {:command (app-config/command-string "pr merge <pr-url>")}))
+        (shared/exit! 1))
+      (do
+        (display/print-error (messages/t :pr/merge-not-available {:hint (str "gh pr merge " url)}))
+        (shared/exit! 1)))))
 
 ;; PR Monitor (continuous loop)
 (defn ^{:stratum 0} pr-monitor-cmd
