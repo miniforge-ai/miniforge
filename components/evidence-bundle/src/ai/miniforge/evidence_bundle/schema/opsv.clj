@@ -20,7 +20,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} KeywordMap [:map-of :keyword :any])
+(def ^{:stratum 0} KeywordMap [:map-of keyword? :any])
 
 (defn ^{:stratum 0} unique-values?
   [values]

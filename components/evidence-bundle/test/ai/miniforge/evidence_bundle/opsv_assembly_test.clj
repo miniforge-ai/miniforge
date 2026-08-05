@@ -102,6 +102,31 @@
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :event-reference-mismatch))))
 
+(deftest ^{:stratum 1} finalize-reports-each-reference-mismatch
+  (doseq [[expected-code change]
+          [[:artifact-reference-mismatch
+            #(update % :opsv/artifact-refs pop)]
+           [:capability-reference-mismatch
+            #(assoc % :opsv/capability-refs [])]
+           [:governed-effect-mismatch
+            #(assoc-in % [:opsv/actuation :governed-effects] [])]]]
+    (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+          result (evidence/finalize-opsv-evidence!
+                  store bundle-id f/base-bundle (change f/opsv-evidence)
+                  (set f/artifact-ids))]
+      (is (response/anomaly-map? result))
+      (is (contains? (error-codes result) expected-code)))))
+
+(deftest ^{:stratum 1} finalize-rejects-unindexed-detailed-artifact
+  (let [evidence-value (update f/opsv-evidence :opsv/artifact-refs pop)
+        [store bundle-id] (accumulated-store evidence-value)
+        result (evidence/finalize-opsv-evidence!
+                store bundle-id f/base-bundle evidence-value
+                (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result)
+                   :detailed-artifact-reference-missing))))
+
 (deftest ^{:stratum 1} finalize-rejects-duplicate-aggregate-references
   (doseq [reference-key [:opsv/event-refs
                          :opsv/artifact-refs
