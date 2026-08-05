@@ -155,7 +155,7 @@ contract — every row is a conformance gap to close.
 ### SPEC_INDEX
 
 N3 entry updated to list the new sections and requirement-ID families. Index
-version 0.8.0 → 0.9.0-draft with an amendment-log entry.
+version 0.9.0 → 0.10.0-draft with an amendment-log entry.
 
 ## Testing Plan
 
