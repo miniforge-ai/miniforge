@@ -1,0 +1,42 @@
+{:spec/title "Implement canonical OPSV domain contracts"
+
+ :spec/description
+ "Create the pure OPSV component and closed Malli contracts for Experiment
+  Packs, Operational Policy Proposals, explainable risk, per-criterion
+  verification, requested/effective actuation, and correlated governed effects.
+  Expose validation and canonical Experiment Pack hashing through the component
+  interface so later phases share one representation."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/opsv/**"
+          "projects/miniforge/deps.edn"]}
+
+ :normative-refs
+ ["specs/normative/N1-architecture.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"]
+
+ :spec/constraints
+ ["Domain namespaces MUST remain pure and contain no adapter or workflow I/O"
+  "Validation failures MUST return typed anomaly data at the public boundary"
+  "Experiment Pack hashes MUST use canonical content hashing"
+  "Schemas MUST reject unknown top-level keys and invalid actuation keywords"]
+
+ :spec/acceptance-criteria
+ ["validate-experiment-pack accepts every required N1/N7 field and rejects each missing field"
+  "validate-operational-policy requires rollback, verification summary, and evidence references"
+  "Risk records reject scores outside [0.0, 1.0] and factors without input, contribution, or rationale"
+  "Actuation records accept only canonical requested/effective modes and correlated N10 effect records"
+  "Equivalent Experiment Pack values produce the same content hash regardless of map insertion order"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:correctness :dogfood-enabler}
+  :theme :operational-policy-synthesis
+  :rationale "Every OPSV producer and consumer depends on one validated canonical value model."
+  :blocks ["n07-opsv-domain-policy.spec.edn"
+           "n07-opsv-observability-governance.spec.edn"]
+  :blocked-by []}
+
+ :dag/id :n07-opsv-contracts
+ :spec/workflow-type :canonical-sdlc}
