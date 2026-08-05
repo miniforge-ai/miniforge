@@ -115,29 +115,7 @@
 (defn ^{:stratum 2} finalize!
   "Publish one immutable N6 bundle using the preallocated identifier."
   [store bundle-id base-bundle evidence available-artifact-ids]
-  (let [record (assembly/get-assembly store bundle-id)
-        schema-valid? (m/validate schema/OpsvEvidence evidence)
-        canonical-evidence (if schema-valid?
-                             (canonicalize-reference-order evidence)
-                             evidence)
-        errors (cond-> []
-                 (not schema-valid?)
-                 (conj {:code :invalid-opsv-evidence})
-                 (and record
-                      (not= (:evidence-bundle/workflow-id record)
-                            (:evidence-bundle/workflow-id base-bundle)))
-                 (conj {:code :workflow-reference-mismatch})
-                 (and record schema-valid?)
-                 (into (reference-errors record canonical-evidence
-                                         available-artifact-ids)))
-        candidate (-> base-bundle
-                      (dissoc :evidence/content-hash)
-                      (assoc :evidence-bundle/id bundle-id
-                             :evidence/opsv canonical-evidence))
-        bundle-errors (:errors (bundle/validate-bundle-impl candidate))
-        errors (into errors
-                     (map #(assoc % :code :invalid-evidence-bundle)
-                          bundle-errors))]
+  (let [record (assembly/get-assembly store bundle-id)]
     (cond
       (nil? record)
       (anomaly :anomalies/not-found "OPSV evidence assembly not found"
@@ -145,26 +123,53 @@
       (not= :assembling (:opsv.assembly/status record))
       (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
                bundle-id [{:code :bundle-already-finalized}])
-      (seq errors)
-      (anomaly :anomalies/incorrect "OPSV evidence finalization failed"
-               bundle-id errors)
       :else
-      (let [final-bundle (assoc candidate :evidence/content-hash
-                                (content-hash/content-hash candidate))
-            [old-state new-state]
-            (swap-vals! store update bundle-id
-                        (fn [current]
-                          (if (= current record)
-                            (assoc current
-                                   :opsv.assembly/status :finalized
-                                   :opsv.assembly/bundle final-bundle)
-                            current)))]
-        (cond
-          (= record (get old-state bundle-id))
-          (get-in new-state [bundle-id :opsv.assembly/bundle])
-          (= :assembling
-             (get-in old-state [bundle-id :opsv.assembly/status]))
-          (recur store bundle-id base-bundle evidence available-artifact-ids)
-          :else
-          (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
-                   bundle-id [{:code :bundle-already-finalized}]))))))
+      (let [schema-valid? (m/validate schema/OpsvEvidence evidence)
+            base-valid? (map? base-bundle)
+            canonical-evidence (if schema-valid?
+                                 (canonicalize-reference-order evidence)
+                                 evidence)
+            candidate (when base-valid?
+                        (-> base-bundle
+                            (dissoc :evidence/content-hash)
+                            (assoc :evidence-bundle/id bundle-id
+                                   :evidence/opsv canonical-evidence)))
+            errors (cond-> []
+                     (not schema-valid?)
+                     (conj {:code :invalid-opsv-evidence})
+                     (not base-valid?)
+                     (conj {:code :invalid-base-bundle})
+                     (and base-valid?
+                          (not= (:evidence-bundle/workflow-id record)
+                                (:evidence-bundle/workflow-id base-bundle)))
+                     (conj {:code :workflow-reference-mismatch})
+                     schema-valid?
+                     (into (reference-errors record canonical-evidence
+                                             available-artifact-ids))
+                     candidate
+                     (into (map #(assoc % :code :invalid-evidence-bundle)
+                                (:errors (bundle/validate-bundle-impl
+                                          candidate)))))]
+        (if (seq errors)
+          (anomaly :anomalies/incorrect "OPSV evidence finalization failed"
+                   bundle-id errors)
+          (let [final-bundle (assoc candidate :evidence/content-hash
+                                    (content-hash/content-hash candidate))
+                [old-state new-state]
+                (swap-vals! store update bundle-id
+                            (fn [current]
+                              (if (= current record)
+                                (assoc current
+                                       :opsv.assembly/status :finalized
+                                       :opsv.assembly/bundle final-bundle)
+                                current)))]
+            (cond
+              (= record (get old-state bundle-id))
+              (get-in new-state [bundle-id :opsv.assembly/bundle])
+              (= :assembling
+                 (get-in old-state [bundle-id :opsv.assembly/status]))
+              (recur store bundle-id base-bundle evidence
+                     available-artifact-ids)
+              :else
+              (anomaly :anomalies/conflict "OPSV evidence bundle is immutable"
+                       bundle-id [{:code :bundle-already-finalized}]))))))))

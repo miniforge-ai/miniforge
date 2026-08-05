@@ -64,11 +64,19 @@
       (is (= :anomalies/conflict
              (:anomaly/category
               (evidence/finalize-opsv-evidence!
-               store bundle-id f/base-bundle f/opsv-evidence
+               store bundle-id :invalid-base-bundle f/opsv-evidence
                (set f/artifact-ids)))))
       (is (= :anomalies/conflict
              (:anomaly/category
               (evidence/accumulate-opsv-evidence! store bundle-id {})))))))
+
+(deftest ^{:stratum 1} finalize-rejects-invalid-base-bundle
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+        result (evidence/finalize-opsv-evidence!
+                store bundle-id :invalid-base-bundle f/opsv-evidence
+                (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result) :invalid-base-bundle))))
 
 (deftest ^{:stratum 1} finalize-rejects-missing-artifact
   (let [[store bundle-id] (accumulated-store f/opsv-evidence)
