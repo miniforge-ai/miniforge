@@ -27,7 +27,7 @@
 
 ;------------------------------------------------------------------------------ Layer 1
 
-(defn ^{:stratum 1} opsv-event
+(defn- ^{:stratum 1} opsv-event
   [stream workflow-id evidence-id event-type payload-keys message data]
   (merge (select-keys data payload-keys)
          (core/create-envelope stream event-type workflow-id message

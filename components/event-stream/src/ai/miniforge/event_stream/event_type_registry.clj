@@ -21,7 +21,7 @@
    This namespace is the single source of truth for the event-type naming audit
    (Tasks 1–7).  It documents:
 
-     1.  Every constructor defined in `interface/events.clj`
+     1.  Every constructor exposed by the `interface.*` API groups
      2.  The `:event/type` keyword each constructor places in the envelope
          (see `event-stream.core/create-envelope`)
      3.  The JSON string that keyword serialises to when transmitted over
@@ -32,11 +32,11 @@
      5.  The constructor-name → serialised-string naming asymmetries that
          would trip up a developer reading only `interface/events.clj`
 
-   ## Audit verdict (2026-03-28)
+   ## Audit verdict (2026-08-05)
 
    * NO mismatches: every browser `case` string exactly matches the server keyword.
-   * LARGE coverage gap: only 6 of 45 server-side event types are handled in
-     the browser switch; the remaining 39 silently fall through to `default: break`.
+   * LARGE coverage gap: only 6 server-side event types are handled in the
+     browser switch; all other registered types fall through to `default: break`.
    * NAMING ASYMMETRIES: 13 constructors use a function name whose implied
      namespace differs from the actual `:event/type` namespace.  See
      `naming-asymmetries` below.
@@ -46,19 +46,13 @@
    file to add or modify event types.  This namespace loads it and
    derives the computed views below."
   (:require
-   [clojure.edn :as edn]
-   [clojure.java.io :as io]
+   [ai.miniforge.event-stream.event-type-registry.audit :as audit]
+   [ai.miniforge.event-stream.event-type-registry.data :as data]
    [clojure.string :as str]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
-;; Registry — loaded from EDN resource
-(def ^{:stratum 0} ^:private registry-resource-path
-  "config/event-stream/event-type-registry.edn")
-
-;------------------------------------------------------------------------------ Layer 1
-
-(def ^{:stratum 1} event-type-registry
+(def ^{:stratum 0} event-type-registry
   "Complete mapping from constructor symbol name (as string) to serialised
    JSON event-type string, grouped by originating namespace.
 
@@ -71,14 +65,16 @@
      :event-type   — Clojure keyword set on `:event/type`
      :json-string  — string the browser receives in `event['event/type']`
      :browser?     — true iff `handleWorkflowEvent` in `app.js` has a case"
-  (-> (io/resource registry-resource-path)
-      slurp
-      edn/read-string))
+  data/event-type-registry)
 
-;------------------------------------------------------------------------------ Layer 2
+(def ^{:stratum 0} audit-summary
+  "Machine-readable registry/browser audit summary."
+  audit/audit-summary)
+
+;------------------------------------------------------------------------------ Layer 1
 
 ;; Derived views
-(def ^{:stratum 2} browser-handled-events
+(def ^{:stratum 1} browser-handled-events
   "The 6 event types currently handled in `handleWorkflowEvent` in app.js.
    All strings confirmed correct — no mismatches."
   (->> event-type-registry
@@ -87,7 +83,7 @@
 
 ;; => ["workflow/started" "workflow/phase-started" "workflow/phase-completed"
 ;;     "workflow/completed" "workflow/failed" "agent/chunk"]
-(def ^{:stratum 2} browser-unhandled-events
+(def ^{:stratum 1} browser-unhandled-events
   "Event types emitted server-side that the browser switch silently ignores.
    These are the gap items for Tasks 1–7."
   (->> event-type-registry
@@ -107,7 +103,7 @@
 ;;   cp-agent-state-changed     → "control-plane/agent-state-changed" (prefix cp → control-plane)
 ;;   cp-decision-created        → "control-plane/decision-created"  (prefix cp → control-plane)
 ;;   cp-decision-resolved       → "control-plane/decision-resolved" (prefix cp → control-plane)
-(def ^{:stratum 2} naming-asymmetries
+(def ^{:stratum 1} naming-asymmetries
   "13 constructors whose function name does not predict the namespace portion
    of the serialised event-type string.  A developer reading only
    `interface/events.clj` would guess the wrong browser case string.
@@ -119,39 +115,6 @@
                {:constructor    constructor
                 :json-string    json-string
                 :asymmetry-note asymmetry-note}))))
-
-;------------------------------------------------------------------------------ Layer 3
-
-;; Audit summary (machine-readable)
-(def ^{:stratum 3} audit-summary
-  {:audit/date          "2026-05-24"
-   :audit/source-server "components/event-stream/src/ai/miniforge/event_stream/interface/events.clj"
-   :audit/source-browser "components/web-dashboard/resources/public/js/app.js"
-   :audit/browser-switch "handleWorkflowEvent"
-
-   :total-server-events      (count event-type-registry)
-   :browser-handled-count    (count browser-handled-events)
-   :browser-unhandled-count  (count browser-unhandled-events)
-   :naming-asymmetry-count   (count naming-asymmetries)
-
-   ;; Verdict
-   :string-mismatches []
-   ;; ^ NONE: every browser case string exactly matches a server-emitted value.
-   ;; The 6 handled events are a correct, strict subset of server events.
-
-   :coverage-gaps browser-unhandled-events
-   ;; ^ Events silently ignored by the browser. Adding cases for these
-   ;;   is the primary work of Tasks 1–7.
-
-   :asymmetries naming-asymmetries
-   ;; ^ When adding browser cases, use the :json-string column above,
-   ;;   NOT a mechanical transformation of the constructor name.
-
-   :serialisation-rule
-   "Clojure namespaced keyword :ns/name serialises (Cheshire/jsonista) to
-    the plain string \"ns/name\" — no leading colon.  The browser reads
-    event['event/type'] (key has a literal slash) and compares against these
-    plain strings."})
 
 ;------------------------------------------------------------------------------ Rich Comment
 (comment

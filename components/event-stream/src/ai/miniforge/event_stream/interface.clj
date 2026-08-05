@@ -201,23 +201,41 @@
 
 ;; ────────────────────────────────────────────────────────────────────────────
 ;; Event constructors
-(def ^{:stratum 0} experiment-planned opsv/experiment-planned)
+(def ^{:stratum 0} experiment-planned
+  "Construct an N3 :opsv.experiment/planned event."
+  opsv/experiment-planned)
 
-(def ^{:stratum 0} experiment-started opsv/experiment-started)
+(def ^{:stratum 0} experiment-started
+  "Construct an N3 :opsv.experiment/started event."
+  opsv/experiment-started)
 
-(def ^{:stratum 0} load-step opsv/load-step)
+(def ^{:stratum 0} load-step
+  "Construct an N3 :opsv/load-step event."
+  opsv/load-step)
 
-(def ^{:stratum 0} guardrail-abort opsv/guardrail-abort)
+(def ^{:stratum 0} guardrail-abort
+  "Construct an N3 :opsv.guardrail/abort event."
+  opsv/guardrail-abort)
 
-(def ^{:stratum 0} convergence-iteration opsv/convergence-iteration)
+(def ^{:stratum 0} convergence-iteration
+  "Construct an N3 :opsv.convergence/iteration event."
+  opsv/convergence-iteration)
 
-(def ^{:stratum 0} policy-proposed opsv/policy-proposed)
+(def ^{:stratum 0} policy-proposed
+  "Construct an N3 :opsv.policy/proposed event."
+  opsv/policy-proposed)
 
-(def ^{:stratum 0} verification-result opsv/verification-result)
+(def ^{:stratum 0} verification-result
+  "Construct an N3 :opsv.verification/result event."
+  opsv/verification-result)
 
-(def ^{:stratum 0} actuation-emitted opsv/actuation-emitted)
+(def ^{:stratum 0} actuation-emitted
+  "Construct an N3 :opsv.actuation/emitted event."
+  opsv/actuation-emitted)
 
-(def ^{:stratum 0} drift-detected opsv/drift-detected)
+(def ^{:stratum 0} drift-detected
+  "Construct an N3 :opsv.drift/detected event."
+  opsv/drift-detected)
 
 (def ^{:stratum 0} workflow-started
   "Build and return a :workflow/started event envelope map. Multi-arity

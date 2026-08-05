@@ -23,38 +23,70 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} ExperimentPlanned schema/ExperimentPlanned)
+(def ^{:stratum 0} ExperimentPlanned
+  "Schema for :opsv.experiment/planned."
+  schema/ExperimentPlanned)
 
-(def ^{:stratum 0} ExperimentStarted schema/ExperimentStarted)
+(def ^{:stratum 0} ExperimentStarted
+  "Schema for :opsv.experiment/started."
+  schema/ExperimentStarted)
 
-(def ^{:stratum 0} LoadStep schema/LoadStep)
+(def ^{:stratum 0} LoadStep "Schema for :opsv/load-step." schema/LoadStep)
 
-(def ^{:stratum 0} GuardrailAbort schema/GuardrailAbort)
+(def ^{:stratum 0} GuardrailAbort
+  "Schema for :opsv.guardrail/abort."
+  schema/GuardrailAbort)
 
-(def ^{:stratum 0} ConvergenceIteration schema/ConvergenceIteration)
+(def ^{:stratum 0} ConvergenceIteration
+  "Schema for :opsv.convergence/iteration."
+  schema/ConvergenceIteration)
 
-(def ^{:stratum 0} PolicyProposed schema/PolicyProposed)
+(def ^{:stratum 0} PolicyProposed
+  "Schema for :opsv.policy/proposed."
+  schema/PolicyProposed)
 
-(def ^{:stratum 0} VerificationResult schema/VerificationResult)
+(def ^{:stratum 0} VerificationResult
+  "Schema for :opsv.verification/result."
+  schema/VerificationResult)
 
-(def ^{:stratum 0} ActuationEmitted schema/ActuationEmitted)
+(def ^{:stratum 0} ActuationEmitted
+  "Schema for :opsv.actuation/emitted."
+  schema/ActuationEmitted)
 
-(def ^{:stratum 0} DriftDetected schema/DriftDetected)
+(def ^{:stratum 0} DriftDetected
+  "Schema for :opsv.drift/detected."
+  schema/DriftDetected)
 
-(def ^{:stratum 0} experiment-planned opsv/experiment-planned)
+(def ^{:stratum 0} experiment-planned
+  "Construct an experiment-planned event."
+  opsv/experiment-planned)
 
-(def ^{:stratum 0} experiment-started opsv/experiment-started)
+(def ^{:stratum 0} experiment-started
+  "Construct an experiment-started event."
+  opsv/experiment-started)
 
-(def ^{:stratum 0} load-step opsv/load-step)
+(def ^{:stratum 0} load-step "Construct a load-step event." opsv/load-step)
 
-(def ^{:stratum 0} guardrail-abort opsv/guardrail-abort)
+(def ^{:stratum 0} guardrail-abort
+  "Construct a guardrail-abort event."
+  opsv/guardrail-abort)
 
-(def ^{:stratum 0} convergence-iteration opsv/convergence-iteration)
+(def ^{:stratum 0} convergence-iteration
+  "Construct a convergence-iteration event."
+  opsv/convergence-iteration)
 
-(def ^{:stratum 0} policy-proposed opsv/policy-proposed)
+(def ^{:stratum 0} policy-proposed
+  "Construct a policy-proposed event."
+  opsv/policy-proposed)
 
-(def ^{:stratum 0} verification-result opsv/verification-result)
+(def ^{:stratum 0} verification-result
+  "Construct a verification-result event."
+  opsv/verification-result)
 
-(def ^{:stratum 0} actuation-emitted opsv/actuation-emitted)
+(def ^{:stratum 0} actuation-emitted
+  "Construct an actuation-emitted event."
+  opsv/actuation-emitted)
 
-(def ^{:stratum 0} drift-detected opsv/drift-detected)
+(def ^{:stratum 0} drift-detected
+  "Construct a drift-detected event."
+  opsv/drift-detected)
