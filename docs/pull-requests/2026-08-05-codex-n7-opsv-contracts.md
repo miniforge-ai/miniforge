@@ -23,7 +23,7 @@ Foundations — domain contracts and pure hashing composition.
 
 ## Depends on
 
-- #1647 — pending merge
+- #1647 — merged
 
 ## Changes in Detail
 
