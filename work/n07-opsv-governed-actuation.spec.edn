@@ -1,0 +1,46 @@
+{:spec/title "Implement governed OPSV PR, Kubernetes apply, and rollback effects"
+
+ :spec/description
+ "Add provider and Kubernetes adapter protocols plus N10-backed PR creation and
+  direct apply. Direct apply uses the resolved OCI/Kubernetes command surface,
+  verified rollback, postcondition monitoring, and effect reconciliation. N8
+  emergency stop revokes new mutation, stops load at a safe boundary, and invokes
+  the separately authorized recovery path."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/opsv-actuation/**"
+          "components/opsv-adapter-kubernetes/**"
+          "projects/miniforge/deps.edn"]}
+
+ :normative-refs
+ ["specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N8-Observability-Control-Interface.md"
+  "specs/normative/N10-governed-tool-execution.md"]
+
+ :spec/constraints
+ ["PR creation and apply MUST require real matching N10 grants at execution time"
+  "OPSV MUST NOT use :authority/unenforced"
+  "Runtime differences MUST remain registry data and MUST NOT branch on :runtime/kind"
+  "Direct apply MUST have verified rollback and configured postconditions"
+  "All image references used by load adapters MUST be fully qualified"]
+
+ :spec/acceptance-criteria
+ ["PR-only records a correlated :effect/pr-create transaction and provider result"
+  "Apply refuses missing, expired, revoked, mismatched, or insufficient grants before mutation"
+  "A successful apply records postcondition evidence and reconciled :effect/deploy outcome"
+  "A failed postcondition triggers the verified rollback and records both outcomes"
+  "Emergency stop prevents new effects and records abort, rollback, and final disposition evidence"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:correctness :scale}
+  :theme :operational-policy-synthesis
+  :rationale "External mutations are the highest-risk N7 stratum and must reuse settled N8/N10 authority."
+  :blocks ["n07-opsv-cli-tui-drift.spec.edn"]
+  :blocked-by ["n07-opsv-domain-policy.spec.edn"
+               "n07-opsv-observability-governance.spec.edn"
+               "n07-opsv-workflow.spec.edn"]}
+
+ :dag/id :n07-opsv-governed-actuation
+ :spec/workflow-type :canonical-sdlc}

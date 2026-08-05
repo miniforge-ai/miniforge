@@ -1,0 +1,46 @@
+{:spec/title "Implement OPSV events, evidence assembly, and governance gates"
+
+ :spec/description
+ "Implement the nine N3 OPSV event constructors and schemas, preallocated-ID
+  evidence assembly, and all six N4 OPSV gates with machine-readable remediation.
+  Replace the obsolete observe-plan-stabilize-verify policy pack metadata with the
+  canonical seven phases and requested/effective actuation semantics."
+
+ :spec/intent
+ {:type :feature
+  :scope ["components/event-stream/src/**"
+          "components/event-stream/test/**"
+          "components/evidence-bundle/src/**"
+          "components/evidence-bundle/test/**"
+          "components/gate/src/**"
+          "components/policy-pack/resources/policy_pack/packs/opsv-governance-1.0.0.pack.edn"]}
+
+ :normative-refs
+ ["specs/normative/N3-event-stream.md"
+  "specs/normative/N4-policy-packs.md"
+  "specs/normative/N6-evidence-provenance.md"]
+
+ :spec/constraints
+ ["Every OPSV event MUST carry the preallocated evidence bundle identifier"
+  "Final evidence MUST be published once and remain immutable"
+  "Gate messages and remediation summaries MUST use message catalogs"
+  "Event schema decomposition MUST preserve the event-stream component boundary"]
+
+ :spec/acceptance-criteria
+ ["All nine OPSV event types validate with the canonical N3 payload shape"
+  "A terminal OPSV run finalizes the preallocated identifier into one valid N6 bundle"
+  "Instrumentation, environment, blast-radius, abort, actuation, and evidence gates each return typed remediation"
+  "The governance pack applies rules to the canonical OPSV phases"
+  "Evidence validation rejects an uncorrelated governed effect or missing referenced artifact"]
+
+ :spec/priority
+ {:tier :blocker
+  :axes #{:observation :correctness :dogfood-enabler}
+  :theme :operational-policy-synthesis
+  :rationale "N7 execution is not governable or auditable until events, evidence, and gates agree."
+  :blocks ["n07-opsv-workflow.spec.edn"
+           "n07-opsv-governed-actuation.spec.edn"]
+  :blocked-by ["n07-opsv-contracts.spec.edn"]}
+
+ :dag/id :n07-opsv-observability-governance
+ :spec/workflow-type :canonical-sdlc}

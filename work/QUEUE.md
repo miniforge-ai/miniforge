@@ -133,8 +133,14 @@ Discover scaling + budget signals via governed experiments, synthesize
 
 | tier | r | theme | spec | axes |
 |---|---|---|---|---|
-| high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — OPSV: converge agent max-tokens + phase-iteration budgets | observation+tokenconservation+dogfoodenabler |
-| medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Workflow Policy Convergence: learned workflow selection | workfloworchestration+governance+reliability |
+| blocker | ● | operational-policy-synthesis | `n07-opsv-contracts.spec.edn` — Implement canonical OPSV domain contracts | correctness+dogfoodenabler |
+| blocker | ○ | operational-policy-synthesis | `n07-opsv-domain-policy.spec.edn` — Implement OPSV risk, convergence, verification, and authority decisions | correctness+dogfoodenabler |
+| blocker | ○ | operational-policy-synthesis | `n07-opsv-observability-governance.spec.edn` — Implement OPSV events, evidence assembly, and governance gates | correctness+observation+dogfoodenabler |
+| blocker | ○ | operational-policy-synthesis | `n07-opsv-workflow.spec.edn` — Implement the seven-phase OPSV workflow and staging MCI | correctness+scale+dogfoodenabler |
+| high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — Dogfood OPSV on agent invocation and phase budgets | correctness+observation+tokenconservation+dogfoodenabler |
+| high | ○ | operational-policy-synthesis | `n07-opsv-cli-tui-drift.spec.edn` — Implement OPSV CLI, TUI drill-down, and drift detection | observation+ux+dogfoodenabler |
+| high | ○ | operational-policy-synthesis | `n07-opsv-governed-actuation.spec.edn` — Implement governed OPSV PR, Kubernetes apply, and rollback effects | correctness+scale |
+| medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Workflow Policy Convergence: learned workflow selection | governance+workfloworchestration+reliability |
 
 ## Theme — unassigned (`unassigned`, status: planned)
 
@@ -146,6 +152,7 @@ Discover scaling + budget signals via governed experiments, synthesize
 | medium | ● | unassigned | `behavioral-verification-monitor.spec.edn` — Behavioral Verification in the Monitor Phase | - |
 | medium | ● | unassigned | `capsule-runtime-spec-wiring.spec.edn` — Wire runtime spec network-policy and secrets to Docker executor | - |
 | medium | ● | unassigned | `clj-xref-context-neighborhoods.spec.edn` — Clojure dependency-neighborhood context via clj-xref | - |
+| medium | ● | unassigned | `codex-gap-instrument.spec.edn` — Codex gap instrument: miss ledger, bucket attribution, gap report | - |
 | medium | ● | unassigned | `configurable-spec-types.spec.edn` — Configurable Spec Type Taxonomy via Policy Pack | - |
 | medium | ● | unassigned | `control-plane-completion.spec.edn` — Control Plane Completion — Decision Wiring, Events, and Dashboard | - |
 | medium | ● | unassigned | `dashboard-production-ready.spec.edn` — Build Production-Ready Web Dashboard with High Fidelity | - |
@@ -163,8 +170,6 @@ Discover scaling + budget signals via governed experiments, synthesize
 | medium | ● | unassigned | `n05-http-api-decision.spec.edn` — N5: Resolve HTTP REST + SSE vs winsock and implement API layer | - |
 | medium | ● | unassigned | `n06-compliance-metadata.spec.edn` — N6: Add compliance metadata fields to evidence bundles | - |
 | medium | ● | unassigned | `n06-sensitive-data-scanning.spec.edn` — N6: Scan evidence bundles for sensitive data before storage | - |
-| medium | ● | unassigned | `n07-opsv-converge-verify-actuate.spec.edn` — N7: OPSV CONVERGE, VERIFY, and ACTUATE phases | - |
-| medium | ● | unassigned | `n07-opsv-workflow.spec.edn` — N7: OPSV workflow skeleton — DISCOVER phase and experiment pack schema | - |
 | medium | ● | unassigned | `n08-oci-governance.spec.edn` — N8: OCI governance — RBAC, listener capabilities, control actions, audit | - |
 | medium | ● | unassigned | `n08-otel-trace-context.spec.edn` — N8: OpenTelemetry alignment and W3C Trace Context propagation | - |
 | medium | ● | unassigned | `n08-privacy-retention.spec.edn` — N8: Privacy levels for event access and data retention policies | - |

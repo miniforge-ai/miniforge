@@ -105,9 +105,9 @@ work specs in `work/`.
 
 ### Vision Completion
 
-- **OPSV** (`n07-opsv-workflow.spec.edn`, `n07-opsv-converge-verify-actuate.spec.edn`)
-  -- Operational Policy Synthesis: experiment packs, convergence loops,
-  verification suites. Largest single gap, timeline dependent on core stability.
+- **OPSV** (`n07-opsv-contracts.spec.edn`; full sequence in `work/QUEUE.md`)
+  -- Seven-phase Operational Policy Synthesis, governed actuation, and the
+  HPA/KEDA staging MCI followed by agent-budget dogfood.
 - **OTel alignment** (`n08-otel-trace-context.spec.edn`)
   -- OpenTelemetry and W3C Trace Context propagation.
 - **Provider-native checks** (`n09-provider-native-checks.spec.edn`)
