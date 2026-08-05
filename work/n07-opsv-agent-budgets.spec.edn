@@ -40,7 +40,8 @@
   :theme :operational-policy-synthesis
   :rationale "This validates OPSV on a second numeric-control domain after the HPA/KEDA MCI."
   :blocks []
-  :blocked-by ["n07-opsv-cli-tui-drift.spec.edn"]}
+  :blocked-by ["n07-opsv-workflow.spec.edn"
+               "n07-opsv-cli-tui-drift.spec.edn"]}
 
  :dag/id :n07-opsv-agent-budgets
  :spec/workflow-type :canonical-sdlc}
