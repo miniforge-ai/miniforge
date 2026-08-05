@@ -202,11 +202,16 @@ An example that omits `:event/id`, `:event/version`, or
 `:event/sequence-number` is eliding them, not waiving them.
 
 **Message placeholders.** `{foo}` inside an example `:message` is illustrative
-interpolation, naming the event's field whose key ends in `foo` — `{reason}` in
-`listener/detached` is `:listener/reason`, `{pack.id}` is `:pack/id`. The
-contract on `:message` is that it is human-renderable (§1.1 principle 5); no
-template is normative, and implementations MAY word messages differently or
-localize them.
+interpolation standing for a value the event carries — usually a field of the
+event, abbreviated (`{reason}` for `:listener/reason`, `{previous}` for
+`:readiness/previous-state`), sometimes a value derived from one
+(`{change-count}` from the length of `:schema/changes`).
+
+Placeholders are prose, not a schema. The contract on `:message` is only that
+it is human-renderable (§1.1 principle 5): no template is normative, a
+placeholder is not a required field, and implementations MAY word messages
+differently or localize them. A conformance test MUST NOT assert on message
+text.
 
 **Scope key.** Each family's scope is fixed by the table in §2.3 and restated
 per family in the §6 registry. `:workflow/id` is the scope key unless that
@@ -1463,7 +1468,7 @@ The sequence range lets a listener choosing to recover reconnect with
  :approval/timeout-at inst
  :scope/type :workflow               ; REQUIRED: the target's §2.3 scope
  :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
- :message "Approval required for {type}: {required} approvers needed"}
+ :message "Approval required for {type}: {required-approvers} approvers needed"}
 ```
 
 #### annotation/created
@@ -2166,7 +2171,7 @@ originating `control-action/requested` (§3.15).
  :from-phase keyword                   ; REQUIRED: phase resumed from
  :skipping [keyword ...]               ; REQUIRED: phases skipped as already complete
 
- :message "Workflow resumed at {from-phase}, skipping {n} completed phases"}
+ :message "Workflow resumed at {from-phase}; skipped: {skipping}"}
 ```
 
 A resumed workflow continues the sequence of its original run: sequence numbers
