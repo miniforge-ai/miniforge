@@ -19,7 +19,8 @@
   (:require
    [clojure.edn :as edn]
    [clojure.java.io :as io]
-   [ai.miniforge.phase-opsv.interface :as opsv-phase]))
+   [ai.miniforge.phase-opsv.interface :as opsv-phase]
+   [ai.miniforge.phase-opsv.protocol :as port]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -40,7 +41,7 @@
                   :image-digests {"catalog" "sha256:abc"}
                   :config-hash "config-1"}))
   ([steps fingerprint]
-   (reify opsv-phase/OPSVAdapter
+   (reify port/OPSVAdapter
      (discover-signals [_ _targets]
        [{:driver :cpu} {:driver :backlog}])
      (run-guarded-ramp [_ _pack]

@@ -26,4 +26,5 @@
     "Return candidate scaling-driver records or an anomaly.")
   (run-guarded-ramp
     [adapter experiment-pack]
-    "Return a fingerprint and non-empty ramp steps, or an anomaly."))
+    "Return {:environment-fingerprint <non-empty map>
+             :steps <non-empty sequence>}, or an anomaly."))
