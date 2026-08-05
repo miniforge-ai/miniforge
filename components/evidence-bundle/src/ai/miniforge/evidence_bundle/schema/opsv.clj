@@ -88,7 +88,8 @@
     [:enum :recommend-only :pr-only :apply-allowed]]
    [:effective-actuation-mode
     [:enum :none :recommend-only :pr-only :apply-allowed]]
-   [:governed-effects [:vector GovernedEffect]]
+   [:governed-effects
+    [:and [:vector GovernedEffect] [:fn unique-values?]]]
    [:pr-refs [:vector string?]]
    [:apply-refs [:vector string?]]
    [:postcondition-artifact-refs [:vector uuid?]]

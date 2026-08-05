@@ -114,7 +114,16 @@
                   store bundle-id f/base-bundle duplicate-evidence
                   (set f/artifact-ids))]
       (is (response/anomaly-map? result))
-      (is (contains? (error-codes result) :invalid-opsv-evidence)))))
+      (is (contains? (error-codes result) :invalid-opsv-evidence))))
+  (let [duplicate-evidence
+        (update-in f/opsv-evidence [:opsv/actuation :governed-effects]
+                   #(conj % (first %)))
+        [store bundle-id] (accumulated-store duplicate-evidence)
+        result (evidence/finalize-opsv-evidence!
+                store bundle-id f/base-bundle duplicate-evidence
+                (set f/artifact-ids))]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result) :invalid-opsv-evidence))))
 
 (deftest ^{:stratum 1} malformed-reference-type-returns-anomaly
   (let [store (evidence/create-opsv-assembly-store)
