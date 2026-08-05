@@ -23,7 +23,7 @@
 {:pack/id          "miniforge/opsv-governance"
  :pack/name        "OPSV Governance"
  :pack/version     "1.0.0"
- :pack/description "Discover-Plan-Execute-Converge-Synthesize-Verify-Actuate governance for instrumentation, environment, blast radius, abort, actuation, and evidence."
+ :pack/description "OPSV instrumentation, environment, blast-radius, abort, actuation, and evidence governance."
  :pack/author      "miniforge.ai"
  :pack/license     "Apache-2.0"
  :pack/trust-level :trusted
