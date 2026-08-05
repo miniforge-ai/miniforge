@@ -15,15 +15,16 @@ that governs indexed normative amendments and N7+ product extensions.
 
 Miniforge's current standards pin still forbids all normative specs after N6,
 which conflicts with the repository's active N7-N15 contracts and delta specs.
-The upstream correction merged in miniforge-standards PR #96.
+The upstream correction merged in
+[miniforge-ai/miniforge-standards#96](https://github.com/miniforge-ai/miniforge-standards/pull/96).
 
 ## Changes in Detail
 
 - Update the standards submodule through miniforge-standards merge commit
-  `72f451d`.
+  [`72f451d`](https://github.com/miniforge-ai/miniforge-standards/commit/72f451d3d7e0ad82079610bec61be0399a2b7117).
 - Consume the corrected core/amendment/extension specification rules.
 
-## Testing Plan
+## Test plan
 
 - Verify the gitlink resolves to the merged upstream commit.
 - Run the repository's documentation and pre-commit checks.
@@ -39,7 +40,7 @@ standards pin.
 
 ## Related Issues/PRs
 
-- miniforge-ai/miniforge-standards#96
+- [miniforge-ai/miniforge-standards#96](https://github.com/miniforge-ai/miniforge-standards/pull/96)
 
 ## Checklist
 
