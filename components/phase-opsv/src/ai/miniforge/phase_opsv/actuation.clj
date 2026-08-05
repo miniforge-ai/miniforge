@@ -47,11 +47,9 @@
                               (= (count opsv/opsv-gate-ids) (count results))
                               (= (set opsv/opsv-gate-ids) (set (map :gate/id results)))
                               (every? #(and (map? %)
-                                            (= #{:gate/id :gate/passed?}
-                                               (set (keys %)))
                                             (boolean? (:gate/passed? %)))
                                       results))
-                       results
+                       (mapv #(select-keys % [:gate/id :gate/passed?]) results)
                        default-gate-results))
      :safe-mode? (true? (input-value ctx :opsv/safe-mode?))
      :pr-capability-valid? (true? (input-value ctx :opsv/pr-capability-valid?))

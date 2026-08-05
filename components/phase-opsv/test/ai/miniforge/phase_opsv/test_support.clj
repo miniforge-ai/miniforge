@@ -86,6 +86,8 @@
     :opsv/experiment-pack (:experiment-pack fixture)
     :opsv/evidence-bundle-id evidence-id
     :opsv/evidence-refs [artifact-id]
+    :opsv/gate-results (:gate-results fixture)
+    :opsv/pr-capability-valid? true
     :opsv/risk-thresholds {:medium 0.3 :high 0.6 :critical 0.85}
     :opsv/metric-snapshot-artifact-refs [artifact-id]
     :opsv/policy-diff-artifact-refs [artifact-id]}

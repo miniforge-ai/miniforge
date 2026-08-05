@@ -71,8 +71,8 @@
       (is (= (content-hash/content-hash
               (:opsv/operational-policy verification))
              (:opsv/policy-hash verification))))
-    (testing "recommend-only completion has no external effects"
-      (is (= :recommend-only
+    (testing "a promoted PR has no direct external effects"
+      (is (= :pr-only
              (get-in actuation
                      [:opsv/actuation-record :effective-actuation-mode])))
       (is (= [] (get-in actuation
@@ -133,9 +133,7 @@
       (let [ctx (cond->
                  (-> (support/execution-context
                       (support/test-adapter support/ramp-steps))
-                     (assoc-in [:execution/input :opsv/experiment-pack
-                                :experiment-pack/actuation-intent] :pr-only)
-                     (assoc-in [:execution/input :opsv/pr-capability-valid?] true))
+                     (update :execution/input dissoc :opsv/gate-results))
                   (not= ::missing gate-results)
                   (assoc-in [:execution/input :opsv/gate-results] gate-results))
             result (reduce support/run-transformation ctx support/handlers)]

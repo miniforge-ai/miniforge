@@ -20,8 +20,16 @@
    :confidence-threshold 0.9
    :minimum-measurement-window-seconds 60
    :required-repetitions 2}
-  :experiment-pack/actuation-intent :recommend-only
+  :experiment-pack/actuation-intent :pr-only
   :experiment-pack/required-instrumentation [:cpu :backlog]}
+
+ :gate-results
+ [{:gate/id :instrumentation :gate/passed? true :gate/type :opsv}
+  {:gate/id :environment :gate/passed? true :gate/type :opsv}
+  {:gate/id :blast-radius :gate/passed? true :gate/type :opsv}
+  {:gate/id :abort :gate/passed? true :gate/type :opsv}
+  {:gate/id :actuation :gate/passed? true :gate/type :opsv}
+  {:gate/id :evidence-completeness :gate/passed? true :gate/type :opsv}]
 
  :ramp-steps
  [{:step/id "1"
