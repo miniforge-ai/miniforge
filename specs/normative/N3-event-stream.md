@@ -1178,7 +1178,7 @@ event types:
    :criterion/reason-code keyword}]
  :opsv/confidence keyword
  :opsv/caveats [string ...]
- :message "OPSV verification passed: {passed?}"}
+ :message "OPSV verification result: {passed?}"}
 ```
 
 #### opsv.actuation/emitted
