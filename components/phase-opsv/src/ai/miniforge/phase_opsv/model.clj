@@ -175,10 +175,10 @@
        (let [adapter (input-value ctx :opsv/adapter)
              ramp (port/run-guarded-ramp
                    adapter (:opsv/experiment-pack planned))
-             empty-ramp (adapter/ramp-shape-anomaly ramp)]
+             invalid-ramp (adapter/ramp-shape-anomaly ramp)]
          (cond
            (anomaly/anomaly? ramp) ramp
-           empty-ramp empty-ramp
+           invalid-ramp invalid-ramp
            :else (merge planned
                         {:opsv/environment-fingerprint
                          (:environment-fingerprint ramp)
