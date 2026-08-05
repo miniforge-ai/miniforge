@@ -42,8 +42,10 @@
   (let [pack (input-value ctx :opsv/experiment-pack)]
     {:requested-actuation-mode (:experiment-pack/actuation-intent pack)
      :verification-passed? (:passed? verification)
-     :gate-results (get-in ctx [:execution/input :opsv/gate-results]
-                           default-gate-results)
+     :gate-results (let [results (input-value ctx :opsv/gate-results)]
+                     (if (and (vector? results) (seq results))
+                       results
+                       default-gate-results))
      :safe-mode? (true? (input-value ctx :opsv/safe-mode?))
      :pr-capability-valid? (true? (input-value ctx :opsv/pr-capability-valid?))
      :apply-capability-valid? (true? (input-value ctx :opsv/apply-capability-valid?))

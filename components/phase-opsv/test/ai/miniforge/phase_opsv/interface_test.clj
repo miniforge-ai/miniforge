@@ -121,17 +121,21 @@
                                               (second support/handlers))]
       (is (= 0.4 (get-in (support/phase-output planned :opsv/plan)
                          [:opsv/risk-result :factors 0 :contribution])))))
-  (testing "missing gate results cannot promote a requested PR"
-    (let [ctx (-> (support/execution-context
-                   (support/test-adapter support/ramp-steps))
-                  (assoc-in [:execution/input :opsv/experiment-pack
-                             :experiment-pack/actuation-intent] :pr-only)
-                  (assoc-in [:execution/input :opsv/pr-capability-valid?] true))
-          result (reduce support/run-transformation ctx support/handlers)]
-      (is (= :recommend-only
-             (get-in (support/phase-output result :opsv/actuate)
-                     [:opsv/actuation-record
-                      :effective-actuation-mode])))))
+  (testing "missing or empty gate results cannot promote a requested PR"
+    (doseq [gate-results [::missing nil [] :invalid]]
+      (let [ctx (cond->
+                 (-> (support/execution-context
+                      (support/test-adapter support/ramp-steps))
+                     (assoc-in [:execution/input :opsv/experiment-pack
+                                :experiment-pack/actuation-intent] :pr-only)
+                     (assoc-in [:execution/input :opsv/pr-capability-valid?] true))
+                  (not= ::missing gate-results)
+                  (assoc-in [:execution/input :opsv/gate-results] gate-results))
+            result (reduce support/run-transformation ctx support/handlers)]
+        (is (= :recommend-only
+               (get-in (support/phase-output result :opsv/actuate)
+                       [:opsv/actuation-record
+                        :effective-actuation-mode]))))))
   (testing "every downstream transformation preserves its upstream anomaly"
     (let [upstream (anomaly/anomaly :invalid-input "upstream failed" {})]
       (doseq [[[upstream-key _] [phase-key handler]]
