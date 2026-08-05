@@ -140,7 +140,7 @@ Discover scaling + budget signals via governed experiments, synthesize
 | high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — Dogfood OPSV on agent invocation and phase budgets | correctness+observation+tokenconservation+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-cli-tui-drift.spec.edn` — Implement OPSV CLI, TUI drill-down, and drift detection | observation+ux+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-governed-actuation.spec.edn` — Implement governed OPSV PR, Kubernetes apply, and rollback effects | correctness+scale |
-| medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Workflow Policy Convergence: learned workflow selection | governance+workfloworchestration+reliability |
+| medium | ○ | operational-policy-synthesis | `workflow-policy-convergence.spec.edn` — Converge workflow-selection policy from governed outcomes | governance+workfloworchestration+reliability |
 
 ## Theme — unassigned (`unassigned`, status: planned)
 
