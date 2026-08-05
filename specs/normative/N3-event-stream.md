@@ -70,7 +70,10 @@ All events MUST conform to this base envelope:
 - **event/id** - MUST be globally unique UUID
 - **event/timestamp** - MUST be ISO-8601 instant
 - **event/version** - MUST be semantic version string
-- **workflow/id** - MUST reference a valid workflow. MAY be nil only for events whose scope is not Workflow; see §2.3.
+- **workflow/id** - REQUIRED and non-nil for Workflow-scoped events, where it
+  MUST reference a valid workflow. MAY be nil only when the event's scope is not
+  Workflow (§2.3); where present on such an event it is a cross-reference and
+  MUST still reference a valid workflow.
 - **event/sequence-number** - MUST be monotonically increasing within the event's scope (§2.3)
 
 #### 2.1.1 Envelope Field Types
@@ -85,7 +88,7 @@ Envelope field types are fixed across every event family:
 | `:event/version` | string | MUST | Semantic version, see §7 |
 | `:event/sequence-number` | long | MUST | Per-scope monotonic |
 | `:event/parent-id` | uuid | MAY | Causality link |
-| `:workflow/id` | uuid | MUST | Nilable only under §2.3 |
+| `:workflow/id` | uuid or nil | Conditional | Non-nil for Workflow-scoped events; nil permitted only under §2.3 |
 | `:workflow/phase` | keyword | MAY | Phase active at emission |
 | `:agent/id` | keyword | MAY | Emitting agent archetype |
 | `:agent/instance-id` | uuid | MAY | Emitting agent instance |
@@ -237,7 +240,7 @@ stays a two-valued control flag; this field carries the full act vocabulary.
 {:event/type :workflow/completed
  :workflow/id uuid
 
- :workflow/status :success       ; :success, :failure, :cancelled
+ :workflow/status :success       ; :success | :failure
  :workflow/duration-ms long
  :workflow/evidence-bundle-id uuid
 
@@ -1998,8 +2001,8 @@ checkpoint/resume contract of N2-delta-phase-checkpoint-and-resume §9.
 #### workflow/cancelled
 
 A terminal state distinct from `:workflow/failed` — the workflow did not fail,
-it was stopped. `:workflow/completed` MUST NOT be used to report cancellation
-even though its `:workflow/status` enum admits `:cancelled`; consumers that
+it was stopped. Cancellation is reported by this event alone;
+`:workflow/completed` MUST NOT carry a `:cancelled` status, and consumers that
 count failures MUST NOT count cancellations.
 
 ```clojure
@@ -2154,12 +2157,17 @@ Implementations MUST:
 Every event type belongs to exactly one retention class. The class is a property
 of the type, declared in the §6 registry.
 
-| Class | Minimum retention | Members |
-|-------|-------------------|---------|
-| `:ephemeral` | 24 hours | `:agent/status`, `:workflow/phase-heartbeat`, LLM request/response bodies |
-| `:operational` | 30 days | Tool use, milestones, task lifecycle, listener lifecycle, reliability metrics, repo intelligence |
-| `:durable` | Life of the scope's record — the workflow, PR Work Item, pack, repository, entity, or deployment the event is scoped to (§2.3) | Workflow/agent/phase lifecycle, gates, pack lifecycle and Pack Runs, capability denials, PR lifecycle, supervisory snapshots, workflow control (§3.21) |
-| `:audit` | Per deployment policy, minimum 1 year | `capability/denied`, `task/scope-violation`, `control-action/*`, `meta-loop/halt-requested`, `pack/promoted`, and every event carrying `:failure/class` |
+| Class | Minimum retention | What belongs here |
+|-------|-------------------|-------------------|
+| `:ephemeral` | 24 hours | High-frequency progress signal, valuable live, near-worthless later |
+| `:operational` | 30 days | Activity and measurement an operator reconstructs a recent run from |
+| `:durable` | Life of the scope's record — the workflow, PR Work Item, pack, repository, entity, or deployment the event is scoped to (§2.3) | State transitions the scope's own history is unreadable without |
+| `:audit` | Per deployment policy, minimum 1 year | Refusals, denials, privileged actions, and trust promotions — the record of what the system declined or was told to do |
+
+The right-hand column characterizes each class; it does not assign membership.
+The **§6 registry is the sole authority** for which class an event type belongs
+to, so that every type has exactly one class and no reader has to reconcile two
+lists.
 
 Implementations MUST NOT expire an event before its class minimum.
 Implementations MAY retain longer. A deployment MUST document its actual
