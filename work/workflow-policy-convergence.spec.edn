@@ -109,59 +109,6 @@
                   :n07-opsv-governed-actuation]
  :dag/blocks [:workflow-synthesis-v2]
 
- :current-state
- {:selection
-  ["bases/cli/src/.../workflow_selector.clj — hand-coded heuristic rules
-    keyed off :pr-count, :type, :keywords, :size"
-   "bases/cli/src/.../workflow_recommender.clj — LLM-based recommender
-    with deterministic fallback"
-   "Both consult only the spec; no historical outcome data is read"]
-  :outcome-evidence
-  ["Evidence bundles (components/evidence-bundle) capture per-run
-    artifacts and metrics — already structured, already governed"
-   "No aggregator that turns N evidence bundles into a workflow-outcome
-    distribution per (task-shape, context)"]
-  :convergence-pattern
-  ["OPSV domain-policy and governed-actuation components provide bounded
-    convergence, verification, effective-authority, and effect services"
-   "Pattern is reusable; no library extraction yet"]
-  :gap "No mechanism converts past run evidence into selection policy.
-        Selection rules are derived by humans and rot as the agent /
-        prompt / model landscape shifts under them."}
-
- :target-state
- {:meta-workflow
-  "A registered workflow `:workflow-policy-convergence` that consumes a task
-   corpus, context descriptor, and outcome rubric, then uses the canonical
-   OPSV domain and effect services to publish a workflow-selection policy pack."
-
-  :outcome-rubric
-  "Schema for the per-(task, workflow) outcome metrics that drive
-   selection. Default rubric covers: tests-pass-rate,
-   scope-deviation-count, tokens-spent, wall-time-seconds,
-   pr-review-churn-count, escalation-count. Orgs can extend with their
-   own axes via a rubric pack (data, not code)."
-
-  :convergence-engine
-  "Pure search procedure given (corpus, candidates, rubric) → policy.
-   v1 candidates are the set of registered workflows. v2 candidates
-   include synthesized workflow definitions (phase pipelines + gates
-   + budgets, all data, all schema-validated and policy-checked
-   before execution)."
-
-  :selection-policy-pack
-  "A policy pack file (EDN) that maps `(task-shape, context-tag) →
-   workflow-id-or-definition`. Read by workflow_selector at the
-   runtime fast path. Versioned and audit-logged like any other
-   policy pack."
-
-  :synthesis-guard
-  "When v2 emits a synthesized workflow definition, it MUST pass the
-   same governance pipeline as a hand-authored workflow: standards
-   pack, no-skip-verify check, evidence-bundle requirements,
-   approval-policy floor. Synthesis without governance guards is
-   explicitly forbidden in this spec."}
-
  :implementation
  {:step-1-outcome-rubric
   {:title "Outcome rubric schema + default rubric"
@@ -277,26 +224,6 @@
   "Holdout regression aborts publication and records an evidence bundle"
   "The selector reads a matching converged entry before invoking its heuristic fallback"
   "The v1 implementation contains no workflow-synthesis behavior"]
-
- :follow-on-specs
- [{:id :workflow-synthesis-v2
-   :title "Synthesized workflow definitions (v2)"
-   :description "Treat workflow definitions as data and let convergence
-                  emit custom workflows. Each candidate must pass the
-                  governance pipeline before scoring. Lands once v1
-                  produces enough corpus signal to make synthesis
-                  meaningful."}
-  {:id :cross-org-policy-sharing
-   :title "Cross-organization workflow-selection policy sharing"
-   :description "Convergence today is per-org. A registry/marketplace
-                  for workflow-selection packs (with provenance and
-                  trust signals) is a follow-on once v1+v2 stabilize."}
-  {:id :selector-heuristic-from-pack
-   :title "Replace the hand-coded heuristic with the converged pack output"
-   :description "Once converged packs are reliable for the common
-                  cases, retire the hand-coded selection-rules in
-                  workflow_selector.clj. Heuristic becomes pure
-                  fallback, then optional."}]
 
  :estimated-effort "5-7 days for v1; v2 is its own multi-week spec"
 
