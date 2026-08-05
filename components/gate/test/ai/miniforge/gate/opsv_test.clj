@@ -141,6 +141,13 @@
                                    -0.1)
                          context))))
   (is (false? (:passed? (gate/check-gate
+                         :opsv/blast-radius-gate
+                         (assoc-in pack
+                                   [:experiment-pack/guardrails
+                                    :blast-radius :replica-delta]
+                                   -1)
+                         context))))
+  (is (false? (:passed? (gate/check-gate
                          :opsv/evidence-completeness-gate
                          (assoc evidence :opsv/metric-snapshot-artifact-refs
                                 ["not-an-artifact-id"])

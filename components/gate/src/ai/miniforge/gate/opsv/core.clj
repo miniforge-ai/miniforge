@@ -77,9 +77,10 @@
   [value]
   (if (collection-value? value) (set value) #{}))
 
-(defn- ^{:stratum 1} magnitude
+(defn- ^{:stratum 1} nonnegative-number
   [value]
-  (some-> (finite-number value) Math/abs))
+  (let [number (finite-number value)]
+    (when (and number (not (neg? number))) number)))
 
 (defn- ^{:stratum 1} gate-result
   [gate-id result]
@@ -148,8 +149,8 @@
   [pack ctx]
   (let [proposed (get-in pack [:experiment-pack/guardrails :blast-radius])
         limits (:opsv/blast-radius-limits ctx)
-        replica-delta (magnitude (:replica-delta proposed))
-        node-delta (magnitude (:node-delta proposed))
+        replica-delta (nonnegative-number (:replica-delta proposed))
+        node-delta (nonnegative-number (:node-delta proposed))
         max-replicas (finite-number (:max-replica-delta limits))
         max-nodes (finite-number (:max-node-delta limits))
         namespaces (value-set (:namespaces proposed))
