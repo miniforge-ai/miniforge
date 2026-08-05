@@ -88,16 +88,16 @@
    (phase-output ctx :opsv/discover)
    (fn [discovery]
      (let [pack (:opsv/experiment-pack discovery)
-           risk (opsv/assess-risk
-                 (risk/factors pack
-                               (input-value ctx :opsv/service-criticality))
-                 (input-value ctx :opsv/risk-thresholds))
+           risk-result (opsv/assess-risk
+                        (risk/factors
+                         pack (input-value ctx :opsv/service-criticality))
+                        (input-value ctx :opsv/risk-thresholds))
            pack-hash (opsv/experiment-pack-hash pack)]
        (cond
-         (anomaly/anomaly? risk) risk
+         (anomaly/anomaly? risk-result) risk-result
          (anomaly/anomaly? pack-hash) pack-hash
          :else (assoc discovery
-                      :opsv/risk-result risk
+                      :opsv/risk-result risk-result
                       :opsv/experiment-pack-hash pack-hash))))))
 
 (defn ^{:stratum 1} converge
