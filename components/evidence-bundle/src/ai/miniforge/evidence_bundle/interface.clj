@@ -50,7 +50,7 @@
   (opsv-assembly/allocate! store workflow-id))
 
 (defn ^{:stratum 0} accumulate-opsv-evidence!
-  "Accumulate OPSV event, artifact, capability, and governed-effect references."
+  "Accumulate references from canonical OPSV evidence or evidence fragments."
   [store bundle-id material]
   (opsv-assembly/accumulate! store bundle-id material))
 

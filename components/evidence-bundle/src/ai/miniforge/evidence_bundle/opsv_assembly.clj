@@ -23,8 +23,7 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (def ^{:stratum 0} ^:private reference-keys
-  [:opsv/event-refs :opsv/artifact-refs :opsv/capability-refs
-   :opsv/governed-effects])
+  [:opsv/event-refs :opsv/artifact-refs :opsv/capability-refs])
 
 (defn ^{:stratum 0} create-store
   "Create an in-memory store for run-scoped OPSV assembly records."
@@ -73,17 +72,14 @@
 
 (defn- ^{:stratum 1} merge-references
   [assembly material]
-  (reduce (fn [result key]
-            (let [values (if (= :opsv/governed-effects key)
-                           (concat
-                            (reference-collection (get material key))
-                            (reference-collection
-                             (get-in material
-                                     [:opsv/actuation :governed-effects])))
-                           (reference-collection (get material key)))]
-              (update result key into values)))
-          assembly
-          reference-keys))
+  (-> (reduce (fn [result key]
+                (update result key into
+                        (reference-collection (get material key))))
+              assembly
+              reference-keys)
+      (update :opsv/governed-effects into
+              (reference-collection
+               (get-in material [:opsv/actuation :governed-effects])))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
