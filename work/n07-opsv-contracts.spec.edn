@@ -14,7 +14,9 @@
 
  :normative-refs
  ["specs/normative/N1-architecture.md"
-  "specs/normative/N7-Operational-Policy-Synthesis.md"]
+  "specs/normative/N6-evidence-provenance.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N10-governed-tool-execution.md"]
 
  :spec/constraints
  ["Domain namespaces MUST remain pure and contain no adapter or workflow I/O"

@@ -15,8 +15,9 @@
 
  :normative-refs
  ["specs/normative/N7-Operational-Policy-Synthesis.md"
-  "specs/normative/N8-Observability-Control-Interface.md"
-  "specs/normative/N10-governed-tool-execution.md"]
+  "specs/normative/N8-observability-control-interface.md"
+  "specs/normative/N10-governed-tool-execution.md"
+  "specs/normative/N11-delta-runtime-adapter.md"]
 
  :spec/constraints
  ["PR creation and apply MUST require real matching N10 grants at execution time"

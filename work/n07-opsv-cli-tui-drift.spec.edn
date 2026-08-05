@@ -16,8 +16,11 @@
           "components/opsv/src/**"]}
 
  :normative-refs
- ["specs/normative/N5-cli-tui-api.md"
-  "specs/normative/N7-Operational-Policy-Synthesis.md"]
+ ["specs/normative/N4-policy-packs.md"
+  "specs/normative/N5-cli-tui-api.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"
+  "specs/normative/N8-observability-control-interface.md"
+  "specs/normative/N10-governed-tool-execution.md"]
 
  :spec/constraints
  ["Command names and positional SERVICE argument MUST match N5 exactly"

@@ -16,6 +16,7 @@
 
  :normative-refs
  ["specs/normative/N2-workflows.md"
+  "specs/normative/N3-event-stream.md"
   "specs/normative/N7-Operational-Policy-Synthesis.md"]
 
  :spec/constraints
