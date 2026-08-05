@@ -62,19 +62,26 @@
   [store bundle-id]
   (get @store bundle-id))
 
-(defn- ^{:stratum 0} reference-values
-  [material key]
-  (if (= :opsv/governed-effects key)
-    (concat (get material key [])
-            (get-in material [:opsv/actuation :governed-effects] []))
-    (get material key [])))
+(defn- ^{:stratum 0} reference-collection
+  [value]
+  (cond
+    (nil? value) []
+    (or (sequential? value) (set? value)) value
+    :else [value]))
 
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} merge-references
   [assembly material]
   (reduce (fn [result key]
-            (update result key into (reference-values material key)))
+            (let [values (if (= :opsv/governed-effects key)
+                           (concat
+                            (reference-collection (get material key))
+                            (reference-collection
+                             (get-in material
+                                     [:opsv/actuation :governed-effects])))
+                           (reference-collection (get material key)))]
+              (update result key into values)))
           assembly
           reference-keys))
 

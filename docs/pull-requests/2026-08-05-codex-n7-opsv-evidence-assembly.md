@@ -41,10 +41,9 @@ Application — evidence-bundle assembly, validation, and publication.
 - `PR_BASE_SHA=$(git rev-parse origin/main) PR_HEAD_SHA=$(git rev-parse HEAD) bb pr-budget`
 
 The evidence-bundle tests run from the Miniforge, MiniForge Core, and Miniforge
-TUI project compositions. The new focused suite contains six tests and twenty-two
-assertions for identity preservation, immutability, canonical reference sets,
-malformed-input handling, artifact existence, governed-effect correlation, and
-accumulated-reference preservation.
+TUI project compositions. The focused suite covers identity preservation,
+immutability, canonical reference sets, malformed-input handling, artifact
+existence, governed-effect correlation, and accumulated-reference preservation.
 
 ## Deployment Plan
 

@@ -36,7 +36,11 @@
 
 (defn- ^{:stratum 0} reference-set
   [value]
-  (if (set? value) value (set value)))
+  (cond
+    (nil? value) #{}
+    (set? value) value
+    (sequential? value) (set value)
+    :else #{value}))
 
 (defn- ^{:stratum 0} detailed-artifact-refs
   [evidence]
@@ -56,6 +60,7 @@
   (let [event-refs (reference-set (:opsv/event-refs evidence))
         artifact-refs (reference-set (:opsv/artifact-refs evidence))
         capability-refs (reference-set (:opsv/capability-refs evidence))
+        available-artifact-refs (reference-set available-artifact-ids)
         effects (reference-set (get-in evidence [:opsv/actuation
                                                  :governed-effects]))
         effect-capabilities (set (map :evidence/capability-id effects))]
@@ -70,11 +75,11 @@
       (conj {:code :governed-effect-mismatch})
       (not (cset/subset? (detailed-artifact-refs evidence) artifact-refs))
       (conj {:code :detailed-artifact-reference-missing})
-      (not (cset/subset? artifact-refs (set available-artifact-ids)))
+      (not (cset/subset? artifact-refs available-artifact-refs))
       (conj {:code :referenced-artifact-not-found
              :missing (vec (sort (cset/difference
                                   artifact-refs
-                                  (set available-artifact-ids))))})
+                                  available-artifact-refs)))})
       (not (cset/subset? effect-capabilities capability-refs))
       (conj {:code :uncorrelated-governed-effect}))))
 

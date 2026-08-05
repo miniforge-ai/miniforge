@@ -38,6 +38,15 @@
      store bundle-id evidence-value)
     [store bundle-id]))
 
+(deftest ^{:stratum 0} scalar-accumulation-is-a-single-reference
+  (let [store (evidence/create-opsv-assembly-store)
+        bundle-id (:evidence-bundle/id
+                   (evidence/allocate-opsv-assembly! store f/workflow-id))
+        event-id (first f/event-ids)
+        result (evidence/accumulate-opsv-evidence!
+                store bundle-id {:opsv/event-refs event-id})]
+    (is (= #{event-id} (:opsv/event-refs result)))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} finalize-preserves-preallocated-identity-once
@@ -117,3 +126,11 @@
                 (set f/artifact-ids))]
     (is (response/anomaly-map? result))
     (is (contains? (error-codes result) :invalid-opsv-evidence))))
+
+(deftest ^{:stratum 1} scalar-artifact-availability-returns-anomaly
+  (let [[store bundle-id] (accumulated-store f/opsv-evidence)
+        result (evidence/finalize-opsv-evidence!
+                store bundle-id f/base-bundle f/opsv-evidence
+                f/pack-artifact-id)]
+    (is (response/anomaly-map? result))
+    (is (contains? (error-codes result) :referenced-artifact-not-found))))
