@@ -45,7 +45,7 @@ It powers:
 All events MUST conform to this base envelope:
 
 ```clojure
-{:event/type keyword           ; REQUIRED: event type identifier
+{:event/type namespaced-keyword ; REQUIRED: event type identifier
  :event/id uuid                ; REQUIRED: unique event ID
  :event/timestamp inst          ; REQUIRED: ISO-8601 timestamp
  :event/version string          ; REQUIRED: event schema version (e.g., "1.0.0")
@@ -110,7 +110,17 @@ events so they correlate with the N9 family (§3.16). A family MUST NOT lower a
 scope key below REQUIRED.
 
 Event families MUST NOT redefine an envelope field with a different type or
-meaning. In particular:
+meaning. This constrains the **top level** of the event map only. Keys nested
+inside a payload map belong to that payload's own namespace as defined by its
+owning spec, and are unrelated to the envelope field of the same name.
+
+`:agent/id` is the case to watch: at the top level it is the envelope's
+emitting-agent archetype (a keyword), while inside `:supervisory/entity` it is
+the AgentSession's identity (a uuid, per N5-delta-1 §3.1). Both may appear in
+one `supervisory/agent-upserted` event without conflict, because one is nested.
+The canonical-ID list in §3.19 names entity keys, not envelope keys.
+
+In particular:
 
 - A family needing a provider-assigned PR number MUST use `:pr/number` (long).
   `:pr/id` is always the PR Work Item UUID.
@@ -3097,7 +3107,7 @@ stream is **real-time product infrastructure** because:
 1. **UI depends on it** - TUI/Web render live progress from events
 2. **Replay enables debugging** - Reproduce exact workflow state
 3. **Analytics build on it** - Performance metrics, learning signals
-4. **Compliance requires it** - Audit trail for SOCII/FedRAMP
+4. **Compliance requires it** - Audit trail for SOC 2/FedRAMP
 
 ### 12.2 Why Append-Only
 
