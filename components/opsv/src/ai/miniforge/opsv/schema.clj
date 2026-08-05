@@ -105,6 +105,11 @@
    [:passed? :boolean]
    [:reason-code :keyword]])
 
+(defn ^{:stratum 0} unique-criterion-ids?
+  [criteria]
+  (let [criterion-ids (map :criterion/id criteria)]
+    (= (count criterion-ids) (count (distinct criterion-ids)))))
+
 (def ^{:stratum 0} GovernedEffect
   [:map {:closed true}
    [:evidence/intent-id :uuid]
@@ -144,7 +149,9 @@
 
 (def ^{:stratum 1} ConvergenceConfig
   [:map {:closed true}
-   [:parameters KeywordMap]
+   [:parameters
+    [:and KeywordMap
+     [:fn {:error/message "convergence parameters must be declared"} seq]]]
    [:iteration-limit [:int {:min 1}]]
    [:confidence-threshold [:double {:min 0.0 :max 1.0}]]
    [:minimum-measurement-window-seconds [:int {:min 0}]]
@@ -201,7 +208,11 @@
 
 (def ^{:stratum 1} VerificationRequest
   [:map {:closed true}
-   [:criteria [:vector {:min 1} VerificationCriterion]]
+   [:criteria
+    [:and
+     [:vector {:min 1} VerificationCriterion]
+     [:fn {:error/message "criterion identifiers must be unique"}
+      unique-criterion-ids?]]]
    [:observations [:map-of :string any?]]
    [:evaluate-fn ifn?]
    [:confidence :keyword]

@@ -21,9 +21,9 @@
 ;------------------------------------------------------------------------------ Layer 0
 
 (defn ^{:stratum 0} evaluate-criterion
-  [observations evaluate-fn criterion]
+  [observations criterion evaluation]
   (let [observed (get observations (:criterion/id criterion))
-        {:keys [passed? reason-code]} (evaluate-fn criterion observed)]
+        {:keys [passed? reason-code]} evaluation]
     {:criterion/id (:criterion/id criterion)
      :criterion/passed? passed?
      :criterion/observed observed
@@ -34,9 +34,9 @@
 
 (defn ^{:stratum 1} verify-policy-impl
   "Verify validated inputs. The interface owns input and result validation."
-  [{:keys [criteria observations evaluate-fn confidence caveats]}]
-  (let [results (mapv #(evaluate-criterion observations evaluate-fn %)
-                      criteria)]
+  [{:keys [criteria observations confidence caveats]} evaluations]
+  (let [results (mapv #(evaluate-criterion observations %1 %2)
+                      criteria evaluations)]
     {:passed? (every? :criterion/passed? results)
      :criteria-evaluation results
      :confidence confidence

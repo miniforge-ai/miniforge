@@ -222,10 +222,22 @@
                                      request)]
     (if (anomaly/anomaly? validated)
       validated
-      (validation-result invalid-domain-value-message
-                         :opsv/verification-result
-                         schema/VerificationResult
-                         (verification/verify-policy-impl validated)))))
+      (let [evaluations
+            (mapv (fn [criterion]
+                    (validation-result
+                     invalid-domain-value-message
+                     :opsv/criterion-evaluation
+                     schema/CriterionEvaluation
+                     (evaluate-fn criterion
+                                  (get observations (:criterion/id criterion)))))
+                  criteria)]
+        (if-let [invalid (some #(when (anomaly/anomaly? %) %) evaluations)]
+          invalid
+          (validation-result invalid-domain-value-message
+                             :opsv/verification-result
+                             schema/VerificationResult
+                             (verification/verify-policy-impl
+                              validated evaluations)))))))
 
 (defn ^{:stratum 1} effective-actuation
   "Reduce requested autonomy according to verification and authority gates."

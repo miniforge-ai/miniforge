@@ -107,6 +107,13 @@
     (is (= 1.0 (:score result)))
     (is (= :critical (:level result)))))
 
+(deftest ^{:stratum 1} test-assess-risk-classifies-every-level
+  (doseq [[score level] [[0.1 :low] [0.25 :medium]
+                         [0.5 :high] [0.75 :critical]]]
+    (let [factors (-> (mapv #(assoc % :contribution 0.0) risk-factors)
+                      (assoc-in [0 :contribution] score))]
+      (is (= level (:level (opsv/assess-risk factors risk-thresholds)))))))
+
 (deftest ^{:stratum 1} test-assess-risk-validates-transparent-policy-input
   (testing "required factors are present exactly once"
     (is (anomaly/anomaly?
@@ -170,6 +177,12 @@
                       (fn [_state _iteration _config]
                         (convergence-evaluation {})))))
   (is (anomaly/anomaly?
+       (opsv/converge (assoc convergence-config :parameters {})
+                      {:value 0}
+                      increment-state
+                      (fn [_state _iteration _config]
+                        (convergence-evaluation {})))))
+  (is (anomaly/anomaly?
        (opsv/converge convergence-config
                       {:value 0}
                       increment-state
@@ -197,6 +210,22 @@
        (opsv/verify-policy verification-criteria
                            verification-observations
                            (fn [_criterion _observed] {:passed? true})
+                           :high
+                           [])))
+  (is (anomaly/anomaly?
+       (opsv/verify-policy verification-criteria
+                           verification-observations
+                           (fn [_criterion _observed]
+                             {:passed? true
+                              :reason-code :within-threshold
+                              :unknown true})
+                           :high
+                           [])))
+  (is (anomaly/anomaly?
+       (opsv/verify-policy (conj verification-criteria
+                                 (first verification-criteria))
+                           verification-observations
+                           threshold-evaluator
                            :high
                            []))))
 
