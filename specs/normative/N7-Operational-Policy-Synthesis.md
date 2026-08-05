@@ -256,7 +256,7 @@ OPSV SHALL emit these event types with required minimal payloads:
 - `:opsv/load-step` (step id, intended load, observed load)
 - `:opsv.guardrail/abort` (trigger, threshold, observed, rollback action)
 - `:opsv.convergence/iteration` (iteration id, params, observed metrics summary)
-- `:opsv.policy/proposed` (policy hash, diff refs, confidence)
+- `:opsv.policy/proposed` (policy hash, diff artifact refs, confidence)
 - `:opsv.verification/result` (pass/fail, criteria evaluation, confidence, caveats)
 - `:opsv.actuation/emitted` (requested/effective mode and correlated N10 effect records)
 - `:opsv.drift/detected` (signal, deviation, suggested re-run)

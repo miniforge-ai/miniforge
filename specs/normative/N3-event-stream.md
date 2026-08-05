@@ -1158,7 +1158,7 @@ event types:
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
  :opsv/policy-hash string
- :opsv/diff-refs [uuid ...]          ; N6 artifact references
+ :opsv/diff-artifact-refs [uuid ...] ; N6 artifact references
  :opsv/confidence keyword
  :message "OPSV policy proposed: {policy-hash}"}
 ```
