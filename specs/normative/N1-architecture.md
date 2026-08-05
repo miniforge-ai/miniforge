@@ -829,9 +829,9 @@ See N7 for detailed Experiment Pack specification.
 An **Actuation Mode** governs whether OPSV workflows produce recommendations, PRs, or
 request direct changes:
 
-- **RECOMMEND_ONLY**: produce policy proposals and evidence; no changes emitted.
-- **PR_ONLY**: produce changes as PRs against declared repos.
-- **APPLY_ALLOWED**: request direct apply eligibility when permitted by policy packs and gates.
+- **RECOMMEND_ONLY** (`:recommend-only`): produce policy proposals and evidence; no changes emitted.
+- **PR_ONLY** (`:pr-only`): produce changes as PRs against declared repos.
+- **APPLY_ALLOWED** (`:apply-allowed`): request direct apply eligibility when permitted by policy packs and gates.
 
 An Actuation Mode expresses intent and MUST NOT be treated as an authority grant.
 PR creation and direct apply require a valid N10 capability at execution time;
