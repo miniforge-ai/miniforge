@@ -50,13 +50,15 @@ All events MUST conform to this base envelope:
  :event/timestamp inst          ; REQUIRED: ISO-8601 timestamp
  :event/version string          ; REQUIRED: event schema version (e.g., "1.0.0")
 
- :workflow/id uuid              ; REQUIRED: workflow this event belongs to
+ ;; Scope — exactly one per event (§2.3). Workflow is the default; the other
+ ;; five scopes carry their own key here instead.
+ :workflow/id uuid              ; REQUIRED for Workflow-scoped events
  :workflow/phase keyword        ; OPTIONAL: current phase (:plan, :implement, etc.)
 
  :agent/id keyword              ; OPTIONAL: agent that emitted event
  :agent/instance-id uuid        ; OPTIONAL: specific agent instance
 
- :event/sequence-number long   ; REQUIRED: monotonic sequence within workflow
+ :event/sequence-number long   ; REQUIRED: monotonic sequence within the event's scope
  :event/parent-id uuid          ; OPTIONAL: parent event ID (for causality)
 
  ;; Event-specific payload
@@ -1413,7 +1415,8 @@ The sequence range lets a listener choosing to recover reconnect with
  :action/type keyword                ; See N8 §3.1
  :action/target {:target-type keyword :target-id uuid}
  :action/requester {:principal string :listener-id uuid}
- :workflow/id uuid
+ :scope/type :workflow               ; REQUIRED: the target's §2.3 scope
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :message "Control action requested: {type}"}
 ```
 
@@ -1424,7 +1427,8 @@ The sequence range lets a listener choosing to recover reconnect with
  :action/id uuid
  :action/type keyword
  :action/result {:status keyword :error {...}}
- :workflow/id uuid
+ :scope/type :workflow               ; REQUIRED: the target's §2.3 scope
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :message "Control action executed: {type} - {status}"}
 ```
 
@@ -1436,7 +1440,8 @@ The sequence range lets a listener choosing to recover reconnect with
  :action/type keyword
  :approval/required-approvers int
  :approval/timeout-at inst
- :workflow/id uuid
+ :scope/type :workflow               ; REQUIRED: the target's §2.3 scope
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :message "Approval required for {type}: {required} approvers needed"}
 ```
 
@@ -1444,7 +1449,8 @@ The sequence range lets a listener choosing to recover reconnect with
 
 ```clojure
 {:event/type :annotation/created
- :workflow/id uuid
+ :scope/type :workflow               ; REQUIRED: the target's §2.3 scope
+ :workflow/id uuid                   ; REQUIRED: the scope key paired with :scope/type
  :annotation/id uuid
  :annotation/type keyword            ; :recommendation, :warning, :insight, :question
  :annotation/source {:listener-id uuid :principal string}
