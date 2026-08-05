@@ -39,8 +39,8 @@
 
 (def ^{:stratum 0} Targets
   [:map {:closed true}
-   [:services [:vector any?]]
-   [:environments [:vector any?]]])
+   [:services [:vector :string]]
+   [:environments [:vector :string]]])
 
 (def ^{:stratum 0} Workload
   [:map {:closed true}
@@ -96,7 +96,7 @@
    [:experiment-pack/convergence KeywordMap]
    [:experiment-pack/actuation-intent
     (into [:enum] requested-actuation-modes)]
-   [:experiment-pack/required-instrumentation [:vector any?]]])
+   [:experiment-pack/required-instrumentation [:vector :keyword]]])
 
 (def ^{:stratum 1} OperationalPolicy
   "N1 section 2.11 and N7 section 4.2 Operational Policy Proposal."

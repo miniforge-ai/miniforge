@@ -117,13 +117,20 @@
     (is (invalid? (opsv/validate-experiment-pack
                    (assoc valid-pack :experiment-pack/unknown true))))
     (is (invalid? (opsv/validate-experiment-pack
-                   (assoc valid-pack :experiment-pack/actuation-intent :apply))))))
+                   (assoc valid-pack :experiment-pack/actuation-intent :apply)))))
+  (testing "given invalid target or instrumentation identifiers → validation returns an anomaly"
+    (is (invalid? (opsv/validate-experiment-pack
+                   (assoc-in valid-pack
+                             [:experiment-pack/targets :services 0]
+                             :catalog))))
+    (is (invalid? (opsv/validate-experiment-pack
+                   (assoc-in valid-pack
+                             [:experiment-pack/required-instrumentation 0]
+                             "cpu"))))))
 
 (deftest ^{:stratum 1} test-required-operational-policy-contract
   (is (= valid-policy (opsv/validate-operational-policy valid-policy)))
-  (doseq [field [:operational-policy/rollback-plan
-                 :operational-policy/verification-summary
-                 :operational-policy/evidence-refs]]
+  (doseq [field (keys valid-policy)]
     (is (invalid? (opsv/validate-operational-policy (dissoc valid-policy field)))
         (str "missing " field))))
 
@@ -189,8 +196,12 @@
 
 ;; Validated content identity
 (deftest ^{:stratum 1} test-canonical-experiment-pack-hash
-  (let [reordered (into (array-map) (reverse (seq valid-pack)))]
-    (is (= (opsv/experiment-pack-hash valid-pack)
+  (let [ordered (into (sorted-map) valid-pack)
+        reordered (into (sorted-map-by
+                         (fn [left right]
+                           (compare (str right) (str left))))
+                        valid-pack)]
+    (is (= (opsv/experiment-pack-hash ordered)
            (opsv/experiment-pack-hash reordered)))
     (is (re-matches #"[0-9a-f]{64}" (opsv/experiment-pack-hash valid-pack))))
   (is (invalid? (opsv/experiment-pack-hash
