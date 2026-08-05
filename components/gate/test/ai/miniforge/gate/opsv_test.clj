@@ -184,9 +184,15 @@
           single-rule-pack (assoc opsv-policy-pack :pack/rules [rule])
           result (policy-pack/check-artifact
                   single-rule-pack artifact
-                  (assoc ctx :phase (get policy-rule-phases gate-key)))]
+                  (assoc ctx :phase (get policy-rule-phases gate-key)))
+          direct-error (-> (gate/check-gate gate-key artifact ctx)
+                           :errors first)
+          policy-error (-> result :blocking first)]
       (is (false? (:passed? result)))
-      (is (= gate-key (-> result :blocking first :code))))))
+      (is (= gate-key (:code policy-error)))
+      (is (= (:message direct-error) (:message policy-error)))
+      (is (= (get-in direct-error [:remediation :summary])
+             (:remediation policy-error))))))
 
 (deftest ^{:stratum 2} all-opsv-gates-pass-compliant-input
   (doseq [[gate-key _gate-id artifact ctx] passing-cases]

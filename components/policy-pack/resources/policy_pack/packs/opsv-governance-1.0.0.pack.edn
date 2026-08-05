@@ -50,8 +50,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/instrumentation-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "Target environment lacks required instrumentation. Deploy observability infrastructure before applying changes."
-                      :remediation "Ensure metrics, logging, and tracing are configured and healthy in the target environment."}}
+                      :message "Required instrumentation is unavailable or unreliable"
+                      :remediation "Configure and verify every required signal before execution"}}
 
   {:rule/id          :opsv/environment-gate
    :rule/title       "Environment Gate"
@@ -62,8 +62,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/environment-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "Target environment or execution window is not authorized."
-                      :remediation "Select an allowed environment and time window; obtain explicit allowlisting for production."}}
+                      :message "The target environment is not authorized for this run"
+                      :remediation "Select an allowed environment and time window, with explicit production approval"}}
 
   {:rule/id          :opsv/blast-radius-gate
    :rule/title       "Blast Radius Gate"
@@ -74,8 +74,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/blast-radius-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "Proposed replica, node, or namespace scope exceeds policy."
-                      :remediation "Reduce the experiment to the configured replica, node, and namespace limits."}}
+                      :message "The proposed blast radius exceeds policy"
+                      :remediation "Reduce replica, node, or namespace scope to the configured limits"}}
 
   {:rule/id          :opsv/abort-gate
    :rule/title       "Abort Condition Gate"
@@ -86,8 +86,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/abort-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "Experiment is missing one or more required abort thresholds."
-                      :remediation "Configure error-budget burn, saturation, and tail-latency rollback triggers."}}
+                      :message "Required abort thresholds are not configured"
+                      :remediation "Define error-budget burn, saturation, and tail-latency thresholds"}}
 
   {:rule/id          :opsv/actuation-gate
    :rule/title       "Actuation Authorization Gate"
@@ -98,8 +98,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/actuation-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "APPLY_ALLOWED is not explicitly authorized for every target service."
-                      :remediation "Enable apply in policy and allowlist every target service, or use a safer actuation mode."}}
+                      :message "APPLY_ALLOWED is not authorized for every target service"
+                      :remediation "Enable apply explicitly and allowlist every target service"}}
 
   {:rule/id          :opsv/evidence-completeness-gate
    :rule/title       "Evidence Completeness"
@@ -110,8 +110,8 @@
    :rule/detection   {:type :custom
                       :custom-fn ai.miniforge.gate.opsv/evidence-completeness-detector}
    :rule/enforcement {:action :hard-halt
-                      :message "OPSV evidence is missing required actuation inputs."
-                      :remediation "Attach the Experiment Pack hash, environment fingerprint, and metric snapshots."}}]
+                      :message "Required OPSV actuation evidence is incomplete"
+                      :remediation "Attach the pack hash, environment fingerprint, and metric snapshots"}}]
 
  :pack/created-at #inst "2026-04-08T00:00:00Z"
  :pack/updated-at #inst "2026-08-05T00:00:00Z"}
