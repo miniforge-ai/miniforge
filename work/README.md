@@ -84,8 +84,9 @@ Specs are archived into subdirectories when they are no longer active:
 
 ### Normative Spec Gap Coverage (n0X-*)
 
-Gap-coverage specs originated in the 2026-04-13 progress review and are updated
-as normative contracts change (see `docs/progress-review-2026-04-13.md`):
+The gap-coverage initiative originated in the historical
+`docs/progress-review-2026-04-13.md` snapshot. The live inventory below tracks
+subsequent normative-contract changes:
 
 | Spec | Normative | Description | Priority |
 |------|-----------|-------------|----------|
