@@ -123,12 +123,15 @@
    (fn [synthesized]
      (let [pack (:opsv/experiment-pack synthesized)
            criteria (verification-criteria pack)
-           observations (get-in synthesized
-                                [:opsv/convergence-result :state
-                                 :selected-step :step/observations])
+           convergence (:opsv/convergence-result synthesized)
+           observations (get-in convergence [:state :selected-step :step/observations])
+           confidence-score (get-in convergence [:evaluation :confidence])
+           confidence-threshold (get-in pack [:experiment-pack/convergence
+                                              :confidence-threshold])
+           confidence (if (>= confidence-score confidence-threshold) :high :low)
            verification (opsv/verify-policy criteria observations
                                             evaluation/criterion-evaluation
-                                            :high [])]
+                                            confidence [])]
        (if (anomaly/anomaly? verification)
          verification
          (let [summary (select-keys verification

@@ -55,11 +55,10 @@
       (is (= #{:cpu :backlog} (set (map :driver (:opsv/candidate-drivers discovery)))))
       (is (= :success-criteria-satisfied
              (get-in convergence [:opsv/convergence-result :terminal-reason])))
-      (is (= 2 (get-in convergence
-                       [:opsv/convergence-result :iterations]))))
-    (testing "risk evidence is derived from the declared experiment"
-      (is (= ["staging"]
-             (get-in planning [:opsv/risk-result :factors 0 :input]))))
+      (is (= 2 (get-in convergence [:opsv/convergence-result :iterations]))))
+    (testing "risk and verification evidence derive from the experiment"
+      (is (= ["staging"] (get-in planning [:opsv/risk-result :factors 0 :input])))
+      (is (= :low (get-in verification [:opsv/verification-result :confidence]))))
     (testing "synthesis returns interoperable scaling recommendations"
       (is (= 65 (get-in synthesis
                         [:opsv/operational-policy

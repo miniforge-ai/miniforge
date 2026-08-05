@@ -58,7 +58,7 @@
    {:slo-passed? true
     :headroom? true
     :guardrail-abort? false
-    :confidence 0.95
+    :confidence 0.8
     :measurement-window-seconds 60
     :repetitions 2
     :hpa-target-utilization 65
