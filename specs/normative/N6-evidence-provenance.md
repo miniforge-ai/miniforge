@@ -6,8 +6,8 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.6.0-draft
-**Date:** 2026-03-08
+**Version:** 0.7.0-draft
+**Date:** 2026-08-04
 **Status:** Draft
 **Conformance:** MUST
 
@@ -323,14 +323,30 @@ For tasks reaching `:merged` terminal state:
 
 For Operational Policy Synthesis workflows (see N7), evidence bundles MUST include:
 
+The workflow MUST allocate the evidence bundle identifier before emitting its
+first OPSV event and accumulate material in a run-scoped assembly record. At
+terminal disposition it MUST publish one immutable bundle whose identifier is
+the preallocated value. Finalization MUST preserve references to every event,
+artifact, capability, and governed effect accumulated during the run.
+
 ```clojure
 {:evidence/opsv
  {:opsv/experiment-pack-hash string   ; Content hash of Experiment Pack used
   :opsv/experiment-pack-id string
+  :opsv/experiment-pack-artifact-id uuid ; Content-addressed pack artifact
   :opsv/environment-fingerprint       ; Cluster, node pool, image digests, config
   {:cluster string
    :node-pools [string ...]
-   :image-digests {...}}
+   :image-digests {...}
+   :config-hash string}
+
+  :opsv/risk-score
+  {:score double                      ; [0.0, 1.0]
+   :level keyword                     ; :low, :medium, :high, :critical
+   :factors [{:factor keyword
+              :input any
+              :contribution double
+              :rationale string}]}
 
   :opsv/convergence-iterations long   ; Number of convergence iterations
   :opsv/policy-proposals              ; Proposed operational policies
@@ -342,16 +358,31 @@ For Operational Policy Synthesis workflows (see N7), evidence bundles MUST inclu
 
   :opsv/verification
   {:passed? boolean
-   :criteria-evaluation [...]         ; Per-criterion results
+   :criteria-evaluation
+   [{:criterion/id string
+     :criterion/passed? boolean
+     :criterion/observed any
+     :criterion/expected any
+     :criterion/reason-code keyword}]
    :confidence keyword
    :caveats [string ...]}
 
   :opsv/actuation
-  {:mode keyword                      ; :recommend-only, :pr-only, :apply-allowed
+  {:requested-actuation-mode keyword  ; :recommend-only, :pr-only, :apply-allowed
+   :effective-actuation-mode keyword  ; :none, :recommend-only, :pr-only, :apply-allowed
+   :governed-effects                   ; One correlated record per N10 effect
+   [{:evidence/intent-id uuid
+     :evidence/oir-id uuid
+     :evidence/capability-id string}]
    :pr-refs [string ...]              ; PR URLs if PR_ONLY
-   :apply-refs [string ...]}          ; Applied resource refs if APPLY_ALLOWED
+   :apply-refs [string ...]           ; Applied resource refs if APPLY_ALLOWED
+   :postcondition-artifact-refs [uuid ...]
+   :rollback {:status keyword         ; :not-required, :not-triggered, :succeeded, :failed
+              :artifact-refs [uuid ...]}}
 
-  :opsv/metric-snapshots [uuid ...]}} ; Links to :opsv-metric-snapshot artifacts
+  :opsv/metric-query-artifact-refs [uuid ...]
+  :opsv/metric-snapshot-artifact-refs [uuid ...]
+  :opsv/diff-artifact-refs [uuid ...]}}
 ```
 
 ### 2.9 Control Action Evidence (N8)
@@ -1084,6 +1115,10 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
+  correlation, content-addressed inputs, explainable risk, per-criterion
+  verification, requested/effective actuation, correlated N10 effects,
+  postconditions, rollback, and diff/metric artifacts
 - 0.6.0-draft (2026-04-23): External-PR artifact amendment — `:pr-context-pack`
   artifact type registered in §3.1.1 with full content schema. PR Context Packs are
   the normalized PR snapshot that reviewer, meta, and governance workflow packs
