@@ -22,60 +22,24 @@
    cross-language contract: they are byte-for-byte copies of what the
    Rust control-plane-client's generator emits, so the consumer parsing
    them here IS the consumer parsing production request files. A shape
-   change on either side fails the golden test, not a dogfood run."
+   change on either side fails the golden test, not a dogfood run.
+
+   Fixtures and stagers live in the sibling consumer-test-support
+   namespace so this file's deftests reach them only through
+   cross-namespace calls — keeping the deftest call graph flat and the
+   file within its stratified-design layer budget."
   (:require
    [ai.miniforge.event-stream.interface :as es]
    [ai.miniforge.operator.consumer :as consumer]
+   [ai.miniforge.operator.consumer-test-support :as support]
    [ai.miniforge.operator.intervention :as intervention]
    [clojure.edn :as edn]
    [clojure.java.io :as io]
    [clojure.test :refer [deftest is testing]])
   (:import
-   [java.nio.channels FileChannel]
-   [java.nio.file Files]
-   [java.nio.file.attribute FileAttribute]))
+   [java.nio.channels FileChannel]))
 
 ;------------------------------------------------------------------------------ Layer 0
-
-;------------------------------------------------------------------------------ Helpers
-(def ^{:stratum 0} ^:const max-workspace-walk-hops
-  "Upper bound on parent-directory hops when locating workspace.edn —
-   deep enough for any worktree nesting, small enough to fail fast when
-   the tests run outside the workspace entirely."
-  8)
-
-(defn- ^{:stratum 0} temp-events-dir
-  ^java.io.File []
-  (.toFile (Files/createTempDirectory "operator-consumer-test"
-                                      (make-array FileAttribute 0))))
-
-(defn- ^{:stratum 0} stage-operator-file!
-  "Copy fixture content into `{events-dir}/operator/{file-name}`."
-  [events-dir file-name content]
-  (let [target (io/file events-dir "operator" file-name)]
-    (io/make-parents target)
-    (spit target content :encoding "UTF-8")
-    target))
-
-(defn- ^{:stratum 0} memory-stream
-  "An event stream with no sinks: published events accumulate in the
-   in-memory log only, so assertions read `es/get-events`."
-  []
-  (es/create-event-stream {:sinks []}))
-
-(defn- ^{:stratum 0} events-of-type
-  [stream event-type]
-  (filterv #(= event-type (:event/type %)) (es/get-events stream)))
-
-(defn- ^{:stratum 0} reject-every-request?
-  [_event]
-  false)
-
-;------------------------------------------------------------------------------ Golden contract gate
-(def ^{:stratum 0} ^:const golden-fixture-count
-  "Fixture scenarios the Rust generator commits (see manifest.edn).
-   Pinned so a silently shrunken vendored corpus fails loudly."
-  6)
 
 (deftest ^{:stratum 0} invalid-request-identities-are-rejected
   (let [valid {:event/id (random-uuid)
@@ -87,26 +51,14 @@
                    (assoc valid k "not-a-uuid")))
           (name k)))))
 
-;------------------------------------------------------------------------------ Layer 1
-
-(defn- ^{:stratum 1} find-workspace-root
-  []
-  (loop [dir (io/file (System/getProperty "user.dir")) hops 0]
-    (cond
-      (.exists (io/file dir "workspace.edn")) dir
-      (or (nil? (.getParentFile dir)) (>= hops max-workspace-walk-hops))
-      (throw (ex-info "workspace.edn not found walking up from user.dir"
-                      {:user-dir (System/getProperty "user.dir")}))
-      :else (recur (.getParentFile dir) (inc hops)))))
-
 ;------------------------------------------------------------------------------ Malformed input is loud, never silent
-(deftest ^{:stratum 1} unreadable-file-emits-anomaly-once
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)]
-    (stage-operator-file! events-dir "garbage.json" "{not json at all")
+(deftest ^{:stratum 0} unreadable-file-emits-anomaly-once
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)]
+    (support/stage-operator-file! events-dir "garbage.json" "{not json at all")
     (is (= {:routed 0 :skipped 0 :anomalies 1}
            (consumer/consume-pass! {:events-dir events-dir :stream stream})))
-    (let [anomalies (events-of-type stream consumer/anomaly-event-type)]
+    (let [anomalies (support/events-of-type stream consumer/anomaly-event-type)]
       (is (= 1 (count anomalies)))
       (is (= "garbage.json" (:source/file (first anomalies))))
       (is (= (get-in (first anomalies) [:anomaly :anomaly/message])
@@ -118,32 +70,32 @@
     (is (.exists (io/file events-dir "operator" "garbage.json"))
         "append-only: the consumer never deletes operator events")))
 
-(deftest ^{:stratum 1} invalid-intervention-emits-anomaly
+(deftest ^{:stratum 0} invalid-intervention-emits-anomaly
   (testing "a valid request id is remembered after request validation fails"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
           content (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
                        "\"~:intervention/id\":\"~u00000000-0000-4000-8000-00000000dead\","
                        "\"~:intervention/type\":\"~:frobnicate\","
                        "\"~:intervention/target-id\":\"t-1\","
                        "\"~:intervention/requested-by\":\"op@example.invalid\","
                        "\"~:intervention/request-source\":\"~:tui\"}")]
-      (stage-operator-file!
+      (support/stage-operator-file!
        events-dir "bad-type.json"
        content)
       (is (= {:routed 0 :skipped 0 :anomalies 1}
              (consumer/consume-pass! {:events-dir events-dir :stream stream})))
-      (stage-operator-file! events-dir "bad-type-redelivery.json" content)
+      (support/stage-operator-file! events-dir "bad-type-redelivery.json" content)
       (is (= {:routed 0 :skipped 1 :anomalies 0}
              (consumer/consume-pass! {:events-dir events-dir :stream stream})))
-      (is (= 1 (count (events-of-type stream consumer/anomaly-event-type)))
+      (is (= 1 (count (support/events-of-type stream consumer/anomaly-event-type)))
           "a new filename for the same intervention id must not repeat the anomaly"))))
 
-(deftest ^{:stratum 1} foreign-operator-events-are-skipped-quietly
+(deftest ^{:stratum 0} foreign-operator-events-are-skipped-quietly
   (testing "meta-loop/train events legitimately share the directory"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)]
-      (stage-operator-file!
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)]
+      (support/stage-operator-file!
        events-dir "pr-merged.json"
        "{\"~:event/type\":\"~:pr/merged\",\"~:pr/number\":42}")
       (is (= {:routed 0 :skipped 1 :anomalies 0}
@@ -155,10 +107,10 @@
           "and each file is examined once"))))
 
 ;------------------------------------------------------------------------------ Approval gate + application hook
-(deftest ^{:stratum 1} non-operator-source-parks-at-pending-human
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)]
-    (stage-operator-file!
+(deftest ^{:stratum 0} non-operator-source-parks-at-pending-human
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)]
+    (support/stage-operator-file!
      events-dir "api-pause.json"
      (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
           "\"~:intervention/id\":\"~u00000000-0000-4000-8000-0000000000f1\","
@@ -167,11 +119,11 @@
           "\"~:intervention/requested-by\":\"delegate@example.invalid\","
           "\"~:intervention/request-source\":\"~:api\"}"))
     (consumer/consume-pass! {:events-dir events-dir :stream stream})
-    (let [changes (events-of-type stream consumer/state-changed-event-type)]
+    (let [changes (support/events-of-type stream consumer/state-changed-event-type)]
       (is (= 1 (count changes)))
       (is (= :pending-human (:intervention/state (first changes)))))))
 
-(deftest ^{:stratum 1} request-source-determines-the-approval-gate
+(deftest ^{:stratum 0} request-source-determines-the-approval-gate
   ;; The runner wires this gate: a request's source decides whether it
   ;; auto-approves (the human already performed the gesture — approving
   ;; it again would approve the approver) or parks at :pending-human for
@@ -186,9 +138,9 @@
            [:native-app :approved "a1"]
            [:api :pending-human "e1"]
            [:meta-agent :pending-human "e2"]]]
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)]
-      (stage-operator-file!
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)]
+      (support/stage-operator-file!
        events-dir (str "req-" (name source) ".json")
        (str "{\"~:event/type\":\"~:supervisory/intervention-requested\","
             "\"~:intervention/id\":\"~u00000000-0000-4000-8000-0000000000" suffix "\","
@@ -197,31 +149,17 @@
             "\"~:intervention/requested-by\":\"caller@example.invalid\","
             "\"~:intervention/request-source\":\"~:" (name source) "\"}"))
       (consumer/consume-pass! {:events-dir events-dir :stream stream})
-      (let [changes (events-of-type stream consumer/state-changed-event-type)]
+      (let [changes (support/events-of-type stream consumer/state-changed-event-type)]
         (is (= 1 (count changes)) (str source " routes exactly one transition"))
         (is (= expected (:intervention/state (first changes)))
             (str source " must gate to " expected))))))
 
-;------------------------------------------------------------------------------ Layer 2
-
-(defn- ^{:stratum 2} golden-dir
-  ^java.io.File []
-  (io/file (find-workspace-root) "contracts" "operator-events" "golden"))
-
-;------------------------------------------------------------------------------ Layer 3
-
-(defn- ^{:stratum 3} stage-golden!
-  [events-dir fixture-name]
-  (stage-operator-file! events-dir fixture-name
-                        (slurp (io/file (golden-dir) fixture-name)
-                               :encoding "UTF-8")))
-
-(deftest ^{:stratum 3} governed-republish-uses-server-lifecycle-and-target
+(deftest ^{:stratum 0} governed-republish-uses-server-lifecycle-and-target
   (testing "client-claimed state, timestamps, and workflow routing are ignored"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
           source (es/read-event-file
-                  (io/file (golden-dir) "pause.transit.json"))
+                  (io/file (support/golden-dir) "pause.transit.json"))
           forged-workflow-id (random-uuid)
           forged-event-id (random-uuid)
           forged-time (java.util.Date/from
@@ -234,10 +172,10 @@
                         :intervention/details {:failure/code :forged}
                         :intervention/requested-at forged-time
                         :intervention/updated-at forged-time)]
-      (stage-operator-file! events-dir "forged.transit.json"
-                            (es/serialize-event forged))
+      (support/stage-operator-file! events-dir "forged.transit.json"
+                                    (es/serialize-event forged))
       (consumer/consume-pass! {:events-dir events-dir :stream stream})
-      (let [requested (first (events-of-type
+      (let [requested (first (support/events-of-type
                               stream consumer/intervention-requested-event-type))]
         (is (= (parse-uuid (:intervention/target-id source))
                (:workflow/id requested)))
@@ -253,15 +191,15 @@
             "the governed event timestamp is the server audit clock,
              not the client-claimed wire time")))))
 
-(deftest ^{:stratum 3} routed-request-anomalies-stay-on-the-operator-stream
-  (let [events-dir (temp-events-dir)
-        operator-stream (memory-stream)
-        workflow-stream (memory-stream)
+(deftest ^{:stratum 0} routed-request-anomalies-stay-on-the-operator-stream
+  (let [events-dir (support/temp-events-dir)
+        operator-stream (support/memory-stream)
+        workflow-stream (support/memory-stream)
         source (es/read-event-file
-                (io/file (golden-dir) "pause.transit.json"))
+                (io/file (support/golden-dir) "pause.transit.json"))
         invalid (assoc source :intervention/target-type :degradation)]
-    (stage-operator-file! events-dir "invalid.transit.json"
-                          (es/serialize-event invalid))
+    (support/stage-operator-file! events-dir "invalid.transit.json"
+                                  (es/serialize-event invalid))
     (is (= {:routed 0 :skipped 0 :anomalies 1}
            (consumer/consume-pass!
             {:events-dir events-dir
@@ -271,61 +209,59 @@
            (mapv :event/type (es/get-events operator-stream))))
     (is (empty? (es/get-events workflow-stream)))))
 
-(deftest ^{:stratum 3} duplicate-intervention-id-under-new-filename-is-skipped
+(deftest ^{:stratum 0} duplicate-intervention-id-under-new-filename-is-skipped
   (testing "id-level idempotency survives re-delivery as a different file"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)
-          content (slurp (io/file (golden-dir) "pause.transit.json")
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)
+          content (slurp (io/file (support/golden-dir) "pause.transit.json")
                          :encoding "UTF-8")]
-      (stage-operator-file! events-dir "20260101T000000000Z-aaaa.json" content)
+      (support/stage-operator-file! events-dir "20260101T000000000Z-aaaa.json" content)
       (consumer/consume-pass! {:events-dir events-dir :stream stream})
-      (stage-operator-file! events-dir "20260101T000000001Z-bbbb.json" content)
+      (support/stage-operator-file! events-dir "20260101T000000001Z-bbbb.json" content)
       (is (= {:routed 0 :skipped 1 :anomalies 0}
              (consumer/consume-pass! {:events-dir events-dir :stream stream}))))))
 
-;------------------------------------------------------------------------------ Layer 4
-
-(deftest ^{:stratum 4} golden-fixtures-route-through-the-lifecycle
+(deftest ^{:stratum 0} golden-fixtures-route-through-the-lifecycle
   (testing "every vendored Rust-produced fixture parses, validates, and routes"
     (let [manifest (edn/read-string
-                    (slurp (io/file (golden-dir) "manifest.edn")
+                    (slurp (io/file (support/golden-dir) "manifest.edn")
                            :encoding "UTF-8"))
           fixture-names (mapv #(str (name %) ".transit.json")
                               (:fixture/scenarios manifest))]
-      (is (= golden-fixture-count (count fixture-names)))
+      (is (= support/golden-fixture-count (count fixture-names)))
       ;; One events-dir per scenario: the deterministic generator stamps
       ;; the SAME intervention id on every fixture, and the consumer's
       ;; id-level idempotency (correct per Phase D) would dedup 2..N in
       ;; a shared directory. Isolation tests the contract per scenario.
       (doseq [f fixture-names]
         (testing f
-          (let [events-dir (temp-events-dir)
-                stream (memory-stream)]
-            (stage-golden! events-dir f)
+          (let [events-dir (support/temp-events-dir)
+                stream (support/memory-stream)]
+            (support/stage-golden! events-dir f)
             (is (= {:routed 1 :skipped 0 :anomalies 0}
                    (consumer/consume-pass! {:events-dir events-dir
                                             :stream stream})))
-            (is (= 1 (count (events-of-type
+            (is (= 1 (count (support/events-of-type
                              stream
                              consumer/intervention-requested-event-type))))
             ;; Every fixture carries a request-source in
             ;; consumer/auto-approve-request-sources (:tui or
             ;; :native-app) → auto-approved.
-            (let [changes (events-of-type
+            (let [changes (support/events-of-type
                            stream consumer/state-changed-event-type)]
               (is (= 1 (count changes)))
               (is (= :approved (:intervention/state (first changes)))))))))))
 
-(deftest ^{:stratum 4} republished-events-carry-typed-identity
+(deftest ^{:stratum 0} republished-events-carry-typed-identity
   (testing "tag-stripped strings are revived before republish (schema:
             :event/id uuid?, timestamps inst?, :workflow/id uuid?)"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)]
-      (stage-golden! events-dir "pause.transit.json")
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)]
+      (support/stage-golden! events-dir "pause.transit.json")
       (consumer/consume-pass! {:events-dir events-dir :stream stream})
-      (let [requested (first (events-of-type
+      (let [requested (first (support/events-of-type
                               stream consumer/intervention-requested-event-type))
-            change (first (events-of-type
+            change (first (support/events-of-type
                            stream consumer/state-changed-event-type))]
         (is (uuid? (:event/id requested)))
         (is (uuid? (:intervention/id requested)))
@@ -340,11 +276,11 @@
                (:event/sequence-number change))
             "republishing the request advances the workflow sequence")))))
 
-(deftest ^{:stratum 4} workflow-request-routes-to-its-registered-stream
-  (let [events-dir (temp-events-dir)
-        operator-stream (memory-stream)
-        workflow-stream (memory-stream)]
-    (stage-golden! events-dir "pause.transit.json")
+(deftest ^{:stratum 0} workflow-request-routes-to-its-registered-stream
+  (let [events-dir (support/temp-events-dir)
+        operator-stream (support/memory-stream)
+        workflow-stream (support/memory-stream)]
+    (support/stage-golden! events-dir "pause.transit.json")
     (is (= {:routed 1 :skipped 0 :anomalies 0}
            (consumer/consume-pass!
             {:events-dir events-dir
@@ -356,10 +292,10 @@
            (mapv :event/type (es/get-events workflow-stream))))))
 
 ;------------------------------------------------------------------------------ Idempotency
-(deftest ^{:stratum 4} second-pass-is-a-no-op
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)]
-    (stage-golden! events-dir "pause.transit.json")
+(deftest ^{:stratum 0} second-pass-is-a-no-op
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)]
+    (support/stage-golden! events-dir "pause.transit.json")
     (is (= {:routed 1 :skipped 0 :anomalies 0}
            (consumer/consume-pass! {:events-dir events-dir :stream stream})))
     (let [event-count (count (es/get-events stream))]
@@ -368,35 +304,35 @@
       (is (= event-count (count (es/get-events stream)))
           "a processed file must publish nothing on re-scan"))))
 
-(deftest ^{:stratum 4} cursor-survives-restart
+(deftest ^{:stratum 0} cursor-survives-restart
   (testing "a fresh consumer (new process) trusts the on-disk cursor"
-    (let [events-dir (temp-events-dir)
-          stream-a (memory-stream)
-          stream-b (memory-stream)]
-      (stage-golden! events-dir "cancel.transit.json")
+    (let [events-dir (support/temp-events-dir)
+          stream-a (support/memory-stream)
+          stream-b (support/memory-stream)]
+      (support/stage-golden! events-dir "cancel.transit.json")
       (consumer/consume-pass! {:events-dir events-dir :stream stream-a})
       (is (= {:routed 0 :skipped 0 :anomalies 0}
              (consumer/consume-pass! {:events-dir events-dir :stream stream-b})))
       (is (empty? (es/get-events stream-b))))))
 
-(deftest ^{:stratum 4} unowned-request-is-deferred-without-advancing-cursors
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)]
-    (stage-golden! events-dir "pause.transit.json")
+(deftest ^{:stratum 0} unowned-request-is-deferred-without-advancing-cursors
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)]
+    (support/stage-golden! events-dir "pause.transit.json")
     (is (= {:routed 0 :skipped 0 :anomalies 0}
            (consumer/consume-pass! {:events-dir events-dir
                                     :stream stream
-                                    :accept? reject-every-request?})))
+                                    :accept? support/reject-every-request?})))
     (is (empty? (:processed-files
                  (consumer/read-cursor (es/operator-dir events-dir)))))
     (is (= {:routed 1 :skipped 0 :anomalies 0}
            (consumer/consume-pass! {:events-dir events-dir :stream stream})))))
 
-(deftest ^{:stratum 4} held-consumer-lock-defers-the-entire-pass
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)
+(deftest ^{:stratum 0} held-consumer-lock-defers-the-entire-pass
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)
         lock-file (io/file events-dir "operator" ".consumer.lock")]
-    (stage-golden! events-dir "pause.transit.json")
+    (support/stage-golden! events-dir "pause.transit.json")
     (with-open [channel (FileChannel/open
                          (.toPath lock-file)
                          (into-array java.nio.file.OpenOption
@@ -408,11 +344,11 @@
     (is (= {:routed 1 :skipped 0 :anomalies 0}
            (consumer/consume-pass! {:events-dir events-dir :stream stream})))))
 
-(deftest ^{:stratum 4} apply-hook-receives-only-approved-interventions
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)
+(deftest ^{:stratum 0} apply-hook-receives-only-approved-interventions
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)
         applied (atom [])]
-    (stage-golden! events-dir "pause.transit.json")
+    (support/stage-golden! events-dir "pause.transit.json")
     (consumer/consume-pass! {:events-dir events-dir
                              :stream stream
                              :apply! (fn [_stream interv]
@@ -421,27 +357,27 @@
     (is (= :approved (:intervention/state (first @applied))))
     (is (= :pause (:intervention/type (first @applied))))))
 
-(deftest ^{:stratum 4} approval-transition-failure-emits-anomaly
-  (let [events-dir (temp-events-dir)
-        stream (memory-stream)]
-    (stage-golden! events-dir "pause.transit.json")
+(deftest ^{:stratum 0} approval-transition-failure-emits-anomaly
+  (let [events-dir (support/temp-events-dir)
+        stream (support/memory-stream)]
+    (support/stage-golden! events-dir "pause.transit.json")
     (with-redefs [intervention/approve
                   (constantly {:success? false
                                :error :invalid-transition
                                :message "approval transition rejected"})]
       (is (= {:routed 0 :skipped 0 :anomalies 1}
              (consumer/consume-pass! {:events-dir events-dir :stream stream}))))
-    (let [event (first (events-of-type stream consumer/anomaly-event-type))]
+    (let [event (first (support/events-of-type stream consumer/anomaly-event-type))]
       (is (= "approval transition rejected" (:message event)))
       (is (= :invalid-transition
              (get-in event [:anomaly :anomaly/data :error]))))))
 
-(deftest ^{:stratum 4} workflow-targeted-state-changes-carry-workflow-id
+(deftest ^{:stratum 0} workflow-targeted-state-changes-carry-workflow-id
   (testing "audit trail lands in the run's own event directory"
-    (let [events-dir (temp-events-dir)
-          stream (memory-stream)]
-      (stage-golden! events-dir "pause.transit.json")
+    (let [events-dir (support/temp-events-dir)
+          stream (support/memory-stream)]
+      (support/stage-golden! events-dir "pause.transit.json")
       (consumer/consume-pass! {:events-dir events-dir :stream stream})
-      (let [change (first (events-of-type
+      (let [change (first (support/events-of-type
                            stream consumer/state-changed-event-type))]
         (is (some? (:workflow/id change)))))))

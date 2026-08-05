@@ -24,6 +24,7 @@
    [cheshire.core :as json]
    [ai.miniforge.event-stream.interface :as event-stream]
    [ai.miniforge.web-dashboard.server.handlers :as sut]
+   [ai.miniforge.web-dashboard.server.handlers.support :as support]
    [ai.miniforge.web-dashboard.state.core :as state-core]
    [clojure.test :refer [deftest is testing]]))
 
@@ -40,13 +41,13 @@
 (deftest ^{:stratum 0} console-controls-map-to-intervention-verbs
   (testing "pause/resume/cancel are the three verbs the console offers"
     (is (= {"pause" :pause "resume" :resume "cancel" :cancel}
-           sut/control-intervention-by-command))
+           support/control-intervention-by-command))
     (testing "the legacy `stop` command name is gone with the .edn poller"
-      (is (not (contains? sut/control-intervention-by-command "stop"))))))
+      (is (not (contains? support/control-intervention-by-command "stop"))))))
 
 (deftest ^{:stratum 0} structured-action-ignores-a-body-supplied-requester
   (testing "build-control-action derives the requester server-side"
-    (let [action (sut/build-control-action
+    (let [action (support/build-control-action
                   {:action/type "cancel"
                    :action/requester {:principal "ceo@example.com" :role :admin}}
                   "wf-1")
@@ -60,7 +61,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (deftest ^{:stratum 1} each-command-writes-its-intervention
-  (doseq [[command expected-type] sut/control-intervention-by-command]
+  (doseq [[command expected-type] support/control-intervention-by-command]
     (testing command
       (let [requests (atom [])
             workflow-id (str (random-uuid))]
