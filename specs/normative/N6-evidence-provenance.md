@@ -6,8 +6,8 @@
 
 # N6 — Evidence & Provenance Standard
 
-**Version:** 0.7.0-draft
-**Date:** 2026-08-04
+**Version:** 0.7.1-draft
+**Date:** 2026-08-05
 **Status:** Draft
 **Conformance:** MUST
 
@@ -339,6 +339,10 @@ artifact, capability, and governed effect accumulated during the run.
    :node-pools [string ...]
    :image-digests {...}
    :config-hash string}
+
+  :opsv/event-refs [uuid ...]          ; Complete N3 event identifier set
+  :opsv/artifact-refs [uuid ...]       ; Complete referenced artifact set
+  :opsv/capability-refs [string ...]   ; Complete N10 capability identifier set
 
   :opsv/risk-score
   {:score double                      ; [0.0, 1.0]
@@ -1115,6 +1119,8 @@ Fleet-wide evidence will enable:
 
 **Version History:**
 
+- 0.7.1-draft (2026-08-05): Added aggregate OPSV event, artifact, and capability
+  reference fields required by the immutable-finalization contract in §2.8
 - 0.7.0-draft (2026-08-04): OPSV evidence now records preallocated bundle
   correlation, content-addressed inputs, explainable risk, per-criterion
   verification, requested/effective actuation, correlated N10 effects,
