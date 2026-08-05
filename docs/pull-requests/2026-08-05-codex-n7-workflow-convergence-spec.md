@@ -9,8 +9,8 @@
 ## Overview
 
 Replaces the oversized workflow-selection convergence task description with a
-bounded work spec that consumes the canonical N7 domain-policy and governed
-actuation services merged in #1644.
+bounded work spec that depends on the canonical N7 domain-policy and governed
+actuation implementation tasks introduced in #1644.
 
 ## Motivation
 
