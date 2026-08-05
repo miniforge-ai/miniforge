@@ -16,7 +16,9 @@
 ;; See the License for the specific language governing permissions and
 ;; limitations under the License.
 (ns ai.miniforge.event-stream.schema.opsv
-  "Canonical N3 section 3.14 OPSV event schemas.")
+  "Canonical N3 section 3.14 OPSV event schemas."
+  (:require
+   [ai.miniforge.event-stream.schema :as event-schema]))
 
 ;------------------------------------------------------------------------------ Layer 0
 
@@ -62,10 +64,6 @@
    [:event/sequence-number :int]
    [:workflow/id :uuid]
    [:opsv/evidence-bundle-id :uuid]
-   [:org/id {:optional true} :uuid]
-   [:workspace/id {:optional true} :uuid]
-   [:repo/id {:optional true} :string]
-   [:auth/context {:optional true} :map]
    [:message :string]])
 
 ;------------------------------------------------------------------------------ Layer 1
@@ -78,8 +76,9 @@
 
 (defn ^{:stratum 1} opsv-event-schema
   [event-type payload-entries]
-  (into [:map [:event/type [:= event-type]]]
-        (concat payload-entries envelope-entries)))
+  (event-schema/with-identity
+   (into [:map [:event/type [:= event-type]]]
+         (concat payload-entries envelope-entries))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
