@@ -56,8 +56,12 @@
    [#uuid "00000000-0000-0000-0000-000000000201"]})
 
 (def ^{:stratum 0} opsv-policy-pack
-  (-> "policy_pack/packs/opsv-governance-1.0.0.pack.edn"
-      io/resource slurp edn/read-string))
+  (let [path "policy_pack/packs/opsv-governance-1.0.0.pack.edn"
+        resource (io/resource path)]
+    (when-not resource
+      (throw (ex-info "OPSV policy pack test resource is missing"
+                      {:resource/path path})))
+    (-> resource slurp edn/read-string)))
 
 (def ^{:stratum 0} policy-rule-phases
   {:opsv/instrumentation-gate :discover
