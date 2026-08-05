@@ -575,6 +575,8 @@
                  "components/codex-gap/resources"
                  "components/codex/src"
                  "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
                  "components/messages/src"
                  "components/messages/resources"]
    :requires ([ai.miniforge.codex-gap.interface :as codex-gap]
@@ -601,6 +603,8 @@
                  "bases/mcp-context-server/resources"
                  "components/codex/src"
                  "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
                  "components/messages/src"
                  "components/messages/resources"]
    :extra-deps {cheshire/cheshire {:mvn/version "5.13.0"}}
@@ -754,6 +758,8 @@
                  "bases/mcp-context-server/resources"
                  "components/codex/src"
                  "components/codex/resources"
+                 "components/codex-gap/src"
+                 "components/codex-gap/resources"
                  "components/phase-software-factory/src"
                  "components/phase-software-factory/resources"
                  "components/compliance-scanner/src"
