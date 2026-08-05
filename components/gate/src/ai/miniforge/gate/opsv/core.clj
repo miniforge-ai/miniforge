@@ -114,7 +114,7 @@
                        (remove #(let [signal (get status %)]
                                   (and (true? (:available? signal))
                                        (true? (:reliable? signal)))))
-                       sort vec)]
+                       (sort-by pr-str) vec)]
     (gate-result :instrumentation
                  (when (or (not (collection-value? configured))
                            (seq unhealthy))
@@ -140,10 +140,11 @@
                  (when (or (empty? targets) (seq disallowed)
                            (seq outside-window) (seq production-denied))
                    {:reason-code :environment-policy-violation
-                    :details {:disallowed (vec (sort disallowed))
-                              :outside-time-window (vec (sort outside-window))
+                    :details {:disallowed (vec (sort-by pr-str disallowed))
+                              :outside-time-window
+                              (vec (sort-by pr-str outside-window))
                               :production-not-allowlisted
-                              (vec (sort production-denied))}}))))
+                              (vec (sort-by pr-str production-denied))}}))))
 
 (defn ^{:stratum 2} check-blast-radius
   [pack ctx]
@@ -171,7 +172,7 @@
                    {:reason-code :blast-radius-limit-exceeded
                     :details {:proposed proposed :limits limits
                               :unauthorized-namespaces
-                              (vec (sort unauthorized))}}))))
+                              (vec (sort-by pr-str unauthorized))}}))))
 
 (defn ^{:stratum 2} check-abort
   [pack _ctx]
@@ -200,7 +201,7 @@
                    {:reason-code :apply-not-authorized
                     :details {:apply-enabled? (true? (:opsv/apply-enabled? ctx))
                               :unauthorized-services
-                              (vec (sort unauthorized))}}))))
+                              (vec (sort-by pr-str unauthorized))}}))))
 
 (defn ^{:stratum 2} check-evidence-completeness
   [artifact ctx]

@@ -161,6 +161,27 @@
                                 ["not-an-artifact-id"])
                          context)))))
 
+(deftest ^{:stratum 1} mixed-type-scope-inputs-return-typed-failures
+  (doseq [[gate-key artifact ctx]
+          [[:opsv/instrumentation-gate
+            (assoc pack :experiment-pack/required-instrumentation
+                   [:latency "invalid"])
+            context]
+           [:opsv/environment-gate
+            (assoc-in pack [:experiment-pack/targets :environments]
+                      ["staging" :invalid])
+            context]
+           [:opsv/blast-radius-gate
+            (assoc-in pack [:experiment-pack/guardrails :blast-radius :namespaces]
+                      ["catalog" :invalid])
+            (assoc-in context [:opsv/blast-radius-limits :allowed-namespaces] #{})]
+           [:opsv/actuation-gate
+            (assoc-in pack [:experiment-pack/targets :services]
+                      ["catalog" :invalid])
+            (assoc context :opsv/apply-service-allowlist #{})]]]
+    (is (= :opsv/gate-failed
+           (-> (gate/check-gate gate-key artifact ctx) :errors first :type)))))
+
 (deftest ^{:stratum 1} safer-actuation-does-not-require-apply-authority
   (let [recommendation (assoc pack :experiment-pack/actuation-intent
                               :recommend-only)]
