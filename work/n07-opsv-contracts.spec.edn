@@ -9,7 +9,8 @@
 
  :spec/intent
  {:type :feature
-  :scope ["components/opsv/**"
+  :scope ["deps.edn"
+          "components/opsv/**"
           "projects/miniforge/deps.edn"]}
 
  :normative-refs
