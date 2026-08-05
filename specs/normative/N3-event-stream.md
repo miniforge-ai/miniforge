@@ -1689,8 +1689,8 @@ N5-delta-supervisory-control-plane §3 and serve as the single source of
 supervisory truth for external consumers (the Rust control console, native
 app, web dashboard).
 
-Consumers MAY rely on the invariant that any `:supervisory/*-upserted` event
-contains a complete and valid entity per the §3 schema. The supervisory-state
+Consumers MAY rely on the invariant that any `:supervisory/*` event contains a
+complete and valid entity per the §3 schema. The supervisory-state
 component owns materialization; consumers never reconstruct entities from
 fine-grained events directly.
 
@@ -1699,8 +1699,8 @@ Rules:
 - Each entity MUST be keyed by its canonical ID (`:workflow-run/id`,
   `:agent/id`, `[:repo :number]` for PRs, `:policy-eval/id`,
   `:attention/id`).
-- A `:supervisory/*-upserted` event SHOULD be emitted at most once per
-  state-change burst (coalesce bursts within ≤ 100 ms into a single emission).
+- A `:supervisory/*` event SHOULD be emitted at most once per state-change
+  burst (coalesce bursts within ≤ 100 ms into a single emission).
 - `:attention/resolved? = true` SHALL be encoded as a standard upsert rather
   than a separate deletion event; consumers observe the transition via the
   `:attention/resolved?` field.
@@ -1748,6 +1748,11 @@ other component MAY emit a snapshot event for an entity family it does not own.
 Adding a member to this family is an N3 change. A delta spec MAY define the
 entity shape, but the event type MUST appear in this table before an
 implementation emits it.
+
+The family glob is `:supervisory/*`, not `:supervisory/*-upserted`:
+`policy-evaluated` and `attention-derived` are members and are named for what
+they report rather than for the upsert mechanism. Every rule in §3.19 applies
+to all twelve.
 
 #### supervisory/workflow-upserted
 
@@ -2276,11 +2281,20 @@ Subscribing by scope is the only way to observe events with a nil
 `:workflow/id` — pack, repository, supervisory-entity, and deployment scopes
 have no workflow to subscribe through.
 
-An event MUST be delivered to subscribers on its own scope, and to subscribers
-on any scope whose key it carries as a cross-reference. A Miniforge-originated
-PR carries both `:workflow/id` and `:pr/id` (§2.3) and so reaches both.
-Implementations MUST NOT deliver it twice to a subscriber holding both handles
-for the same underlying consumer — de-duplication is by `:event/id`.
+**Delivery is by scope, strictly.** A subscription on scope S receives exactly
+the events whose scope is S. A cross-reference key does not confer membership:
+a Workflow-scoped PR lifecycle event carrying `:pr/id` (§3.10) is delivered on
+its workflow, not on the PR Work Item scope.
+
+This is a consequence of per-scope sequencing (§2.2), not a convenience.
+Sequence numbers are monotonic within a scope, so mixing another scope's events
+into a subscription would interleave two independent counters and make
+resume-by-sequence (§5.3.5) ambiguous for the receiving side.
+
+Cross-reference keys exist for correlation, and the query API is where they are
+used: §5.2 retrieves by scope, and §5.3.4's `pr-id` filter narrows a stream to
+the events within it that mention a given PR. A consumer that wants both a
+workflow and its PR Work Item subscribes to both and correlates on `:pr/id`.
 
 #### 5.1.1 Scope Identifier Encoding
 
@@ -2897,7 +2911,7 @@ withdrawn, not deleted.
 | ID | Level | Requirement |
 |----|-------|-------------|
 | N3.API.1 | MUST | Provide subscription and query by every scope type of §2.3 (§5.1, §5.2), and a single-scope stream endpoint for each (§5.3.1). |
-| N3.API.2 | MUST | Deliver an event to its own scope and to every scope whose key it cross-references, de-duplicated by `:event/id` (§5.1). |
+| N3.API.2 | MUST | Deliver to a scope subscription exactly the events whose scope is that scope; a cross-reference key MUST NOT confer membership (§5.1). |
 | N3.API.3 | MUST | Provide the query API of §5.2, ordered by sequence ascending, and round-trip composite scope ids per §5.1.1. |
 | N3.API.4 | MUST | Provide an SSE endpoint per §5.3; WebSocket is OPTIONAL. |
 | N3.API.5 | MUST | Authenticate per §5.3.2 and fail 401 in any network-exposed deployment. |
