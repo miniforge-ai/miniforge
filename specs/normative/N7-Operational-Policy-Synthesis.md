@@ -250,8 +250,8 @@ plan MUST identify a concrete N10-governed rollback action.
 
 OPSV SHALL emit these event types with required minimal payloads:
 
-- `:opsv.experiment/planned` (pack hash, targets, risk score)
-- `:opsv.experiment/started` (pack hash, environment fingerprint)
+- `:opsv.experiment/planned` (Experiment Pack hash, targets, risk score)
+- `:opsv.experiment/started` (Experiment Pack hash, environment fingerprint)
 - `:opsv/load-step` (step id, intended load, observed load)
 - `:opsv.guardrail/abort` (trigger, threshold, observed, rollback action)
 - `:opsv.convergence/iteration` (iteration id, params, observed metrics summary)

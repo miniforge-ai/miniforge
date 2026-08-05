@@ -1089,7 +1089,13 @@ event types:
  :opsv/evidence-bundle-id uuid
  :opsv/experiment-pack-hash string   ; Experiment Pack content hash
  :opsv/targets {:services [...] :environments [...]}
- :opsv/risk-score {:score double :level keyword :factors [...]}
+ :opsv/risk-score
+ {:score double                      ; [0.0, 1.0]
+  :level keyword                     ; :low, :medium, :high, :critical
+  :factors [{:factor keyword
+             :input any
+             :contribution double
+             :rationale string}]}
  :message "OPSV experiment planned: {experiment-pack-hash}"}
 ```
 
