@@ -87,9 +87,9 @@ Experiment Packs SHALL be hash-addressed and recorded in the event stream and ev
 
 OPSV MUST support these requested actuation modes:
 
-- **RECOMMEND_ONLY**: produce policy proposals and evidence; no changes are emitted.
-- **PR_ONLY**: produce changes as PRs (or patch sets) against declared repos.
-- **APPLY_ALLOWED**: request direct apply eligibility; it does not grant execution authority.
+- **RECOMMEND_ONLY** (`:recommend-only`): produce policy proposals and evidence; no changes are emitted.
+- **PR_ONLY** (`:pr-only`): produce changes as PRs (or patch sets) against declared repos.
+- **APPLY_ALLOWED** (`:apply-allowed`): request direct apply eligibility; it does not grant execution authority.
 
 `APPLY_ALLOWED` MUST be disabled by default.
 
