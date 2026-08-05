@@ -66,12 +66,12 @@ authoritative.
 
 **Core normative specs:**
 
-1. **N1 - Core Architecture** (Draft) - Conceptual model, layering, Polylith boundaries
-2. **N2 - Workflow Execution** (Draft) - Phase graph, inner loop, gate contract
-3. **N3 - Event Stream** (Draft) ✅ - Event protocol, streaming API, observability
-4. **N4 - Policy Packs** (Draft) - Policy pack standard, gate execution
-5. **N5 - CLI/TUI/API** (Draft) - User interface contract, command taxonomy
-6. **N6 - Evidence & Provenance** (Draft) ✅ - Evidence bundles, artifact provenance, semantic validation
+1. **N1 - Core Architecture** - Conceptual model, layering, Polylith boundaries
+2. **N2 - Workflow Execution** - Phase graph, inner loop, gate contract
+3. **N3 - Event Stream** - Event protocol, streaming API, observability
+4. **N4 - Policy Packs** - Policy pack standard, gate execution
+5. **N5 - CLI/TUI/API** - User interface contract, command taxonomy
+6. **N6 - Evidence & Provenance** - Evidence bundles, artifact provenance, semantic validation
 
 ### Informative Documentation
 
