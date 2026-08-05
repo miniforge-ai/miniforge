@@ -142,3 +142,17 @@
                             upstream)]
           (is (= upstream (handler ctx))
               (str phase-key " must preserve " upstream-key " anomalies")))))))
+
+(deftest ^{:stratum 0} flat-success-criteria-flow-test
+  (let [ctx (assoc-in
+             (support/execution-context
+              (support/test-adapter support/ramp-steps))
+             [:execution/input :opsv/experiment-pack
+              :experiment-pack/success-criteria]
+             {:cpu-utilization 0.7 :backlog-per-replica 100.0})
+        result (reduce support/run-transformation ctx support/handlers)
+        evaluations (get-in (support/phase-output result :opsv/verify)
+                            [:opsv/verification-result
+                             :criteria-evaluation])]
+    (is (= #{"cpu-utilization" "backlog-per-replica"}
+           (set (map :criterion/id evaluations))))))

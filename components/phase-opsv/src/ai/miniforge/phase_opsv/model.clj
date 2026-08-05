@@ -42,6 +42,17 @@
     value
     (continue value)))
 
+(defn- ^{:stratum 0} verification-criteria
+  [pack]
+  (let [declared (:experiment-pack/success-criteria pack)]
+    (if (contains? declared :criteria)
+      (:criteria declared)
+      (->> declared
+           (sort-by (comp str key))
+           (mapv (fn [[criterion-id expected]]
+                   {:criterion/id (name criterion-id)
+                    :criterion/expected expected}))))))
+
 ;------------------------------------------------------------------------------ Layer 1
 
 (defn- ^{:stratum 1} operational-policy
@@ -111,7 +122,7 @@
    (phase-output ctx :opsv/synthesize)
    (fn [synthesized]
      (let [pack (:opsv/experiment-pack synthesized)
-           criteria (get-in pack [:experiment-pack/success-criteria :criteria])
+           criteria (verification-criteria pack)
            observations (get-in synthesized
                                 [:opsv/convergence-result :state
                                  :selected-step :step/observations])
