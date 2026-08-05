@@ -1179,7 +1179,7 @@ event types:
    :evidence/capability-id string}]
  :opsv/pr-refs [string ...]          ; PR URLs if PR_ONLY
  :opsv/apply-refs [string ...]       ; Applied resource refs if APPLY_ALLOWED
- :message "OPSV actuation emitted: {effective-mode}"}
+ :message "OPSV actuation emitted: {effective-actuation-mode}"}
 ```
 
 #### opsv.drift/detected

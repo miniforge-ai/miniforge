@@ -43,7 +43,7 @@ specs/
 ├── informative/               # Guidance & references (non-normative)
 │   ├── ux-tui-mockups.md
 │   ├── ai-ux-flows.md
-│   └── I-*.md                  # Informative contract and design notes
+│   └── *.md                    # Informative contract, design, and system notes
 └── deprecated/                # Superseded documents (historical reference)
     ├── AGENT_STATUS_STREAMING.md  → Superseded by N3
     ├── BUILD_PLAN_REVISED.md      → Content extracted to N2, N3, N6

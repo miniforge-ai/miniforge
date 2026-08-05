@@ -391,7 +391,6 @@ These documents provide guidance, examples, and context but do NOT define contra
 
 - [informative/CONFIG-SYSTEM.md](informative/CONFIG-SYSTEM.md) - Configuration precedence and ownership
 - [informative/tool-registry.md](informative/tool-registry.md) - Tool registry guidance
-- [informative/I-PHASE-HANDOFF-ENVELOPES.md](informative/I-PHASE-HANDOFF-ENVELOPES.md) - Phase handoff envelopes
 - [Workflow supervision architecture](informative/I-WORKFLOW-SUPERVISION-MACHINE-ARCHITECTURE.md) - Design note
 
 > Product strategy documents (pricing, roadmap, competitive positioning) are maintained
