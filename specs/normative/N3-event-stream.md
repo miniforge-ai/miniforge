@@ -45,7 +45,7 @@ It powers:
 All events MUST conform to this base envelope:
 
 ```clojure
-{:event/type namespaced-keyword ; REQUIRED: event type identifier
+{:event/type keyword           ; REQUIRED: namespaced event type identifier
  :event/id uuid                ; REQUIRED: unique event ID
  :event/timestamp inst          ; REQUIRED: ISO-8601 timestamp
  :event/version string          ; REQUIRED: event schema version (e.g., "1.0.0")
@@ -599,7 +599,7 @@ the §2 envelope:
 {:dag/id uuid                    ; REQUIRED: DAG run ID
  :run/id uuid                    ; REQUIRED: Run instance ID
  :plan/id uuid                   ; OPTIONAL: Plan ID (if applicable)
- :task/id uuid                   ; REQUIRED: Task workflow ID
+ :task/id uuid                   ; REQUIRED: DAG node this workflow executes
  :pr/id uuid                     ; REQUIRED: PR Work Item id (§2.1.1)
  :pr/number long                 ; REQUIRED: Provider-assigned PR number
  :pr/repo string                 ; REQUIRED: "org/name"
