@@ -20,7 +20,7 @@
 
 ;------------------------------------------------------------------------------ Layer 0
 
-(def ^{:stratum 0} KeywordMap [:map-of :keyword any?])
+(def ^{:stratum 0} KeywordMap [:map-of :keyword :any])
 
 (def ^{:stratum 0} Targets
   [:map {:closed true}
@@ -30,7 +30,7 @@
 (def ^{:stratum 0} RiskFactor
   [:map {:closed true}
    [:factor :keyword]
-   [:input any?]
+   [:input :any]
    [:contribution [:double {:min 0.0 :max 1.0}]]
    [:rationale :string]])
 
@@ -38,8 +38,8 @@
   [:map {:closed true}
    [:criterion/id :string]
    [:criterion/passed? :boolean]
-   [:criterion/observed any?]
-   [:criterion/expected any?]
+   [:criterion/observed :any]
+   [:criterion/expected :any]
    [:criterion/reason-code :keyword]])
 
 (def ^{:stratum 0} GovernedEffect
