@@ -36,6 +36,12 @@
   [ctx key]
   (get-in ctx [:execution/input key]))
 
+(defn- ^{:stratum 0} preserve-anomaly
+  [value continue]
+  (if (anomaly/anomaly? value)
+    value
+    (continue value)))
+
 (defn- ^{:stratum 0} invalid-ramp-anomaly
   [ramp]
   (cond
@@ -90,57 +96,65 @@
 
 (defn ^{:stratum 1} plan
   [ctx]
-  (let [discovery (phase-output ctx :opsv/discover)
-        pack (:opsv/experiment-pack discovery)
-        risk (opsv/assess-risk
-              (risk/factors pack
-                            (input-value ctx :opsv/service-criticality))
-              (input-value ctx :opsv/risk-thresholds))
-        pack-hash (opsv/experiment-pack-hash pack)]
-    (cond
-      (anomaly/anomaly? risk) risk
-      (anomaly/anomaly? pack-hash) pack-hash
-      :else (assoc discovery
-                   :opsv/risk-result risk
-                   :opsv/experiment-pack-hash pack-hash))))
+  (preserve-anomaly
+   (phase-output ctx :opsv/discover)
+   (fn [discovery]
+     (let [pack (:opsv/experiment-pack discovery)
+           risk (opsv/assess-risk
+                 (risk/factors pack
+                               (input-value ctx :opsv/service-criticality))
+                 (input-value ctx :opsv/risk-thresholds))
+           pack-hash (opsv/experiment-pack-hash pack)]
+       (cond
+         (anomaly/anomaly? risk) risk
+         (anomaly/anomaly? pack-hash) pack-hash
+         :else (assoc discovery
+                      :opsv/risk-result risk
+                      :opsv/experiment-pack-hash pack-hash))))))
 
 (defn ^{:stratum 1} converge
   [ctx]
-  (let [executed (phase-output ctx :opsv/execute)
-        config (:experiment-pack/convergence executed)
-        initial-state {:steps (:opsv/ramp-steps executed) :history []}
-        result (opsv/converge config initial-state
-                              evaluation/convergence-step
-                              evaluation/convergence-evaluation)]
-    (if (anomaly/anomaly? result)
-      result
-      (assoc executed :opsv/convergence-result result))))
+  (preserve-anomaly
+   (phase-output ctx :opsv/execute)
+   (fn [executed]
+     (let [config (:experiment-pack/convergence executed)
+           initial-state {:steps (:opsv/ramp-steps executed) :history []}
+           result (opsv/converge config initial-state
+                                 evaluation/convergence-step
+                                 evaluation/convergence-evaluation)]
+       (if (anomaly/anomaly? result)
+         result
+         (assoc executed :opsv/convergence-result result))))))
 
 (defn ^{:stratum 1} verify
   [ctx]
-  (let [synthesized (phase-output ctx :opsv/synthesize)
-        pack (:opsv/experiment-pack synthesized)
-        criteria (get-in pack [:experiment-pack/success-criteria :criteria])
-        observations (get-in synthesized
-                             [:opsv/convergence-result :state
-                              :selected-step :step/observations])
-        verification (opsv/verify-policy criteria observations
-                                         evaluation/criterion-evaluation
-                                         :high [])]
-    (if (anomaly/anomaly? verification)
-      verification
-      (let [summary (select-keys verification [:passed? :confidence :caveats])
-            policy (assoc (:opsv/operational-policy synthesized)
-                          :operational-policy/verification-summary summary)
-            validated (opsv/validate-operational-policy policy)]
-        (if (anomaly/anomaly? validated)
-          validated
-          (assoc synthesized
-                 :opsv/verification-result verification
-                 :opsv/operational-policy validated
-                 :opsv/policy-hash (content-hash/content-hash validated)
-                 :opsv/metric-snapshot-artifact-refs
-                 (input-value ctx :opsv/metric-snapshot-artifact-refs)))))))
+  (preserve-anomaly
+   (phase-output ctx :opsv/synthesize)
+   (fn [synthesized]
+     (let [pack (:opsv/experiment-pack synthesized)
+           criteria (get-in pack [:experiment-pack/success-criteria :criteria])
+           observations (get-in synthesized
+                                [:opsv/convergence-result :state
+                                 :selected-step :step/observations])
+           verification (opsv/verify-policy criteria observations
+                                            evaluation/criterion-evaluation
+                                            :high [])]
+       (if (anomaly/anomaly? verification)
+         verification
+         (let [summary (select-keys verification
+                                    [:passed? :confidence :caveats])
+               policy (assoc (:opsv/operational-policy synthesized)
+                             :operational-policy/verification-summary summary)
+               validated (opsv/validate-operational-policy policy)]
+           (if (anomaly/anomaly? validated)
+             validated
+             (assoc synthesized
+                    :opsv/verification-result verification
+                    :opsv/operational-policy validated
+                    :opsv/policy-hash (content-hash/content-hash validated)
+                    :opsv/metric-snapshot-artifact-refs
+                    (input-value ctx
+                                 :opsv/metric-snapshot-artifact-refs)))))))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
@@ -163,27 +177,33 @@
 
 (defn ^{:stratum 2} execute
   [ctx]
-  (if-let [invalid (adapter-anomaly ctx)]
-    invalid
-    (let [planned (phase-output ctx :opsv/plan)
-          adapter (input-value ctx :opsv/adapter)
-          ramp (port/run-guarded-ramp adapter (:opsv/experiment-pack planned))
-          empty-ramp (ramp-shape-anomaly ramp)]
-      (cond
-        (anomaly/anomaly? ramp) ramp
-        empty-ramp empty-ramp
-        :else (merge planned
-                     {:opsv/environment-fingerprint
-                      (:environment-fingerprint ramp)
-                      :opsv/ramp-steps (:steps ramp)})))))
+  (preserve-anomaly
+   (phase-output ctx :opsv/plan)
+   (fn [planned]
+     (if-let [invalid (adapter-anomaly ctx)]
+       invalid
+       (let [adapter (input-value ctx :opsv/adapter)
+             ramp (port/run-guarded-ramp
+                   adapter (:opsv/experiment-pack planned))
+             empty-ramp (ramp-shape-anomaly ramp)]
+         (cond
+           (anomaly/anomaly? ramp) ramp
+           empty-ramp empty-ramp
+           :else (merge planned
+                        {:opsv/environment-fingerprint
+                         (:environment-fingerprint ramp)
+                         :opsv/ramp-steps (:steps ramp)})))))))
 
 (defn ^{:stratum 2} synthesize
   [ctx]
-  (let [converged (phase-output ctx :opsv/converge)
-        proposal (operational-policy ctx (:opsv/convergence-result converged))
-        validated (opsv/validate-operational-policy proposal)]
-    (if (anomaly/anomaly? validated)
-      validated
-      (assoc converged
-             :opsv/operational-policy validated
-             :opsv/policy-hash (content-hash/content-hash validated)))))
+  (preserve-anomaly
+   (phase-output ctx :opsv/converge)
+   (fn [converged]
+     (let [proposal (operational-policy
+                     ctx (:opsv/convergence-result converged))
+           validated (opsv/validate-operational-policy proposal)]
+       (if (anomaly/anomaly? validated)
+         validated
+         (assoc converged
+                :opsv/operational-policy validated
+                :opsv/policy-hash (content-hash/content-hash validated)))))))

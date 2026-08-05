@@ -119,9 +119,13 @@
              (get-in (support/phase-output result :opsv/actuate)
                      [:opsv/actuation-record
                       :effective-actuation-mode])))))
-  (testing "actuation preserves an upstream verification anomaly"
-    (let [upstream (anomaly/anomaly :invalid-input "verification failed" {})
-          ctx (assoc-in (support/execution-context nil)
-                        [:execution/phase-results :opsv/verify :result :output]
-                        upstream)]
-      (is (= upstream (opsv-phase/actuate ctx))))))
+  (testing "every downstream transformation preserves its upstream anomaly"
+    (let [upstream (anomaly/anomaly :invalid-input "upstream failed" {})]
+      (doseq [[[upstream-key _] [phase-key handler]]
+              (partition 2 1 support/handlers)]
+        (let [ctx (assoc-in (support/execution-context nil)
+                            [:execution/phase-results upstream-key
+                             :result :output]
+                            upstream)]
+          (is (= upstream (handler ctx))
+              (str phase-key " must preserve " upstream-key " anomalies")))))))
