@@ -15,7 +15,8 @@ remediation whose human message and summary come from the gate catalog.
 
 The completed observability-governance work specification is removed so future
 agents do not attempt to reimplement its already-satisfied event, evidence,
-gate, or policy-pack acceptance criteria.
+gate, or policy-pack acceptance criteria. Its dependency edges and live work
+inventory are removed as well, and the generated work queue is refreshed.
 
 ## Design
 

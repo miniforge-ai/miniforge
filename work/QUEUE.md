@@ -135,7 +135,6 @@ Discover scaling + budget signals via governed experiments, synthesize
 |---|---|---|---|---|
 | blocker | ● | operational-policy-synthesis | `n07-opsv-contracts.spec.edn` — Implement canonical OPSV domain contracts | correctness+dogfoodenabler |
 | blocker | ○ | operational-policy-synthesis | `n07-opsv-domain-policy.spec.edn` — Implement OPSV risk, convergence, verification, and authority decisions | correctness+dogfoodenabler |
-| blocker | ○ | operational-policy-synthesis | `n07-opsv-observability-governance.spec.edn` — Implement OPSV events, evidence assembly, and governance gates | correctness+observation+dogfoodenabler |
 | blocker | ○ | operational-policy-synthesis | `n07-opsv-workflow.spec.edn` — Implement the seven-phase OPSV workflow and staging MCI | correctness+scale+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-agent-budgets.spec.edn` — Dogfood OPSV on agent invocation and phase budgets | correctness+observation+tokenconservation+dogfoodenabler |
 | high | ○ | operational-policy-synthesis | `n07-opsv-cli-tui-drift.spec.edn` — Implement OPSV CLI, TUI drill-down, and drift detection | observation+ux+dogfoodenabler |

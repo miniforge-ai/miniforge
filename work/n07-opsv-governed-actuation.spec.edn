@@ -40,7 +40,6 @@
   :rationale "External mutations are the highest-risk N7 stratum and must reuse settled N8/N10 authority."
   :blocks ["n07-opsv-cli-tui-drift.spec.edn"]
   :blocked-by ["n07-opsv-domain-policy.spec.edn"
-               "n07-opsv-observability-governance.spec.edn"
                "n07-opsv-workflow.spec.edn"]}
 
  :dag/id :n07-opsv-governed-actuation

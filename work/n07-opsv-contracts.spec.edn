@@ -37,8 +37,7 @@
   :axes #{:correctness :dogfood-enabler}
   :theme :operational-policy-synthesis
   :rationale "Every OPSV producer and consumer depends on one validated canonical value model."
-  :blocks ["n07-opsv-domain-policy.spec.edn"
-           "n07-opsv-observability-governance.spec.edn"]
+  :blocks ["n07-opsv-domain-policy.spec.edn"]
   :blocked-by []}
 
  :dag/id :n07-opsv-contracts

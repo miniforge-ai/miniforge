@@ -99,7 +99,6 @@ subsequent normative-contract changes:
 | `n06-compliance-metadata` | N6 | Data classification, retention, regulatory tags | Medium |
 | `n07-opsv-contracts` | N7 | Canonical OPSV domain values and validation | Blocker |
 | `n07-opsv-domain-policy` | N7 | Pure risk, convergence, verification, and authority decisions | Blocker |
-| `n07-opsv-observability-governance` | N7 | Events, evidence, and governance gates | Blocker |
 | `n07-opsv-workflow` | N7 | Seven-phase workflow and deterministic HPA/KEDA MCI | Blocker |
 | `n07-opsv-governed-actuation` | N7 | Governed PR, Kubernetes apply, and rollback effects | High |
 | `n07-opsv-cli-tui-drift` | N7 | Canonical commands, TUI drill-down, and drift | High |
