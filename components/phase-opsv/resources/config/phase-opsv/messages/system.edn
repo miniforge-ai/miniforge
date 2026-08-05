@@ -1,0 +1,3 @@
+{:phase-opsv/system
+ {:adapter/missing "The OPSV workflow requires an adapter implementing OPSVAdapter."
+  :adapter/empty-ramp "The OPSV adapter returned no guarded ramp observations."}}
