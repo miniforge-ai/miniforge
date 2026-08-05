@@ -201,6 +201,13 @@ envelope is REQUIRED on every event regardless of whether an example repeats it.
 An example that omits `:event/id`, `:event/version`, or
 `:event/sequence-number` is eliding them, not waiving them.
 
+**Message placeholders.** `{foo}` inside an example `:message` is illustrative
+interpolation, naming the event's field whose key ends in `foo` — `{reason}` in
+`listener/detached` is `:listener/reason`, `{pack.id}` is `:pack/id`. The
+contract on `:message` is that it is human-renderable (§1.1 principle 5); no
+template is normative, and implementations MAY word messages differently or
+localize them.
+
 **Scope key.** Each family's scope is fixed by the table in §2.3 and restated
 per family in the §6 registry. `:workflow/id` is the scope key unless that
 table says otherwise.
@@ -2333,8 +2340,15 @@ text boundary — an HTTP path, a query parameter, a log line:
   `/`.
 
 Example: entity key `["miniforge-ai/miniforge" 1641]` encodes as
-`miniforge-ai%2Fminiforge:1641`. Implementations MUST round-trip this
-encoding — a decoded id MUST equal the original key.
+`miniforge-ai%2Fminiforge:1641`.
+
+Decoding MUST coerce each component back to the type the entity's schema
+declares for it — the PR key is `[string long]`, so the second component parses
+as a base-10 long, not as the string `"1641"`. Implementations MUST round-trip
+the encoding: a decoded id MUST be equal to the original key under the host
+language's value equality, which an uncoerced string component would fail. A
+component that does not parse as its declared type is a malformed scope id and
+MUST be rejected rather than passed through as a string.
 
 ### 5.2 Query API
 
