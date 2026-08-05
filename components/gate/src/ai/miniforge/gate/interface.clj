@@ -39,6 +39,7 @@
    [ai.miniforge.gate.codex-consultation]
    [ai.miniforge.gate.precommit-discipline]
    [ai.miniforge.gate.behavioral]
+   [ai.miniforge.gate.opsv]
    ;; Phase-scoped pack gates (:policy-verify / :policy-review), registered
    ;; for side effects so apply-gate-validation can resolve them per phase.
    [ai.miniforge.gate.policy-pack]

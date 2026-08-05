@@ -39,8 +39,7 @@
   :rationale "The complete shared-lifecycle MCI is the first executable proof of N7 conformance."
   :blocks ["n07-opsv-governed-actuation.spec.edn"
            "n07-opsv-cli-tui-drift.spec.edn"]
-  :blocked-by ["n07-opsv-domain-policy.spec.edn"
-               "n07-opsv-observability-governance.spec.edn"]}
+  :blocked-by ["n07-opsv-domain-policy.spec.edn"]}
 
  :dag/id :n07-opsv-workflow
  :spec/workflow-type :canonical-sdlc}
