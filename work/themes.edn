@@ -131,8 +131,9 @@
   [{:doc "specs/normative/N7-Operational-Policy-Synthesis.md"
     :relation :primary}]
   :theme/completion-criteria
-  ["OPSV workflow (DISCOVER → CONVERGE → VERIFY → ACTUATE) runs end-to-end on at least one real budget parameter"
-   "At least one policy is actuated to production config via OPSV (not hand-tuned)"
+  ["OPSV workflow (DISCOVER → PLAN → EXECUTE → CONVERGE → SYNTHESIZE → VERIFY → ACTUATE) runs end-to-end on a deterministic HPA/KEDA staging fixture"
+   "At least one verified policy is actuated through the governed N10 effect path"
+   "Agent invocation and phase budgets are evaluated as the second OPSV use case"
    "Verification evidence bundle shows pass/fail per acceptance criterion"]
   :theme/status :planned
   :theme/owner :christopher}

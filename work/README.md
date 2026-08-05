@@ -96,8 +96,13 @@ normative spec requirements (see `docs/progress-review-2026-04-13.md`):
 | `n05-http-api-decision` | N5 | Resolve winsock vs HTTP/SSE, implement API layer | Medium |
 | `n06-sensitive-data-scanning` | N6 | Credential/PII scanning in evidence bundles | High |
 | `n06-compliance-metadata` | N6 | Data classification, retention, regulatory tags | Medium |
-| `n07-opsv-workflow` | N7 | OPSV skeleton — DISCOVER phase + experiment packs | Low |
-| `n07-opsv-converge-verify-actuate` | N7 | OPSV remaining phases (requires n07-opsv-workflow) | Low |
+| `n07-opsv-contracts` | N7 | Canonical OPSV domain values and validation | Blocker |
+| `n07-opsv-domain-policy` | N7 | Pure risk, convergence, verification, and authority decisions | Blocker |
+| `n07-opsv-observability-governance` | N7 | Events, evidence, and governance gates | Blocker |
+| `n07-opsv-workflow` | N7 | Seven-phase workflow and deterministic HPA/KEDA MCI | Blocker |
+| `n07-opsv-governed-actuation` | N7 | Governed PR, Kubernetes apply, and rollback effects | High |
+| `n07-opsv-cli-tui-drift` | N7 | Canonical commands, TUI drill-down, and drift | High |
+| `n07-opsv-agent-budgets` | N7 | Agent-budget dogfood after the staging MCI | High |
 | `n08-oci-governance` | N8 | RBAC, listener capabilities, control actions, audit | Medium |
 | `n08-privacy-retention` | N8 | Privacy levels, listener budgets, retention (requires n08-oci-governance) | Medium |
 | `n08-otel-trace-context` | N8 | OpenTelemetry alignment, W3C Trace Context | Low |
