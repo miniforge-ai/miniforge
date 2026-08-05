@@ -19,8 +19,12 @@
   "Public API for canonical OPSV contracts and Experiment Pack hashing."
   (:require
    [ai.miniforge.anomaly.interface :as anomaly]
+   [ai.miniforge.opsv.actuation :as actuation]
+   [ai.miniforge.opsv.convergence :as convergence]
    [ai.miniforge.opsv.core :as core]
+   [ai.miniforge.opsv.risk :as risk]
    [ai.miniforge.opsv.schema :as schema]
+   [ai.miniforge.opsv.verification :as verification]
    [malli.core :as m]
    [malli.error :as me]))
 
@@ -43,6 +47,10 @@
   "Canonical N6 OPSV rollback dispositions."
   schema/rollback-statuses)
 
+(def ^{:stratum 0} opsv-gate-ids
+  "The complete N7 section 5.2 gate vocabulary."
+  schema/opsv-gate-ids)
+
 (def ^{:stratum 0} ExperimentPack
   "Closed Malli schema for an N1/N7 Experiment Pack."
   schema/ExperimentPack)
@@ -63,6 +71,22 @@
   "Closed Malli schema for normalized explainable OPSV risk."
   schema/RiskResult)
 
+(def ^{:stratum 0} RiskAssessment
+  "Closed Malli schema for transparent OPSV risk inputs and thresholds."
+  schema/RiskAssessment)
+
+(def ^{:stratum 0} convergence-terminal-reasons
+  "Canonical bounded-loop terminal reasons from N7 section 3.4."
+  schema/convergence-terminal-reasons)
+
+(def ^{:stratum 0} ConvergenceConfig
+  "Closed Malli schema for bounded and stabilized convergence."
+  schema/ConvergenceConfig)
+
+(def ^{:stratum 0} ConvergenceResult
+  "Closed Malli schema for a terminal convergence result."
+  schema/ConvergenceResult)
+
 (def ^{:stratum 0} CriterionResult
   "Closed Malli schema for one verification criterion result."
   schema/CriterionResult)
@@ -70,6 +94,10 @@
 (def ^{:stratum 0} VerificationResult
   "Closed Malli schema for per-criterion OPSV verification."
   schema/VerificationResult)
+
+(def ^{:stratum 0} VerificationCriterion
+  "Closed Malli schema for an OPSV success criterion."
+  schema/VerificationCriterion)
 
 (def ^{:stratum 0} GovernedEffect
   "Closed Malli schema correlating an N10 intent, OIR, and capability."
@@ -82,6 +110,10 @@
 (def ^{:stratum 0} ActuationRecord
   "Closed Malli schema for requested/effective actuation and effects."
   schema/ActuationRecord)
+
+(def ^{:stratum 0} EffectiveActuationInput
+  "Closed Malli schema for an N4/N7/N8/N10 authority decision."
+  schema/EffectiveActuationInput)
 
 (def ^{:stratum 0} ^:private invalid-domain-value-message
   "Stable programmer-facing message for OPSV contract violations."
@@ -129,6 +161,94 @@
   [value]
   (validation-result invalid-domain-value-message
                      :opsv/actuation-record schema/ActuationRecord value))
+
+(defn ^{:stratum 1} assess-risk
+  "Sum explicit factor contributions and classify the normalized score."
+  [factors level-thresholds]
+  (let [assessment {:factors factors :level-thresholds level-thresholds}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/risk-assessment
+                                     schema/RiskAssessment
+                                     assessment)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (risk/assess-risk-impl validated))))
+
+(defn ^{:stratum 1} converge
+  "Run a bounded deterministic convergence loop over trusted pure callbacks.
+
+   Both callbacks receive state, the one-based iteration, and config. The step
+   callback returns the next state; the evaluator returns a ConvergenceEvaluation."
+  [config initial-state step-fn evaluate-fn]
+  (let [request {:config config
+                 :initial-state initial-state
+                 :step-fn step-fn
+                 :evaluate-fn evaluate-fn}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/convergence-request
+                                     schema/ConvergenceRequest
+                                     request)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (loop [state initial-state
+             iteration 1]
+        (let [next-state (step-fn state iteration config)
+              evaluation (validation-result
+                          invalid-domain-value-message
+                          :opsv/convergence-evaluation
+                          schema/ConvergenceEvaluation
+                          (evaluate-fn next-state iteration config))]
+          (if (anomaly/anomaly? evaluation)
+            evaluation
+            (if-let [reason (convergence/terminal-reason
+                             config evaluation iteration)]
+              {:terminal-reason reason
+               :iterations iteration
+               :state next-state
+               :evaluation evaluation}
+              (recur next-state (inc iteration)))))))))
+
+(defn ^{:stratum 1} verify-policy
+  "Evaluate every declared criterion and return the aggregate result."
+  [criteria observations evaluate-fn confidence caveats]
+  (let [request {:criteria criteria
+                 :observations observations
+                 :evaluate-fn evaluate-fn
+                 :confidence confidence
+                 :caveats caveats}
+        validated (validation-result invalid-domain-value-message
+                                     :opsv/verification-request
+                                     schema/VerificationRequest
+                                     request)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (let [evaluations
+            (mapv (fn [criterion]
+                    (validation-result
+                     invalid-domain-value-message
+                     :opsv/criterion-evaluation
+                     schema/CriterionEvaluation
+                     (evaluate-fn criterion
+                                  (get observations (:criterion/id criterion)))))
+                  criteria)]
+        (if-let [invalid (some #(when (anomaly/anomaly? %) %) evaluations)]
+          invalid
+          (validation-result invalid-domain-value-message
+                             :opsv/verification-result
+                             schema/VerificationResult
+                             (verification/verify-policy-impl
+                              validated evaluations)))))))
+
+(defn ^{:stratum 1} effective-actuation
+  "Reduce requested autonomy according to verification and authority gates."
+  [decision-input]
+  (let [validated (validation-result invalid-domain-value-message
+                                     :opsv/effective-actuation-input
+                                     schema/EffectiveActuationInput
+                                     decision-input)]
+    (if (anomaly/anomaly? validated)
+      validated
+      (actuation/effective-actuation-impl validated))))
 
 ;------------------------------------------------------------------------------ Layer 2
 
