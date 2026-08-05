@@ -1756,7 +1756,7 @@ implementation emits it.
  :supervisory/schema-version string     ; REQUIRED: entity schema version (§3.19)
 
  :supervisory/entity {:pr/repo                string
-                      :pr/number              int
+                      :pr/number              long
                       :pr/url                 string
                       :pr/branch              string
                       :pr/title               string
@@ -2154,7 +2154,7 @@ of the type, declared in the §6 registry.
 |-------|-------------------|---------|
 | `:ephemeral` | 24 hours | `:agent/status`, `:workflow/phase-heartbeat`, LLM request/response bodies |
 | `:operational` | 30 days | Tool use, milestones, task lifecycle, listener lifecycle, reliability metrics, repo intelligence |
-| `:durable` | Life of the workflow record | Workflow/agent/phase lifecycle, gates, pack lifecycle and Pack Runs, capability denials, PR lifecycle, supervisory snapshots, workflow control (§3.21) |
+| `:durable` | Life of the scope's record — the workflow, PR Work Item, pack, repository, entity, or deployment the event is scoped to (§2.3) | Workflow/agent/phase lifecycle, gates, pack lifecycle and Pack Runs, capability denials, PR lifecycle, supervisory snapshots, workflow control (§3.21) |
 | `:audit` | Per deployment policy, minimum 1 year | `capability/denied`, `task/scope-violation`, `control-action/*`, `meta-loop/halt-requested`, `pack/promoted`, and every event carrying `:failure/class` |
 
 Implementations MUST NOT expire an event before its class minimum.
@@ -2167,9 +2167,11 @@ Expiring an event narrows the replay horizon. Implementations MUST:
 
 1. Track the oldest retained sequence number per scope and expose it as
    `:oldest-available` on the HTTP 410 response of §5.3.5.
-2. Never expire an event of class `:durable` or `:audit` while a workflow in
-   the same scope is non-terminal. Replay determinism (§2.2) is unachievable
-   for a live workflow whose own lifecycle events have been collected.
+2. Never expire an event of class `:durable` or `:audit` while its scope
+   (§2.3) is still live — a non-terminal workflow, an open PR Work Item, an
+   installed pack, a tracked repository, a current entity, a running
+   deployment. Replay determinism (§2.2) is unachievable for a live scope
+   whose own lifecycle events have been collected.
 3. Expire whole prefixes only. Expiring an event from the middle of a scope's
    sequence breaks causal ordering and is non-conformant.
 
@@ -3030,7 +3032,7 @@ The implementation emits a differently-named event than the spec requires.
 |------------------|-------------|-------|
 | `repo-index/quality-computed` (§3.18) | `repo-index/quality-measured` | Field sets also differ: spec uses `:repo/id` + `:revision/commit-sha` + `:quality/*`; implementation uses `:index/id` + `:index/*`. N1 §2.27.9 independently specifies the spec name. |
 | `repo-index/canary-failed` (§3.18) | `repo-index/coverage-changed` | Not a rename — a different event. The canary-recall contract of N1 §2.27.10 has no implementation. |
-| `pr/opened` (§3.10) | `pr/created` | Both appear in the tree; `pr-lifecycle` emits `:pr/opened`, the event-stream registry lists `pr/created`. |
+| `pr/opened` (§3.10) | `pr/created` | Both appear in the tree; `pr-lifecycle` emits `:pr/opened`, while the implementation's own registry resource (`event-type-registry.edn`) lists `pr/created`. The §6 registry in this spec is unambiguous: `pr/opened` is the contract. |
 | `chain.edge/started` / `-completed` / `-failed` (§3.12) | `chain/started`, `chain/step-started`, and variants | Implementation models chain **steps**; the spec models chain **edges**. Reconciliation requires deciding which concept is canonical, then amending N1 and N3 together. |
 | `tool/invoked` / `tool/completed` (§3.5) | also `agent/tool-call-started` / `tool/call-completed` | Two parallel tool-event vocabularies exist. §6.2 forbids the duplication; one MUST be withdrawn. |
 
