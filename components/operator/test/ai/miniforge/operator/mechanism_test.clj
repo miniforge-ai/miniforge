@@ -118,7 +118,7 @@
   (vals (:policy-evals (supervisory/apply-events supervisory/empty-table
                                                  (es/get-events stream)))))
 
-(deftest ^{:stratum 0} valid-evaluation-requires-a-verdict-and-seqable-lists
+(deftest ^{:stratum 0} valid-evaluation-requires-a-verdict-and-sequential-lists
   (testing "a well-formed verdict, with or without list fields, is valid"
     (is (true? (mechanism/valid-evaluation? {:evaluation/passed? true})))
     (is (true? (mechanism/valid-evaluation?
@@ -135,10 +135,12 @@
     (is (false? (mechanism/valid-evaluation? :not-a-map)))
     (is (false? (mechanism/valid-evaluation? {})))
     (is (false? (mechanism/valid-evaluation? {:evaluation/passed? "true"}))))
-  (testing "a non-seqable violations / packs field is rejected here, not as a throw later"
-    ;; `(vec :kw)` / `(vec 3)` throw; caught downstream they degrade to
-    ;; the generic `:application-error`. Reject the shape so the failure
-    ;; stays the specific `:invalid-policy-evaluation`.
+  (testing "a non-sequential violations / packs field is rejected here, not as a throw later"
+    ;; The predicate requires `sequential?` (nil or a list/vector/seq),
+    ;; so a set is rejected too even though it is seqable. The scalars
+    ;; below (`(vec :kw)` / `(vec 3)`) throw downstream and degrade to the
+    ;; generic `:application-error`; rejecting the shape here keeps the
+    ;; failure the specific `:invalid-policy-evaluation`.
     (is (false? (mechanism/valid-evaluation?
                  {:evaluation/passed? true :evaluation/violations 3})))
     (is (false? (mechanism/valid-evaluation?
