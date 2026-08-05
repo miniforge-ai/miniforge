@@ -1171,8 +1171,8 @@ event types:
 {:event/type :opsv.actuation/emitted
  :workflow/id uuid
  :opsv/evidence-bundle-id uuid
- :opsv/requested-actuation-mode keyword
- :opsv/effective-actuation-mode keyword ; :none or no more autonomous than requested
+ :opsv/requested-actuation-mode keyword ; :recommend-only, :pr-only, :apply-allowed
+ :opsv/effective-actuation-mode keyword ; :none, :recommend-only, :pr-only, :apply-allowed
  :opsv/governed-effects              ; Correlates each N10 intent, OIR, and capability
  [{:evidence/intent-id uuid
    :evidence/oir-id uuid
