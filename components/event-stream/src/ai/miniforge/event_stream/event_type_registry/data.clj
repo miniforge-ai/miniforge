@@ -29,6 +29,7 @@
 ;------------------------------------------------------------------------------ Layer 1
 
 (def ^{:stratum 1} event-type-registry
-  (-> (io/resource registry-resource-path)
-      slurp
-      edn/read-string))
+  (if-let [resource (io/resource registry-resource-path)]
+    (-> resource slurp edn/read-string)
+    (throw (ex-info "Event type registry resource not found"
+                    {:resource-path registry-resource-path}))))

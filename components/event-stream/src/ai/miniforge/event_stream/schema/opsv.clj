@@ -58,13 +58,13 @@
    [:config-hash :string]])
 
 (def ^{:stratum 0} ^:private envelope-entries
-  [[:event/id :uuid]
+  [[:event/id uuid?]
    [:event/timestamp inst?]
-   [:event/version :string]
-   [:event/sequence-number :int]
-   [:workflow/id :uuid]
-   [:opsv/evidence-bundle-id :uuid]
-   [:message :string]])
+   [:event/version string?]
+   [:event/sequence-number int?]
+   [:workflow/id uuid?]
+   [:opsv/evidence-bundle-id uuid?]
+   [:message string?]])
 
 ;------------------------------------------------------------------------------ Layer 1
 

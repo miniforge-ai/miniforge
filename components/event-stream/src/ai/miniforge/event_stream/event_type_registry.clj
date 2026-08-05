@@ -30,7 +30,7 @@
      4.  Whether the browser `handleWorkflowEvent` switch in `app.js` handles
          that string
      5.  The constructor-name → serialised-string naming asymmetries that
-         would trip up a developer reading only `interface/events.clj`
+         would trip up a developer reading only one `interface.*` API group
 
    ## Audit verdict (2026-08-05)
 
@@ -61,7 +61,7 @@
    data here.
 
    Columns:
-     :constructor  — var name in `interface/events.clj` / `core.clj`
+     :constructor  — var name exposed by an `interface.*` API group
      :event-type   — Clojure keyword set on `:event/type`
      :json-string  — string the browser receives in `event['event/type']`
      :browser?     — true iff `handleWorkflowEvent` in `app.js` has a case."
