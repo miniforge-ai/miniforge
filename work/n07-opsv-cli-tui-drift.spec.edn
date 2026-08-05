@@ -1,0 +1,45 @@
+{:spec/title "Implement OPSV CLI, TUI drill-down, and drift detection"
+
+ :spec/description
+ "Expose the six canonical fleet opsv commands through the CLI, localize every
+  user-visible string, and add the N5 Fleet to Service to OPSV Runs drill-down.
+  Project current, proposed, and verified policy state from events/evidence and
+  detect monitored-policy drift with a suggested rerun disposition."
+
+ :spec/intent
+ {:type :feature
+  :scope ["bases/cli/src/**"
+          "bases/cli/resources/config/cli/messages/en-US.edn"
+          "bases/cli/test/**"
+          "components/tui-views/src/**"
+          "components/tui-views/test/**"
+          "components/opsv/src/**"]}
+
+ :normative-refs
+ ["specs/normative/N5-cli-tui-api.md"
+  "specs/normative/N7-Operational-Policy-Synthesis.md"]
+
+ :spec/constraints
+ ["Command names and positional SERVICE argument MUST match N5 exactly"
+  "CLI and TUI state MUST be projections of canonical events/evidence"
+  "fleet opsv apply MUST preserve the normal N4/N8/N10 authorization path"
+  "All user-visible text MUST resolve through message catalogs"]
+
+ :spec/acceptance-criteria
+ ["fleet opsv plan, run, verify, propose, emit, and apply dispatch with SERVICE and documented flags"
+  "fleet opsv apply cannot bypass verification, gates, safe mode, or execution grants"
+  "The TUI drill-down displays Experiment Pack, Events, Evidence, Policy Diff, and Verification views"
+  "The policy-state view distinguishes current, proposed, verified, and failed candidates"
+  "Drift detection emits :opsv.drift/detected with the originating workflow, bundle, deviation, and rerun suggestion"]
+
+ :spec/priority
+ {:tier :high
+  :axes #{:ux :observation :dogfood-enabler}
+  :theme :operational-policy-synthesis
+  :rationale "The canonical control surface and drift loop complete the user-observable N7 contract."
+  :blocks ["n07-opsv-agent-budgets.spec.edn"]
+  :blocked-by ["n07-opsv-workflow.spec.edn"
+               "n07-opsv-governed-actuation.spec.edn"]}
+
+ :dag/id :n07-opsv-cli-tui-drift
+ :spec/workflow-type :canonical-sdlc}
